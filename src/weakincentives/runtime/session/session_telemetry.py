@@ -26,10 +26,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, cast
 
-from ...types.dataclass import SupportsDataclass
+from ...types.dataclass import SupportsDataclass, is_dataclass_instance
 from ..events import PromptExecuted, PromptRendered, ToolInvoked
 from ._types import ReducerEvent
-from .dataclasses import is_dataclass_instance
 
 if TYPE_CHECKING:
     from .session import Session

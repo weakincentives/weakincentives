@@ -39,6 +39,7 @@ from ._provider_protocols import (
     ProviderMessageData,
     ProviderToolCallData,
 )
+from ._retry_utils import extract_error_payload, retry_after_from_error
 from ._tool_messages import serialize_tool_message
 from .config import OpenAIClientConfig, OpenAIModelConfig
 from .core import (
@@ -118,75 +119,6 @@ def create_openai_client(**kwargs: object) -> _OpenAIProtocol:
 
     openai_module = _load_openai_module()
     return openai_module.OpenAI(**kwargs)
-
-
-def _coerce_retry_after(value: object) -> timedelta | None:
-    if value is None:
-        return None
-    if isinstance(value, timedelta):
-        return value if value > timedelta(0) else None
-    if isinstance(value, (int, float)):
-        seconds = float(value)
-        return timedelta(seconds=seconds) if seconds > 0 else None
-    if isinstance(value, str) and value.isdigit():
-        seconds = float(value)
-        return timedelta(seconds=seconds)
-    return None
-
-
-def _retry_after_from_headers(headers: Mapping[str, Any] | None) -> timedelta | None:
-    if headers is None:
-        return None
-    normalized = {str(key).lower(): val for key, val in headers.items()}
-    value = normalized.get("retry-after")
-    return _coerce_retry_after(value)
-
-
-def _retry_after_from_error(error: object) -> timedelta | None:
-    direct = _coerce_retry_after(getattr(error, "retry_after", None))
-    if direct is not None:
-        return direct
-    headers = getattr(error, "headers", None)
-    retry_after = _retry_after_from_headers(
-        cast(Mapping[str, object], headers) if isinstance(headers, Mapping) else None
-    )
-    if retry_after is not None:
-        return retry_after
-    response = cast(object | None, getattr(error, "response", None))
-    if isinstance(response, Mapping):
-        response_mapping = cast(Mapping[str, object], response)
-        retry_after = _retry_after_from_headers(
-            cast(Mapping[str, object], response_mapping.get("headers"))
-            if isinstance(response_mapping.get("headers"), Mapping)
-            else None
-        )
-        if retry_after is not None:
-            return retry_after
-        retry_after = _coerce_retry_after(response_mapping.get("retry_after"))
-        if retry_after is not None:
-            return retry_after
-        response_headers_obj: object | None = response_mapping.get("headers")
-    else:
-        response_headers_obj = (
-            getattr(response, "headers", None) if response is not None else None
-        )
-    return _retry_after_from_headers(
-        cast(Mapping[str, object], response_headers_obj)
-        if isinstance(response_headers_obj, Mapping)
-        else None
-    )
-
-
-def _error_payload(error: object) -> dict[str, Any] | None:
-    payload_candidate = getattr(error, "response", None)
-    if isinstance(payload_candidate, Mapping):
-        payload_mapping = cast(Mapping[object, Any], payload_candidate)
-        return {str(key): value for key, value in payload_mapping.items()}
-    payload_candidate = getattr(error, "json_body", None)
-    if isinstance(payload_candidate, Mapping):
-        payload_mapping = cast(Mapping[object, Any], payload_candidate)
-        return {str(key): value for key, value in payload_mapping.items()}
-    return None
 
 
 def _normalize_tool_arguments(arguments: object) -> str | None:
@@ -539,7 +471,7 @@ def _normalize_openai_throttle(
     if kind is None:
         return None
 
-    retry_after = _retry_after_from_error(error)
+    retry_after = retry_after_from_error(error)
     return ThrottleError(
         message,
         prompt_name=prompt_name,
@@ -547,7 +479,7 @@ def _normalize_openai_throttle(
         details=throttle_details(
             kind=kind,
             retry_after=retry_after,
-            provider_payload=_error_payload(error),
+            provider_payload=extract_error_payload(error),
         ),
     )
 
@@ -853,7 +785,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                     "OpenAI request failed.",
                     prompt_name=prompt_name,
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                    provider_payload=_error_payload(error),
+                    provider_payload=extract_error_payload(error),
                 ) from error
             else:
                 logger.debug(

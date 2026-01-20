@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from ._slice_types import SessionSlice, SessionSliceType
+from ._types import SessionSlice, SessionSliceType
 from .slice_policy import SlicePolicy
 
 if TYPE_CHECKING:

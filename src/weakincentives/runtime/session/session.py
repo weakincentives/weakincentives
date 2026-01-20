@@ -36,8 +36,7 @@ from ..events import (
     ToolInvoked,
 )
 from ..logging import StructuredLogger, get_logger
-from ._slice_types import SessionSlice, SessionSliceType
-from ._types import ReducerEvent, TypedReducer
+from ._types import ReducerEvent, SessionSlice, SessionSliceType, TypedReducer
 from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append_all
 from .session_cloning import (

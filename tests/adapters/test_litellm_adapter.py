@@ -28,6 +28,7 @@ from weakincentives.adapters import (
     PromptEvaluationError,
     PromptResponse,
 )
+from weakincentives.adapters._retry_utils import retry_after_from_error
 from weakincentives.adapters._tool_messages import serialize_tool_message
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
@@ -1856,24 +1857,24 @@ def test_litellm_adapter_completion_factory_merges_config_and_kwargs(
 
 
 def test_retry_after_from_error_returns_coerced_value() -> None:
-    module = cast(Any, _reload_module())
+    """Test shared retry_after_from_error coerces string values."""
 
     class ErrorWithRetryAfter:
         retry_after = "5"
 
-    result = module._retry_after_from_error(ErrorWithRetryAfter())
+    result = retry_after_from_error(ErrorWithRetryAfter())
     assert result is not None
     assert result.total_seconds() == 5
 
 
 def test_retry_after_from_headers_mapping() -> None:
-    module = cast(Any, _reload_module())
+    """Test shared retry_after_from_error extracts from response headers."""
 
     class ErrorWithHeaders:
         def __init__(self) -> None:
             self.response: dict[str, object] = {"headers": {"retry-after": "10"}}
 
-    result = module._retry_after_from_error(ErrorWithHeaders())
+    result = retry_after_from_error(ErrorWithHeaders())
     assert result is not None
     assert result.total_seconds() == 10
 
@@ -1928,41 +1929,38 @@ def test_litellm_adapter_uses_tool_choice_directive() -> None:
 
 
 def test_litellm_retry_after_from_error_handles_non_coercible_header() -> None:
-    """Test branch 127->129: retry_after header value cannot be coerced."""
-    module = cast(Any, _reload_module())
+    """Test shared retry_after_from_error: header value cannot be coerced."""
 
     class ErrorWithBadHeader:
         def __init__(self) -> None:
             self.headers = {"retry-after": "not-a-number"}
 
     error = ErrorWithBadHeader()
-    result = module._retry_after_from_error(error)
+    result = retry_after_from_error(error)
     assert result is None
 
 
 def test_litellm_retry_after_from_error_handles_non_mapping_headers() -> None:
-    """Test branch 137->145: headers in response is not a Mapping."""
-    module = cast(Any, _reload_module())
+    """Test shared retry_after_from_error: headers in response is not a Mapping."""
 
     class ErrorWithNonMappingHeaders:
         def __init__(self) -> None:
             self.response = {"headers": "not-a-mapping"}
 
     error = ErrorWithNonMappingHeaders()
-    result = module._retry_after_from_error(error)
+    result = retry_after_from_error(error)
     assert result is None
 
 
 def test_litellm_retry_after_from_error_handles_nested_non_coercible() -> None:
-    """Test branch 143->145: nested header retry_after cannot be coerced."""
-    module = cast(Any, _reload_module())
+    """Test shared retry_after_from_error: nested header cannot be coerced."""
 
     class ErrorWithNestedBadHeader:
         def __init__(self) -> None:
             self.response = {"headers": {"retry-after": "bad-value"}}
 
     error = ErrorWithNestedBadHeader()
-    result = module._retry_after_from_error(error)
+    result = retry_after_from_error(error)
     assert result is None
 
 

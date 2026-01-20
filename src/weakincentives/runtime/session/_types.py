@@ -12,7 +12,16 @@
 
 # pyright: reportImportCycles=false
 
-"""Shared typing helpers for session reducers."""
+"""Shared typing helpers for session modules.
+
+This module provides type aliases and protocols used across the session package:
+
+- SessionSliceType: Type of a slice (a dataclass type)
+- SessionSlice: A tuple of dataclass instances
+- ReducerEvent: Type alias for reducer event payloads
+- ReducerContextProtocol: Protocol for reducer context objects
+- TypedReducer: Protocol for reducer callables
+"""
 
 from __future__ import annotations
 
@@ -25,6 +34,11 @@ if TYPE_CHECKING:
     from .protocols import SessionViewProtocol
 
 
+# Slice type aliases
+type SessionSliceType = type[SupportsDataclass]
+type SessionSlice = tuple[SupportsDataclass, ...]
+
+# Reducer type alias
 ReducerEvent = SupportsDataclass
 
 
@@ -53,5 +67,7 @@ class TypedReducer[S: SupportsDataclass](Protocol):
 __all__ = [
     "ReducerContextProtocol",
     "ReducerEvent",
+    "SessionSlice",
+    "SessionSliceType",
     "TypedReducer",
 ]

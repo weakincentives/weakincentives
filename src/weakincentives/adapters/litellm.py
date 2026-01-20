@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
 from typing import Any, Final, Protocol, cast, override
@@ -32,6 +31,7 @@ from ._provider_protocols import (
     ProviderCompletionCallable,
     ProviderCompletionResponse,
 )
+from ._retry_utils import extract_error_payload, retry_after_from_error
 from ._tool_messages import serialize_tool_message
 from .config import LiteLLMClientConfig, LiteLLMModelConfig
 from .core import (
@@ -92,59 +92,6 @@ def create_litellm_completion(**kwargs: object) -> LiteLLMCompletion:
     return _wrapped_completion
 
 
-def _coerce_retry_after(value: object) -> timedelta | None:
-    if value is None:
-        return None
-    if isinstance(value, timedelta):
-        return value if value > timedelta(0) else None
-    if isinstance(value, (int, float)):
-        seconds = float(value)
-        return timedelta(seconds=seconds) if seconds > 0 else None
-    if isinstance(value, str) and value.isdigit():
-        return timedelta(seconds=float(value))
-    return None
-
-
-def _retry_after_from_error(error: object) -> timedelta | None:
-    direct = _coerce_retry_after(getattr(error, "retry_after", None))
-    if direct is not None:
-        return direct
-    headers = getattr(error, "headers", None)
-    if isinstance(headers, Mapping):
-        header_mapping = cast(Mapping[str, object], headers)
-        retry_after = header_mapping.get("retry-after") or header_mapping.get(
-            "Retry-After"
-        )
-        coerced = _coerce_retry_after(retry_after)
-        if coerced is not None:
-            return coerced
-    response = getattr(error, "response", None)
-    if isinstance(response, Mapping):
-        response_mapping = cast(Mapping[str, object], response)
-        retry_after = response_mapping.get("retry_after")
-        coerced = _coerce_retry_after(retry_after)
-        if coerced is not None:
-            return coerced
-        headers = response_mapping.get("headers")
-        if isinstance(headers, Mapping):
-            header_mapping = cast(Mapping[str, object], headers)
-            retry_after = header_mapping.get("retry-after") or header_mapping.get(
-                "Retry-After"
-            )
-            coerced = _coerce_retry_after(retry_after)
-            if coerced is not None:
-                return coerced
-    return None
-
-
-def _error_payload(error: object) -> dict[str, Any] | None:
-    response = getattr(error, "response", None)
-    if isinstance(response, Mapping):
-        response_mapping = cast(Mapping[object, Any], response)
-        return {str(key): value for key, value in response_mapping.items()}
-    return None
-
-
 def _normalize_litellm_throttle(
     error: Exception, *, prompt_name: str
 ) -> ThrottleError | None:
@@ -193,7 +140,7 @@ def _normalize_litellm_throttle(
         )
         return None
 
-    retry_after = _retry_after_from_error(error)
+    retry_after = retry_after_from_error(error)
     logger.debug(
         "litellm.throttle.detected",
         event="throttle.detected",
@@ -213,7 +160,7 @@ def _normalize_litellm_throttle(
         details=throttle_details(
             kind=kind,
             retry_after=retry_after,
-            provider_payload=_error_payload(error),
+            provider_payload=extract_error_payload(error),
         ),
     )
 
@@ -428,7 +375,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 normalize_throttle=lambda error: _normalize_litellm_throttle(
                     error, prompt_name=prompt_name
                 ),
-                provider_payload=_error_payload,
+                provider_payload=extract_error_payload,
                 request_error_message="LiteLLM request failed.",
             )
 

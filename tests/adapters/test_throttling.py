@@ -20,6 +20,11 @@ import pytest
 from tests.adapters._test_stubs import DummyChoice, DummyMessage, DummyResponse
 from tests.adapters.test_conversation_runner import RecordingBus, build_inner_loop
 from weakincentives.adapters import litellm, openai
+from weakincentives.adapters._retry_utils import (
+    coerce_retry_after,
+    extract_error_payload,
+    retry_after_from_error,
+)
 from weakincentives.adapters.core import PROMPT_EVALUATION_PHASE_REQUEST
 from weakincentives.adapters.throttle import (
     ThrottleError,
@@ -328,6 +333,7 @@ class _ThrottleLikeError(Exception):
 
 
 def test_openai_retry_after_extraction_paths() -> None:
+    """Test retry-after extraction from various error shapes (shared implementation)."""
     direct = _ThrottleLikeError("rate limit", retry_after=2)
     header = _ThrottleLikeError("rate limit", headers={"Retry-After": "3"})
     response = _ThrottleLikeError(
@@ -338,12 +344,11 @@ def test_openai_retry_after_extraction_paths() -> None:
         "rate limit", response={"retry_after": 6}
     )
 
-    assert openai._retry_after_from_error(direct) == timedelta(seconds=2)
-    assert openai._retry_after_from_error(header) == timedelta(seconds=3)
-    assert openai._retry_after_from_error(response) == timedelta(seconds=5)
-    assert openai._retry_after_from_error(response_retry_after_only) == timedelta(
-        seconds=6
-    )
+    # Use shared retry_after_from_error
+    assert retry_after_from_error(direct) == timedelta(seconds=2)
+    assert retry_after_from_error(header) == timedelta(seconds=3)
+    assert retry_after_from_error(response) == timedelta(seconds=5)
+    assert retry_after_from_error(response_retry_after_only) == timedelta(seconds=6)
 
 
 def test_openai_throttle_normalization_and_payloads() -> None:
@@ -371,6 +376,7 @@ def test_openai_throttle_normalization_and_payloads() -> None:
 
 
 def test_litellm_retry_after_and_normalization() -> None:
+    """Test retry-after extraction and LiteLLM-specific normalization."""
     header_error = _ThrottleLikeError("rate limited", headers={"retry-after": 1})
     response_error = _ThrottleLikeError(
         "rate limited",
@@ -379,8 +385,9 @@ def test_litellm_retry_after_and_normalization() -> None:
         code="rate_limit",
     )
 
-    assert litellm._retry_after_from_error(header_error) == timedelta(seconds=1)
-    assert litellm._retry_after_from_error(response_error) == timedelta(seconds=2)
+    # Use shared retry_after_from_error
+    assert retry_after_from_error(header_error) == timedelta(seconds=1)
+    assert retry_after_from_error(response_error) == timedelta(seconds=2)
 
     throttle = litellm._normalize_litellm_throttle(response_error, prompt_name="prompt")
 
@@ -389,12 +396,12 @@ def test_litellm_retry_after_and_normalization() -> None:
     assert throttle.retry_after == timedelta(seconds=2)
 
     direct_error = _ThrottleLikeError("rate limited", retry_after=timedelta(seconds=3))
-    assert litellm._retry_after_from_error(direct_error) == timedelta(seconds=3)
+    assert retry_after_from_error(direct_error) == timedelta(seconds=3)
 
     response_retry_error = _ThrottleLikeError(
         "rate limited", response={"retry_after": "6"}
     )
-    assert litellm._retry_after_from_error(response_retry_error) == timedelta(seconds=6)
+    assert retry_after_from_error(response_retry_error) == timedelta(seconds=6)
 
     quota_error = _ThrottleLikeError("insufficient_quota", code="insufficient_quota")
     quota_throttle = litellm._normalize_litellm_throttle(
@@ -413,22 +420,29 @@ def test_litellm_retry_after_and_normalization() -> None:
     assert timeout_throttle.kind == "timeout"
 
     payload_error = _ThrottleLikeError("rate limited", response={"detail": "x"})
-    assert litellm._error_payload(payload_error) == {"detail": "x"}
+    assert extract_error_payload(payload_error) == {"detail": "x"}
 
 
 def test_retry_after_coercion_variants() -> None:
-    assert litellm._coerce_retry_after(timedelta(seconds=2)) == timedelta(seconds=2)
-    assert litellm._coerce_retry_after(timedelta(seconds=-1)) is None
-    assert litellm._coerce_retry_after("not-a-number") is None
-    assert openai._coerce_retry_after(timedelta(seconds=4)) == timedelta(seconds=4)
-    assert openai._coerce_retry_after(timedelta(seconds=-2)) is None
-    assert openai._coerce_retry_after("7") == timedelta(seconds=7)
-    assert openai._coerce_retry_after("abc") is None
-    assert openai._coerce_retry_after(1.5) == timedelta(seconds=1.5)
-    assert openai._coerce_retry_after(None) is None
+    """Test shared coerce_retry_after function with various input types."""
+    # timedelta inputs
+    assert coerce_retry_after(timedelta(seconds=2)) == timedelta(seconds=2)
+    assert coerce_retry_after(timedelta(seconds=-1)) is None
+    assert coerce_retry_after(timedelta(seconds=4)) == timedelta(seconds=4)
+    assert coerce_retry_after(timedelta(seconds=-2)) is None
+
+    # String inputs
+    assert coerce_retry_after("not-a-number") is None
+    assert coerce_retry_after("7") == timedelta(seconds=7)
+    assert coerce_retry_after("abc") is None
+
+    # Numeric inputs
+    assert coerce_retry_after(1.5) == timedelta(seconds=1.5)
+    assert coerce_retry_after(None) is None
 
 
 def test_openai_additional_throttle_paths() -> None:
+    """Test OpenAI-specific throttle normalization and error payload extraction."""
     timeout_class_error = type("TimeoutIssue", (Exception,), {})("timeout")
     timeout_throttle = openai._normalize_openai_throttle(
         timeout_class_error, prompt_name="prompt"
@@ -437,8 +451,9 @@ def test_openai_additional_throttle_paths() -> None:
     assert timeout_throttle is not None
     assert timeout_throttle.kind == "timeout"
 
+    # Test shared extract_error_payload (checks json_body too)
     json_error = _ThrottleLikeError("other", json_body={"info": "payload"})
-    assert openai._error_payload(json_error) == {"info": "payload"}
+    assert extract_error_payload(json_error) == {"info": "payload"}
 
     neutral_error = _ThrottleLikeError("other")
     assert (

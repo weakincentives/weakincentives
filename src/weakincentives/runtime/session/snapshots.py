@@ -26,9 +26,8 @@ from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
 from ...serde import TYPE_REF_KEY, dump, parse, resolve_type_identifier, type_identifier
 from ...types import JSONValue
-from ...types.dataclass import SupportsDataclass
-from ._slice_types import SessionSlice, SessionSliceType
-from .dataclasses import is_dataclass_instance
+from ...types.dataclass import SupportsDataclass, is_dataclass_instance
+from ._types import SessionSlice, SessionSliceType
 from .slice_policy import SlicePolicy
 
 SNAPSHOT_SCHEMA_VERSION = "1"
