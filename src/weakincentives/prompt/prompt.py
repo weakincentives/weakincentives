@@ -42,7 +42,7 @@ from .structured_output import StructuredOutputConfig
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
     from ..resources.context import ScopedResourceContext
-    from ..runtime.session.protocols import SessionProtocol
+    from ..runtime.session._protocols import SessionProtocol
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
 

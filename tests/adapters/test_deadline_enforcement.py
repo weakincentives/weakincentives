@@ -56,7 +56,7 @@ from weakincentives.prompt.tool import Tool, ToolContext
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import InProcessDispatcher, ToolInvoked
 from weakincentives.runtime.session import Session
-from weakincentives.runtime.session.protocols import SessionProtocol
+from weakincentives.runtime.session._protocols import SessionProtocol
 from weakincentives.types.dataclass import SupportsDataclassOrNone, SupportsToolResult
 
 

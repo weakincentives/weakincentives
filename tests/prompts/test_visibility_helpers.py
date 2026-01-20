@@ -27,7 +27,7 @@ from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 if TYPE_CHECKING:
-    from weakincentives.runtime.session.protocols import SessionProtocol
+    from weakincentives.runtime.session._protocols import SessionProtocol
 
 
 @dataclass

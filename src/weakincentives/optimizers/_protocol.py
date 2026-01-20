@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Protocol, TypeVar
 
 from ..prompt import Prompt
-from ..runtime.session.protocols import SessionProtocol
+from ..runtime.session import SessionProtocol
 
 # OutputT is covariant: optimizer can return more specific result types.
 # InputT is invariant (pyright requirement): Prompt[InputT] in parameter position

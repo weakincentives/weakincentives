@@ -38,7 +38,7 @@ from weakincentives.runtime import (
     ShutdownCoordinator,
     wait_until,
 )
-from weakincentives.runtime.session.protocols import SessionProtocol
+from weakincentives.runtime.session._protocols import SessionProtocol
 
 if TYPE_CHECKING:
     from weakincentives.runtime.watchdog import Heartbeat

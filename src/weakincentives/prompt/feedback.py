@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from ..deadlines import Deadline
     from ..filesystem import Filesystem
     from ..runtime.events import ToolInvoked
-    from ..runtime.session.protocols import SessionProtocol
+    from ..runtime.session._protocols import SessionProtocol
     from ._prompt_resources import PromptResources
     from .protocols import PromptProtocol
 

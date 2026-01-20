@@ -33,7 +33,7 @@ from .tool_result import ToolResult
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Set
 
-    from ..runtime.session.protocols import SessionProtocol
+    from ..runtime.session._protocols import SessionProtocol
     from ._types import SupportsDataclass
     from .registry import RegistrySnapshot, SectionNode
 

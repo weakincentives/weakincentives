@@ -41,7 +41,7 @@ from .structured_output import StructuredOutputConfig
 from .tool import Tool
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..runtime.session.protocols import SessionProtocol
+    from ..runtime.session._protocols import SessionProtocol
     from .overrides import PromptDescriptor, ToolOverride
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "prompt"})

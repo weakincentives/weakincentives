@@ -48,7 +48,7 @@ from ..dataclasses import FrozenDataclass
 from ..errors import RestoreFailedError
 from ..serde import TYPE_REF_KEY, dump, parse, resolve_type_identifier, type_identifier
 from ..types import JSONValue
-from .session.protocols import SessionProtocol, SnapshotProtocol
+from .session._protocols import SessionProtocol, SnapshotProtocol
 from .session.snapshots import (
     Snapshot,
     SnapshotRestoreError,

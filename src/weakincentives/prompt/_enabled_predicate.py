@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, cast
 from ._types import SupportsDataclass
 
 if TYPE_CHECKING:
-    from ..runtime.session.protocols import SessionProtocol
+    from ..runtime.session._protocols import SessionProtocol
 
 EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
 

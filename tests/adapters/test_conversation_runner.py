@@ -60,7 +60,7 @@ from weakincentives.runtime.session import (
     SessionProtocol,
     SlicePolicy,
 )
-from weakincentives.runtime.session.protocols import SnapshotProtocol
+from weakincentives.runtime.session._protocols import SnapshotProtocol
 from weakincentives.runtime.session.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
 from weakincentives.types.dataclass import (

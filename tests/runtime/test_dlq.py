@@ -41,7 +41,7 @@ from weakincentives.runtime.main_loop import (
 )
 from weakincentives.runtime.run_context import RunContext
 from weakincentives.runtime.session import Session
-from weakincentives.runtime.session.protocols import SessionProtocol
+from weakincentives.runtime.session._protocols import SessionProtocol
 from weakincentives.runtime.watchdog import Heartbeat
 
 

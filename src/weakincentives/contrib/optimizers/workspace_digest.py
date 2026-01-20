@@ -39,8 +39,7 @@ from ...prompt.overrides import (
     SectionOverride,
 )
 from ...prompt.section import Section
-from ...runtime.session import Session
-from ...runtime.session.protocols import SessionProtocol
+from ...runtime.session import Session, SessionProtocol
 from ...types.dataclass import SupportsDataclass
 from ..tools.asteval import AstevalSection
 from ..tools.digests import (

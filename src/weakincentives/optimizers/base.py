@@ -18,8 +18,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from ..prompt import Prompt
-from ..runtime.session import Session
-from ..runtime.session.protocols import SessionProtocol
+from ..runtime.session import Session, SessionProtocol
 from .context import OptimizationContext
 
 

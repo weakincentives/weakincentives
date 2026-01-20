@@ -19,11 +19,8 @@ from typing import cast
 
 from ...dbc import pure
 from ...types.dataclass import SupportsDataclass
-from ._types import (
-    ReducerContextProtocol,
-    ReducerEvent,
-    TypedReducer,
-)
+from ._protocols import ReducerContextProtocol, TypedReducerProtocol
+from ._types import ReducerEvent
 from .slices import Append, Replace, SliceView
 
 
@@ -61,7 +58,7 @@ def replace_latest[T: SupportsDataclass](
 
 def upsert_by[T: SupportsDataclass, K](
     key_fn: Callable[[T], K],
-) -> TypedReducer[T]:
+) -> TypedReducerProtocol[T]:
     """Create reducer that upserts by derived key.
 
     Must access view to find existing item - O(n) for any backend.
@@ -86,7 +83,7 @@ def upsert_by[T: SupportsDataclass, K](
 
 def replace_latest_by[T: SupportsDataclass, K](
     key_fn: Callable[[T], K],
-) -> TypedReducer[T]:
+) -> TypedReducerProtocol[T]:
     """Return a reducer that keeps only the most recent item for each key.
 
     Must access view to filter by key - O(n) for any backend.

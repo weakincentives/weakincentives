@@ -23,7 +23,7 @@ from ._enabled_predicate import callable_accepts_session_kwarg
 from ._types import SupportsDataclass
 
 if TYPE_CHECKING:
-    from ..runtime.session.protocols import SessionProtocol
+    from ..runtime.session._protocols import SessionProtocol
 
 
 class SectionVisibility(Enum):

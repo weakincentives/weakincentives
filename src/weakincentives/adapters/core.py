@@ -22,7 +22,7 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import WinkError
 from ..prompt import Prompt
-from ..runtime.session.protocols import SessionProtocol
+from ..runtime.session import SessionProtocol
 
 if TYPE_CHECKING:
     from ..runtime.run_context import RunContext

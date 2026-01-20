@@ -428,7 +428,7 @@ def test_jsonl_slice_view_iteration_skips_empty_lines() -> None:
 
 def test_session_extend_slice_op(session_factory: SessionFactory) -> None:
     """Session applies Extend SliceOp correctly."""
-    from weakincentives.runtime.session._types import ReducerContextProtocol
+    from weakincentives.runtime.session._protocols import ReducerContextProtocol
     from weakincentives.runtime.session.slices import SliceView
 
     @dataclass(slots=True, frozen=True)
@@ -455,7 +455,7 @@ def test_session_extend_slice_op(session_factory: SessionFactory) -> None:
 
 def test_session_clear_slice_op(session_factory: SessionFactory) -> None:
     """Session applies Clear SliceOp correctly."""
-    from weakincentives.runtime.session._types import ReducerContextProtocol
+    from weakincentives.runtime.session._protocols import ReducerContextProtocol
     from weakincentives.runtime.session.slices import SliceView
 
     @dataclass(slots=True, frozen=True)
@@ -488,7 +488,7 @@ def test_session_clear_with_predicate_slice_op(
     session_factory: SessionFactory,
 ) -> None:
     """Session applies Clear SliceOp with predicate correctly."""
-    from weakincentives.runtime.session._types import ReducerContextProtocol
+    from weakincentives.runtime.session._protocols import ReducerContextProtocol
     from weakincentives.runtime.session.slices import SliceView
 
     @dataclass(slots=True, frozen=True)

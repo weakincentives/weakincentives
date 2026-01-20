@@ -23,7 +23,7 @@ from ...prompt._visibility import SectionVisibility
 from ...prompt.section import Section
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
-from ...runtime.session.protocols import SessionProtocol
+from ...runtime.session import SessionProtocol
 from ...types.dataclass import SupportsDataclass
 
 

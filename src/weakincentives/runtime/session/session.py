@@ -36,9 +36,9 @@ from ..events import (
     ToolInvoked,
 )
 from ..logging import StructuredLogger, get_logger
-from ._protocols import SessionProtocol, SnapshotProtocol
+from ._protocols import SessionProtocol, SnapshotProtocol, TypedReducerProtocol
 from ._slice_types import SessionSlice, SessionSliceType
-from ._types import ReducerEvent, TypedReducer
+from ._types import ReducerEvent
 from .reducers import append_all
 from .session_cloning import (
     apply_policies_to_clone,
@@ -124,7 +124,7 @@ EMPTY_SLICE: SessionSlice = ()
 
 @dataclass(slots=True)
 class _ReducerRegistration:
-    reducer: TypedReducer[Any]
+    reducer: TypedReducerProtocol[Any]
     slice_type: SessionSliceType
 
 
@@ -505,7 +505,7 @@ class Session(SessionProtocol):
     def _mutation_register_reducer[S: SupportsDataclass](
         self,
         data_type: SessionSliceType,
-        reducer: TypedReducer[S],
+        reducer: TypedReducerProtocol[S],
         *,
         slice_type: type[S] | None = None,
         policy: SlicePolicy | None = None,
@@ -527,7 +527,7 @@ class Session(SessionProtocol):
             },
         )
         registration = _ReducerRegistration(
-            reducer=cast(TypedReducer[Any], reducer),
+            reducer=cast(TypedReducerProtocol[Any], reducer),
             slice_type=target_slice_type,
         )
         bucket = self._reducers.setdefault(data_type, [])
@@ -724,7 +724,7 @@ class Session(SessionProtocol):
                 # Default: ledger semantics (always append)
                 registrations = [
                     _ReducerRegistration(
-                        reducer=cast(TypedReducer[Any], append_all),
+                        reducer=cast(TypedReducerProtocol[Any], append_all),
                         slice_type=data_type,
                     )
                 ]
@@ -823,5 +823,5 @@ __all__ = [
     "DataEvent",
     "Session",
     "SliceAccessor",
-    "TypedReducer",
+    "TypedReducerProtocol",
 ]

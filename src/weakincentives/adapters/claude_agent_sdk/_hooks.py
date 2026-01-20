@@ -28,7 +28,7 @@ from ...prompt.protocols import PromptProtocol
 from ...runtime.events.types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
-from ...runtime.session.protocols import SessionProtocol
+from ...runtime.session import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
 from ...runtime.watchdog import Heartbeat
 from ._task_completion import (

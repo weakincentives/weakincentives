@@ -36,7 +36,7 @@ from ...serde import parse, schema
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
-    from ...runtime.session.protocols import SessionProtocol
+    from ...runtime.session import SessionProtocol
     from ..core import ProviderAdapter
 
 __all__ = [

@@ -10,24 +10,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared typing helpers for session reducers.
-
-This module re-exports protocol types from _protocols for backward compatibility.
-For new code, prefer importing directly from _protocols.
-"""
+"""Shared typing helpers for session reducers."""
 
 from ...types.dataclass import SupportsDataclass
-from ._protocols import ReducerContextProtocol, TypedReducerProtocol
 
 # Type alias for reducer events (any dataclass)
 ReducerEvent = SupportsDataclass
 
-# Re-export with original name for backward compatibility
-TypedReducer = TypedReducerProtocol
-
 
 __all__ = [
-    "ReducerContextProtocol",
     "ReducerEvent",
-    "TypedReducer",
 ]

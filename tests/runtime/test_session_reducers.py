@@ -21,7 +21,7 @@ from weakincentives.runtime.session import (
     Replace,
     Session,
 )
-from weakincentives.runtime.session._types import ReducerContextProtocol
+from weakincentives.runtime.session._protocols import ReducerContextProtocol
 from weakincentives.runtime.session.reducers import (
     append_all,
     replace_latest_by,

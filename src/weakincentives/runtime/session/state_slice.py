@@ -58,7 +58,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from ...dbc import pure
 from ...types.dataclass import SupportsDataclass
-from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
+from ._protocols import ReducerContextProtocol, TypedReducerProtocol
+from ._types import ReducerEvent
 from .slices import Replace, SliceOp, SliceView
 
 if TYPE_CHECKING:
@@ -150,7 +151,7 @@ def _create_reducer_for_method[S: SupportsDataclass, E: SupportsDataclass](
     slice_type: type[S],
     method_name: str,
     initial_factory: Callable[[], S] | None = None,
-) -> TypedReducer[S]:
+) -> TypedReducerProtocol[S]:
     """Create a reducer function that wraps a method on the slice class.
 
     The generated reducer:

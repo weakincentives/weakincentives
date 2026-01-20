@@ -35,8 +35,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..budget import Budget, BudgetTracker
     from ..filesystem import Filesystem
     from ..resources import ResourceRegistry
-    from ..runtime.session import Session
-    from ..runtime.session.protocols import SessionProtocol
+    from ..runtime.session import Session, SessionProtocol
     from ._prompt_resources import PromptResources
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor

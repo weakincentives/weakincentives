@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
     from ..resources import ResourceRegistry
-    from ..runtime.session.protocols import SessionProtocol
+    from ..runtime.session._protocols import SessionProtocol
     from .policy import ToolPolicy
     from .tool import Tool
 

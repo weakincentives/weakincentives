@@ -12,19 +12,16 @@
 
 """Session state container for agent runs."""
 
-from ._types import (
-    ReducerContextProtocol,
-    ReducerEvent,
-    TypedReducer,
-)
-from .protocols import (
+from ._protocols import (
     ReadOnlySliceAccessorProtocol,
+    ReducerContextProtocol,
     SessionProtocol,
     SessionViewProtocol,
     SliceAccessorProtocol,
     SnapshotProtocol,
     TypedReducerProtocol,
 )
+from ._types import ReducerEvent
 from .reducer_context import ReducerContext, build_reducer_context
 from .reducers import (
     append_all,
@@ -114,7 +111,6 @@ __all__ = [  # noqa: RUF022
     "SnapshotProtocol",
     "SnapshotRestoreError",
     "SnapshotSerializationError",
-    "TypedReducer",
     "TypedReducerProtocol",
     "VisibilityOverrides",
     "append_all",

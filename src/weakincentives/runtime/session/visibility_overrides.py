@@ -32,7 +32,7 @@ from .state_slice import reducer
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .protocols import SessionProtocol
+    from ._protocols import SessionProtocol
 
 
 @FrozenDataclass()
