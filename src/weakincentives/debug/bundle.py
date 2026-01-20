@@ -166,30 +166,24 @@ class BundleConfig:
 
     Attributes:
         target: Output directory for bundles. None disables bundling.
-        include_session_before: Capture pre-execution session state.
-        include_filesystem: Archive workspace files.
-        include_logs: Capture log records during execution.
+        max_log_lines: Limit log capture. None for unlimited.
         max_file_size: Skip files larger than this (bytes). Default 10MB.
         max_total_size: Maximum filesystem capture size (bytes). Default 50MB.
         compression: Zip compression method.
     """
 
     target: Path | None = None
-    include_session_before: bool = True
-    include_filesystem: bool = True
-    include_logs: bool = True
+    max_log_lines: int | None = None
     max_file_size: int = 10_000_000  # 10MB
     max_total_size: int = 52_428_800  # 50MB
     compression: str = "deflate"
 
     @classmethod
-    def __pre_init__(  # noqa: PLR0913
+    def __pre_init__(
         cls,
         *,
         target: Path | str | None = None,
-        include_session_before: bool = True,
-        include_filesystem: bool = True,
-        include_logs: bool = True,
+        max_log_lines: int | None = None,
         max_file_size: int = 10_000_000,
         max_total_size: int = 52_428_800,
         compression: str = "deflate",
@@ -198,9 +192,7 @@ class BundleConfig:
         normalized_target = Path(target) if isinstance(target, str) else target
         return {
             "target": normalized_target,
-            "include_session_before": include_session_before,
-            "include_filesystem": include_filesystem,
-            "include_logs": include_logs,
+            "max_log_lines": max_log_lines,
             "max_file_size": max_file_size,
             "max_total_size": max_total_size,
             "compression": compression,
@@ -539,9 +531,6 @@ class BundleWriter:
 
     def write_session_before(self, session: Session) -> None:
         """Write session state before execution."""
-        if not self._config.include_session_before:
-            return
-
         try:
             self._session_id = session.session_id
             snapshot = session.snapshot(include_all=True)
@@ -571,10 +560,6 @@ class BundleWriter:
     @contextmanager
     def capture_logs(self) -> Iterator[None]:
         """Context manager to capture logs during execution."""
-        if not self._config.include_logs:
-            yield
-            return
-
         if self._temp_dir is None:
             yield
             return
@@ -679,9 +664,6 @@ class BundleWriter:
         root_path: str = ".",
     ) -> None:
         """Write workspace filesystem snapshot."""
-        if not self._config.include_filesystem:
-            return
-
         try:
             self._archive_filesystem(fs, root_path)
         except Exception:

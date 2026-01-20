@@ -106,9 +106,7 @@ Configuration for bundle creation:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `target` | `Path \| None` | `None` | Output directory |
-| `include_session_before` | `bool` | `True` | Capture pre-execution state |
-| `include_filesystem` | `bool` | `True` | Archive workspace files |
-| `include_logs` | `bool` | `True` | Capture log records |
+| `max_log_lines` | `int \| None` | `None` | Limit log capture |
 | `max_file_size` | `int` | `10_000_000` | Skip files > 10MB |
 | `max_total_size` | `int` | `52_428_800` | Max filesystem capture (50MB) |
 | `compression` | `str` | `"deflate"` | Zip compression method |
