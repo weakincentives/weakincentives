@@ -150,6 +150,33 @@ wink query ./bundle.zip --schema
       ]
     },
     {
+      "name": "metrics",
+      "description": "Token usage, timing, budget state",
+      "row_count": 1,
+      "columns": [
+        {"name": "input_tokens", "type": "INTEGER", "description": "Total input tokens"},
+        {"name": "output_tokens", "type": "INTEGER", "description": "Total output tokens"},
+        {"name": "total_tokens", "type": "INTEGER", "description": "Combined token count"},
+        {"name": "render_ms", "type": "INTEGER", "description": "Prompt rendering time"},
+        {"name": "call_ms", "type": "INTEGER", "description": "LLM API call time"},
+        {"name": "tool_ms", "type": "INTEGER", "description": "Tool execution time"},
+        {"name": "total_ms", "type": "INTEGER", "description": "Total execution time"},
+        {"name": "budget_remaining", "type": "INTEGER", "description": "Remaining token budget"}
+      ]
+    },
+    {
+      "name": "run_context",
+      "description": "Execution IDs and tracing",
+      "row_count": 1,
+      "columns": [
+        {"name": "run_id", "type": "TEXT", "description": "Run identifier"},
+        {"name": "request_id", "type": "TEXT", "description": "Request identifier"},
+        {"name": "session_id", "type": "TEXT", "description": "Session identifier"},
+        {"name": "trace_id", "type": "TEXT", "description": "Distributed trace ID"},
+        {"name": "span_id", "type": "TEXT", "description": "Current span ID"}
+      ]
+    },
+    {
       "name": "slice_agentplan",
       "description": "Typed view: myapp.state:AgentPlan",
       "row_count": 3,
@@ -177,6 +204,15 @@ wink query ./bundle.zip --schema
 | `session_slices` | All session state as JSON items |
 | `files` | Filesystem snapshot with content |
 | `config` | Flattened configuration key-value pairs |
+| `metrics` | Token usage, timing phases, budget state |
+| `run_context` | Execution IDs and tracing metadata |
+
+### Optional Tables
+
+| Table | Present When | Description |
+|-------|--------------|-------------|
+| `prompt_overrides` | `prompt_overrides.json` exists | Visibility overrides applied during execution |
+| `eval` | `eval.json` exists | Evaluation metadata (EvalLoop bundles only) |
 
 ### Dynamic Slice Tables
 
@@ -256,6 +292,12 @@ SELECT slice_type, COUNT(*) as items FROM session_slices GROUP BY slice_type
 
 -- Search file contents
 SELECT path FROM files WHERE content LIKE '%TODO%'
+
+-- Token usage and timing
+SELECT input_tokens, output_tokens, total_ms FROM metrics
+
+-- Execution context
+SELECT request_id, session_id FROM run_context
 ```
 
 ## Caching
@@ -285,6 +327,10 @@ if the bundle's modification time is newer than the cache file.
    - Derive `tool_calls` from logs (filter by event type)
    - Derive `errors` from logs + `error.json` + failed tool calls
    - Parse `config.json` → `config` table (flattened)
+   - Parse `metrics.json` → `metrics` table
+   - Parse `run_context.json` → `run_context` table
+   - Parse `prompt_overrides.json` → `prompt_overrides` table (if present)
+   - Parse `eval.json` → `eval` table (if present)
    - Read `filesystem/` → `files` table
 1. Execute query against database
 1. Return results as JSON or table
