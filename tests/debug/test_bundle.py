@@ -1159,3 +1159,37 @@ class TestFinalizeEdgeCases:
         original_path = writer.path
         writer._finalize()
         assert writer.path == original_path
+
+    def test_finalize_cleans_up_temp_file_on_rename_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that temp file is cleaned up if atomic rename fails."""
+        from unittest.mock import patch
+
+        writer = BundleWriter(tmp_path)
+        writer.__enter__()
+        writer.write_request_input({"test": "data"})
+
+        # Track what temp file would be created
+        timestamp = writer._started_at.strftime("%Y%m%d_%H%M%S")
+        zip_name = f"{writer._bundle_id}_{timestamp}.zip"
+        tmp_file_path = tmp_path / f"{zip_name}.tmp"
+
+        # Make Path.replace raise an exception
+        original_replace = Path.replace
+
+        def failing_replace(self: Path, target: Path) -> Path:
+            # Call original to actually create the tmp file first
+            if str(self).endswith(".tmp"):
+                raise OSError("Simulated rename failure")
+            return original_replace(self, target)
+
+        with patch.object(Path, "replace", failing_replace):
+            with pytest.raises(OSError, match="Simulated rename failure"):
+                writer._finalize()
+
+        # Temp file should be cleaned up by the finally block
+        assert not tmp_file_path.exists()
+
+        # Clean up manually since we bypassed normal __exit__
+        writer.__exit__(None, None, None)

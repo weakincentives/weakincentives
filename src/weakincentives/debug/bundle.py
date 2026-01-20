@@ -848,22 +848,32 @@ class BundleWriter:
         _ = manifest_path.write_text(manifest_content, encoding="utf-8")
         self._files.append("manifest.json")
 
-        # Create zip archive
+        # Create zip archive atomically (write to temp, then rename)
         self._target.mkdir(parents=True, exist_ok=True)
         timestamp = self._started_at.strftime("%Y%m%d_%H%M%S")
         zip_name = f"{self._bundle_id}_{timestamp}.zip"
         zip_path = self._target / zip_name
+        tmp_path = self._target / f"{zip_name}.tmp"
 
         compression = _get_compression_type(self._config.compression)
-        with zipfile.ZipFile(zip_path, "w", compression) as zf:
-            bundle_dir = self._temp_dir / BUNDLE_ROOT_DIR
-            for root, _, files in bundle_dir.walk():
-                for file in files:
-                    file_path = root / file
-                    arcname = (
-                        BUNDLE_ROOT_DIR + "/" + str(file_path.relative_to(bundle_dir))
-                    )
-                    zf.write(file_path, arcname)
+        try:
+            with zipfile.ZipFile(tmp_path, "w", compression) as zf:
+                bundle_dir = self._temp_dir / BUNDLE_ROOT_DIR
+                for root, _, files in bundle_dir.walk():
+                    for file in files:
+                        file_path = root / file
+                        arcname = (
+                            BUNDLE_ROOT_DIR
+                            + "/"
+                            + str(file_path.relative_to(bundle_dir))
+                        )
+                        zf.write(file_path, arcname)
+            # Atomic rename: either fully created or not present
+            _ = tmp_path.replace(zip_path)
+        finally:
+            # Clean up temp file if it still exists (e.g., rename failed)
+            if tmp_path.exists():
+                tmp_path.unlink()
 
         self._path = zip_path
         self._finalized = True
