@@ -172,9 +172,15 @@ class DocsChecker:
                     continue
                 resolved = (md_file.parent / target).resolve()
                 if not resolved.exists():
+                    msg = (
+                        f"Broken link: [{link.text}]({link.target})\n"
+                        f"Target: {resolved}\n"
+                        f"Fix: Update link target or create missing file\n"
+                        f"Check: git log --follow -- {target} (to see if file moved)"
+                    )
                     diagnostics.append(
                         Diagnostic(
-                            message=f"Broken link: [{link.text}]({link.target})",
+                            message=msg,
                             location=Location(file=str(md_file), line=link.line),
                         )
                     )
@@ -197,9 +203,15 @@ class DocsChecker:
                         for match in pattern.finditer(line):
                             path = match.group(1)
                             if not (root / path).exists():  # pragma: no cover
+                                msg = (
+                                    f"Referenced file not found: {path}\n"
+                                    f"Fix: Create the file or update the reference\n"
+                                    f"Check: git log --follow -- {path} (to see if file moved)\n"
+                                    f"Create: touch {path} (if it should exist)"
+                                )
                                 diagnostics.append(
                                     Diagnostic(
-                                        message=f"Referenced file not found: {path}",
+                                        message=msg,
                                         location=Location(file=str(spec), line=line_num),
                                     )
                                 )

@@ -153,9 +153,19 @@ def parse_pytest(output: str, code: int) -> tuple[Diagnostic, ...]:
     if not diagnostics and code != 0:
         # Look for any error hint
         if "no tests ran" in output.lower():
-            diagnostics.append(Diagnostic("No tests ran"))
+            msg = (
+                "No tests ran\n"
+                "Fix: Check test collection and file naming\n"
+                "Run: uv run pytest tests -v"
+            )
+            diagnostics.append(Diagnostic(msg))
         else:
-            diagnostics.append(Diagnostic("Tests failed (run with -v for details)"))
+            msg = (
+                "Tests failed\n"
+                "Reproduce: uv run pytest tests -v\n"
+                "Focus on specific test: uv run pytest tests/path/to/test.py::test_name -vv"
+            )
+            diagnostics.append(Diagnostic(msg))
 
     return tuple(diagnostics)
 
@@ -228,7 +238,12 @@ def parse_deptry(output: str, code: int) -> tuple[Diagnostic, ...]:
         for line in output.strip().split("\n"):
             line = line.strip()
             if line and not line.startswith(("-", "=", "Found", "Scanning")):
-                diagnostics.append(Diagnostic(message=line))
+                msg = (
+                    f"{line}\n"
+                    "Reproduce: uv run deptry src/weakincentives\n"
+                    "Fix: Remove unused imports or add missing dependencies to pyproject.toml"
+                )
+                diagnostics.append(Diagnostic(message=msg))
 
     return tuple(diagnostics)
 
@@ -250,7 +265,13 @@ def parse_pip_audit(output: str, code: int) -> tuple[Diagnostic, ...]:
         )
 
     if not diagnostics and code != 0:
-        diagnostics.append(Diagnostic("Vulnerability check failed"))
+        msg = (
+            "Vulnerability check failed\n"
+            "Reproduce: uv run pip-audit\n"
+            "Fix: Update dependencies in pyproject.toml\n"
+            "Details: Check output for specific vulnerable packages"
+        )
+        diagnostics.append(Diagnostic(msg))
 
     return tuple(diagnostics)
 

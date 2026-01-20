@@ -50,11 +50,16 @@ class ArchitectureChecker:
         pkg_dir = src / "weakincentives"
 
         if not pkg_dir.is_dir():
+            msg = (
+                f"Package not found: {pkg_dir}\n"
+                f"Fix: Ensure you're in the project root directory\n"
+                f"Expected structure: src/weakincentives/"
+            )
             return CheckResult(
                 name=self.name,
                 status="failed",
                 duration_ms=int((time.monotonic() - start) * 1000),
-                diagnostics=(Diagnostic(f"Package not found: {pkg_dir}"),),
+                diagnostics=(Diagnostic(msg),),
             )
 
         diagnostics: list[Diagnostic] = []
@@ -86,9 +91,14 @@ class ArchitectureChecker:
             source = py_file.read_text(encoding="utf-8")
             imports = extract_imports(source, module_name)
         except SyntaxError as e:
+            msg = (
+                f"Syntax error: {e}\n"
+                f"Fix: Correct the syntax error in the file\n"
+                f"Run: make format lint to identify all issues"
+            )
             return [
                 Diagnostic(
-                    message=f"Syntax error: {e}",
+                    message=msg,
                     location=Location(file=str(py_file), line=e.lineno),
                 )
             ]
@@ -96,9 +106,15 @@ class ArchitectureChecker:
         diagnostics: list[Diagnostic] = []
         for imp in imports:
             if "contrib" in imp.imported_from:
+                msg = (
+                    f"Core module imports from contrib: {imp.imported_from}\n"
+                    f"Fix: Move code to contrib or refactor to use protocols\n"
+                    f"Architecture: Core modules must not depend on contrib\n"
+                    f"See: CLAUDE.md for architecture guidelines"
+                )
                 diagnostics.append(
                     Diagnostic(
-                        message=f"Core module imports from contrib: {imp.imported_from}",
+                        message=msg,
                         location=Location(file=str(py_file), line=imp.lineno),
                     )
                 )
