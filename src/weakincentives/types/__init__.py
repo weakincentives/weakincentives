@@ -14,6 +14,11 @@
 
 from __future__ import annotations
 
+from ._guards import (
+    ensure_type,
+    is_instance_of,
+    narrow_optional,
+)
 from .adapter import (
     CLAUDE_AGENT_SDK_ADAPTER_NAME,
     LITELLM_ADAPTER_NAME,
@@ -53,5 +58,8 @@ __all__ = [
     "SupportsDataclass",
     "SupportsDataclassOrNone",
     "SupportsToolResult",
+    "ensure_type",
     "is_dataclass_instance",
+    "is_instance_of",
+    "narrow_optional",
 ]
