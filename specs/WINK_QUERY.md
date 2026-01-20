@@ -823,12 +823,99 @@ wink query ./bundle.zip "
 
 ### Virtual Table Architecture
 
-Tables are implemented as SQLite virtual tables using the `sqlite3` module's
-`create_function` and `create_module` capabilities. This enables:
+Tables are implemented as SQLite virtual tables using
+[APSW](https://rogerbinns.github.io/apsw/) (Another Python SQLite Wrapper).
+APSW is chosen over the standard library `sqlite3` module because it provides
+complete access to SQLite's virtual table API.
 
-- Lazy loading of large artifacts
-- Memory-efficient streaming
-- Custom indexing strategies
+**Why APSW:**
+
+- Full virtual table support via `apsw.VTTable` and `apsw.VTModule` classes
+- Access to `xBestIndex` for query planner hints and constraint propagation
+- Proper `xFilter` implementation for predicate pushdown
+- Support for `xColumn` lazy evaluation (columns computed on demand)
+- Complete SQLite C API exposure (standard `sqlite3` has limited vtable support)
+
+**Virtual Table Implementation:**
+
+```python
+import apsw
+
+class BundleModule:
+    """APSW virtual table module for debug bundle tables."""
+
+    def __init__(self, bundle: DebugBundle) -> None:
+        self._bundle = bundle
+
+    def Create(
+        self,
+        db: apsw.Connection,
+        modulename: str,
+        dbname: str,
+        tablename: str,
+        *args: str,
+    ) -> tuple[str, "BundleTable"]:
+        # Return schema DDL and table instance
+        schema = self._bundle.schema_for(tablename)
+        return schema.to_ddl(), BundleTable(self._bundle, tablename, schema)
+
+    Connect = Create  # Same behavior for CREATE and connect
+
+
+class BundleTable:
+    """Virtual table backed by bundle artifact."""
+
+    def __init__(
+        self, bundle: DebugBundle, name: str, schema: TableSchema
+    ) -> None:
+        self._bundle = bundle
+        self._name = name
+        self._schema = schema
+
+    def BestIndex(
+        self, constraints: list[tuple[int, int]], orderbys: list[tuple[int, int]]
+    ) -> tuple[list[tuple[int, bool]], int, str, bool, int]:
+        # Inform query planner about usable indexes
+        # Return: (constraint_usage, index_num, index_str, order_satisfied, cost)
+        ...
+
+    def Open(self) -> "BundleCursor":
+        return BundleCursor(self._bundle, self._name, self._schema)
+
+
+class BundleCursor:
+    """Cursor for iterating bundle data with predicate pushdown."""
+
+    def Filter(
+        self, indexnum: int, indexstring: str, constraintargs: tuple
+    ) -> None:
+        # Apply pushed-down predicates before iteration
+        self._predicate = self._build_predicate(indexnum, constraintargs)
+        self._iterator = self._bundle.iterate(self._name, self._predicate)
+        self._current = None
+        self.Next()
+
+    def Next(self) -> None:
+        self._current = next(self._iterator, None)
+
+    def Eof(self) -> bool:
+        return self._current is None
+
+    def Column(self, n: int) -> Any:
+        # Lazy column evaluation - only compute requested columns
+        return self._schema.extract_column(self._current, n)
+
+    def Rowid(self) -> int:
+        return self._current._rowid
+```
+
+**Key capabilities enabled by APSW:**
+
+- Lazy loading of large artifacts (rows loaded during iteration)
+- Memory-efficient streaming (no full materialization)
+- Predicate pushdown via `BestIndex`/`Filter` (skip non-matching rows early)
+- Custom indexing strategies communicated to query planner
+- Column-level lazy evaluation (complex JSON parsing deferred)
 
 ### Memory Management
 
