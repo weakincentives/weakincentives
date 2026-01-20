@@ -185,7 +185,6 @@ class BundleConfig:
         include_session_before: Capture pre-execution session state.
         include_filesystem: Archive workspace files.
         include_logs: Capture log records during execution.
-        max_log_lines: Limit log capture. None for unlimited.
         max_file_size: Skip files larger than this (bytes). Default 10MB.
         max_total_size: Maximum filesystem capture size (bytes). Default 50MB.
         compression: Zip compression method.
@@ -196,7 +195,6 @@ class BundleConfig:
     include_session_before: bool = True
     include_filesystem: bool = True
     include_logs: bool = True
-    max_log_lines: int | None = None
     max_file_size: int = 10_000_000  # 10MB
     max_total_size: int = 52_428_800  # 50MB
     compression: str = "deflate"
@@ -210,7 +208,6 @@ class BundleConfig:
         include_session_before: bool = True,
         include_filesystem: bool = True,
         include_logs: bool = True,
-        max_log_lines: int | None = None,
         max_file_size: int = 10_000_000,
         max_total_size: int = 52_428_800,
         compression: str = "deflate",
@@ -224,7 +221,6 @@ class BundleConfig:
             "include_session_before": include_session_before,
             "include_filesystem": include_filesystem,
             "include_logs": include_logs,
-            "max_log_lines": max_log_lines,
             "max_file_size": max_file_size,
             "max_total_size": max_total_size,
             "compression": compression,

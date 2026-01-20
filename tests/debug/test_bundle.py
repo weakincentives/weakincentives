@@ -70,7 +70,6 @@ class TestBundleConfig:
         assert config.include_session_before is True
         assert config.include_filesystem is True
         assert config.include_logs is True
-        assert config.max_log_lines is None
         assert config.max_file_size == 10_000_000
         assert config.max_total_size == 52_428_800
         assert config.compression == "deflate"
