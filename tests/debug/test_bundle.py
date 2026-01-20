@@ -1125,10 +1125,10 @@ class TestBundleDocumentation:
         """Test _DOCS_ENTRYPOINTS contains expected paths."""
         assert "docs/README.md" in _DOCS_ENTRYPOINTS
         assert "docs/SCHEMAS.md" in _DOCS_ENTRYPOINTS
+        assert "docs/FILESYSTEM.md" in _DOCS_ENTRYPOINTS
         assert "request/README.md" in _DOCS_ENTRYPOINTS
         assert "session/README.md" in _DOCS_ENTRYPOINTS
         assert "logs/README.md" in _DOCS_ENTRYPOINTS
-        assert "docs/FILESYSTEM.md" in _DOCS_ENTRYPOINTS
 
     def test_generate_docs_readme(self) -> None:
         """Test docs/README.md generation."""
@@ -1207,10 +1207,10 @@ class TestBundleDocumentation:
         # Check all expected docs files are present
         assert "docs/README.md" in files
         assert "docs/SCHEMAS.md" in files
+        assert "docs/FILESYSTEM.md" in files
         assert "request/README.md" in files
         assert "session/README.md" in files
         assert "logs/README.md" in files
-        assert "docs/FILESYSTEM.md" in files
 
     def test_bundle_manifest_includes_docs(self, tmp_path: Path) -> None:
         """Test that bundle manifest includes docs entrypoints."""
