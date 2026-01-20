@@ -99,6 +99,7 @@ class MainLoopRequest[UserRequestT]:
 
     The ``budget``, ``deadline``, and ``resources`` fields override config defaults.
     The ``experiment`` field specifies a configuration variant for A/B testing.
+    The ``debug_bundle`` field overrides ``MainLoopConfig.debug_bundle`` for this request.
     """
 
     request: UserRequestT
@@ -111,6 +112,8 @@ class MainLoopRequest[UserRequestT]:
     """Optional execution context. If not provided, MainLoop creates one."""
     experiment: Experiment | None = None
     """Optional experiment for A/B testing. When provided, prepare() receives it."""
+    debug_bundle: BundleConfig | None = None
+    """Optional per-request debug bundle config. Overrides MainLoopConfig.debug_bundle."""
 
 
 __all__ = [

@@ -49,6 +49,7 @@ import threading
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
 
@@ -69,8 +70,10 @@ from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
+    from ..debug.bundle import BundleConfig
     from ..evals._experiment import Experiment
     from ..prompt import Prompt
+    from .session.visibility_overrides import VisibilityOverrides
 
 _logger: StructuredLogger = get_logger(
     __name__, context={"component": "runtime.main_loop"}
@@ -396,13 +399,19 @@ class MainLoop[UserRequestT, OutputT](ABC):
             },
         )
 
-        # Check if debug bundling is enabled
-        bundle_config = self._config.debug_bundle
+        # Check if debug bundling is enabled (per-request overrides config-level)
+        bundle_config = (
+            request_event.debug_bundle
+            if request_event.debug_bundle is not None
+            else self._config.debug_bundle
+        )
 
         # Attach lease extender to heartbeat for this message
         with self._lease_extender.attach(msg, self._heartbeat):
             if bundle_config is not None and bundle_config.enabled:
-                self._handle_message_with_bundle(msg, request_event, run_context, log)
+                self._handle_message_with_bundle(
+                    msg, request_event, run_context, log, bundle_config
+                )
             else:
                 self._handle_message_without_bundle(msg, request_event, run_context)
 
@@ -414,39 +423,90 @@ class MainLoop[UserRequestT, OutputT](ABC):
         request_event: MainLoopRequest[UserRequestT],
         run_context: RunContext,
         log: StructuredLogger,
+        bundle_config: BundleConfig,
     ) -> None:
         """Process message with debug bundling enabled."""
         from ..debug.bundle import BundleWriter
         from ..filesystem import Filesystem
+        from .session.visibility_overrides import VisibilityOverrides
 
-        bundle_config = self._config.debug_bundle
-        if bundle_config is None or bundle_config.target is None:  # pragma: no cover
+        if bundle_config.target is None:  # pragma: no cover
             # Defensive guard: _handle_message only calls this when enabled=True
             self._handle_message_without_bundle(msg, request_event, run_context)
             return
 
+        # Determine trigger based on where config came from
+        trigger = "request" if request_event.debug_bundle is not None else "config"
+
         writer: BundleWriter | None = None
+        started_at = datetime.now(UTC)
+        budget_tracker: BudgetTracker | None = None
         try:
             with BundleWriter(
                 bundle_config.target,
                 bundle_id=run_context.run_id,
                 config=bundle_config,
-                trigger="config",
+                trigger=trigger,
             ) as writer:
+                # Write request input
                 writer.write_request_input(request_event)
+
+                # Prepare prompt and session first so we can capture session/before
+                prompt, session = self.prepare(
+                    request_event.request,
+                    experiment=request_event.experiment,
+                )
+
+                # Write session before execution
+                writer.write_session_before(session)
+
+                # Update run_context with session_id for early write
+                run_context = replace(run_context, session_id=session.session_id)
                 writer.write_run_context(run_context)
 
-                with writer.capture_logs():
-                    response, session, prompt = self._execute(
-                        request_event, run_context=run_context
-                    )
+                # Set prompt info for manifest
+                adapter_name = self._get_adapter_name()
+                writer.set_prompt_info(
+                    ns=prompt.ns,
+                    key=prompt.key,
+                    adapter=adapter_name,
+                )
 
-                # Add session_id while preserving the same run_id
-                run_context = replace(run_context, session_id=session.session_id)
+                # Resolve effective settings and execute
+                response, budget_tracker = self._execute_with_bundled_settings(
+                    request_event=request_event,
+                    prompt=prompt,
+                    session=session,
+                    run_context=run_context,
+                    writer=writer,
+                )
 
+                ended_at = datetime.now(UTC)
+
+                # Write session after execution
                 writer.write_session_after(session)
                 writer.write_request_output(response)
                 writer.write_config(self._config)
+
+                # Write final run_context (session_id already set above)
+                writer.write_run_context(run_context)
+
+                # Write metrics: timing, token usage, budget status
+                metrics = self._collect_metrics(
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    session=session,
+                    budget_tracker=budget_tracker,
+                )
+                writer.write_metrics(metrics)
+
+                # Write prompt overrides from session
+                visibility_overrides = session[VisibilityOverrides].latest()
+                if visibility_overrides is not None and visibility_overrides.overrides:
+                    prompt_overrides = self._format_visibility_overrides(
+                        visibility_overrides, session
+                    )
+                    writer.write_prompt_overrides(prompt_overrides)
 
                 # Write filesystem snapshot if available from prompt resources
                 fs = prompt.resources.get_optional(Filesystem)
@@ -493,6 +553,196 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 result_class=MainLoopResult,
                 bundle_path=bundle_path,
             )
+
+    def _execute_with_bundled_settings(
+        self,
+        *,
+        request_event: MainLoopRequest[UserRequestT],
+        prompt: Prompt[OutputT],
+        session: Session,
+        run_context: RunContext,
+        writer: object,  # BundleWriter, but avoid import for typing
+    ) -> tuple[PromptResponse[OutputT], BudgetTracker | None]:
+        """Execute prompt with settings resolved and log capture enabled.
+
+        This helper reduces nesting in _handle_message_with_bundle by
+        encapsulating the execution loop with visibility override retry.
+        """
+        # Resolve effective settings
+        effective_budget = (
+            request_event.budget
+            if request_event.budget is not None
+            else self._config.budget
+        )
+        effective_deadline = (
+            request_event.deadline
+            if request_event.deadline is not None
+            else self._config.deadline
+        )
+        effective_resources = (
+            request_event.resources
+            if request_event.resources is not None
+            else self._config.resources
+        )
+
+        # Bind resources to prompt if provided
+        if effective_resources is not None:
+            prompt = prompt.bind(resources=effective_resources)
+
+        budget_tracker = (
+            BudgetTracker(budget=effective_budget)
+            if effective_budget is not None
+            else None
+        )
+
+        # Use capture_logs from writer
+        with writer.capture_logs():  # type: ignore[union-attr]
+            while True:
+                try:
+                    response = self._adapter.evaluate(
+                        prompt,
+                        session=session,
+                        deadline=effective_deadline,
+                        budget_tracker=budget_tracker,
+                        heartbeat=self._heartbeat,
+                        run_context=run_context,
+                    )
+                except VisibilityExpansionRequired as e:
+                    for path, visibility in e.requested_overrides.items():
+                        _ = session.dispatch(
+                            SetVisibilityOverride(path=path, visibility=visibility)
+                        )
+                else:
+                    self.finalize(prompt, session)
+                    break
+
+        return response, budget_tracker
+
+    def _get_adapter_name(self) -> str:
+        """Get the canonical adapter name for the current adapter."""
+        from ..adapters import (
+            CLAUDE_AGENT_SDK_ADAPTER_NAME,
+            LITELLM_ADAPTER_NAME,
+            OPENAI_ADAPTER_NAME,
+        )
+        from ..adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+        from ..adapters.litellm import LiteLLMAdapter
+        from ..adapters.openai import OpenAIAdapter
+
+        if isinstance(self._adapter, ClaudeAgentSDKAdapter):
+            return CLAUDE_AGENT_SDK_ADAPTER_NAME  # pragma: no cover
+        if isinstance(self._adapter, OpenAIAdapter):
+            return OPENAI_ADAPTER_NAME  # pragma: no cover
+        if isinstance(self._adapter, LiteLLMAdapter):
+            return LITELLM_ADAPTER_NAME  # pragma: no cover
+        return type(self._adapter).__name__
+
+    @staticmethod
+    def _collect_metrics(
+        *,
+        started_at: datetime,
+        ended_at: datetime,
+        session: Session,
+        budget_tracker: BudgetTracker | None,
+    ) -> dict[str, object]:
+        """Collect metrics for the bundle: timing, token usage, budget status."""
+        from weakincentives.runtime.events import PromptExecuted
+
+        # Calculate timing
+        duration_ms = (ended_at - started_at).total_seconds() * 1000
+
+        # Collect token usage from PromptExecuted events in session
+        total_input_tokens = 0
+        total_output_tokens = 0
+        total_cached_tokens = 0
+        prompt_count = 0
+
+        # Try to get PromptExecuted events from session telemetry
+        try:
+            telemetry_slice = session[PromptExecuted]
+            for event in telemetry_slice.all():  # pragma: no cover
+                prompt_count += 1  # pragma: no cover
+                if event.usage is not None:  # pragma: no cover
+                    total_input_tokens += (
+                        event.usage.input_tokens or 0
+                    )  # pragma: no cover
+                    total_output_tokens += (
+                        event.usage.output_tokens or 0
+                    )  # pragma: no cover
+                    total_cached_tokens += (
+                        event.usage.cached_tokens or 0
+                    )  # pragma: no cover
+        except (KeyError, AttributeError):  # pragma: no cover
+            pass  # pragma: no cover
+
+        metrics: dict[str, object] = {
+            "timing": {
+                "started_at": started_at.isoformat(),
+                "ended_at": ended_at.isoformat(),
+                "duration_ms": duration_ms,
+            },
+            "token_usage": {
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "cached_tokens": total_cached_tokens,
+                "total_tokens": total_input_tokens + total_output_tokens,
+                "prompt_count": prompt_count,
+            },
+        }
+
+        # Add budget status if budget tracking was enabled
+        if budget_tracker is not None:
+            consumed = budget_tracker.consumed
+            budget = budget_tracker.budget
+            metrics["budget"] = {
+                "consumed": {
+                    "input_tokens": consumed.input_tokens,
+                    "output_tokens": consumed.output_tokens,
+                    "cached_tokens": consumed.cached_tokens,
+                    "total_tokens": consumed.total_tokens,
+                },
+                "limits": {
+                    "max_input_tokens": budget.max_input_tokens,
+                    "max_output_tokens": budget.max_output_tokens,
+                    "max_total_tokens": budget.max_total_tokens,
+                    "deadline": budget.deadline.expires_at.isoformat()
+                    if budget.deadline is not None
+                    else None,
+                },
+            }
+
+        return metrics
+
+    @staticmethod
+    def _format_visibility_overrides(
+        overrides: VisibilityOverrides,
+        session: Session,
+    ) -> dict[str, object]:
+        """Format visibility overrides for bundle export."""
+        from weakincentives.runtime.session.visibility_overrides import (
+            VisibilityOverrides as VOType,
+        )
+
+        formatted: dict[str, object] = {"overrides": {}}
+        overrides_dict: dict[str, str] = {}
+
+        for path, visibility in overrides.overrides.items():
+            # Convert tuple path to string format (e.g., "section.subsection")
+            path_str = ".".join(path)
+            overrides_dict[path_str] = visibility.value
+
+        formatted["overrides"] = overrides_dict
+
+        # Try to get provenance info from session history
+        try:
+            vo_slice = session[VOType]
+            history = [{"overrides": dict(item.overrides)} for item in vo_slice.all()]
+            if history:  # pragma: no cover
+                formatted["history_count"] = len(history)  # pragma: no cover
+        except (KeyError, AttributeError):  # pragma: no cover
+            pass  # pragma: no cover
+
+        return formatted
 
     def _handle_message_without_bundle(
         self,
