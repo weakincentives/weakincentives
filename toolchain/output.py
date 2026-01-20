@@ -63,7 +63,7 @@ class ConsoleFormatter:
     verbose: bool = False
     color: bool | None = None  # None = auto-detect
     stream: IO[str] | None = None
-    max_diagnostics: int = 10  # Max diagnostics to show per checker
+    max_diagnostics: int = 100  # Max diagnostics to show per checker
 
     def _use_color(self) -> bool:
         if self.color is not None:

@@ -109,19 +109,33 @@ class SubprocessChecker:
             )
         except subprocess.TimeoutExpired:
             duration_ms = int((time.monotonic() - start) * 1000)
+            cmd_str = " ".join(self.command)
+            msg = (
+                f"Timed out after {self.timeout}s\n"
+                f"Command: {cmd_str}\n"
+                f"Fix: Increase timeout or investigate hanging process\n"
+                f"Run manually: {cmd_str}"
+            )
             return CheckResult(
                 name=self.name,
                 status="failed",
                 duration_ms=duration_ms,
-                diagnostics=(Diagnostic(f"Timed out after {self.timeout}s"),),
+                diagnostics=(Diagnostic(msg),),
                 output="",
             )
         except FileNotFoundError as e:
             duration_ms = int((time.monotonic() - start) * 1000)
+            cmd_str = " ".join(self.command)
+            msg = (
+                f"Command not found: {e.filename}\n"
+                f"Attempted: {cmd_str}\n"
+                f"Fix: Ensure dependencies are installed\n"
+                f"Run: uv sync && ./install-hooks.sh"
+            )
             return CheckResult(
                 name=self.name,
                 status="failed",
                 duration_ms=duration_ms,
-                diagnostics=(Diagnostic(f"Command not found: {e.filename}"),),
+                diagnostics=(Diagnostic(msg),),
                 output="",
             )

@@ -57,7 +57,13 @@ class Runner:
             # Validate requested names
             unknown = set(names) - set(self.checkers.keys())
             if unknown:
-                msg = f"Unknown checker(s): {', '.join(sorted(unknown))}"
+                available = sorted(self.checkers.keys())
+                msg = (
+                    f"Unknown checker(s): {', '.join(sorted(unknown))}\n"
+                    f"Available checkers: {', '.join(available)}\n"
+                    f"Run all: make check\n"
+                    f"Run specific: uv run python check.py <checker-name>"
+                )
                 raise ValueError(msg)
             to_run = [self.checkers[n] for n in names]
         else:
