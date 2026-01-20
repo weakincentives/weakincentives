@@ -71,7 +71,7 @@ _PROMPT_NS = "integration/claude-agent-sdk"
 def _get_model() -> str:
     """Return the model name used for integration tests.
 
-    Uses get_default_model() which returns Opus 4.5 in the appropriate
+    Uses get_default_model() which returns Sonnet 4.5 in the appropriate
     format based on whether Bedrock is configured.
     """
     return os.environ.get(_MODEL_ENV_VAR, get_default_model())

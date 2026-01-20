@@ -33,6 +33,7 @@ from ...runtime.transactions import (
 )
 from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema
+from ._visibility_signal import VisibilityExpansionSignal
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
@@ -95,6 +96,7 @@ class BridgedTool:
         prompt_name: str | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
+        visibility_signal: VisibilityExpansionSignal | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -110,6 +112,7 @@ class BridgedTool:
         self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
         self._heartbeat = heartbeat
         self._run_context = run_context
+        self._visibility_signal = visibility_signal
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
@@ -200,9 +203,38 @@ class BridgedTool:
                 "isError": True,
             }
 
-        except VisibilityExpansionRequired:
-            # Context manager handles restore; just re-raise
-            raise
+        except VisibilityExpansionRequired as exc:
+            # Store exception in signal for adapter to re-raise after SDK completes.
+            # Manually restore snapshot since we're catching and returning, not re-raising.
+            self._restore_snapshot(snapshot, reason="visibility_expansion")
+            if self._visibility_signal is not None:
+                self._visibility_signal.set(exc)
+            logger.debug(
+                "claude_agent_sdk.bridge.visibility_expansion_required",
+                event="bridge.visibility_expansion_required",
+                context={
+                    "tool_name": self.name,
+                    "section_keys": exc.section_keys,
+                    "reason": exc.reason,
+                },
+            )
+            # Return success (not error) - the tool worked correctly by identifying
+            # sections that need expansion. The SDK will complete gracefully, then
+            # the adapter checks the signal and re-raises the exception so the
+            # caller can re-render the prompt with expanded sections.
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Sections expanded: {', '.join(exc.section_keys)}. "
+                            "The prompt will be re-rendered with the full content "
+                            "of the requested sections."
+                        ),
+                    }
+                ],
+                "isError": False,
+            }
 
         except Exception as error:
             # Context manager handles restore for propagating exceptions,
@@ -320,6 +352,7 @@ def create_bridged_tools(
     prompt_name: str | None = None,
     heartbeat: Heartbeat | None = None,
     run_context: RunContext | None = None,
+    visibility_signal: VisibilityExpansionSignal | None = None,
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -335,6 +368,8 @@ def create_bridged_tools(
         prompt_name: Name of the prompt for event dispatching.
         heartbeat: Optional heartbeat for tool context.
         run_context: Optional execution context with correlation identifiers.
+        visibility_signal: Signal for propagating VisibilityExpansionRequired
+            exceptions from tool handlers to the adapter.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
@@ -376,6 +411,7 @@ def create_bridged_tools(
             prompt_name=resolved_prompt_name,
             heartbeat=heartbeat,
             run_context=run_context,
+            visibility_signal=visibility_signal,
         )
         bridged.append(bridged_tool)
 

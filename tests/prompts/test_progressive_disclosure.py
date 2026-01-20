@@ -335,6 +335,77 @@ def test_open_sections_rejects_already_expanded() -> None:
         tool.handler(params, context=_make_tool_context())  # type: ignore[arg-type]
 
 
+def test_open_sections_rejects_multiple_already_expanded() -> None:
+    """Handler rejects when all requested sections are already expanded."""
+    section1 = _make_section(
+        key="expanded1",
+        visibility=SectionVisibility.FULL,
+    )
+    section2 = _make_section(
+        key="expanded2",
+        visibility=SectionVisibility.FULL,
+    )
+    registry = _make_registry((section1, section2))
+    snapshot = registry.snapshot()
+    current_visibility = {
+        ("expanded1",): SectionVisibility.FULL,
+        ("expanded2",): SectionVisibility.FULL,
+    }
+
+    tool = create_open_sections_handler(
+        registry=snapshot,
+        current_visibility=current_visibility,
+    )
+
+    params = OpenSectionsParams(
+        section_keys=("expanded1", "expanded2"),
+        reason="Both already expanded",
+    )
+
+    with pytest.raises(PromptValidationError, match="All requested sections"):
+        tool.handler(params, context=_make_tool_context())  # type: ignore[arg-type]
+
+
+def test_open_sections_skips_already_expanded_in_mixed_request() -> None:
+    """Handler skips already-expanded sections and expands the rest."""
+    expanded_section = _make_section(
+        key="expanded",
+        visibility=SectionVisibility.FULL,
+    )
+    summarized_section = _make_section(
+        key="summarized",
+        summary="Needs expansion",
+        visibility=SectionVisibility.SUMMARY,
+    )
+    registry = _make_registry((expanded_section, summarized_section))
+    snapshot = registry.snapshot()
+    current_visibility = {
+        ("expanded",): SectionVisibility.FULL,
+        ("summarized",): SectionVisibility.SUMMARY,
+    }
+
+    tool = create_open_sections_handler(
+        registry=snapshot,
+        current_visibility=current_visibility,
+    )
+
+    # Request both expanded and summarized sections
+    params = OpenSectionsParams(
+        section_keys=("expanded", "summarized"),
+        reason="Mixed request",
+    )
+
+    # Should raise VisibilityExpansionRequired only for the summarized section
+    with pytest.raises(VisibilityExpansionRequired) as exc_info:
+        tool.handler(params, context=_make_tool_context())  # type: ignore[arg-type]
+
+    exc = cast(VisibilityExpansionRequired, exc_info.value)
+    # Only the summarized section should be in the overrides
+    assert ("summarized",) in exc.requested_overrides
+    assert ("expanded",) not in exc.requested_overrides
+    assert exc.requested_overrides["summarized",] == SectionVisibility.FULL
+
+
 def test_open_sections_nested_key_parsing() -> None:
     """Handler correctly parses dot-notation section keys."""
     # Create parent section with child

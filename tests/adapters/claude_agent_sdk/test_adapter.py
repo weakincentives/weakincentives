@@ -787,6 +787,51 @@ class TestVisibilityExpansionRequired:
         assert exc.section_keys == ("section.key",)
         assert exc.reason == "Need more details"
 
+    def test_propagates_visibility_expansion_from_signal(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that VisibilityExpansionRequired from signal propagates correctly.
+
+        This tests the signal-based propagation path where a tool handler raises
+        VisibilityExpansionRequired, the bridge stores it in the signal, and the
+        adapter re-raises it after the SDK query completes.
+        """
+        from weakincentives.adapters.claude_agent_sdk._visibility_signal import (
+            VisibilityExpansionSignal,
+        )
+
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        # Create a signal with an exception pre-set
+        test_exc = VisibilityExpansionRequired(
+            "Signal-based expansion",
+            requested_overrides={("signal", "test"): SectionVisibility.FULL},
+            reason="From signal",
+            section_keys=("signal.test",),
+        )
+
+        # Patch VisibilityExpansionSignal to return our pre-set signal
+        original_init = VisibilityExpansionSignal.__init__
+
+        def patched_init(self: VisibilityExpansionSignal) -> None:
+            original_init(self)
+            self.set(test_exc)
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with patch.object(VisibilityExpansionSignal, "__init__", patched_init):
+                with pytest.raises(VisibilityExpansionRequired) as exc_info:
+                    adapter.evaluate(simple_prompt, session=session)
+
+        # Verify the exception from the signal is raised
+        exc = exc_info.value
+        assert exc is test_exc
+        assert exc.section_keys == ("signal.test",)
+        assert exc.reason == "From signal"
+
 
 class TestIsolationConfig:
     """Tests for IsolationConfig integration with the adapter."""

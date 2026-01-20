@@ -20,10 +20,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
-from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    get_default_model,
+)
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -41,19 +46,29 @@ from weakincentives.runtime.session import (
     VisibilityOverrides,
 )
 
-pytest.importorskip("openai")
+pytest.importorskip("claude_agent_sdk")
+
+
+def _is_bedrock_mode() -> bool:
+    """Check if running in Bedrock mode based on environment."""
+    return os.getenv("CLAUDE_CODE_USE_BEDROCK") == "1" and "AWS_REGION" in os.environ
+
+
+def _has_credentials() -> bool:
+    """Check if Bedrock or Anthropic API credentials are available."""
+    return _is_bedrock_mode() or "ANTHROPIC_API_KEY" in os.environ
+
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        "OPENAI_API_KEY" not in os.environ,
-        reason="OPENAI_API_KEY not set; skipping OpenAI integration tests.",
+        not _has_credentials(),
+        reason="Neither CLAUDE_CODE_USE_BEDROCK+AWS_REGION nor ANTHROPIC_API_KEY set.",
     ),
-    pytest.mark.timeout(60),
+    pytest.mark.timeout(120),  # Increased timeout for progressive disclosure loops
 ]
 
-_MODEL_ENV_VAR = "OPENAI_TEST_MODEL"
-_DEFAULT_MODEL = "gpt-5.2"
+_MODEL_ENV_VAR = "CLAUDE_AGENT_SDK_TEST_MODEL"
 _PROMPT_NS = "integration/progressive-disclosure"
 
 # Maximum number of expansion requests expected for a two-level hierarchy
@@ -61,10 +76,31 @@ _PROMPT_NS = "integration/progressive-disclosure"
 _MAX_EXPECTED_EXPANSIONS = 3
 
 
-@pytest.fixture(scope="module")
-def openai_model() -> str:
-    """Return the model name used for integration tests."""
-    return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
+def _get_model() -> str:
+    """Return the model name used for integration tests.
+
+    Uses get_default_model() which returns Sonnet 4.5 in the appropriate
+    format based on whether Bedrock is configured.
+    """
+    return os.environ.get(_MODEL_ENV_VAR, get_default_model())
+
+
+def _make_config(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKClientConfig:
+    """Build a ClaudeAgentSDKClientConfig with explicit cwd."""
+    config_kwargs: dict[str, object] = {
+        "permission_mode": "bypassPermissions",
+        "cwd": str(tmp_path),
+    }
+    config_kwargs.update(kwargs)
+    return ClaudeAgentSDKClientConfig(**config_kwargs)
+
+
+def _make_adapter(tmp_path: Path) -> ClaudeAgentSDKAdapter[object]:
+    """Create a Claude Agent SDK adapter for progressive disclosure tests."""
+    return ClaudeAgentSDKAdapter(
+        model=_get_model(),
+        client_config=_make_config(tmp_path),
+    )
 
 
 @dataclass(slots=True)
@@ -183,7 +219,7 @@ def _build_two_level_hierarchy_prompt(
     )
 
 
-def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
+def test_progressive_disclosure_two_level_hierarchy(tmp_path: Path) -> None:
     """Test that a model can expand a two-level hierarchy and use a leaf tool.
 
     This test verifies:
@@ -196,7 +232,7 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
     prompt_template = _build_two_level_hierarchy_prompt(verify_tool)
     params = InstructionParams(task="Verify the value 'integration-test-value'")
 
-    adapter = OpenAIAdapter(model=openai_model)
+    adapter = _make_adapter(tmp_path)
 
     prompt = Prompt(prompt_template).bind(params)
     session = Session()
@@ -256,7 +292,7 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
         )
 
 
-def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None:
+def test_progressive_disclosure_direct_leaf_expansion(tmp_path: Path) -> None:
     """Test that models can request expansion of nested sections directly.
 
     Some models may request expansion of both parent and child in a single call.
@@ -268,7 +304,7 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
         task="Expand all summarized sections and call verify_result with 'direct-test'"
     )
 
-    adapter = OpenAIAdapter(model=openai_model)
+    adapter = _make_adapter(tmp_path)
 
     prompt = Prompt(prompt_template).bind(params)
     session = Session()

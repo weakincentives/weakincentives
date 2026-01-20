@@ -104,11 +104,16 @@ def _validate_section_keys(
 ) -> dict[SectionPath, SectionVisibility]:
     """Validate section keys and build the visibility override mapping.
 
+    Sections that are already expanded are silently skipped. This allows
+    models to request expansion of multiple sections without needing to
+    track which ones are already expanded.
+
     Returns:
         Mapping from section paths to FULL visibility.
 
     Raises:
-        PromptValidationError: If any key is invalid or already expanded.
+        PromptValidationError: If no keys provided, key is invalid, or all
+            requested sections are already expanded.
     """
     if not section_keys:
         raise PromptValidationError("At least one section key must be provided.")
@@ -126,9 +131,21 @@ def _validate_section_keys(
 
         effective_visibility = current_visibility.get(path)
         if effective_visibility == SectionVisibility.FULL:
-            raise PromptValidationError(f"Section '{key}' is already expanded.")
+            # Skip already-expanded sections silently
+            continue
 
         requested_overrides[path] = SectionVisibility.FULL
+
+    # If all requested sections were already expanded, inform the model
+    if not requested_overrides:
+        if len(section_keys) == 1:
+            raise PromptValidationError(
+                f"Section '{section_keys[0]}' is already expanded."
+            )
+        keys_str = ", ".join(f"'{k}'" for k in section_keys)
+        raise PromptValidationError(
+            f"All requested sections are already expanded: {keys_str}"
+        )
 
     return requested_overrides
 
