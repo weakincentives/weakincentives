@@ -4,6 +4,38 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Debug Bundle System Redesign
+
+The debug bundle system has been redesigned with a new `DebugBundleCollector` for
+capturing session state, logs, and filesystem snapshots during agent execution.
+Bundles are now automatically generated on MainLoop task completion or failure.
+
+```python
+from weakincentives.debug import BundleConfig, CaptureMode
+from weakincentives.runtime import MainLoopConfig
+
+config = MainLoopConfig(
+    debug_bundle=BundleConfig(
+        target="./debug_bundles/",
+        mode=CaptureMode.STANDARD,
+    ),
+)
+```
+
+Bundle format: ZIP archive containing `meta.json`, session state, `logs.jsonl`,
+request input/output, and optional filesystem snapshot with configurable ignore
+patterns.
+
+**Debug Viewer UI (`wink debug`) simplifications:**
+
+- Merged search and filter inputs into a single search field
+- Simplified Logs view by removing event filter dropdown and time range inputs
+- Added Task view toolbar with depth control and expand/collapse buttons
+- Unified JSON rendering across Sessions and Task views
+- Simplified keyboard shortcuts (J/K navigation retained)
+
+See `specs/DEBUG_BUNDLE.md` and `specs/WINK_DEBUG.md` for full specifications.
+
 ### AWS Bedrock Support
 
 `IsolationConfig` now supports AWS Bedrock authentication by inheriting
@@ -41,6 +73,23 @@ Model ID helpers for unified model selection (defaults to Opus 4.5):
 - `get_default_model()`: Returns model ID in the appropriate format for auth mode
 - `to_bedrock_model_id(name)`: Convert Anthropic model name to Bedrock ID
 - `to_anthropic_model_name(id)`: Convert Bedrock ID to Anthropic model name
+
+### Internal
+
+- Consolidated AI assistant guidelines into single CLAUDE.md file
+- Refactored large monolithic Python files for maintainability
+- Standardized path normalization functions across codebase
+- Reviewed and improved RunContext population across codebase
+
+### Fixed
+
+- **Frozenset serialization in session snapshots:** The serde dump module now
+  handles `frozenset` types correctly, fixing "Object of type frozenset is not
+  JSON serializable" errors when dataclasses contain frozenset fields.
+
+- **Excessive warnings for non-dataclass tool example values:** The tool example
+  serialization now properly handles primitives (str, int, float, bool) and
+  sequences without logging spurious warnings.
 
 ## v0.20.0 - 2026-01-16
 
