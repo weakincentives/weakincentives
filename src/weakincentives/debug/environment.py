@@ -437,20 +437,66 @@ def _capture_git_info(working_dir: Path | None = None) -> GitInfo | None:
     )
 
 
+def _capture_untracked_files(working_dir: Path) -> str:
+    """Capture untracked file names and their contents.
+
+    Returns a unified-diff-style representation of untracked files.
+    """
+    untracked_output = _run_git_command(
+        "ls-files", "--others", "--exclude-standard", cwd=working_dir
+    )
+    if not untracked_output:
+        return ""
+
+    untracked_files = [f.strip() for f in untracked_output.splitlines() if f.strip()]
+    if not untracked_files:
+        return ""
+
+    parts: list[str] = ["\n# Untracked files:"]
+    for filename in untracked_files:
+        file_path = working_dir / filename
+        try:
+            if not file_path.is_file():
+                continue
+            content = file_path.read_text(errors="replace")
+            # Format as unified diff for new file
+            parts.append(f"\ndiff --git a/{filename} b/{filename}")
+            parts.append("new file mode 100644")
+            parts.append("--- /dev/null")
+            parts.append(f"+++ b/{filename}")
+            lines = content.splitlines(keepends=True)
+            if lines:
+                parts.append(f"@@ -0,0 +1,{len(lines)} @@")
+                parts.extend(f"+{line.rstrip()}" for line in lines)
+        except (OSError, UnicodeDecodeError):
+            # Skip files we can't read
+            parts.append(f"\n# {filename}: [unable to read]")
+
+    return "\n".join(parts)
+
+
 def _capture_git_diff(working_dir: Path | None = None) -> str | None:
-    """Capture uncommitted git changes (capped at _MAX_GIT_DIFF_SIZE)."""
+    """Capture uncommitted git changes including untracked files.
+
+    Captures both tracked file changes (staged and unstaged) and untracked files.
+    Output is capped at _MAX_GIT_DIFF_SIZE bytes.
+    """
     cwd = working_dir or Path.cwd()
 
-    # Get staged and unstaged changes
+    # Get staged and unstaged changes to tracked files
     diff = _run_git_command("diff", "HEAD", cwd=cwd)
     if diff is None:
         return None
 
-    if len(diff) > _MAX_GIT_DIFF_SIZE:
-        truncation_msg = f"\n\n[TRUNCATED: diff exceeded {_MAX_GIT_DIFF_SIZE} bytes]"
-        return diff[: _MAX_GIT_DIFF_SIZE - len(truncation_msg)] + truncation_msg
+    # Capture untracked files
+    untracked = _capture_untracked_files(cwd)
+    combined = diff + untracked if untracked else diff
 
-    return diff if diff else None
+    if len(combined) > _MAX_GIT_DIFF_SIZE:
+        truncation_msg = f"\n\n[TRUNCATED: diff exceeded {_MAX_GIT_DIFF_SIZE} bytes]"
+        return combined[: _MAX_GIT_DIFF_SIZE - len(truncation_msg)] + truncation_msg
+
+    return combined if combined else None
 
 
 def _is_valid_container_id(s: str) -> bool:

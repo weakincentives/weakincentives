@@ -360,6 +360,180 @@ class TestGitDiff:
         diff = _capture_git_diff(tmp_path)
         assert diff is None
 
+    def test_capture_git_diff_with_untracked_files(self, git_repo: Path) -> None:
+        """Test _capture_git_diff includes untracked files."""
+        # Create an untracked file
+        (git_repo / "new_file.txt").write_text("new file content")
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        assert "Untracked files:" in diff
+        assert "new_file.txt" in diff
+        assert "new file content" in diff
+
+    def test_capture_git_diff_untracked_with_tracked_changes(
+        self, git_repo: Path
+    ) -> None:
+        """Test _capture_git_diff includes both tracked and untracked changes."""
+        # Modify tracked file
+        (git_repo / "test.txt").write_text("modified content")
+        # Create untracked file
+        (git_repo / "untracked.py").write_text("print('hello')")
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        # Should contain tracked file change
+        assert "modified content" in diff
+        # Should contain untracked file
+        assert "untracked.py" in diff
+        assert "print('hello')" in diff
+
+    def test_capture_git_diff_untracked_file_format(self, git_repo: Path) -> None:
+        """Test untracked files are formatted as unified diff."""
+        (git_repo / "config.json").write_text('{"key": "value"}')
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        # Should have unified diff format
+        assert "diff --git a/config.json b/config.json" in diff
+        assert "new file mode" in diff
+        assert "--- /dev/null" in diff
+        assert "+++ b/config.json" in diff
+        assert '+{"key": "value"}' in diff
+
+    def test_capture_git_diff_untracked_multiline(self, git_repo: Path) -> None:
+        """Test untracked file with multiple lines shows line count."""
+        content = "line1\nline2\nline3"
+        (git_repo / "multi.txt").write_text(content)
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        assert "@@ -0,0 +1,3 @@" in diff
+
+    def test_capture_git_diff_untracked_directory(self, git_repo: Path) -> None:
+        """Test untracked files in subdirectories are captured."""
+        subdir = git_repo / "subdir"
+        subdir.mkdir()
+        (subdir / "nested.txt").write_text("nested content")
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        assert "subdir/nested.txt" in diff
+        assert "nested content" in diff
+
+    def test_capture_git_diff_untracked_unreadable(self, git_repo: Path) -> None:
+        """Test graceful handling of unreadable untracked files."""
+        unreadable = git_repo / "unreadable.txt"
+        unreadable.write_text("test")
+        # Remove read permission
+        unreadable.chmod(0o000)
+
+        try:
+            diff = _capture_git_diff(git_repo)
+            # Should still return something (possibly just the header)
+            # and not crash
+            assert diff is None or isinstance(diff, str)
+        finally:
+            # Restore permissions for cleanup
+            unreadable.chmod(0o644)
+
+    def test_capture_git_diff_truncation_with_untracked(self, git_repo: Path) -> None:
+        """Test truncation applies to combined tracked + untracked changes."""
+        # Create large tracked change
+        (git_repo / "test.txt").write_text("x" * 60_000)
+        # Create large untracked file
+        (git_repo / "large.txt").write_text("y" * 60_000)
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        assert "[TRUNCATED:" in diff
+        assert len(diff) <= 100_000
+
+    def test_capture_git_diff_untracked_symlink_to_dir(self, git_repo: Path) -> None:
+        """Test graceful handling of untracked symlinks to directories."""
+        # Create a directory and symlink to it (symlink won't be a regular file)
+        target_dir = git_repo / "target_dir"
+        target_dir.mkdir()
+        symlink = git_repo / "link_to_dir"
+        symlink.symlink_to(target_dir)
+
+        # Also create a regular untracked file
+        (git_repo / "regular.txt").write_text("content")
+
+        diff = _capture_git_diff(git_repo)
+
+        # Should include the regular file but skip the symlink to directory
+        assert diff is not None
+        assert "regular.txt" in diff
+        assert "content" in diff
+
+    def test_capture_git_diff_untracked_binary_file(self, git_repo: Path) -> None:
+        """Test graceful handling of binary untracked files with decode errors."""
+        # Create a file that will trigger errors="replace" behavior
+        binary_file = git_repo / "binary.bin"
+        binary_file.write_bytes(b"\xff\xfe\x00\x01invalid\x80utf8")
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        assert "binary.bin" in diff
+        # Content should be captured with replacement characters
+
+    def test_capture_git_diff_untracked_read_error(self, git_repo: Path) -> None:
+        """Test graceful handling when file read raises OSError."""
+        (git_repo / "error.txt").write_text("test")
+
+        # Mock Path.read_text to raise OSError
+        original_read_text = Path.read_text
+
+        def mock_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            if self.name == "error.txt":
+                raise OSError("Read error")
+            return original_read_text(self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", mock_read_text):
+            diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        assert "error.txt: [unable to read]" in diff
+
+    def test_capture_git_diff_untracked_whitespace_only(self, git_repo: Path) -> None:
+        """Test handling when ls-files returns only whitespace."""
+        # Mock ls-files to return whitespace-only output
+        original_run_git = _run_git_command
+
+        def mock_run_git(*args: str, cwd: Path | None = None) -> str | None:
+            if args[:2] == ("ls-files", "--others"):
+                return "   \n  \n"
+            return original_run_git(*args, cwd=cwd)
+
+        with patch(
+            "weakincentives.debug.environment._run_git_command",
+            side_effect=mock_run_git,
+        ):
+            diff = _capture_git_diff(git_repo)
+
+        # Should return None since no tracked or untracked changes
+        assert diff is None
+
+    def test_capture_git_diff_untracked_empty_file(self, git_repo: Path) -> None:
+        """Test handling of empty untracked files."""
+        # Create an empty untracked file
+        (git_repo / "empty.txt").write_text("")
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        assert "empty.txt" in diff
+        # Empty file should have the header but no @@ hunk
+        assert "diff --git a/empty.txt b/empty.txt" in diff
+
 
 class TestContainerInfo:
     """Tests for ContainerInfo capture."""
@@ -685,6 +859,28 @@ class TestBundleWriterEnvironment:
         env_data = bundle.environment
         assert env_data is not None
         assert env_data.get("git") is not None
+
+    def test_write_environment_with_git_diff(self, git_repo: Path) -> None:
+        """Test write_environment includes git diff when present."""
+        # Create uncommitted changes
+        (git_repo / "test.txt").write_text("modified content")
+
+        env = capture_environment(
+            working_dir=git_repo,
+            include_packages=False,
+            include_git_diff=True,
+        )
+
+        with BundleWriter(git_repo.parent) as writer:
+            writer.write_environment(env)
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        assert "environment/git.diff" in bundle.list_files()
+        env_data = bundle.environment
+        assert env_data is not None
+        assert env_data.get("git_diff") is not None
+        assert "modified content" in str(env_data.get("git_diff"))
 
     def test_write_environment_system_data(self, tmp_path: Path) -> None:
         """Test environment system data is correct."""
