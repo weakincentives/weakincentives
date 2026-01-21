@@ -639,7 +639,7 @@ def test_transactional_tool_rollback_on_failure(tmp_path: Path) -> None:
         )
 
         # Verify file content in bundle
-        content = bundle.read_file("filesystem/workspace/success.txt")
+        content = bundle.read_file("filesystem/success.txt")
         assert content.decode("utf-8") == "persisted"
 
         # Verify session state directly
@@ -817,8 +817,8 @@ def test_transactional_tool_sequential_operations(tmp_path: Path) -> None:
         )
 
         # Verify file contents in bundle
-        assert bundle.read_file("filesystem/workspace/first.txt").decode() == "first"
-        assert bundle.read_file("filesystem/workspace/third.txt").decode() == "third"
+        assert bundle.read_file("filesystem/first.txt").decode() == "first"
+        assert bundle.read_file("filesystem/third.txt").decode() == "third"
 
         # Verify session state directly
         _verify_session_operations_direct(

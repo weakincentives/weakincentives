@@ -45,8 +45,7 @@ debug_bundle/
   error.json              # Error details (if failed)
   eval.json               # Eval metadata (EvalLoop only)
   filesystem/             # Workspace snapshot (if captured)
-    workspace/
-      ...
+    ...
 ```
 
 ### Artifact Requirements

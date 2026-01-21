@@ -1030,9 +1030,9 @@ class TestFilesystemFiles:
             zf.writestr("debug_bundle/request/input.json", "{}")
             zf.writestr("debug_bundle/request/output.json", "{}")
             # Add filesystem files
-            zf.writestr("debug_bundle/filesystem/workspace/test.txt", "Hello World")
+            zf.writestr("debug_bundle/filesystem/test.txt", "Hello World")
             zf.writestr(
-                "debug_bundle/filesystem/workspace/subdir/nested.txt",
+                "debug_bundle/filesystem/subdir/nested.txt",
                 "Nested content",
             )
 
@@ -1042,8 +1042,8 @@ class TestFilesystemFiles:
             results = db.execute_query("SELECT path, content FROM files")
             paths = [r["path"] for r in results]
             assert len(results) == 2
-            assert "workspace/test.txt" in paths
-            assert "workspace/subdir/nested.txt" in paths
+            assert "test.txt" in paths
+            assert "subdir/nested.txt" in paths
         finally:
             db.close()
 
