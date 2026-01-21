@@ -82,4 +82,5 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "migration-from-dspy": "Coming from DSPy",
     "formal-verification": "TLA+ specs for critical code",
     "code-review-agent": "End-to-end walkthrough of the code reviewer",
+    "deployment": "Production deployment to containers, Kubernetes, AWS",
 }

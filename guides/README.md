@@ -25,6 +25,7 @@ debug issues when they arise.
 1. [Claude Agent SDK](claude-agent-sdk.md) - Recommended adapter for production
 1. [Orchestration](orchestration.md) - Handle requests at scale
 1. [Lifecycle](lifecycle.md) - Health checks, shutdown, watchdogs
+1. [Deployment](deployment.md) - Containers, Kubernetes, AWS, and security
 1. [Debugging](debugging.md) - Inspect and troubleshoot sessions
 
 ### For Advanced Users
@@ -64,6 +65,7 @@ debug issues when they arise.
 | [Orchestration](orchestration.md) | Use MainLoop for request handling |
 | [Evaluation](evaluation.md) | Test agents with datasets and evaluators |
 | [Lifecycle](lifecycle.md) | Manage shutdown, health checks, and watchdogs |
+| [Deployment](deployment.md) | Deploy to containers, Kubernetes, and AWS |
 
 ## Advanced Topics
 
