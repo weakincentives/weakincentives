@@ -38,6 +38,15 @@ debug_bundle/
     after.jsonl           # Session state after execution
   logs/
     app.jsonl             # All log records during execution
+  environment/            # Reproducibility envelope
+    system.json           # OS, kernel, arch, CPU, memory
+    python.json           # Python version, executable, venv info
+    packages.txt          # Installed packages (pip freeze)
+    env_vars.json         # Environment variables (filtered/redacted)
+    git.json              # Repo root, commit, branch, remotes
+    git.diff              # Uncommitted changes (if any)
+    command.txt           # argv, working dir, entrypoint
+    container.json        # Container runtime info (if applicable)
   config.json             # MainLoop and adapter configuration
   run_context.json        # Execution context (IDs, tracing)
   metrics.json            # Token usage, timing, budget state
@@ -59,6 +68,7 @@ debug_bundle/
 | `session/before.jsonl` | No | Pre-execution session snapshot |
 | `session/after.jsonl` | Yes | Post-execution session snapshot |
 | `logs/app.jsonl` | Yes | Structured log records with request correlation |
+| `environment/` | No | Reproducibility envelope (system, Python, packages, git) |
 | `config.json` | Yes | MainLoop, adapter, prompt configuration |
 | `run_context.json` | Yes | Run/request/session IDs, tracing spans |
 | `metrics.json` | Yes | Timing phases, token consumption, budget |
@@ -82,7 +92,7 @@ debug_bundle/
     "ended_at": "..."
   },
   "capture": {
-    "mode": "minimal|standard|full",
+    "mode": "full",
     "trigger": "config|env|request",
     "limits_applied": { "filesystem_truncated": false }
   },
@@ -124,6 +134,7 @@ with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
         response = adapter.evaluate(prompt, session=session)
     writer.write_session_after(session)
     writer.write_request_output(response)
+    writer.write_environment()  # Capture reproducibility envelope
     writer.write_filesystem(fs)
     writer.write_config(config)
     writer.write_run_context(run_context)
@@ -173,6 +184,7 @@ MainLoop._handle_message()
   │    ├─ write_request_input()
   │    ├─ capture_logs() → adapter.evaluate()
   │    ├─ write_session_after()
+  │    ├─ write_environment()
   │    ├─ write_filesystem()
   │    ├─ write_config(), write_run_context(), write_metrics()
   │    └─ write_error()  # if failed
@@ -212,6 +224,8 @@ EvalResult(
 ```bash
 wink debug <bundle.zip>            # Open bundle in web UI
 wink debug <directory>             # Open most recent bundle in directory
+wink query <bundle.zip> "SELECT * FROM manifest"  # SQL query against bundle
+wink query <bundle.zip> --schema   # Show database schema
 ```
 
 Options:
@@ -228,28 +242,31 @@ Options:
 |-------|--------|-------------|
 | Overview | `manifest.json` | Bundle summary, navigation |
 | Request | `request/*.json` | Input/output inspector |
-| Sessions | `session/*.jsonl` | State browser with diff |
-| Logs | `logs/app.jsonl` | Searchable, filterable viewer |
+| Slices | `session/*.jsonl` | Session state browser by slice type |
+| Logs | `logs/app.jsonl` | Searchable, filterable log viewer |
 | Files | `filesystem/` | File tree with content |
 | Config | `config.json` | Configuration inspector |
 | Metrics | `metrics.json` | Performance dashboard |
 | Error | `error.json` | Error details (if present) |
-| Eval | `eval.json` | Score and judge output (if present) |
 
 ### API Routes
 
 | Route | Description |
 |-------|-------------|
-| `/api/manifest` | Bundle manifest |
-| `/api/request/{input\|output}` | Request data |
-| `/api/session/{before\|after}` | Session snapshots |
-| `/api/session/slices/{type}` | Slice items (paginated) |
-| `/api/logs` | Log entries (paginated, filterable) |
-| `/api/files`, `/api/files/{path}` | Filesystem listing and content |
-| `/api/config`, `/api/metrics` | Configuration and metrics |
-| `/api/error`, `/api/eval` | Error and eval details |
+| `/api/meta` | Bundle metadata summary |
+| `/api/manifest` | Full bundle manifest |
+| `/api/request/input` | Request input data |
+| `/api/request/output` | Request output data |
+| `/api/slices/{type}` | Slice items (paginated) |
+| `/api/logs` | Log entries (paginated, filterable by level) |
+| `/api/files` | Filesystem listing |
+| `/api/files/{path}` | File content |
+| `/api/config` | Configuration |
+| `/api/metrics` | Metrics |
+| `/api/error` | Error details |
 | `/api/bundles` | List bundles in directory |
-| `/api/switch`, `/api/reload` | Bundle navigation |
+| `/api/switch` | Switch to different bundle |
+| `/api/reload` | Reload current bundle |
 
 ## Bundle Naming
 
@@ -261,12 +278,21 @@ EvalLoop: `{eval_request_id}/{sample_id}_{timestamp}.zip`
 
 ```python
 from weakincentives.debug import (
+    # Bundle creation and inspection
     BundleWriter,
     BundleConfig,
     DebugBundle,
     BundleManifest,
     BundleError,
     BundleValidationError,
+    # Environment capture
+    capture_environment,
+    EnvironmentCapture,
+    SystemInfo,
+    PythonInfo,
+    GitInfo,
+    CommandInfo,
+    ContainerInfo,
 )
 ```
 
@@ -284,10 +310,9 @@ from weakincentives.debug import (
 Bundles may contain sensitive data: API keys in logs, proprietary code in
 filesystem snapshots, PII in inputs. Recommendations:
 
-- Use `minimal` mode for production incidents
 - Review before sharing externally
 - Store with appropriate access controls
-- Use `exclude_patterns` for sensitive paths
+- Disable filesystem capture via `WEAKINCENTIVES_DEBUG_BUNDLE_NO_FS=1` for sensitive workspaces
 
 ## Limitations
 
