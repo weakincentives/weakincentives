@@ -76,6 +76,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "prompt-overrides": "Iterate on prompts without code changes",
     "workspace-tools": "Use VFS, Podman, planning, workspace digests",
     "debugging": "Inspect sessions and use the debug UI",
+    "errors-and-exceptions": "Exception hierarchy and ToolResult patterns",
     "testing": "Test prompts, tools, and reducers",
     "code-quality": "Types, contracts, coverage, security",
     "recipes": "Common patterns for agents",
