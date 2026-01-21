@@ -40,6 +40,7 @@ from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerEvent, TypedReducer
 from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append_all
+from .rendered_tools import RenderedTools
 from .session_cloning import (
     apply_policies_to_clone,
     apply_state_to_clone,
@@ -54,6 +55,7 @@ from .session_dispatch import apply_slice_op
 from .session_telemetry import (
     handle_prompt_executed,
     handle_prompt_rendered,
+    handle_rendered_tools,
     handle_tool_invoked,
 )
 from .slice_accessor import SliceAccessor
@@ -117,6 +119,9 @@ _PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
 _TOOL_INVOKED_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolInvoked)
 _PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
     type[SupportsDataclass], PromptExecuted
+)
+_RENDERED_TOOLS_TYPE: type[SupportsDataclass] = cast(
+    type[SupportsDataclass], RenderedTools
 )
 
 EMPTY_SLICE: SessionSlice = ()
@@ -232,6 +237,7 @@ class Session(SessionProtocol):
             _PROMPT_RENDERED_TYPE: SlicePolicy.LOG,
             _PROMPT_EXECUTED_TYPE: SlicePolicy.LOG,
             _TOOL_INVOKED_TYPE: SlicePolicy.LOG,
+            _RENDERED_TOOLS_TYPE: SlicePolicy.LOG,
         }
         self._lock = RLock()
         self._parent = parent
@@ -790,6 +796,10 @@ class Session(SessionProtocol):
         start_event = cast(PromptRendered, event)
         handle_prompt_rendered(self, start_event)
 
+    def _on_rendered_tools(self, event: object) -> None:
+        tools_event = cast(RenderedTools, event)
+        handle_rendered_tools(self, tools_event)
+
     def _attach_to_dispatcher(self, dispatcher: TelemetryDispatcher) -> None:
         with self.locked():
             if self._subscriptions_attached and self._dispatcher is dispatcher:
@@ -799,6 +809,7 @@ class Session(SessionProtocol):
             dispatcher.subscribe(ToolInvoked, self._on_tool_invoked)
             dispatcher.subscribe(PromptExecuted, self._on_prompt_executed)
             dispatcher.subscribe(PromptRendered, self._on_prompt_rendered)
+            dispatcher.subscribe(RenderedTools, self._on_rendered_tools)
 
     def _register_builtin_reducers(self) -> None:
         """Register built-in reducers for prompt visibility overrides.

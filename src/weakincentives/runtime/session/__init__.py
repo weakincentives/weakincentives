@@ -25,6 +25,10 @@ from .reducers import (
     replace_latest_by,
     upsert_by,
 )
+from .rendered_tools import (
+    RenderedTools,
+    ToolSchema,
+)
 from .session import DataEvent, Session, iter_sessions_bottom_up
 from .session_view import SessionView, as_view
 from .slice_accessor import ReadOnlySliceAccessor, SliceAccessor
@@ -88,6 +92,7 @@ __all__ = [  # noqa: RUF022
     "ReducerContextProtocol",
     "ReducerEvent",
     "ReducerMeta",
+    "RenderedTools",
     "Replace",
     "Session",
     "SessionProtocol",
@@ -105,6 +110,7 @@ __all__ = [  # noqa: RUF022
     "SnapshotProtocol",
     "SnapshotRestoreError",
     "SnapshotSerializationError",
+    "ToolSchema",
     "TypedReducer",
     "VisibilityOverrides",
     "append_all",

@@ -30,6 +30,7 @@ from ...types.dataclass import SupportsDataclass
 from ..events import PromptExecuted, PromptRendered, ToolInvoked
 from ._types import ReducerEvent
 from .dataclasses import is_dataclass_instance
+from .rendered_tools import RenderedTools
 
 if TYPE_CHECKING:
     from .session import Session
@@ -41,6 +42,9 @@ _PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
 _TOOL_INVOKED_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolInvoked)
 _PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
     type[SupportsDataclass], PromptExecuted
+)
+_RENDERED_TOOLS_TYPE: type[SupportsDataclass] = cast(
+    type[SupportsDataclass], RenderedTools
 )
 
 
@@ -125,8 +129,26 @@ def handle_prompt_rendered(session: Session, event: PromptRendered) -> None:
     )
 
 
+def handle_rendered_tools(session: Session, event: RenderedTools) -> None:
+    """Handle RenderedTools telemetry event.
+
+    Dispatches the RenderedTools event to any registered reducers.
+    Stores the complete list of tools available at render time with
+    their JSON Schema definitions.
+
+    Args:
+        session: The session to dispatch to.
+        event: The RenderedTools telemetry event.
+    """
+    session._dispatch_data_event(
+        _RENDERED_TOOLS_TYPE,
+        cast(ReducerEvent, event),
+    )
+
+
 __all__ = [
     "handle_prompt_executed",
     "handle_prompt_rendered",
+    "handle_rendered_tools",
     "handle_tool_invoked",
 ]

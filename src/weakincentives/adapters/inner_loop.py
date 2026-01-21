@@ -35,6 +35,7 @@ from ..prompt.prompt import Prompt, RenderedPrompt
 from ..runtime.events import HandlerFailure, PromptExecuted, PromptRendered
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.run_context import RunContext
+from ..runtime.session.rendered_tools import RenderedTools, ToolSchema
 from ..types import AdapterName
 from ..types.dataclass import (
     SupportsDataclass,
@@ -395,7 +396,11 @@ class InnerLoop[OutputT]:
         self._dispatch_rendered_event()
 
     def _dispatch_rendered_event(self) -> None:
-        """Dispatch the PromptRendered event."""
+        """Dispatch the PromptRendered and RenderedTools events."""
+
+        render_event_id = uuid4()
+        session_id = getattr(self.config.session, "session_id", None)
+        created_at = datetime.now(UTC)
 
         dispatch_result = self.config.session.dispatcher.dispatch(
             PromptRendered(
@@ -403,13 +408,13 @@ class InnerLoop[OutputT]:
                 prompt_key=self.inputs.prompt.key,
                 prompt_name=self.inputs.prompt.name,
                 adapter=self.inputs.adapter_name,
-                session_id=getattr(self.config.session, "session_id", None),
+                session_id=session_id,
                 render_inputs=self.inputs.render_inputs,
                 rendered_prompt=self._rendered.text,
                 descriptor=self._rendered.descriptor,
-                created_at=datetime.now(UTC),
+                created_at=created_at,
                 run_context=self.config.run_context,
-                event_id=uuid4(),
+                event_id=render_event_id,
             )
         )
         if not dispatch_result.ok:
@@ -430,6 +435,44 @@ class InnerLoop[OutputT]:
                 "Prompt rendered event dispatched.",
                 event="prompt_rendered_dispatched",
                 context={"handler_count": dispatch_result.handled_count},
+            )
+
+        # Dispatch RenderedTools with tool schemas
+        tool_schemas = tuple(
+            ToolSchema(
+                name=spec["function"]["name"],
+                description=spec["function"]["description"],
+                parameters=spec["function"]["parameters"],
+            )
+            for spec in self._tool_specs
+        )
+        tools_dispatch_result = self.config.session.dispatcher.dispatch(
+            RenderedTools(
+                prompt_ns=self.inputs.prompt.ns,
+                prompt_key=self.inputs.prompt.key,
+                tools=tool_schemas,
+                render_event_id=render_event_id,
+                session_id=session_id,
+                created_at=created_at,
+            )
+        )
+        if not tools_dispatch_result.ok:
+            self._log.error(
+                "Rendered tools dispatch failed.",
+                event="rendered_tools_dispatch_failed",
+                context={
+                    "failure_count": len(tools_dispatch_result.errors),
+                    "tool_count": len(tool_schemas),
+                },
+            )
+        else:
+            self._log.debug(
+                "Rendered tools event dispatched.",
+                event="rendered_tools_dispatched",
+                context={
+                    "tool_count": len(tool_schemas),
+                    "handler_count": tools_dispatch_result.handled_count,
+                },
             )
 
     def _handle_tool_calls(
