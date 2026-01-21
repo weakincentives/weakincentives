@@ -18,6 +18,7 @@ debug issues when they arise.
 1. [Prompts](prompts.md) - Learn the core abstraction
 1. [Tools](tools.md) - Add capabilities to your agent
 1. [Sessions](sessions.md) - Manage state correctly
+1. [Serialization](serialization.md) - Parse and dump dataclasses
 1. [Adapters](adapters.md) - Connect to your preferred provider
 
 ### For Production Deployments
@@ -49,6 +50,7 @@ debug issues when they arise.
 | [Prompts](prompts.md) | Build typed, testable prompts as first-class objects |
 | [Tools](tools.md) | Define tool contracts and handlers |
 | [Sessions](sessions.md) | Manage state with reducers and event-driven updates |
+| [Serialization](serialization.md) | Parse and serialize dataclasses without Pydantic |
 
 ## Provider Integration
 

@@ -64,6 +64,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "prompts": "Build typed, testable prompts",
     "tools": "Define tool contracts and handlers",
     "sessions": "Manage state with reducers",
+    "serialization": "Parse and serialize dataclasses without Pydantic",
     "adapters": "Connect to OpenAI, LiteLLM, Claude Agent SDK",
     "claude-agent-sdk": "Production integration with Claude Code",
     "orchestration": "Use MainLoop for request handling",
