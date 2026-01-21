@@ -210,13 +210,17 @@ EvalResult(
 ### Commands
 
 ```bash
-wink debug ./bundle.zip            # Open in web UI
-wink debug ./debug/                # Open most recent bundle in directory
-wink debug extract ./bundle.zip    # Extract to directory
-wink debug info ./bundle.zip       # Show summary
-wink debug list ./debug/           # List bundles
-wink debug prune ./debug/ --older-than 7d
+wink debug <bundle.zip>            # Open bundle in web UI
+wink debug <directory>             # Open most recent bundle in directory
 ```
+
+Options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--host` | `127.0.0.1` | Host interface to bind |
+| `--port` | `8000` | Port to bind |
+| `--no-open-browser` | | Disable automatic browser open |
 
 ### Web UI Panels
 
@@ -246,14 +250,6 @@ wink debug prune ./debug/ --older-than 7d
 | `/api/error`, `/api/eval` | Error and eval details |
 | `/api/bundles` | List bundles in directory |
 | `/api/switch`, `/api/reload` | Bundle navigation |
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `WEAKINCENTIVES_DEBUG_BUNDLE=1` | Enable bundling globally |
-| `WEAKINCENTIVES_DEBUG_BUNDLE_DIR` | Output directory |
-| `WEAKINCENTIVES_DEBUG_BUNDLE_NO_FS=1` | Disable filesystem capture |
 
 ## Bundle Naming
 

@@ -6,7 +6,7 @@
 are loaded into a cached SQLite database with a schema derived from bundle
 artifacts.
 
-**Implementation:** (not yet implemented)
+**Implementation:** `src/weakincentives/cli/query.py`
 
 ## CLI
 
