@@ -272,10 +272,12 @@ def _find_test_failure_line(output: str, file: str, test: str) -> tuple[int | No
 def _extract_uncovered_files(output: str) -> str | None:
     """Extract files with incomplete coverage from pytest coverage output.
 
-    Parses pytest-cov output format:
+    Parses pytest-cov output format (with or without branch coverage):
     Name                                      Stmts   Miss  Cover
+    Name                                      Stmts   Miss Branch BrPart  Cover
     -------------------------------------------------------------
     src/module.py                               100     10    90%
+    src/module.py                               100     10     20      5    90%   1-5, 10
     TOTAL                                       500     50    90%
 
     Returns a formatted string listing uncovered files and their missing line info.
@@ -283,12 +285,18 @@ def _extract_uncovered_files(output: str) -> str | None:
     uncovered_files = []
 
     # Look for the coverage table in output
-    # Pattern matches lines like: src/module.py   100    10    90%
-    # or with missing lines: src/module.py   100    10    90%   1-5, 10, 20-30
-    # Missing lines format: numbers, ranges (1-5), commas, spaces
-    # Note: hyphen must be at end of character class to be literal (not a range)
+    # Pattern matches lines with variable columns before percentage:
+    # - Basic: file   stmts   miss   cover%
+    # - Branch: file   stmts   miss   branch   brpart   cover%
+    # Capture file, miss count, coverage %, and optional missing lines
+    # The pattern is flexible: file, then numbers, then percentage, then optional lines
     cov_line_pattern = re.compile(
-        r"^([\w/.-]+\.py)\s+(\d+)\s+(\d+)\s+(\d+)%(?:\s+([\d,\s-]+))?$",
+        r"^([\w/.-]+\.py)\s+"  # file path
+        r"(\d+)\s+"  # stmts
+        r"(\d+)\s+"  # miss
+        r"(?:\d+\s+)*?"  # optional branch columns (non-capturing, non-greedy)
+        r"(\d+)%"  # coverage percentage
+        r"(?:\s+([\d,\s-]+))?$",  # optional missing lines
         re.MULTILINE,
     )
 
@@ -440,18 +448,35 @@ def parse_mdformat(output: str, code: int) -> tuple[Diagnostic, ...]:
         return ()
 
     diagnostics = []
-    # mdformat outputs files that would be changed
-    for line in output.strip().split("\n"):
-        line = line.strip()
-        if line.endswith(".md"):  # pragma: no branch
-            diagnostics.append(
-                Diagnostic(
-                    message=(
-                        f"Markdown formatting required\n"
-                        f"Fix: Run `mdformat {line}` to auto-format"
-                    ),
-                    location=Location(file=line),
-                )
+
+    # mdformat outputs in format: Error: File "path/to/file.md" is not formatted.
+    # or just the file path on older versions
+    error_pattern = re.compile(r'Error: File "([^"]+\.md)" is not formatted\.')
+    for match in error_pattern.finditer(output):
+        file_path = match.group(1)
+        diagnostics.append(
+            Diagnostic(
+                message=(
+                    f"Markdown formatting required\n"
+                    f"Fix: Run `mdformat {file_path}` to auto-format"
+                ),
+                location=Location(file=file_path),
             )
+        )
+
+    # Fallback: look for lines that are just file paths (older mdformat versions)
+    if not diagnostics:
+        for line in output.strip().split("\n"):
+            line = line.strip()
+            if line.endswith(".md") and not line.startswith("Error"):
+                diagnostics.append(
+                    Diagnostic(
+                        message=(
+                            f"Markdown formatting required\n"
+                            f"Fix: Run `mdformat {line}` to auto-format"
+                        ),
+                        location=Location(file=line),
+                    )
+                )
 
     return tuple(diagnostics)

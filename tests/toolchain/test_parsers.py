@@ -355,6 +355,21 @@ TOTAL                                        200     11    95%"""
         assert result is not None
         assert "... and 5 more files" in result
 
+    def test_extracts_files_with_branch_coverage_columns(self) -> None:
+        """Test parsing coverage output with branch coverage columns."""
+        output = """Name                                      Stmts   Miss Branch BrPart  Cover   Missing
+---------------------------------------------------------------------------------------
+src/weakincentives/module.py                 17      5      2      0    63%   54-56, 65-66
+src/weakincentives/other.py                 147     95     34      0    29%   48, 56, 64
+TOTAL                                        164    100     36      0    35%"""
+        result = _extract_uncovered_files(output)
+        assert result is not None
+        assert "module.py" in result
+        assert "63%" in result
+        assert "lines 54-56, 65-66" in result
+        assert "other.py" in result
+        assert "29%" in result
+
 
 class TestExtractTestFiles:
     """Tests for _extract_test_files helper."""
@@ -513,3 +528,37 @@ docs/guide.md"""
         assert len(diagnostics) == 1
         assert "Fix:" in diagnostics[0].message
         assert "mdformat docs/api.md" in diagnostics[0].message
+
+    def test_parses_error_format(self) -> None:
+        """Test parsing the Error: File format used by modern mdformat."""
+        output = 'Error: File "/home/user/project/README.md" is not formatted.'
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 1
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "/home/user/project/README.md"
+        assert "Markdown formatting required" in diagnostics[0].message
+        assert "mdformat /home/user/project/README.md" in diagnostics[0].message
+
+    def test_parses_multiple_error_format_files(self) -> None:
+        """Test parsing multiple Error: File lines."""
+        output = """Error: File "docs/api.md" is not formatted.
+Error: File "guides/tutorial.md" is not formatted."""
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 2
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "docs/api.md"
+        assert diagnostics[1].location is not None
+        assert diagnostics[1].location.file == "guides/tutorial.md"
+
+    def test_fallback_skips_non_md_lines(self) -> None:
+        """Test that fallback parser skips lines that aren't .md files."""
+        output = """Some random output
+README.md
+Another line that is not a markdown file
+docs/guide.md"""
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 2
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "README.md"
+        assert diagnostics[1].location is not None
+        assert diagnostics[1].location.file == "docs/guide.md"
