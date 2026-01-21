@@ -46,7 +46,7 @@ from .mailbox import ReceiptHandleExpiredError
 
 if TYPE_CHECKING:
     from .mailbox import Message
-    from .watchdog import Heartbeat
+    from .watchdog import Heartbeat, Subscription
 
 _logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ class LeaseExtender:
 
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _msg: Message[Any, Any] | None = field(default=None, repr=False)
-    _heartbeat: Heartbeat | None = field(default=None, repr=False)
+    _subscription: Subscription | None = field(default=None, repr=False)
     _last_extension: float = field(default=0.0, repr=False)
 
     @contextmanager
@@ -144,29 +144,36 @@ class LeaseExtender:
             self._detach()
 
     def _attach(self, msg: Message[Any, Any], heartbeat: Heartbeat) -> None:
-        """Attach lease extension callback to heartbeat."""
+        """Attach lease extension callback to heartbeat.
+
+        Uses the subscription pattern for automatic cleanup on detach.
+        """
         with self._lock:
             if self._msg is not None:
                 raise RuntimeError("LeaseExtender already attached")
 
             self._msg = msg
-            self._heartbeat = heartbeat
             # Initialize to 0.0 so first beat always extends immediately
             self._last_extension = 0.0
 
-        # Register callback (outside lock - add_callback has its own lock)
-        heartbeat.add_callback(self._on_beat)
+        # Subscribe returns a Subscription for lifecycle management
+        subscription = heartbeat.subscribe(self._on_beat)
+        with self._lock:
+            self._subscription = subscription
 
     def _detach(self) -> None:
-        """Detach lease extension callback from heartbeat."""
-        with self._lock:
-            heartbeat = self._heartbeat
-            self._msg = None
-            self._heartbeat = None
+        """Detach lease extension callback from heartbeat.
 
-        # Unregister callback (outside lock - remove_callback has its own lock)
-        if heartbeat is not None:
-            heartbeat.remove_callback(self._on_beat)
+        Cancels the subscription, which automatically removes the callback.
+        """
+        with self._lock:
+            subscription = self._subscription
+            self._msg = None
+            self._subscription = None
+
+        # Cancel subscription (handles cleanup automatically)
+        if subscription is not None:
+            subscription.cancel()
 
     def _on_beat(self) -> None:
         """Called when heartbeat.beat() is invoked."""

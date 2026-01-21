@@ -30,10 +30,25 @@ Example::
     while running:
         heartbeats[i].beat()
         process_message()
+
+Subscription-based callbacks::
+
+    heartbeat = Heartbeat()
+
+    # Subscribe returns a Subscription for lifecycle management
+    subscription = heartbeat.subscribe(lambda: print("beat!"))
+
+    # Use as context manager for automatic cleanup
+    with heartbeat.subscribe(lambda: print("scoped beat!")):
+        heartbeat.beat()  # Both callbacks invoked
+
+    # Or manually cancel
+    subscription.cancel()
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -42,11 +57,74 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any
+from typing import Any, Self
 
 from ..clock import SYSTEM_CLOCK, MonotonicClock
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class Subscription:
+    """Manages the lifecycle of a callback registration.
+
+    Subscriptions provide context manager support for automatic cleanup
+    and can be explicitly cancelled. Thread-safe for concurrent access.
+
+    Example::
+
+        heartbeat = Heartbeat()
+
+        # Context manager pattern (preferred)
+        with heartbeat.subscribe(my_callback):
+            heartbeat.beat()  # my_callback invoked
+        # Automatically cancelled on exit
+
+        # Manual management
+        sub = heartbeat.subscribe(my_callback)
+        try:
+            heartbeat.beat()
+        finally:
+            sub.cancel()  # Explicit cleanup
+    """
+
+    _callback: Callable[[], None]
+    _unsubscribe: Callable[[Callable[[], None]], None]
+    _cancelled: bool = field(default=False, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @property
+    def active(self) -> bool:
+        """True if the subscription is still active."""
+        with self._lock:
+            return not self._cancelled
+
+    def cancel(self) -> None:
+        """Cancel the subscription, removing the callback.
+
+        Safe to call multiple times; subsequent calls are no-ops.
+        """
+        with self._lock:
+            if self._cancelled:
+                return
+            self._cancelled = True
+            callback = self._callback
+
+        self._unsubscribe(callback)
+
+    def __enter__(self) -> Self:
+        """Context manager entry."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        """Context manager exit cancels the subscription."""
+        _ = (exc_type, exc_val, exc_tb)
+        self.cancel()
 
 
 @dataclass(slots=True)
@@ -124,8 +202,49 @@ class Heartbeat:
         with self._lock:
             return self.clock.monotonic() - self._last_beat
 
+    def subscribe(self, callback: Callable[[], None]) -> Subscription:
+        """Subscribe a callback to be invoked on each beat.
+
+        Returns a Subscription that can be used as a context manager for
+        automatic cleanup, or manually cancelled.
+
+        Callbacks are invoked outside the lock in subscription order.
+        Exceptions in callbacks are logged but do not prevent other
+        callbacks from running.
+
+        Args:
+            callback: Callable with no arguments to invoke on beat.
+
+        Returns:
+            A Subscription for managing the callback lifecycle.
+
+        Example::
+
+            # Preferred: context manager for automatic cleanup
+            with heartbeat.subscribe(lambda: print("beat!")):
+                heartbeat.beat()
+            # Callback automatically removed on exit
+
+            # Manual management
+            sub = heartbeat.subscribe(my_callback)
+            # ... later ...
+            sub.cancel()
+        """
+        with self._lock:
+            self._callbacks.append(callback)
+        return Subscription(_callback=callback, _unsubscribe=self._remove_callback)
+
+    def _remove_callback(self, callback: Callable[[], None]) -> None:
+        """Internal: remove a callback (used by Subscription.cancel)."""
+        with self._lock, contextlib.suppress(ValueError):
+            self._callbacks.remove(callback)
+
     def add_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be invoked on each beat.
+
+        .. deprecated::
+            Use :meth:`subscribe` instead, which returns a Subscription
+            for lifecycle management.
 
         Callbacks are invoked outside the lock in registration order.
         Exceptions in callbacks are logged but do not prevent other
@@ -139,6 +258,10 @@ class Heartbeat:
 
     def remove_callback(self, callback: Callable[[], None]) -> None:
         """Remove a previously added callback.
+
+        .. deprecated::
+            Use :meth:`subscribe` instead, which returns a Subscription
+            that can be cancelled or used as a context manager.
 
         Args:
             callback: The callback to remove.
@@ -351,5 +474,6 @@ class HealthServer:
 __all__ = [
     "HealthServer",
     "Heartbeat",
+    "Subscription",
     "Watchdog",
 ]

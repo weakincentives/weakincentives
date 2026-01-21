@@ -96,6 +96,104 @@ def test_heartbeat_elapsed_updated_on_beat() -> None:
 
 
 # =============================================================================
+# Subscription Tests
+# =============================================================================
+
+
+def test_heartbeat_subscribe_returns_subscription() -> None:
+    """Verify subscribe() returns a Subscription object."""
+    from weakincentives.runtime.watchdog import Subscription
+
+    calls: list[str] = []
+    heartbeat = Heartbeat()
+    sub = heartbeat.subscribe(lambda: calls.append("callback"))
+
+    assert isinstance(sub, Subscription)
+    assert sub.active
+
+    heartbeat.beat()
+    assert calls == ["callback"]
+
+
+def test_subscription_cancel_removes_callback() -> None:
+    """Verify Subscription.cancel() removes the callback."""
+    calls: list[str] = []
+    heartbeat = Heartbeat()
+    sub = heartbeat.subscribe(lambda: calls.append("callback"))
+
+    heartbeat.beat()
+    assert calls == ["callback"]
+
+    sub.cancel()
+    assert not sub.active
+
+    heartbeat.beat()
+    assert calls == ["callback"]  # Not called again
+
+
+def test_subscription_context_manager_cleanup() -> None:
+    """Verify Subscription works as a context manager."""
+    calls: list[str] = []
+    heartbeat = Heartbeat()
+
+    with heartbeat.subscribe(lambda: calls.append("callback")) as sub:
+        assert sub.active
+        heartbeat.beat()
+        assert calls == ["callback"]
+
+    assert not sub.active
+    heartbeat.beat()
+    assert calls == ["callback"]  # Not called again after exit
+
+
+def test_subscription_cancel_idempotent() -> None:
+    """Verify cancel() can be called multiple times safely."""
+    heartbeat = Heartbeat()
+    sub = heartbeat.subscribe(lambda: None)
+
+    sub.cancel()
+    assert not sub.active
+
+    # Should not raise
+    sub.cancel()
+    sub.cancel()
+    assert not sub.active
+
+
+def test_subscription_cancel_handles_already_removed() -> None:
+    """Verify cancel() is safe even if callback was already removed."""
+    heartbeat = Heartbeat()
+    callback = lambda: None  # noqa: E731
+    sub = heartbeat.subscribe(callback)
+
+    # Remove via deprecated method first
+    heartbeat.remove_callback(callback)
+
+    # cancel() should not raise
+    sub.cancel()
+
+
+def test_multiple_subscriptions() -> None:
+    """Verify multiple subscriptions work independently."""
+    calls: list[str] = []
+    heartbeat = Heartbeat()
+
+    sub1 = heartbeat.subscribe(lambda: calls.append("sub1"))
+    sub2 = heartbeat.subscribe(lambda: calls.append("sub2"))
+
+    heartbeat.beat()
+    assert calls == ["sub1", "sub2"]
+
+    sub1.cancel()
+    calls.clear()
+
+    heartbeat.beat()
+    assert calls == ["sub2"]
+
+    sub2.cancel()
+
+
+# =============================================================================
 # LeaseExtenderConfig Tests
 # =============================================================================
 

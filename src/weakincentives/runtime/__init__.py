@@ -48,6 +48,7 @@ from .lifecycle import (
     LoopGroup,
     Runnable,
     ShutdownCoordinator,
+    ShutdownRegistration,
     wait_until,
 )
 from .logging import StructuredLogger, configure_logging, get_logger
@@ -105,6 +106,7 @@ from .transactions import (
 from .watchdog import (
     HealthServer,
     Heartbeat,
+    Subscription,
     Watchdog,
 )
 
@@ -152,6 +154,7 @@ __all__ = [
     "Session",
     "SessionProtocol",
     "ShutdownCoordinator",
+    "ShutdownRegistration",
     "SlicePolicy",
     "Snapshot",
     "SnapshotMetadata",
@@ -160,6 +163,7 @@ __all__ = [
     "SnapshotSerializationError",
     "Snapshotable",
     "StructuredLogger",
+    "Subscription",
     "TelemetryDispatcher",
     "TokenUsage",
     "ToolInvoked",
