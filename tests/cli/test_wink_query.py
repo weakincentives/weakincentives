@@ -677,7 +677,8 @@ class TestExtractToolCall:
         result = _extract_tool_call_from_entry(entry)
         assert result is None
 
-    def test_with_error(self) -> None:
+    def test_with_error_legacy_fallback(self) -> None:
+        """Test legacy fallback: infer failure from error text presence."""
         from weakincentives.cli.query import _extract_tool_call_from_entry
 
         entry: dict[str, Any] = {
@@ -692,6 +693,41 @@ class TestExtractToolCall:
         assert result is not None
         assert result[4] == 0  # success = 0
         assert result[5] == "E001"  # error_code
+
+    def test_explicit_success_true(self) -> None:
+        """Test explicit success=True field from tool.execution.complete logs."""
+        from weakincentives.cli.query import _extract_tool_call_from_entry
+
+        entry: dict[str, Any] = {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "context": {
+                "tool_name": "read_file",
+                "success": True,
+                "message": "File read successfully",
+            },
+        }
+        result = _extract_tool_call_from_entry(entry)
+        assert result is not None
+        assert result[4] == 1  # success = 1
+        assert result[5] == ""  # no error_code
+
+    def test_explicit_success_false(self) -> None:
+        """Test explicit success=False field takes precedence over error text."""
+        from weakincentives.cli.query import _extract_tool_call_from_entry
+
+        # Even without "error" in context, success=False should be detected
+        entry: dict[str, Any] = {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "context": {
+                "tool_name": "write_file",
+                "success": False,
+                "message": "Permission denied",
+            },
+        }
+        result = _extract_tool_call_from_entry(entry)
+        assert result is not None
+        assert result[4] == 0  # success = 0
+        assert result[5] == "Permission denied"  # message used as error_code
 
 
 class TestIsToolEvent:
@@ -1396,6 +1432,7 @@ class TestFailedToolCallErrors:
         """Test that failed tool calls are added to errors table."""
         import zipfile
 
+        # Use explicit success=False to match actual tool.execution.complete logs
         logs_content = json.dumps(
             {
                 "timestamp": "2024-01-01T00:00:00Z",
@@ -1403,8 +1440,8 @@ class TestFailedToolCallErrors:
                 "event": "tool.execution.complete",
                 "context": {
                     "tool_name": "write_file",
-                    "error": "Permission denied",
-                    "error_code": "EPERM",
+                    "success": False,
+                    "message": "Permission denied",
                 },
             }
         )

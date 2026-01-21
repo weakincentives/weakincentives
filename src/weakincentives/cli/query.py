@@ -154,11 +154,13 @@ def _is_tool_event(event: str) -> bool:
 
     Matches events like:
     - tool.execution.start, tool.execution.complete (actual log events)
-    - tool.call.*, tool.result.* (alternative formats)
+    - tool.execute.*, tool.call.*, tool.result.* (alternative formats)
     """
     event_lower = event.lower()
     return "tool" in event_lower and (
-        "call" in event_lower or "result" in event_lower or "execution" in event_lower
+        "call" in event_lower
+        or "result" in event_lower
+        or "execut" in event_lower  # matches both "execute" and "execution"
     )
 
 
@@ -179,13 +181,20 @@ def _extract_tool_call_from_entry(
     if not tool_name:
         return None
 
-    success = 1
+    # Use explicit success field if present (from tool.execution.complete logs)
+    # Fall back to inferring from error presence for compatibility
+    success_val: Any = ctx.get("success")
+    if success_val is not None:
+        success = 1 if success_val else 0
+    else:
+        # Legacy fallback: infer from error text presence
+        context_str = str(ctx)
+        success = 0 if "error" in context_str.lower() else 1
+
     error_code = ""
-    context_str = str(ctx)
-    if "error" in context_str.lower():
-        success = 0
-        err_code: Any = ctx.get("error_code") or ctx.get("error") or ""
-        error_code = str(err_code)
+    if success == 0:
+        err_code: Any = ctx.get("error_code") or ctx.get("error") or ctx.get("message")
+        error_code = str(err_code) if err_code else ""
 
     duration: Any = ctx.get("duration_ms")
     duration_ms: float = float(duration) if duration is not None else 0.0
