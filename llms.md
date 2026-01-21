@@ -1,1154 +1,197 @@
-# WINK (Weak Incentives) - Agent Reference
+# WINK Agent Documentation Tools
 
-Dense technical guide for AI coding agents. WINK is a Python 3.12+ library for
-building deterministic, side-effect-free background agents with typed prompts,
-immutable sessions, and provider-agnostic adapters.
-
-## Core Philosophy
-
-**The prompt is the agent.** Prompts are hierarchical documents where sections
-bundle instructions and tools together. No separate tool registry; capabilities
-live in the prompt definition.
-
-**Event-driven state.** All mutations flow through pure reducers processing
-typed events. State is immutable and inspectable via snapshots.
-
-**Provider-agnostic.** Same agent definition works across OpenAI, LiteLLM, and
-Claude Agent SDK via adapter abstraction.
+Instructions for AI agents helping users develop and optimize WINK agents.
 
 ______________________________________________________________________
 
-## Guiding Principles
+## wink docs
 
-### Definition vs Harness
+Access WINK documentation from the command line. Use this to find implementation
+patterns, API details, and design guidance.
 
-WINK separates what you own from what the runtime provides:
-
-**Agent Definition (you own and iterate):**
-
-- **Prompt** - A structured decision procedure, not a loose string
-- **Tools** - The capability surface; the only place side effects occur
-- **Policies** - Enforceable invariants constraining tool use and state
-- **Feedback** - "Are we done?" checks preventing premature termination
-
-**Execution Harness (runtime-owned):**
-
-- Planning/act loop driving tool calls
-- Sandboxing and permissions (filesystem, shell, network)
-- Retries, throttling, crash recovery
-- Deadlines, budgets, operational guardrails
-
-The harness keeps changing (and increasingly comes from vendor runtimes), but
-your agent definition should not. WINK makes the definition a first-class
-artifact you can version, review, test, and port across runtimes.
-
-### The Prompt is the Agent
-
-Most frameworks treat prompts as afterthoughts—templates glued to separately
-registered tool lists. WINK inverts this: you define an agent as a single
-hierarchical document where each section bundles its own instructions and tools.
-
-```text
-PromptTemplate[ReviewResponse]
-├── MarkdownSection (guidance)
-├── WorkspaceDigestSection     ← auto-generated codebase summary
-├── MarkdownSection (reference docs, progressive disclosure)
-├── PlanningToolsSection       ← contributes planning_* tools
-│   └── (nested planning docs)
-├── VfsToolsSection            ← contributes ls/read_file/write_file/...
-│   └── (nested filesystem docs)
-└── MarkdownSection (user request)
-```
-
-**Why this matters:**
-
-1. **Co-location** - Instructions and tools live together. The section that
-   explains filesystem navigation provides the `read_file` tool. Documentation
-   can't drift from implementation.
-
-1. **Progressive disclosure** - Nest child sections to reveal advanced
-   capabilities when relevant. The LLM sees numbered, hierarchical headings.
-
-1. **Dynamic scoping** - Each section has an `enabled` predicate. Disable a
-   section and its entire subtree—tools included—disappears from the prompt.
-
-1. **Typed all the way down** - Sections are parameterized with dataclasses.
-   Placeholders are validated at construction time. Tools declare typed params
-   and results.
-
-### Policies Over Workflows
-
-**Prefer declarative policies over prescriptive workflows.**
-
-A workflow encodes _how_ to accomplish a goal—a predetermined sequence that
-fractures when encountering unexpected situations. A policy encodes _what_ the
-goal requires—constraints the agent must satisfy while remaining free to find
-any valid path.
-
-```text
-Workflow (brittle):              Policy (flexible):
-1. Read the file                 - File must be read before overwriting
-2. Parse the AST                 - Tests must pass before deployment
-3. Generate patch                - Sensitive ops require confirmation
-4. Write file
-5. Run tests
-```
-
-When workflow step 3 fails, the agent is stuck. When a policy check fails, the
-agent can reason about alternatives that satisfy the constraint.
-
-**Key policy characteristics:**
-
-- **Declarative** - State what must be true, not how to make it true
-- **Composable** - Policies combine via conjunction (all must allow)
-- **Fail-closed** - When uncertain, deny; let the agent adapt
-- **Observable** - Explain denials to enable self-correction
-
-### Transactional Tools
-
-Tool calls are atomic transactions. When a tool fails:
-
-1. Session state rolls back to pre-call state
-1. Filesystem changes revert
-1. Error result returned to LLM with guidance
-
-Failed tools don't leave partial state. This enables aggressive retry and
-recovery strategies.
-
-### One Sentence Summary
-
-> "You write the agent definition (prompt, tools, policies, feedback); the
-> runtime owns the harness (planning loop, sandboxing, orchestration). WINK
-> keeps the definition portable while runtimes evolve."
-
-______________________________________________________________________
-
-## Accessing Documentation
-
-After installing WINK, use `wink docs` to access bundled documentation:
+### Commands
 
 ```bash
-wink docs --reference   # This file (API reference)
-wink docs --guide       # Usage guide with tutorials
-wink docs --specs       # All specification documents
-wink docs --changelog   # Release history
+# List available documents
+wink docs list              # All documents
+wink docs list specs        # Design specifications only
+wink docs list guides       # Usage guides only
 
-# Combine flags for multiple sections
-wink docs --reference --specs
+# Search documentation
+wink docs search "pattern"           # Search all docs
+wink docs search "pattern" --specs   # Search specs only
+wink docs search "pattern" --guides  # Search guides only
+wink docs search "pattern" --regex   # Regex search
+wink docs search "pattern" --context 5  # More context lines
 
-# Pipe to clipboard or other tools
-wink docs --specs | pbcopy
-wink docs --guide | llm "Summarize key concepts"
+# Show table of contents
+wink docs toc spec SESSIONS    # TOC for a spec
+wink docs toc guide quickstart # TOC for a guide
+
+# Read full documents
+wink docs read reference       # API reference (this conceptual doc)
+wink docs read changelog       # Release history
+wink docs read example         # Complete code review agent example
+wink docs read spec SESSIONS   # Read a specific spec
+wink docs read guide quickstart # Read a specific guide
 ```
 
-**Available documentation:**
+### When to Use
 
-- `--reference` - Dense API reference (this file)
-- `--guide` - Step-by-step usage guide with examples
-- `--specs` - Design specifications (adapters, sessions, tools, etc.)
-- `--changelog` - Version history and breaking changes
+**Use `wink docs search`** when:
+
+- User asks "how do I..." questions about WINK
+- Looking for specific API patterns or examples
+- Finding which spec covers a topic
+
+**Use `wink docs read spec <NAME>`** when:
+
+- Implementing a feature covered by that spec
+- Understanding design constraints before modifying code
+- Reviewing expected behavior during debugging
+
+**Use `wink docs read guide <NAME>`** when:
+
+- Walking user through a workflow
+- Setting up a new agent from scratch
+- Learning recommended patterns
+
+### Key Specs
+
+| Spec | When to Read |
+|------|--------------|
+| PROMPTS | Building or modifying prompts, sections, tools |
+| SESSIONS | Working with state, events, reducers |
+| TOOLS | Implementing custom tools, policies |
+| ADAPTERS | Configuring providers (OpenAI, LiteLLM, Claude) |
+| CLAUDE_AGENT_SDK | Using Claude Code native capabilities |
+| WORKSPACE | File operations, sandboxing |
+| FEEDBACK_PROVIDERS | Progress feedback for long tasks |
+| TASK_COMPLETION | Verifying agents complete all work |
 
 ______________________________________________________________________
 
-## Module Map
+## wink query
 
-```text
-weakincentives                    # Top-level exports
-weakincentives.prompt             # Prompt authoring, sections, tools
-weakincentives.prompt.overrides   # Hash-based prompt iteration
-weakincentives.runtime            # Session, events, lifecycle, mailbox
-weakincentives.runtime.session    # Slice ops, reducers, snapshots
-weakincentives.runtime.events     # Dispatcher, event types
-weakincentives.runtime.mailbox    # Message queues
-weakincentives.adapters           # Provider base, config, throttling
-weakincentives.adapters.openai    # OpenAIAdapter
-weakincentives.adapters.litellm   # LiteLLMAdapter
-weakincentives.adapters.claude_agent_sdk  # ClaudeAgentSDKAdapter
-weakincentives.contrib.tools      # VFS, planning, asteval, podman
-weakincentives.contrib.optimizers # WorkspaceDigestOptimizer
-weakincentives.contrib.mailbox    # RedisMailbox
-weakincentives.resources          # Dependency injection
-weakincentives.filesystem         # Filesystem protocol
-weakincentives.evals              # Evaluation framework
-weakincentives.serde              # Dataclass serialization
-weakincentives.dbc                # Design-by-contract decorators
-weakincentives.formal             # TLA+ specification embedding
-weakincentives.skills             # Agent Skills support
-weakincentives.types              # JSON type aliases
-```
+Query debug bundles via SQL. Use this to investigate agent failures and
+analyze execution traces.
 
-______________________________________________________________________
-
-## Import Cheatsheet
-
-### Essential Imports
-
-```python
-# Top-level exports
-from weakincentives import (
-    Prompt,
-    MarkdownSection,
-    Tool,
-    ToolContext,
-    ToolResult,
-    Budget,
-    BudgetTracker,
-    Deadline,
-)
-
-# Prompt system
-from weakincentives.prompt import (
-    PromptTemplate,
-    Section,
-    SectionVisibility,
-    ToolExample,
-    RenderedPrompt,
-)
-
-# Runtime
-from weakincentives.runtime import (
-    Session,
-    InProcessDispatcher,
-    MainLoop,
-    MainLoopConfig,
-    MainLoopRequest,
-    PromptExecuted,
-    ToolInvoked,
-    Snapshot,
-    append_all,
-    replace_latest,
-    upsert_by,
-)
-
-# Adapters
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.adapters.litellm import LiteLLMAdapter
-from weakincentives.adapters import PromptResponse
-
-# Contrib tools
-from weakincentives.contrib.tools import (
-    PlanningToolsSection,
-    PlanningStrategy,
-    Plan,
-    PlanStep,
-    VfsToolsSection,
-    HostMount,
-    VfsPath,
-    WorkspaceDigestSection,
-    WorkspaceDigest,
-    AstevalSection,
-    PodmanSandboxSection,
-    PodmanSandboxConfig,
-)
-
-# Serde
-from weakincentives.serde import dump, parse, schema, clone
-
-# Resources
-from weakincentives.resources import Binding, Scope, ResourceRegistry
-
-# Tool policies
-from weakincentives.prompt import (
-    ReadBeforeWritePolicy,
-    SequentialDependencyPolicy,
-    PolicyDecision,
-    PolicyState,
-    ToolPolicy,
-)
-
-# Feedback providers
-from weakincentives.prompt import (
-    DeadlineFeedback,
-    Feedback,
-    FeedbackProvider,
-    FeedbackProviderConfig,
-    FeedbackTrigger,
-)
-```
-
-### Claude Agent SDK
-
-```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
-    HostMount,  # Different from contrib.tools.HostMount
-    IsolationConfig,
-    NetworkPolicy,
-    SandboxConfig,
-    # Task completion
-    TaskCompletionChecker,
-    TaskCompletionContext,
-    TaskCompletionResult,
-    PlanBasedChecker,
-    CompositeChecker,
-)
-```
-
-______________________________________________________________________
-
-## Minimal Working Example
-
-```python
-from dataclasses import dataclass
-
-from weakincentives import Prompt, MarkdownSection
-from weakincentives.prompt import PromptTemplate
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import Session
-
-
-@dataclass(slots=True, frozen=True)
-class TaskParams:
-    objective: str
-
-
-@dataclass(slots=True, frozen=True)
-class TaskResult:
-    summary: str
-    steps: list[str]
-
-
-template = PromptTemplate[TaskResult](
-    ns="myapp",
-    key="task-agent",
-    name="task_agent",
-    sections=(
-        MarkdownSection[TaskParams](
-            title="Task",
-            key="task",
-            template="Complete: ${objective}",
-        ),
-    ),
-)
-
-session = Session()
-adapter = OpenAIAdapter(model="gpt-4o-mini")
-prompt = Prompt(template).bind(TaskParams(objective="Review the auth module"))
-response = adapter.evaluate(prompt, session=session)
-result: TaskResult = response.output
-```
-
-______________________________________________________________________
-
-## Core Patterns
-
-### 1. Prompt Construction
-
-**PromptTemplate** is the immutable blueprint. **Prompt** wraps it with
-bindings.
-
-```python
-from dataclasses import dataclass
-
-from weakincentives import Prompt
-from weakincentives.prompt import PromptTemplate, MarkdownSection
-
-
-@dataclass(slots=True, frozen=True)
-class OutputType:
-    answer: str
-
-
-# Template: defines structure, typed output
-template = PromptTemplate[OutputType](
-    ns="namespace",  # Required: grouping
-    key="prompt-key",  # Required: unique identifier
-    name="prompt_name",  # Optional: display name
-    sections=(MarkdownSection(title="Task", key="task", template="Do something"),),
-)
-
-# Prompt: wraps template, binds parameters
-prompt = Prompt(template)
-
-# Render to inspect
-rendered = prompt.render()
-print(rendered.text)  # Markdown content
-print(rendered.tools)  # Tool tuple
-```
-
-### 2. Sections
-
-All sections inherit from `Section`. Most common: `MarkdownSection`.
-
-```python
-from dataclasses import dataclass
-
-from weakincentives.prompt import MarkdownSection, SectionVisibility
-
-
-@dataclass(slots=True, frozen=True)
-class ReviewParams:
-    focus: str
-
-
-section = MarkdownSection[ReviewParams](
-    title="Review Guidelines",  # Rendered as heading
-    key="review-guidelines",  # Unique within prompt
-    template="Focus on: ${focus}",  # Template.substitute syntax
-    default_params=ReviewParams(focus="correctness"),
-    tools=(),  # Tools attached to section
-    children=(),  # Nested sections
-    visibility=SectionVisibility.FULL,  # Or SUMMARY for progressive disclosure
-    summary="Guidelines available.",  # Shown when visibility=SUMMARY
-    accepts_overrides=True,  # Allow prompt overrides
-)
-```
-
-**Placeholder syntax**: `${field_name}` from the params dataclass.
-
-**Children**: Nest sections for hierarchy. Heading levels auto-increment.
-
-### 3. Tools
-
-Tools are typed with params and result dataclasses.
-
-```python nocheck
-from dataclasses import dataclass, field
-
-from weakincentives import Tool, ToolContext, ToolResult
-
-
-@dataclass(slots=True, frozen=True)
-class SearchParams:
-    query: str = field(metadata={"description": "Search query"})
-    limit: int = field(default=10, metadata={"description": "Max results"})
-
-
-@dataclass(slots=True, frozen=True)
-class SearchResult:
-    snippets: tuple[str, ...]
-
-    def render(self) -> str:
-        return "\n".join(f"- {s}" for s in self.snippets)
-
-
-def search_handler(
-    params: SearchParams,
-    *,
-    context: ToolContext,
-) -> ToolResult[SearchResult]:
-    # Access session state
-    # plan = context.session[Plan].latest()
-
-    # Access resources
-    fs = context.filesystem  # Shorthand for context.resources.get_optional(Filesystem)
-
-    # Check deadline
-    if context.deadline and context.deadline.remaining().total_seconds() < 5:
-        return ToolResult.error("Deadline too close")
-
-    # Do work...
-    snippets = ("result1", "result2")
-
-    # Return typed result
-    return ToolResult.ok(SearchResult(snippets=snippets), message="Found 2 results")
-
-
-# Create tool
-search_tool = Tool[SearchParams, SearchResult](
-    name="search",
-    description="Search for content",
-    handler=search_handler,
-)
-```
-
-**ToolResult constructors**:
-
-- `ToolResult.ok(value, message="...")` - Success with typed value
-- `ToolResult.error("message")` - Failure, value=None
-
-### 4. Tool Examples
-
-Provide representative invocations for documentation and few-shot learning.
-
-```python
-from dataclasses import dataclass, field
-
-from weakincentives import Tool, ToolContext, ToolResult
-from weakincentives.prompt import ToolExample
-
-
-@dataclass(slots=True, frozen=True)
-class LookupParams:
-    entity_id: str = field(metadata={"description": "ID to fetch"})
-
-
-@dataclass(slots=True, frozen=True)
-class LookupResult:
-    entity_id: str
-    url: str
-
-
-def lookup_handler(
-    params: LookupParams, *, context: ToolContext
-) -> ToolResult[LookupResult]:
-    result = LookupResult(entity_id=params.entity_id, url="https://example.com/...")
-    return ToolResult.ok(result, message=f"Fetched {result.entity_id}")
-
-
-lookup_tool = Tool[LookupParams, LookupResult](
-    name="lookup_entity",
-    description="Fetch information for an entity ID.",
-    handler=lookup_handler,
-    examples=(
-        ToolExample(
-            description="Basic lookup",
-            input=LookupParams(entity_id="abc-123"),
-            output=LookupResult(entity_id="abc-123", url="https://example.com/abc-123"),
-        ),
-    ),
-)
-```
-
-### 5. Sessions
-
-Redux-style immutable state container with typed slices.
-
-```python
-from weakincentives.runtime import Session, InProcessDispatcher, Snapshot
-from weakincentives.runtime import replace_latest, append_all
-from weakincentives.contrib.tools import Plan
-
-# Create session
-session = Session()  # Creates InProcessDispatcher internally
-
-# Query state
-plan = session[Plan].latest()  # Most recent or None
-all_plans = session[Plan].all()  # All values as tuple
-active = session[Plan].where(lambda p: p.status == "active")
-exists = session[Plan].exists()  # Boolean
-
-# Mutations (all dispatch events internally)
-# session[Plan].seed(initial_plan)  # Initialize/replace slice
-# session[Plan].append(new_plan)    # Append via default reducer
-session[Plan].clear()  # Clear all
-
-# Snapshots
-snapshot = session.snapshot()
-session.restore(snapshot)
-```
-
-**Built-in reducers** (from `weakincentives.runtime`):
-
-- `append_all` - Always append (default)
-- `replace_latest` - Keep only most recent
-- `upsert_by(key_fn)` - Replace by key
-- `replace_latest_by(key_fn)` - Latest per key
-
-### 6. Adapters
-
-Provider-agnostic evaluation interface.
-
-```python nocheck
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.adapters.litellm import LiteLLMAdapter
-from weakincentives.adapters import PromptResponse
-from weakincentives.errors import DeadlineExceededError
-
-# Basic
-adapter = OpenAIAdapter(model="gpt-4o")
-
-# LiteLLM (multi-provider)
-adapter = LiteLLMAdapter(model="claude-3-sonnet-20240229")
-
-# Evaluate
-response = adapter.evaluate(
-    prompt,
-    session=session,
-    deadline=deadline,  # Optional
-    budget=budget,  # Optional
-    budget_tracker=tracker,  # Optional
-)
-
-# Response fields
-response.output  # Parsed dataclass (OutputType)
-response.text  # Raw text
-response.prompt_name  # Prompt identifier
-```
-
-### 7. Claude Agent SDK Adapter
-
-Native Claude Code capabilities with hermetic isolation.
-
-```python
-import os
-
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
-    HostMount,
-    IsolationConfig,
-    NetworkPolicy,
-    SandboxConfig,
-)
-from weakincentives.runtime import Session
-
-session = Session()
-
-# Create workspace (materializes files to temp dir)
-workspace = ClaudeAgentWorkspaceSection(
-    session=session,
-    mounts=(
-        HostMount(
-            host_path="/path/to/project",
-            mount_path="project",
-            include_glob=("*.py", "*.md"),
-            exclude_glob=("__pycache__/*",),
-            max_bytes=5_000_000,
-        ),
-    ),
-    allowed_host_roots=("/path/to",),
-)
-
-# Configure isolation
-adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-5-20250929",
-    client_config=ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",  # Auto-approve tools
-        cwd=str(workspace.temp_dir),
-        isolation=IsolationConfig(
-            api_key=os.environ["ANTHROPIC_API_KEY"],
-            network_policy=NetworkPolicy.no_network(),  # API only
-            sandbox=SandboxConfig(enabled=True),
-        ),
-    ),
-)
-
-# Use and cleanup
-# response = adapter.evaluate(prompt, session=session)
-workspace.cleanup()
-```
-
-**Isolation modes**:
-
-- `NetworkPolicy.no_network()` - API access only
-- `NetworkPolicy(allowed_domains=("docs.python.org",))` - Specific domains
-- `SandboxConfig(enabled=True)` - OS-level sandboxing
-
-### 8. Tool Policies
-
-Enforce sequential dependencies between tool invocations.
-
-```python
-from weakincentives.prompt import (
-    ReadBeforeWritePolicy,
-    SequentialDependencyPolicy,
-    PolicyDecision,
-)
-
-# Read-before-write: must read existing files before overwriting
-rbw_policy = ReadBeforeWritePolicy(
-    read_tools=frozenset({"read_file"}),
-    write_tools=frozenset({"write_file", "edit_file"}),
-)
-
-# Sequential dependency: enforce tool ordering
-seq_policy = SequentialDependencyPolicy(
-    dependencies={
-        "deploy": frozenset({"test", "build"}),  # deploy requires test AND build
-        "build": frozenset({"lint"}),  # build requires lint
-    }
-)
-```
-
-**Policy behavior**:
-
-- `ReadBeforeWritePolicy`: New files can be created freely; existing files must
-  be read first. Tracks read paths in session `PolicyState` slice.
-- `SequentialDependencyPolicy`: Tool B requires tool A to have succeeded.
-  Tracks invoked tools in session `PolicyState` slice.
-
-### 9. Feedback Providers
-
-Deliver ongoing progress feedback during unattended execution.
-
-```python
-from weakincentives.prompt import (
-    DeadlineFeedback,
-    FeedbackProviderConfig,
-    FeedbackTrigger,
-)
-
-# Built-in: deadline feedback (warns about remaining time)
-deadline_config = FeedbackProviderConfig(
-    provider=DeadlineFeedback(warning_threshold_seconds=120),
-    trigger=FeedbackTrigger(every_n_seconds=30),  # Check every 30 seconds
-)
-```
-
-**Trigger conditions** (OR'd together):
-
-- `every_n_calls` - Run after N tool calls since last feedback
-- `every_n_seconds` - Run after N seconds elapsed
-
-### 10. Task Completion Checkers
-
-Verify agents complete all tasks before stopping. Critical for unattended
-agents.
-
-```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    PlanBasedChecker,
-    CompositeChecker,
-)
-from weakincentives.contrib.tools import Plan
-
-# Plan-based: ensure all plan steps are "done"
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(plan_type=Plan),
-    ),
-)
-```
-
-**Hook integration** (Claude Agent SDK):
-
-1. **PostToolUse Hook**: After `StructuredOutput`, checker verifies completion.
-   If incomplete, adds feedback to encourage continuation.
-1. **Stop Hook**: Before allowing stop, checker verifies. If incomplete, signals
-   `needsMoreTurns: True`.
-
-### 11. Contrib Tools
-
-**VFS (Virtual Filesystem)**:
-
-```python
-from pathlib import Path
-
-from weakincentives.contrib.tools import VfsToolsSection, HostMount, VfsPath
-from weakincentives.runtime import Session
-
-session = Session()
-
-vfs = VfsToolsSection(
-    session=session,
-    mounts=(
-        HostMount(
-            host_path="./repo",
-            mount_path=VfsPath(("workspace",)),
-            include_glob=("*.py",),
-            exclude_glob=("*.pyc",),
-            max_bytes=600_000,
-        ),
-    ),
-    allowed_host_roots=(Path("."),),
-)
-# Tools: ls, read_file, write_file, edit_file, glob, grep, rm
-```
-
-**Planning**:
-
-```python
-from weakincentives.contrib.tools import (
-    PlanningToolsSection,
-    PlanningStrategy,
-    Plan,
-)
-from weakincentives.runtime import Session
-
-session = Session()
-
-planning = PlanningToolsSection(
-    session=session,
-    strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-)
-# Tools: planning_setup_plan, planning_add_step, planning_update_step, planning_read_plan
-
-# Query plan state
-plan = session[Plan].latest()
-if plan:
-    for step in plan.steps:
-        print(f"[{step.status}] {step.title}")
-```
-
-### 12. Resources
-
-Dependency injection with scoped lifecycles.
-
-```python
-from weakincentives.resources import Binding, Scope, ResourceRegistry
-
-
-class Config:
-    pass
-
-
-class HTTPClient:
-    pass
-
-
-# Build registry
-registry = ResourceRegistry.of(
-    Binding(Config, lambda r: Config()),
-    Binding(HTTPClient, lambda r: HTTPClient()),
-)
-```
-
-**Scopes**:
-
-- `Scope.SINGLETON` - Once per context (default)
-- `Scope.TOOL_CALL` - Fresh per tool invocation
-- `Scope.PROTOTYPE` - Fresh every resolution
-
-### 13. Serialization
-
-```python
-from dataclasses import dataclass
-
-from weakincentives.serde import dump, parse, schema, clone
-
-
-@dataclass(frozen=True)
-class MyData:
-    value: int
-
-
-data = MyData(value=42)
-
-# Serialize dataclass to dict
-d = dump(data)
-
-# Parse dict to dataclass
-obj = parse(MyData, d)
-
-# JSON schema
-json_schema = schema(MyData)
-
-# Deep clone
-copy = clone(data)
-```
-
-### 14. Design-by-Contract
-
-```python
-from weakincentives.dbc import require, ensure, invariant, pure
-
-
-@require(lambda x: x > 0)
-@ensure(lambda result: result >= 0)
-def compute(x: int) -> int:
-    return x * 2
-
-
-@invariant(lambda self: self.count >= 0)
-class Counter:
-    count: int = 0
-
-
-@pure  # Validates no side effects
-def hash_value(x: str) -> int:
-    return hash(x)
-```
-
-______________________________________________________________________
-
-## Best Practices
-
-### Agent Design
-
-1. **Plan first**: Use `PlanningToolsSection` to structure work before acting
-1. **Verify completion**: Enable `TaskCompletionChecker` for unattended agents
-1. **Set budgets**: Always configure `Budget` with token limits
-1. **Use deadlines**: Set wall-clock limits via `Deadline`
-1. **Provide feedback**: Configure `FeedbackProvider` for long-running tasks
-
-### Tool Implementation
-
-1. **Type everything**: Use `@dataclass(slots=True, frozen=True)` for
-   params/results
-1. **Document params**: Add `metadata={"description": "..."}` to all fields
-1. **Handle failures gracefully**: Return `ToolResult.error()`, don't raise
-1. **Check deadlines**: Early-exit if `context.deadline.remaining()` is low
-1. **Access resources properly**: Use `context.resources.get(Protocol)`
-
-### Session Management
-
-1. **Snapshot before risky operations**: `session.snapshot()` enables rollback
-1. **Use typed slices**: Query via `session[Type].latest()`, not raw access
-1. **Dispatch events**: Never mutate state directly; use `session.dispatch()`
-1. **Register reducers early**: Call `session[Type].register()` before
-   dispatching
-
-### Prompt Authoring
-
-1. **Keep sections focused**: One concern per section
-1. **Use progressive disclosure**: Set `visibility=SUMMARY` for verbose content
-1. **Attach tools to relevant sections**: Tools should be near their
-   instructions
-1. **Apply policies at appropriate level**: Section-level for local constraints,
-   prompt-level for global ones
-
-______________________________________________________________________
-
-## Decision Trees
-
-### Which Adapter?
-
-```text
-Need Claude Code native tools? → ClaudeAgentSDKAdapter
-Need multi-provider support?   → LiteLLMAdapter
-OpenAI only?                   → OpenAIAdapter
-```
-
-### Which Workspace Tool?
-
-```text
-Claude Agent SDK mode?         → ClaudeAgentWorkspaceSection
-Need shell execution?          → PodmanSandboxSection
-Standard file ops only?        → VfsToolsSection
-```
-
-### Which Reducer?
-
-```text
-Recording every event?         → append_all (default)
-Only latest value matters?     → replace_latest
-Keyed upsert (like cache)?     → upsert_by(key_fn)
-Complex state transitions?     → @reducer decorator on dataclass
-```
-
-### Session vs Resource State?
-
-```text
-Agent state (plans, results)?  → Session slices
-Runtime deps (HTTP, DB)?       → ResourceRegistry
-Filesystem state?              → Filesystem via resources
-```
-
-______________________________________________________________________
-
-## Common Pitfalls
-
-1. **Forgetting `slots=True, frozen=True`** on dataclasses - breaks serde
-1. **Missing `${}` in templates** - use `${field}` not `{field}`
-1. **Tool handler signature** - must be `(params, *, context: ToolContext)`
-1. **ToolResult return** - use `.ok()` or `.error()`, not raw constructor
-1. **Session mutations** - all go through `dispatch()`, use accessor methods
-1. **Resource access outside context** - use `with prompt.resources:` block
-1. **Duplicate tool names** - raises `PromptValidationError`
-1. **Hash mismatch in overrides** - stale overrides silently filtered
-
-______________________________________________________________________
-
-## Event Types
-
-```python
-from weakincentives.runtime import (
-    PromptRendered,  # After render, before provider call
-    PromptExecuted,  # After all tools and parsing
-    ToolInvoked,  # After each tool handler
-    TokenUsage,  # Token consumption data
-)
-```
-
-______________________________________________________________________
-
-## Error Hierarchy
-
-```text
-WinkError                       # Base for all WINK errors
-├── DeadlineExceededError       # Wall-clock limit hit
-├── BudgetExceededError         # Token limit breached
-├── ToolValidationError         # Tool params invalid
-├── PromptError                 # Prompt system errors
-│   ├── PromptValidationError   # Construction failures
-│   ├── PromptRenderError       # Render failures
-│   ├── OutputParseError        # Structured output invalid
-│   └── VisibilityExpansionRequired  # Progressive disclosure request
-├── SnapshotRestoreError        # Snapshot restore failed
-└── TransactionError            # Transaction failed
-```
-
-______________________________________________________________________
-
-## Development Commands
+### Commands
 
 ```bash
-uv sync && ./install-hooks.sh   # Setup
+# Always start with schema to discover tables
+wink query ./bundle.zip --schema
 
-make format      # ruff format (88-char)
-make lint        # ruff check --preview
-make typecheck   # ty + pyright strict
-make test        # pytest, 100% coverage required
-make check       # ALL checks - run before commit
+# Query with JSON output (default)
+wink query ./bundle.zip "SELECT * FROM errors"
 
-make bandit      # Security scan
-make deptry      # Dependency analysis
-make pip-audit   # Vulnerability scan
+# Query with ASCII table output
+wink query ./bundle.zip "SELECT * FROM errors" --table
 ```
+
+### Available Tables
+
+| Table | Contents |
+|-------|----------|
+| `manifest` | Bundle metadata (bundle_id, status, created_at) |
+| `errors` | Aggregated errors from all sources |
+| `logs` | Log entries from execution |
+| `tool_calls` | Tool invocations with timing and results |
+| `session_slices` | Session state items |
+| `files` | Workspace files captured in bundle |
+| `config` | Flattened configuration |
+| `metrics` | Token usage and timing |
+
+### Essential Queries
+
+```sql
+-- What went wrong?
+SELECT error_type, message FROM errors
+
+-- Which tools failed?
+SELECT tool_name, error_code, params FROM tool_calls WHERE success = 0
+
+-- Tool performance
+SELECT tool_name, COUNT(*) as calls, AVG(duration_ms) as avg_ms
+FROM tool_calls GROUP BY tool_name
+
+-- Error logs
+SELECT timestamp, message FROM logs WHERE level = 'ERROR'
+
+-- Token usage
+SELECT input_tokens, output_tokens, total_ms FROM metrics
+
+-- Session state summary
+SELECT slice_type, COUNT(*) FROM session_slices GROUP BY slice_type
+
+-- Find content in files
+SELECT path FROM files WHERE content LIKE '%pattern%'
+```
+
+### Debugging Workflow
+
+1. **Start with schema**: `wink query bundle.zip --schema`
+1. **Check for errors**: `SELECT * FROM errors`
+1. **Review failed tools**: `SELECT * FROM tool_calls WHERE success = 0`
+1. **Examine logs around failure**: `SELECT * FROM logs WHERE level IN ('ERROR', 'WARNING')`
+1. **Inspect session state**: Query `session_slices` or typed `slice_*` tables
 
 ______________________________________________________________________
 
-## File Layout
+## Agent Development Workflow
 
-```text
-src/weakincentives/
-├── adapters/           # OpenAI, LiteLLM, Claude Agent SDK
-│   └── claude_agent_sdk/
-├── cli/                # wink CLI
-├── contrib/
-│   ├── tools/          # Planning, VFS, asteval, podman, workspace digest
-│   ├── optimizers/     # WorkspaceDigestOptimizer
-│   └── mailbox/        # RedisMailbox
-├── dataclasses/        # FrozenDataclass utilities
-├── dbc/                # @require, @ensure, @invariant, @pure
-├── debug/              # Log collector, session inspection
-├── evals/              # Evaluation framework
-├── filesystem/         # Filesystem protocol
-├── formal/             # TLA+ embedding
-├── optimizers/         # Optimizer framework
-├── prompt/             # Sections, tools, rendering, overrides
-│   └── overrides/      # LocalPromptOverridesStore
-├── resources/          # DI with Binding, Scope
-├── runtime/
-│   ├── events/         # Dispatcher, event types
-│   ├── mailbox/        # Message queue protocol
-│   └── session/        # Session, slices, reducers
-│       └── slices/     # MemorySlice, JsonlSlice
-├── serde/              # dump, parse, schema, clone
-├── skills/             # Agent Skills support
-└── types/              # JSONValue, type aliases
+When helping a user build or debug a WINK agent:
+
+### 1. Understanding Requirements
+
+```bash
+# Find relevant specs
+wink docs search "topic user mentioned"
+
+# Read the appropriate spec
+wink docs read spec RELEVANT_SPEC
 ```
 
-______________________________________________________________________
+### 2. Writing Code
 
-## Key Specs
+- Follow patterns from `wink docs read example`
+- Check spec constraints before implementing
+- Use typed dataclasses with `slots=True, frozen=True`
 
-Read before modifying related code:
+### 3. Debugging Failures
 
-| Spec | Topic |
-| --------------------------- | ---------------------------------------- |
-| `specs/PROMPTS.md` | Prompt system, composition, overrides |
-| `specs/SESSIONS.md` | Session lifecycle, events, budgets |
-| `specs/TOOLS.md` | Tool registration, planning tools, policies |
-| `specs/FEEDBACK_PROVIDERS.md` | Trajectory feedback, stall detection |
-| `specs/TASK_COMPLETION.md` | Task completion verification |
-| `specs/ADAPTERS.md` | Provider adapters, throttling |
-| `specs/CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
-| `specs/WORKSPACE.md` | VFS, Podman, asteval |
-| `specs/DBC.md` | Design-by-contract patterns |
-| `specs/RESOURCE_REGISTRY.md` | Dependency injection |
-| `specs/MAIN_LOOP.md` | MainLoop orchestration |
-| `specs/MAILBOX.md` | Message queue abstraction |
+```bash
+# Load the debug bundle
+wink query ./bundle.zip --schema
+
+# Investigate errors
+wink query ./bundle.zip "SELECT * FROM errors" --table
+wink query ./bundle.zip "SELECT * FROM tool_calls WHERE success = 0" --table
+```
+
+### 4. Optimizing Performance
+
+```bash
+# Analyze tool usage
+wink query ./bundle.zip "SELECT tool_name, COUNT(*), AVG(duration_ms) FROM tool_calls GROUP BY tool_name" --table
+
+# Check token consumption
+wink query ./bundle.zip "SELECT * FROM metrics" --table
+```
 
 ______________________________________________________________________
 
 ## Quick Reference
 
-### PromptTemplate
+```bash
+# Documentation
+wink docs list                    # See all available docs
+wink docs search "keyword"        # Find relevant sections
+wink docs read spec SPEC_NAME     # Read full spec
+wink docs read guide GUIDE_NAME   # Read full guide
 
-```text
-PromptTemplate[OutputT](
-    ns: str,                    # Namespace (required)
-    key: str,                   # Unique key (required)
-    name: str | None,           # Display name
-    sections: tuple[Section],   # Ordered sections
-)
+# Debugging
+wink query bundle.zip --schema    # Discover tables
+wink query bundle.zip "SQL"       # JSON output
+wink query bundle.zip "SQL" --table  # Table output
 ```
-
-### MarkdownSection
-
-```text
-MarkdownSection[ParamsT](
-    title: str,                 # Heading text
-    key: str,                   # Unique key
-    template: str,              # ${field} syntax
-    default_params: ParamsT,
-    tools: tuple[Tool],
-    children: tuple[Section],
-    visibility: SectionVisibility,
-    summary: str,               # For SUMMARY visibility
-    enabled: Callable[[ParamsT], bool],
-    accepts_overrides: bool,
-)
-```
-
-### Tool
-
-```text
-Tool[ParamsT, ResultT](
-    name: str,                  # ^[a-z0-9_-]{1,64}$
-    description: str,           # 1-200 chars
-    handler: ToolHandler,
-    examples: tuple[ToolExample],
-    accepts_overrides: bool,
-)
-
-# Handler signature
-def handler(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]
-```
-
-### ToolContext
-
-```text
-context.session           # Session
-context.deadline          # Deadline | None
-context.budget_tracker    # BudgetTracker | None
-context.resources         # ScopedResourceContext (from prompt)
-context.filesystem        # Filesystem | None (shorthand)
-context.prompt            # PromptProtocol
-context.rendered_prompt   # RenderedPromptProtocol | None
-context.adapter           # ProviderAdapterProtocol
-```
-
-### Session
-
-```text
-session[T].latest()       # T | None
-session[T].all()          # tuple[T, ...]
-session[T].where(pred)    # tuple[T, ...]
-session[T].exists()       # bool
-session[T].seed(value)    # Initialize slice
-session[T].append(value)  # Dispatch to reducers
-session[T].clear()        # Clear slice
-session[T].register(E, reducer)  # Register reducer
-session.dispatch(event)   # Broadcast dispatch
-session.snapshot()        # Snapshot
-session.restore(snap)     # Restore from snapshot
-```
-
-### Budget
-
-```text
-Budget(
-    deadline: Deadline | None,
-    max_total_tokens: int | None,
-    max_input_tokens: int | None,
-    max_output_tokens: int | None,
-)
-
-tracker = BudgetTracker(budget)
-tracker.record_cumulative(eval_id, usage)
-tracker.check()  # Raises BudgetExceededError
-```
-
-______________________________________________________________________
-
-## Example: Complete Agent
-
-See `code_reviewer_example.py` for production patterns:
-
-- Structured output types
-- VFS/Planning tool sections
-- MainLoop implementation
-- Event subscription
-- Prompt overrides
-- Claude Agent SDK mode
-
-______________________________________________________________________
-
-## Alpha Status
-
-All APIs may change without backward compatibility. No deprecation warnings;
-unused code is deleted completely.
-
-______________________________________________________________________
-
-## License
-
-Apache License 2.0
