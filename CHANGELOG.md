@@ -2,228 +2,154 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
-
-> **Commits reviewed:** 2026-01-17 (bdba902) through 2026-01-20 (e0defaf)
+## v0.21.0 - 2026-01-20
 
 ### TL;DR
 
-This release delivers **AWS Bedrock authentication** for the Claude Agent SDK,
-a completely **redesigned debug bundle system** with automatic per-request
-capture, **progressive disclosure** support for the Claude Agent SDK adapter,
-**controllable time dependencies** for deterministic testing, and a **unified
-verification toolbox** that replaces scattered build scripts. Debug bundles now
-include comprehensive metrics, session snapshots, and filesystem archives in
-atomic zip files. The codebase received significant internal cleanup including
-path normalization consolidation, large file decomposition, and actionable
-error messages throughout the toolchain.
+This release introduces a comprehensive **debug bundle system** for post-mortem
+analysis with SQL-based exploration, environment capture, and automatic
+per-request collection. The Claude Agent SDK adapter gains **progressive
+disclosure** support. New **controllable time dependencies** enable
+deterministic testing without real delays. A **unified verification toolbox**
+consolidates scattered build scripts into a single extensible framework.
 
-### AWS Bedrock Support
+### Debug Bundle System
 
-`IsolationConfig` now supports AWS Bedrock authentication by inheriting
-credentials from the host environment. When `api_key` is `None` (the default),
-authentication is inherited transparently—this works with both Anthropic API
-(`ANTHROPIC_API_KEY`) and AWS Bedrock (`CLAUDE_CODE_USE_BEDROCK=1` + AWS
-credentials).
+A new debug bundle system captures comprehensive execution state for post-mortem
+analysis. Bundles are self-contained zip archives that MainLoop generates
+automatically per-request, enabling reliable debugging without manual
+instrumentation.
 
 ```python
-# Inherit host auth (works with Bedrock or Anthropic API)
-adapter = ClaudeAgentSDKAdapter(
-    model="us.anthropic.claude-sonnet-4-20250514-v1:0",
-    client_config=ClaudeAgentSDKClientConfig(
-        isolation=IsolationConfig(),  # Inherits host auth
-    ),
-)
-
-# Docker: specify where AWS config is mounted
-isolation = IsolationConfig(aws_config_path="/mnt/aws")
-```
-
-New `IsolationConfig` fields:
-
-- `aws_config_path`: Path to AWS config directory for Docker containers where
-  credentials are mounted at non-standard paths
-
-Factory methods for explicit intent and fail-fast validation:
-
-- `IsolationConfig.inherit_host_auth()`: Inherit auth, fail if none configured
-- `IsolationConfig.with_api_key(key)`: Use explicit API key
-- `IsolationConfig.for_bedrock()`: Require Bedrock, fail if not configured
-
-Model ID helpers for unified model selection (defaults to Sonnet 4.5):
-
-- `get_default_model()`: Returns model ID in the appropriate format for auth mode
-- `to_bedrock_model_id(name)`: Convert Anthropic model name to Bedrock ID
-- `to_anthropic_model_name(id)`: Convert Bedrock ID to Anthropic model name
-
-New exports: `AuthMode`, `BedrockConfig`, `AwsConfigResolution`,
-`IsolationAuthError`, `DEFAULT_MODEL`, `DEFAULT_BEDROCK_MODEL`,
-`get_supported_bedrock_models()`.
-
-### Redesigned Debug Bundle System
-
-The debug bundle system has been completely redesigned around a unified
-`BundleWriter` API that replaces the previous fragmented utilities
-(`collect_all_logs`, `dump_session`, `archive_filesystem`).
-
-```python
-from weakincentives.debug import BundleConfig, CaptureMode
+from weakincentives.debug import BundleConfig
 from weakincentives.runtime import MainLoopConfig
 
 config = MainLoopConfig(
-    debug_bundle=BundleConfig(
-        target="./debug_bundles/",
-        mode=CaptureMode.STANDARD,
-    ),
+    debug_bundle=BundleConfig(target="./debug_bundles/"),
 )
-# Bundles are now created automatically per-request
+# Bundles created automatically for each request
 ```
 
-**Key improvements:**
+**Bundle contents:**
 
-- **Automatic capture**: MainLoop generates debug bundles automatically when
-  configured, including session state before/after execution, logs, metrics,
-  and filesystem snapshots
-- **Atomic zip creation**: Bundles are written to temporary files first, then
-  atomically renamed to prevent partial/corrupted archives on crashes
-- **Comprehensive metrics**: New `metrics.json` includes timing data
-  (`started_at`, `ended_at`, `duration_ms`), token usage (input, output,
-  cached, total, prompt count), and budget consumption when tracking is enabled
-- **Per-request override**: `MainLoopRequest.debug_bundle` allows overriding
-  the config-level bundle settings for individual requests
-- **Prompt metadata**: Bundles include prompt namespace, key, and adapter name
-- **Visibility overrides**: `prompt_overrides.json` captures visibility changes
-  made during execution
-- **Simplified UI**: Debug viewer streamlined with unified JSON tree renderer,
-  removed over-engineered command palette and complex filtering
+- **Session state**: Snapshots before and after execution (`session/`)
+- **Logs**: Complete DEBUG-level logs from the request (`logs/`)
+- **Metrics**: Timing, token usage, and budget consumption (`metrics.json`)
+- **Request I/O**: Input parameters and output response (`request/`)
+- **Filesystem**: Workspace snapshot within size limits (`filesystem/`)
+- **Environment**: Reproducibility envelope for issue reproduction
+  (`environment/`)
 
-**Removed** (replaced by BundleWriter):
-- `collect_all_logs(path)` → Use `BundleWriter.capture_logs()`
-- `dump_session(session, target)` → Use `BundleWriter.write_session_after()`
-- `archive_filesystem(fs, target)` → Use `BundleWriter.write_filesystem()`
-- `max_log_lines` parameter removed from `BundleConfig` (bundles collect all
-  logs without limits)
+**Reproducibility envelope** captures execution context with security-conscious
+redaction:
 
-`MainLoopResult` now includes `bundle_path: Path | None` for accessing the
-created bundle.
+- System info (OS, architecture, CPU, memory)
+- Python runtime (version, virtualenv detection, packages via `pip freeze`)
+- Git state (commit, branch, dirty status, remotes with credential redaction)
+- Container detection (Docker/Podman/Kubernetes)
+- Filtered environment variables with sensitive value redaction
+
+**SQL-based exploration** via `wink query` enables familiar querying of bundle
+contents:
+
+```bash
+wink query bundle.zip --schema
+wink query bundle.zip "SELECT tool_name, success FROM tool_calls"
+wink query bundle.zip "SELECT * FROM logs WHERE level = 'ERROR'" --table
+```
+
+Auto-generates typed SQLite tables from bundle artifacts (`manifest`, `logs`,
+`tool_calls`, `errors`, `session_slices`, `files`, `metrics`). Session state
+types become queryable tables (e.g., `slice_agentplan`). Caches database
+alongside bundle for fast repeated queries.
+
+**Additional features:**
+
+- Atomic zip creation prevents partial archives on crashes
+- Per-request override via `MainLoopRequest.debug_bundle`
+- `MainLoopResult.bundle_path` provides access to created bundle
+
+See `specs/DEBUG_BUNDLE.md` and `specs/WINK_QUERY.md` for specifications.
 
 ### Progressive Disclosure for Claude Agent SDK
 
 The Claude Agent SDK adapter now supports progressive disclosure via the
-`open_sections` tool. Models can request section expansion, and the adapter
-handles the cross-context exception propagation transparently.
+`open_sections` tool, enabling models to request section expansion with
+automatic cross-context exception handling.
 
-**How it works:** Since the MCP bridge runs in a different execution context
-than the adapter, `VisibilityExpansionRequired` exceptions cannot propagate
-directly. A new `VisibilityExpansionSignal` captures exceptions in tool
-handlers and re-raises them after the SDK query completes, enabling the
-standard progressive disclosure retry loop.
+Since the MCP bridge runs in a different execution context than the adapter,
+`VisibilityExpansionRequired` exceptions cannot propagate directly. A new
+`VisibilityExpansionSignal` captures these exceptions in tool handlers and
+re-raises them after the SDK query completes, enabling the standard retry loop.
 
-**Improved validation:** The `open_sections` tool is now more lenient—
-requesting already-expanded sections no longer fails (they are silently
-skipped). Errors only occur when ALL requested sections are already expanded.
+The `open_sections` tool validation is lenient—already-expanded sections are
+silently skipped rather than causing errors.
 
 ### Controllable Time Dependencies
 
-A new clock abstraction enables deterministic testing of time-dependent code
+New clock abstractions enable deterministic testing of time-dependent code
 without real delays or monkeypatching.
 
 ```python
-from weakincentives import FakeClock, SYSTEM_CLOCK, Clock
+from weakincentives import FakeClock, SYSTEM_CLOCK
 
-# Production code uses SYSTEM_CLOCK (the default)
+# Production: uses system time (the default)
 deadline = Deadline(budget.deadline, clock=SYSTEM_CLOCK)
 
-# Test code uses FakeClock for instant, deterministic time control
+# Testing: instant, deterministic time control
 fake = FakeClock()
-fake.advance(seconds=300)  # Instant time travel
+fake.advance(seconds=300)  # No actual delay
 ```
 
-**New protocols:**
+**Protocols:** `MonotonicClock` (elapsed time), `WallClock` (UTC timestamps),
+`Sleeper` (delays), and unified `Clock` combining all three.
 
-- `MonotonicClock`: Elapsed time measurement (timeouts, rate limiting)
-- `WallClock`: UTC timestamps (deadlines, event recording)
-- `Sleeper`: Delay operations
-- `Clock`: Unified protocol combining all three
+**Implementations:** `SystemClock`/`SYSTEM_CLOCK` for production;
+`FakeClock` with `advance()`, `set_monotonic()`, `set_wall()` for testing.
 
-**Implementations:**
-
-- `SystemClock` / `SYSTEM_CLOCK`: Production implementation using system time
-- `FakeClock`: Test implementation with `advance()`, `set_monotonic()`,
-  `set_wall()` methods
-
-All time-dependent components now accept optional `clock` parameters with
-sensible defaults, including `Deadline`, `Heartbeat`, `LeaseExtender`,
-`wait_until()`, and `InMemoryMailbox`.
+All time-dependent components accept optional `clock` parameters: `Deadline`,
+`Heartbeat`, `LeaseExtender`, `wait_until()`, `InMemoryMailbox`.
 
 See `specs/CLOCK.md` for the complete specification.
 
 ### Unified Verification Toolbox
 
-The scattered build scripts have been consolidated into a unified, extensible
-`toolchain/` framework with a single entry point.
+Build verification consolidated into an extensible `toolchain/` framework with
+a single entry point replacing 10+ scattered scripts.
 
 ```bash
-# Run all checks
-python check.py
-
-# Run specific checks
-python check.py lint test typecheck
-
-# List available checks
-python check.py --list
-
-# Machine-readable output for CI
-python check.py --json
+python check.py                    # Run all checks
+python check.py lint test          # Run specific checks
+python check.py --list             # List available checks
+python check.py --json             # Machine-readable output
 ```
 
-**Key features:**
-
-- **Single entry point**: `check.py` replaces 10+ scattered scripts in `build/`
-  and `scripts/`
-- **Extensible protocol**: Simple `Checker` interface for adding new checks
-- **Structured diagnostics**: `Location` (file:line:column) + `Diagnostic` +
-  `CheckResult` types for IDE-clickable output
-- **Multiple formatters**: `ConsoleFormatter` (colored), `JSONFormatter`
-  (machine-readable), `QuietFormatter` (failures only)
-- **Unified parsers**: Extract structured diagnostics from ruff, pyright,
-  pytest, mdformat, bandit, deptry, pip-audit output
-
-**Actionable error messages**: All toolchain failures now provide structured,
-multi-line diagnostics explaining what went wrong, how to reproduce, and how to
-fix. Pytest failures include traceback context from `--tb=short` output.
+**Features:** Extensible `Checker` protocol; structured diagnostics with
+`Location` (file:line:column) for IDE-clickable output; multiple formatters
+(console, JSON, quiet); actionable error messages with reproduction steps and
+fix guidance.
 
 See `specs/VERIFICATION_TOOLBOX.md` for the complete specification.
 
 ### Fixed
 
 - **Frozenset serialization**: Session snapshots now correctly serialize
-  `frozenset` fields (previously caused "not JSON serializable" errors)
-- **Tool example warnings**: Non-dataclass tool example values (primitives,
-  sequences) no longer trigger spurious warnings during serialization
-- **RunContext population**: Events dispatched by the Claude Agent SDK adapter
-  now include `session_id` for proper event correlation and distributed tracing
-- **Manifest checksum circularity**: `manifest.json` is no longer included in
-  its own checksums dictionary, eliminating the circular dependency
+  `frozenset` fields
+- **Tool example warnings**: Non-dataclass tool example values no longer
+  trigger spurious warnings during serialization
+- **RunContext population**: Claude Agent SDK adapter events now include
+  `session_id` for proper correlation
+- **Sandbox settings**: `allowUnsandboxedCommands=False` now explicitly written
+  to settings.json
 
 ### Internal
 
-- **Path normalization standardized**: Consolidated duplicate path normalization
-  logic from three locations into `weakincentives.filesystem._path` module with
-  `normalize_path_string()`, `validate_path()`, and `strip_mount_point()`
-- **Large file decomposition**: Split `main_loop.py` (~728→540 lines) and
-  `session.py` (~954→700 lines) into focused modules: `main_loop_types.py`,
-  `message_handlers.py`, `session_cloning.py`, `session_dispatch.py`,
-  `session_telemetry.py`
-- **Documentation consolidation**: AGENTS.md, GEMINI.md, and WARP.md now
-  redirect to CLAUDE.md as the single source of truth for AI assistant
-  guidelines, with a prominent "Definition of Done" requirement
-- **Test improvements**: Removed unnecessary `time.sleep()` calls using
-  controllable clock injection; added `--timeout=10` to pytest for hang
-  prevention
-- **CI improvements**: Integration tests now skip automatically when API keys
-  are missing (removed Makefile gatekeeper); Claude code review workflow hides
-  previous reviews before posting new ones
+- Consolidated path normalization into `weakincentives.filesystem._path`
+- Split `main_loop.py` and `session.py` into focused modules
+- Unified AI assistant guidelines in CLAUDE.md
+- Replaced `time.sleep()` calls with controllable clock injection in tests
+- Integration tests auto-skip when API keys missing
+- Claude code review workflow hides previous reviews before posting new ones
 
 ## v0.20.0 - 2026-01-16
 
