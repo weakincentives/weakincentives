@@ -25,6 +25,13 @@ from pathlib import Path
 from ..runtime.logging import StructuredLogger, configure_logging, get_logger
 from . import debug_app
 from .docs_metadata import GUIDE_DESCRIPTIONS, SPEC_DESCRIPTIONS
+from .query import (
+    QueryDatabase,
+    QueryError,
+    format_as_json,
+    format_as_table,
+    open_query_database,
+)
 
 
 def _read_doc(name: str) -> str:
@@ -421,6 +428,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "debug":
         return _run_debug(args, logger)
 
+    if args.command == "query":
+        return _run_query(args, logger)
+
     return 0
 
 
@@ -471,6 +481,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     _build_docs_parser(subcommands)
+    _build_query_parser(subcommands)
 
     return parser
 
@@ -601,3 +612,93 @@ def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:
             context={"error": repr(error)},
         )
         return 3
+
+
+def _build_query_parser(
+    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+) -> None:
+    """Build the query subcommand parser."""
+    query_parser = subcommands.add_parser(
+        "query",
+        help="Query debug bundles via SQL",
+        description="Load debug bundle into SQLite and execute SQL queries.",
+    )
+    _ = query_parser.add_argument(
+        "bundle_path",
+        help="Path to a debug bundle .zip file.",
+    )
+    _ = query_parser.add_argument(
+        "sql",
+        nargs="?",
+        help="SQL query to execute. If omitted, --schema must be provided.",
+    )
+    _ = query_parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Output schema as JSON and exit.",
+    )
+    _ = query_parser.add_argument(
+        "--table",
+        action="store_true",
+        help="Output as ASCII table (default: JSON).",
+    )
+
+
+def _run_query(args: argparse.Namespace, logger: StructuredLogger) -> int:
+    """Run the query command."""
+    bundle_path = Path(args.bundle_path)
+
+    if not bundle_path.exists():
+        print(f"Error: Bundle not found: {bundle_path}", file=sys.stderr)
+        return 2
+
+    try:
+        db = open_query_database(bundle_path)
+    except QueryError as e:
+        logger.exception(
+            "Failed to open query database",
+            event="wink.query.open_error",
+            context={"path": str(bundle_path), "error": str(e)},
+        )
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+
+    try:
+        return _execute_query_command(args, db)
+    except QueryError as e:
+        logger.exception(
+            "Query execution failed",
+            event="wink.query.execution_error",
+            context={"sql": args.sql, "error": str(e)},
+        )
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    finally:
+        db.close()
+
+
+def _execute_query_command(
+    args: argparse.Namespace,
+    db: QueryDatabase,
+) -> int:
+    """Execute the query command logic.
+
+    Returns exit code.
+    """
+    if args.schema:
+        schema = db.get_schema()
+        print(schema.to_json())
+        return 0
+
+    if not args.sql:
+        print("Error: SQL query required (or use --schema)", file=sys.stderr)
+        return 1
+
+    results = db.execute_query(args.sql)
+
+    if args.table:
+        print(format_as_table(results))
+    else:
+        print(format_as_json(results))
+
+    return 0
