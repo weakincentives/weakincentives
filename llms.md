@@ -4,6 +4,35 @@ Instructions for AI agents helping users develop and optimize WINK agents.
 
 ______________________________________________________________________
 
+## Library Overview
+
+**WINK (Weak Incentives)** is a Python 3.12+ library for building deterministic,
+side-effect-free background agents with typed prompts, immutable sessions, and
+provider-agnostic adapters.
+
+**Core concepts:**
+
+- **Prompt as agent** - Hierarchical documents where sections bundle instructions
+  and tools together. No separate tool registry.
+- **Event-driven state** - All mutations flow through pure reducers processing
+  typed events. State is immutable and inspectable via snapshots.
+- **Provider-agnostic** - Same agent definition works across OpenAI, LiteLLM,
+  and Claude Agent SDK via adapter abstraction.
+
+**Key modules:**
+
+| Module | Purpose |
+|--------|---------|
+| `weakincentives.prompt` | Prompt authoring, sections, tools |
+| `weakincentives.runtime` | Session, events, lifecycle |
+| `weakincentives.adapters` | OpenAI, LiteLLM, Claude Agent SDK |
+| `weakincentives.contrib.tools` | VFS, planning, asteval, podman |
+| `weakincentives.resources` | Dependency injection |
+| `weakincentives.serde` | Dataclass serialization |
+| `weakincentives.dbc` | Design-by-contract decorators |
+
+______________________________________________________________________
+
 ## wink docs
 
 Access WINK documentation from the command line. Use this to find implementation
