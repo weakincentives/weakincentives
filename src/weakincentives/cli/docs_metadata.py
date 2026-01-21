@@ -72,6 +72,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "evaluation": "Test agents with datasets and evaluators",
     "lifecycle": "Manage shutdown, health checks, and watchdogs",
     "resources": "Dependency injection, scopes, and lifecycle management",
+    "time-and-clock": "Deadlines, budgets, and injectable clocks",
     "progressive-disclosure": "Control context size with summaries",
     "prompt-overrides": "Iterate on prompts without code changes",
     "workspace-tools": "Use VFS, Podman, planning, workspace digests",
