@@ -43,7 +43,7 @@ import tempfile
 import zipfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Self, override
@@ -149,7 +149,7 @@ def collect_all_logs(
 # Bundle constants and types
 # ---------------------------------------------------------------------------
 
-BUNDLE_FORMAT_VERSION = "1.0.0"
+BUNDLE_FORMAT_VERSION = "1.1.0"
 BUNDLE_ROOT_DIR = "debug_bundle"
 
 
@@ -202,14 +202,31 @@ class BundleConfig:
 
 
 @FrozenDataclass()
+class RedactionInfo:
+    """Redaction metadata for manifest."""
+
+    enabled: bool = False
+    ruleset: str = ""
+    patterns: tuple[str, ...] = ()
+
+
+@FrozenDataclass()
+class LimitsApplied:
+    """Limits applied during capture."""
+
+    filesystem_truncated: bool = False
+    logs_truncated: bool = False
+    tool_outputs_truncated: bool = False
+
+
+@FrozenDataclass()
 class CaptureInfo:
     """Capture metadata for manifest."""
 
     mode: str
     trigger: str
-    limits_applied: Mapping[str, bool] = field(
-        default_factory=lambda: {"filesystem_truncated": False}
-    )
+    limits_applied: LimitsApplied = field(default_factory=LimitsApplied)
+    redaction: RedactionInfo = field(default_factory=RedactionInfo)
 
 
 @FrozenDataclass()
@@ -249,17 +266,119 @@ class BuildInfo:
 
 
 @FrozenDataclass()
+class TokenUsage:
+    """Token usage summary."""
+
+    input: int = 0
+    output: int = 0
+    cached: int = 0
+
+
+@FrozenDataclass()
+class BundleSummary:
+    """Execution summary for manifest."""
+
+    duration_ms: int = 0
+    status: str = "success"
+    error_count: int = 0
+    prompt_count: int = 0
+    tool_call_count: int = 0
+    provider_call_count: int = 0
+    token_usage: TokenUsage = field(default_factory=TokenUsage)
+
+
+@FrozenDataclass()
+class IndexPointer:
+    """Pointer to an index file for an artifact."""
+
+    path: str
+
+
+@FrozenDataclass()
+class TimeRange:
+    """Time range for temporal artifacts like logs."""
+
+    start: str = ""
+    end: str = ""
+
+
+@FrozenDataclass()
+class LogCounts:
+    """Count metadata for log artifacts.
+
+    The `records` field is required to distinguish from FilesystemCounts
+    during serde union parsing.
+    """
+
+    records: int  # Required - no default
+    levels: Mapping[str, int] = field(default_factory=lambda: dict[str, int]())
+
+
+@FrozenDataclass()
+class FilesystemCapture:
+    """Capture parameters for filesystem artifacts."""
+
+    max_file_size: int = 10_000_000
+    max_total_size: int = 52_428_800
+    excluded_patterns: tuple[str, ...] = ()
+
+
+@FrozenDataclass()
+class FilesystemCounts:
+    """Count metadata for filesystem artifacts.
+
+    The `files_captured` field is required to distinguish from LogCounts
+    during serde union parsing.
+    """
+
+    files_captured: int  # Required - no default
+    files_skipped: int = 0
+    total_bytes_captured: int = 0
+
+
+@FrozenDataclass()
+class SchemaInfo:
+    """Schema information for structured artifacts."""
+
+    type: str = ""
+    version: str = ""
+
+
+@FrozenDataclass()
+class ArtifactInfo:
+    """Metadata for a single artifact in the bundle.
+
+    The artifact is identified by a logical ID (e.g., 'logs', 'session_after',
+    'filesystem') rather than its file path. This allows agents to understand
+    the artifact's purpose without parsing file paths.
+    """
+
+    path: str
+    kind: str  # 'json', 'jsonl', 'text', 'directory'
+    content_type: str = ""
+    size_bytes: int = 0
+    sha256: str = ""
+    index: IndexPointer | None = None
+    time_range: TimeRange | None = None
+    counts: FilesystemCounts | LogCounts | None = None
+    schema: SchemaInfo | None = None
+    capture: FilesystemCapture | None = None
+
+
+@FrozenDataclass()
 class BundleManifest:
     """Bundle manifest containing metadata and integrity checksums.
 
     Schema::
 
         {
-          "format_version": "1.0.0",
+          "format_version": "1.1.0",
           "bundle_id": "uuid",
           "created_at": "2024-01-15T10:30:00+00:00",
           "request": { ... },
           "capture": { ... },
+          "summary": { ... },
+          "artifacts": { "logs": { ... }, "session_after": { ... }, ... },
           "prompt": { ... },
           "files": ["manifest.json", ...],
           "integrity": { ... },
@@ -273,6 +392,10 @@ class BundleManifest:
     request: RequestInfo = field(default_factory=lambda: RequestInfo(request_id=""))
     capture: CaptureInfo = field(
         default_factory=lambda: CaptureInfo(mode="full", trigger="config")
+    )
+    summary: BundleSummary = field(default_factory=BundleSummary)
+    artifacts: Mapping[str, ArtifactInfo] = field(
+        default_factory=lambda: dict[str, ArtifactInfo]()
     )
     prompt: PromptInfo = field(default_factory=PromptInfo)
     files: tuple[str, ...] = ()
@@ -408,15 +531,20 @@ class BundleWriter:
     _ended_at: datetime | None
     _files: list[str]
     _checksums: dict[str, str]
+    _sizes: dict[str, int]  # Track artifact sizes for manifest
     _request_id: UUID | None
     _session_id: UUID | None
     _status: str
     _prompt_info: PromptInfo
     _trigger: str
-    _limits_applied: dict[str, bool]
+    _limits_applied: LimitsApplied
     _finalized: bool
     _path: Path | None
     _log_collector_path: Path | None
+    # Filesystem capture stats
+    _fs_files_captured: int
+    _fs_files_skipped: int
+    _fs_total_bytes: int
 
     def __init__(
         self,
@@ -443,15 +571,20 @@ class BundleWriter:
         self._ended_at = None
         self._files = []
         self._checksums = {}
+        self._sizes = {}
         self._request_id = None
         self._session_id = None
         self._status = "success"
         self._prompt_info = PromptInfo()
         self._trigger = trigger
-        self._limits_applied = {"filesystem_truncated": False}
+        self._limits_applied = LimitsApplied()
         self._finalized = False
         self._path = None
         self._log_collector_path = None
+        # Filesystem capture stats
+        self._fs_files_captured = 0
+        self._fs_files_skipped = 0
+        self._fs_total_bytes = 0
 
     @property
     def bundle_id(self) -> UUID:
@@ -514,6 +647,7 @@ class BundleWriter:
         _ = full_path.write_bytes(content_bytes)
         self._files.append(rel_path)
         self._checksums[rel_path] = _compute_checksum(content_bytes)
+        self._sizes[rel_path] = len(content_bytes)
 
     def write_request_input(self, request: object) -> None:
         """Write the MainLoop request input."""
@@ -762,6 +896,8 @@ class BundleWriter:
 
     def _archive_filesystem(self, fs: Filesystem, root_path: str) -> None:
         """Archive filesystem contents to bundle."""
+        from dataclasses import replace as dc_replace
+
         if self._temp_dir is None:  # pragma: no cover
             return
 
@@ -770,16 +906,20 @@ class BundleWriter:
 
         total_size = 0
         truncated = False
+        files_captured = 0
+        files_skipped = 0
 
         files = self._collect_files(fs, root_path)
         for file_path in files:
             if total_size >= self._config.max_total_size:
                 truncated = True
+                files_skipped += len(files) - files_captured - files_skipped
                 break
 
             try:
                 stat = fs.stat(file_path)
                 if stat.size_bytes > self._config.max_file_size:
+                    files_skipped += 1
                     continue
 
                 result = fs.read_bytes(file_path)
@@ -794,13 +934,22 @@ class BundleWriter:
                 bundle_rel = f"filesystem/{rel_path}"
                 self._files.append(bundle_rel)
                 self._checksums[bundle_rel] = _compute_checksum(content)
+                self._sizes[bundle_rel] = len(content)
 
                 total_size += len(content)
+                files_captured += 1
 
             except (FileNotFoundError, PermissionError, IsADirectoryError):
+                files_skipped += 1
                 continue
 
-        self._limits_applied["filesystem_truncated"] = truncated
+        # Update filesystem stats
+        self._fs_files_captured = files_captured
+        self._fs_files_skipped = files_skipped
+        self._fs_total_bytes = total_size
+        self._limits_applied = dc_replace(
+            self._limits_applied, filesystem_truncated=truncated
+        )
 
     def _collect_files(self, fs: Filesystem, path: str) -> list[str]:
         """Recursively collect all file paths from filesystem."""
@@ -825,21 +974,73 @@ class BundleWriter:
 
     def _finalize(self) -> None:
         """Finalize bundle: generate README, compute manifest, create zip."""
+        from dataclasses import replace as dc_replace
+
         if self._finalized or self._temp_dir is None:
             return
 
         self._ended_at = datetime.now(UTC)
+        log_stats = self._finalize_logs()
+        ctx = self._build_artifact_context(log_stats)
 
-        # Add logs to file list if captured
-        if self._log_collector_path is not None and self._log_collector_path.exists():
-            rel_path = "logs/app.jsonl"
-            if rel_path not in self._files:  # pragma: no branch
-                content = self._log_collector_path.read_bytes()
-                self._files.append(rel_path)
-                self._checksums[rel_path] = _compute_checksum(content)
+        # Compute duration and build summary
+        delta = self._ended_at - self._started_at
+        summary = BundleSummary(
+            duration_ms=int(delta.total_seconds() * 1000),
+            status=self._status,
+            error_count=1 if self._status == "error" else 0,
+        )
 
         # Build manifest
-        manifest = BundleManifest(
+        manifest = self._build_manifest(summary, _build_artifacts_map(ctx))
+
+        # Write README and update manifest
+        self._write_artifact("README.txt", _generate_readme(manifest))
+        manifest = dc_replace(
+            manifest,
+            artifacts=_build_artifacts_map(self._build_artifact_context(log_stats)),
+            files=tuple(sorted(self._files)),
+            integrity=IntegrityInfo(algorithm="sha256", checksums=self._checksums),
+        )
+
+        # Write manifest and create zip
+        self._write_manifest_file(manifest)
+        self._path = self._create_zip_archive()
+        self._finalized = True
+
+        _logger.info(
+            "Debug bundle created",
+            extra={
+                "bundle_id": str(self._bundle_id),
+                "bundle_path": str(self._path),
+                "file_count": len(self._files),
+            },
+        )
+
+    def _build_artifact_context(
+        self, log_stats: tuple[int, dict[str, int], str, str]
+    ) -> _ArtifactBuildContext:
+        """Build the artifact context for the artifacts map."""
+        return _ArtifactBuildContext(
+            files=tuple(self._files),
+            sizes=self._sizes,
+            checksums=self._checksums,
+            config=self._config,
+            fs_stats=(
+                self._fs_files_captured,
+                self._fs_files_skipped,
+                self._fs_total_bytes,
+            ),
+            log_stats=log_stats,
+        )
+
+    def _build_manifest(
+        self,
+        summary: BundleSummary,
+        artifacts: dict[str, ArtifactInfo],
+    ) -> BundleManifest:
+        """Build the bundle manifest."""
+        return BundleManifest(
             format_version=BUNDLE_FORMAT_VERSION,
             bundle_id=str(self._bundle_id),
             created_at=self._started_at.isoformat(),
@@ -855,41 +1056,29 @@ class BundleWriter:
                 trigger=self._trigger,
                 limits_applied=self._limits_applied,
             ),
+            summary=summary,
+            artifacts=artifacts,
             prompt=self._prompt_info,
             files=tuple(sorted(self._files)),
-            integrity=IntegrityInfo(
-                algorithm="sha256",
-                checksums=self._checksums,
-            ),
+            integrity=IntegrityInfo(algorithm="sha256", checksums=self._checksums),
             build=BuildInfo(),
         )
 
-        # Write README
-        readme_content = _generate_readme(manifest)
-        self._write_artifact("README.txt", readme_content)
-
-        # Update manifest with README (use replace since files list changed)
-        from dataclasses import replace as dc_replace
-
-        manifest = dc_replace(
-            manifest,
-            files=tuple(sorted(self._files)),
-            integrity=IntegrityInfo(
-                algorithm="sha256",
-                checksums=self._checksums,
-            ),
-        )
-
-        # Write manifest (excluded from checksums to avoid circular dependency)
-        manifest_content = manifest.to_json()
+    def _write_manifest_file(self, manifest: BundleManifest) -> None:
+        """Write manifest JSON to the bundle."""
+        if self._temp_dir is None:  # pragma: no cover
+            return
         manifest_path = self._temp_dir / BUNDLE_ROOT_DIR / "manifest.json"
-        _ = manifest_path.write_text(manifest_content, encoding="utf-8")
+        _ = manifest_path.write_text(manifest.to_json(), encoding="utf-8")
         self._files.append("manifest.json")
 
-        # Create zip archive atomically (write to temp, then rename)
+    def _create_zip_archive(self) -> Path:
+        """Create the zip archive atomically."""
+        if self._temp_dir is None:  # pragma: no cover
+            raise BundleError("BundleWriter not entered")
+
         self._target.mkdir(parents=True, exist_ok=True)
-        timestamp = self._started_at.strftime("%Y%m%d_%H%M%S")
-        zip_name = f"{self._bundle_id}_{timestamp}.zip"
+        zip_name = f"{self._bundle_id}_{self._started_at.strftime('%Y%m%d_%H%M%S')}.zip"
         zip_path = self._target / zip_name
         tmp_path = self._target / f"{zip_name}.tmp"
 
@@ -901,29 +1090,205 @@ class BundleWriter:
                     for file in files:
                         file_path = root / file
                         arcname = (
-                            BUNDLE_ROOT_DIR
-                            + "/"
-                            + str(file_path.relative_to(bundle_dir))
+                            f"{BUNDLE_ROOT_DIR}/{file_path.relative_to(bundle_dir)}"
                         )
                         zf.write(file_path, arcname)
-            # Atomic rename: either fully created or not present
             _ = tmp_path.replace(zip_path)
         finally:
-            # Clean up temp file if it still exists (e.g., rename failed)
             if tmp_path.exists():
                 tmp_path.unlink()
 
-        self._path = zip_path
-        self._finalized = True
+        return zip_path
 
-        _logger.info(
-            "Debug bundle created",
-            extra={
-                "bundle_id": str(self._bundle_id),
-                "bundle_path": str(zip_path),
-                "file_count": len(self._files),
-            },
+    def _finalize_logs(self) -> tuple[int, dict[str, int], str, str]:
+        """Finalize log capture and return stats.
+
+        Returns:
+            Tuple of (record_count, level_counts, start_time, end_time).
+        """
+        if self._log_collector_path is None or not self._log_collector_path.exists():
+            return 0, {}, "", ""
+
+        rel_path = "logs/app.jsonl"
+        if rel_path in self._files:  # pragma: no cover
+            return 0, {}, "", ""
+
+        content = self._log_collector_path.read_bytes()
+        self._files.append(rel_path)
+        self._checksums[rel_path] = _compute_checksum(content)
+        self._sizes[rel_path] = len(content)
+
+        return _parse_log_stats(content.decode("utf-8"))
+
+
+def _parse_log_stats(content: str) -> tuple[int, dict[str, int], str, str]:
+    """Parse log content and extract statistics.
+
+    Returns:
+        Tuple of (record_count, level_counts, start_time, end_time).
+    """
+    record_count = 0
+    level_counts: dict[str, int] = {}
+    start_time = ""
+    end_time = ""
+
+    for line in content.splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        record_count += 1
+        level = record.get("level", "UNKNOWN")
+        level_counts[level] = level_counts.get(level, 0) + 1
+
+        ts = record.get("timestamp", "")
+        if ts:
+            if not start_time or ts < start_time:
+                start_time = ts
+            if not end_time or ts > end_time:
+                end_time = ts
+
+    return record_count, level_counts, start_time, end_time
+
+
+@dataclass(frozen=True, slots=True)
+class _ArtifactBuildContext:
+    """Context for building artifact metadata."""
+
+    files: tuple[str, ...]
+    sizes: Mapping[str, int]
+    checksums: Mapping[str, str]
+    config: BundleConfig
+    fs_stats: tuple[int, int, int]  # (files_captured, files_skipped, total_bytes)
+    log_stats: tuple[int, Mapping[str, int], str, str]  # (count, levels, start, end)
+
+
+def _build_artifacts_map(ctx: _ArtifactBuildContext) -> dict[str, ArtifactInfo]:
+    """Build the artifacts map with logical IDs."""
+    artifacts: dict[str, ArtifactInfo] = {}
+    record_count, level_counts, log_start, log_end = ctx.log_stats
+    fs_files_captured, fs_files_skipped, fs_total_bytes = ctx.fs_stats
+
+    # Map file paths to logical IDs and content types
+    artifact_mappings: list[tuple[str, str, str, str]] = [
+        ("request/input.json", "request_input", "json", "application/json"),
+        ("request/output.json", "request_output", "json", "application/json"),
+        ("session/before.jsonl", "session_before", "jsonl", "application/x-ndjson"),
+        ("session/after.jsonl", "session_after", "jsonl", "application/x-ndjson"),
+        ("logs/app.jsonl", "logs", "jsonl", "application/x-ndjson"),
+        ("config.json", "config", "json", "application/json"),
+        ("run_context.json", "run_context", "json", "application/json"),
+        ("metrics.json", "metrics", "json", "application/json"),
+        ("prompt_overrides.json", "prompt_overrides", "json", "application/json"),
+        ("error.json", "error", "json", "application/json"),
+        ("eval.json", "eval", "json", "application/json"),
+        ("README.txt", "readme", "text", "text/plain"),
+    ]
+
+    for path, logical_id, kind, content_type in artifact_mappings:
+        if path in ctx.files:
+            params = _ArtifactParams(
+                path=path,
+                kind=kind,
+                content_type=content_type,
+                logical_id=logical_id,
+                size_bytes=ctx.sizes.get(path, 0),
+                sha256=ctx.checksums.get(path, ""),
+            )
+            info = _make_artifact_info(
+                params,
+                (record_count, level_counts, log_start, log_end),
+            )
+            artifacts[logical_id] = info
+
+    # Handle filesystem directory artifact
+    fs_files = [f for f in ctx.files if f.startswith("filesystem/")]
+    if fs_files:
+        fs_total = sum(ctx.sizes.get(f, 0) for f in fs_files)
+        artifacts["filesystem"] = ArtifactInfo(
+            path="filesystem/",
+            kind="directory",
+            content_type="",
+            size_bytes=fs_total,
+            sha256="",
+            capture=FilesystemCapture(
+                max_file_size=ctx.config.max_file_size,
+                max_total_size=ctx.config.max_total_size,
+            ),
+            counts=FilesystemCounts(
+                files_captured=fs_files_captured,
+                files_skipped=fs_files_skipped,
+                total_bytes_captured=fs_total_bytes,
+            ),
         )
+
+    # Handle environment directory
+    env_files = [f for f in ctx.files if f.startswith("environment/")]
+    if env_files:
+        env_total = sum(ctx.sizes.get(f, 0) for f in env_files)
+        artifacts["environment"] = ArtifactInfo(
+            path="environment/",
+            kind="directory",
+            content_type="",
+            size_bytes=env_total,
+            sha256="",
+        )
+
+    return artifacts
+
+
+@dataclass(frozen=True, slots=True)
+class _ArtifactParams:
+    """Parameters for creating an artifact."""
+
+    path: str
+    kind: str
+    content_type: str
+    logical_id: str
+    size_bytes: int
+    sha256: str
+
+
+def _make_artifact_info(
+    params: _ArtifactParams,
+    log_stats: tuple[int, Mapping[str, int], str, str],
+) -> ArtifactInfo:
+    """Create an ArtifactInfo with appropriate metadata based on logical ID."""
+    record_count, level_counts, log_start, log_end = log_stats
+
+    # Add log-specific metadata
+    if params.logical_id == "logs" and record_count > 0:
+        return ArtifactInfo(
+            path=params.path,
+            kind=params.kind,
+            content_type=params.content_type,
+            size_bytes=params.size_bytes,
+            sha256=params.sha256,
+            time_range=TimeRange(start=log_start, end=log_end),
+            counts=LogCounts(records=record_count, levels=level_counts),
+        )
+
+    # Add session-specific schema info
+    if params.logical_id in {"session_before", "session_after"}:
+        return ArtifactInfo(
+            path=params.path,
+            kind=params.kind,
+            content_type=params.content_type,
+            size_bytes=params.size_bytes,
+            sha256=params.sha256,
+            schema=SchemaInfo(type="Snapshot", version="1.0.0"),
+        )
+
+    return ArtifactInfo(
+        path=params.path,
+        kind=params.kind,
+        content_type=params.content_type,
+        size_bytes=params.size_bytes,
+        sha256=params.sha256,
+    )
 
 
 class DebugBundle:
@@ -1200,10 +1565,22 @@ class DebugBundle:
 
 __all__ = [
     "BUNDLE_FORMAT_VERSION",
+    "ArtifactInfo",
     "BundleConfig",
     "BundleError",
     "BundleManifest",
+    "BundleSummary",
     "BundleValidationError",
     "BundleWriter",
+    "CaptureInfo",
     "DebugBundle",
+    "FilesystemCapture",
+    "FilesystemCounts",
+    "IndexPointer",
+    "LimitsApplied",
+    "LogCounts",
+    "RedactionInfo",
+    "SchemaInfo",
+    "TimeRange",
+    "TokenUsage",
 ]

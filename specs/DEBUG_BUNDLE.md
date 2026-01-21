@@ -71,7 +71,7 @@ debug_bundle/
 
 ```json
 {
-  "format_version": "1.0.0",
+  "format_version": "1.1.0",
   "bundle_id": "uuid",
   "created_at": "2024-01-15T10:30:00+00:00",
   "request": {
@@ -82,9 +82,65 @@ debug_bundle/
     "ended_at": "..."
   },
   "capture": {
-    "mode": "minimal|standard|full",
+    "mode": "full",
     "trigger": "config|env|request",
-    "limits_applied": { "filesystem_truncated": false }
+    "limits_applied": {
+      "filesystem_truncated": false,
+      "logs_truncated": false,
+      "tool_outputs_truncated": false
+    },
+    "redaction": {
+      "enabled": false,
+      "ruleset": "",
+      "patterns": []
+    }
+  },
+  "summary": {
+    "duration_ms": 15342,
+    "status": "success",
+    "error_count": 0,
+    "prompt_count": 0,
+    "tool_call_count": 0,
+    "provider_call_count": 0,
+    "token_usage": { "input": 0, "output": 0, "cached": 0 }
+  },
+  "artifacts": {
+    "request_input": {
+      "path": "request/input.json",
+      "kind": "json",
+      "content_type": "application/json",
+      "size_bytes": 842,
+      "sha256": "..."
+    },
+    "logs": {
+      "path": "logs/app.jsonl",
+      "kind": "jsonl",
+      "content_type": "application/x-ndjson",
+      "size_bytes": 932182,
+      "sha256": "...",
+      "time_range": { "start": "...", "end": "..." },
+      "counts": { "records": 1203, "levels": { "INFO": 900, "ERROR": 3 } }
+    },
+    "session_after": {
+      "path": "session/after.jsonl",
+      "kind": "jsonl",
+      "content_type": "application/x-ndjson",
+      "schema": { "type": "Snapshot", "version": "1.0.0" }
+    },
+    "filesystem": {
+      "path": "filesystem/",
+      "kind": "directory",
+      "capture": {
+        "max_file_size": 10000000,
+        "max_total_size": 52428800,
+        "excluded_patterns": []
+      },
+      "counts": {
+        "files_captured": 312,
+        "files_skipped": 19,
+        "total_bytes_captured": 4212345
+      }
+    }
   },
   "prompt": { "ns": "...", "key": "...", "adapter": "..." },
   "files": ["manifest.json", "..."],
@@ -95,6 +151,41 @@ debug_bundle/
   "build": { "version": "1.42.0", "commit": "abc123" }
 }
 ```
+
+### Artifacts Map
+
+The `artifacts` field provides a catalog of bundle artifacts keyed by logical ID.
+Each artifact has:
+
+| Field | Description |
+|-------|-------------|
+| `path` | Relative path within bundle |
+| `kind` | Type: `json`, `jsonl`, `text`, `directory` |
+| `content_type` | MIME type (e.g., `application/json`) |
+| `size_bytes` | File size in bytes |
+| `sha256` | SHA-256 checksum (empty for directories) |
+| `index` | Optional pointer to index file |
+| `time_range` | Optional start/end timestamps for temporal artifacts |
+| `counts` | Optional summary counts (records for logs, files for filesystem) |
+| `schema` | Optional schema info for structured data |
+| `capture` | Optional capture parameters for filesystem |
+
+Standard logical IDs:
+
+| ID | Path | Description |
+|----|------|-------------|
+| `request_input` | `request/input.json` | MainLoop request |
+| `request_output` | `request/output.json` | MainLoop response |
+| `session_before` | `session/before.jsonl` | Pre-execution session |
+| `session_after` | `session/after.jsonl` | Post-execution session |
+| `logs` | `logs/app.jsonl` | Log records |
+| `config` | `config.json` | Configuration |
+| `run_context` | `run_context.json` | Execution context |
+| `metrics` | `metrics.json` | Timing and usage |
+| `filesystem` | `filesystem/` | Workspace snapshot |
+| `environment` | `environment/` | Reproducibility envelope |
+| `error` | `error.json` | Error details (if failed) |
+| `eval` | `eval.json` | Eval metadata (EvalLoop only) |
 
 ## API
 

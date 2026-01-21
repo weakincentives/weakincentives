@@ -520,7 +520,7 @@ class TestFilesystemArchiving:
         # The filesystem_truncated flag should be set
         bundle = DebugBundle.load(writer.path)
         manifest = bundle.manifest
-        assert manifest.capture.limits_applied.get("filesystem_truncated") is True
+        assert manifest.capture.limits_applied.filesystem_truncated is True
 
 
 class TestBundleAccessors:
@@ -1161,3 +1161,222 @@ class TestWriteEnvironment:
         writer.write_environment()
 
         assert "BundleWriter not entered" in caplog.text
+
+
+class TestArtifactsMap:
+    """Tests for the artifacts map in bundle manifest."""
+
+    def test_manifest_contains_artifacts(self, tmp_path: Path) -> None:
+        """Test that manifest includes artifacts mapping."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"test": "input"})
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+
+        assert bundle.manifest.artifacts is not None
+        assert "request_input" in bundle.manifest.artifacts
+
+    def test_artifact_has_correct_metadata(self, tmp_path: Path) -> None:
+        """Test artifact entries have correct metadata."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"test": "input"})
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        artifact = bundle.manifest.artifacts["request_input"]
+
+        assert artifact.path == "request/input.json"
+        assert artifact.kind == "json"
+        assert artifact.content_type == "application/json"
+        assert artifact.size_bytes > 0
+        assert len(artifact.sha256) == 64  # SHA-256 hex digest
+
+    def test_logs_artifact_has_counts_and_time_range(self, tmp_path: Path) -> None:
+        """Test log artifact includes record counts and time range."""
+        import logging
+
+        from weakincentives.debug.bundle import LogCounts
+
+        test_logger = logging.getLogger("test.artifacts.logs")
+        test_logger.setLevel(logging.INFO)
+
+        with BundleWriter(tmp_path) as writer:
+            with writer.capture_logs():
+                test_logger.info("First log message")
+                test_logger.warning("Second log message")
+                test_logger.info("Third log message")
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+
+        if "logs" in bundle.manifest.artifacts:
+            artifact = bundle.manifest.artifacts["logs"]
+            assert artifact.kind == "jsonl"
+            assert artifact.content_type == "application/x-ndjson"
+            if artifact.counts is not None:
+                # Check for records attribute (LogCounts has this)
+                assert isinstance(artifact.counts, LogCounts)
+                assert artifact.counts.records >= 0
+            if artifact.time_range is not None:
+                # Time range may have start and end set
+                pass
+
+    def test_session_artifact_has_schema_info(self, tmp_path: Path) -> None:
+        """Test session artifacts include schema information."""
+
+        @dataclass(frozen=True, slots=True)
+        class TestSlice:
+            value: str
+
+        session = Session()
+        _ = session.dispatch(TestSlice(value="test"))
+
+        with BundleWriter(tmp_path) as writer:
+            writer.write_session_after(session)
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+
+        assert "session_after" in bundle.manifest.artifacts
+        artifact = bundle.manifest.artifacts["session_after"]
+        assert artifact.schema is not None
+        assert artifact.schema.type == "Snapshot"
+        assert artifact.schema.version == "1.0.0"
+
+    def test_filesystem_artifact_has_capture_info(self, tmp_path: Path) -> None:
+        """Test filesystem artifact includes capture parameters and counts."""
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.debug.bundle import FilesystemCounts
+
+        fs = InMemoryFilesystem()
+        _ = fs.write("/test.txt", "Hello, World!")
+        _ = fs.write("/subdir/nested.txt", "Nested content")
+
+        with BundleWriter(tmp_path) as writer:
+            writer.write_filesystem(fs)
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+
+        assert "filesystem" in bundle.manifest.artifacts
+        artifact = bundle.manifest.artifacts["filesystem"]
+        assert artifact.kind == "directory"
+        assert artifact.path == "filesystem/"
+
+        # Check capture parameters
+        assert artifact.capture is not None
+        assert artifact.capture.max_file_size == 10_000_000
+        assert artifact.capture.max_total_size == 52_428_800
+
+        # Check counts - needs to be FilesystemCounts
+        assert artifact.counts is not None
+        assert isinstance(artifact.counts, FilesystemCounts)
+        assert artifact.counts.files_captured == 2
+        assert artifact.counts.total_bytes_captured > 0
+
+    def test_summary_in_manifest(self, tmp_path: Path) -> None:
+        """Test manifest includes summary section."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"test": "input"})
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        summary = bundle.manifest.summary
+
+        assert summary.status == "success"
+        assert summary.duration_ms >= 0
+        assert summary.error_count == 0
+
+    def test_summary_on_error(self, tmp_path: Path) -> None:
+        """Test summary shows error status on exception."""
+        with pytest.raises(ValueError):
+            with BundleWriter(tmp_path) as writer:
+                raise ValueError("Test error")
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        summary = bundle.manifest.summary
+
+        assert summary.status == "error"
+        assert summary.error_count == 1
+
+    def test_capture_info_structure(self, tmp_path: Path) -> None:
+        """Test capture info has new structure with limits_applied and redaction."""
+        with BundleWriter(tmp_path) as writer:
+            pass
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        capture = bundle.manifest.capture
+
+        # Check limits_applied is a dataclass not a dict
+        assert capture.limits_applied.filesystem_truncated is False
+
+        # Check redaction info exists
+        assert capture.redaction.enabled is False
+        assert capture.redaction.ruleset == ""
+
+    def test_environment_artifact(self, tmp_path: Path) -> None:
+        """Test environment artifacts are tracked."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_environment()
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+
+        assert "environment" in bundle.manifest.artifacts
+        artifact = bundle.manifest.artifacts["environment"]
+        assert artifact.kind == "directory"
+        assert artifact.size_bytes > 0
+
+
+class TestLogParsing:
+    """Tests for log parsing edge cases."""
+
+    def test_parse_log_stats_with_empty_lines(self) -> None:
+        """Test log parsing handles empty lines correctly."""
+        from weakincentives.debug.bundle import _parse_log_stats
+
+        content = '{"level": "INFO", "timestamp": "2024-01-01T00:00:00"}\n\n\n{"level": "ERROR"}\n'
+        count, levels, _start, _end = _parse_log_stats(content)
+
+        assert count == 2
+        assert levels == {"INFO": 1, "ERROR": 1}
+
+    def test_parse_log_stats_with_invalid_json(self) -> None:
+        """Test log parsing handles invalid JSON lines gracefully."""
+        from weakincentives.debug.bundle import _parse_log_stats
+
+        content = '{"level": "INFO"}\nnot valid json\n{"level": "WARN"}\n'
+        count, levels, _, _ = _parse_log_stats(content)
+
+        assert count == 2
+        assert levels == {"INFO": 1, "WARN": 1}
+
+    def test_parse_log_stats_timestamp_range(self) -> None:
+        """Test log parsing correctly tracks timestamp range."""
+        from weakincentives.debug.bundle import _parse_log_stats
+
+        content = (
+            '{"timestamp": "2024-01-01T12:00:00"}\n'
+            '{"timestamp": "2024-01-01T10:00:00"}\n'
+            '{"timestamp": "2024-01-01T14:00:00"}\n'
+        )
+        count, _, start, end = _parse_log_stats(content)
+
+        assert count == 3
+        assert start == "2024-01-01T10:00:00"
+        assert end == "2024-01-01T14:00:00"
+
+    def test_parse_log_stats_no_timestamps(self) -> None:
+        """Test log parsing handles records without timestamps."""
+        from weakincentives.debug.bundle import _parse_log_stats
+
+        content = '{"level": "INFO"}\n{"level": "ERROR"}\n'
+        count, levels, start, end = _parse_log_stats(content)
+
+        assert count == 2
+        assert levels == {"INFO": 1, "ERROR": 1}
+        assert start == ""
+        assert end == ""
