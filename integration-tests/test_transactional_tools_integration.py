@@ -39,7 +39,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentWorkspaceSection,
 )
 from weakincentives.dataclasses import FrozenDataclass
-from weakincentives.debug import BundleConfig, BundleWriter, CaptureMode, DebugBundle
+from weakincentives.debug import BundleConfig, BundleWriter, DebugBundle
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -613,7 +613,7 @@ def test_transactional_tool_rollback_on_failure(tmp_path: Path) -> None:
             assert result2.get("isError", True), "write_fail should return error"
 
         # Capture debug bundle after programmatic tool execution
-        bundle_config = BundleConfig(mode=CaptureMode.STANDARD)
+        bundle_config = BundleConfig(target=bundle_dir)
         with BundleWriter(target=bundle_dir, config=bundle_config, trigger="test") as w:
             w.set_prompt_info(ns=prompt.ns, key=prompt.key, adapter="claude_agent_sdk")
             w.write_session_after(session)
@@ -789,7 +789,7 @@ def test_transactional_tool_sequential_operations(tmp_path: Path) -> None:
             assert not result3.get("isError", False), f"op3 failed: {result3}"
 
         # Capture debug bundle after programmatic tool execution
-        bundle_config = BundleConfig(mode=CaptureMode.STANDARD)
+        bundle_config = BundleConfig(target=bundle_dir)
         with BundleWriter(target=bundle_dir, config=bundle_config, trigger="test") as w:
             w.set_prompt_info(ns=prompt.ns, key=prompt.key, adapter="claude_agent_sdk")
             w.write_session_after(session)
