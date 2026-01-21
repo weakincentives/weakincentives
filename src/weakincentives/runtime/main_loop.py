@@ -513,6 +513,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 if fs is not None:
                     writer.write_filesystem(fs)
 
+                # Write environment capture
+                writer.write_environment()
+
             # Bundle path is set after context manager exits (in __exit__ -> _finalize)
             bundle_path = writer.path
 

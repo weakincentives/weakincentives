@@ -1079,3 +1079,85 @@ class TestFinalizeEdgeCases:
 
         # Clean up manually since we bypassed normal __exit__
         writer.__exit__(None, None, None)
+
+
+class TestWriteEnvironment:
+    """Tests for BundleWriter.write_environment method."""
+
+    def test_write_environment_creates_files(self, tmp_path: Path) -> None:
+        """Test that write_environment creates expected files."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_environment()
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        files = bundle.list_files()
+
+        # Should have environment files
+        assert any("environment/system.json" in f for f in files)
+        assert any("environment/python.json" in f for f in files)
+        assert any("environment/env_vars.json" in f for f in files)
+        assert any("environment/command.txt" in f for f in files)
+        assert any("environment/packages.txt" in f for f in files)
+
+    def test_write_environment_with_pre_captured_env(self, tmp_path: Path) -> None:
+        """Test that write_environment accepts pre-captured environment."""
+        from weakincentives.debug.environment import (
+            CommandInfo,
+            EnvironmentCapture,
+            PythonInfo,
+            SystemInfo,
+        )
+
+        pre_captured = EnvironmentCapture(
+            system=SystemInfo(os_name="TestOS"),
+            python=PythonInfo(version="3.12.0"),
+            packages="test-package==1.0.0",
+            env_vars={"TEST_VAR": "test_value"},
+            command=CommandInfo(
+                argv=("test",),
+                working_dir="/test",
+                entrypoint="test.py",
+                executable="/usr/bin/python",
+            ),
+            captured_at="2024-01-01T00:00:00+00:00",
+        )
+
+        with BundleWriter(tmp_path) as writer:
+            writer.write_environment(env=pre_captured)
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        files = bundle.list_files()
+
+        # Should have written the pre-captured environment
+        assert any("environment/system.json" in f for f in files)
+        assert any("environment/python.json" in f for f in files)
+
+    def test_write_environment_handles_error(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test write_environment handles capture errors gracefully."""
+        from unittest.mock import patch
+
+        def failing_capture(*args: object, **kwargs: object) -> object:
+            raise RuntimeError("Capture failed")
+
+        with BundleWriter(tmp_path) as writer:
+            with patch(
+                "weakincentives.debug.environment.capture_environment", failing_capture
+            ):
+                writer.write_environment()
+
+        # Should not raise, just log error
+        assert writer.path is not None
+        assert "Failed to write environment" in caplog.text
+
+    def test_write_environment_not_entered(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test write_environment logs error if writer not entered."""
+        writer = BundleWriter(tmp_path)
+        writer.write_environment()
+
+        assert "BundleWriter not entered" in caplog.text
