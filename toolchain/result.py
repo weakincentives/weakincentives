@@ -27,13 +27,31 @@ from typing import Literal
 
 @dataclass(frozen=True, slots=True)
 class Location:
-    """A position in a file."""
+    """A position in a file.
+
+    Constraints:
+    - end_line requires line to be set
+    - end_column requires both column and end_line to be set
+    """
 
     file: str
     line: int | None = None
     column: int | None = None
     end_line: int | None = None
     end_column: int | None = None
+
+    def __post_init__(self) -> None:
+        """Validate Location field consistency."""
+        if self.end_line is not None and self.line is None:
+            msg = "end_line requires line to be set"
+            raise ValueError(msg)
+        if self.end_column is not None:
+            if self.column is None:
+                msg = "end_column requires column to be set"
+                raise ValueError(msg)
+            if self.end_line is None:
+                msg = "end_column requires end_line to be set"
+                raise ValueError(msg)
 
     def __str__(self) -> str:
         if self.line is None:

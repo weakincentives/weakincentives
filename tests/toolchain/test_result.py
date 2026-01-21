@@ -47,10 +47,20 @@ class TestLocation:
         loc = Location(file="src/foo.py", line=10, column=5, end_line=12)
         assert str(loc) == "src/foo.py:10:5"
 
-    def test_str_end_column_without_end_line_ignored(self) -> None:
-        # If we have column and end_column but no end_line, end position is ignored
-        loc = Location(file="src/foo.py", line=10, column=5, end_column=3)
-        assert str(loc) == "src/foo.py:10:5"
+    def test_end_column_without_end_line_raises(self) -> None:
+        # end_column requires end_line to be set
+        with pytest.raises(ValueError, match="end_column requires end_line"):
+            Location(file="src/foo.py", line=10, column=5, end_column=3)
+
+    def test_end_column_without_column_raises(self) -> None:
+        # end_column requires column to be set
+        with pytest.raises(ValueError, match="end_column requires column"):
+            Location(file="src/foo.py", line=10, end_line=12, end_column=3)
+
+    def test_end_line_without_line_raises(self) -> None:
+        # end_line requires line to be set
+        with pytest.raises(ValueError, match="end_line requires line"):
+            Location(file="src/foo.py", end_line=12)
 
     def test_frozen(self) -> None:
         loc = Location(file="src/foo.py", line=42, column=10)

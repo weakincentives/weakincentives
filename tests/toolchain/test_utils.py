@@ -127,10 +127,23 @@ from pathlib import Path"""
         assert imports[0].statement == "from typing import List as L"
 
     def test_from_import_multiple_names(self) -> None:
+        # Now creates one ImportInfo per alias for precise error reporting
         source = "from os.path import join, exists"
         imports = extract_imports(source, "mymodule")
-        assert len(imports) == 1
-        assert imports[0].statement == "from os.path import join, exists"
+        assert len(imports) == 2
+        assert imports[0].statement == "from os.path import join"
+        assert imports[1].statement == "from os.path import exists"
+
+    def test_import_multiple_modules(self) -> None:
+        # Multiple imports on one line: import os, sys
+        source = "import os, sys, json"
+        imports = extract_imports(source, "mymodule")
+        assert len(imports) == 3
+        # Each import has its own statement
+        statements = [i.statement for i in imports]
+        assert "import os" in statements
+        assert "import sys" in statements
+        assert "import json" in statements
 
 
 class TestPathToModule:

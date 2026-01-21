@@ -25,6 +25,12 @@ import re
 
 from .result import Diagnostic, Location
 
+# Limits for diagnostic output to avoid overwhelming the user
+MAX_UNCOVERED_FILES = 10  # Max files shown in coverage failure
+MAX_TEST_FILES_PREVIEW = 5  # Max test files shown in failure message
+MAX_TRACEBACK_LINES = 5  # Max traceback lines per test failure
+MAX_OUTPUT_PREVIEW_LINES = 5  # Max raw output lines in fallback messages
+
 
 def parse_ruff(output: str, _code: int) -> tuple[Diagnostic, ...]:
     """Parse ruff output format: file:line:col: CODE message."""
@@ -192,9 +198,9 @@ def parse_pytest(output: str, code: int) -> tuple[Diagnostic, ...]:
             # Try to extract test files mentioned in output
             test_files = _extract_test_files(output)
             if test_files:
-                files_str = ", ".join(test_files[:5])  # Limit to 5 files
-                if len(test_files) > 5:
-                    files_str += f" (and {len(test_files) - 5} more)"
+                files_str = ", ".join(test_files[:MAX_TEST_FILES_PREVIEW])  # Limit to 5 files
+                if len(test_files) > MAX_TEST_FILES_PREVIEW:
+                    files_str += f" (and {len(test_files) - MAX_TEST_FILES_PREVIEW} more)"
                 msg = (
                     f"Tests failed\n"
                     f"Files involved: {files_str}\n"
@@ -249,7 +255,7 @@ def _find_test_failure_line(output: str, file: str, test: str) -> tuple[int | No
                 error_lines.append(line.strip()[1:].strip())  # Add assertion line
 
         if error_lines:
-            traceback_msg = "\n".join(error_lines[:5])  # Limit to first 5 lines
+            traceback_msg = "\n".join(error_lines[:MAX_TRACEBACK_LINES])  # Limit to first 5 lines
             return line_num, traceback_msg
 
         return line_num, None
@@ -289,12 +295,12 @@ def _extract_uncovered_files(output: str) -> str | None:
     # - Basic: file   stmts   miss   cover%
     # - Branch: file   stmts   miss   branch   brpart   cover%
     # Capture file, miss count, coverage %, and optional missing lines
-    # The pattern is flexible: file, then numbers, then percentage, then optional lines
+    # Use {0,2} instead of *? to avoid potential regex backtracking on malformed input
     cov_line_pattern = re.compile(
         r"^([\w/.-]+\.py)\s+"  # file path
         r"(\d+)\s+"  # stmts
         r"(\d+)\s+"  # miss
-        r"(?:\d+\s+)*?"  # optional branch columns (non-capturing, non-greedy)
+        r"(?:\d+\s+){0,2}"  # 0-2 optional branch columns (Branch, BrPart)
         r"(\d+)%"  # coverage percentage
         r"(?:\s+([\d,\s-]+))?$",  # optional missing lines
         re.MULTILINE,
@@ -312,9 +318,9 @@ def _extract_uncovered_files(output: str) -> str | None:
 
     if uncovered_files:
         # Limit to first 10 files
-        result = uncovered_files[:10]
-        if len(uncovered_files) > 10:
-            result.append(f"  ... and {len(uncovered_files) - 10} more files")
+        result = uncovered_files[:MAX_UNCOVERED_FILES]
+        if len(uncovered_files) > MAX_UNCOVERED_FILES:
+            result.append(f"  ... and {len(uncovered_files) - MAX_UNCOVERED_FILES} more files")
         return "\n".join(result)
 
     return None
@@ -420,8 +426,8 @@ def parse_pip_audit(output: str, code: int) -> tuple[Diagnostic, ...]:
             for line in output.strip().split("\n")
             if line.strip() and not line.startswith(("-", "=", "#"))
         ]
-        output_preview = "\n".join(output_lines[:5])
-        if len(output_lines) > 5:
+        output_preview = "\n".join(output_lines[:MAX_OUTPUT_PREVIEW_LINES])
+        if len(output_lines) > MAX_OUTPUT_PREVIEW_LINES:
             output_preview += "\n..."
 
         if output_preview:

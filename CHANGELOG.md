@@ -141,6 +141,12 @@ See `specs/VERIFICATION_TOOLBOX.md` for the complete specification.
   `session_id` for proper correlation
 - **Sandbox settings**: `allowUnsandboxedCommands=False` now explicitly written
   to settings.json
+- **Toolchain coverage parser**: Now correctly handles branch coverage columns
+  in pytest output format
+- **Toolchain mdformat parser**: Now correctly extracts file paths from modern
+  mdformat error format
+- **Toolchain multi-import statements**: Architecture checker now shows the
+  specific import causing a violation, not all imports on the same line
 
 ### Internal
 
