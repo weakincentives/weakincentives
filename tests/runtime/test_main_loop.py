@@ -1819,3 +1819,43 @@ def test_loop_handles_visibility_expansion_with_bundle(tmp_path: Path) -> None:
     finally:
         requests.close()
         results.close()
+
+
+def test_loop_with_debug_bundle_includes_environment(tmp_path: Path) -> None:
+    """MainLoop includes environment capture in debug bundle."""
+    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+
+    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        bundle_config = BundleConfig(target=tmp_path)
+        config = MainLoopConfig(debug_bundle=bundle_config)
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
+
+        request = MainLoopRequest(request=_Request(message="hello environment"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is True
+        assert msgs[0].body.bundle_path is not None
+
+        # Bundle should have environment files
+        bundle = DebugBundle.load(msgs[0].body.bundle_path)
+        files = bundle.list_files()
+        assert any("environment/system.json" in f for f in files)
+        assert any("environment/python.json" in f for f in files)
+        assert any("environment/env_vars.json" in f for f in files)
+        assert any("environment/command.txt" in f for f in files)
+
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
