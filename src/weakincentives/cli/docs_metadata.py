@@ -66,6 +66,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "sessions": "Manage state with reducers",
     "adapters": "Connect to OpenAI, LiteLLM, Claude Agent SDK",
     "claude-agent-sdk": "Production integration with Claude Code",
+    "skills-authoring": "Create and mount custom skills",
     "orchestration": "Use MainLoop for request handling",
     "evaluation": "Test agents with datasets and evaluators",
     "lifecycle": "Manage shutdown, health checks, and watchdogs",
