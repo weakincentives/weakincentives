@@ -293,7 +293,6 @@ def _invoke_tool_handler(
 def _log_tool_completion(
     log: StructuredLogger,
     tool_result: ToolResult[SupportsToolResult],
-    tool_name: str,
 ) -> None:
     log.info(
         "Tool handler completed.",
@@ -303,12 +302,11 @@ def _log_tool_completion(
             "has_value": tool_result.value is not None,
         },
     )
-    # Log full result details at DEBUG level
-    logger.debug(
+    # Log full result details at DEBUG level (using bound logger for correlation)
+    log.debug(
         "tool.execution.complete",
         event="tool.execution.complete",
         context={
-            "tool_name": tool_name,
             "success": tool_result.success,
             "message": tool_result.message,
             "value": str(tool_result.value) if tool_result.value is not None else None,
@@ -557,7 +555,7 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
                 result=tool_result,
                 context=tool_context,
             )
-        _log_tool_completion(log, tool_result, tool_name)
+        _log_tool_completion(log, tool_result)
 
     # Defensive check: None is valid for parameterless tools (params_type is type(None))
     if tool_params is None and tool.params_type is not type(None):  # pragma: no cover
@@ -605,14 +603,11 @@ def tool_execution(
         tool_call=tool_call,
     )
 
-    # Log tool execution start with full arguments
-    logger.debug(
+    # Log tool execution start with full arguments (using bound logger for correlation)
+    log.debug(
         "tool.execution.start",
         event="tool.execution.start",
         context={
-            "tool_name": tool_name,
-            "call_id": call_id,
-            "prompt_name": context.prompt_name,
             "arguments": dict(arguments_mapping),
         },
     )

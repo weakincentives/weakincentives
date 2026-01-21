@@ -371,6 +371,9 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             },
         )
 
+        # Create bound logger with run context for correlation
+        bound_logger = bind_run_context(logger, run_context)
+
         def _call_provider(
             messages: list[dict[str, Any]],
             tool_specs: Sequence[Mapping[str, Any]],
@@ -390,7 +393,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             if response_format_payload is not None:
                 request_payload["response_format"] = response_format_payload
 
-            logger.debug(
+            bound_logger.debug(
                 "litellm.provider.request",
                 event="provider.request",
                 context={
@@ -410,7 +413,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
 
             def _execute_completion() -> object:
                 response = self._completion(**request_payload)
-                logger.debug(
+                bound_logger.debug(
                     "litellm.provider.response",
                     event="provider.response",
                     context={
@@ -454,7 +457,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 serialize_tool_message_fn=serialize_tool_message,
                 format_dispatch_failures=format_dispatch_failures,
                 parse_arguments=parse_tool_arguments,
-                logger_override=bind_run_context(logger, run_context),
+                logger_override=bound_logger,
                 deadline=deadline,
                 budget_tracker=effective_tracker,
                 heartbeat=heartbeat,
