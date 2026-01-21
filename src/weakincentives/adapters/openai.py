@@ -667,19 +667,22 @@ class OpenAIAdapter(ProviderAdapter[Any]):
 
         # Enter resource context for lifecycle management
         with prompt.resources:
+            # Create bound logger with run context for correlation
+            bound_logger = bind_run_context(self._conversation_logger(), run_context)
+
             config = InnerLoopConfig(
                 session=session,
                 tool_choice=self._tool_choice,
                 response_format=context.response_format,
                 require_structured_output_text=False,
-                call_provider=self._build_provider_invoker(context.prompt_name),
+                call_provider=self._build_provider_invoker(
+                    context.prompt_name, bound_logger=bound_logger
+                ),
                 select_choice=self._build_choice_selector(context.prompt_name),
                 serialize_tool_message_fn=serialize_tool_message,
                 format_dispatch_failures=format_dispatch_failures,
                 parse_arguments=parse_tool_arguments,
-                logger_override=bind_run_context(
-                    self._conversation_logger(), run_context
-                ),
+                logger_override=bound_logger,
                 deadline=deadline,
                 budget_tracker=effective_tracker,
                 heartbeat=heartbeat,
@@ -774,7 +777,12 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             return {"format": text_format}
         return None
 
-    def _build_provider_invoker(self, prompt_name: str) -> ProviderInvoker:  # noqa: C901 - complexity for debug logging
+    def _build_provider_invoker(  # noqa: C901 - complexity for debug logging
+        self, prompt_name: str, *, bound_logger: StructuredLogger | None = None
+    ) -> ProviderInvoker:
+        # Use bound logger (with run context) if provided, otherwise fall back to module logger
+        log = bound_logger or logger
+
         def _call_provider(
             messages: list[dict[str, Any]],
             tool_specs: Sequence[Mapping[str, Any]],
@@ -799,7 +807,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             if response_format_payload is not None:
                 request_payload["text"] = response_format_payload
 
-            logger.debug(
+            log.debug(
                 "openai.provider.request",
                 event="provider.request",
                 context={
@@ -820,7 +828,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             try:
                 response = self._client.responses.create(**request_payload)
             except Exception as error:  # pragma: no cover - network/SDK failure
-                logger.debug(
+                log.debug(
                     "openai.provider.error",
                     event="provider.error",
                     context={
@@ -835,7 +843,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                     error, prompt_name=prompt_name
                 )
                 if throttle_error is not None:
-                    logger.debug(
+                    log.debug(
                         "openai.provider.throttle_detected",
                         event="provider.throttle_detected",
                         context={
@@ -856,7 +864,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                     provider_payload=_error_payload(error),
                 ) from error
             else:
-                logger.debug(
+                log.debug(
                     "openai.provider.response",
                     event="provider.response",
                     context={
