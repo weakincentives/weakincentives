@@ -1161,7 +1161,17 @@ def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
     assert settings is not None, "Expected settings.json in ephemeral .claude directory"
     assert "sandbox" in settings, "Expected sandbox configuration in settings"
     sandbox = settings["sandbox"]
+
+    # Print captured settings for verification
+    print("\nCaptured settings.json sandbox configuration:")
+    print(f"  enabled: {sandbox.get('enabled')}")
+    print(f"  autoAllowBashIfSandboxed: {sandbox.get('autoAllowBashIfSandboxed')}")
+    print(f"  allowUnsandboxedCommands: {sandbox.get('allowUnsandboxedCommands')}")
+
     assert isinstance(sandbox, dict) and sandbox.get("enabled") is True
+    assert sandbox.get("autoAllowBashIfSandboxed") is True
+    # Critical: allowUnsandboxedCommands must be explicitly False (bug 70a64c78)
+    assert sandbox.get("allowUnsandboxedCommands") is False
 
     # Verify network policy was applied (no_network() means empty allowed domains)
     assert "network" in sandbox, "Expected network configuration in sandbox"
@@ -1582,6 +1592,115 @@ def test_claude_agent_sdk_adapter_sandbox_writable_paths(tmp_path: Path) -> None
 
         # Verify file actually exists
         assert Path(test_file).exists(), "Expected file to be created"
+
+
+def _print_bundle_logs(bundle: object) -> None:
+    """Print relevant logs from a debug bundle."""
+    import json
+
+    print("\nCaptured Python logs from debug bundle:")
+    logs_content = bundle.logs  # type: ignore[attr-defined]
+    if not logs_content:
+        print("  (SDK runs as subprocess - Python logs not captured)")
+        return
+
+    for line in logs_content.strip().split("\n"):
+        if not line:
+            continue
+        try:
+            log_entry = json.loads(line)
+            level = log_entry.get("level", "?")
+            event = log_entry.get("event", "")
+            message = log_entry.get("message", "")[:80]
+            # Filter to show only relevant logs
+            keywords = ["sandbox", "permission", "error", "fail"]
+            if any(kw in (event + message).lower() for kw in keywords):
+                print(f"  [{level}] {event}: {message}")
+        except json.JSONDecodeError:
+            print(f"  [RAW] {line[:100]}")
+
+
+def test_claude_agent_sdk_adapter_sandbox_blocks_write_outside_writable_paths(
+    tmp_path: Path,
+) -> None:
+    """Verify sandbox BLOCKS writes to paths NOT in writable_paths.
+
+    This is the NEGATIVE counterpart to test_sandbox_writable_paths.
+    It validates that the sandbox actually enforces write restrictions.
+    """
+    import tempfile
+
+    from weakincentives.debug import BundleConfig, BundleWriter, DebugBundle
+
+    with tempfile.TemporaryDirectory(prefix="wink-allowed-") as allowed_dir:
+        blocked_file = f"/tmp/wink-sandbox-escape-test-{tmp_path.name}.txt"
+        bundle_dir = tmp_path / "bundles"
+        bundle_dir.mkdir()
+
+        config = _make_config(
+            tmp_path,
+            isolation=IsolationConfig(
+                network_policy=NetworkPolicy.no_network(),
+                sandbox=SandboxConfig(
+                    enabled=True,
+                    writable_paths=(allowed_dir,),
+                ),
+            ),
+        )
+        adapter = _make_adapter(tmp_path, client_config=config, allowed_tools=("Bash",))
+        prompt = Prompt(_build_file_write_test_prompt()).bind(
+            ReadFileParams(file_path=blocked_file)
+        )
+        session = _make_session_with_usage_tracking()
+
+        try:
+            bundle_config = BundleConfig(target=bundle_dir)
+            with BundleWriter(
+                target=bundle_dir, config=bundle_config, trigger="sandbox_test"
+            ) as writer:
+                writer.set_prompt_info(
+                    ns=prompt.ns, key=prompt.key, adapter="claude_agent_sdk"
+                )
+                with writer.capture_logs():
+                    response = adapter.evaluate(prompt, session=session)
+                writer.write_session_after(session)
+
+            bundle = DebugBundle.load(writer.path)
+            assert response.output is not None, (
+                f"Expected structured output, got: {response.text}"
+            )
+            result = response.output
+
+            # Verify sandbox blocked the write
+            assert result.write_succeeded is False, (
+                "Expected write to FAIL outside writable_paths, but it succeeded. "
+                "This indicates sandbox is not enforcing write restrictions!"
+            )
+            assert not Path(blocked_file).exists(), (
+                f"File {blocked_file} should NOT exist - sandbox escape detected!"
+            )
+
+            # Verify error message indicates sandbox enforcement
+            error_msg = (result.error_message or "").lower()
+            sandbox_indicators = [
+                "permission denied",
+                "read-only",
+                "operation not permitted",
+            ]
+            assert any(ind in error_msg for ind in sandbox_indicators), (
+                f"Expected sandbox-related error message, got: {result.error_message}"
+            )
+
+            # Print enforcement signals
+            print(
+                f"\nBlocked write: succeeded={result.write_succeeded}, "
+                f"error={result.error_message}"
+            )
+            _print_bundle_logs(bundle)
+
+        finally:
+            if Path(blocked_file).exists():
+                Path(blocked_file).unlink()
 
 
 @dataclass(slots=True, frozen=True)
