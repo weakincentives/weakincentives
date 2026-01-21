@@ -765,7 +765,7 @@ class BundleWriter:
         if self._temp_dir is None:  # pragma: no cover
             return
 
-        fs_dir = self._temp_dir / BUNDLE_ROOT_DIR / "filesystem" / "workspace"
+        fs_dir = self._temp_dir / BUNDLE_ROOT_DIR / "filesystem"
         fs_dir.mkdir(parents=True, exist_ok=True)
 
         total_size = 0
@@ -791,7 +791,7 @@ class BundleWriter:
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 _ = dest_path.write_bytes(content)
 
-                bundle_rel = f"filesystem/workspace/{rel_path}"
+                bundle_rel = f"filesystem/{rel_path}"
                 self._files.append(bundle_rel)
                 self._checksums[bundle_rel] = _compute_checksum(content)
 
