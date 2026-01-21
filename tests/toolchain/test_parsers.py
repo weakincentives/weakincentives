@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 from toolchain.parsers import (
+    _extract_test_files,
+    _extract_uncovered_files,
     _find_test_failure_line,
     parse_bandit,
     parse_deptry,
@@ -65,6 +67,16 @@ class TestParsePyright:
         assert diagnostics[0].location.file == "src/foo.py"
         assert diagnostics[0].location.line == 42
 
+    def test_parses_error_with_rule_name(self) -> None:
+        """Test that rule names like (reportGeneralTypeIssues) are captured."""
+        output = '  src/foo.py:42:10 - error: Argument of type "str" cannot be assigned to "int" (reportGeneralTypeIssues)'
+        diagnostics = parse_pyright(output, 1)
+        assert len(diagnostics) == 1
+        assert "[reportGeneralTypeIssues]" in diagnostics[0].message
+        assert "cannot be assigned" in diagnostics[0].message
+        # Rule name should be at the start, not end
+        assert not diagnostics[0].message.endswith("(reportGeneralTypeIssues)")
+
     def test_parses_warning(self) -> None:
         output = "  src/foo.py:10:5 - warning: Variable is unused"
         diagnostics = parse_pyright(output, 1)
@@ -91,6 +103,8 @@ class TestParseTy:
         diagnostics = parse_ty(output, 1)
         assert len(diagnostics) == 1
         assert "not assignable" in diagnostics[0].message
+        # Error code should be included in message
+        assert "[invalid-type]" in diagnostics[0].message
         assert diagnostics[0].severity == "error"
         assert diagnostics[0].location is not None
         assert diagnostics[0].location.file == "src/foo.py"
@@ -102,6 +116,8 @@ class TestParseTy:
         diagnostics = parse_ty(output, 1)
         assert len(diagnostics) == 1
         assert diagnostics[0].severity == "warning"
+        # Error code should be included in message
+        assert "[unused]" in diagnostics[0].message
 
     def test_empty_output(self) -> None:
         diagnostics = parse_ty("", 0)
@@ -153,11 +169,63 @@ SyntaxError: invalid syntax"""
         assert "95.5%" in diagnostics[0].message
         assert "100%" in diagnostics[0].message
 
+    def test_parses_coverage_failure_with_uncovered_files(self) -> None:
+        """Test that uncovered files/lines are extracted from coverage report."""
+        output = """Name                                      Stmts   Miss  Cover
+-------------------------------------------------------------
+src/weakincentives/module.py                100     10    90%
+src/weakincentives/other.py                  50      5    90%
+TOTAL                                        150     15    90%
+FAIL Required test coverage of 100% not reached. Total coverage: 90%"""
+        diagnostics = parse_pytest(output, 1)
+        assert len(diagnostics) == 1
+        assert "90%" in diagnostics[0].message
+        assert "100%" in diagnostics[0].message
+        assert "Uncovered" in diagnostics[0].message
+        assert "module.py" in diagnostics[0].message
+        assert "other.py" in diagnostics[0].message
+
+    def test_parses_coverage_failure_with_missing_lines(self) -> None:
+        """Test coverage report that includes specific missing line numbers."""
+        output = """Name                                      Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------------
+src/weakincentives/module.py                100     10    90%   1-5, 10, 20-30
+TOTAL                                        100     10    90%
+FAIL Required test coverage of 100% not reached. Total coverage: 90%"""
+        diagnostics = parse_pytest(output, 1)
+        assert len(diagnostics) == 1
+        assert "lines 1-5, 10, 20-30" in diagnostics[0].message
+
     def test_generic_failure_message(self) -> None:
         output = "some random failure output"
         diagnostics = parse_pytest(output, 1)
         assert len(diagnostics) == 1
         assert "Tests failed" in diagnostics[0].message
+
+    def test_generic_failure_extracts_test_files(self) -> None:
+        """Test that test files are extracted from generic failure output."""
+        output = """Error occurred in tests/test_foo.py
+Something went wrong in tests/unit/test_bar.py
+Also failed: test_baz.py"""
+        diagnostics = parse_pytest(output, 1)
+        assert len(diagnostics) == 1
+        assert "Tests failed" in diagnostics[0].message
+        assert "Files involved" in diagnostics[0].message
+        assert "test_foo.py" in diagnostics[0].message or "tests/test_foo.py" in diagnostics[0].message
+
+    def test_generic_failure_limits_test_files_to_five(self) -> None:
+        """Test that more than 5 test files are truncated."""
+        output = """tests/test_a.py failed
+tests/test_b.py failed
+tests/test_c.py failed
+tests/test_d.py failed
+tests/test_e.py failed
+tests/test_f.py failed
+tests/test_g.py failed"""
+        diagnostics = parse_pytest(output, 1)
+        assert len(diagnostics) == 1
+        assert "Tests failed" in diagnostics[0].message
+        assert "(and 2 more)" in diagnostics[0].message
 
     def test_no_tests_ran(self) -> None:
         output = "no tests ran in 0.5s"
@@ -221,6 +289,113 @@ _ test_other _"""
         line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
         assert line == 42
         assert msg is None
+
+
+class TestExtractUncoveredFiles:
+    """Tests for _extract_uncovered_files helper."""
+
+    def test_extracts_uncovered_files(self) -> None:
+        output = """Name                                      Stmts   Miss  Cover
+-------------------------------------------------------------
+src/module.py                               100     10    90%
+src/other.py                                 50      5    90%
+TOTAL                                        150     15    90%"""
+        result = _extract_uncovered_files(output)
+        assert result is not None
+        assert "module.py" in result
+        assert "other.py" in result
+        assert "90%" in result
+
+    def test_extracts_files_with_missing_lines(self) -> None:
+        output = """Name                                      Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------------
+src/module.py                               100     10    90%   1-5, 10
+TOTAL                                        100     10    90%"""
+        result = _extract_uncovered_files(output)
+        assert result is not None
+        assert "lines 1-5, 10" in result
+
+    def test_returns_none_for_full_coverage(self) -> None:
+        output = """Name                                      Stmts   Miss  Cover
+-------------------------------------------------------------
+src/module.py                               100      0   100%
+TOTAL                                        100      0   100%"""
+        result = _extract_uncovered_files(output)
+        assert result is None
+
+    def test_returns_none_for_no_coverage_table(self) -> None:
+        output = "No coverage table here"
+        result = _extract_uncovered_files(output)
+        assert result is None
+
+    def test_skips_files_with_100_percent_coverage(self) -> None:
+        """Test that files showing 100% are skipped even if miss count seems inconsistent."""
+        # Edge case: coverage report shows 100% despite non-zero miss (shouldn't happen
+        # in practice, but code should handle it gracefully)
+        output = """Name                                      Stmts   Miss  Cover
+-------------------------------------------------------------
+src/partial.py                              100     10    90%
+src/full.py                                 100      1   100%
+TOTAL                                        200     11    95%"""
+        result = _extract_uncovered_files(output)
+        assert result is not None
+        assert "partial.py" in result
+        assert "full.py" not in result  # 100% coverage skipped
+
+    def test_limits_output_to_ten_files(self) -> None:
+        lines = [
+            "Name                                      Stmts   Miss  Cover",
+            "-------------------------------------------------------------",
+        ]
+        for i in range(15):
+            lines.append(f"src/module{i}.py                           100     10    90%")
+        lines.append("TOTAL                                        1500    150    90%")
+        output = "\n".join(lines)
+        result = _extract_uncovered_files(output)
+        assert result is not None
+        assert "... and 5 more files" in result
+
+    def test_extracts_files_with_branch_coverage_columns(self) -> None:
+        """Test parsing coverage output with branch coverage columns."""
+        output = """Name                                      Stmts   Miss Branch BrPart  Cover   Missing
+---------------------------------------------------------------------------------------
+src/weakincentives/module.py                 17      5      2      0    63%   54-56, 65-66
+src/weakincentives/other.py                 147     95     34      0    29%   48, 56, 64
+TOTAL                                        164    100     36      0    35%"""
+        result = _extract_uncovered_files(output)
+        assert result is not None
+        assert "module.py" in result
+        assert "63%" in result
+        assert "lines 54-56, 65-66" in result
+        assert "other.py" in result
+        assert "29%" in result
+
+
+class TestExtractTestFiles:
+    """Tests for _extract_test_files helper."""
+
+    def test_extracts_test_files(self) -> None:
+        output = """Error in tests/test_foo.py
+Also: tests/unit/test_bar.py"""
+        result = _extract_test_files(output)
+        assert "tests/test_foo.py" in result
+        assert "tests/unit/test_bar.py" in result
+
+    def test_extracts_standalone_test_files(self) -> None:
+        output = "Running test_something.py"
+        result = _extract_test_files(output)
+        assert "test_something.py" in result
+
+    def test_returns_empty_list_when_no_test_files(self) -> None:
+        output = "No test files mentioned here"
+        result = _extract_test_files(output)
+        assert result == []
+
+    def test_deduplicates_files(self) -> None:
+        output = """tests/test_foo.py failed
+tests/test_foo.py error"""
+        result = _extract_test_files(output)
+        assert len(result) == 1
 
 
 class TestParseBandit:
@@ -289,6 +464,43 @@ class TestParsePipAudit:
         diagnostics = parse_pip_audit(output, 1)
         assert len(diagnostics) == 1
         assert "Vulnerability check failed" in diagnostics[0].message
+        # Should include the output in the message
+        assert "audit failed" in diagnostics[0].message
+
+    def test_generic_failure_includes_output_preview(self) -> None:
+        """Test that fallback includes first few lines of output."""
+        output = """Error: Could not resolve dependencies
+Package foo requires bar>=2.0
+Package baz requires bar<2.0
+Conflict detected"""
+        diagnostics = parse_pip_audit(output, 1)
+        assert len(diagnostics) == 1
+        assert "Vulnerability check failed" in diagnostics[0].message
+        assert "Output:" in diagnostics[0].message
+        assert "Could not resolve dependencies" in diagnostics[0].message
+
+    def test_generic_failure_with_empty_output(self) -> None:
+        """Test fallback with empty/whitespace-only output."""
+        output = "   \n   \n   "
+        diagnostics = parse_pip_audit(output, 1)
+        assert len(diagnostics) == 1
+        assert "Vulnerability check failed" in diagnostics[0].message
+        # Should not have "Output:" section when output is empty
+        assert "Output:" not in diagnostics[0].message
+
+    def test_generic_failure_truncates_long_output(self) -> None:
+        """Test that fallback truncates output longer than 5 lines."""
+        output = """Line 1: Some error
+Line 2: Another error
+Line 3: More info
+Line 4: Additional details
+Line 5: Even more
+Line 6: Extra line
+Line 7: Yet another"""
+        diagnostics = parse_pip_audit(output, 1)
+        assert len(diagnostics) == 1
+        assert "..." in diagnostics[0].message
+        assert "Line 6" not in diagnostics[0].message
 
 
 class TestParseMdformat:
@@ -305,4 +517,48 @@ docs/guide.md"""
         assert len(diagnostics) == 2
         assert diagnostics[0].location is not None
         assert diagnostics[0].location.file == "README.md"
-        assert "Needs formatting" in diagnostics[0].message
+        # Check improved message format
+        assert "Markdown formatting required" in diagnostics[0].message
+        assert "mdformat README.md" in diagnostics[0].message
+
+    def test_message_includes_fix_command(self) -> None:
+        """Test that each file diagnostic includes the fix command."""
+        output = "docs/api.md"
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 1
+        assert "Fix:" in diagnostics[0].message
+        assert "mdformat docs/api.md" in diagnostics[0].message
+
+    def test_parses_error_format(self) -> None:
+        """Test parsing the Error: File format used by modern mdformat."""
+        output = 'Error: File "/home/user/project/README.md" is not formatted.'
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 1
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "/home/user/project/README.md"
+        assert "Markdown formatting required" in diagnostics[0].message
+        assert "mdformat /home/user/project/README.md" in diagnostics[0].message
+
+    def test_parses_multiple_error_format_files(self) -> None:
+        """Test parsing multiple Error: File lines."""
+        output = """Error: File "docs/api.md" is not formatted.
+Error: File "guides/tutorial.md" is not formatted."""
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 2
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "docs/api.md"
+        assert diagnostics[1].location is not None
+        assert diagnostics[1].location.file == "guides/tutorial.md"
+
+    def test_fallback_skips_non_md_lines(self) -> None:
+        """Test that fallback parser skips lines that aren't .md files."""
+        output = """Some random output
+README.md
+Another line that is not a markdown file
+docs/guide.md"""
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 2
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "README.md"
+        assert diagnostics[1].location is not None
+        assert diagnostics[1].location.file == "docs/guide.md"

@@ -69,18 +69,32 @@ def create_typecheck_checker() -> SubprocessChecker:
 
 
 def _parse_typecheck(output: str, code: int) -> tuple:
-    """Parse combined ty + pyright output."""
+    """Parse combined ty + pyright output.
+
+    Each diagnostic's message is prefixed with the tool name ([ty] or [pyright])
+    to indicate which type checker produced the error.
+    """
     from ..result import Diagnostic
 
     diagnostics: list[Diagnostic] = []
 
-    # Try ty parser
-    ty_diags = parse_ty(output, code)
-    diagnostics.extend(ty_diags)
+    # Try ty parser - prefix messages with [ty]
+    for diag in parse_ty(output, code):
+        prefixed = Diagnostic(
+            message=f"[ty] {diag.message}",
+            location=diag.location,
+            severity=diag.severity,
+        )
+        diagnostics.append(prefixed)
 
-    # Try pyright parser
-    pyright_diags = parse_pyright(output, code)
-    diagnostics.extend(pyright_diags)
+    # Try pyright parser - prefix messages with [pyright]
+    for diag in parse_pyright(output, code):
+        prefixed = Diagnostic(
+            message=f"[pyright] {diag.message}",
+            location=diag.location,
+            severity=diag.severity,
+        )
+        diagnostics.append(prefixed)
 
     return tuple(diagnostics)
 

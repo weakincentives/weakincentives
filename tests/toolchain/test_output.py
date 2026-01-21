@@ -146,6 +146,58 @@ class TestConsoleFormatter:
         formatter = ConsoleFormatter(color=False, max_diagnostics=10)
         output = formatter.format(report)
         assert "... and 5 more" in output
+        assert "Run: python check.py lint -v" in output
+
+    def test_checker_hint_shown_on_failure(self) -> None:
+        report = Report(
+            results=(
+                CheckResult(
+                    name="typecheck",
+                    status="failed",
+                    duration_ms=5200,
+                    diagnostics=(Diagnostic(message="Type error"),),
+                ),
+            ),
+            total_duration_ms=5200,
+        )
+        formatter = ConsoleFormatter(color=False)
+        output = formatter.format(report)
+        # Should show checker hint in parentheses
+        assert "typecheck (ty + pyright)" in output
+
+    def test_checker_hint_not_shown_for_unknown_checker(self) -> None:
+        report = Report(
+            results=(
+                CheckResult(
+                    name="unknown_checker",
+                    status="failed",
+                    duration_ms=100,
+                    diagnostics=(Diagnostic(message="Error"),),
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = ConsoleFormatter(color=False)
+        output = formatter.format(report)
+        # Should show just the name without extra parentheses
+        assert "unknown_checker" in output
+        assert "unknown_checker ()" not in output
+
+    def test_reproduction_hint_not_shown_when_no_truncation(self) -> None:
+        report = Report(
+            results=(
+                CheckResult(
+                    name="lint",
+                    status="failed",
+                    duration_ms=100,
+                    diagnostics=(Diagnostic(message="Error 1"),),
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = ConsoleFormatter(color=False, max_diagnostics=10)
+        output = formatter.format(report)
+        assert "Run: python check.py" not in output
 
     def test_duration_formatting_milliseconds(self) -> None:
         formatter = ConsoleFormatter(color=False)
@@ -278,6 +330,23 @@ class TestQuietFormatter:
         formatter = QuietFormatter(color=False)
         output = formatter.format(report)
         assert "... and 5 more" in output
+        assert "Run: python check.py lint -v" in output
+
+    def test_reproduction_hint_not_shown_when_no_truncation(self) -> None:
+        report = Report(
+            results=(
+                CheckResult(
+                    name="lint",
+                    status="failed",
+                    duration_ms=100,
+                    diagnostics=(Diagnostic(message="Error 1"),),
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = QuietFormatter(color=False)
+        output = formatter.format(report)
+        assert "Run: python check.py" not in output
 
     def test_auto_color_detection(self) -> None:
         stream = io.StringIO()

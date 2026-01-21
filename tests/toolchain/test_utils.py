@@ -69,24 +69,28 @@ class TestExtractImports:
         assert len(imports) == 1
         assert imports[0].imported_from == "os"
         assert imports[0].lineno == 1
+        assert imports[0].statement == "import os"
 
     def test_from_import(self) -> None:
         source = "from pathlib import Path"
         imports = extract_imports(source, "mymodule")
         assert len(imports) == 1
         assert imports[0].imported_from == "pathlib"
+        assert imports[0].statement == "from pathlib import Path"
 
     def test_relative_import(self) -> None:
         source = "from .utils import helper"
         imports = extract_imports(source, "weakincentives.prompt")
         assert len(imports) == 1
         assert imports[0].imported_from == "weakincentives.utils"
+        assert imports[0].statement == "from .utils import helper"
 
     def test_parent_relative_import(self) -> None:
         source = "from ..core import Base"
         imports = extract_imports(source, "weakincentives.prompt.section")
         assert len(imports) == 1
         assert imports[0].imported_from == "weakincentives.core"
+        assert imports[0].statement == "from ..core import Base"
 
     def test_deeply_nested_relative_import(self) -> None:
         # Test relative import that goes too high
@@ -94,6 +98,7 @@ class TestExtractImports:
         imports = extract_imports(source, "a.b")  # Only 2 levels, but ...- is 3
         assert len(imports) == 1
         # Should handle gracefully
+        assert imports[0].statement == "from ...top import thing"
 
     def test_relative_import_without_module(self) -> None:
         # from . import x (without module name) is skipped by the parser
@@ -108,6 +113,37 @@ import sys
 from pathlib import Path"""
         imports = extract_imports(source, "mymodule")
         assert len(imports) == 3
+
+    def test_import_with_alias(self) -> None:
+        source = "import numpy as np"
+        imports = extract_imports(source, "mymodule")
+        assert len(imports) == 1
+        assert imports[0].statement == "import numpy as np"
+
+    def test_from_import_with_alias(self) -> None:
+        source = "from typing import List as L"
+        imports = extract_imports(source, "mymodule")
+        assert len(imports) == 1
+        assert imports[0].statement == "from typing import List as L"
+
+    def test_from_import_multiple_names(self) -> None:
+        # Now creates one ImportInfo per alias for precise error reporting
+        source = "from os.path import join, exists"
+        imports = extract_imports(source, "mymodule")
+        assert len(imports) == 2
+        assert imports[0].statement == "from os.path import join"
+        assert imports[1].statement == "from os.path import exists"
+
+    def test_import_multiple_modules(self) -> None:
+        # Multiple imports on one line: import os, sys
+        source = "import os, sys, json"
+        imports = extract_imports(source, "mymodule")
+        assert len(imports) == 3
+        # Each import has its own statement
+        statements = [i.statement for i in imports]
+        assert "import os" in statements
+        assert "import sys" in statements
+        assert "import json" in statements
 
 
 class TestPathToModule:
@@ -337,7 +373,8 @@ class TestImportInfo:
     """Tests for ImportInfo dataclass."""
 
     def test_creation(self) -> None:
-        info = ImportInfo(module="a", imported_from="b", lineno=1)
+        info = ImportInfo(module="a", imported_from="b", lineno=1, statement="import b")
         assert info.module == "a"
         assert info.imported_from == "b"
         assert info.lineno == 1
+        assert info.statement == "import b"

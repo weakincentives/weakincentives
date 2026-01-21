@@ -134,9 +134,11 @@ class DocsChecker:
                 check=False,
             )
 
+            parsed_ok = False
             if result.stdout:  # pragma: no cover - integration with pyright
                 try:
                     output = json.loads(result.stdout)
+                    parsed_ok = True
                     for diag in output.get("generalDiagnostics", []):
                         if diag.get("severity") not in ("error", "warning"):
                             continue
@@ -152,7 +154,23 @@ class DocsChecker:
                                 )
                             )
                 except json.JSONDecodeError:
-                    pass
+                    raw = (result.stdout + result.stderr)[:200]
+                    msg = (
+                        f"Failed to parse pyright output (exit code {result.returncode})\n"
+                        f"Output: {raw}\n"
+                        f"Fix: Run pyright manually to investigate"
+                    )
+                    diagnostics.append(Diagnostic(message=msg))
+
+            # Handle case where pyright failed but produced no parseable output
+            if not parsed_ok and result.returncode != 0:
+                raw = (result.stdout + result.stderr)[:200]
+                msg = (
+                    f"Pyright failed with exit code {result.returncode}\n"
+                    f"Output: {raw}\n"
+                    f"Fix: Run pyright manually to investigate"
+                )
+                diagnostics.append(Diagnostic(message=msg))
 
         return diagnostics
 

@@ -82,6 +82,29 @@ class ImportInfo:
     module: str  # Module containing the import
     imported_from: str  # Module being imported
     lineno: int
+    statement: str  # The reconstructed import statement text
+
+
+def _format_alias(alias: ast.alias) -> str:
+    """Format a single import alias."""
+    return f"{alias.name} as {alias.asname}" if alias.asname else alias.name
+
+
+def _format_import_statement(node: ast.Import | ast.ImportFrom, alias: ast.alias) -> str:
+    """Reconstruct import statement text from AST node for a specific alias.
+
+    Args:
+        node: The import AST node.
+        alias: The specific alias to format the statement for.
+    """
+    if isinstance(node, ast.Import):
+        return f"import {_format_alias(alias)}"
+
+    # ast.ImportFrom
+    dots = "." * node.level
+    module_part = node.module or ""
+    from_part = f"{dots}{module_part}"
+    return f"from {from_part} import {_format_alias(alias)}"
 
 
 def extract_imports(source: str, module_name: str) -> list[ImportInfo]:
@@ -97,6 +120,7 @@ def extract_imports(source: str, module_name: str) -> list[ImportInfo]:
                         module=module_name,
                         imported_from=alias.name.split(".")[0],
                         lineno=node.lineno,
+                        statement=_format_import_statement(node, alias),
                     )
                 )
         elif isinstance(node, ast.ImportFrom) and node.module:
@@ -110,13 +134,16 @@ def extract_imports(source: str, module_name: str) -> list[ImportInfo]:
             else:
                 imported_from = node.module
 
-            imports.append(
-                ImportInfo(
-                    module=module_name,
-                    imported_from=imported_from,
-                    lineno=node.lineno,
+            # For ImportFrom, create one entry per alias for precise error reporting
+            for alias in node.names:
+                imports.append(
+                    ImportInfo(
+                        module=module_name,
+                        imported_from=imported_from,
+                        lineno=node.lineno,
+                        statement=_format_import_statement(node, alias),
+                    )
                 )
-            )
 
     return imports
 
