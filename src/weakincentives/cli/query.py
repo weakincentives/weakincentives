@@ -199,8 +199,14 @@ def _extract_tool_call_from_entry(
     duration: Any = ctx.get("duration_ms")
     duration_ms: float = float(duration) if duration is not None else 0.0
 
-    params: Any = ctx.get("params") or {}
-    result: Any = ctx.get("result") or {}
+    # Read tool arguments: current logs use "arguments", legacy may use "params"
+    params: Any = ctx.get("arguments") or ctx.get("params") or {}
+
+    # Read tool result: current logs use "value"/"message", legacy may use "result"
+    result_val: Any = ctx.get("value")
+    if result_val is None:
+        result_val = ctx.get("result") or {}
+    result: Any = result_val
 
     return (
         str(entry.get("timestamp", "")),

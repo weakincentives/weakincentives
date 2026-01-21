@@ -729,6 +729,46 @@ class TestExtractToolCall:
         assert result[4] == 0  # success = 0
         assert result[5] == "Permission denied"  # message used as error_code
 
+    def test_arguments_field_used_for_params(self) -> None:
+        """Test that 'arguments' field from current logs is used for params."""
+        from weakincentives.cli.query import _extract_tool_call_from_entry
+
+        entry: dict[str, Any] = {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "context": {
+                "tool_name": "read_file",
+                "arguments": {"path": "/test.txt", "encoding": "utf-8"},
+                "success": True,
+            },
+        }
+        result = _extract_tool_call_from_entry(entry)
+        assert result is not None
+        # result[2] is params (JSON string)
+        import json
+
+        params = json.loads(result[2])
+        assert params == {"path": "/test.txt", "encoding": "utf-8"}
+
+    def test_value_field_used_for_result(self) -> None:
+        """Test that 'value' field from current logs is used for result."""
+        from weakincentives.cli.query import _extract_tool_call_from_entry
+
+        entry: dict[str, Any] = {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "context": {
+                "tool_name": "read_file",
+                "value": "file contents here",
+                "success": True,
+            },
+        }
+        result = _extract_tool_call_from_entry(entry)
+        assert result is not None
+        # result[3] is result (JSON string)
+        import json
+
+        result_val = json.loads(result[3])
+        assert result_val == "file contents here"
+
 
 class TestIsToolEvent:
     """Tests for _is_tool_event helper function."""
