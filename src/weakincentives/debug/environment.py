@@ -107,6 +107,29 @@ _MIN_REMOTE_PARTS = 2
 # Docker container ID length (64-character hex string)
 _CONTAINER_ID_LENGTH = 64
 
+# Maximum size per untracked file in bytes (10KB)
+_MAX_UNTRACKED_FILE_SIZE = 10_000
+
+# Patterns for sensitive files that should be excluded from untracked capture
+# Patterns use (^|/) to match at start of path or after directory separator
+_SENSITIVE_FILE_PATTERNS = (
+    re.compile(r"(^|/)\.env($|\.)", re.IGNORECASE),  # .env, .env.local, .env.production
+    re.compile(r"(^|/)credentials?\.json$", re.IGNORECASE),
+    re.compile(r"(^|/)secrets?\.json$", re.IGNORECASE),
+    re.compile(r"(^|/)secrets?\.ya?ml$", re.IGNORECASE),
+    re.compile(r"\.pem$", re.IGNORECASE),
+    re.compile(r"\.key$", re.IGNORECASE),
+    re.compile(r"\.p12$", re.IGNORECASE),
+    re.compile(r"\.pfx$", re.IGNORECASE),
+    re.compile(r"(^|/)id_rsa", re.IGNORECASE),
+    re.compile(r"(^|/)id_ed25519", re.IGNORECASE),
+    re.compile(r"(^|/)\.ssh/", re.IGNORECASE),
+    re.compile(r"(^|/)\.netrc$", re.IGNORECASE),
+    re.compile(r"(^|/)\.npmrc$", re.IGNORECASE),
+    re.compile(r"(^|/)\.pypirc$", re.IGNORECASE),
+    re.compile(r"(^|/)token", re.IGNORECASE),
+)
+
 
 @FrozenDataclass()
 class SystemInfo:
@@ -175,7 +198,7 @@ class GitInfo:
     commit_short: str = ""
     branch: str | None = None
     is_dirty: bool = False
-    remotes: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
+    remotes: Mapping[str, str] = field(default_factory=lambda: {})
     tags: tuple[str, ...] = ()
 
 
@@ -239,7 +262,7 @@ class EnvironmentCapture:
     system: SystemInfo = field(default_factory=SystemInfo)
     python: PythonInfo = field(default_factory=PythonInfo)
     packages: str = ""
-    env_vars: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
+    env_vars: Mapping[str, str] = field(default_factory=lambda: {})
     git: GitInfo | None = None
     git_diff: str | None = None
     command: CommandInfo = field(default_factory=CommandInfo)
@@ -250,13 +273,16 @@ class EnvironmentCapture:
 def _get_linux_memory_bytes() -> int | None:
     """Get total memory bytes from /proc/meminfo on Linux."""
     meminfo_path = Path("/proc/meminfo")
-    with meminfo_path.open() as f:
-        for line in f:
-            if line.startswith("MemTotal:"):
-                # Parse "MemTotal:    12345678 kB"
-                parts = line.split()
-                if len(parts) >= _MIN_MEMINFO_PARTS:
-                    return int(parts[1]) * 1024
+    try:
+        with meminfo_path.open() as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    # Parse "MemTotal:    12345678 kB"
+                    parts = line.split()
+                    if len(parts) >= _MIN_MEMINFO_PARTS:
+                        return int(parts[1]) * 1024
+    except (OSError, ValueError):
+        return None
     return None
 
 
@@ -437,10 +463,48 @@ def _capture_git_info(working_dir: Path | None = None) -> GitInfo | None:
     )
 
 
+def _is_sensitive_file(filename: str) -> bool:
+    """Check if a filename matches sensitive file patterns."""
+    return any(pattern.search(filename) for pattern in _SENSITIVE_FILE_PATTERNS)
+
+
+def _read_file_with_limit(file_path: Path) -> tuple[str, bool]:
+    """Read file content with size limit.
+
+    Returns (content, truncated) tuple.
+    """
+    file_size = file_path.stat().st_size
+    if file_size > _MAX_UNTRACKED_FILE_SIZE:
+        content = file_path.read_bytes()[:_MAX_UNTRACKED_FILE_SIZE].decode(
+            errors="replace"
+        )
+        return content, True
+    return file_path.read_text(errors="replace"), False
+
+
+def _format_untracked_file_diff(filename: str, content: str, truncated: bool) -> str:
+    """Format a single untracked file as unified diff."""
+    parts = [
+        f"\ndiff --git a/{filename} b/{filename}",
+        "new file mode 100644",
+        "--- /dev/null",
+        f"+++ b/{filename}",
+    ]
+    lines = content.splitlines(keepends=True)
+    if lines:
+        parts.append(f"@@ -0,0 +1,{len(lines)} @@")
+        parts.extend(f"+{line.rstrip()}" for line in lines)
+    if truncated:
+        parts.append(f"+[TRUNCATED: file exceeded {_MAX_UNTRACKED_FILE_SIZE}B]")
+    return "\n".join(parts)
+
+
 def _capture_untracked_files(working_dir: Path) -> str:
     """Capture untracked file names and their contents.
 
     Returns a unified-diff-style representation of untracked files.
+    Sensitive files (credentials, keys, etc.) are excluded.
+    Large files are truncated to _MAX_UNTRACKED_FILE_SIZE.
     """
     untracked_output = _run_git_command(
         "ls-files", "--others", "--exclude-standard", cwd=working_dir
@@ -454,22 +518,17 @@ def _capture_untracked_files(working_dir: Path) -> str:
 
     parts: list[str] = ["\n# Untracked files:"]
     for filename in untracked_files:
+        if _is_sensitive_file(filename):
+            parts.append(f"\n# {filename}: [excluded - sensitive file]")
+            continue
+
         file_path = working_dir / filename
         try:
             if not file_path.is_file():
                 continue
-            content = file_path.read_text(errors="replace")
-            # Format as unified diff for new file
-            parts.append(f"\ndiff --git a/{filename} b/{filename}")
-            parts.append("new file mode 100644")
-            parts.append("--- /dev/null")
-            parts.append(f"+++ b/{filename}")
-            lines = content.splitlines(keepends=True)
-            if lines:
-                parts.append(f"@@ -0,0 +1,{len(lines)} @@")
-                parts.extend(f"+{line.rstrip()}" for line in lines)
+            content, truncated = _read_file_with_limit(file_path)
+            parts.append(_format_untracked_file_diff(filename, content, truncated))
         except (OSError, UnicodeDecodeError):
-            # Skip files we can't read
             parts.append(f"\n# {filename}: [unable to read]")
 
     return "\n".join(parts)

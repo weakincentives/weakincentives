@@ -45,6 +45,7 @@ from weakincentives.debug.environment import (
     _extract_container_id_from_cgroup,
     _get_darwin_memory_bytes,
     _get_linux_memory_bytes,
+    _is_sensitive_file,
     _is_valid_container_id,
     _run_git_command,
     _should_capture_env_var,
@@ -169,6 +170,12 @@ class TestSystemInfo:
         with patch.object(Path, "open", meminfo.open):
             result = _get_linux_memory_bytes()
             # Malformed line means None
+            assert result is None
+
+    def test_get_linux_memory_bytes_oserror(self) -> None:
+        """Test _get_linux_memory_bytes handles OSError gracefully."""
+        with patch.object(Path, "open", side_effect=OSError("Permission denied")):
+            result = _get_linux_memory_bytes()
             assert result is None
 
     def test_get_darwin_memory_bytes_success(self) -> None:
@@ -326,6 +333,46 @@ class TestGitInfo:
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 10)):
             result = _run_git_command("status", cwd=tmp_path)
             assert result is None
+
+
+class TestSensitiveFileDetection:
+    """Tests for sensitive file pattern detection."""
+
+    def test_is_sensitive_file_env_files(self) -> None:
+        """Test _is_sensitive_file detects .env files."""
+        assert _is_sensitive_file(".env") is True
+        assert _is_sensitive_file(".env.local") is True
+        assert _is_sensitive_file(".env.production") is True
+        assert _is_sensitive_file("src/.env") is True
+
+    def test_is_sensitive_file_credentials(self) -> None:
+        """Test _is_sensitive_file detects credential files."""
+        assert _is_sensitive_file("credentials.json") is True
+        assert _is_sensitive_file("secrets.json") is True
+        assert _is_sensitive_file("secrets.yaml") is True
+        assert _is_sensitive_file("secrets.yml") is True
+
+    def test_is_sensitive_file_keys(self) -> None:
+        """Test _is_sensitive_file detects key files."""
+        assert _is_sensitive_file("private.pem") is True
+        assert _is_sensitive_file("server.key") is True
+        assert _is_sensitive_file("cert.p12") is True
+        assert _is_sensitive_file("id_rsa") is True
+        assert _is_sensitive_file("id_ed25519") is True
+        assert _is_sensitive_file(".ssh/config") is True
+
+    def test_is_sensitive_file_config_files(self) -> None:
+        """Test _is_sensitive_file detects sensitive config files."""
+        assert _is_sensitive_file(".netrc") is True
+        assert _is_sensitive_file(".npmrc") is True
+        assert _is_sensitive_file(".pypirc") is True
+
+    def test_is_sensitive_file_safe_files(self) -> None:
+        """Test _is_sensitive_file allows safe files."""
+        assert _is_sensitive_file("README.md") is False
+        assert _is_sensitive_file("main.py") is False
+        assert _is_sensitive_file("config.json") is False
+        assert _is_sensitive_file("package.json") is False
 
 
 class TestGitDiff:
@@ -533,6 +580,40 @@ class TestGitDiff:
         assert "empty.txt" in diff
         # Empty file should have the header but no @@ hunk
         assert "diff --git a/empty.txt b/empty.txt" in diff
+
+    def test_capture_git_diff_excludes_sensitive_files(self, git_repo: Path) -> None:
+        """Test that sensitive files are excluded from untracked capture."""
+        # Create sensitive files
+        (git_repo / ".env").write_text("SECRET_KEY=abc123")
+        (git_repo / "credentials.json").write_text('{"api_key": "xyz"}')
+        # Create a safe file too
+        (git_repo / "config.txt").write_text("safe content")
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        # Sensitive files should be excluded with a message
+        assert ".env: [excluded - sensitive file]" in diff
+        assert "credentials.json: [excluded - sensitive file]" in diff
+        # Content should NOT be captured
+        assert "SECRET_KEY" not in diff
+        assert "api_key" not in diff
+        # Safe file should be included
+        assert "config.txt" in diff
+        assert "safe content" in diff
+
+    def test_capture_git_diff_untracked_file_truncation(self, git_repo: Path) -> None:
+        """Test that large untracked files are truncated per-file."""
+        # Create a file larger than 10KB limit
+        large_content = "x" * 15_000
+        (git_repo / "large.txt").write_text(large_content)
+
+        diff = _capture_git_diff(git_repo)
+
+        assert diff is not None
+        assert "large.txt" in diff
+        # Should be truncated
+        assert "[TRUNCATED: file exceeded 10000B]" in diff
 
 
 class TestContainerInfo:
