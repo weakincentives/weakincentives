@@ -414,7 +414,7 @@ Debug bundles may contain sensitive information:
 1. Review `request/input.json` for sensitive prompts
 2. Check `session/after.jsonl` for accumulated sensitive data
 3. Inspect `filesystem/` contents if present
-4. Consider using `MINIMAL` capture mode for less sensitive bundles
+4. Consider redacting sensitive files before sharing
 
 ## Reproduction Quickstart
 
@@ -491,7 +491,7 @@ The manifest contains bundle metadata and integrity information.
     "ended_at": "ISO-8601 timestamp"
   },
   "capture": {
-    "mode": "minimal | standard | full",
+    "mode": "full",
     "trigger": "config | env | request",
     "limits_applied": {
       "filesystem_truncated": false
@@ -839,15 +839,10 @@ if bundle.logs:
             print(f"Tool: {record['context'].get('tool_name')}")
 ```
 
-## Capture Modes
+## Log Verbosity
 
-Log verbosity depends on capture mode:
-
-| Mode | Log Level |
-|------|-----------|
-| `MINIMAL` | INFO and above |
-| `STANDARD` | DEBUG and above |
-| `FULL` | DEBUG and above |
+All logs are captured at **DEBUG level and above**, providing complete
+visibility into session behavior for debugging purposes.
 """
 
 
@@ -898,16 +893,6 @@ manifest = bundle.manifest
 if manifest.capture.limits_applied.get("filesystem_truncated"):
     print("WARNING: Filesystem capture was truncated")
 ```
-
-## Capture Modes
-
-Filesystem capture depends on the capture mode:
-
-| Mode | Behavior |
-|------|----------|
-| `MINIMAL` | No filesystem capture |
-| `STANDARD` | Modified files only (if tracked) |
-| `FULL` | All files within limits |
 
 ## Accessing Files
 
