@@ -504,6 +504,7 @@ class TestEphemeralHomeSettingsGeneration:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["enabled"] is True
             assert settings["sandbox"]["autoAllowBashIfSandboxed"] is True
+            assert settings["sandbox"]["allowUnsandboxedCommands"] is False
             assert settings["sandbox"]["network"]["allowedDomains"] == []
 
     def test_network_policy_allowed_domains(self) -> None:
