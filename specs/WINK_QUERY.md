@@ -40,7 +40,8 @@ wink query ./bundle.zip "SELECT * FROM errors" --table
 
 | Table | Source | Description |
 |-------|--------|-------------|
-| `manifest` | `manifest.json` | Bundle metadata |
+| `manifest` | `manifest.json` | Bundle metadata and execution summary |
+| `artifacts` | `manifest.artifacts` | Artifact catalog with sizes, types, and counts |
 | `logs` | `logs/app.jsonl` | Log entries |
 | `tool_calls` | derived from logs | Tool invocations |
 | `errors` | derived | Aggregated errors |
@@ -49,6 +50,46 @@ wink query ./bundle.zip "SELECT * FROM errors" --table
 | `config` | `config.json` | Flattened configuration |
 | `metrics` | `metrics.json` | Token usage and timing |
 | `run_context` | `run_context.json` | Execution IDs |
+
+### Manifest Table Columns
+
+The `manifest` table includes execution summary fields:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `bundle_id` | TEXT | Unique bundle identifier |
+| `format_version` | TEXT | Bundle format version |
+| `created_at` | TEXT | ISO-8601 creation timestamp |
+| `status` | TEXT | 'success' or 'error' |
+| `duration_ms` | INTEGER | Total execution time |
+| `error_count` | INTEGER | Number of errors encountered |
+| `prompt_count` | INTEGER | Number of prompts processed |
+| `tool_call_count` | INTEGER | Number of tool invocations |
+| `provider_call_count` | INTEGER | Number of LLM API calls |
+| `input_tokens` | INTEGER | Total input tokens |
+| `output_tokens` | INTEGER | Total output tokens |
+| `cached_tokens` | INTEGER | Tokens served from cache |
+
+### Artifacts Table Columns
+
+The `artifacts` table exposes the manifest's artifact catalog:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `artifact_id` | TEXT | Logical artifact ID (e.g., 'logs', 'session_after') |
+| `path` | TEXT | File path within bundle |
+| `kind` | TEXT | 'json', 'jsonl', 'text', or 'directory' |
+| `content_type` | TEXT | MIME type |
+| `size_bytes` | INTEGER | Artifact size |
+| `sha256` | TEXT | Content checksum |
+| `time_range_start` | TEXT | First timestamp (for logs) |
+| `time_range_end` | TEXT | Last timestamp (for logs) |
+| `record_count` | INTEGER | Number of records (for logs) |
+| `files_captured` | INTEGER | Files archived (for filesystem) |
+| `files_skipped` | INTEGER | Files skipped (for filesystem) |
+| `total_bytes_captured` | INTEGER | Total bytes (for filesystem) |
+| `schema_type` | TEXT | Schema type (for session) |
+| `schema_version` | TEXT | Schema version (for session) |
 
 ### Optional Tables
 
@@ -73,20 +114,37 @@ Example: `myapp.state:AgentPlan` → `slice_agentplan`
 wink query ./bundle.zip --schema
 ```
 
+The schema output includes summary statistics for quick bundle assessment:
+
 ```json
 {
   "bundle_id": "abc123",
   "status": "error",
   "created_at": "2024-01-15T10:30:00Z",
+  "duration_ms": 45230,
+  "error_count": 1,
+  "tool_call_count": 12,
+  "artifact_count": 6,
+  "log_record_count": 342,
   "tables": [
     {
       "name": "manifest",
-      "description": "Bundle metadata",
+      "description": "Bundle metadata and execution summary",
       "row_count": 1,
       "columns": [
-        {"name": "bundle_id", "type": "TEXT", "description": "Bundle identifier"},
-        {"name": "status", "type": "TEXT", "description": "'success' or 'error'"},
-        {"name": "created_at", "type": "TEXT", "description": "ISO-8601 timestamp"}
+        {"name": "bundle_id", "type": "TEXT", "description": ""},
+        {"name": "status", "type": "TEXT", "description": ""},
+        {"name": "duration_ms", "type": "INTEGER", "description": ""}
+      ]
+    },
+    {
+      "name": "artifacts",
+      "description": "Artifact catalog with sizes, types, and counts",
+      "row_count": 6,
+      "columns": [
+        {"name": "artifact_id", "type": "TEXT", "description": ""},
+        {"name": "path", "type": "TEXT", "description": ""},
+        {"name": "size_bytes", "type": "INTEGER", "description": ""}
       ]
     },
     {
@@ -94,20 +152,39 @@ wink query ./bundle.zip --schema
       "description": "Aggregated errors",
       "row_count": 1,
       "columns": [
-        {"name": "rowid", "type": "INTEGER", "description": "Sequence"},
-        {"name": "source", "type": "TEXT", "description": "'log', 'error.json', 'tool_call'"},
-        {"name": "error_type", "type": "TEXT", "description": "Exception type"},
-        {"name": "message", "type": "TEXT", "description": "Error message"},
-        {"name": "traceback", "type": "TEXT", "description": "Stack trace"}
+        {"name": "rowid", "type": "INTEGER", "description": ""},
+        {"name": "source", "type": "TEXT", "description": ""},
+        {"name": "error_type", "type": "TEXT", "description": ""},
+        {"name": "message", "type": "TEXT", "description": ""}
       ]
     }
   ]
 }
 ```
 
+The top-level fields (`duration_ms`, `error_count`, `tool_call_count`, `artifact_count`,
+`log_record_count`) provide a quick overview without querying individual tables.
+
 ## Example Queries
 
 ```sql
+-- Quick summary from manifest
+SELECT status, duration_ms, error_count, tool_call_count,
+       input_tokens, output_tokens
+FROM manifest
+
+-- List all artifacts with sizes
+SELECT artifact_id, kind, size_bytes, record_count
+FROM artifacts ORDER BY size_bytes DESC
+
+-- Check if logs were captured and how many records
+SELECT artifact_id, record_count, time_range_start, time_range_end
+FROM artifacts WHERE artifact_id = 'logs'
+
+-- Filesystem capture stats
+SELECT files_captured, files_skipped, total_bytes_captured
+FROM artifacts WHERE artifact_id = 'filesystem'
+
 -- Errors
 SELECT error_type, message FROM errors
 
@@ -123,9 +200,6 @@ SELECT timestamp, message FROM logs WHERE level = 'ERROR'
 
 -- JSON extraction
 SELECT json_extract(context, '$.tool_name') FROM logs
-
--- Token usage
-SELECT input_tokens, output_tokens, total_ms FROM metrics
 
 -- Session state
 SELECT slice_type, COUNT(*) FROM session_slices GROUP BY slice_type
@@ -151,7 +225,8 @@ Cache invalidated when bundle mtime > cache mtime.
 
 1. Check cache validity (mtime comparison)
 1. If stale/missing, create SQLite at `<bundle>.sqlite`:
-   - `manifest.json` → `manifest`
+   - `manifest.json` → `manifest` (includes summary fields)
+   - `manifest.artifacts` → `artifacts` (artifact catalog)
    - `logs/app.jsonl` → `logs`
    - `session/after.jsonl` → `session_slices` + `slice_*`
    - `config.json` → `config` (flattened)
