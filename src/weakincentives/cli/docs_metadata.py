@@ -72,6 +72,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "lifecycle": "Manage shutdown, health checks, and watchdogs",
     "resources": "Dependency injection, scopes, and lifecycle management",
     "progressive-disclosure": "Control context size with summaries",
+    "custom-sections": "Create tool suites and dynamic sections",
     "prompt-overrides": "Iterate on prompts without code changes",
     "workspace-tools": "Use VFS, Podman, planning, workspace digests",
     "debugging": "Inspect sessions and use the debug UI",
