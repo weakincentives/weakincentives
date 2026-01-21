@@ -7,8 +7,9 @@ A `Mailbox` is WINK's message queue abstraction with a key design principle:
 > **Durable, at-least-once delivery with explicit acknowledgment.**
 
 Unlike the fire-and-forget `Dispatcher`, mailboxes guarantee that messages are
-processed exactly once (from the queue's perspective) through visibility timeout
-semantics borrowed from AWS SQS.
+not lost: they remain in the queue until explicitly acknowledged. Visibility
+timeout semantics (borrowed from AWS SQS) allow automatic retry when consumers
+crash or stall.
 
 ## When to Use Mailbox
 
