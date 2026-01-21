@@ -63,11 +63,16 @@ class TableInfo:
 
 @FrozenDataclass()
 class SchemaOutput:
-    """Schema output structure."""
+    """Schema output structure with summary statistics."""
 
     bundle_id: str
     status: str
     created_at: str
+    duration_ms: int = 0
+    error_count: int = 0
+    tool_call_count: int = 0
+    artifact_count: int = 0
+    log_record_count: int = 0
     tables: tuple[TableInfo, ...] = field(default_factory=tuple)
 
     def to_json(self) -> str:
@@ -453,6 +458,7 @@ class QueryDatabase(Closeable):
 
         # Core tables
         self._build_manifest_table(conn)
+        self._build_artifacts_table(conn)
         self._build_logs_table(conn)
         self._build_tool_calls_table(conn)
         self._build_errors_table(conn)
@@ -473,7 +479,7 @@ class QueryDatabase(Closeable):
         self.close()  # Close so next access reopens in read-only mode
 
     def _build_manifest_table(self, conn: sqlite3.Connection) -> None:
-        """Build manifest table from manifest.json."""
+        """Build manifest table from manifest.json including summary."""
         manifest = self._bundle.manifest
         _ = conn.execute("""
             CREATE TABLE IF NOT EXISTS manifest (
@@ -489,12 +495,21 @@ class QueryDatabase(Closeable):
                 capture_trigger TEXT,
                 prompt_ns TEXT,
                 prompt_key TEXT,
-                prompt_adapter TEXT
+                prompt_adapter TEXT,
+                duration_ms INTEGER,
+                error_count INTEGER,
+                prompt_count INTEGER,
+                tool_call_count INTEGER,
+                provider_call_count INTEGER,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                cached_tokens INTEGER
             )
         """)
         _ = conn.execute(
             """
-            INSERT INTO manifest VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO manifest VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                         ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 manifest.bundle_id,
@@ -510,8 +525,91 @@ class QueryDatabase(Closeable):
                 manifest.prompt.ns,
                 manifest.prompt.key,
                 manifest.prompt.adapter,
+                manifest.summary.duration_ms,
+                manifest.summary.error_count,
+                manifest.summary.prompt_count,
+                manifest.summary.tool_call_count,
+                manifest.summary.provider_call_count,
+                manifest.summary.token_usage.input,
+                manifest.summary.token_usage.output,
+                manifest.summary.token_usage.cached,
             ),
         )
+
+    def _build_artifacts_table(self, conn: sqlite3.Connection) -> None:
+        """Build artifacts table from manifest.artifacts map.
+
+        Exposes artifact metadata including sizes, types, checksums, and counts
+        for each logical artifact in the bundle.
+        """
+        _ = conn.execute("""
+            CREATE TABLE IF NOT EXISTS artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                path TEXT,
+                kind TEXT,
+                content_type TEXT,
+                size_bytes INTEGER,
+                sha256 TEXT,
+                time_range_start TEXT,
+                time_range_end TEXT,
+                record_count INTEGER,
+                files_captured INTEGER,
+                files_skipped INTEGER,
+                total_bytes_captured INTEGER,
+                schema_type TEXT,
+                schema_version TEXT
+            )
+        """)
+
+        artifacts = self._bundle.manifest.artifacts
+        for artifact_id, info in artifacts.items():
+            # Extract counts based on type
+            record_count = None
+            files_captured = None
+            files_skipped = None
+            total_bytes_captured = None
+
+            if info.counts is not None:
+                # Import here to avoid circular imports at module level
+                from ..debug.bundle import LogCounts
+
+                if isinstance(info.counts, LogCounts):
+                    record_count = info.counts.records
+                else:
+                    # FilesystemCounts - the only other option in the union
+                    files_captured = info.counts.files_captured
+                    files_skipped = info.counts.files_skipped
+                    total_bytes_captured = info.counts.total_bytes_captured
+
+            # Extract time range
+            time_start = info.time_range.start if info.time_range else None
+            time_end = info.time_range.end if info.time_range else None
+
+            # Extract schema info
+            schema_type = info.schema.type if info.schema else None
+            schema_version = info.schema.version if info.schema else None
+
+            _ = conn.execute(
+                """
+                INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    artifact_id,
+                    info.path,
+                    info.kind,
+                    info.content_type,
+                    info.size_bytes,
+                    info.sha256,
+                    time_start,
+                    time_end,
+                    record_count,
+                    files_captured,
+                    files_skipped,
+                    total_bytes_captured,
+                    schema_type,
+                    schema_version,
+                ),
+            )
 
     def _build_logs_table(self, conn: sqlite3.Connection) -> None:
         """Build logs table from logs/app.jsonl."""
@@ -866,10 +964,26 @@ class QueryDatabase(Closeable):
                 )
             )
 
+        # Get log record count from artifacts map if available
+        log_record_count = 0
+        if "logs" in manifest.artifacts:
+            logs_artifact = manifest.artifacts["logs"]
+            if logs_artifact.counts is not None:
+                # Import here to avoid circular imports at module level
+                from ..debug.bundle import LogCounts
+
+                if isinstance(logs_artifact.counts, LogCounts):  # pragma: no branch
+                    log_record_count = logs_artifact.counts.records
+
         return SchemaOutput(
             bundle_id=manifest.bundle_id,
             status=manifest.request.status,
             created_at=manifest.created_at,
+            duration_ms=manifest.summary.duration_ms,
+            error_count=manifest.summary.error_count,
+            tool_call_count=manifest.summary.tool_call_count,
+            artifact_count=len(manifest.artifacts),
+            log_record_count=log_record_count,
             tables=tuple(tables),
         )
 
@@ -888,7 +1002,8 @@ class QueryDatabase(Closeable):
 def _get_table_description(table_name: str) -> str:
     """Get description for a table by name."""
     descriptions = {
-        "manifest": "Bundle metadata",
+        "manifest": "Bundle metadata and execution summary",
+        "artifacts": "Artifact catalog with sizes, types, and counts",
         "logs": "Log entries",
         "tool_calls": "Tool invocations",
         "errors": "Aggregated errors",

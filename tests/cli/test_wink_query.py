@@ -243,9 +243,16 @@ class TestGetTableDescription:
     """Tests for _get_table_description function."""
 
     def test_known_table(self) -> None:
-        assert _get_table_description("manifest") == "Bundle metadata"
+        assert (
+            _get_table_description("manifest")
+            == "Bundle metadata and execution summary"
+        )
         assert _get_table_description("logs") == "Log entries"
         assert _get_table_description("errors") == "Aggregated errors"
+        assert (
+            _get_table_description("artifacts")
+            == "Artifact catalog with sizes, types, and counts"
+        )
 
     def test_slice_table(self) -> None:
         assert _get_table_description("slice_agentplan") == "Session slice: agentplan"
@@ -1776,3 +1783,218 @@ class TestFilesTableReadError:
                 assert "bad.txt" not in paths
             finally:
                 db.close()
+
+
+class TestArtifactsTable:
+    """Tests for the artifacts table from manifest.artifacts."""
+
+    def test_artifacts_table_exists(self, tmp_path: Path) -> None:
+        """Test that artifacts table is created."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            schema = db.get_schema()
+            table_names = [t.name for t in schema.tables]
+            assert "artifacts" in table_names
+        finally:
+            db.close()
+
+    def test_artifacts_table_has_entries(self, tmp_path: Path) -> None:
+        """Test that artifacts table is populated from manifest.artifacts."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            results = db.execute_query("SELECT artifact_id, path, kind FROM artifacts")
+            # Should have some artifacts
+            assert len(results) > 0
+            # Check that artifact_id is populated
+            artifact_ids = [r["artifact_id"] for r in results]
+            assert all(aid for aid in artifact_ids)  # All non-empty
+        finally:
+            db.close()
+
+    def test_artifacts_table_has_size_info(self, tmp_path: Path) -> None:
+        """Test that artifacts table includes size information."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            results = db.execute_query(
+                "SELECT artifact_id, size_bytes FROM artifacts WHERE size_bytes > 0"
+            )
+            # Should have artifacts with size > 0
+            assert len(results) > 0
+        finally:
+            db.close()
+
+    def test_artifacts_table_filesystem_counts(self, tmp_path: Path) -> None:
+        """Test that filesystem artifacts have counts extracted."""
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+
+        fs = InMemoryFilesystem()
+        _ = fs.write("/test.txt", "Hello, World!")
+        _ = fs.write("/subdir/nested.txt", "Nested content")
+
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"task": "test"})
+            writer.write_filesystem(fs)
+
+        assert writer.path is not None
+        db = open_query_database(writer.path)
+
+        try:
+            results = db.execute_query(
+                "SELECT files_captured, files_skipped, total_bytes_captured "
+                "FROM artifacts WHERE artifact_id = 'filesystem'"
+            )
+            assert len(results) == 1
+            assert results[0]["files_captured"] == 2
+            assert results[0]["total_bytes_captured"] > 0
+        finally:
+            db.close()
+
+
+class TestManifestSummaryFields:
+    """Tests for manifest table summary fields."""
+
+    def test_manifest_has_summary_columns(self, tmp_path: Path) -> None:
+        """Test that manifest table includes summary columns."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            results = db.execute_query(
+                "SELECT duration_ms, error_count, tool_call_count FROM manifest"
+            )
+            assert len(results) == 1
+            # duration_ms should be >= 0
+            assert results[0]["duration_ms"] >= 0
+        finally:
+            db.close()
+
+    def test_manifest_has_token_usage(self, tmp_path: Path) -> None:
+        """Test that manifest table includes token usage columns."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            results = db.execute_query(
+                "SELECT input_tokens, output_tokens, cached_tokens FROM manifest"
+            )
+            assert len(results) == 1
+            # All token fields should exist (may be 0)
+            assert results[0]["input_tokens"] >= 0
+            assert results[0]["output_tokens"] >= 0
+            assert results[0]["cached_tokens"] >= 0
+        finally:
+            db.close()
+
+
+class TestEnhancedSchemaOutput:
+    """Tests for enhanced schema output with summary stats."""
+
+    def test_schema_has_summary_fields(self, tmp_path: Path) -> None:
+        """Test that schema output includes summary fields."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            schema = db.get_schema()
+            # Check new summary fields
+            assert hasattr(schema, "duration_ms")
+            assert hasattr(schema, "error_count")
+            assert hasattr(schema, "tool_call_count")
+            assert hasattr(schema, "artifact_count")
+            assert hasattr(schema, "log_record_count")
+        finally:
+            db.close()
+
+    def test_schema_artifact_count(self, tmp_path: Path) -> None:
+        """Test that schema output has correct artifact count."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            schema = db.get_schema()
+            # artifact_count should match number of artifacts in table
+            results = db.execute_query("SELECT COUNT(*) as cnt FROM artifacts")
+            assert schema.artifact_count == results[0]["cnt"]
+        finally:
+            db.close()
+
+    def test_schema_log_record_count(self, tmp_path: Path) -> None:
+        """Test that schema output has correct log record count."""
+        # Create bundle with logs to test log_record_count extraction
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"task": "test"})
+            with writer.capture_logs():
+                test_logger = logging.getLogger("test.schema.logs")
+                test_logger.setLevel(logging.DEBUG)  # Ensure logs are captured
+                test_logger.info("Log message 1")
+                test_logger.info("Log message 2")
+                test_logger.warning("Log message 3")
+
+        assert writer.path is not None
+        db = open_query_database(writer.path)
+
+        try:
+            schema = db.get_schema()
+            # log_record_count should reflect number of log records
+            # At least 3 from our explicit logs
+            assert schema.log_record_count >= 3
+        finally:
+            db.close()
+
+    def test_schema_log_record_count_empty_logs(self, tmp_path: Path) -> None:
+        """Test that schema handles logs with no records (counts is None)."""
+        # Create bundle with log capture but no actual logs written
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"task": "test"})
+            with writer.capture_logs():
+                pass  # Don't log anything
+
+        assert writer.path is not None
+        db = open_query_database(writer.path)
+
+        try:
+            schema = db.get_schema()
+            # log_record_count should be 0 when counts is None
+            assert schema.log_record_count == 0
+        finally:
+            db.close()
+
+    def test_schema_to_json_includes_summary(self, tmp_path: Path) -> None:
+        """Test that schema JSON output includes summary fields."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            schema = db.get_schema()
+            json_str = schema.to_json()
+            data = json.loads(json_str)
+
+            # Check new fields are in JSON
+            assert "duration_ms" in data
+            assert "error_count" in data
+            assert "tool_call_count" in data
+            assert "artifact_count" in data
+            assert "log_record_count" in data
+        finally:
+            db.close()
+
+
+class TestTableDescriptions:
+    """Tests for updated table descriptions."""
+
+    def test_manifest_description_updated(self) -> None:
+        """Test that manifest table description mentions summary."""
+        desc = _get_table_description("manifest")
+        assert "summary" in desc.lower()
+
+    def test_artifacts_description(self) -> None:
+        """Test that artifacts table has description."""
+        desc = _get_table_description("artifacts")
+        assert "artifact" in desc.lower()
+        assert len(desc) > 0
