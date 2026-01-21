@@ -24,6 +24,7 @@ debug issues when they arise.
 ### For Production Deployments
 
 1. [Claude Agent SDK](claude-agent-sdk.md) - Recommended adapter for production
+1. [Mailbox](mailbox.md) - Message queue abstraction for durable processing
 1. [Orchestration](orchestration.md) - Handle requests at scale
 1. [Lifecycle](lifecycle.md) - Health checks, shutdown, watchdogs
 1. [Debugging](debugging.md) - Inspect and troubleshoot sessions
@@ -64,6 +65,7 @@ debug issues when they arise.
 
 | Guide | What You'll Learn |
 | --- | --- |
+| [Mailbox](mailbox.md) | Message queue abstraction with visibility timeout semantics |
 | [Orchestration](orchestration.md) | Use MainLoop for request handling |
 | [Evaluation](evaluation.md) | Test agents with datasets and evaluators |
 | [Lifecycle](lifecycle.md) | Manage shutdown, health checks, and watchdogs |
