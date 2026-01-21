@@ -37,6 +37,7 @@ debug issues when they arise.
 ### For Contributors
 
 1. [Code Quality](code-quality.md) - Standards and tooling
+1. [Security](security.md) - Secure tool handlers, sandboxing, input validation
 1. [Testing](testing.md) - How to test prompts, tools, reducers
 1. See also: `AGENTS.md` for the canonical contributor handbook
 
@@ -80,6 +81,7 @@ debug issues when they arise.
 | --- | --- |
 | [Testing](testing.md) | Test prompts, tools, and reducers without a model |
 | [Code Quality](code-quality.md) | Types, contracts, coverage, and security scanning |
+| [Security](security.md) | Secure tool handlers, sandboxing, and input validation |
 | [Formal Verification](formal-verification.md) | Embed TLA+ specifications for critical code |
 
 ## Practical Reference

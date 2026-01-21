@@ -75,6 +75,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "debugging": "Inspect sessions and use the debug UI",
     "testing": "Test prompts, tools, and reducers",
     "code-quality": "Types, contracts, coverage, security",
+    "security": "Secure tool handlers, sandboxing, input validation",
     "recipes": "Common patterns for agents",
     "troubleshooting": "Debug common errors",
     "api-reference": "Quick lookup for key types",
