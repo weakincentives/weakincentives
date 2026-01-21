@@ -47,6 +47,7 @@ from weakincentives.debug.environment import (
     _get_linux_memory_bytes,
     _is_sensitive_file,
     _is_valid_container_id,
+    _redact_url_credentials,
     _run_git_command,
     _should_capture_env_var,
     _should_redact_value,
@@ -373,6 +374,52 @@ class TestSensitiveFileDetection:
         assert _is_sensitive_file("main.py") is False
         assert _is_sensitive_file("config.json") is False
         assert _is_sensitive_file("package.json") is False
+
+
+class TestUrlCredentialRedaction:
+    """Tests for URL credential redaction."""
+
+    def test_redact_url_credentials_with_user_pass(self) -> None:
+        """Test _redact_url_credentials with username:password."""
+        url = "https://user:token123@github.com/org/repo.git"
+        result = _redact_url_credentials(url)
+        assert result == "https://[REDACTED]@github.com/org/repo.git"
+
+    def test_redact_url_credentials_with_user_only(self) -> None:
+        """Test _redact_url_credentials with username only (no password)."""
+        url = "https://user@github.com/org/repo.git"
+        result = _redact_url_credentials(url)
+        assert result == "https://[REDACTED]@github.com/org/repo.git"
+
+    def test_redact_url_credentials_with_token(self) -> None:
+        """Test _redact_url_credentials with token as username."""
+        url = "https://ghp_xxxxxxxxxxxx@github.com/org/repo.git"
+        result = _redact_url_credentials(url)
+        assert result == "https://[REDACTED]@github.com/org/repo.git"
+
+    def test_redact_url_credentials_no_credentials(self) -> None:
+        """Test _redact_url_credentials with no credentials."""
+        url = "https://github.com/org/repo.git"
+        result = _redact_url_credentials(url)
+        assert result == "https://github.com/org/repo.git"
+
+    def test_redact_url_credentials_ssh(self) -> None:
+        """Test _redact_url_credentials with SSH URL (no redaction needed)."""
+        url = "git@github.com:org/repo.git"
+        result = _redact_url_credentials(url)
+        # SSH URLs don't match the scheme:// pattern, returned unchanged
+        assert result == "git@github.com:org/repo.git"
+
+    def test_redact_url_credentials_various_schemes(self) -> None:
+        """Test _redact_url_credentials with various URL schemes."""
+        # HTTP with credentials
+        assert _redact_url_credentials("http://user:pass@host/path") == (
+            "http://[REDACTED]@host/path"
+        )
+        # Git protocol with credentials
+        assert _redact_url_credentials("git://token@host/repo.git") == (
+            "git://[REDACTED]@host/repo.git"
+        )
 
 
 class TestGitDiff:

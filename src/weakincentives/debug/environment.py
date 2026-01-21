@@ -437,14 +437,14 @@ def _capture_git_info(working_dir: Path | None = None) -> GitInfo | None:
     status = _run_git_command("status", "--porcelain", cwd=cwd)
     is_dirty = bool(status)
 
-    # Get remotes
+    # Get remotes (with credential redaction)
     remotes: dict[str, str] = {}
     remote_output = _run_git_command("remote", "-v", cwd=cwd)
     if remote_output:
         for line in remote_output.splitlines():
             parts = line.split()
             if len(parts) >= _MIN_REMOTE_PARTS and "(fetch)" in line:
-                remotes[parts[0]] = parts[1]
+                remotes[parts[0]] = _redact_url_credentials(parts[1])
 
     # Get tags pointing to HEAD
     tags: list[str] = []
@@ -463,21 +463,35 @@ def _capture_git_info(working_dir: Path | None = None) -> GitInfo | None:
     )
 
 
+def _redact_url_credentials(url: str) -> str:
+    """Redact credentials from a URL (e.g., https://user:token@host/...).
+
+    Returns the URL with any userinfo (username:password) replaced with [REDACTED].
+    """
+    # Match URLs with credentials: scheme://user:pass@host or scheme://user@host
+    # Pattern captures: (scheme://)(userinfo@)(rest)
+    pattern = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*://)[^@/]+@(.+)$")
+    match = pattern.match(url)
+    if match:
+        return f"{match.group(1)}[REDACTED]@{match.group(2)}"
+    return url
+
+
 def _is_sensitive_file(filename: str) -> bool:
     """Check if a filename matches sensitive file patterns."""
     return any(pattern.search(filename) for pattern in _SENSITIVE_FILE_PATTERNS)
 
 
 def _read_file_with_limit(file_path: Path) -> tuple[str, bool]:
-    """Read file content with size limit.
+    """Read file content with size limit, streaming only the needed bytes.
 
     Returns (content, truncated) tuple.
     """
     file_size = file_path.stat().st_size
     if file_size > _MAX_UNTRACKED_FILE_SIZE:
-        content = file_path.read_bytes()[:_MAX_UNTRACKED_FILE_SIZE].decode(
-            errors="replace"
-        )
+        # Stream only the first N bytes to avoid loading large files into memory
+        with file_path.open("rb") as f:
+            content = f.read(_MAX_UNTRACKED_FILE_SIZE).decode(errors="replace")
         return content, True
     return file_path.read_text(errors="replace"), False
 
