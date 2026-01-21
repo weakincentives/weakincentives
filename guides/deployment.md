@@ -297,7 +297,7 @@ adapter = ClaudeAgentSDKAdapter(
 | `CLAUDE_CODE_USE_BEDROCK` | Use AWS Bedrock | `0` |
 | `AWS_REGION` | AWS region for Bedrock | Required if Bedrock |
 | `WEAKINCENTIVES_LOG_LEVEL` | Log verbosity | `INFO` |
-| `WEAKINCENTIVES_LOG_JSON` | JSON log format | `true` in containers |
+| `WEAKINCENTIVES_LOG_FORMAT` | Log format (`json` or `text`) | `text` |
 
 ### Application Configuration
 
@@ -335,9 +335,15 @@ class AgentConfig:
 
 ### Structured Logging
 
-Configure JSON logging for log aggregation:
+Enable JSON logging via environment variable or code:
+
+```bash
+# Environment variable (recommended for containers)
+export WEAKINCENTIVES_LOG_FORMAT=json
+```
 
 ```python nocheck
+# Or configure programmatically
 from weakincentives.runtime import configure_logging
 
 configure_logging(
