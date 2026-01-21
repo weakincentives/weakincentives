@@ -44,16 +44,30 @@ def parse_ruff(output: str, _code: int) -> tuple[Diagnostic, ...]:
 
 
 def parse_pyright(output: str, _code: int) -> tuple[Diagnostic, ...]:
-    """Parse pyright output format: file:line:col - severity: message."""
+    """Parse pyright output format: file:line:col - severity: message.
+
+    Preserves rule names like (reportGeneralTypeIssues) in the message.
+    """
     diagnostics = []
     pattern = re.compile(r"^  (.+?):(\d+):(\d+) - (error|warning|info): (.+)$", re.MULTILINE)
 
     for match in pattern.finditer(output):
         file, line, col, severity, message = match.groups()
         sev = "error" if severity == "error" else ("warning" if severity == "warning" else "info")
+
+        # Extract rule name if present (e.g., "(reportGeneralTypeIssues)")
+        rule_match = re.search(r"\((\w+)\)$", message)
+        if rule_match:
+            rule_name = rule_match.group(1)
+            # Remove rule from end of message and prepend as code
+            base_message = message[: rule_match.start()].strip()
+            formatted_message = f"[{rule_name}] {base_message}"
+        else:
+            formatted_message = message
+
         diagnostics.append(
             Diagnostic(
-                message=message,
+                message=formatted_message,
                 location=Location(file=file, line=int(line), column=int(col)),
                 severity=sev,  # type: ignore[arg-type]
             )
@@ -63,7 +77,10 @@ def parse_pyright(output: str, _code: int) -> tuple[Diagnostic, ...]:
 
 
 def parse_ty(output: str, _code: int) -> tuple[Diagnostic, ...]:
-    """Parse ty output format: error[code]: message --> file:line:col."""
+    """Parse ty output format: error[code]: message --> file:line:col.
+
+    Preserves the error code in the message as [code] prefix.
+    """
     diagnostics = []
     pattern = re.compile(
         r"(error|warning)\[([^\]]+)\]: (.+?)\n\s*--> (.+?):(\d+):(\d+)",
@@ -71,11 +88,13 @@ def parse_ty(output: str, _code: int) -> tuple[Diagnostic, ...]:
     )
 
     for match in pattern.finditer(output):
-        severity, _code, message, file, line, col = match.groups()
+        severity, error_code, message, file, line, col = match.groups()
         sev = "error" if severity == "error" else "warning"
+        # Include error code in message for actionable diagnostics
+        formatted_message = f"[{error_code}] {message.strip()}"
         diagnostics.append(
             Diagnostic(
-                message=message.strip(),
+                message=formatted_message,
                 location=Location(file=file, line=int(line), column=int(col)),
                 severity=sev,  # type: ignore[arg-type]
             )
@@ -151,9 +170,13 @@ def parse_pytest(output: str, code: int) -> tuple[Diagnostic, ...]:
     )
     if cov_match:
         required, actual = cov_match.groups()
-        diagnostics.append(
-            Diagnostic(message=f"Coverage {actual}% < {required}% required")
-        )
+        # Extract uncovered files from coverage report
+        uncovered_info = _extract_uncovered_files(output)
+        if uncovered_info:
+            msg = f"Coverage {actual}% < {required}% required\nUncovered:\n{uncovered_info}"
+        else:
+            msg = f"Coverage {actual}% < {required}% required"
+        diagnostics.append(Diagnostic(message=msg))
 
     # If nothing parsed but failed, add generic message
     if not diagnostics and code != 0:
@@ -166,11 +189,24 @@ def parse_pytest(output: str, code: int) -> tuple[Diagnostic, ...]:
             )
             diagnostics.append(Diagnostic(msg))
         else:
-            msg = (
-                "Tests failed\n"
-                "Reproduce: uv run pytest tests -v\n"
-                "Focus on specific test: uv run pytest tests/path/to/test.py::test_name -vv"
-            )
+            # Try to extract test files mentioned in output
+            test_files = _extract_test_files(output)
+            if test_files:
+                files_str = ", ".join(test_files[:5])  # Limit to 5 files
+                if len(test_files) > 5:
+                    files_str += f" (and {len(test_files) - 5} more)"
+                msg = (
+                    f"Tests failed\n"
+                    f"Files involved: {files_str}\n"
+                    "Reproduce: uv run pytest tests -v\n"
+                    "Focus on specific test: uv run pytest tests/path/to/test.py::test_name -vv"
+                )
+            else:
+                msg = (
+                    "Tests failed\n"
+                    "Reproduce: uv run pytest tests -v\n"
+                    "Focus on specific test: uv run pytest tests/path/to/test.py::test_name -vv"
+                )
             diagnostics.append(Diagnostic(msg))
 
     return tuple(diagnostics)
@@ -231,6 +267,68 @@ def _find_test_failure_line(output: str, file: str, test: str) -> tuple[int | No
         return int(match.group(1)), None
 
     return None, None
+
+
+def _extract_uncovered_files(output: str) -> str | None:
+    """Extract files with incomplete coverage from pytest coverage output.
+
+    Parses pytest-cov output format:
+    Name                                      Stmts   Miss  Cover
+    -------------------------------------------------------------
+    src/module.py                               100     10    90%
+    TOTAL                                       500     50    90%
+
+    Returns a formatted string listing uncovered files and their missing line info.
+    """
+    uncovered_files = []
+
+    # Look for the coverage table in output
+    # Pattern matches lines like: src/module.py   100    10    90%
+    # or with missing lines: src/module.py   100    10    90%   1-5, 10, 20-30
+    # Missing lines format: numbers, ranges (1-5), commas, spaces
+    # Note: hyphen must be at end of character class to be literal (not a range)
+    cov_line_pattern = re.compile(
+        r"^([\w/.-]+\.py)\s+(\d+)\s+(\d+)\s+(\d+)%(?:\s+([\d,\s-]+))?$",
+        re.MULTILINE,
+    )
+
+    for match in cov_line_pattern.finditer(output):
+        file, _stmts, miss, cover, missing_lines = match.groups()
+        if file == "TOTAL" or int(miss) == 0:
+            continue
+        if int(cover) < 100:
+            if missing_lines and missing_lines.strip():
+                uncovered_files.append(f"  {file} ({cover}%): lines {missing_lines.strip()}")
+            else:
+                uncovered_files.append(f"  {file} ({cover}%): {miss} lines missing")
+
+    if uncovered_files:
+        # Limit to first 10 files
+        result = uncovered_files[:10]
+        if len(uncovered_files) > 10:
+            result.append(f"  ... and {len(uncovered_files) - 10} more files")
+        return "\n".join(result)
+
+    return None
+
+
+def _extract_test_files(output: str) -> list[str]:
+    """Extract test file names mentioned in pytest output.
+
+    Looks for patterns like:
+    - tests/test_foo.py
+    - test_*.py
+    - path/to/test_something.py
+    """
+    test_files: set[str] = set()
+
+    # Pattern for test file paths
+    test_file_pattern = re.compile(r"((?:[\w./]*)?tests?/[\w/]*test_\w+\.py|test_\w+\.py)")
+
+    for match in test_file_pattern.finditer(output):
+        test_files.add(match.group(1))
+
+    return sorted(test_files)
 
 
 def parse_bandit(output: str, code: int) -> tuple[Diagnostic, ...]:
@@ -308,12 +406,29 @@ def parse_pip_audit(output: str, code: int) -> tuple[Diagnostic, ...]:
         )
 
     if not diagnostics and code != 0:
-        msg = (
-            "Vulnerability check failed\n"
-            "Reproduce: uv run pip-audit\n"
-            "Fix: Update dependencies in pyproject.toml\n"
-            "Details: Check output for specific vulnerable packages"
-        )
+        # Include first few meaningful lines of output for context
+        output_lines = [
+            line.strip()
+            for line in output.strip().split("\n")
+            if line.strip() and not line.startswith(("-", "=", "#"))
+        ]
+        output_preview = "\n".join(output_lines[:5])
+        if len(output_lines) > 5:
+            output_preview += "\n..."
+
+        if output_preview:
+            msg = (
+                f"Vulnerability check failed\n"
+                f"Output:\n{output_preview}\n"
+                "Reproduce: uv run pip-audit\n"
+                "Fix: Update dependencies in pyproject.toml"
+            )
+        else:
+            msg = (
+                "Vulnerability check failed\n"
+                "Reproduce: uv run pip-audit\n"
+                "Fix: Update dependencies in pyproject.toml"
+            )
         diagnostics.append(Diagnostic(msg))
 
     return tuple(diagnostics)
@@ -331,7 +446,10 @@ def parse_mdformat(output: str, code: int) -> tuple[Diagnostic, ...]:
         if line.endswith(".md"):  # pragma: no branch
             diagnostics.append(
                 Diagnostic(
-                    message="Needs formatting",
+                    message=(
+                        f"Markdown formatting required\n"
+                        f"Fix: Run `mdformat {line}` to auto-format"
+                    ),
                     location=Location(file=line),
                 )
             )

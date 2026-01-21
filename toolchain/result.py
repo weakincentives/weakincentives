@@ -32,12 +32,20 @@ class Location:
     file: str
     line: int | None = None
     column: int | None = None
+    end_line: int | None = None
+    end_column: int | None = None
 
     def __str__(self) -> str:
         if self.line is None:
             return self.file
         if self.column is None:
+            # No column: file:line or file:line-end_line
+            if self.end_line is not None:
+                return f"{self.file}:{self.line}-{self.end_line}"
             return f"{self.file}:{self.line}"
+        # Has column: file:line:column or file:line:column-end_line:end_column
+        if self.end_line is not None and self.end_column is not None:
+            return f"{self.file}:{self.line}:{self.column}-{self.end_line}:{self.end_column}"
         return f"{self.file}:{self.line}:{self.column}"
 
 

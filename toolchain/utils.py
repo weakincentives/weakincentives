@@ -82,6 +82,27 @@ class ImportInfo:
     module: str  # Module containing the import
     imported_from: str  # Module being imported
     lineno: int
+    statement: str  # The reconstructed import statement text
+
+
+def _format_import_statement(node: ast.Import | ast.ImportFrom) -> str:
+    """Reconstruct import statement text from AST node."""
+    if isinstance(node, ast.Import):
+        names = ", ".join(
+            f"{alias.name} as {alias.asname}" if alias.asname else alias.name
+            for alias in node.names
+        )
+        return f"import {names}"
+
+    # ast.ImportFrom
+    dots = "." * node.level
+    module_part = node.module or ""
+    from_part = f"{dots}{module_part}"
+    names = ", ".join(
+        f"{alias.name} as {alias.asname}" if alias.asname else alias.name
+        for alias in node.names
+    )
+    return f"from {from_part} import {names}"
 
 
 def extract_imports(source: str, module_name: str) -> list[ImportInfo]:
@@ -97,6 +118,7 @@ def extract_imports(source: str, module_name: str) -> list[ImportInfo]:
                         module=module_name,
                         imported_from=alias.name.split(".")[0],
                         lineno=node.lineno,
+                        statement=_format_import_statement(node),
                     )
                 )
         elif isinstance(node, ast.ImportFrom) and node.module:
@@ -115,6 +137,7 @@ def extract_imports(source: str, module_name: str) -> list[ImportInfo]:
                     module=module_name,
                     imported_from=imported_from,
                     lineno=node.lineno,
+                    statement=_format_import_statement(node),
                 )
             )
 

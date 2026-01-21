@@ -76,6 +76,11 @@ class TestArchitectureChecker:
             result = checker.run()
             assert result.status == "failed"
             assert any("contrib" in d.message.lower() for d in result.diagnostics)
+            # Verify that the import statement is included in the diagnostic
+            assert any(
+                "Import: from weakincentives.contrib import something" in d.message
+                for d in result.diagnostics
+            )
 
     def test_allows_contrib_importing_contrib(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -244,6 +249,85 @@ def example():
         result = checker._map_diagnostic(diag, blocks, module)
         assert result is None
 
+    def test_handles_pyright_json_decode_error(self) -> None:
+        """Test that JSON decode errors are properly reported."""
+        import subprocess
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            readme = root / "README.md"
+            readme.write_text("```python\nx = 1\n```")
+
+            subprocess.run(["git", "init"], cwd=root, capture_output=True)
+            subprocess.run(["git", "add", "."], cwd=root, capture_output=True)
+
+            # Mock subprocess.run to return malformed JSON from pyright
+            original_run = subprocess.run
+
+            def mock_run(
+                cmd: list[str], **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
+                if "pyright" in cmd:
+                    return subprocess.CompletedProcess(
+                        args=cmd,
+                        returncode=1,
+                        stdout="This is not valid JSON output from pyright",
+                        stderr="Some error occurred",
+                    )
+                return original_run(cmd, **kwargs)
+
+            with patch("subprocess.run", side_effect=mock_run):
+                checker = DocsChecker(root=root)
+                result = checker.run()
+
+            # Should have a diagnostic about JSON parse failure
+            assert any(
+                "Failed to parse pyright output" in d.message for d in result.diagnostics
+            )
+            assert any("exit code 1" in d.message for d in result.diagnostics)
+            assert any("This is not valid JSON" in d.message for d in result.diagnostics)
+
+    def test_handles_pyright_failure_no_output(self) -> None:
+        """Test that pyright failures with no output are properly reported."""
+        import subprocess
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            readme = root / "README.md"
+            readme.write_text("```python\nx = 1\n```")
+
+            subprocess.run(["git", "init"], cwd=root, capture_output=True)
+            subprocess.run(["git", "add", "."], cwd=root, capture_output=True)
+
+            # Mock subprocess.run to return empty output but non-zero exit code
+            original_run = subprocess.run
+
+            def mock_run(
+                cmd: list[str], **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
+                if "pyright" in cmd:
+                    return subprocess.CompletedProcess(
+                        args=cmd,
+                        returncode=2,
+                        stdout="",
+                        stderr="pyright: command not found or crashed",
+                    )
+                return original_run(cmd, **kwargs)
+
+            with patch("subprocess.run", side_effect=mock_run):
+                checker = DocsChecker(root=root)
+                result = checker.run()
+
+            # Should have a diagnostic about pyright failure
+            assert any(
+                "Pyright failed with exit code 2" in d.message for d in result.diagnostics
+            )
+            assert any(
+                "pyright: command not found" in d.message for d in result.diagnostics
+            )
+
 
 class TestParseTypecheck:
     """Tests for _parse_typecheck helper."""
@@ -257,6 +341,45 @@ class TestParseTypecheck:
   src/bar.py:20:10 - error: Cannot assign str to int"""
         diagnostics = _parse_typecheck(output, 1)
         assert len(diagnostics) == 2
+
+    def test_prefixes_ty_diagnostics(self) -> None:
+        from toolchain.checkers import _parse_typecheck
+
+        # ty-style output
+        output = """error[invalid-type]: Type mismatch
+  --> src/foo.py:10:5"""
+        diagnostics = _parse_typecheck(output, 1)
+        assert len(diagnostics) == 1
+        assert diagnostics[0].message.startswith("[ty] ")
+        assert "Type mismatch" in diagnostics[0].message
+
+    def test_prefixes_pyright_diagnostics(self) -> None:
+        from toolchain.checkers import _parse_typecheck
+
+        # pyright-style output (note: pyright parser expects 2 leading spaces)
+        output = """  src/bar.py:20:10 - error: Cannot assign str to int"""
+        diagnostics = _parse_typecheck(output, 1)
+        assert len(diagnostics) == 1
+        assert diagnostics[0].message.startswith("[pyright] ")
+        assert "Cannot assign str to int" in diagnostics[0].message
+
+    def test_combined_output_has_both_prefixes(self) -> None:
+        from toolchain.checkers import _parse_typecheck
+
+        # Combined ty + pyright output
+        output = """error[invalid-type]: Type mismatch
+  --> src/foo.py:10:5
+  src/bar.py:20:10 - error: Cannot assign str to int"""
+        diagnostics = _parse_typecheck(output, 1)
+        assert len(diagnostics) == 2
+        # Find the ty diagnostic
+        ty_diags = [d for d in diagnostics if d.message.startswith("[ty] ")]
+        assert len(ty_diags) == 1
+        assert "Type mismatch" in ty_diags[0].message
+        # Find the pyright diagnostic
+        pyright_diags = [d for d in diagnostics if d.message.startswith("[pyright] ")]
+        assert len(pyright_diags) == 1
+        assert "Cannot assign str to int" in pyright_diags[0].message
 
     def test_empty_output(self) -> None:
         from toolchain.checkers import _parse_typecheck

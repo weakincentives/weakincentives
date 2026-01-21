@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import asdict, dataclass
-from typing import IO, Protocol
+from typing import IO, ClassVar, Protocol
 
 from .result import CheckResult, Report
 
@@ -59,6 +59,20 @@ class ConsoleFormatter:
     - Detailed diagnostics for failures
     - Summary line with counts and timing
     """
+
+    # Mapping of checker names to short descriptions for display
+    CHECKER_HINTS: ClassVar[dict[str, str]] = {
+        "format": "ruff format",
+        "lint": "ruff",
+        "typecheck": "ty + pyright",
+        "test": "pytest",
+        "bandit": "bandit",
+        "deptry": "deptry",
+        "pip-audit": "pip-audit",
+        "markdown": "mdformat",
+        "architecture": "core/contrib",
+        "docs": "examples, links",
+    }
 
     verbose: bool = False
     color: bool | None = None  # None = auto-detect
@@ -97,7 +111,10 @@ class ConsoleFormatter:
             lines.append(f"{mark} {result.name:<20} (skipped)")
         else:
             mark = "\033[31m✗\033[0m" if use_color else "✗"
-            lines.append(f"{mark} {result.name:<20} ({duration})")
+            hint = self.CHECKER_HINTS.get(result.name, "")
+            hint_text = f" ({hint})" if hint else ""
+            name_with_hint = f"{result.name}{hint_text}"
+            lines.append(f"{mark} {name_with_hint:<32} ({duration})")
 
             # Show diagnostics for failures
             if result.diagnostics:
@@ -112,6 +129,7 @@ class ConsoleFormatter:
                 remaining = len(result.diagnostics) - len(shown)
                 if remaining > 0:
                     lines.append(f"  ... and {remaining} more")
+                    lines.append(f"  Run: python check.py {result.name} -v")
             elif self.verbose and result.output:  # pragma: no cover
                 # Show raw output if no structured diagnostics
                 for line in result.output.split("\n")[:20]:
@@ -211,5 +229,6 @@ class QuietFormatter:
 
             if len(result.diagnostics) > 10:
                 lines.append(f"  ... and {len(result.diagnostics) - 10} more")
+                lines.append(f"  Run: python check.py {result.name} -v")
 
         return "\n".join(lines)

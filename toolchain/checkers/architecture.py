@@ -108,6 +108,7 @@ class ArchitectureChecker:
             if "contrib" in imp.imported_from:
                 msg = (
                     f"Core module imports from contrib: {imp.imported_from}\n"
+                    f"Import: {imp.statement}\n"
                     f"Fix: Move code to contrib or refactor to use protocols\n"
                     f"Architecture: Core modules must not depend on contrib\n"
                     f"See: CLAUDE.md for architecture guidelines"
