@@ -18,10 +18,34 @@ from .filesystem import (
     ReadOnlyFilesystemValidationSuite,
     SnapshotableFilesystemValidationSuite,
 )
+from .threading import (
+    FakeBackgroundWorker,
+    FakeCheckpoint,
+    FakeExecutor,
+    FakeGate,
+    FakeLatch,
+    FakeScheduler,
+    fake_checkpoint,
+    fake_executor,
+    fake_gate,
+    fake_latch_factory,
+    fake_scheduler,
+)
 
 __all__ = [
+    "FakeBackgroundWorker",
+    "FakeCheckpoint",
+    "FakeExecutor",
+    "FakeGate",
+    "FakeLatch",
+    "FakeScheduler",
     "FilesystemValidationSuite",
     "NullDispatcher",
     "ReadOnlyFilesystemValidationSuite",
     "SnapshotableFilesystemValidationSuite",
+    "fake_checkpoint",
+    "fake_executor",
+    "fake_gate",
+    "fake_latch_factory",
+    "fake_scheduler",
 ]

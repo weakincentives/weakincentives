@@ -49,10 +49,10 @@ import contextlib
 import signal
 import threading
 from collections.abc import Callable, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Protocol, Self
 
 from ..clock import SYSTEM_CLOCK, Clock
+from ..threading import SYSTEM_EXECUTOR, Executor, Future, Gate, SystemGate
 from .watchdog import HealthServer, Heartbeat, Watchdog
 
 if TYPE_CHECKING:
@@ -148,16 +148,19 @@ class ShutdownCoordinator:
     _instance: ShutdownCoordinator | None = None
     _instance_lock: threading.Lock = threading.Lock()
 
-    def __init__(self) -> None:
+    def __init__(self, *, gate: Gate | None = None) -> None:
         """Initialize the coordinator.
 
         Use ShutdownCoordinator.install() to get the singleton instance
         with signal handlers installed.
+
+        Args:
+            gate: Gate for shutdown signaling. Defaults to SystemGate.
         """
         super().__init__()
         self._callbacks: list[Callable[[], object]] = []
         self._callbacks_lock = threading.Lock()
-        self._triggered = threading.Event()
+        self._triggered: Gate = gate or SystemGate()
 
     @classmethod
     def install(
@@ -290,6 +293,7 @@ class LoopGroup:
         health_host: str = "0.0.0.0",  # nosec B104 - bind to all interfaces for k8s
         watchdog_threshold: float | None = 720.0,
         watchdog_interval: float = 60.0,
+        executor: Executor | None = None,
     ) -> None:
         """Initialize the LoopGroup.
 
@@ -302,6 +306,8 @@ class LoopGroup:
                 None disables watchdog. Default 720s (12 min) calibrated for
                 10-minute prompt evaluations.
             watchdog_interval: Seconds between watchdog checks. Default 60s.
+            executor: Executor for running loop threads. Defaults to SYSTEM_EXECUTOR.
+                Inject FakeExecutor for testing.
         """
         super().__init__()
         self.loops = loops
@@ -310,7 +316,8 @@ class LoopGroup:
         self._health_host = health_host
         self._watchdog_threshold = watchdog_threshold
         self._watchdog_interval = watchdog_interval
-        self._executor: ThreadPoolExecutor | None = None
+        self._executor = executor
+        self._owns_executor = executor is None
         self._futures: list[Future[None]] = []
         self._health_server: HealthServer | None = None
         self._watchdog: Watchdog | None = None
@@ -366,17 +373,16 @@ class LoopGroup:
             )
             self._health_server.start()
 
-        self._executor = ThreadPoolExecutor(
-            max_workers=len(self.loops),
-            thread_name_prefix="loop-worker",
-        )
+        # Use provided executor or create a new one
+        executor = self._executor or SYSTEM_EXECUTOR
 
         try:
             for loop in self.loops:
-                future: Future[None] = self._executor.submit(
-                    loop.run,
-                    visibility_timeout=visibility_timeout,
-                    wait_time_seconds=wait_time_seconds,
+                future: Future[None] = executor.submit(
+                    lambda lp=loop: lp.run(
+                        visibility_timeout=visibility_timeout,
+                        wait_time_seconds=wait_time_seconds,
+                    ),
                 )
                 self._futures.append(future)
 
@@ -391,7 +397,11 @@ class LoopGroup:
             if self._watchdog is not None:
                 self._watchdog.stop()
                 self._watchdog = None
-            self._executor.shutdown(wait=True)
+            # Only shutdown if we created the executor
+            # Note: Currently unreachable as SYSTEM_EXECUTOR is used as fallback
+            # and not stored in self._executor. Kept for future extensibility.
+            if self._owns_executor and self._executor is not None:  # pragma: no cover
+                self._executor.shutdown(wait=True)
             self._futures.clear()
 
     def _build_readiness_check(

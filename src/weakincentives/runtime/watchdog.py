@@ -45,6 +45,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 from ..clock import SYSTEM_CLOCK, MonotonicClock
+from ..threading import BackgroundWorker, Gate, SystemGate
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -176,6 +177,7 @@ class Watchdog:
         stall_threshold: float = 720.0,
         check_interval: float = 60.0,
         loop_names: Sequence[str] | None = None,
+        stop_signal: Gate | None = None,
     ) -> None:
         """Initialize the watchdog.
 
@@ -184,6 +186,8 @@ class Watchdog:
             stall_threshold: Seconds without heartbeat before termination.
             check_interval: Seconds between watchdog checks.
             loop_names: Optional names for logging. Defaults to indices.
+            stop_signal: Gate for stop signaling. Defaults to SystemGate.
+                Inject FakeGate for testing.
         """
         super().__init__()
         self._heartbeats = heartbeats
@@ -194,8 +198,8 @@ class Watchdog:
             if loop_names is not None
             else [f"loop-{i}" for i in range(len(heartbeats))]
         )
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._stop_signal: Gate = stop_signal or SystemGate()
+        self._worker: BackgroundWorker | None = None
 
     @property
     def stall_threshold(self) -> float:
@@ -204,27 +208,27 @@ class Watchdog:
 
     def start(self) -> None:
         """Start the watchdog thread."""
-        if self._thread is not None:
+        if self._worker is not None:
             return
 
-        self._stop_event.clear()
-        self._thread = threading.Thread(
+        self._stop_signal.clear()
+        self._worker = BackgroundWorker(
             target=self._run,
             name="watchdog",
             daemon=True,
         )
-        self._thread.start()
+        self._worker.start()
 
     def stop(self) -> None:
         """Stop the watchdog thread gracefully."""
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=self._check_interval * 2)
-            self._thread = None
+        self._stop_signal.set()
+        if self._worker is not None:
+            _ = self._worker.stop(timeout=self._check_interval * 2)
+            self._worker = None
 
     def _run(self) -> None:
         """Watchdog loop: check heartbeats, terminate on stall."""
-        while not self._stop_event.wait(timeout=self._check_interval):
+        while not self._stop_signal.wait(timeout=self._check_interval):
             stalled = self._check_heartbeats()
             if stalled:
                 self._terminate(stalled)  # pragma: no cover - terminates process

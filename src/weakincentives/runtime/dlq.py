@@ -44,6 +44,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Self
 from uuid import UUID
 
+from ..threading import Gate, SystemGate
 from .lifecycle import wait_until
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError
 from .watchdog import Heartbeat
@@ -197,7 +198,7 @@ class DLQConsumer[T]:
     _handler: Callable[[DeadLetter[T]], None]
     _visibility_timeout: int
     _running: bool
-    _shutdown_event: threading.Event
+    _shutdown_signal: Gate
     _lock: threading.Lock
     _heartbeat: Heartbeat
 
@@ -207,6 +208,7 @@ class DLQConsumer[T]:
         mailbox: Mailbox[DeadLetter[T], None],
         handler: Callable[[DeadLetter[T]], None],
         visibility_timeout: int = 300,
+        shutdown_signal: Gate | None = None,
     ) -> None:
         """Initialize the DLQ consumer.
 
@@ -215,13 +217,15 @@ class DLQConsumer[T]:
             handler: Callback to process each dead letter. Should not raise;
                 exceptions are logged and the message is nacked with long backoff.
             visibility_timeout: Default visibility timeout for messages.
+            shutdown_signal: Gate for shutdown signaling. Defaults to SystemGate.
+                Inject FakeGate for testing.
         """
         super().__init__()
         self._mailbox = mailbox
         self._handler = handler
         self._visibility_timeout = visibility_timeout
         self._running = False
-        self._shutdown_event = threading.Event()
+        self._shutdown_signal = shutdown_signal or SystemGate()
         self._lock = threading.Lock()
         self._heartbeat = Heartbeat()
 
@@ -247,7 +251,7 @@ class DLQConsumer[T]:
         """
         with self._lock:
             self._running = True
-            self._shutdown_event.clear()
+            self._shutdown_signal.clear()
 
         iterations = 0
         vt = (
@@ -259,7 +263,7 @@ class DLQConsumer[T]:
         try:
             while max_iterations is None or iterations < max_iterations:
                 # Check shutdown before blocking on receive
-                if self._shutdown_event.is_set():
+                if self._shutdown_signal.is_set():
                     break
 
                 # Exit if mailbox closed
@@ -275,7 +279,7 @@ class DLQConsumer[T]:
 
                 for msg in messages:
                     # Check shutdown between messages
-                    if self._shutdown_event.is_set():  # pragma: no cover
+                    if self._shutdown_signal.is_set():  # pragma: no cover
                         with contextlib.suppress(ReceiptHandleExpiredError):
                             msg.nack(visibility_timeout=0)
                         break
@@ -310,7 +314,7 @@ class DLQConsumer[T]:
         Returns:
             True if loop stopped cleanly, False if timeout expired.
         """
-        self._shutdown_event.set()
+        self._shutdown_signal.set()
         return wait_until(lambda: not self.running, timeout=timeout)
 
     @property

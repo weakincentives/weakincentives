@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from ...clock import SYSTEM_CLOCK, MonotonicClock
+from ...threading import BackgroundWorker, Gate, SystemGate
 from ..logging import StructuredLogger, get_logger
 from ._types import (
     Mailbox,
@@ -148,13 +149,11 @@ class InMemoryMailbox[T, R]:
     _pending: deque[_InFlightMessage[T, R]] = field(init=False, repr=False)
     _invisible: dict[str, _InFlightMessage[T, R]] = field(init=False, repr=False)
     _delivery_counts: dict[str, int] = field(init=False, repr=False)
-    _reaper_thread: threading.Thread | None = field(
+    _reaper_worker: BackgroundWorker | None = field(
         default=None, repr=False, init=False
     )
     _closed: bool = field(default=False, repr=False, init=False)
-    _stop_reaper: threading.Event = field(
-        default_factory=threading.Event, repr=False, init=False
-    )
+    _stop_reaper: Gate = field(default_factory=SystemGate, repr=False, init=False)
 
     def __post_init__(self) -> None:
         self._condition = threading.Condition(self._lock)
@@ -165,12 +164,12 @@ class InMemoryMailbox[T, R]:
 
     def _start_reaper(self) -> None:
         """Start background thread to requeue expired messages."""
-        self._reaper_thread = threading.Thread(
+        self._reaper_worker = BackgroundWorker(
             target=self._reaper_loop,
             daemon=True,
             name=f"mailbox-reaper-{self.name}",
         )
-        self._reaper_thread.start()
+        self._reaper_worker.start()
 
     def _reaper_loop(self) -> None:
         """Background loop that checks for expired visibility timeouts."""
@@ -403,10 +402,10 @@ class InMemoryMailbox[T, R]:
             self._closed = True
             self._condition.notify_all()
 
-        # Stop reaper thread
+        # Stop reaper worker
         self._stop_reaper.set()
-        if self._reaper_thread is not None:  # pragma: no branch
-            self._reaper_thread.join(timeout=1.0)
+        if self._reaper_worker is not None:  # pragma: no branch
+            _ = self._reaper_worker.stop(timeout=1.0)
 
     @property
     def closed(self) -> bool:

@@ -36,6 +36,7 @@ from ..runtime.mailbox import (
     ReplyNotAvailableError,
 )
 from ..runtime.watchdog import Heartbeat
+from ..threading import Gate, SystemGate
 from ._evaluators import is_session_aware
 from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
 
@@ -93,7 +94,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
     _config: EvalLoopConfig
     _dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None
-    _shutdown_event: threading.Event
+    _shutdown_signal: Gate
     _running: bool
     _lock: threading.Lock
     _heartbeat: Heartbeat
@@ -107,6 +108,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
         config: EvalLoopConfig | None = None,
         dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None = None,
+        shutdown_signal: Gate | None = None,
     ) -> None:
         """Initialize the EvalLoop.
 
@@ -121,6 +123,8 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             dlq: Optional dead letter queue policy. When configured, messages
                 that fail repeatedly are sent to the DLQ mailbox instead of
                 retrying indefinitely.
+            shutdown_signal: Gate for shutdown signaling. Defaults to SystemGate.
+                Inject FakeGate for testing.
         """
         super().__init__()
         self._loop = loop
@@ -128,7 +132,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         self._requests = requests
         self._config = config if config is not None else EvalLoopConfig()
         self._dlq = dlq
-        self._shutdown_event = threading.Event()
+        self._shutdown_signal = shutdown_signal or SystemGate()
         self._running = False
         self._lock = threading.Lock()
         self._heartbeat = Heartbeat()
@@ -168,13 +172,13 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         """
         with self._lock:
             self._running = True
-            self._shutdown_event.clear()
+            self._shutdown_signal.clear()
 
         iterations = 0
         try:
             while max_iterations is None or iterations < max_iterations:
                 # Check shutdown before blocking on receive
-                if self._shutdown_event.is_set():
+                if self._shutdown_signal.is_set():
                     break
 
                 # Exit if mailbox closed
@@ -186,7 +190,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                     wait_time_seconds=wait_time_seconds,
                 ):
                     # Check shutdown between messages
-                    if self._shutdown_event.is_set():
+                    if self._shutdown_signal.is_set():
                         # Nack unprocessed message for redelivery
                         with contextlib.suppress(ReceiptHandleExpiredError):
                             msg.nack(visibility_timeout=0)
@@ -217,7 +221,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         Returns:
             True if loop stopped cleanly, False if timeout expired.
         """
-        self._shutdown_event.set()
+        self._shutdown_signal.set()
         return wait_until(lambda: not self.running, timeout=timeout)
 
     @property
