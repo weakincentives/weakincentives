@@ -2,37 +2,13 @@
 
 ## Purpose
 
-`wink query` is a CLI command enabling AI coding agents to explore debug bundles
-via SQL. It loads bundle contents into a SQLite database with a dynamic schema
-based on bundle contents.
-
-**Primary use case:** AI agents diagnosing failures in agent executions.
+`wink query` enables AI agents to explore debug bundles via SQL. Bundle contents
+are loaded into a cached SQLite database with a schema derived from bundle
+artifacts.
 
 **Implementation:** (not yet implemented)
 
-## Design Principles
-
-- **SQL-first**: Standard SQL (SQLite dialect) as the query language
-- **Self-describing**: `--schema` provides everything needed to construct queries
-- **Zero configuration**: Point at bundle, start querying
-- **Cached**: Bundle parsed once, cached as SQLite file for fast repeated queries
-
-## Quick Start
-
-```bash
-# Get schema (always start here)
-wink query ./bundle.zip --schema
-
-# Run query (JSON output, default)
-wink query ./bundle.zip "SELECT * FROM errors"
-
-# Run query (table output for humans)
-wink query ./bundle.zip "SELECT * FROM errors" --table
-```
-
-## CLI Reference
-
-### Synopsis
+## CLI
 
 ```
 wink query <BUNDLE> --schema
@@ -40,23 +16,58 @@ wink query <BUNDLE> "<SQL>"
 wink query <BUNDLE> "<SQL>" --table
 ```
 
-### Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `BUNDLE` | Path to `.zip` debug bundle |
-| `SQL` | SQL query to execute |
-
-### Options
-
 | Option | Description |
 |--------|-------------|
 | `--schema` | Output schema as JSON and exit |
-| `--table` | Output results as ASCII table (default: JSON) |
+| `--table` | Output as ASCII table (default: JSON) |
+
+## Usage
+
+```bash
+# Always start with schema to discover tables
+wink query ./bundle.zip --schema
+
+# Query (JSON output)
+wink query ./bundle.zip "SELECT * FROM errors"
+
+# Query (table output)
+wink query ./bundle.zip "SELECT * FROM errors" --table
+```
+
+## Tables
+
+### Core Tables
+
+| Table | Source | Description |
+|-------|--------|-------------|
+| `manifest` | `manifest.json` | Bundle metadata |
+| `logs` | `logs/app.jsonl` | Log entries |
+| `tool_calls` | derived from logs | Tool invocations |
+| `errors` | derived | Aggregated errors |
+| `session_slices` | `session/after.jsonl` | Session state items |
+| `files` | `filesystem/` | Workspace files |
+| `config` | `config.json` | Flattened configuration |
+| `metrics` | `metrics.json` | Token usage and timing |
+| `run_context` | `run_context.json` | Execution IDs |
+
+### Optional Tables
+
+| Table | Source | Present When |
+|-------|--------|--------------|
+| `prompt_overrides` | `prompt_overrides.json` | File exists |
+| `eval` | `eval.json` | EvalLoop bundle |
+
+### Dynamic Slice Tables
+
+For each slice type in `session/after.jsonl`, a typed table is created:
+
+```
+slice_{normalized_type_name}
+```
+
+Example: `myapp.state:AgentPlan` → `slice_agentplan`
 
 ## Schema Output
-
-The `--schema` flag outputs schema information as JSON.
 
 ```bash
 wink query ./bundle.zip --schema
@@ -64,7 +75,7 @@ wink query ./bundle.zip --schema
 
 ```json
 {
-  "bundle_id": "debug_abc123_2024-01-15",
+  "bundle_id": "abc123",
   "status": "error",
   "created_at": "2024-01-15T10:30:00Z",
   "tables": [
@@ -73,210 +84,36 @@ wink query ./bundle.zip --schema
       "description": "Bundle metadata",
       "row_count": 1,
       "columns": [
-        {"name": "bundle_id", "type": "TEXT", "description": "Unique bundle identifier"},
+        {"name": "bundle_id", "type": "TEXT", "description": "Bundle identifier"},
         {"name": "status", "type": "TEXT", "description": "'success' or 'error'"},
-        {"name": "created_at", "type": "TEXT", "description": "ISO-8601 timestamp"},
-        {"name": "duration_ms", "type": "INTEGER", "description": "Execution duration"}
-      ]
-    },
-    {
-      "name": "logs",
-      "description": "Log entries from logs/app.jsonl",
-      "row_count": 1523,
-      "columns": [
-        {"name": "rowid", "type": "INTEGER", "description": "Entry sequence number"},
-        {"name": "timestamp", "type": "TEXT", "description": "ISO-8601 timestamp"},
-        {"name": "level", "type": "TEXT", "description": "DEBUG, INFO, WARNING, ERROR, CRITICAL"},
-        {"name": "logger", "type": "TEXT", "description": "Logger name"},
-        {"name": "message", "type": "TEXT", "description": "Log message"},
-        {"name": "context", "type": "TEXT", "description": "JSON object; use json_extract()"}
-      ]
-    },
-    {
-      "name": "tool_calls",
-      "description": "Tool invocations",
-      "row_count": 47,
-      "columns": [
-        {"name": "rowid", "type": "INTEGER", "description": "Call sequence number"},
-        {"name": "tool_name", "type": "TEXT", "description": "Tool identifier"},
-        {"name": "started_at", "type": "TEXT", "description": "Start timestamp"},
-        {"name": "duration_ms", "type": "INTEGER", "description": "Execution time"},
-        {"name": "success", "type": "INTEGER", "description": "1=success, 0=failure"},
-        {"name": "error_code", "type": "TEXT", "description": "Error code if failed"},
-        {"name": "params", "type": "TEXT", "description": "JSON parameters"},
-        {"name": "result", "type": "TEXT", "description": "JSON result"}
+        {"name": "created_at", "type": "TEXT", "description": "ISO-8601 timestamp"}
       ]
     },
     {
       "name": "errors",
-      "description": "Aggregated errors from all sources",
+      "description": "Aggregated errors",
       "row_count": 1,
       "columns": [
-        {"name": "rowid", "type": "INTEGER", "description": "Error sequence"},
-        {"name": "source", "type": "TEXT", "description": "'log', 'error.json', or 'tool_call'"},
-        {"name": "timestamp", "type": "TEXT", "description": "When error occurred"},
+        {"name": "rowid", "type": "INTEGER", "description": "Sequence"},
+        {"name": "source", "type": "TEXT", "description": "'log', 'error.json', 'tool_call'"},
         {"name": "error_type", "type": "TEXT", "description": "Exception type"},
         {"name": "message", "type": "TEXT", "description": "Error message"},
-        {"name": "traceback", "type": "TEXT", "description": "Stack trace if available"}
-      ]
-    },
-    {
-      "name": "session_slices",
-      "description": "All session state items",
-      "row_count": 12,
-      "columns": [
-        {"name": "rowid", "type": "INTEGER", "description": "Item sequence"},
-        {"name": "slice_type", "type": "TEXT", "description": "Qualified type (e.g., 'myapp.state:Plan')"},
-        {"name": "data", "type": "TEXT", "description": "JSON item; use json_extract()"}
-      ]
-    },
-    {
-      "name": "files",
-      "description": "Filesystem snapshot",
-      "row_count": 25,
-      "columns": [
-        {"name": "path", "type": "TEXT", "description": "Relative file path"},
-        {"name": "size", "type": "INTEGER", "description": "Size in bytes"},
-        {"name": "content", "type": "TEXT", "description": "File content (NULL if binary)"}
-      ]
-    },
-    {
-      "name": "config",
-      "description": "Flattened configuration",
-      "row_count": 8,
-      "columns": [
-        {"name": "key", "type": "TEXT", "description": "Dot-notation path"},
-        {"name": "value", "type": "TEXT", "description": "Configuration value"}
-      ]
-    },
-    {
-      "name": "metrics",
-      "description": "Token usage, timing, budget state",
-      "row_count": 1,
-      "columns": [
-        {"name": "input_tokens", "type": "INTEGER", "description": "Total input tokens"},
-        {"name": "output_tokens", "type": "INTEGER", "description": "Total output tokens"},
-        {"name": "total_tokens", "type": "INTEGER", "description": "Combined token count"},
-        {"name": "render_ms", "type": "INTEGER", "description": "Prompt rendering time"},
-        {"name": "call_ms", "type": "INTEGER", "description": "LLM API call time"},
-        {"name": "tool_ms", "type": "INTEGER", "description": "Tool execution time"},
-        {"name": "total_ms", "type": "INTEGER", "description": "Total execution time"},
-        {"name": "budget_remaining", "type": "INTEGER", "description": "Remaining token budget"}
-      ]
-    },
-    {
-      "name": "run_context",
-      "description": "Execution IDs and tracing",
-      "row_count": 1,
-      "columns": [
-        {"name": "run_id", "type": "TEXT", "description": "Run identifier"},
-        {"name": "request_id", "type": "TEXT", "description": "Request identifier"},
-        {"name": "session_id", "type": "TEXT", "description": "Session identifier"},
-        {"name": "trace_id", "type": "TEXT", "description": "Distributed trace ID"},
-        {"name": "span_id", "type": "TEXT", "description": "Current span ID"}
-      ]
-    },
-    {
-      "name": "slice_agentplan",
-      "description": "Typed view: myapp.state:AgentPlan",
-      "row_count": 3,
-      "columns": [
-        {"name": "rowid", "type": "INTEGER", "description": "Item sequence"},
-        {"name": "goal", "type": "TEXT", "description": "Field: str"},
-        {"name": "steps", "type": "TEXT", "description": "Field: tuple[str, ...] (JSON)"},
-        {"name": "status", "type": "TEXT", "description": "Field: Literal['pending', 'active', 'complete']"}
+        {"name": "traceback", "type": "TEXT", "description": "Stack trace"}
       ]
     }
   ]
 }
 ```
 
-## Tables
-
-### Core Tables
-
-| Table | Description |
-|-------|-------------|
-| `manifest` | Bundle metadata (status, timestamps, duration) |
-| `logs` | Log entries from `logs/app.jsonl` |
-| `tool_calls` | Tool invocations with timing and results |
-| `errors` | Aggregated errors from logs, error.json, and failed tools |
-| `session_slices` | All session state as JSON items |
-| `files` | Filesystem snapshot with content |
-| `config` | Flattened configuration key-value pairs |
-| `metrics` | Token usage, timing phases, budget state |
-| `run_context` | Execution IDs and tracing metadata |
-
-### Optional Tables
-
-| Table | Present When | Description |
-|-------|--------------|-------------|
-| `prompt_overrides` | `prompt_overrides.json` exists | Visibility overrides applied during execution |
-| `eval` | `eval.json` exists | Evaluation metadata (EvalLoop bundles only) |
-
-### Dynamic Slice Tables
-
-For each slice type in session state, a typed table is generated:
-
-```
-slice_{normalized_type_name}
-```
-
-Example: `myapp.state:AgentPlan` → `slice_agentplan`
-
-Columns are derived from dataclass fields. Complex types are JSON-encoded.
-
-## Output Formats
-
-### JSON (default)
-
-```bash
-wink query ./bundle.zip "SELECT tool_name, duration_ms FROM tool_calls"
-```
-
-```json
-[
-  {"tool_name": "read_file", "duration_ms": 12},
-  {"tool_name": "write", "duration_ms": 45}
-]
-```
-
-### Table
-
-```bash
-wink query ./bundle.zip "SELECT tool_name, duration_ms FROM tool_calls" --table
-```
-
-```
-┌───────────┬─────────────┐
-│ tool_name │ duration_ms │
-├───────────┼─────────────┤
-│ read_file │ 12          │
-│ write     │ 45          │
-└───────────┴─────────────┘
-```
-
-## SQL Functions
-
-Only SQLite built-in functions are available. Key functions for bundle analysis:
-
-| Function | Example |
-|----------|---------|
-| `json_extract(col, path)` | `json_extract(context, '$.tool_name')` |
-| `json_array_length(col)` | `json_array_length(steps)` |
-| `json_each(col)` | `SELECT * FROM json_each(steps)` |
-| `instr(str, substr)` | `instr(message, 'timeout')` |
-| `substr(str, start, len)` | `substr(traceback, 1, 500)` |
-
 ## Example Queries
 
 ```sql
--- Find all errors
+-- Errors
 SELECT error_type, message FROM errors
 
 -- Tool performance
 SELECT tool_name, COUNT(*) as calls, AVG(duration_ms) as avg_ms
-FROM tool_calls GROUP BY tool_name ORDER BY calls DESC
+FROM tool_calls GROUP BY tool_name
 
 -- Failed tools
 SELECT tool_name, error_code, params FROM tool_calls WHERE success = 0
@@ -284,85 +121,74 @@ SELECT tool_name, error_code, params FROM tool_calls WHERE success = 0
 -- Error logs
 SELECT timestamp, message FROM logs WHERE level = 'ERROR'
 
--- Extract from JSON context
-SELECT json_extract(context, '$.request_id') as req_id FROM logs LIMIT 5
+-- JSON extraction
+SELECT json_extract(context, '$.tool_name') FROM logs
 
--- Session state types
-SELECT slice_type, COUNT(*) as items FROM session_slices GROUP BY slice_type
-
--- Search file contents
-SELECT path FROM files WHERE content LIKE '%TODO%'
-
--- Token usage and timing
+-- Token usage
 SELECT input_tokens, output_tokens, total_ms FROM metrics
 
--- Execution context
-SELECT request_id, session_id FROM run_context
+-- Session state
+SELECT slice_type, COUNT(*) FROM session_slices GROUP BY slice_type
+
+-- File search
+SELECT path FROM files WHERE content LIKE '%TODO%'
 ```
 
 ## Caching
 
-On first query, the bundle is parsed and loaded into a SQLite database file:
+Bundle is parsed once and cached as SQLite:
 
 ```
-./bundle.zip           → input bundle
-./bundle.zip.sqlite    → cached SQLite database
+./bundle.zip           → input
+./bundle.zip.sqlite    → cache
 ```
 
-Subsequent queries use the cached database directly. The cache is invalidated
-if the bundle's modification time is newer than the cache file.
+Cache invalidated when bundle mtime > cache mtime.
 
-**Cache location:** Same directory as the input bundle.
-
-## Implementation Notes
+## Implementation
 
 ### Database Creation
 
-1. Extract bundle to temp directory (or read from zip directly)
-1. Create SQLite database at `<bundle-path>.sqlite`
-1. Create tables and insert data:
-   - Parse `manifest.json` → `manifest` table
-   - Parse `logs/app.jsonl` → `logs` table
-   - Parse `session/after.jsonl` → `session_slices` table + dynamic `slice_*` tables
-   - Derive `tool_calls` from logs (filter by event type)
-   - Derive `errors` from logs + `error.json` + failed tool calls
-   - Parse `config.json` → `config` table (flattened)
-   - Parse `metrics.json` → `metrics` table
-   - Parse `run_context.json` → `run_context` table
-   - Parse `prompt_overrides.json` → `prompt_overrides` table (if present)
-   - Parse `eval.json` → `eval` table (if present)
-   - Read `filesystem/` → `files` table
-1. Execute query against database
-1. Return results as JSON or table
-
-### Dynamic Slice Tables
-
-For each unique `__type__` in `session/after.jsonl`:
-
-1. Normalize type name: `myapp.state:AgentPlan` → `slice_agentplan`
-1. Infer columns from first item's JSON keys
-1. Create table with inferred schema
-1. Insert all items of that type
+1. Check cache validity (mtime comparison)
+1. If stale/missing, create SQLite at `<bundle>.sqlite`:
+   - `manifest.json` → `manifest`
+   - `logs/app.jsonl` → `logs`
+   - `session/after.jsonl` → `session_slices` + `slice_*`
+   - `config.json` → `config` (flattened)
+   - `metrics.json` → `metrics`
+   - `run_context.json` → `run_context`
+   - `filesystem/` → `files`
+   - Derive `tool_calls` from logs
+   - Derive `errors` from logs + `error.json` + failed tools
+   - Optional: `prompt_overrides.json`, `eval.json`
+1. Execute query
+1. Return JSON or table
 
 ### Error Aggregation
 
-The `errors` table combines:
+`errors` table combines:
 
 - Log entries where `level = 'ERROR'`
-- Contents of `error.json` (if present)
+- `error.json` contents (if present)
 - Tool calls where `success = 0`
 
-Each row includes `source` column indicating origin.
+Each row has `source` column indicating origin.
+
+### Dynamic Slice Tables
+
+For each `__type__` in session JSONL:
+
+1. Normalize: `myapp.state:AgentPlan` → `slice_agentplan`
+1. Infer columns from JSON keys
+1. Create table, insert items
 
 ## Limitations
 
-- **Single bundle**: No multi-bundle queries
-- **Read-only**: Cannot modify bundle contents
-- **SQLite built-ins only**: No custom functions
-- **Memory**: Entire bundle loaded into SQLite on first query
+- Single bundle only
+- SQLite built-in functions only
+- Entire bundle loaded on first query
 
 ## Related Specifications
 
-- `specs/DEBUG_BUNDLE.md` - Bundle format and contents
-- `specs/SESSIONS.md` - Session state structure
-- `specs/SLICES.md` - Slice storage and types
+- `specs/DEBUG_BUNDLE.md` - Bundle format
+- `specs/SESSIONS.md` - Session state
