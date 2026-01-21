@@ -215,22 +215,43 @@ Disabled skills are not copied to the agent's skill directory.
 
 ### Name Override
 
-Override the skill name when mounting:
+Override the skill name when mounting. This is primarily useful for **file skills**
+where there's no directory name constraint:
 
 ```python nocheck
 SkillMount(
-    source=Path("./skills/my-cool-skill-v2"),
-    name="my-cool-skill",  # Mount as "my-cool-skill" instead
+    source=Path("./skills/code-reviewer.md"),
+    name="code-review",  # Mount as "code-review" instead of "code-reviewer"
 )
 ```
 
+For directory skills, the `name` field in SKILL.md must match the source
+directory name to pass validation. If you need to mount a directory skill under
+a different name, you must disable validation:
+
+```python nocheck
+# Directory skill with name override requires disabling validation
+SkillMount(
+    source=Path("./skills/my-cool-skill-v2"),
+    name="my-cool-skill",
+)
+# ...
+SkillConfig(skills=(...), validate_on_mount=False)
+```
+
+This is not recommended for external or untrusted skills.
+
 ### Disable Validation
 
-Skip validation for trusted skills (not recommended for external sources):
+Skip validation for trusted skills:
 
 ```python nocheck
 SkillConfig(skills=(...), validate_on_mount=False)
 ```
+
+Use this when you control the skill source and need flexibility (e.g., name
+overrides for directory skills). Avoid for external sources where validation
+catches malformed or potentially malicious skills.
 
 ## Complete Example
 
