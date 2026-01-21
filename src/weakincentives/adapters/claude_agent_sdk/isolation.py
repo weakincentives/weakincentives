@@ -810,8 +810,9 @@ class EphemeralHome:
         if sandbox.excluded_commands:
             settings["sandbox"]["excludedCommands"] = list(sandbox.excluded_commands)
 
-        if sandbox.allow_unsandboxed_commands:
-            settings["sandbox"]["allowUnsandboxedCommands"] = True
+        settings["sandbox"]["allowUnsandboxedCommands"] = (
+            sandbox.allow_unsandboxed_commands
+        )
 
         if sandbox.writable_paths:
             settings["sandbox"]["writablePaths"] = list(sandbox.writable_paths)
