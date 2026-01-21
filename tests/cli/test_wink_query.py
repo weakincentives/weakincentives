@@ -130,7 +130,7 @@ def _create_bundle_with_logs(target_dir: Path, log_file: Path) -> Path:
             logger.info(
                 "Tool executed",
                 extra={
-                    "event": "tool.call.execute",
+                    "event": "tool.execution.complete",
                     "context": {
                         "tool_name": "read_file",
                         "params": {"path": "/test.txt"},
@@ -697,12 +697,19 @@ class TestExtractToolCall:
 class TestIsToolEvent:
     """Tests for _is_tool_event helper function."""
 
+    def test_tool_execution_events(self) -> None:
+        from weakincentives.cli.query import _is_tool_event
+
+        # Actual event names from tool_executor
+        assert _is_tool_event("tool.execution.start") is True
+        assert _is_tool_event("tool.execution.complete") is True
+
     def test_tool_call_event(self) -> None:
         from weakincentives.cli.query import _is_tool_event
 
+        # Alternative event formats
         assert _is_tool_event("tool.call.start") is True
         assert _is_tool_event("tool.result.end") is True
-        assert _is_tool_event("tool.execute.done") is True
 
     def test_not_tool_event(self) -> None:
         from weakincentives.cli.query import _is_tool_event
@@ -840,6 +847,20 @@ class TestQueryDatabaseEdgeCases:
         schema = db.get_schema()
         assert len(schema.tables) > 0
         db.close()
+
+    def test_connection_reused(self, tmp_path: Path) -> None:
+        """Test that connection is reused when already open."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            # First query opens connection
+            results1 = db.execute_query("SELECT * FROM manifest")
+            # Second query should reuse existing connection
+            results2 = db.execute_query("SELECT * FROM manifest")
+            assert results1 == results2
+        finally:
+            db.close()
 
 
 class TestFlattenJsonTopLevelList:
@@ -1320,7 +1341,7 @@ class TestToolCallExtraction:
                     {
                         "timestamp": "2024-01-01T00:00:00Z",
                         "level": "INFO",
-                        "event": "tool.call.execute",
+                        "event": "tool.execution.complete",
                         "context": {
                             "tool_name": "read_file",
                             "params": {"path": "/test.txt"},
@@ -1379,7 +1400,7 @@ class TestFailedToolCallErrors:
             {
                 "timestamp": "2024-01-01T00:00:00Z",
                 "level": "INFO",
-                "event": "tool.call.execute",
+                "event": "tool.execution.complete",
                 "context": {
                     "tool_name": "write_file",
                     "error": "Permission denied",
@@ -1530,7 +1551,7 @@ class TestToolEventWithoutToolName:
             {
                 "timestamp": "2024-01-01T00:00:00Z",
                 "level": "INFO",
-                "event": "tool.call.execute",
+                "event": "tool.execution.complete",
                 "context": {"params": {"path": "/test.txt"}},  # No tool_name
             }
         )

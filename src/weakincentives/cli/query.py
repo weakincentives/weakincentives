@@ -24,11 +24,13 @@ import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, override
 
 from ..dataclasses import FrozenDataclass
+from ..dbc import pure
 from ..debug.bundle import BundleValidationError, DebugBundle
 from ..errors import WinkError
+from ..resources.protocols import Closeable
 from ..types import JSONValue
 
 
@@ -75,6 +77,7 @@ class SchemaOutput:
         return json.dumps(dump(self), indent=2)
 
 
+@pure
 def _normalize_slice_type(type_name: str) -> str:
     """Normalize a slice type name to a valid table name.
 
@@ -90,6 +93,7 @@ def _normalize_slice_type(type_name: str) -> str:
     return f"slice_{type_name.lower()}"
 
 
+@pure
 def _flatten_json(
     obj: JSONValue, prefix: str = "", sep: str = "_"
 ) -> dict[str, JSONValue]:
@@ -117,6 +121,7 @@ def _flatten_json(
     return result
 
 
+@pure
 def _infer_sqlite_type(value: object) -> str:
     """Infer SQLite type from Python value."""
     if value is None:
@@ -130,6 +135,7 @@ def _infer_sqlite_type(value: object) -> str:
     return "TEXT"
 
 
+@pure
 def _json_to_sql_value(value: JSONValue) -> object:
     """Convert JSON value to SQL-compatible value."""
     if value is None:
@@ -142,11 +148,17 @@ def _json_to_sql_value(value: JSONValue) -> object:
     return json.dumps(value)
 
 
+@pure
 def _is_tool_event(event: str) -> bool:
-    """Check if an event string represents a tool call event."""
+    """Check if an event string represents a tool call event.
+
+    Matches events like:
+    - tool.execution.start, tool.execution.complete (actual log events)
+    - tool.call.*, tool.result.* (alternative formats)
+    """
     event_lower = event.lower()
     return "tool" in event_lower and (
-        "call" in event_lower or "result" in event_lower or "execute" in event_lower
+        "call" in event_lower or "result" in event_lower or "execution" in event_lower
     )
 
 
@@ -359,12 +371,22 @@ def _insert_session_slice(
     slices_by_type[slice_type].append(item)
 
 
-class QueryDatabase:
-    """Builds and manages SQLite database from a debug bundle."""
+class QueryDatabase(Closeable):
+    """Builds and manages SQLite database from a debug bundle.
+
+    This class implements the Closeable protocol for proper resource management.
+
+    Note: For very large bundles (100MB+), all data is loaded into memory during
+    build. Consider this limitation when working with large debug captures.
+
+    The database is opened in read-only mode after building to prevent
+    accidental modification of the cached data.
+    """
 
     _bundle: DebugBundle
     _db_path: Path
     _conn: sqlite3.Connection | None
+    _built: bool
 
     def __init__(self, bundle: DebugBundle, db_path: Path) -> None:
         """Initialize query database.
@@ -377,23 +399,41 @@ class QueryDatabase:
         self._bundle = bundle
         self._db_path = db_path
         self._conn = None
+        self._built = False
 
     @property
     def connection(self) -> sqlite3.Connection:
-        """Get database connection, opening if needed."""
+        """Get database connection, opening if needed.
+
+        Opens in read-only mode if database is already built.
+        """
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self._db_path))
+            if self._built and self._db_path.exists():
+                # Open in read-only mode after building
+                uri = f"file:{self._db_path}?mode=ro"
+                self._conn = sqlite3.connect(uri, uri=True)
+            else:
+                self._conn = sqlite3.connect(str(self._db_path))
             self._conn.row_factory = sqlite3.Row
         return self._conn
 
+    @override
     def close(self) -> None:
         """Close database connection."""
         if self._conn is not None:
             self._conn.close()
             self._conn = None
 
+    def mark_built(self) -> None:
+        """Mark database as built for read-only mode on next connection."""
+        self._built = True
+
     def build(self) -> None:
-        """Build SQLite database from bundle contents."""
+        """Build SQLite database from bundle contents.
+
+        Note: Loads all bundle data into memory. For bundles over 100MB,
+        this may consume significant memory.
+        """
         conn = self.connection
 
         # Core tables
@@ -412,6 +452,10 @@ class QueryDatabase:
         self._build_eval_table(conn)
 
         conn.commit()
+
+        # Mark as built and reopen in read-only mode
+        self._built = True
+        self.close()  # Close so next access reopens in read-only mode
 
     def _build_manifest_table(self, conn: sqlite3.Connection) -> None:
         """Build manifest table from manifest.json."""
@@ -825,6 +869,7 @@ class QueryDatabase:
             raise QueryError(f"SQL error: {e}") from e
 
 
+@pure
 def _get_table_description(table_name: str) -> str:
     """Get description for a table by name."""
     descriptions = {
@@ -881,10 +926,14 @@ def open_query_database(bundle_path: Path) -> QueryDatabase:
         if cache_path.exists():
             cache_path.unlink()
         db.build()
+    else:
+        # Cache is valid, mark as built for read-only mode
+        db.mark_built()
 
     return db
 
 
+@pure
 def format_as_table(rows: Sequence[Mapping[str, Any]]) -> str:
     """Format query results as ASCII table."""
     if not rows:
@@ -923,6 +972,7 @@ def format_as_table(rows: Sequence[Mapping[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+@pure
 def format_as_json(rows: Sequence[Mapping[str, Any]]) -> str:
     """Format query results as JSON."""
     # Convert to list of plain dicts for JSON serialization
