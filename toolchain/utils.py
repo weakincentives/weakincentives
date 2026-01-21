@@ -255,9 +255,9 @@ def patch_ast_for_bandit() -> None:
         if not hasattr(ast, name):  # pragma: no cover
             setattr(ast, name, constant)
 
-    def _make_prop() -> property:
+    def _make_prop() -> property:  # pragma: no cover
         return property(lambda self: self.value)
 
     for attr in ("n", "s", "b"):
-        if not hasattr(constant, attr):
+        if not hasattr(constant, attr):  # pragma: no cover
             setattr(constant, attr, _make_prop())

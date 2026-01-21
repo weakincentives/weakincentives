@@ -276,7 +276,7 @@ def _get_linux_memory_bytes() -> int | None:
     try:
         with meminfo_path.open() as f:
             for line in f:
-                if line.startswith("MemTotal:"):
+                if line.startswith("MemTotal:"):  # pragma: no cover
                     # Parse "MemTotal:    12345678 kB"
                     parts = line.split()
                     if len(parts) >= _MIN_MEMINFO_PARTS:

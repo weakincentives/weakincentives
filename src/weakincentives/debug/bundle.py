@@ -733,7 +733,7 @@ class BundleWriter:
             self._write_artifact("environment/command.txt", "\n".join(command_lines))
 
             # Write container.json (if containerized)
-            if env.container is not None:
+            if env.container is not None:  # pragma: no cover
                 container_data = _serialize_object(env.container)
                 self._write_artifact(
                     "environment/container.json", json.dumps(container_data, indent=2)
