@@ -92,6 +92,7 @@ debug issues when they arise.
 
 | Guide | What You'll Learn |
 | --- | --- |
+| [Errors and Exceptions](errors-and-exceptions.md) | Exception hierarchy and ToolResult patterns |
 | [Recipes](recipes.md) | Common patterns for code review, Q&A, and patching agents |
 | [Troubleshooting](troubleshooting.md) | Debug common errors and issues |
 | [API Reference](api-reference.md) | Quick lookup for key types and functions |
