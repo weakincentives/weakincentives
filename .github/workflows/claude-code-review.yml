@@ -27,7 +27,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: read
       id-token: write
 
     steps:
@@ -36,59 +35,42 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Hide previous Claude reviews
+      - name: Minimize previous Claude reviews
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Get all comments on the PR and find ones from github-actions bot
-          # that look like Claude reviews (contain review-like content)
           PR_NUMBER=${{ github.event.pull_request.number }}
-          REPO=${{ github.repository }}
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
 
-          # Fetch all issue comments on the PR
+          # Fetch comments and minimize those with the claude-review marker
           COMMENTS=$(gh api graphql -f query='
             query($owner: String!, $repo: String!, $pr: Int!) {
               repository(owner: $owner, name: $repo) {
                 pullRequest(number: $pr) {
                   comments(first: 100) {
-                    nodes {
-                      id
-                      author {
-                        login
-                      }
-                      body
-                      isMinimized
-                    }
+                    nodes { id body isMinimized }
                   }
                 }
               }
             }
-          ' -f owner="${REPO%/*}" -f repo="${REPO#*/}" -F pr="$PR_NUMBER")
+          ' -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER" 2>/dev/null) || exit 0
 
-          # Extract comment IDs from github-actions bot that appear to be Claude reviews
-          # and are not already minimized
-          COMMENT_IDS=$(echo "$COMMENTS" | jq -r '
+          echo "$COMMENTS" | jq -r '
             .data.repository.pullRequest.comments.nodes[]
-            | select(.author.login == "github-actions")
             | select(.isMinimized == false)
-            | select(.body | test("Code quality|Potential bugs|Performance|Security|review"; "i"))
+            | select(.body | contains("<!-- claude-review -->"))
             | .id
-          ')
-
-          # Minimize each identified comment
-          for COMMENT_ID in $COMMENT_IDS; do
-            if [ -n "$COMMENT_ID" ]; then
-              echo "Minimizing comment: $COMMENT_ID"
-              gh api graphql -f query='
-                mutation($id: ID!) {
-                  minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) {
-                    minimizedComment {
-                      isMinimized
-                    }
-                  }
+          ' | while read -r ID; do
+            [ -z "$ID" ] && continue
+            echo "Minimizing: $ID"
+            gh api graphql -f query='
+              mutation($id: ID!) {
+                minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) {
+                  minimizedComment { isMinimized }
                 }
-              ' -f id="$COMMENT_ID" || echo "Failed to minimize comment $COMMENT_ID"
-            fi
+              }
+            ' -f id="$ID" 2>/dev/null || true
           done
 
       - name: Run Claude Code Review
@@ -97,21 +79,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
 
-            Please review this pull request and provide feedback on:
-            - Code quality and best practices
-            - Potential bugs or issues
-            - Performance considerations
-            - Security concerns
-            - Test coverage
+            Focus only on significant issues: bugs, security vulnerabilities, or major design problems. Skip minor style issues and nitpicks. If there are no significant issues, say so briefly.
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            Post a concise review using `gh pr comment`. Start your comment with `<!-- claude-review -->` (hidden marker for automation).
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
-
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
-
+          claude_args: '--allowed-tools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"'
