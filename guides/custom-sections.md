@@ -10,18 +10,19 @@ This guide explains when and how to create custom section types.
 
 ## When to Create Custom Sections
 
-Use `MarkdownSection` when:
+Use `MarkdownSection` directly when:
 
 - Your content is static or uses simple `${placeholder}` substitution
-- You don't need to inject tools or resources
+- Tools can be defined inline without complex initialization
 - Progressive disclosure (summary/full) with templates is sufficient
+- Resources don't require session-bound lifecycle management
 
 Create a custom section when:
 
-- You need to attach tools and contribute resources
-- Content depends on session state and must be computed at render time
-- You need control over rendering logic beyond template substitution
-- You want to encapsulate related tools, resources, and instructions together
+- Content must be computed dynamically from session state at render time
+- Tools require session access or complex initialization logic
+- You need a custom `clone()` to manage session-bound state
+- You want to encapsulate reusable tool suites with their own setup
 
 ## The Section Hierarchy
 
