@@ -28,7 +28,6 @@ Authorization: Basic dXNlcjpwYXNz
   "budget": {"max_iterations": 100},
   "deadline": "2024-01-15T12:00:00Z",
   "request_id": "client-provided-id",
-  "resources": {},
   "experiment": "exp-001"
 }
 ```
@@ -39,7 +38,6 @@ Authorization: Basic dXNlcjpwYXNz
 | `budget` | `BudgetSpec` | No | Override default budget |
 | `deadline` | `string` | No | ISO 8601 deadline |
 | `request_id` | `string` | No | Client ID (generated if omitted) |
-| `resources` | `object` | No | Resource overrides |
 | `experiment` | `string` | No | Experiment identifier |
 
 **Response:**
