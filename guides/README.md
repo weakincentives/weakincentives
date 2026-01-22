@@ -24,6 +24,7 @@ debug issues when they arise.
 ### For Production Deployments
 
 1. [Claude Agent SDK](claude-agent-sdk.md) - Recommended adapter for production
+1. [Skills Authoring](skills-authoring.md) - Create and mount custom skills
 1. [Orchestration](orchestration.md) - Handle requests at scale
 1. [Lifecycle](lifecycle.md) - Health checks, shutdown, watchdogs
 1. [Debugging](debugging.md) - Inspect and troubleshoot sessions
@@ -59,6 +60,7 @@ debug issues when they arise.
 | --- | --- |
 | [Adapters](adapters.md) | Connect to OpenAI, LiteLLM, and Claude Agent SDK |
 | [Claude Agent SDK](claude-agent-sdk.md) | Production integration with Claude Code's native tooling |
+| [Skills Authoring](skills-authoring.md) | Create and mount custom skills for Claude Code |
 
 ## Production Patterns
 
