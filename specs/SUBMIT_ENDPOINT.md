@@ -28,12 +28,16 @@ Authorization: Basic dXNlcjpwYXNz
   "budget": {"max_iterations": 100},
   "deadline": "2024-01-15T12:00:00Z",
   "request_id": "client-provided-id",
+  "reply_to": "client-results-abc123",
   "experiment": {
     "name": "v2-concise-prompts",
     "overrides_tag": "v2",
-    "flags": {"verbose_logging": true},
-    "owner": "alice@example.com",
-    "description": "Test shorter prompt phrasing"
+    "flags": {"verbose_logging": true}
+  },
+  "debug_bundle": {
+    "target": "/var/bundles",
+    "max_file_size": 10000000,
+    "compression": "deflate"
   }
 }
 ```
@@ -44,7 +48,9 @@ Authorization: Basic dXNlcjpwYXNz
 | `budget` | `BudgetSpec` | No | Override default budget |
 | `deadline` | `string` | No | ISO 8601 deadline |
 | `request_id` | `string` | No | Client ID (generated if omitted) |
+| `reply_to` | `string` | No | Mailbox identifier for result delivery |
 | `experiment` | `Experiment` | No | Experiment config (see below) |
+| `debug_bundle` | `BundleConfig` | No | Debug bundle config (see below) |
 
 #### Experiment
 
@@ -55,6 +61,15 @@ Authorization: Basic dXNlcjpwYXNz
 | `flags` | `object` | No | Feature flags (string keys, primitive values) |
 | `owner` | `string` | No | Owner identifier |
 | `description` | `string` | No | Human-readable description |
+
+#### BundleConfig
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `target` | `string` | No | Output directory for bundles (null disables) |
+| `max_file_size` | `int` | No | Skip files larger than this (default: 10MB) |
+| `max_total_size` | `int` | No | Max filesystem capture size (default: 50MB) |
+| `compression` | `string` | No | Zip compression: "deflate", "stored", "bzip2", "lzma" |
 
 **Response:**
 
@@ -79,6 +94,24 @@ Content-Type: application/json
 | 401 | Missing or invalid Authorization header |
 | 413 | Request body exceeds `request_body_limit` |
 | 503 | Mailbox unavailable or full |
+
+## Reply Delivery
+
+When `reply_to` is provided, MainLoop workers send `MainLoopResult` to the
+specified mailbox after processing. The identifier is resolved via
+`MailboxResolver` configured on the worker.
+
+**Client responsibilities:**
+
+1. Create a mailbox accessible to workers (e.g., `RedisMailbox`)
+2. Provide mailbox name as `reply_to`
+3. Poll the mailbox for results, keyed by `request_id`
+
+**Without `reply_to`:** Fire-and-forget. Results must be collected via
+side-channel (e.g., workers write to database).
+
+**Note:** This requires workers and clients share a `MailboxResolver` that can
+resolve the `reply_to` identifier. See `specs/MAILBOX.md` for resolver patterns.
 
 ## Configuration
 
@@ -108,12 +141,18 @@ BasicAuthConfig(
 
 ## Limitations
 
-- **Fire-and-forget**: No result tracking; clients collect results separately
+- **No idempotency**: Duplicate `request_id` submissions create duplicate messages
 - **No cancellation**: Once submitted, requests cannot be cancelled
 - **No batching**: One request per HTTP call
-- **Single mailbox**: One endpoint routes to one mailbox
+- **Single mailbox**: One endpoint routes to one request mailbox
+- **Resolver required**: `reply_to` requires shared `MailboxResolver` between endpoint and workers
+
+## Future Work
+
+- **Idempotency**: Deduplicate by `request_id` with configurable window
 
 ## Related Specifications
 
 - `specs/MAIN_LOOP.md` - Request processing
-- `specs/MAILBOX.md` - Queue protocol and delivery guarantees
+- `specs/MAILBOX.md` - Queue protocol, delivery guarantees, and resolver patterns
+- `specs/DEBUG_BUNDLE.md` - Debug bundle capture
