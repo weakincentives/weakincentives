@@ -25,6 +25,8 @@ from . import (
     message_handlers,
     session,
     watchdog,
+    webhook_loop,
+    webhook_loop_types,
 )
 from .dlq import (
     DeadLetter,
@@ -107,6 +109,16 @@ from .watchdog import (
     Heartbeat,
     Watchdog,
 )
+from .webhook_loop import WebhookLoop
+from .webhook_loop_types import (
+    HTTPClient,
+    HTTPClientError,
+    HTTPResponse,
+    WebhookDelivery,
+    WebhookLoopConfig,
+    WebhookLoopResult,
+    WebhookRoute,
+)
 
 __all__ = [
     "DEFAULT_SNAPSHOT_POLICIES",
@@ -120,6 +132,9 @@ __all__ = [
     "DispatchResult",
     "Dispatcher",
     "FakeMailbox",
+    "HTTPClient",
+    "HTTPClientError",
+    "HTTPResponse",
     "HandlerFailure",
     "HealthServer",
     "Heartbeat",
@@ -165,6 +180,11 @@ __all__ = [
     "ToolInvoked",
     "TypedReducer",
     "Watchdog",
+    "WebhookDelivery",
+    "WebhookLoop",
+    "WebhookLoopConfig",
+    "WebhookLoopResult",
+    "WebhookRoute",
     "append_all",
     "build_reducer_context",
     "configure_logging",
@@ -187,6 +207,8 @@ __all__ = [
     "upsert_by",
     "wait_until",
     "watchdog",
+    "webhook_loop",
+    "webhook_loop_types",
 ]
 
 
