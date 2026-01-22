@@ -7,6 +7,8 @@ messages to a worker pool without requiring clients to understand Mailbox
 internals. Enables load balancer placement in front of workers for horizontal
 scaling and simplified client integration.
 
+**Promise:** Request durably persisted in mailbox. Nothing more.
+
 **Implementation:** `src/weakincentives/runtime/submit_endpoint.py` (proposed)
 
 ## Principles
@@ -14,7 +16,7 @@ scaling and simplified client integration.
 - **HTTP-native**: Standard REST semantics; clients use any HTTP library
 - **Mailbox-agnostic**: Clients submit requests; endpoint handles queue routing
 - **Optional auth**: Basic authentication for multi-tenant and untrusted networks
-- **Fire-and-forget or sync**: Async submission with callback or blocking response
+- **Fire-and-forget**: Confirm durable persistence; no result tracking
 - **Load-balancer friendly**: Stateless design; any instance can accept requests
 - **Minimal surface**: Single endpoint; complexity lives in MainLoop workers
 
@@ -37,8 +39,6 @@ HTTP server accepting MainLoop requests and routing to configured mailbox.
 | `host` | `str` | `"0.0.0.0"` | Bind address |
 | `port` | `int` | `8081` | Listen port |
 | `auth` | `BasicAuthConfig \| None` | `None` | Optional basic auth |
-| `response_mode` | `ResponseMode` | `ASYNC` | Async or sync response |
-| `sync_timeout` | `float` | `300.0` | Max wait for sync responses |
 | `request_body_limit` | `int` | `1048576` | Max request body (1MB) |
 
 ### BasicAuthConfig
@@ -48,14 +48,6 @@ HTTP server accepting MainLoop requests and routing to configured mailbox.
 | `username` | `str` | Required username |
 | `password` | `str` | Required password (use secrets in production) |
 | `realm` | `str` | HTTP realm for 401 response (default: "weakincentives") |
-
-### ResponseMode
-
-| Value | Description |
-|-------|-------------|
-| `ASYNC` | Return 202 Accepted with request_id immediately |
-| `SYNC` | Block until MainLoopResult available, return in response |
-| `CALLBACK` | Return 202 Accepted; POST result to callback URL |
 
 ### SubmitRequest
 
@@ -67,7 +59,6 @@ Client-facing request schema (JSON):
 | `budget` | `BudgetSpec` | No | Override default budget |
 | `deadline` | `string` | No | ISO 8601 deadline |
 | `request_id` | `string` | No | Client-provided ID (generated if omitted) |
-| `callback_url` | `string` | No | URL for CALLBACK mode results |
 | `resources` | `object` | No | Resource overrides |
 | `experiment` | `string` | No | Experiment identifier |
 
@@ -77,9 +68,8 @@ Response schema (JSON):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `request_id` | `string` | Request identifier for tracking |
-| `status` | `string` | `"accepted"`, `"completed"`, or `"failed"` |
-| `result` | `object \| null` | MainLoopResult (sync mode only) |
+| `request_id` | `string` | Request identifier for correlation |
+| `status` | `string` | `"accepted"` on success |
 | `error` | `string \| null` | Error message if submission failed |
 
 ## HTTP API
@@ -105,7 +95,7 @@ Authorization: Basic dXNlcjpwYXNz
 }
 ```
 
-**Response (ASYNC mode):**
+**Response (success):**
 
 ```http
 HTTP/1.1 202 Accepted
@@ -117,40 +107,8 @@ Content-Type: application/json
 }
 ```
 
-**Response (SYNC mode):**
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{
-  "request_id": "req_abc123",
-  "status": "completed",
-  "result": {
-    "request_id": "req_abc123",
-    "output": {...},
-    "session_id": "sess_xyz",
-    "completed_at": "2024-01-15T11:55:00Z"
-  }
-}
-```
-
-### GET /submit/status/{request_id}
-
-Check status of submitted request (optional, for ASYNC mode).
-
-**Response:**
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{
-  "request_id": "req_abc123",
-  "status": "pending" | "processing" | "completed" | "failed",
-  "result": {...}  // if completed
-}
-```
+202 confirms the request is durably persisted in the mailbox. The client can
+trust the request will be processed (subject to mailbox delivery guarantees).
 
 ### Error Responses
 
@@ -161,7 +119,6 @@ Content-Type: application/json
 | 413 | Request body exceeds limit |
 | 429 | Rate limit exceeded (if configured) |
 | 503 | Mailbox unavailable or queue full |
-| 504 | Sync timeout exceeded |
 
 ## Architecture
 
@@ -190,35 +147,11 @@ Content-Type: application/json
 1. Client POSTs to any SubmitEndpoint instance via load balancer
 2. SubmitEndpoint validates request and auth
 3. SubmitEndpoint constructs `MainLoopRequest` and sends to mailbox
-4. Response depends on mode:
-   - **ASYNC**: Return 202 immediately with request_id
-   - **SYNC**: Create ephemeral reply mailbox, wait for result, return
-   - **CALLBACK**: Return 202, POST result to callback_url when complete
+4. Mailbox confirms durable persistence
+5. Return 202 Accepted with request_id
 
-### Sync Mode Implementation
-
-For SYNC responses, SubmitEndpoint:
-
-1. Creates ephemeral reply mailbox with unique name
-2. Sends request with `reply_to` pointing to ephemeral mailbox
-3. Polls reply mailbox until result or timeout
-4. Returns result in HTTP response
-5. Cleans up ephemeral mailbox
-
-```python
-reply_mailbox = RedisMailbox(name=f"reply-{request_id}", client=redis, ttl=600)
-requests.send(main_loop_request, reply_to=reply_mailbox)
-messages = reply_mailbox.receive(wait_time_seconds=sync_timeout)
-```
-
-### Callback Mode Implementation
-
-For CALLBACK mode:
-
-1. Background worker monitors reply mailboxes
-2. On result arrival, POST to registered callback_url
-3. Retry with exponential backoff on failure
-4. Dead-letter after max retries
+The endpoint returns only after the mailbox confirms persistence. If the
+mailbox write fails, the client receives an error and can retry.
 
 ## Authentication
 
@@ -340,19 +273,6 @@ endpoint = SubmitEndpoint(
 )
 ```
 
-### Synchronous Mode
-
-```python
-endpoint = SubmitEndpoint(
-    requests=requests_mailbox,
-    config=SubmitEndpointConfig(
-        port=8081,
-        response_mode=ResponseMode.SYNC,
-        sync_timeout=60.0,
-    ),
-)
-```
-
 ### Client Usage (Python)
 
 ```python
@@ -366,6 +286,7 @@ response = httpx.post(
         "deadline": "2024-01-15T12:00:00Z",
     },
 )
+response.raise_for_status()  # 202 = persisted
 result = response.json()
 print(f"Request ID: {result['request_id']}")
 ```
@@ -379,9 +300,9 @@ curl -X POST https://submit.example.com/submit \
   -d '{"request": {"task": "analyze", "input": "..."}}'
 ```
 
-## Request Tracking
+## Request ID
 
-### Request ID Generation
+### Generation
 
 If client omits `request_id`, endpoint generates UUID v4:
 
@@ -391,49 +312,27 @@ request_id = request.get("request_id") or str(uuid4())
 
 ### Correlation
 
-Request ID propagates through:
+Request ID propagates through the system for debugging:
 
 1. `SubmitResponse.request_id` - Returned to client
 2. `MainLoopRequest.request_id` - In mailbox message
 3. `MainLoopResult.request_id` - In worker response
-4. Structured logs - For debugging
+4. Structured logs - For tracing
 
-### Status Tracking (ASYNC mode)
-
-For status queries, maintain lightweight state:
-
-| Storage | Tradeoffs |
-|---------|-----------|
-| Redis | Shared state, TTL cleanup, extra dependency |
-| In-memory | Fast, but per-instance (needs sticky sessions) |
-| Mailbox peek | No extra storage, but limited visibility |
+Clients needing results must implement their own collection mechanism (e.g.,
+configure MainLoop workers to write results to a database or separate queue).
 
 ## Error Handling
-
-### Submission Errors
 
 | Error | HTTP Status | Action |
 |-------|-------------|--------|
 | Invalid JSON | 400 | Return error message |
+| Missing `request` field | 400 | Return field-level error |
 | Auth failure | 401 | Return WWW-Authenticate header |
+| Body too large | 413 | Return limit in error |
 | Mailbox full | 503 | Return Retry-After header |
-| Serialization | 400 | Return field-level errors |
-
-### Processing Errors
-
-Processing errors are returned in `MainLoopResult.error`, not HTTP errors:
-
-```json
-{
-  "request_id": "req_abc123",
-  "status": "completed",
-  "result": {
-    "request_id": "req_abc123",
-    "error": "Budget exceeded after 50 iterations",
-    "session_id": "sess_xyz"
-  }
-}
-```
+| Mailbox unavailable | 503 | Return Retry-After header |
+| Serialization failure | 400 | Return field-level errors |
 
 ## Observability
 
@@ -444,7 +343,6 @@ logger.info(
     "request_submitted",
     request_id=request_id,
     client=client_id,  # From auth
-    mode=response_mode,
 )
 ```
 
@@ -455,7 +353,6 @@ logger.info(
 | `wink_submit_requests_total` | Counter | Total submissions |
 | `wink_submit_latency_seconds` | Histogram | Submission latency |
 | `wink_submit_errors_total` | Counter | Submission errors by type |
-| `wink_submit_sync_timeout_total` | Counter | Sync mode timeouts |
 
 ### Health Integration
 
@@ -466,9 +363,8 @@ SubmitEndpoint exposes health via existing HealthServer:
 
 ## Limitations
 
-- **No request modification**: Once submitted, requests cannot be cancelled or modified
-- **Sync mode scaling**: Each sync request holds a connection; limit concurrent syncs
-- **Callback reliability**: Network failures may delay or lose callbacks
+- **Fire-and-forget only**: No result tracking; clients collect results separately
+- **No request modification**: Once submitted, requests cannot be cancelled
 - **No batching**: One request per HTTP call; batch at client level
 - **Basic auth only**: Token auth planned but not implemented
 - **Single mailbox**: One SubmitEndpoint routes to one request mailbox
