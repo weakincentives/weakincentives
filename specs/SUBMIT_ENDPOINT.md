@@ -28,7 +28,13 @@ Authorization: Basic dXNlcjpwYXNz
   "budget": {"max_iterations": 100},
   "deadline": "2024-01-15T12:00:00Z",
   "request_id": "client-provided-id",
-  "experiment": "exp-001"
+  "experiment": {
+    "name": "v2-concise-prompts",
+    "overrides_tag": "v2",
+    "flags": {"verbose_logging": true},
+    "owner": "alice@example.com",
+    "description": "Test shorter prompt phrasing"
+  }
 }
 ```
 
@@ -38,7 +44,17 @@ Authorization: Basic dXNlcjpwYXNz
 | `budget` | `BudgetSpec` | No | Override default budget |
 | `deadline` | `string` | No | ISO 8601 deadline |
 | `request_id` | `string` | No | Client ID (generated if omitted) |
-| `experiment` | `string` | No | Experiment identifier |
+| `experiment` | `Experiment` | No | Experiment config (see below) |
+
+#### Experiment
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | Yes | Unique experiment identifier |
+| `overrides_tag` | `string` | No | Prompt overrides tag (default: "latest") |
+| `flags` | `object` | No | Feature flags (string keys, primitive values) |
+| `owner` | `string` | No | Owner identifier |
+| `description` | `string` | No | Human-readable description |
 
 **Response:**
 
