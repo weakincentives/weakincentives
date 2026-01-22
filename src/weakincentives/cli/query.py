@@ -399,6 +399,7 @@ class QueryDatabase(Closeable):
     """
 
     _bundle: DebugBundle
+    _bundle_path: Path
     _db_path: Path
     _conn: sqlite3.Connection | None
     _built: bool
@@ -412,9 +413,21 @@ class QueryDatabase(Closeable):
         """
         super().__init__()
         self._bundle = bundle
+        # Derive bundle path from db_path (remove .sqlite suffix)
+        self._bundle_path = Path(str(db_path).removesuffix(".sqlite"))
         self._db_path = db_path
         self._conn = None
         self._built = False
+
+    @property
+    def bundle(self) -> DebugBundle:
+        """The underlying debug bundle."""
+        return self._bundle
+
+    @property
+    def bundle_path(self) -> Path:
+        """Path to the bundle zip file."""
+        return self._bundle_path
 
     @property
     def connection(self) -> sqlite3.Connection:
@@ -912,6 +925,33 @@ def _is_cache_valid(bundle_path: Path, cache_path: Path) -> bool:
     return cache_path.stat().st_mtime >= bundle_path.stat().st_mtime
 
 
+def resolve_bundle_path(path: Path) -> Path:
+    """Resolve a path to a bundle file.
+
+    If path is a directory, returns the most recently modified .zip file.
+    If path is a file, returns it directly.
+
+    Raises:
+        QueryError: If path is a directory with no bundles.
+    """
+    if path.is_dir():
+        candidates = sorted(
+            (p for p in path.glob("*.zip") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            msg = f"No bundles found in directory: {path}"
+            raise QueryError(msg)
+        return candidates[0]
+    return path
+
+
+def iter_bundle_files(root: Path) -> list[Path]:
+    """Find all bundle zip files in a directory."""
+    return [p for p in root.glob("*.zip") if p.is_file()]
+
+
 def open_query_database(bundle_path: Path) -> QueryDatabase:
     """Open or create a query database for a bundle.
 
@@ -919,7 +959,8 @@ def open_query_database(bundle_path: Path) -> QueryDatabase:
     reusing if valid (cache mtime >= bundle mtime).
 
     Args:
-        bundle_path: Path to the debug bundle zip file.
+        bundle_path: Path to the debug bundle zip file or directory.
+            If a directory, uses the most recently modified .zip file.
 
     Returns:
         QueryDatabase instance ready for queries.
@@ -927,16 +968,17 @@ def open_query_database(bundle_path: Path) -> QueryDatabase:
     Raises:
         QueryError: If bundle cannot be loaded.
     """
-    cache_path = bundle_path.with_suffix(bundle_path.suffix + ".sqlite")
+    resolved_path = resolve_bundle_path(bundle_path)
+    cache_path = resolved_path.with_suffix(resolved_path.suffix + ".sqlite")
 
     try:
-        bundle = DebugBundle.load(bundle_path)
+        bundle = DebugBundle.load(resolved_path)
     except BundleValidationError as e:
         raise QueryError(f"Failed to load bundle: {e}") from e
 
     db = QueryDatabase(bundle, cache_path)
 
-    if not _is_cache_valid(bundle_path, cache_path):
+    if not _is_cache_valid(resolved_path, cache_path):
         # Remove stale cache if exists
         if cache_path.exists():
             cache_path.unlink()
@@ -1003,5 +1045,7 @@ __all__ = [
     "TableInfo",
     "format_as_json",
     "format_as_table",
+    "iter_bundle_files",
     "open_query_database",
+    "resolve_bundle_path",
 ]

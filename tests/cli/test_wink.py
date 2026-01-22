@@ -120,7 +120,7 @@ def test_main_runs_debug_command(
     assert calls["logger_name"] == "weakincentives.cli.wink"
     bundle_store = calls["app_args"]["store"]
     assert isinstance(bundle_store, wink.debug_app.BundleStore)
-    assert bundle_store.meta.path == str(bundle_path)
+    assert str(bundle_store.path) == str(bundle_path)
     assert calls["app_args"]["logger"] == fake_logger
     assert calls["run_args"] == {
         "app": "app",
