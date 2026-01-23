@@ -2069,10 +2069,9 @@ select:focus-visible {
 }
 
 .filter-chip.excluded {
-  background: var(--color-danger);
-  color: white;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-danger);
   border-color: var(--color-danger);
-  text-decoration: line-through;
 }
 
 .filter-chip .chip-count {

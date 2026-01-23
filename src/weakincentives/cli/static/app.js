@@ -565,10 +565,14 @@ function createFilterChip(name, count, isIncluded, isExcluded, onToggle) {
   if (isExcluded) chip.classList.add("excluded");
 
   const displayName = name.split(".").pop() || name;
-  chip.innerHTML = `${escapeHtml(displayName)} <span class="chip-count">${count}</span>`;
-  chip.title = name;
+  let prefix = "";
+  if (isIncluded) prefix = "+ ";
+  if (isExcluded) prefix = "− ";
+  chip.innerHTML = `${prefix}${escapeHtml(displayName)} <span class="chip-count">${count}</span>`;
+  chip.title = `${name}\nClick: show only | Shift+click: hide`;
 
   chip.addEventListener("click", (e) => {
+    e.preventDefault();
     if (e.shiftKey) {
       // Shift+click to exclude
       onToggle(name, false, !isExcluded);
