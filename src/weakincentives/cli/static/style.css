@@ -2035,9 +2035,7 @@ select:focus-visible {
 .filter-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  max-height: 120px;
-  overflow-y: auto;
+  gap: 6px;
 }
 
 .filter-chip {

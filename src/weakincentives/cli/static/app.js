@@ -527,7 +527,7 @@ function updateLogsStats() {
 function renderLogFilterChips() {
   // Render logger chips
   elements.logsLoggerChips.innerHTML = "";
-  state.logsFacets.loggers.slice(0, 15).forEach((item) => {
+  state.logsFacets.loggers.forEach((item) => {
     const chip = createFilterChip(
       item.name,
       item.count,
@@ -542,7 +542,7 @@ function renderLogFilterChips() {
 
   // Render event chips
   elements.logsEventChips.innerHTML = "";
-  state.logsFacets.events.slice(0, 15).forEach((item) => {
+  state.logsFacets.events.forEach((item) => {
     const chip = createFilterChip(
       item.name,
       item.count,
