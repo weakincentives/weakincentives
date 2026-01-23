@@ -65,13 +65,174 @@ for X" is the same section that registers the tool.
 same outputs. You can write tests that assert on exact prompt text. DSPy's
 compiled prompts depend on optimizer state and training data.
 
+## WINK Strengths in Depth
+
+Beyond the philosophical differences, WINK offers several concrete capabilities
+that address common pain points in agent development:
+
+### Transactional Tool Execution
+
+Every tool call is wrapped in a transaction. If a tool fails, WINK automatically
+rolls back session state and filesystem changes to their pre-call state. No
+corrupted state, no defensive rollback code in every handler.
+
+```python nocheck
+# Tool fails halfway through? State is automatically restored.
+# No need for try/except blocks with manual cleanup.
+def risky_handler(params: Params, *, context: ToolContext) -> ToolResult[R]:
+    # If this raises, all state changes are rolled back
+    return ToolResult.ok(result)
+```
+
+### Visual Debug UI
+
+When something goes wrong, `wink debug` opens a local server that renders the
+full prompt/tool timeline. See exactly what was sent to the model, what tools
+were called, what they returned, and how state evolved.
+
+```bash
+wink debug debug_bundles/session.jsonl --port 8000
+```
+
+This is how you answer "why did the agent do X?"—not by adding print statements,
+but by inspecting the full execution trace.
+
+### Tool Policies
+
+Declarative constraints that govern when tools can be invoked. Instead of
+embedding validation logic in handlers, express constraints compositionally:
+
+```python nocheck
+from weakincentives.prompt import SequentialDependencyPolicy, ReadBeforeWritePolicy
+
+# Require 'test' before 'deploy'
+deploy_policy = SequentialDependencyPolicy(
+    dependencies={"deploy": frozenset({"test"})}
+)
+
+# Require reading a file before overwriting it
+read_first = ReadBeforeWritePolicy()
+```
+
+When a tool call violates a policy, WINK returns an error without executing the
+handler. The model learns to follow the constraints.
+
+### Budget and Deadline Controls
+
+Prevent runaway agents with explicit resource limits:
+
+```python nocheck
+from weakincentives import Budget, Deadline
+from datetime import timedelta
+
+response = adapter.evaluate(
+    prompt,
+    session=session,
+    deadline=Deadline.from_timeout(timedelta(minutes=5)),
+    budget=Budget(max_total_tokens=20_000),
+)
+```
+
+Token budgets and wall-clock deadlines are checked at key points throughout
+execution. When limits are exceeded, you get a clear exception.
+
+### Built-in Evaluation Framework
+
+EvalLoop wraps your MainLoop—same prompt templates, same tools, same adapters.
+Run evaluations against production code, not a separate test harness:
+
+```python nocheck
+from weakincentives.evals import EvalLoop, exact_match, tool_called, all_of
+
+# Combine output evaluation with behavioral assertions
+evaluator = all_of(
+    exact_match,                      # Output must match expected
+    tool_called("search"),            # Agent must have used search
+    token_usage_under(max_tokens=5000),  # Stay within budget
+)
+
+eval_loop = EvalLoop(loop=main_loop, evaluator=evaluator, requests=mailbox)
+```
+
+Session evaluators let you assert not just *what* the agent produced, but *how*
+it got there—tool usage patterns, token consumption, state invariants.
+
+### Progressive Disclosure
+
+Sections can default to summaries and expand on demand. Instead of stuffing
+everything into the prompt upfront, let the model request what it needs:
+
+```python nocheck
+section = MarkdownSection(
+    title="Reference Documentation",
+    key="docs",
+    template=full_documentation,
+    summary="Reference docs available. Use read_docs tool for details.",
+)
+```
+
+This keeps initial token counts low while giving the agent access to full
+context when needed.
+
+### Sandboxed Execution
+
+Out-of-the-box support for safe file operations:
+
+- **VFS tools**: In-memory virtual filesystem tracked as session state
+- **Podman sandbox**: OS-level isolation with network policies
+- **Claude Agent SDK adapter**: Native sandboxing via bubblewrap/seatbelt
+
+Mount host directories read-only; the sandbox prevents accidental writes.
+
+### Provider Portability
+
+Adapters make switching between providers straightforward. The same prompt
+template works with OpenAI, LiteLLM (for Bedrock, Vertex, etc.), or Claude:
+
+```python nocheck
+# Same prompt, different providers
+from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.adapters.litellm import LiteLLMAdapter
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+
+# Pick one—your agent definition stays the same
+adapter = OpenAIAdapter(model="gpt-4o")
+adapter = LiteLLMAdapter(model="bedrock/anthropic.claude-3-sonnet")
+adapter = ClaudeAgentSDKAdapter(model="claude-sonnet-4-5-20250929")
+```
+
+### Type Safety Everywhere
+
+Pyright strict mode is enforced. Params, tool calls, tool results, structured
+outputs, session state—all typed with dataclasses. Type mismatches surface at
+construction time, not when the model is mid-response.
+
 ## When to Use WINK Instead of DSPy
 
-- You need to inspect and understand exactly what prompts are being sent
-- You're building systems where auditability matters (compliance, debugging)
-- You want to iterate on prompts manually with version control
-- You value determinism and testability over automatic optimization
-- You're building tool-heavy agents where prompt/tool co-location helps
+**Inspectability matters:**
+
+- You need to see exactly what prompts are being sent
+- You want a visual debug UI to trace agent behavior
+- Auditability is required (compliance, debugging, post-mortems)
+
+**Reliability matters:**
+
+- You need transactional tool execution with automatic rollback
+- You want declarative policies (read-before-write, sequential dependencies)
+- You need budget and deadline controls to prevent runaway agents
+
+**Production concerns matter:**
+
+- You're building tool-heavy agents where prompt/tool co-location prevents drift
+- You need sandboxed execution (VFS, Podman, or OS-level isolation)
+- You want evaluation to run against production code, not a separate harness
+- Provider portability is important (OpenAI today, Bedrock tomorrow)
+
+**Developer experience matters:**
+
+- You value determinism and testability
+- You want strict type safety (Pyright strict mode enforced)
+- You prefer explicit iteration over black-box optimization
 
 ## When to Stick with DSPy
 
@@ -142,13 +303,21 @@ obvious from the prompt structure.
 ## The Key Mindset Shift
 
 DSPy optimizes prompts for you; WINK gives you tools to write and iterate on
-prompts yourself.
+prompts yourself—with guardrails that make production deployment safer.
 
 If you've been frustrated by not knowing what DSPy is actually sending to the
-model, WINK's explicit approach may feel liberating.
+model, WINK's explicit approach will feel liberating. Every prompt is
+inspectable. Every tool call is traceable. Every state change is auditable.
+
+If you've struggled with partial failures corrupting agent state, WINK's
+transactional tool execution eliminates that class of bugs entirely.
+
+If you've deployed agents that ran up token bills or timed out ungracefully,
+WINK's budget and deadline controls give you explicit resource boundaries.
 
 If you've relied heavily on DSPy's optimizers, you'll need to build or adopt
-optimization workflows separately.
+optimization workflows separately. But you'll gain the ability to understand
+exactly what your agent is doing—and why—at every step.
 
 ## Next Steps
 
