@@ -24,6 +24,8 @@ const state = {
   logsLevels: new Set(["DEBUG", "INFO", "WARNING", "ERROR"]),
   logsSearch: "",
   logsFacets: { loggers: [], events: [], levels: [] },
+  logsLoggerChipFilter: "",
+  logsEventChipFilter: "",
   logsIncludeLoggers: new Set(),
   logsExcludeLoggers: new Set(),
   logsIncludeEvents: new Set(),
@@ -93,7 +95,9 @@ const elements = {
   logsCopy: document.getElementById("logs-copy"),
   logsScrollBottom: document.getElementById("logs-scroll-bottom"),
   logsList: document.getElementById("logs-list"),
+  logsLoggerFilter: document.getElementById("logs-logger-filter"),
   logsLoggerChips: document.getElementById("logs-logger-chips"),
+  logsEventFilter: document.getElementById("logs-event-filter"),
   logsEventChips: document.getElementById("logs-event-chips"),
   logsActiveFilters: document.getElementById("logs-active-filters"),
   logsActiveFiltersGroup: document.getElementById("logs-active-filters-group"),
@@ -525,35 +529,42 @@ function updateLogsStats() {
 }
 
 function renderLogFilterChips() {
+  const loggerFilter = state.logsLoggerChipFilter.toLowerCase();
+  const eventFilter = state.logsEventChipFilter.toLowerCase();
+
   // Render logger chips
   elements.logsLoggerChips.innerHTML = "";
-  state.logsFacets.loggers.forEach((item) => {
-    const chip = createFilterChip(
-      item.name,
-      item.count,
-      state.logsIncludeLoggers.has(item.name),
-      state.logsExcludeLoggers.has(item.name),
-      (name, include, exclude) => {
-        toggleLoggerFilter(name, include, exclude);
-      }
-    );
-    elements.logsLoggerChips.appendChild(chip);
-  });
+  state.logsFacets.loggers
+    .filter((item) => !loggerFilter || item.name.toLowerCase().includes(loggerFilter))
+    .forEach((item) => {
+      const chip = createFilterChip(
+        item.name,
+        item.count,
+        state.logsIncludeLoggers.has(item.name),
+        state.logsExcludeLoggers.has(item.name),
+        (name, include, exclude) => {
+          toggleLoggerFilter(name, include, exclude);
+        }
+      );
+      elements.logsLoggerChips.appendChild(chip);
+    });
 
   // Render event chips
   elements.logsEventChips.innerHTML = "";
-  state.logsFacets.events.forEach((item) => {
-    const chip = createFilterChip(
-      item.name,
-      item.count,
-      state.logsIncludeEvents.has(item.name),
-      state.logsExcludeEvents.has(item.name),
-      (name, include, exclude) => {
-        toggleEventFilter(name, include, exclude);
-      }
-    );
-    elements.logsEventChips.appendChild(chip);
-  });
+  state.logsFacets.events
+    .filter((item) => !eventFilter || item.name.toLowerCase().includes(eventFilter))
+    .forEach((item) => {
+      const chip = createFilterChip(
+        item.name,
+        item.count,
+        state.logsIncludeEvents.has(item.name),
+        state.logsExcludeEvents.has(item.name),
+        (name, include, exclude) => {
+          toggleEventFilter(name, include, exclude);
+        }
+      );
+      elements.logsEventChips.appendChild(chip);
+    });
 
   renderActiveFilters();
 }
@@ -759,6 +770,16 @@ elements.logsSearch.addEventListener("input", () => {
   debouncedLogsSearch();
 });
 
+elements.logsLoggerFilter.addEventListener("input", () => {
+  state.logsLoggerChipFilter = elements.logsLoggerFilter.value;
+  renderLogFilterChips();
+});
+
+elements.logsEventFilter.addEventListener("input", () => {
+  state.logsEventChipFilter = elements.logsEventChipFilter.value;
+  renderLogFilterChips();
+});
+
 // Level checkboxes
 document.querySelectorAll(".level-checkbox input").forEach((checkbox) => {
   checkbox.addEventListener("change", () => {
@@ -778,8 +799,12 @@ elements.logsClearFilters.addEventListener("click", () => {
   state.logsExcludeLoggers.clear();
   state.logsIncludeEvents.clear();
   state.logsExcludeEvents.clear();
+  state.logsLoggerChipFilter = "";
+  state.logsEventChipFilter = "";
 
   elements.logsSearch.value = "";
+  elements.logsLoggerFilter.value = "";
+  elements.logsEventFilter.value = "";
   document.querySelectorAll(".level-checkbox input").forEach((cb) => (cb.checked = true));
 
   renderLogFilterChips();
