@@ -42,6 +42,9 @@ class QueryError(WinkError, RuntimeError):
 # Maximum column width for ASCII table output
 _MAX_COLUMN_WIDTH = 50
 
+# Schema version for cache invalidation - increment when schema changes
+_SCHEMA_VERSION = 2  # v2: added seq column, views, hints
+
 
 @FrozenDataclass()
 class ColumnInfo:
@@ -63,6 +66,14 @@ class TableInfo:
 
 
 @FrozenDataclass()
+class SchemaHints:
+    """Hints for querying the database effectively."""
+
+    json_extraction: tuple[str, ...] = ()
+    common_queries: dict[str, str] = field(default_factory=lambda: {})
+
+
+@FrozenDataclass()
 class SchemaOutput:
     """Schema output structure."""
 
@@ -70,6 +81,7 @@ class SchemaOutput:
     status: str
     created_at: str
     tables: tuple[TableInfo, ...] = field(default_factory=tuple)
+    hints: SchemaHints | None = None
 
     def to_json(self) -> str:
         """Serialize schema to JSON string."""
@@ -489,6 +501,14 @@ class QueryDatabase(Closeable):
         """
         conn = self.connection
 
+        # Store schema version for cache invalidation
+        _ = conn.execute(
+            "CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY)"
+        )
+        _ = conn.execute(
+            "INSERT INTO _schema_version (version) VALUES (?)", (_SCHEMA_VERSION,)
+        )
+
         # Core tables
         self._build_manifest_table(conn)
         self._build_logs_table(conn)
@@ -503,6 +523,9 @@ class QueryDatabase(Closeable):
         # Optional tables
         self._build_prompt_overrides_table(conn)
         self._build_eval_table(conn)
+
+        # Views for common query patterns
+        self._build_views(conn)
 
         conn.commit()
 
@@ -561,7 +584,8 @@ class QueryDatabase(Closeable):
                 logger TEXT,
                 event TEXT,
                 message TEXT,
-                context TEXT
+                context TEXT,
+                seq INTEGER
             )
         """)
 
@@ -574,10 +598,21 @@ class QueryDatabase(Closeable):
                 continue
             try:
                 entry: dict[str, Any] = json.loads(line)
+                # Extract sequence number from log_aggregator events
+                seq: int | None = None
+                ctx_raw = entry.get("context", {})
+                if (
+                    isinstance(ctx_raw, dict)
+                    and entry.get("event") == "log_aggregator.log_line"
+                ):
+                    ctx = cast("dict[str, Any]", ctx_raw)
+                    seq_val: Any = ctx.get("sequence_number")
+                    if isinstance(seq_val, int):
+                        seq = seq_val
                 _ = conn.execute(
                     """
-                    INSERT INTO logs (timestamp, level, logger, event, message, context)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO logs (timestamp, level, logger, event, message, context, seq)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         entry.get("timestamp", ""),
@@ -586,6 +621,7 @@ class QueryDatabase(Closeable):
                         entry.get("event", ""),
                         entry.get("message", ""),
                         json.dumps(entry.get("context", {})),
+                        seq,
                     ),
                 )
             except json.JSONDecodeError:
@@ -867,18 +903,61 @@ class QueryDatabase(Closeable):
                     (key, str(value) if value is not None else None),
                 )
 
+    @staticmethod
+    def _build_views(conn: sqlite3.Connection) -> None:
+        """Create SQL views for common query patterns."""
+        # Tool execution timeline
+        _ = conn.execute("""
+            CREATE VIEW IF NOT EXISTS tool_timeline AS
+            SELECT
+                rowid,
+                timestamp,
+                tool_name,
+                json_extract(params, '$.command') as command,
+                success,
+                duration_ms,
+                CASE WHEN success = 0 THEN error_code ELSE NULL END as error
+            FROM tool_calls
+            ORDER BY timestamp
+        """)
+
+        # Native tool calls from log aggregator (Claude Code's Bash, Read, etc.)
+        _ = conn.execute("""
+            CREATE VIEW IF NOT EXISTS native_tool_calls AS
+            SELECT
+                seq,
+                timestamp,
+                json_extract(context, '$.file') as source_file,
+                json_extract(context, '$.content') as raw_content
+            FROM logs
+            WHERE event = 'log_aggregator.log_line'
+              AND json_extract(context, '$.content') LIKE '%"type":"tool_%'
+            ORDER BY seq
+        """)
+
+        # Error summary with truncated traceback
+        _ = conn.execute("""
+            CREATE VIEW IF NOT EXISTS error_summary AS
+            SELECT
+                source,
+                error_type,
+                message,
+                SUBSTR(traceback, 1, 200) as traceback_head
+            FROM errors
+        """)
+
     def get_schema(self) -> SchemaOutput:
-        """Get schema information for all tables."""
+        """Get schema information for all tables and views."""
         manifest = self._bundle.manifest
         conn = self.connection
 
         tables: list[TableInfo] = []
 
-        # Get all tables
+        # Get all tables and views
         cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY type DESC, name"
         )
-        for (table_name,) in cursor.fetchall():
+        for table_name, obj_type in cursor.fetchall():
             # table_name comes from sqlite_master, which is internal SQLite metadata
             # Get column info
             col_cursor = conn.execute(f"PRAGMA table_info({table_name})")  # nosec B608
@@ -898,17 +977,41 @@ class QueryDatabase(Closeable):
             tables.append(
                 TableInfo(
                     name=table_name,
-                    description=_get_table_description(table_name),
+                    description=_get_table_description(
+                        table_name, is_view=obj_type == "view"
+                    ),
                     row_count=row_count,
                     columns=columns,
                 )
             )
+
+        hints = SchemaHints(
+            json_extraction=(
+                "json_extract(context, '$.tool_name')",
+                "json_extract(context, '$.content')",
+                "json_extract(params, '$.command')",
+            ),
+            common_queries={
+                "native_tools": (
+                    "SELECT seq, json_extract(context, '$.content') as content "
+                    "FROM logs WHERE event = 'log_aggregator.log_line' "
+                    "AND seq BETWEEN 100 AND 200 ORDER BY seq"
+                ),
+                "tool_timeline": (
+                    "SELECT * FROM tool_timeline WHERE duration_ms > 1000"
+                ),
+                "error_context": (
+                    "SELECT timestamp, message, context FROM logs WHERE level = 'ERROR'"
+                ),
+            },
+        )
 
         return SchemaOutput(
             bundle_id=manifest.bundle_id,
             status=manifest.request.status,
             created_at=manifest.created_at,
             tables=tuple(tables),
+            hints=hints,
         )
 
     def execute_query(self, sql: str) -> list[dict[str, Any]]:
@@ -923,11 +1026,11 @@ class QueryDatabase(Closeable):
 
 
 @pure
-def _get_table_description(table_name: str) -> str:
-    """Get description for a table by name."""
+def _get_table_description(table_name: str, *, is_view: bool = False) -> str:
+    """Get description for a table or view by name."""
     descriptions = {
         "manifest": "Bundle metadata",
-        "logs": "Log entries",
+        "logs": "Log entries (seq column for log_aggregator events)",
         "tool_calls": "Tool invocations",
         "errors": "Aggregated errors",
         "session_slices": "Session state items",
@@ -937,17 +1040,41 @@ def _get_table_description(table_name: str) -> str:
         "run_context": "Execution IDs",
         "prompt_overrides": "Visibility overrides",
         "eval": "Eval metadata",
+        # Views
+        "tool_timeline": "View: Tool calls ordered by timestamp",
+        "native_tool_calls": "View: Claude Code native tools from log aggregator",
+        "error_summary": "View: Errors with truncated traceback",
     }
     if table_name.startswith("slice_"):
         return f"Session slice: {table_name[6:]}"
-    return descriptions.get(table_name, "")
+    desc = descriptions.get(table_name, "")
+    if is_view and not desc.startswith("View:"):
+        desc = f"View: {desc}" if desc else "View"
+    return desc
 
 
 def _is_cache_valid(bundle_path: Path, cache_path: Path) -> bool:
-    """Check if cache is still valid based on mtime comparison."""
+    """Check if cache is still valid based on mtime and schema version."""
     if not cache_path.exists():
         return False
-    return cache_path.stat().st_mtime >= bundle_path.stat().st_mtime
+    if cache_path.stat().st_mtime < bundle_path.stat().st_mtime:
+        return False
+    # Check schema version
+    try:
+        conn = sqlite3.connect(f"file:{cache_path}?mode=ro", uri=True)
+        try:
+            cursor = conn.execute("SELECT version FROM _schema_version LIMIT 1")
+            row = cursor.fetchone()
+            if row is None or row[0] != _SCHEMA_VERSION:
+                return False
+        except sqlite3.OperationalError:
+            # Table doesn't exist (old cache) or other error
+            return False
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+    return True
 
 
 def resolve_bundle_path(path: Path) -> Path:
@@ -1016,10 +1143,17 @@ def open_query_database(bundle_path: Path) -> QueryDatabase:
 
 
 @pure
-def format_as_table(rows: Sequence[Mapping[str, Any]]) -> str:
-    """Format query results as ASCII table."""
+def format_as_table(rows: Sequence[Mapping[str, Any]], *, truncate: bool = True) -> str:
+    """Format query results as ASCII table.
+
+    Args:
+        rows: Query results to format.
+        truncate: If True, truncate long values to _MAX_COLUMN_WIDTH.
+    """
     if not rows:
         return "(no results)"
+
+    max_width = _MAX_COLUMN_WIDTH if truncate else None
 
     # Get columns from first row
     columns = list(rows[0].keys())
@@ -1027,14 +1161,13 @@ def format_as_table(rows: Sequence[Mapping[str, Any]]) -> str:
     # Calculate column widths
     widths: dict[str, int] = {}
     for col in columns:
-        max_width = len(col)
+        col_max = len(col)
         for row in rows:
             val = str(row.get(col, ""))
-            # Truncate very long values for display
-            if len(val) > _MAX_COLUMN_WIDTH:
-                val = val[: _MAX_COLUMN_WIDTH - 3] + "..."
-            max_width = max(max_width, len(val))
-        widths[col] = min(max_width, _MAX_COLUMN_WIDTH)
+            if max_width is not None and len(val) > max_width:
+                val = val[: max_width - 3] + "..."
+            col_max = max(col_max, len(val))
+        widths[col] = col_max if max_width is None else min(col_max, max_width)
 
     # Build header
     header = " | ".join(col.ljust(widths[col]) for col in columns)
@@ -1046,8 +1179,8 @@ def format_as_table(rows: Sequence[Mapping[str, Any]]) -> str:
         cells: list[str] = []
         for col in columns:
             val = str(row.get(col, ""))
-            if len(val) > _MAX_COLUMN_WIDTH:
-                val = val[: _MAX_COLUMN_WIDTH - 3] + "..."
+            if max_width is not None and len(val) > max_width:
+                val = val[: max_width - 3] + "..."
             cells.append(val.ljust(widths[col]))
         lines.append(" | ".join(cells))
 
@@ -1062,12 +1195,31 @@ def format_as_json(rows: Sequence[Mapping[str, Any]]) -> str:
     return json.dumps(result, indent=2)
 
 
+def export_jsonl(bundle: DebugBundle, source: str) -> str | None:
+    """Export raw JSONL content from bundle.
+
+    Args:
+        bundle: Debug bundle to export from.
+        source: Either "logs" for logs/app.jsonl or "session" for session/after.jsonl.
+
+    Returns:
+        Raw JSONL content, or None if not present.
+    """
+    if source == "logs":
+        return bundle.logs
+    if source == "session":
+        return bundle.session_after
+    return None
+
+
 __all__ = [
     "ColumnInfo",
     "QueryDatabase",
     "QueryError",
+    "SchemaHints",
     "SchemaOutput",
     "TableInfo",
+    "export_jsonl",
     "format_as_json",
     "format_as_table",
     "iter_bundle_files",

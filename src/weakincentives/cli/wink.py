@@ -22,12 +22,14 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
+from ..debug.bundle import BundleValidationError, DebugBundle
 from ..runtime.logging import StructuredLogger, configure_logging, get_logger
 from . import debug_app
 from .docs_metadata import GUIDE_DESCRIPTIONS, SPEC_DESCRIPTIONS
 from .query import (
     QueryDatabase,
     QueryError,
+    export_jsonl,
     format_as_json,
     format_as_table,
     open_query_database,
@@ -642,6 +644,18 @@ def _build_query_parser(
         action="store_true",
         help="Output as ASCII table (default: JSON).",
     )
+    _ = query_parser.add_argument(
+        "--no-truncate",
+        action="store_true",
+        help="Disable column truncation in table output.",
+    )
+    _ = query_parser.add_argument(
+        "--export-jsonl",
+        nargs="?",
+        const="logs",
+        choices=["logs", "session"],
+        help="Export raw JSONL (logs or session) to stdout.",
+    )
 
 
 def _run_query(args: argparse.Namespace, logger: StructuredLogger) -> int:
@@ -652,6 +666,36 @@ def _run_query(args: argparse.Namespace, logger: StructuredLogger) -> int:
         print(f"Error: Bundle not found: {bundle_path}", file=sys.stderr)
         return 2
 
+    # Handle --export-jsonl without SQL layer
+    export_source = getattr(args, "export_jsonl", None)
+    if export_source is not None:
+        return _handle_export_jsonl(bundle_path, export_source)
+
+    return _handle_sql_query(args, bundle_path, logger)
+
+
+def _handle_export_jsonl(bundle_path: Path, source: str) -> int:
+    """Handle --export-jsonl flag."""
+    try:
+        bundle = DebugBundle.load(bundle_path)
+        content = export_jsonl(bundle, source)
+    except BundleValidationError as e:
+        print(f"Error: Failed to load bundle: {e}", file=sys.stderr)
+        return 2
+
+    if content:
+        _ = sys.stdout.write(content)
+        if not content.endswith("\n"):
+            _ = sys.stdout.write("\n")
+        return 0
+    print(f"Error: No {source} content in bundle", file=sys.stderr)
+    return 1
+
+
+def _handle_sql_query(
+    args: argparse.Namespace, bundle_path: Path, logger: StructuredLogger
+) -> int:
+    """Handle SQL query execution."""
     try:
         db = open_query_database(bundle_path)
     except QueryError as e:
@@ -697,7 +741,8 @@ def _execute_query_command(
     results = db.execute_query(args.sql)
 
     if args.table:
-        print(format_as_table(results))
+        no_truncate = getattr(args, "no_truncate", False)
+        print(format_as_table(results, truncate=not no_truncate))
     else:
         print(format_as_json(results))
 
