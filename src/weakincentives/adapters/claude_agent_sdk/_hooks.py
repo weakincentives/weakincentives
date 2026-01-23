@@ -570,8 +570,8 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         )
 
         logger.debug(
-            "claude_agent_sdk.hook.tool_invoked",
-            event="hook.tool_invoked",
+            "claude_agent_sdk.hook.tool_call.complete",
+            event="hook.tool_call.complete",
             context={
                 "tool_name": data.tool_name,
                 "success": success,
