@@ -312,12 +312,12 @@ async function isEventSlice(entry) {
 
 async function bucketSlices(entries) {
   const buckets = { state: [], event: [] };
-  await Promise.all(
-    entries.map(async (entry) => {
-      const isEvent = await isEventSlice(entry);
-      buckets[isEvent ? "event" : "state"].push(entry);
-    })
-  );
+  // Classify all entries concurrently, preserving order via Promise.all
+  const classifications = await Promise.all(entries.map((entry) => isEventSlice(entry)));
+  // Bucket entries in original order based on classification results
+  entries.forEach((entry, i) => {
+    buckets[classifications[i] ? "event" : "state"].push(entry);
+  });
   return buckets;
 }
 
