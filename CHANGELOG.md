@@ -2,6 +2,154 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+*Commits reviewed: 2026-01-20 (065e76c) through 2026-01-23 (751c221)*
+
+### TL;DR
+
+This release delivers significant **debug UI performance improvements** through
+SQLite-backed caching shared with `wink query`, enabling instant startup when
+databases are pre-built and powerful log filtering. **Tool schema auditing**
+captures available tools at each prompt render for debugging and analysis. All
+logs now carry **correlation IDs** from `RunContext` for unified distributed
+tracing. **Environment capture** is now wired into the main loop for automatic
+reproducibility envelopes. New **user guides** cover skills authoring,
+dependency injection, and serialization. The **toolchain** gains enhanced error
+reporting with precise import tracking and better diagnostics.
+
+### Debug UI SQLite Caching
+
+The `wink debug` web interface now shares the SQLite database infrastructure
+with `wink query`, eliminating code duplication and dramatically improving
+performance. When a cached database exists from a previous `wink query` run, the
+debug UI starts instantly without re-parsing bundle contents.
+
+**Key improvements:**
+
+- **Unified caching**: Both `wink debug` and `wink query` use the same `.sqlite`
+  cache file, avoiding redundant parsing
+- **Thread-safe access**: Database operations use locking and
+  `check_same_thread=False` for FastAPI compatibility
+- **SQL-powered pagination**: Filtering and pagination handled by SQLite
+  LIMIT/OFFSET instead of in-memory Python lists
+- **Enhanced log filtering**: New filters for `level`, `logger`, `event`,
+  `exclude_logger`, `exclude_event`, and full-text `search`
+- **Filter facets API**: Returns counts per logger/event/level for UI
+  autocomplete
+- **Directory mode**: `wink debug /path/to/dir` auto-selects the newest bundle
+
+### Tool Schema Auditing
+
+A new `RenderedTools` session slice captures the complete set of available tools
+and their JSON Schema definitions at each prompt render, enabling debugging and
+analysis of tool availability.
+
+```python
+from weakincentives.runtime.session import RenderedTools, ToolSchema
+
+# Query tools available during prompt renders
+for record in session[RenderedTools].all():
+    print(record.tool_names)       # Tuple of tool names
+    print(record.tool_count)       # Number of tools
+    schema = record.get_tool("my_tool")  # Get specific ToolSchema
+```
+
+Each `RenderedTools` record includes a `render_event_id` that matches the
+corresponding `PromptRendered` event, enabling precise correlation of "what
+tools were available when this prompt was rendered."
+
+### Correlation IDs for Distributed Tracing
+
+All provider adapters (OpenAI, LiteLLM) and tool executors now bind `run_id`
+from `RunContext` to their loggers, enabling unified traceability across the
+entire execution lifecycle. Logs from prompt calls, provider calls, tool calls,
+and filesystem changes can now be joined into a coherent timeline for debugging.
+
+**Pattern improvements:**
+
+- Bound logger created once and reused throughout request handling
+- Removed redundant context fields (`tool_name`, `call_id`, `prompt_name`) that
+  are already carried by the bound logger
+- Consistent correlation ID handling across all adapter modules
+
+### Environment Capture Integration
+
+The `BundleWriter.write_environment()` method, which captures comprehensive
+reproducibility envelopes, is now automatically called by MainLoop during debug
+bundle finalization. Previously, this method existed but was never invoked.
+
+Debug bundles now automatically include:
+
+- System information (OS, architecture, CPU, memory)
+- Python runtime details (version, virtualenv, packages)
+- Git state (commit, branch, uncommitted changes)
+- Environment variables (filtered and redacted)
+- Command-line invocation context
+
+### Native Tool Tracking in Debug Database
+
+Native Claude Agent SDK tools (Bash, Read, Write, etc.) now appear in the
+`tool_calls` debug table alongside MCP-bridged WINK tools. The fix corrects an
+event naming pattern that prevented native tool events from matching the query
+filter.
+
+### Documentation
+
+**New guides:**
+
+- **`guides/skills-authoring.md`**: Comprehensive guide for creating skills
+  following the Agent Skills specification, covering SKILL.md format,
+  frontmatter fields, mounting configuration, validation, and troubleshooting
+
+- **`guides/resources.md`**: Complete reference for the dependency injection
+  system including `Binding`, `Scope` (SINGLETON, TOOL_CALL, PROTOTYPE),
+  lifecycle protocols (Closeable, PostConstruct, Snapshotable), testing
+  patterns, and best practices
+
+- **`guides/serialization.md`**: Full documentation of the `weakincentives.serde`
+  module covering `parse`/`dump`/`clone`/`schema` functions, type coercion,
+  validation constraints, custom validators, field aliases, extra field
+  handling, polymorphic serialization, and JSON Schema generation
+
+**Specification updates:**
+
+- `specs/DEBUG_BUNDLE.md`: Aligned with implementation—removed unimplemented
+  capture modes and CLI commands, added environment capture documentation,
+  updated API routes to match actual endpoints
+- `specs/WINK_QUERY.md`: Updated implementation status to reference
+  `src/weakincentives/cli/query.py`
+- Debug CLI documentation corrected to show actual `--host`, `--port`,
+  `--no-open-browser` options instead of non-existent subcommands
+
+### Toolchain Improvements
+
+**Enhanced error reporting:**
+
+- **Tool-specific prefixes**: Type checker diagnostics now show `[pyright]` or
+  `[ty]` prefixes for clear attribution
+- **Precise import tracking**: Architecture violations show the exact import
+  statement causing the violation, not just the module name
+- **Location ranges**: `Location` class supports `end_line` and `end_column`
+  for range-based error reporting
+- **Coverage details**: Uncovered files now listed with line numbers (up to 10
+  files)
+- **Modern format support**: Coverage parser handles branch coverage columns;
+  mdformat parser handles both old and new output formats
+- **Actionable hints**: Truncated output shows "Run: python check.py X -v"
+  guidance
+
+### Internal
+
+- Added `# pragma: no cover` annotations for platform-specific and
+  version-specific code paths that cannot be tested in a single environment
+- Simplified GitHub Actions code review workflow: marker-based comment detection
+  (`<!-- claude-review -->`), focused review scope (bugs/security/design only),
+  reduced allowed tools
+- Dependency upgrades: bandit 1.9.3, claude-agent-sdk 0.1.21, huggingface-hub
+  1.3.2, litellm 1.81.1, packaging 26.0, podman 5.7.0, pycparser 3.0, pyparsing
+  3.3.2, regex 2026.1.15, ruff 0.14.13, sse-starlette 3.2.0
+
 ## v0.21.0 - 2026-01-20
 
 ### TL;DR
