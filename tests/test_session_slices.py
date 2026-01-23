@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests.helpers.session import ExampleOutput, make_prompt_event
-from weakincentives.dbc import dbc_enabled
 from weakincentives.runtime.session import (
     SliceAccessor,
     replace_latest,
@@ -112,15 +111,15 @@ def test_query_respects_dbc_purity(session_factory: SessionFactory) -> None:
     dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
     dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
-    with dbc_enabled():
-        assert session[ExampleOutput].all() == (
-            ExampleOutput(text="first"),
-            ExampleOutput(text="second"),
-        )
-        assert session[ExampleOutput].latest() == ExampleOutput(text="second")
-        assert session[ExampleOutput].where(lambda x: x.text.startswith("f")) == (
-            ExampleOutput(text="first"),
-        )
+    # DbC is always enabled by default
+    assert session[ExampleOutput].all() == (
+        ExampleOutput(text="first"),
+        ExampleOutput(text="second"),
+    )
+    assert session[ExampleOutput].latest() == ExampleOutput(text="second")
+    assert session[ExampleOutput].where(lambda x: x.text.startswith("f")) == (
+        ExampleOutput(text="first"),
+    )
 
 
 def test_query_where_logs_violate_purity_contract(
@@ -136,7 +135,8 @@ def test_query_where_logs_violate_purity_contract(
         logger.warning("Saw %s", value)
         return True
 
-    with dbc_enabled(), pytest.raises(AssertionError):
+    # DbC is always enabled by default
+    with pytest.raises(AssertionError):
         session[ExampleOutput].where(predicate)
 
 

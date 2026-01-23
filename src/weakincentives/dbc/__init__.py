@@ -17,7 +17,6 @@ from __future__ import annotations
 import builtins
 import copy
 import logging
-import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -36,54 +35,45 @@ T = TypeVar("T", bound=object)
 
 ContractCallable = Callable[..., ContractResult | object]
 
-_ENV_FLAG = "WEAKINCENTIVES_DBC"
-_forced_state: bool | None = None
-
-
-def _coerce_flag(value: str | None) -> bool:
-    if value is None:
-        return False
-    lowered = value.strip().lower()
-    return lowered not in {"", "0", "false", "off", "no"}
+# Use a ContextVar for thread-safe and async-safe suspension tracking.
+# The default is True (DbC always enabled). Only the context manager can
+# temporarily suspend checks for performance-sensitive code paths.
+_DBC_ACTIVE: ContextVar[bool] = ContextVar("weakincentives_dbc_active", default=True)
 
 
 def dbc_active() -> bool:
-    """Return ``True`` when DbC checks should run."""
+    """Return ``True`` when DbC checks should run.
 
-    if _forced_state is not None:
-        return _forced_state
-    return _coerce_flag(os.getenv(_ENV_FLAG))
+    DbC is always enabled by default and cannot be globally disabled.
+    Use :func:`dbc_suspended` to temporarily disable checks in
+    performance-sensitive code paths.
+    """
+    return _DBC_ACTIVE.get()
 
 
 def _qualname(target: object) -> str:
     return getattr(target, "__qualname__", repr(target))
 
 
-def enable_dbc() -> None:
-    """Force DbC enforcement on."""
-
-    global _forced_state
-    _forced_state = True
-
-
-def disable_dbc() -> None:
-    """Force DbC enforcement off."""
-
-    global _forced_state
-    _forced_state = False
-
-
 @contextmanager
-def dbc_enabled(active: bool = True) -> Iterator[None]:
-    """Temporarily set the DbC flag inside a ``with`` block."""
+def dbc_suspended() -> Iterator[None]:
+    """Temporarily suspend DbC checks inside a ``with`` block.
 
-    global _forced_state
-    previous = _forced_state
-    _forced_state = active
+    Use this context manager sparingly in performance-sensitive code paths
+    where contract checking overhead is unacceptable. DbC checks are
+    automatically restored when the block exits.
+
+    Example::
+
+        with dbc_suspended():
+            # No contract checks in this block
+            result = expensive_hot_path(data)
+    """
+    token = _DBC_ACTIVE.set(False)
     try:
         yield
     finally:
-        _forced_state = previous
+        _DBC_ACTIVE.reset(token)
 
 
 def _normalize_contract_result(
@@ -502,9 +492,7 @@ def pure(func: Callable[P, R]) -> Callable[P, R]:  # noqa: UP047
 
 __all__ = [
     "dbc_active",
-    "dbc_enabled",
-    "disable_dbc",
-    "enable_dbc",
+    "dbc_suspended",
     "ensure",
     "invariant",
     "pure",

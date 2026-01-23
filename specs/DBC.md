@@ -3,16 +3,17 @@
 ## Purpose
 
 Internal-only DbC framework for `weakincentives`. Decorators describe
-preconditions, postconditions, invariants, and purity expectations. Active in
-tests only; zero-cost in production. Implementation at `src/weakincentives/dbc/__init__.py`.
+preconditions, postconditions, invariants, and purity expectations. Always
+enabled by default; use `dbc_suspended()` for performance-critical paths.
+Implementation at `src/weakincentives/dbc/__init__.py`.
 
 ## Principles
 
 - **Internal safety net**: Reinforces contributor discipline; not public API
-- **Zero-cost default**: No-ops unless explicitly enabled
+- **Always-on by default**: Contracts enforced in all contexts (tests and production)
 - **Pragmatic coverage**: Catches common footguns, not exhaustive verification
 - **Clear diagnostics**: Names decorator, callable, and offending predicate
-- **Composable opt-ins**: `dbc_enabled()` and env flags for scoped enforcement
+- **Local opt-out only**: `dbc_suspended()` for scoped performance-critical code
 
 ## Contract Decorators
 
@@ -75,9 +76,8 @@ Patching at `_activate_pure_patches()` (`src/weakincentives/dbc/__init__.py`).
 
 | Context | Behavior |
 | --- | --- |
-| Production (`WEAKINCENTIVES_DBC=0`) | Decorators return original callable |
-| Tests | Pytest plugin activates enforcement |
-| Manual | `enable_dbc()`, `disable_dbc()`, `dbc_enabled()` context manager |
+| Default | Contracts always enforced |
+| `with dbc_suspended():` | Temporarily disable for performance-critical code |
 
 Contract violations raise `AssertionError` with decorator type, callable name,
 and formatted argument dump.
@@ -88,15 +88,21 @@ Defined in `src/weakincentives/dbc/__init__.py`:
 
 | Function | Description |
 | --- | --- |
-| `dbc_active()` | Check if DbC enabled |
-| `enable_dbc()` | Force enable |
-| `disable_dbc()` | Force disable |
-| `dbc_enabled()` | Context manager for temporary override |
+| `dbc_active()` | Check if DbC currently active (always `True` unless suspended) |
+| `dbc_suspended()` | Context manager to temporarily suspend enforcement |
+
+### Design Rationale
+
+DbC cannot be globally disabled. This ensures:
+
+- Contracts are checked in production, catching bugs early
+- No accidental deployment with contracts disabled
+- Performance-sensitive code can explicitly opt-out via `dbc_suspended()`
 
 ### Pytest Integration
 
-Plugin at `tests/plugins/dbc.py` toggles flag via `pytest_configure` and
-`pytest_unconfigure`.
+Plugin at `tests/plugins/dbc.py` exists for compatibility but no longer needs
+to toggle state since DbC is always enabled.
 
 ## Example Use Cases
 
@@ -144,4 +150,4 @@ Adding new variant to union immediately surfaces as pyright error.
 - **Internal only**: Not exported; not in public docs
 - **Synchronous only**: No async support
 - **Best-effort purity**: Checks common side effects, not exhaustive
-- **Runtime overhead in tests**: Active enforcement during test runs only
+- **Runtime overhead**: Contracts are always enforced; use `dbc_suspended()` for hot paths

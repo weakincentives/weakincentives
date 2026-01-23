@@ -10,18 +10,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pytest plugin that activates the design-by-contract helpers during tests."""
+"""Pytest plugin for design-by-contract helpers.
+
+DbC is always enabled by default, so no explicit activation is needed.
+This module exists for backward compatibility with pytest plugin registration.
+"""
 
 from __future__ import annotations
 
-from weakincentives.dbc import disable_dbc, enable_dbc
-
 
 def pytest_configure(config: object) -> None:  # pragma: no cover - pytest hook
+    """DbC is always enabled - no action needed."""
     del config
-    enable_dbc()
 
 
 def pytest_unconfigure(config: object) -> None:  # pragma: no cover - pytest hook
+    """DbC cannot be globally disabled - no action needed."""
     del config
-    disable_dbc()
