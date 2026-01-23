@@ -360,8 +360,9 @@ class BundleStore:
             root = path
             try:
                 target = resolve_bundle_path(path)
-            except QueryError as e:
-                raise BundleLoadError(str(e).replace("directory", "")) from e
+            except QueryError:
+                msg = f"No bundles found under {path}"
+                raise BundleLoadError(msg) from None
         else:
             root = path.parent
             target = path
