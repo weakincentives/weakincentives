@@ -318,12 +318,14 @@ class BundleStore:
 
     def reload(self) -> Mapping[str, JSONValue]:
         """Reload the current bundle from disk."""
-        self._db.close()
         # Delete cache to force rebuild
         cache_path = self._path.with_suffix(self._path.suffix + ".sqlite")
         if cache_path.exists():
             cache_path.unlink()
-        self._db = self._open_database(self._path)
+        # Open new database before closing old to preserve state on failure
+        new_db = self._open_database(self._path)
+        self._db.close()
+        self._db = new_db
         self._logger.info(
             "Bundle reloaded",
             event="debug.server.reload",
@@ -339,10 +341,12 @@ class BundleStore:
             msg = f"Bundle must live under {self._root}"
             raise BundleLoadError(msg)
 
+        # Open new database before closing old to preserve state on failure
+        new_db = self._open_database(target)
         self._db.close()
         self._root = root
         self._path = target
-        self._db = self._open_database(target)
+        self._db = new_db
         self._logger.info(
             "Bundle switched",
             event="debug.server.switch",
