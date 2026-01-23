@@ -113,8 +113,8 @@ with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
 **Run:**
 
 ```bash
-wink debug debug_bundles/  # Opens most recent bundle
-wink debug debug_bundles/<session_id>.jsonl  # Opens specific snapshot
+wink debug debug_bundles/  # Opens most recent bundle (directory mode)
+wink debug debug_bundles/<session_id>.zip  # Opens specific bundle
 ```
 
 This starts a local server that renders the prompt/tool timeline for inspection.
@@ -127,6 +127,119 @@ You can see:
 
 The debug UI is your primary tool for understanding agent behavior after the
 fact.
+
+### SQLite Caching
+
+The debug UI shares SQLite database infrastructure with `wink query`. When a
+cached database exists from a previous query run, the debug UI starts instantly
+without re-parsing bundle contents:
+
+```
+./bundle.zip           → input
+./bundle.zip.sqlite    → cache (shared by debug UI and query)
+```
+
+Key benefits:
+
+- **Unified caching**: Both `wink debug` and `wink query` use the same `.sqlite`
+  cache file
+- **Thread-safe access**: Database operations use locking for FastAPI
+  compatibility
+- **SQL-powered pagination**: Filtering handled by SQLite instead of in-memory
+  Python lists
+
+### Log Filtering
+
+The debug UI provides powerful log filtering capabilities:
+
+| Filter | Description |
+| --- | --- |
+| `level` | Filter by log level (DEBUG, INFO, WARNING, ERROR) |
+| `logger` | Filter by logger name |
+| `event` | Filter by event type |
+| `exclude_logger` | Exclude specific loggers |
+| `exclude_event` | Exclude specific event types |
+| `search` | Full-text search across log messages |
+
+The filter facets API returns counts per logger/event/level for autocomplete in
+the UI.
+
+## Querying Debug Bundles
+
+*Canonical spec: [specs/WINK_QUERY.md](../specs/WINK_QUERY.md)*
+
+The `wink query` command enables SQL-based exploration of debug bundles. Bundle
+contents are loaded into a cached SQLite database.
+
+```bash
+# Always start with schema to discover tables
+wink query ./bundle.zip --schema
+
+# Query with JSON output (default)
+wink query ./bundle.zip "SELECT * FROM errors"
+
+# Query with ASCII table output
+wink query ./bundle.zip "SELECT * FROM tool_calls" --table
+
+# Full values without truncation
+wink query ./bundle.zip "SELECT * FROM tool_calls" --table --no-truncate
+```
+
+### SQL Views
+
+Pre-built views provide common analysis patterns:
+
+| View | Description |
+| --- | --- |
+| `tool_timeline` | Tool calls ordered by timestamp with command extraction |
+| `native_tool_calls` | Claude Code native tools from log_aggregator events |
+| `error_summary` | Errors with truncated traceback for quick debugging |
+
+```sql
+-- Use views directly
+SELECT * FROM tool_timeline WHERE duration_ms > 1000
+SELECT * FROM error_summary
+SELECT * FROM native_tool_calls LIMIT 10
+```
+
+### Sequence Number Tracking
+
+The `logs` table includes a `seq` column extracted from `log_aggregator.log_line`
+events, enabling range queries on native tool executions:
+
+```sql
+-- Query native tool logs by sequence range
+SELECT seq, json_extract(context, '$.content') as content
+FROM logs
+WHERE event = 'log_aggregator.log_line'
+  AND seq BETWEEN 100 AND 200
+ORDER BY seq
+```
+
+For non-log_aggregator events, `seq` is NULL.
+
+### JSONL Export
+
+For power users who prefer `jq` over SQL:
+
+```bash
+# Export logs
+wink query ./bundle.zip --export-jsonl | jq 'select(.event == "tool.execution.start")'
+
+# Export session state
+wink query ./bundle.zip --export-jsonl=session | jq 'select(.__type__ | contains("Plan"))'
+```
+
+### Schema Hints
+
+The `--schema` output includes helpful hints for querying:
+
+- **json_extraction**: Common `json_extract()` patterns for nested JSON data
+- **common_queries**: Ready-to-use SQL queries for typical analysis tasks
+
+```bash
+wink query ./bundle.zip --schema | jq '.hints'
+```
 
 **Loading bundles programmatically:**
 
@@ -171,7 +284,14 @@ print(bundle.logs)
 
 ```bash
 # Start the debug UI server
-wink debug <snapshot_path> [options]
+wink debug <bundle_path> [options]
+wink debug <directory>   # Auto-selects newest bundle
+
+# Query bundles with SQL
+wink query <bundle_path> --schema
+wink query <bundle_path> "<SQL>"
+wink query <bundle_path> "<SQL>" --table
+wink query <bundle_path> --export-jsonl
 
 # Access bundled documentation
 wink docs --guide       # Print guides (usage guide)
@@ -180,7 +300,7 @@ wink docs --specs       # Print all spec files concatenated
 wink docs --changelog   # Print CHANGELOG.md
 ```
 
-**Debug options:**
+**Debug UI options:**
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -190,6 +310,15 @@ wink docs --changelog   # Print CHANGELOG.md
 | `--no-open-browser` | - | Disable auto-open |
 | `--log-level` | `INFO` | Log verbosity |
 | `--json-logs` | `true` | Emit structured JSON logs |
+
+**Query options:**
+
+| Option | Description |
+| --- | --- |
+| `--schema` | Output schema as JSON and exit |
+| `--table` | Output as ASCII table (default: JSON) |
+| `--no-truncate` | Disable column truncation in table output |
+| `--export-jsonl` | Export raw JSONL (`logs` or `session`) to stdout |
 
 ## Accessing Bundled Documentation
 
