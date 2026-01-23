@@ -439,9 +439,11 @@ class QueryDatabase(Closeable):
             if self._built and self._db_path.exists():
                 # Open in read-only mode after building
                 uri = f"file:{self._db_path}?mode=ro"
-                self._conn = sqlite3.connect(uri, uri=True)
+                self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
             else:
-                self._conn = sqlite3.connect(str(self._db_path))
+                self._conn = sqlite3.connect(
+                    str(self._db_path), check_same_thread=False
+                )
             self._conn.row_factory = sqlite3.Row
         return self._conn
 
