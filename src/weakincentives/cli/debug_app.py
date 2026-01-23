@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import threading
 import webbrowser
 from collections.abc import Mapping
@@ -108,6 +109,93 @@ def _render_markdown_values(value: JSONValue) -> JSONValue:
 def _class_name(type_identifier: str) -> str:
     """Extract the class name from a fully qualified type identifier."""
     return type_identifier.rsplit(".", 1)[-1]
+
+
+def _split_csv(value: str | None) -> list[str]:
+    """Split comma-separated string into list of stripped values."""
+    if not value:
+        return []
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
+def _add_in_filter(
+    conditions: list[str],
+    params: list[Any],
+    column: str,
+    values: list[str],
+    *,
+    upper: bool = False,
+) -> None:
+    """Add IN filter condition."""
+    if not values:
+        return
+    placeholders = ",".join("?" for _ in values)
+    col_expr = f"UPPER({column})" if upper else column
+    vals = [v.upper() for v in values] if upper else values
+    conditions.append(f"{col_expr} IN ({placeholders})")
+    params.extend(vals)
+
+
+def _add_not_in_filter(
+    conditions: list[str],
+    params: list[Any],
+    column: str,
+    values: list[str],
+) -> None:
+    """Add NOT IN filter condition (with NULL handling)."""
+    if not values:
+        return
+    placeholders = ",".join("?" for _ in values)
+    conditions.append(f"({column} IS NULL OR {column} NOT IN ({placeholders}))")
+    params.extend(values)
+
+
+def _build_log_filters(filters: Mapping[str, str | None]) -> tuple[str, list[Any]]:
+    """Build WHERE clause and params for log filtering.
+
+    Args:
+        filters: Dict with keys: level, logger, event, search, exclude_logger, exclude_event
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    _add_in_filter(
+        conditions, params, "level", _split_csv(filters.get("level")), upper=True
+    )
+    _add_in_filter(conditions, params, "logger", _split_csv(filters.get("logger")))
+    _add_in_filter(conditions, params, "event", _split_csv(filters.get("event")))
+    _add_not_in_filter(
+        conditions, params, "logger", _split_csv(filters.get("exclude_logger"))
+    )
+    _add_not_in_filter(
+        conditions, params, "event", _split_csv(filters.get("exclude_event"))
+    )
+
+    search = filters.get("search")
+    if search:
+        conditions.append("(message LIKE ? OR context LIKE ?)")
+        pattern = f"%{search}%"
+        params.extend([pattern, pattern])
+
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+    return where_clause, params
+
+
+def _parse_log_row(row: sqlite3.Row) -> Mapping[str, JSONValue]:
+    """Parse a log row into a dictionary."""
+    context_str = row[5] or "{}"
+    try:
+        context: JSONValue = json.loads(context_str)
+    except json.JSONDecodeError:  # pragma: no cover
+        context = {}
+    return {
+        "timestamp": row[0],
+        "level": row[1],
+        "logger": row[2],
+        "event": row[3],
+        "message": row[4],
+        "context": context,
+    }
 
 
 class BundleStore:
@@ -236,59 +324,100 @@ class BundleStore:
             "items": [_render_markdown_values(item) for item in items],
         }
 
-    def get_logs(
-        self, *, offset: int = 0, limit: int | None = None, level: str | None = None
+    def get_logs(  # noqa: PLR0913
+        self,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+        level: str | None = None,
+        logger: str | None = None,
+        event: str | None = None,
+        search: str | None = None,
+        exclude_logger: str | None = None,
+        exclude_event: str | None = None,
     ) -> Mapping[str, JSONValue]:
-        """Get log entries."""
-        # Build query
-        where_clause = ""
-        params: list[Any] = []
+        """Get log entries with filtering."""
+        filters = {
+            "level": level,
+            "logger": logger,
+            "event": event,
+            "search": search,
+            "exclude_logger": exclude_logger,
+            "exclude_event": exclude_event,
+        }
+        where_clause, params = _build_log_filters(filters)
+        return self._execute_log_query(where_clause, params, offset, limit)
 
-        if level:
-            where_clause = "WHERE UPPER(level) = UPPER(?)"
-            params.append(level)
-
-        # Get total count
-        # where_clause is always a safe constant (empty or "WHERE UPPER(level) = UPPER(?)")
-        count_query = f"SELECT COUNT(*) FROM logs {where_clause}"  # nosec B608
+    def _execute_log_query(
+        self,
+        where_clause: str,
+        params: list[Any],
+        offset: int,
+        limit: int | None,
+    ) -> Mapping[str, JSONValue]:
+        """Execute log query with pagination."""
         conn = self._db.connection
-        total = conn.execute(count_query, params).fetchone()[0]
 
-        # Get entries
-        # where_clause is always a safe constant (empty or "WHERE UPPER(level) = UPPER(?)")
+        # Get total count (where_clause built from safe patterns)
+        count_query = f"SELECT COUNT(*) FROM logs {where_clause}"  # nosec B608
+        total = conn.execute(count_query, list(params)).fetchone()[0]
+
+        # Build select query (where_clause built from safe patterns)
         query = f"SELECT timestamp, level, logger, event, message, context FROM logs {where_clause}"  # nosec B608
+        query_params = list(params)
 
         if limit is not None:
             query += " LIMIT ? OFFSET ?"
-            params.extend([limit, offset])
+            query_params.extend([limit, offset])
         elif offset > 0:
             query += " LIMIT -1 OFFSET ?"
-            params.append(offset)
+            query_params.append(offset)
 
-        cursor = conn.execute(query, params)
-        entries: list[Mapping[str, JSONValue]] = []
-        for row in cursor.fetchall():
-            context_str = row[5] or "{}"
-            context: JSONValue
-            try:
-                context = json.loads(context_str)
-            except (
-                json.JSONDecodeError
-            ):  # pragma: no cover - data is validated during build
-                context = {}
-
-            entries.append(
-                {
-                    "timestamp": row[0],
-                    "level": row[1],
-                    "logger": row[2],
-                    "event": row[3],
-                    "message": row[4],
-                    "context": context,
-                }
-            )
-
+        cursor = conn.execute(query, query_params)
+        entries = [_parse_log_row(row) for row in cursor.fetchall()]
         return {"entries": entries, "total": total}
+
+    def get_log_facets(self) -> Mapping[str, JSONValue]:
+        """Get unique loggers and events for filter suggestions."""
+        conn = self._db.connection
+
+        # Get unique loggers with counts
+        loggers_cursor = conn.execute("""
+            SELECT logger, COUNT(*) as count
+            FROM logs
+            WHERE logger IS NOT NULL AND logger != ''
+            GROUP BY logger
+            ORDER BY count DESC
+        """)
+        loggers: list[Mapping[str, JSONValue]] = [
+            {"name": row[0], "count": row[1]} for row in loggers_cursor.fetchall()
+        ]
+
+        # Get unique events with counts
+        events_cursor = conn.execute("""
+            SELECT event, COUNT(*) as count
+            FROM logs
+            WHERE event IS NOT NULL AND event != ''
+            GROUP BY event
+            ORDER BY count DESC
+        """)
+        events: list[Mapping[str, JSONValue]] = [
+            {"name": row[0], "count": row[1]} for row in events_cursor.fetchall()
+        ]
+
+        # Get level counts
+        levels_cursor = conn.execute("""
+            SELECT UPPER(level) as level, COUNT(*) as count
+            FROM logs
+            WHERE level IS NOT NULL AND level != ''
+            GROUP BY UPPER(level)
+            ORDER BY count DESC
+        """)
+        levels: list[Mapping[str, JSONValue]] = [
+            {"name": row[0], "count": row[1]} for row in levels_cursor.fetchall()
+        ]
+
+        return {"loggers": loggers, "events": events, "levels": levels}
 
     def list_bundles(self) -> list[Mapping[str, JSONValue]]:
         """List all bundles in the root directory."""
@@ -409,15 +538,33 @@ class _DebugAppHandlers:
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
-    def get_logs(
+    def get_logs(  # noqa: PLR0913
         self,
         *,
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int | None, Query(ge=0)] = None,
         level: Annotated[str | None, Query()] = None,
+        logger: Annotated[str | None, Query()] = None,
+        event: Annotated[str | None, Query()] = None,
+        search: Annotated[str | None, Query()] = None,
+        exclude_logger: Annotated[str | None, Query()] = None,
+        exclude_event: Annotated[str | None, Query()] = None,
     ) -> Mapping[str, JSONValue]:
         """Return log entries from the bundle."""
-        return self._store.get_logs(offset=offset, limit=limit, level=level)
+        return self._store.get_logs(
+            offset=offset,
+            limit=limit,
+            level=level,
+            logger=logger,
+            event=event,
+            search=search,
+            exclude_logger=exclude_logger,
+            exclude_event=exclude_event,
+        )
+
+    def get_log_facets(self) -> Mapping[str, JSONValue]:
+        """Return unique loggers, events, and levels for filter UI."""
+        return self._store.get_log_facets()
 
     def get_config(self) -> JSONResponse:
         """Return the bundle config."""
@@ -517,6 +664,7 @@ def build_debug_app(store: BundleStore, logger: StructuredLogger) -> FastAPI:
     _ = app.get("/api/manifest")(handlers.get_manifest)
     _ = app.get("/api/slices/{encoded_slice_type}")(handlers.get_slice)
     _ = app.get("/api/logs")(handlers.get_logs)
+    _ = app.get("/api/logs/facets")(handlers.get_log_facets)
     _ = app.get("/api/config")(handlers.get_config)
     _ = app.get("/api/metrics")(handlers.get_metrics)
     _ = app.get("/api/error")(handlers.get_error)

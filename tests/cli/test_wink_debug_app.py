@@ -700,6 +700,165 @@ def test_logs_endpoint_no_logs(tmp_path: Path) -> None:
     assert logs["total"] == 0
 
 
+def test_logs_facets_endpoint(tmp_path: Path) -> None:
+    """Test log facets endpoint returns unique loggers and events."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            logger1 = logging.getLogger("app.service")
+            logger1.setLevel(logging.INFO)
+            logger1.info("Service started", extra={"event": "service.start"})
+
+            logger2 = logging.getLogger("app.database")
+            logger2.setLevel(logging.INFO)
+            logger2.info("DB connected", extra={"event": "db.connect"})
+            logger2.info("Query executed", extra={"event": "db.query"})
+
+    assert writer.path is not None
+    test_logger = debug_app.get_logger("test.facets")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
+    client = TestClient(app)
+
+    facets = client.get("/api/logs/facets").json()
+
+    assert "loggers" in facets
+    assert "events" in facets
+    assert "levels" in facets
+    assert len(facets["loggers"]) >= 2
+    assert len(facets["events"]) >= 2
+
+
+def test_logs_filter_by_logger(tmp_path: Path) -> None:
+    """Test filtering logs by logger name."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            logger1 = logging.getLogger("app.service")
+            logger1.setLevel(logging.INFO)
+            logger1.info("Service message")
+
+            logger2 = logging.getLogger("app.database")
+            logger2.setLevel(logging.INFO)
+            logger2.info("Database message")
+
+    assert writer.path is not None
+    test_logger = debug_app.get_logger("test.filter.logger")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
+    client = TestClient(app)
+
+    # Filter by specific logger
+    logs = client.get("/api/logs", params={"logger": "app.service"}).json()
+    assert all(
+        "service" in entry.get("logger", "").lower() for entry in logs["entries"]
+    )
+
+
+def test_logs_filter_by_event(tmp_path: Path) -> None:
+    """Test filtering logs by event name."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            test_log = logging.getLogger("test.events")
+            test_log.setLevel(logging.INFO)
+            test_log.info("Event A", extra={"event": "event.a"})
+            test_log.info("Event B", extra={"event": "event.b"})
+
+    assert writer.path is not None
+    test_logger = debug_app.get_logger("test.filter.event")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
+    client = TestClient(app)
+
+    # Filter by specific event
+    logs = client.get("/api/logs", params={"event": "event.a"}).json()
+    assert all(entry.get("event") == "event.a" for entry in logs["entries"])
+
+
+def test_logs_exclude_logger(tmp_path: Path) -> None:
+    """Test excluding logs by logger name."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            logger1 = logging.getLogger("keep.this")
+            logger1.setLevel(logging.INFO)
+            logger1.info("Keep message")
+
+            logger2 = logging.getLogger("exclude.this")
+            logger2.setLevel(logging.INFO)
+            logger2.info("Exclude message")
+
+    assert writer.path is not None
+    test_logger = debug_app.get_logger("test.exclude.logger")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
+    client = TestClient(app)
+
+    # Exclude specific logger
+    logs = client.get("/api/logs", params={"exclude_logger": "exclude.this"}).json()
+    assert all(entry.get("logger") != "exclude.this" for entry in logs["entries"])
+
+
+def test_logs_search_filter(tmp_path: Path) -> None:
+    """Test full-text search in logs."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            test_log = logging.getLogger("test.search")
+            test_log.setLevel(logging.INFO)
+            test_log.info("Find the needle in the haystack")
+            test_log.info("Another message without it")
+
+    assert writer.path is not None
+    test_logger = debug_app.get_logger("test.search")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
+    client = TestClient(app)
+
+    # Search for "needle"
+    logs = client.get("/api/logs", params={"search": "needle"}).json()
+    assert logs["total"] >= 1
+    assert any(
+        "needle" in entry.get("message", "").lower() for entry in logs["entries"]
+    )
+
+
 def test_config_endpoint_missing(tmp_path: Path) -> None:
     """Test config endpoint returns 404 when no config in bundle."""
     bundle_path = _create_minimal_bundle(tmp_path, session_content=None)

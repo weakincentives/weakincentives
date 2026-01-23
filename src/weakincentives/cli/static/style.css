@@ -1757,6 +1757,21 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.log-logger.clickable,
+.log-event-name.clickable {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  transition: background 0.15s ease;
+}
+
+.log-logger.clickable:hover,
+.log-event-name.clickable:hover {
+  background: var(--color-primary);
+  color: white;
+}
+
 .log-exception {
   margin-top: 8px;
   padding: 8px;
@@ -2007,6 +2022,112 @@ select:focus-visible {
 .filter-actions {
   padding-top: 8px;
   border-top: 1px solid var(--color-border);
+}
+
+.filter-hint {
+  font-weight: 400;
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: normal;
+  opacity: 0.7;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 12px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.filter-chip:hover {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+.filter-chip.included {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+.filter-chip.excluded {
+  background: var(--color-danger);
+  color: white;
+  border-color: var(--color-danger);
+  text-decoration: line-through;
+}
+
+.filter-chip .chip-count {
+  opacity: 0.7;
+  font-size: 10px;
+}
+
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.active-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 12px;
+  background: var(--color-primary);
+  color: white;
+}
+
+.active-filter.exclude {
+  background: var(--color-danger);
+}
+
+.active-filter .remove-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.active-filter .remove-filter:hover {
+  background: rgba(255,255,255,0.4);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panel-header .ghost.small {
+  padding: 4px 8px;
+  font-size: 11px;
 }
 
 /* --- Logs Content Area --- */
