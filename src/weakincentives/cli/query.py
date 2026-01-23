@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import field
 from pathlib import Path
@@ -396,6 +397,9 @@ class QueryDatabase(Closeable):
 
     The database is opened in read-only mode after building to prevent
     accidental modification of the cached data.
+
+    Thread safety: Uses a lock to ensure only one thread accesses the
+    connection at a time, making it safe for use with FastAPI's thread pool.
     """
 
     _bundle: DebugBundle
@@ -403,6 +407,7 @@ class QueryDatabase(Closeable):
     _db_path: Path
     _conn: sqlite3.Connection | None
     _built: bool
+    _lock: threading.Lock
 
     def __init__(self, bundle: DebugBundle, db_path: Path) -> None:
         """Initialize query database.
@@ -418,6 +423,7 @@ class QueryDatabase(Closeable):
         self._db_path = db_path
         self._conn = None
         self._built = False
+        self._lock = threading.Lock()
 
     @property
     def bundle(self) -> DebugBundle:
@@ -446,6 +452,23 @@ class QueryDatabase(Closeable):
                 )
             self._conn.row_factory = sqlite3.Row
         return self._conn
+
+    def execute(
+        self, query: str, params: Sequence[Any] | None = None
+    ) -> list[sqlite3.Row]:
+        """Execute a query with thread safety.
+
+        Args:
+            query: SQL query to execute.
+            params: Optional query parameters.
+
+        Returns:
+            List of result rows.
+        """
+        with self._lock:
+            conn = self.connection
+            cursor = conn.execute(query, params or [])
+            return cursor.fetchall()
 
     @override
     def close(self) -> None:

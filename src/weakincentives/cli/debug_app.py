@@ -288,18 +288,16 @@ class BundleStore:
             query += " LIMIT -1 OFFSET ?"
             params.append(offset)
 
-        # Use raw connection for parameterized queries
-        conn = self._db.connection
-        cursor = conn.execute(query, params)
-        rows = cursor.fetchall()
+        # Use thread-safe execute
+        rows = self._db.execute(query, params)
 
         if not rows and offset == 0:
             # Check if slice type exists at all
-            count_cursor = conn.execute(
+            count_rows = self._db.execute(
                 "SELECT COUNT(*) FROM session_slices WHERE slice_type = ?",
                 [slice_type],
             )
-            if count_cursor.fetchone()[0] == 0:  # pragma: no branch
+            if count_rows[0][0] == 0:  # pragma: no branch
                 raise KeyError(f"Unknown slice type: {slice_type}")
 
         items: list[Mapping[str, JSONValue]] = []
@@ -356,11 +354,10 @@ class BundleStore:
         limit: int | None,
     ) -> Mapping[str, JSONValue]:
         """Execute log query with pagination."""
-        conn = self._db.connection
-
         # Get total count (where_clause built from safe patterns)
         count_query = f"SELECT COUNT(*) FROM logs {where_clause}"  # nosec B608
-        total = conn.execute(count_query, list(params)).fetchone()[0]
+        count_rows = self._db.execute(count_query, list(params))
+        total = count_rows[0][0]
 
         # Build select query (where_clause built from safe patterns)
         query = f"SELECT timestamp, level, logger, event, message, context FROM logs {where_clause}"  # nosec B608
@@ -373,16 +370,14 @@ class BundleStore:
             query += " LIMIT -1 OFFSET ?"
             query_params.append(offset)
 
-        cursor = conn.execute(query, query_params)
-        entries = [_parse_log_row(row) for row in cursor.fetchall()]
+        rows = self._db.execute(query, query_params)
+        entries = [_parse_log_row(row) for row in rows]
         return {"entries": entries, "total": total}
 
     def get_log_facets(self) -> Mapping[str, JSONValue]:
         """Get unique loggers and events for filter suggestions."""
-        conn = self._db.connection
-
         # Get unique loggers with counts
-        loggers_cursor = conn.execute("""
+        logger_rows = self._db.execute("""
             SELECT logger, COUNT(*) as count
             FROM logs
             WHERE logger IS NOT NULL AND logger != ''
@@ -390,11 +385,11 @@ class BundleStore:
             ORDER BY count DESC
         """)
         loggers: list[Mapping[str, JSONValue]] = [
-            {"name": row[0], "count": row[1]} for row in loggers_cursor.fetchall()
+            {"name": row[0], "count": row[1]} for row in logger_rows
         ]
 
         # Get unique events with counts
-        events_cursor = conn.execute("""
+        event_rows = self._db.execute("""
             SELECT event, COUNT(*) as count
             FROM logs
             WHERE event IS NOT NULL AND event != ''
@@ -402,11 +397,11 @@ class BundleStore:
             ORDER BY count DESC
         """)
         events: list[Mapping[str, JSONValue]] = [
-            {"name": row[0], "count": row[1]} for row in events_cursor.fetchall()
+            {"name": row[0], "count": row[1]} for row in event_rows
         ]
 
         # Get level counts
-        levels_cursor = conn.execute("""
+        level_rows = self._db.execute("""
             SELECT UPPER(level) as level, COUNT(*) as count
             FROM logs
             WHERE level IS NOT NULL AND level != ''
@@ -414,7 +409,7 @@ class BundleStore:
             ORDER BY count DESC
         """)
         levels: list[Mapping[str, JSONValue]] = [
-            {"name": row[0], "count": row[1]} for row in levels_cursor.fetchall()
+            {"name": row[0], "count": row[1]} for row in level_rows
         ]
 
         return {"loggers": loggers, "events": events, "levels": levels}
