@@ -28,6 +28,7 @@ debug issues when they arise.
 1. [Orchestration](orchestration.md) - Handle requests at scale
 1. [Lifecycle](lifecycle.md) - Health checks, shutdown, watchdogs
 1. [Debugging](debugging.md) - Inspect and troubleshoot sessions
+1. [Query](query.md) - SQL-based debug bundle analysis
 
 ### For Advanced Users
 
@@ -92,6 +93,7 @@ debug issues when they arise.
 
 | Guide | What You'll Learn |
 | --- | --- |
+| [Query](query.md) | SQL-based exploration of debug bundles |
 | [Recipes](recipes.md) | Common patterns for code review, Q&A, and patching agents |
 | [Troubleshooting](troubleshooting.md) | Debug common errors and issues |
 | [API Reference](api-reference.md) | Quick lookup for key types and functions |
