@@ -23,6 +23,13 @@ const state = {
   filteredLogs: [],
   logsLevels: new Set(["DEBUG", "INFO", "WARNING", "ERROR"]),
   logsSearch: "",
+  logsFacets: { loggers: [], events: [], levels: [] },
+  logsLoggerChipFilter: "",
+  logsEventChipFilter: "",
+  logsIncludeLoggers: new Set(),
+  logsExcludeLoggers: new Set(),
+  logsIncludeEvents: new Set(),
+  logsExcludeEvents: new Set(),
   // Logs pagination
   logsLimit: 200,
   logsTotalCount: 0,
@@ -88,6 +95,12 @@ const elements = {
   logsCopy: document.getElementById("logs-copy"),
   logsScrollBottom: document.getElementById("logs-scroll-bottom"),
   logsList: document.getElementById("logs-list"),
+  logsLoggerFilter: document.getElementById("logs-logger-filter"),
+  logsLoggerChips: document.getElementById("logs-logger-chips"),
+  logsEventFilter: document.getElementById("logs-event-filter"),
+  logsEventChips: document.getElementById("logs-event-chips"),
+  logsActiveFilters: document.getElementById("logs-active-filters"),
+  logsActiveFiltersGroup: document.getElementById("logs-active-filters-group"),
   // Task
   taskPanelTitle: document.getElementById("task-panel-title"),
   taskContent: document.getElementById("task-content"),
@@ -198,7 +211,8 @@ function switchView(viewName) {
   elements.filesystemView.classList.toggle("hidden", viewName !== "filesystem");
 
   // Load data if needed
-  if (viewName === "logs" && state.allLogs.length === 0) {
+  if (viewName === "logs" && state.filteredLogs.length === 0) {
+    loadLogFacets();
     loadLogs();
   } else if (viewName === "task" && state.taskInput === null) {
     loadTaskData();
@@ -312,12 +326,12 @@ async function isEventSlice(entry) {
 
 async function bucketSlices(entries) {
   const buckets = { state: [], event: [] };
-  await Promise.all(
-    entries.map(async (entry) => {
-      const isEvent = await isEventSlice(entry);
-      buckets[isEvent ? "event" : "state"].push(entry);
-    })
-  );
+  // Classify all entries concurrently, preserving order via Promise.all
+  const classifications = await Promise.all(entries.map((entry) => isEventSlice(entry)));
+  // Bucket entries in original order based on classification results
+  entries.forEach((entry, i) => {
+    buckets[classifications[i] ? "event" : "state"].push(entry);
+  });
   return buckets;
 }
 
@@ -431,19 +445,65 @@ elements.copyButton.addEventListener("click", async () => {
 // LOGS
 // ============================================================================
 
+function buildLogsQueryParams(offset = 0) {
+  const params = new URLSearchParams();
+  params.set("offset", offset);
+  params.set("limit", state.logsLimit);
+
+  // Level filter
+  if (state.logsLevels.size > 0 && state.logsLevels.size < 4) {
+    params.set("level", Array.from(state.logsLevels).join(","));
+  }
+
+  // Search filter (server-side)
+  if (state.logsSearch.trim()) {
+    params.set("search", state.logsSearch.trim());
+  }
+
+  // Logger filters
+  if (state.logsIncludeLoggers.size > 0) {
+    params.set("logger", Array.from(state.logsIncludeLoggers).join(","));
+  }
+  if (state.logsExcludeLoggers.size > 0) {
+    params.set("exclude_logger", Array.from(state.logsExcludeLoggers).join(","));
+  }
+
+  // Event filters
+  if (state.logsIncludeEvents.size > 0) {
+    params.set("event", Array.from(state.logsIncludeEvents).join(","));
+  }
+  if (state.logsExcludeEvents.size > 0) {
+    params.set("exclude_event", Array.from(state.logsExcludeEvents).join(","));
+  }
+
+  return params.toString();
+}
+
+async function loadLogFacets() {
+  try {
+    state.logsFacets = await fetchJSON("/api/logs/facets");
+    renderLogFilterChips();
+  } catch (error) {
+    console.warn("Failed to load log facets:", error);
+  }
+}
+
 async function loadLogs(append = false) {
   if (state.logsLoading) return;
 
   try {
     state.logsLoading = true;
-    const offset = append ? state.allLogs.length : 0;
-    const result = await fetchJSON(`/api/logs?offset=${offset}&limit=${state.logsLimit}`);
+    const offset = append ? state.filteredLogs.length : 0;
+    const query = buildLogsQueryParams(offset);
+    const result = await fetchJSON(`/api/logs?${query}`);
     const entries = result.entries || [];
 
-    state.allLogs = append ? state.allLogs.concat(entries) : entries;
-    state.logsTotalCount = result.total || state.allLogs.length;
-    state.logsHasMore = state.allLogs.length < state.logsTotalCount;
-    applyLogsFilters();
+    state.filteredLogs = append ? state.filteredLogs.concat(entries) : entries;
+    state.logsTotalCount = result.total || state.filteredLogs.length;
+    state.logsHasMore = state.filteredLogs.length < state.logsTotalCount;
+
+    renderLogs();
+    updateLogsStats();
   } catch (error) {
     elements.logsList.innerHTML = `<p class="muted">Failed to load logs: ${error.message}</p>`;
   } finally {
@@ -455,35 +515,170 @@ async function loadMoreLogs() {
   await loadLogs(true);
 }
 
-function applyLogsFilters() {
-  const search = state.logsSearch.toLowerCase();
-
-  state.filteredLogs = state.allLogs.filter((log) => {
-    // Level filter
-    const level = (log.level || "INFO").toUpperCase();
-    if (!state.logsLevels.has(level)) return false;
-
-    // Search filter
-    if (search) {
-      const message = (log.message || "").toLowerCase();
-      const event = (log.event || "").toLowerCase();
-      const context = JSON.stringify(log.context || {}).toLowerCase();
-      if (!message.includes(search) && !event.includes(search) && !context.includes(search)) {
-        return false;
-      }
-    }
-
-    return true;
-  });
-
-  renderLogs();
-  updateLogsStats();
+// Debounced search to avoid too many API calls
+let logsSearchTimeout = null;
+function debouncedLogsSearch() {
+  clearTimeout(logsSearchTimeout);
+  logsSearchTimeout = setTimeout(() => loadLogs(false), 300);
 }
 
 function updateLogsStats() {
-  let status = `Showing ${state.filteredLogs.length} of ${state.allLogs.length}`;
-  if (state.logsHasMore) status += ` (${state.logsTotalCount} total)`;
+  let status = `Showing ${state.filteredLogs.length}`;
+  if (state.logsHasMore) status += ` of ${state.logsTotalCount}`;
   elements.logsShowing.textContent = status;
+}
+
+function renderLogFilterChips() {
+  const loggerFilter = state.logsLoggerChipFilter.toLowerCase();
+  const eventFilter = state.logsEventChipFilter.toLowerCase();
+
+  // Render logger chips
+  elements.logsLoggerChips.innerHTML = "";
+  state.logsFacets.loggers
+    .filter((item) => !loggerFilter || item.name.toLowerCase().includes(loggerFilter))
+    .forEach((item) => {
+      const chip = createFilterChip(
+        item.name,
+        item.count,
+        state.logsIncludeLoggers.has(item.name),
+        state.logsExcludeLoggers.has(item.name),
+        (name, include, exclude) => {
+          toggleLoggerFilter(name, include, exclude);
+        }
+      );
+      elements.logsLoggerChips.appendChild(chip);
+    });
+
+  // Render event chips
+  elements.logsEventChips.innerHTML = "";
+  state.logsFacets.events
+    .filter((item) => !eventFilter || item.name.toLowerCase().includes(eventFilter))
+    .forEach((item) => {
+      const chip = createFilterChip(
+        item.name,
+        item.count,
+        state.logsIncludeEvents.has(item.name),
+        state.logsExcludeEvents.has(item.name),
+        (name, include, exclude) => {
+          toggleEventFilter(name, include, exclude);
+        }
+      );
+      elements.logsEventChips.appendChild(chip);
+    });
+
+  renderActiveFilters();
+}
+
+function createFilterChip(name, count, isIncluded, isExcluded, onToggle) {
+  const chip = document.createElement("span");
+  chip.className = "filter-chip";
+  if (isIncluded) chip.classList.add("included");
+  if (isExcluded) chip.classList.add("excluded");
+
+  const displayName = name.split(".").pop() || name;
+  let prefix = "";
+  if (isIncluded) prefix = "+ ";
+  if (isExcluded) prefix = "− ";
+  chip.innerHTML = `${prefix}${escapeHtml(displayName)} <span class="chip-count">${count}</span>`;
+  chip.title = `${name}\nClick: show only | Shift+click: hide`;
+
+  chip.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (e.shiftKey) {
+      // Shift+click to exclude
+      onToggle(name, false, !isExcluded);
+    } else {
+      // Regular click to include
+      onToggle(name, !isIncluded, false);
+    }
+  });
+
+  return chip;
+}
+
+function toggleLoggerFilter(name, include, exclude) {
+  if (include) {
+    state.logsIncludeLoggers.add(name);
+    state.logsExcludeLoggers.delete(name);
+  } else if (exclude) {
+    state.logsExcludeLoggers.add(name);
+    state.logsIncludeLoggers.delete(name);
+  } else {
+    state.logsIncludeLoggers.delete(name);
+    state.logsExcludeLoggers.delete(name);
+  }
+  renderLogFilterChips();
+  loadLogs(false);
+}
+
+function toggleEventFilter(name, include, exclude) {
+  if (include) {
+    state.logsIncludeEvents.add(name);
+    state.logsExcludeEvents.delete(name);
+  } else if (exclude) {
+    state.logsExcludeEvents.add(name);
+    state.logsIncludeEvents.delete(name);
+  } else {
+    state.logsIncludeEvents.delete(name);
+    state.logsExcludeEvents.delete(name);
+  }
+  renderLogFilterChips();
+  loadLogs(false);
+}
+
+function renderActiveFilters() {
+  const hasFilters =
+    state.logsIncludeLoggers.size > 0 ||
+    state.logsExcludeLoggers.size > 0 ||
+    state.logsIncludeEvents.size > 0 ||
+    state.logsExcludeEvents.size > 0;
+
+  elements.logsActiveFiltersGroup.style.display = hasFilters ? "flex" : "none";
+
+  if (!hasFilters) return;
+
+  elements.logsActiveFilters.innerHTML = "";
+
+  // Include loggers
+  state.logsIncludeLoggers.forEach((name) => {
+    elements.logsActiveFilters.appendChild(
+      createActiveFilter("logger", name, false, () => toggleLoggerFilter(name, false, false))
+    );
+  });
+
+  // Exclude loggers
+  state.logsExcludeLoggers.forEach((name) => {
+    elements.logsActiveFilters.appendChild(
+      createActiveFilter("logger", name, true, () => toggleLoggerFilter(name, false, false))
+    );
+  });
+
+  // Include events
+  state.logsIncludeEvents.forEach((name) => {
+    elements.logsActiveFilters.appendChild(
+      createActiveFilter("event", name, false, () => toggleEventFilter(name, false, false))
+    );
+  });
+
+  // Exclude events
+  state.logsExcludeEvents.forEach((name) => {
+    elements.logsActiveFilters.appendChild(
+      createActiveFilter("event", name, true, () => toggleEventFilter(name, false, false))
+    );
+  });
+}
+
+function createActiveFilter(type, name, isExclude, onRemove) {
+  const filter = document.createElement("span");
+  filter.className = `active-filter${isExclude ? " exclude" : ""}`;
+
+  const displayName = name.split(".").pop() || name;
+  const prefix = isExclude ? "−" : "+";
+  filter.innerHTML = `${prefix}${escapeHtml(displayName)} <span class="remove-filter">×</span>`;
+  filter.title = `${type}: ${name}`;
+
+  filter.querySelector(".remove-filter").addEventListener("click", onRemove);
+  return filter;
 }
 
 function renderLogs() {
@@ -506,10 +701,11 @@ function renderLogs() {
       html += `<span class="log-timestamp">${log.timestamp}</span>`;
     }
     if (log.logger) {
-      html += `<span class="log-logger">${escapeHtml(log.logger)}</span>`;
+      const loggerShort = log.logger.split(".").slice(-2).join(".");
+      html += `<span class="log-logger clickable" data-logger="${escapeHtml(log.logger)}" title="${escapeHtml(log.logger)}">${escapeHtml(loggerShort)}</span>`;
     }
     if (log.event) {
-      html += `<span class="log-event-name">${escapeHtml(log.event)}</span>`;
+      html += `<span class="log-event-name clickable" data-event="${escapeHtml(log.event)}">${escapeHtml(log.event)}</span>`;
     }
     html += `</div>`;
 
@@ -526,6 +722,30 @@ function renderLogs() {
     }
 
     entry.innerHTML = html;
+
+    // Add click handlers for inline filtering
+    entry.querySelectorAll(".log-logger.clickable").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        const logger = el.dataset.logger;
+        if (e.shiftKey) {
+          toggleLoggerFilter(logger, false, true);
+        } else {
+          toggleLoggerFilter(logger, true, false);
+        }
+      });
+    });
+
+    entry.querySelectorAll(".log-event-name.clickable").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        const event = el.dataset.event;
+        if (e.shiftKey) {
+          toggleEventFilter(event, false, true);
+        } else {
+          toggleEventFilter(event, true, false);
+        }
+      });
+    });
+
     elements.logsList.appendChild(entry);
   });
 
@@ -533,7 +753,7 @@ function renderLogs() {
   if (state.logsHasMore) {
     const loadMoreContainer = document.createElement("div");
     loadMoreContainer.className = "logs-load-more";
-    const remaining = state.logsTotalCount - state.allLogs.length;
+    const remaining = state.logsTotalCount - state.filteredLogs.length;
     loadMoreContainer.innerHTML = `
       <button class="ghost logs-load-more-btn" type="button">
         Load more (${remaining} remaining)
@@ -547,7 +767,17 @@ function renderLogs() {
 // Logs filter events
 elements.logsSearch.addEventListener("input", () => {
   state.logsSearch = elements.logsSearch.value;
-  applyLogsFilters();
+  debouncedLogsSearch();
+});
+
+elements.logsLoggerFilter.addEventListener("input", () => {
+  state.logsLoggerChipFilter = elements.logsLoggerFilter.value;
+  renderLogFilterChips();
+});
+
+elements.logsEventFilter.addEventListener("input", () => {
+  state.logsEventChipFilter = elements.logsEventChipFilter.value;
+  renderLogFilterChips();
 });
 
 // Level checkboxes
@@ -558,18 +788,27 @@ document.querySelectorAll(".level-checkbox input").forEach((checkbox) => {
     } else {
       state.logsLevels.delete(checkbox.value);
     }
-    applyLogsFilters();
+    loadLogs(false);
   });
 });
 
 elements.logsClearFilters.addEventListener("click", () => {
   state.logsSearch = "";
   state.logsLevels = new Set(["DEBUG", "INFO", "WARNING", "ERROR"]);
+  state.logsIncludeLoggers.clear();
+  state.logsExcludeLoggers.clear();
+  state.logsIncludeEvents.clear();
+  state.logsExcludeEvents.clear();
+  state.logsLoggerChipFilter = "";
+  state.logsEventChipFilter = "";
 
   elements.logsSearch.value = "";
+  elements.logsLoggerFilter.value = "";
+  elements.logsEventFilter.value = "";
   document.querySelectorAll(".level-checkbox input").forEach((cb) => (cb.checked = true));
 
-  applyLogsFilters();
+  renderLogFilterChips();
+  loadLogs(false);
 });
 
 elements.logsCopy.addEventListener("click", async () => {

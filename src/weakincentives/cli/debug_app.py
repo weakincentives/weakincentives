@@ -10,19 +10,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""FastAPI app for exploring debug bundle zip files."""
+"""FastAPI app for exploring debug bundle zip files.
+
+This module provides a web UI for inspecting debug bundles, powered by
+SQLite for fast querying. It reuses the same database caching logic as
+the `wink query` command.
+"""
 
 from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import threading
 import webbrowser
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -30,17 +36,17 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
 
-from ..dataclasses import FrozenDataclass
-from ..debug.bundle import BundleValidationError, DebugBundle
+from ..debug.bundle import DebugBundle
 from ..errors import WinkError
 from ..runtime.logging import StructuredLogger, get_logger
-from ..runtime.session.snapshots import (
-    Snapshot,
-    SnapshotPayload,
-    SnapshotRestoreError,
-    SnapshotSlicePayload,
-)
 from ..types import JSONValue
+from .query import (
+    QueryDatabase,
+    QueryError,
+    iter_bundle_files,
+    open_query_database,
+    resolve_bundle_path,
+)
 
 # Module-level logger keeps loader warnings consistent with the debug server.
 logger: StructuredLogger = get_logger(__name__)
@@ -105,117 +111,99 @@ def _class_name(type_identifier: str) -> str:
     return type_identifier.rsplit(".", 1)[-1]
 
 
-@FrozenDataclass()
-class SliceSummary:
-    slice_type: str
-    item_type: str
-    count: int
+def _split_csv(value: str | None) -> list[str]:
+    """Split comma-separated string into list of stripped values."""
+    if not value:
+        return []
+    return [v.strip() for v in value.split(",") if v.strip()]
 
 
-@FrozenDataclass()
-class BundleMeta:
-    """Metadata about a loaded bundle for the debug UI."""
-
-    bundle_id: str
-    created_at: str
-    path: str
-    request_id: str
-    session_id: str | None
-    status: str
-    slices: tuple[SliceSummary, ...]
-    validation_error: str | None = None
-
-
-@FrozenDataclass()
-class LoadedBundle:
-    """A loaded debug bundle with parsed session data."""
-
-    meta: BundleMeta
-    bundle: DebugBundle
-    session_slices: Mapping[str, SnapshotSlicePayload]
-    path: Path
+def _add_in_filter(
+    conditions: list[str],
+    params: list[Any],
+    column: str,
+    values: list[str],
+    *,
+    upper: bool = False,
+) -> None:
+    """Add IN filter condition."""
+    if not values:
+        return
+    placeholders = ",".join("?" for _ in values)
+    col_expr = f"UPPER({column})" if upper else column
+    vals = [v.upper() for v in values] if upper else values
+    conditions.append(f"{col_expr} IN ({placeholders})")
+    params.extend(vals)
 
 
-def load_bundle(bundle_path: Path) -> LoadedBundle:
-    """Load and validate a debug bundle from disk."""
-    if not bundle_path.exists():
-        msg = f"Bundle file not found: {bundle_path}"
-        raise BundleLoadError(msg)
+def _add_not_in_filter(
+    conditions: list[str],
+    params: list[Any],
+    column: str,
+    values: list[str],
+) -> None:
+    """Add NOT IN filter condition (with NULL handling)."""
+    if not values:
+        return
+    placeholders = ",".join("?" for _ in values)
+    conditions.append(f"({column} IS NULL OR {column} NOT IN ({placeholders}))")
+    params.extend(values)
 
+
+def _build_log_filters(filters: Mapping[str, str | None]) -> tuple[str, list[Any]]:
+    """Build WHERE clause and params for log filtering.
+
+    Args:
+        filters: Dict with keys: level, logger, event, search, exclude_logger, exclude_event
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    _add_in_filter(
+        conditions, params, "level", _split_csv(filters.get("level")), upper=True
+    )
+    _add_in_filter(conditions, params, "logger", _split_csv(filters.get("logger")))
+    _add_in_filter(conditions, params, "event", _split_csv(filters.get("event")))
+    _add_not_in_filter(
+        conditions, params, "logger", _split_csv(filters.get("exclude_logger"))
+    )
+    _add_not_in_filter(
+        conditions, params, "event", _split_csv(filters.get("exclude_event"))
+    )
+
+    search = filters.get("search")
+    if search:
+        conditions.append("(message LIKE ? OR context LIKE ?)")
+        pattern = f"%{search}%"
+        params.extend([pattern, pattern])
+
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+    return where_clause, params
+
+
+def _parse_log_row(row: sqlite3.Row) -> Mapping[str, JSONValue]:
+    """Parse a log row into a dictionary."""
+    context_str = row[5] or "{}"
     try:
-        bundle = DebugBundle.load(bundle_path)
-    except BundleValidationError as error:
-        msg = f"Invalid bundle: {error}"
-        raise BundleLoadError(msg) from error
-
-    # Parse session data to get slices
-    session_slices: dict[str, SnapshotSlicePayload] = {}
-    slice_summaries: list[SliceSummary] = []
-    validation_error: str | None = None
-
-    session_content = bundle.session_after
-    if session_content:
-        # Session is JSONL - parse the first line
-        lines = [line.strip() for line in session_content.splitlines() if line.strip()]
-        if lines:
-            try:
-                payload = SnapshotPayload.from_json(lines[0])
-                session_slices = {entry.slice_type: entry for entry in payload.slices}
-                slice_summaries = [
-                    SliceSummary(
-                        slice_type=entry.slice_type,
-                        item_type=entry.item_type,
-                        count=len(entry.items),
-                    )
-                    for entry in payload.slices
-                ]
-
-                # Try full validation
-                try:
-                    _ = Snapshot.from_json(lines[0])
-                except SnapshotRestoreError as error:
-                    validation_error = str(error)
-                    logger.warning(
-                        "Session validation failed",
-                        event="wink.debug.session_error",
-                        context={
-                            "path": str(bundle_path),
-                            "error": validation_error,
-                        },
-                    )
-            except SnapshotRestoreError as error:
-                validation_error = str(error)
-                logger.warning(
-                    "Failed to parse session data",
-                    event="wink.debug.session_parse_error",
-                    context={
-                        "path": str(bundle_path),
-                        "error": validation_error,
-                    },
-                )
-
-    manifest = bundle.manifest
-    meta = BundleMeta(
-        bundle_id=manifest.bundle_id,
-        created_at=manifest.created_at,
-        path=str(bundle_path),
-        request_id=manifest.request.request_id,
-        session_id=manifest.request.session_id,
-        status=manifest.request.status,
-        slices=tuple(slice_summaries),
-        validation_error=validation_error,
-    )
-
-    return LoadedBundle(
-        meta=meta,
-        bundle=bundle,
-        session_slices=session_slices,
-        path=bundle_path,
-    )
+        context: JSONValue = json.loads(context_str)
+    except json.JSONDecodeError:  # pragma: no cover
+        context = {}
+    return {
+        "timestamp": row[0],
+        "level": row[1],
+        "logger": row[2],
+        "event": row[3],
+        "message": row[4],
+        "context": context,
+    }
 
 
 class BundleStore:
-    """In-memory store for the active bundle and reload handling."""
+    """Manages the active bundle via SQLite database.
+
+    Wraps QueryDatabase to provide bundle management (switching, reloading)
+    and access to bundle data through SQL queries.
+    """
 
     def __init__(
         self,
@@ -227,24 +215,209 @@ class BundleStore:
         resolved = path.resolve()
         self._root, self._path = self._normalize_path(resolved)
         self._logger = logger or get_logger(__name__)
-        self._bundle: LoadedBundle = load_bundle(self._path)
-
-    @property
-    def meta(self) -> BundleMeta:
-        return self._bundle.meta
-
-    @property
-    def bundle(self) -> DebugBundle:
-        return self._bundle.bundle
+        self._db: QueryDatabase = self._open_database(self._path)
 
     @property
     def path(self) -> Path:
         return self._path
 
+    @property
+    def bundle(self) -> DebugBundle:
+        """Access the underlying DebugBundle for raw file operations."""
+        return self._db.bundle
+
+    @staticmethod
+    def _open_database(bundle_path: Path) -> QueryDatabase:
+        """Open SQLite database for a bundle."""
+        try:
+            return open_query_database(bundle_path)
+        except QueryError as e:
+            raise BundleLoadError(str(e)) from e
+
+    def get_meta(self) -> Mapping[str, JSONValue]:
+        """Get bundle metadata from SQLite."""
+        rows = self._db.execute_query("SELECT * FROM manifest LIMIT 1")
+        if not rows:  # pragma: no cover - manifest always exists
+            return {}
+
+        manifest = rows[0]
+
+        # Get slice information
+        slice_rows = self._db.execute_query("""
+            SELECT slice_type, COUNT(*) as count
+            FROM session_slices
+            GROUP BY slice_type
+        """)
+
+        slices: list[Mapping[str, JSONValue]] = []
+        for row in slice_rows:
+            slice_type = str(row["slice_type"])
+            slices.append(
+                {
+                    "slice_type": slice_type,
+                    "item_type": slice_type,
+                    "display_name": _class_name(slice_type),
+                    "item_display_name": _class_name(slice_type),
+                    "count": row["count"],
+                }
+            )
+
+        return {
+            "bundle_id": manifest.get("bundle_id", ""),
+            "created_at": manifest.get("created_at", ""),
+            "path": str(self._path),
+            "request_id": manifest.get("request_id", ""),
+            "session_id": manifest.get("session_id"),
+            "status": manifest.get("status", ""),
+            "validation_error": None,
+            "slices": slices,
+        }
+
+    def get_slice_items(
+        self, slice_type: str, *, offset: int = 0, limit: int | None = None
+    ) -> Mapping[str, JSONValue]:
+        """Get items for a specific slice type."""
+        # Query session_slices table
+        query = "SELECT data FROM session_slices WHERE slice_type = ?"
+        params: list[Any] = [slice_type]
+
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+        elif offset > 0:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
+
+        # Use thread-safe execute
+        rows = self._db.execute(query, params)
+
+        if not rows and offset == 0:
+            # Check if slice type exists at all
+            count_rows = self._db.execute(
+                "SELECT COUNT(*) FROM session_slices WHERE slice_type = ?",
+                [slice_type],
+            )
+            if count_rows[0][0] == 0:  # pragma: no branch
+                raise KeyError(f"Unknown slice type: {slice_type}")
+
+        items: list[Mapping[str, JSONValue]] = []
+        for row in rows:
+            data_str = row[0]
+            try:
+                item = json.loads(data_str)
+                if isinstance(
+                    item, Mapping
+                ):  # pragma: no branch - data is always Mapping
+                    items.append(cast(Mapping[str, JSONValue], item))
+            except (
+                json.JSONDecodeError
+            ):  # pragma: no cover - data is validated during build
+                continue
+
+        return {
+            "slice_type": slice_type,
+            "item_type": slice_type,
+            "display_name": _class_name(slice_type),
+            "item_display_name": _class_name(slice_type),
+            "items": [_render_markdown_values(item) for item in items],
+        }
+
+    def get_logs(  # noqa: PLR0913
+        self,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+        level: str | None = None,
+        logger: str | None = None,
+        event: str | None = None,
+        search: str | None = None,
+        exclude_logger: str | None = None,
+        exclude_event: str | None = None,
+    ) -> Mapping[str, JSONValue]:
+        """Get log entries with filtering."""
+        filters = {
+            "level": level,
+            "logger": logger,
+            "event": event,
+            "search": search,
+            "exclude_logger": exclude_logger,
+            "exclude_event": exclude_event,
+        }
+        where_clause, params = _build_log_filters(filters)
+        return self._execute_log_query(where_clause, params, offset, limit)
+
+    def _execute_log_query(
+        self,
+        where_clause: str,
+        params: list[Any],
+        offset: int,
+        limit: int | None,
+    ) -> Mapping[str, JSONValue]:
+        """Execute log query with pagination."""
+        # Get total count (where_clause built from safe patterns)
+        count_query = f"SELECT COUNT(*) FROM logs {where_clause}"  # nosec B608
+        count_rows = self._db.execute(count_query, list(params))
+        total = count_rows[0][0]
+
+        # Build select query (where_clause built from safe patterns)
+        query = f"SELECT timestamp, level, logger, event, message, context FROM logs {where_clause}"  # nosec B608
+        query_params = list(params)
+
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            query_params.extend([limit, offset])
+        elif offset > 0:
+            query += " LIMIT -1 OFFSET ?"
+            query_params.append(offset)
+
+        rows = self._db.execute(query, query_params)
+        entries = [_parse_log_row(row) for row in rows]
+        return {"entries": entries, "total": total}
+
+    def get_log_facets(self) -> Mapping[str, JSONValue]:
+        """Get unique loggers and events for filter suggestions."""
+        # Get unique loggers with counts
+        logger_rows = self._db.execute("""
+            SELECT logger, COUNT(*) as count
+            FROM logs
+            WHERE logger IS NOT NULL AND logger != ''
+            GROUP BY logger
+            ORDER BY count DESC
+        """)
+        loggers: list[Mapping[str, JSONValue]] = [
+            {"name": row[0], "count": row[1]} for row in logger_rows
+        ]
+
+        # Get unique events with counts
+        event_rows = self._db.execute("""
+            SELECT event, COUNT(*) as count
+            FROM logs
+            WHERE event IS NOT NULL AND event != ''
+            GROUP BY event
+            ORDER BY count DESC
+        """)
+        events: list[Mapping[str, JSONValue]] = [
+            {"name": row[0], "count": row[1]} for row in event_rows
+        ]
+
+        # Get level counts
+        level_rows = self._db.execute("""
+            SELECT UPPER(level) as level, COUNT(*) as count
+            FROM logs
+            WHERE level IS NOT NULL AND level != ''
+            GROUP BY UPPER(level)
+            ORDER BY count DESC
+        """)
+        levels: list[Mapping[str, JSONValue]] = [
+            {"name": row[0], "count": row[1]} for row in level_rows
+        ]
+
+        return {"loggers": loggers, "events": events, "levels": levels}
+
     def list_bundles(self) -> list[Mapping[str, JSONValue]]:
         """List all bundles in the root directory."""
         bundles: list[tuple[float, Path]] = []
-        for candidate in sorted(self._iter_bundle_files(self._root)):
+        for candidate in sorted(iter_bundle_files(self._root)):
             try:
                 stats = candidate.stat()
                 created_at = max(stats.st_ctime, stats.st_mtime)
@@ -267,23 +440,24 @@ class BundleStore:
             )
         return entries
 
-    def slice_items(self, slice_type: str) -> SnapshotSlicePayload:
-        try:
-            return self._bundle.session_slices[slice_type]
-        except KeyError as error:
-            raise KeyError(f"Unknown slice type: {slice_type}") from error
-
-    def reload(self) -> BundleMeta:
+    def reload(self) -> Mapping[str, JSONValue]:
         """Reload the current bundle from disk."""
-        self._bundle = load_bundle(self._path)
+        # Delete cache to force rebuild
+        cache_path = self._path.with_suffix(self._path.suffix + ".sqlite")
+        if cache_path.exists():
+            cache_path.unlink()
+        # Open new database before closing old to preserve state on failure
+        new_db = self._open_database(self._path)
+        self._db.close()
+        self._db = new_db
         self._logger.info(
             "Bundle reloaded",
             event="debug.server.reload",
             context={"path": str(self._path)},
         )
-        return self.meta
+        return self.get_meta()
 
-    def switch(self, path: Path) -> BundleMeta:
+    def switch(self, path: Path) -> Mapping[str, JSONValue]:
         """Switch to a different bundle."""
         resolved = path.resolve()
         root, target = self._normalize_path(resolved)
@@ -291,59 +465,36 @@ class BundleStore:
             msg = f"Bundle must live under {self._root}"
             raise BundleLoadError(msg)
 
+        # Open new database before closing old to preserve state on failure
+        new_db = self._open_database(target)
+        self._db.close()
         self._root = root
         self._path = target
-        self._bundle = load_bundle(target)
+        self._db = new_db
         self._logger.info(
             "Bundle switched",
             event="debug.server.switch",
             context={"path": str(self._path)},
         )
-        return self.meta
+        return self.get_meta()
 
-    def _normalize_path(self, path: Path) -> tuple[Path, Path]:
+    def close(self) -> None:
+        """Close the database connection."""
+        self._db.close()
+
+    @staticmethod
+    def _normalize_path(path: Path) -> tuple[Path, Path]:
         if path.is_dir():
             root = path
-            candidates = sorted(
-                self._iter_bundle_files(root),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-            if not candidates:
-                msg = f"No bundles found under {root}"
-                raise BundleLoadError(msg)
-            target = candidates[0]
+            try:
+                target = resolve_bundle_path(path)
+            except QueryError:
+                msg = f"No bundles found under {path}"
+                raise BundleLoadError(msg) from None
         else:
             root = path.parent
             target = path
         return root, target
-
-    @staticmethod
-    def _iter_bundle_files(root: Path) -> list[Path]:
-        """Find all bundle zip files in a directory."""
-        return [p for p in root.glob("*.zip") if p.is_file()]
-
-
-def _meta_response(meta: BundleMeta) -> Mapping[str, JSONValue]:
-    return {
-        "bundle_id": meta.bundle_id,
-        "created_at": meta.created_at,
-        "path": meta.path,
-        "request_id": meta.request_id,
-        "session_id": meta.session_id,
-        "status": meta.status,
-        "validation_error": meta.validation_error,
-        "slices": [
-            {
-                "slice_type": entry.slice_type,
-                "item_type": entry.item_type,
-                "display_name": _class_name(entry.slice_type),
-                "item_display_name": _class_name(entry.item_type),
-                "count": entry.count,
-            }
-            for entry in meta.slices
-        ],
-    }
 
 
 class _DebugAppHandlers:
@@ -360,7 +511,7 @@ class _DebugAppHandlers:
         return index_path.read_text()
 
     def get_meta(self) -> Mapping[str, JSONValue]:
-        return _meta_response(self._store.meta)
+        return self._store.get_meta()
 
     def get_manifest(self) -> JSONResponse:
         """Return the raw bundle manifest."""
@@ -374,64 +525,41 @@ class _DebugAppHandlers:
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int | None, Query(ge=0)] = None,
     ) -> Mapping[str, JSONValue]:
-        slice_items = self._slice_items(encoded_slice_type)
-        items = self._paginate_items(
-            list(slice_items.items), offset=offset, limit=limit
-        )
-        rendered_items = [_render_markdown_values(item) for item in items]
-        return {
-            "slice_type": slice_items.slice_type,
-            "item_type": slice_items.item_type,
-            "display_name": _class_name(slice_items.slice_type),
-            "item_display_name": _class_name(slice_items.item_type),
-            "items": rendered_items,
-        }
+        from urllib.parse import unquote
 
-    def get_logs(
+        slice_type = unquote(encoded_slice_type)
+        try:
+            return self._store.get_slice_items(slice_type, offset=offset, limit=limit)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    def get_logs(  # noqa: PLR0913
         self,
         *,
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int | None, Query(ge=0)] = None,
         level: Annotated[str | None, Query()] = None,
+        logger: Annotated[str | None, Query()] = None,
+        event: Annotated[str | None, Query()] = None,
+        search: Annotated[str | None, Query()] = None,
+        exclude_logger: Annotated[str | None, Query()] = None,
+        exclude_event: Annotated[str | None, Query()] = None,
     ) -> Mapping[str, JSONValue]:
         """Return log entries from the bundle."""
-        logs_content = self._store.bundle.logs
-        if logs_content is None:
-            return {"entries": [], "total": 0}
+        return self._store.get_logs(
+            offset=offset,
+            limit=limit,
+            level=level,
+            logger=logger,
+            event=event,
+            search=search,
+            exclude_logger=exclude_logger,
+            exclude_event=exclude_event,
+        )
 
-        entries = self._parse_log_entries(logs_content, level)
-        total = len(entries)
-        entries = self._paginate_items(entries, offset=offset, limit=limit)
-        return {"entries": entries, "total": total}
-
-    @staticmethod
-    def _parse_log_entries(
-        logs_content: str, level_filter: str | None
-    ) -> list[Mapping[str, JSONValue]]:
-        """Parse JSONL log content, optionally filtering by level."""
-        entries: list[Mapping[str, JSONValue]] = []
-        for line in logs_content.splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                parsed: JSONValue = json.loads(stripped)
-                if not isinstance(parsed, dict):
-                    continue
-                entry: Mapping[str, JSONValue] = cast(Mapping[str, JSONValue], parsed)
-                if level_filter:
-                    entry_level: JSONValue = entry.get("level", "")
-                    if (
-                        isinstance(entry_level, str)
-                        and entry_level.upper() != level_filter.upper()
-                    ):
-                        continue
-                    if not isinstance(entry_level, str):
-                        continue
-                entries.append(entry)
-            except json.JSONDecodeError:
-                continue
-        return entries
+    def get_log_facets(self) -> Mapping[str, JSONValue]:
+        """Return unique loggers, events, and levels for filter UI."""
+        return self._store.get_log_facets()
 
     def get_config(self) -> JSONResponse:
         """Return the bundle config."""
@@ -468,6 +596,8 @@ class _DebugAppHandlers:
 
     def get_file(self, file_path: str) -> JSONResponse:
         """Get content of a specific file in the bundle."""
+        from ..debug.bundle import BundleValidationError
+
         try:
             content = self._store.bundle.read_file(file_path)
             # Try to parse as JSON
@@ -485,55 +615,25 @@ class _DebugAppHandlers:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
     def reload(self) -> Mapping[str, JSONValue]:
-        return _meta_response(self._execute_reload())
-
-    def list_bundles(self) -> list[Mapping[str, JSONValue]]:
-        return self._store.list_bundles()
-
-    def switch(self, payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
-        path = self._parse_switch_payload(payload)
-        meta = self._execute_bundle_command(lambda: self._store.switch(path))
-        return _meta_response(meta)
-
-    def _slice_items(self, encoded_slice_type: str) -> SnapshotSlicePayload:
-        from urllib.parse import unquote
-
-        slice_type = unquote(encoded_slice_type)
-        try:
-            return self._store.slice_items(slice_type)
-        except KeyError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-
-    @staticmethod
-    def _paginate_items(
-        items: list[Mapping[str, JSONValue]], *, offset: int, limit: int | None
-    ) -> list[Mapping[str, JSONValue]]:
-        if offset:
-            items = items[offset:]
-        if limit is not None:
-            items = items[:limit]
-        return items
-
-    def _execute_reload(self) -> BundleMeta:
         try:
             return self._store.reload()
         except BundleLoadError as error:
             self._logger.warning(
                 "Bundle reload failed",
                 event="debug.server.reload_failed",
-                context={"path": self._store.meta.path, "error": str(error)},
+                context={"path": str(self._store.path), "error": str(error)},
             )
-            raise self._translate_bundle_error(error) from error
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
-    @staticmethod
-    def _translate_bundle_error(error: BundleLoadError) -> HTTPException:
-        return HTTPException(status_code=400, detail=str(error))
+    def list_bundles(self) -> list[Mapping[str, JSONValue]]:
+        return self._store.list_bundles()
 
-    def _execute_bundle_command(self, command: Callable[[], BundleMeta]) -> BundleMeta:
+    def switch(self, payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
+        path = self._parse_switch_payload(payload)
         try:
-            return command()
+            return self._store.switch(path)
         except BundleLoadError as error:
-            raise self._translate_bundle_error(error) from error
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @staticmethod
     def _parse_switch_payload(payload: Mapping[str, JSONValue]) -> Path:
@@ -559,6 +659,7 @@ def build_debug_app(store: BundleStore, logger: StructuredLogger) -> FastAPI:
     _ = app.get("/api/manifest")(handlers.get_manifest)
     _ = app.get("/api/slices/{encoded_slice_type}")(handlers.get_slice)
     _ = app.get("/api/logs")(handlers.get_logs)
+    _ = app.get("/api/logs/facets")(handlers.get_log_facets)
     _ = app.get("/api/config")(handlers.get_config)
     _ = app.get("/api/metrics")(handlers.get_metrics)
     _ = app.get("/api/error")(handlers.get_error)
@@ -621,9 +722,3 @@ def _open_browser(url: str, logger: StructuredLogger) -> None:
             event="debug.server.browser",
             context={"url": url, "error": repr(error)},
         )
-
-
-# Backwards compatibility aliases (deprecated)
-SnapshotLoadError = BundleLoadError
-SnapshotStore = BundleStore
-load_snapshot = load_bundle

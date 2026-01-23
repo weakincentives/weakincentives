@@ -37,7 +37,9 @@ from weakincentives.cli.query import (
     _normalize_slice_type,
     format_as_json,
     format_as_table,
+    iter_bundle_files,
     open_query_database,
+    resolve_bundle_path,
 )
 from weakincentives.debug.bundle import BundleConfig, BundleWriter
 from weakincentives.runtime.session import Session
@@ -1776,3 +1778,114 @@ class TestFilesTableReadError:
                 assert "bad.txt" not in paths
             finally:
                 db.close()
+
+
+class TestResolveBundlePath:
+    """Tests for resolve_bundle_path function."""
+
+    def test_resolve_file_path(self, tmp_path: Path) -> None:
+        """Test resolving a direct file path."""
+        bundle_path = _create_test_bundle(tmp_path)
+        resolved = resolve_bundle_path(bundle_path)
+        assert resolved == bundle_path
+
+    def test_resolve_directory_picks_newest(self, tmp_path: Path) -> None:
+        """Test resolving a directory picks the newest bundle."""
+        import os
+        import time
+
+        bundle_one = _create_test_bundle(tmp_path)
+        time.sleep(0.01)
+        bundle_two = _create_test_bundle(tmp_path)
+
+        # Make bundle_two newer
+        now = time.time()
+        os.utime(bundle_one, (now - 1, now - 1))
+        os.utime(bundle_two, (now, now))
+
+        resolved = resolve_bundle_path(tmp_path)
+        assert resolved == bundle_two
+
+    def test_resolve_empty_directory_raises(self, tmp_path: Path) -> None:
+        """Test resolving an empty directory raises QueryError."""
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+
+        with pytest.raises(QueryError, match="No bundles found"):
+            resolve_bundle_path(empty_dir)
+
+
+class TestIterBundleFiles:
+    """Tests for iter_bundle_files function."""
+
+    def test_lists_zip_files(self, tmp_path: Path) -> None:
+        """Test listing zip files in a directory."""
+        bundle_path = _create_test_bundle(tmp_path)
+
+        files = iter_bundle_files(tmp_path)
+        assert len(files) == 1
+        assert files[0] == bundle_path
+
+    def test_excludes_non_zip(self, tmp_path: Path) -> None:
+        """Test that non-zip files are excluded."""
+        bundle_path = _create_test_bundle(tmp_path)
+        (tmp_path / "not_a_bundle.txt").write_text("hello")
+
+        files = iter_bundle_files(tmp_path)
+        assert len(files) == 1
+        assert files[0] == bundle_path
+
+    def test_empty_directory(self, tmp_path: Path) -> None:
+        """Test listing an empty directory."""
+        files = iter_bundle_files(tmp_path)
+        assert files == []
+
+
+class TestQueryDatabaseBundleProperties:
+    """Tests for QueryDatabase bundle property access."""
+
+    def test_bundle_property(self, tmp_path: Path) -> None:
+        """Test accessing the bundle property."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            assert db.bundle is not None
+            assert db.bundle.manifest.bundle_id != ""
+        finally:
+            db.close()
+
+    def test_bundle_path_property(self, tmp_path: Path) -> None:
+        """Test accessing the bundle_path property."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            assert db.bundle_path == bundle_path
+        finally:
+            db.close()
+
+
+class TestOpenQueryDatabaseDirectory:
+    """Tests for open_query_database with directory input."""
+
+    def test_opens_from_directory(self, tmp_path: Path) -> None:
+        """Test opening database from a directory."""
+        import os
+        import time
+
+        bundle_one = _create_test_bundle(tmp_path)
+        time.sleep(0.01)
+        bundle_two = _create_test_bundle(tmp_path)
+
+        # Make bundle_two newer
+        now = time.time()
+        os.utime(bundle_one, (now - 1, now - 1))
+        os.utime(bundle_two, (now, now))
+
+        db = open_query_database(tmp_path)
+
+        try:
+            assert db.bundle_path == bundle_two
+        finally:
+            db.close()

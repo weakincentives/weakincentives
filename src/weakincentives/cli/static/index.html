@@ -223,6 +223,7 @@
         <div class="panel">
           <div class="panel-header">
             <h2>Filters</h2>
+            <button id="logs-clear-filters" class="ghost small" type="button">Clear all</button>
           </div>
           <div class="logs-filters">
             <div class="filter-group">
@@ -230,7 +231,7 @@
               <input
                 id="logs-search"
                 type="search"
-                placeholder="Search messages..."
+                placeholder="Search messages & context..."
                 autocomplete="off"
               />
             </div>
@@ -251,8 +252,37 @@
                 </label>
               </div>
             </div>
-            <div class="filter-actions">
-              <button id="logs-clear-filters" class="ghost" type="button">Clear filters</button>
+            <div class="filter-group">
+              <label class="filter-label">
+                Logger
+                <span class="filter-hint">(click = show only, ⇧click = hide)</span>
+              </label>
+              <input
+                id="logs-logger-filter"
+                type="search"
+                class="chip-filter-input"
+                placeholder="Filter loggers..."
+                autocomplete="off"
+              />
+              <div id="logs-logger-chips" class="filter-chips"></div>
+            </div>
+            <div class="filter-group">
+              <label class="filter-label">
+                Event
+                <span class="filter-hint">(click = show only, ⇧click = hide)</span>
+              </label>
+              <input
+                id="logs-event-filter"
+                type="search"
+                class="chip-filter-input"
+                placeholder="Filter events..."
+                autocomplete="off"
+              />
+              <div id="logs-event-chips" class="filter-chips"></div>
+            </div>
+            <div class="filter-group" id="logs-active-filters-group" style="display: none;">
+              <label class="filter-label">Active Filters</label>
+              <div id="logs-active-filters" class="active-filters"></div>
             </div>
           </div>
         </div>

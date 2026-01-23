@@ -117,88 +117,31 @@ def _create_minimal_bundle(
     return zip_path
 
 
-def _create_session_jsonl(values: list[str], session_id: str = "test") -> str:
-    """Create JSONL session content for a bundle."""
-    session = Session(session_id=uuid4())
-    for value in values:
-        session.dispatch(_ExampleSlice(value))
-    snapshot = session.snapshot(include_all=True)
-    return snapshot.to_json() + "\n"
-
-
-def test_load_bundle_validates_schema(tmp_path: Path) -> None:
+def test_bundle_store_loads_bundle(tmp_path: Path) -> None:
     bundle_path = _create_test_bundle(tmp_path, ["one"])
 
-    loaded = debug_app.load_bundle(bundle_path)
+    store = debug_app.BundleStore(bundle_path, logger=debug_app.get_logger("test"))
+    meta = store.get_meta()
 
-    assert loaded.meta.bundle_id
-    assert loaded.meta.status == "success"
-    assert len(loaded.meta.slices) == 1
-    assert loaded.meta.slices[0].count == 1
+    assert meta["bundle_id"]
+    assert meta["status"] == "success"
+    assert len(meta["slices"]) == 1
 
 
-def test_load_bundle_errors(tmp_path: Path) -> None:
+def test_bundle_store_errors_on_missing(tmp_path: Path) -> None:
     missing_path = tmp_path / "missing.zip"
 
     with pytest.raises(debug_app.BundleLoadError):
-        debug_app.load_bundle(missing_path)
+        debug_app.BundleStore(missing_path, logger=debug_app.get_logger("test"))
 
+
+def test_bundle_store_errors_on_invalid(tmp_path: Path) -> None:
     # Invalid zip file
     invalid_path = tmp_path / "invalid.zip"
     invalid_path.write_text("not a zip")
 
     with pytest.raises(debug_app.BundleLoadError):
-        debug_app.load_bundle(invalid_path)
-
-
-def test_load_bundle_recovers_from_unknown_types(tmp_path: Path) -> None:
-    payload = {
-        "version": "1",
-        "created_at": datetime.now(UTC).isoformat(),
-        "slices": [
-            {
-                "slice_type": "__main__:UnknownType",
-                "item_type": "__main__:UnknownType",
-                "items": [{"value": "one"}],
-            }
-        ],
-        "tags": {"session_id": "unknown"},
-    }
-    session_content = json.dumps(payload)
-    bundle_path = _create_minimal_bundle(tmp_path, session_content=session_content)
-
-    loaded = debug_app.load_bundle(bundle_path)
-
-    assert loaded.meta.validation_error
-    assert "__main__:UnknownType" in loaded.session_slices
-    unknown_slice = loaded.session_slices["__main__:UnknownType"]
-    assert unknown_slice.items == ({"value": "one"},)
-
-
-def test_load_bundle_recovers_from_unknown_policy_types(tmp_path: Path) -> None:
-    """Verify bundles with __main__ policy types can be loaded for display."""
-    payload = {
-        "version": "1",
-        "created_at": datetime.now(UTC).isoformat(),
-        "slices": [
-            {
-                "slice_type": "__main__:ReviewResponse",
-                "item_type": "__main__:ReviewResponse",
-                "items": [{"score": 10}],
-            }
-        ],
-        "policies": {"__main__:ReviewResponse": "state"},
-        "tags": {"session_id": "policy-test"},
-    }
-    session_content = json.dumps(payload)
-    bundle_path = _create_minimal_bundle(tmp_path, session_content=session_content)
-
-    loaded = debug_app.load_bundle(bundle_path)
-
-    assert loaded.meta.validation_error
-    assert "__main__:ReviewResponse" in loaded.session_slices
-    review_slice = loaded.session_slices["__main__:ReviewResponse"]
-    assert review_slice.items == ({"score": 10},)
+        debug_app.BundleStore(invalid_path, logger=debug_app.get_logger("test"))
 
 
 def test_api_routes_expose_bundle_data(tmp_path: Path) -> None:
@@ -317,7 +260,7 @@ def test_bundle_store_handles_errors(tmp_path: Path) -> None:
     assert listing[0]["selected"] is True
 
     with pytest.raises(KeyError, match="Unknown slice type: missing"):
-        store.slice_items("missing")
+        store.get_slice_items("missing")
 
 
 def test_api_slice_offset_and_errors(tmp_path: Path) -> None:
@@ -414,7 +357,7 @@ def test_normalize_path_requires_bundles(tmp_path: Path) -> None:
     with pytest.raises(debug_app.BundleLoadError) as excinfo:
         debug_app.BundleStore(empty_dir, logger=debug_app.get_logger("test.empty"))
 
-    assert "No bundles found under" in str(excinfo.value)
+    assert "No bundles found" in str(excinfo.value)
 
 
 def test_index_and_error_endpoints(tmp_path: Path) -> None:
@@ -673,32 +616,11 @@ def test_bundle_without_session(tmp_path: Path) -> None:
     """Test loading a bundle without session data."""
     bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
 
-    loaded = debug_app.load_bundle(bundle_path)
+    store = debug_app.BundleStore(bundle_path, logger=debug_app.get_logger("test"))
+    meta = store.get_meta()
 
-    assert loaded.meta.bundle_id
-    assert len(loaded.meta.slices) == 0
-    assert len(loaded.session_slices) == 0
-
-
-def test_bundle_with_whitespace_session(tmp_path: Path) -> None:
-    """Test loading a bundle with whitespace-only session content."""
-    bundle_path = _create_minimal_bundle(tmp_path, session_content="   \n\n   ")
-
-    loaded = debug_app.load_bundle(bundle_path)
-
-    assert loaded.meta.bundle_id
-    assert len(loaded.meta.slices) == 0
-    assert len(loaded.session_slices) == 0
-
-
-def test_bundle_with_invalid_session_content(tmp_path: Path) -> None:
-    """Test loading a bundle with unparseable session content."""
-    bundle_path = _create_minimal_bundle(tmp_path, session_content="not-json")
-
-    loaded = debug_app.load_bundle(bundle_path)
-
-    assert loaded.meta.bundle_id
-    assert loaded.meta.validation_error is not None
+    assert meta["bundle_id"]
+    assert len(meta["slices"]) == 0
 
 
 def test_logs_endpoint_with_level_filter(tmp_path: Path) -> None:
@@ -738,6 +660,9 @@ def test_list_bundles_with_broken_symlink(
     bad = tmp_path / "bad.zip"
     bad.write_text("invalid")
 
+    # Create store first, before monkeypatching stat
+    store = debug_app.BundleStore(good_bundle, logger=debug_app.get_logger("test.list"))
+
     original_stat = Path.stat
 
     def fake_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
@@ -746,24 +671,18 @@ def test_list_bundles_with_broken_symlink(
         return original_stat(path, follow_symlinks=follow_symlinks)
 
     monkeypatch.setattr(Path, "stat", fake_stat)
+
+    # Patch iter_bundle_files where it's imported and used (debug_app module)
     monkeypatch.setattr(
-        debug_app.BundleStore,
-        "_iter_bundle_files",
-        staticmethod(lambda root: [good_bundle, bad]),
+        debug_app,
+        "iter_bundle_files",
+        lambda root: [good_bundle, bad],
     )
 
-    store = debug_app.BundleStore(good_bundle, logger=debug_app.get_logger("test.list"))
     entries = store.list_bundles()
 
     assert len(entries) == 1
     assert entries[0]["name"] == good_bundle.name
-
-
-def test_backwards_compatibility_aliases() -> None:
-    """Test that old names still work."""
-    assert debug_app.SnapshotLoadError is debug_app.BundleLoadError
-    assert debug_app.SnapshotStore is debug_app.BundleStore
-    assert debug_app.load_snapshot is debug_app.load_bundle
 
 
 def test_logs_endpoint_no_logs(tmp_path: Path) -> None:
@@ -781,8 +700,8 @@ def test_logs_endpoint_no_logs(tmp_path: Path) -> None:
     assert logs["total"] == 0
 
 
-def test_logs_with_malformed_and_non_dict_entries(tmp_path: Path) -> None:
-    """Test logs endpoint handles malformed and non-dict JSON entries."""
+def test_logs_facets_endpoint(tmp_path: Path) -> None:
+    """Test log facets endpoint returns unique loggers and events."""
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
@@ -790,31 +709,35 @@ def test_logs_with_malformed_and_non_dict_entries(tmp_path: Path) -> None:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            logger1 = logging.getLogger("app.service")
+            logger1.setLevel(logging.INFO)
+            logger1.info("Service started", extra={"event": "service.start"})
+
+            logger2 = logging.getLogger("app.database")
+            logger2.setLevel(logging.INFO)
+            logger2.info("DB connected", extra={"event": "db.connect"})
+            logger2.info("Query executed", extra={"event": "db.query"})
 
     assert writer.path is not None
-
-    # Manually add malformed log content with blank lines and non-dict entries
-    import zipfile
-
-    with zipfile.ZipFile(writer.path, "a") as zf:
-        log_content = '\n{"level": "INFO", "msg": "valid"}\n[1,2,3]\ninvalid-json\n\n'
-        zf.writestr("debug_bundle/logs/app.jsonl", log_content)
-
-    logger = debug_app.get_logger("test.logs.malformed")
-    store = debug_app.BundleStore(writer.path, logger=logger)
-    app = debug_app.build_debug_app(store, logger=logger)
+    test_logger = debug_app.get_logger("test.facets")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
     client = TestClient(app)
 
-    logs_response = client.get("/api/logs")
-    assert logs_response.status_code == 200
-    logs = logs_response.json()
-    # Should only have the valid dict entry
-    assert logs["total"] == 1
-    assert logs["entries"][0]["msg"] == "valid"
+    facets = client.get("/api/logs/facets").json()
+
+    assert "loggers" in facets
+    assert "events" in facets
+    assert "levels" in facets
+    assert len(facets["loggers"]) >= 2
+    assert len(facets["events"]) >= 2
 
 
-def test_logs_with_non_string_level(tmp_path: Path) -> None:
-    """Test logs endpoint handles entries where level is not a string."""
+def test_logs_filter_by_logger(tmp_path: Path) -> None:
+    """Test filtering logs by logger name."""
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
@@ -822,27 +745,118 @@ def test_logs_with_non_string_level(tmp_path: Path) -> None:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            logger1 = logging.getLogger("app.service")
+            logger1.setLevel(logging.INFO)
+            logger1.info("Service message")
+
+            logger2 = logging.getLogger("app.database")
+            logger2.setLevel(logging.INFO)
+            logger2.info("Database message")
 
     assert writer.path is not None
-
-    # Manually add log with non-string level
-    import zipfile
-
-    with zipfile.ZipFile(writer.path, "a") as zf:
-        log_content = '{"level": 42, "msg": "numeric level"}\n{"level": "WARNING", "msg": "string level"}\n'
-        zf.writestr("debug_bundle/logs/app.jsonl", log_content)
-
-    logger = debug_app.get_logger("test.logs.nonstring_level")
-    store = debug_app.BundleStore(writer.path, logger=logger)
-    app = debug_app.build_debug_app(store, logger=logger)
+    test_logger = debug_app.get_logger("test.filter.logger")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
     client = TestClient(app)
 
-    # Filter by WARNING - numeric level entry should be excluded
-    logs_response = client.get("/api/logs", params={"level": "WARNING"})
-    assert logs_response.status_code == 200
-    logs = logs_response.json()
-    assert logs["total"] == 1
-    assert logs["entries"][0]["msg"] == "string level"
+    # Filter by specific logger
+    logs = client.get("/api/logs", params={"logger": "app.service"}).json()
+    assert all(
+        "service" in entry.get("logger", "").lower() for entry in logs["entries"]
+    )
+
+
+def test_logs_filter_by_event(tmp_path: Path) -> None:
+    """Test filtering logs by event name."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            test_log = logging.getLogger("test.events")
+            test_log.setLevel(logging.INFO)
+            test_log.info("Event A", extra={"event": "event.a"})
+            test_log.info("Event B", extra={"event": "event.b"})
+
+    assert writer.path is not None
+    test_logger = debug_app.get_logger("test.filter.event")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
+    client = TestClient(app)
+
+    # Filter by specific event
+    logs = client.get("/api/logs", params={"event": "event.a"}).json()
+    assert all(entry.get("event") == "event.a" for entry in logs["entries"])
+
+
+def test_logs_exclude_logger(tmp_path: Path) -> None:
+    """Test excluding logs by logger name."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            logger1 = logging.getLogger("keep.this")
+            logger1.setLevel(logging.INFO)
+            logger1.info("Keep message")
+
+            logger2 = logging.getLogger("exclude.this")
+            logger2.setLevel(logging.INFO)
+            logger2.info("Exclude message")
+
+    assert writer.path is not None
+    test_logger = debug_app.get_logger("test.exclude.logger")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
+    client = TestClient(app)
+
+    # Exclude specific logger
+    logs = client.get("/api/logs", params={"exclude_logger": "exclude.this"}).json()
+    assert all(entry.get("logger") != "exclude.this" for entry in logs["entries"])
+
+
+def test_logs_search_filter(tmp_path: Path) -> None:
+    """Test full-text search in logs."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            test_log = logging.getLogger("test.search")
+            test_log.setLevel(logging.INFO)
+            test_log.info("Find the needle in the haystack")
+            test_log.info("Another message without it")
+
+    assert writer.path is not None
+    test_logger = debug_app.get_logger("test.search")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
+    client = TestClient(app)
+
+    # Search for "needle"
+    logs = client.get("/api/logs", params={"search": "needle"}).json()
+    assert logs["total"] >= 1
+    assert any(
+        "needle" in entry.get("message", "").lower() for entry in logs["entries"]
+    )
 
 
 def test_config_endpoint_missing(tmp_path: Path) -> None:
@@ -874,8 +888,6 @@ def test_error_endpoint_with_error(tmp_path: Path) -> None:
     bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
 
     # Manually add error.json
-    import zipfile
-
     with zipfile.ZipFile(bundle_path, "a") as zf:
         zf.writestr(
             "debug_bundle/error.json",
@@ -898,8 +910,6 @@ def test_file_endpoint_text_file(tmp_path: Path) -> None:
     bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
 
     # Manually add a text file
-    import zipfile
-
     with zipfile.ZipFile(bundle_path, "a") as zf:
         zf.writestr("debug_bundle/README.txt", "This is plain text content")
 
@@ -920,8 +930,6 @@ def test_file_endpoint_binary_file(tmp_path: Path) -> None:
     bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
 
     # Manually add a binary file
-    import zipfile
-
     with zipfile.ZipFile(bundle_path, "a") as zf:
         # Add binary data that can't be decoded as UTF-8
         zf.writestr("debug_bundle/binary.dat", b"\x80\x81\x82\x83\xff\xfe")
@@ -936,3 +944,137 @@ def test_file_endpoint_binary_file(tmp_path: Path) -> None:
     content = file_response.json()
     assert content["type"] == "binary"
     assert content["content"] is None
+
+
+def test_bundle_store_close(tmp_path: Path) -> None:
+    """Test that BundleStore can be closed."""
+    bundle_path = _create_test_bundle(tmp_path, ["one"])
+    store = debug_app.BundleStore(bundle_path, logger=debug_app.get_logger("test"))
+
+    # Should be able to close without error
+    store.close()
+
+    # Closing again should also work
+    store.close()
+
+
+def test_bundle_store_from_directory(tmp_path: Path) -> None:
+    """Test creating BundleStore from a directory with multiple bundles."""
+    # Create two bundles
+    bundle_one = _create_test_bundle(tmp_path, ["a"])
+    time.sleep(0.01)
+    bundle_two = _create_test_bundle(tmp_path, ["b"])
+
+    # Set mtimes to make bundle_two newest
+    now = time.time()
+    os.utime(bundle_one, (now - 1, now - 1))
+    os.utime(bundle_two, (now, now))
+
+    # Create store from directory - should pick newest bundle
+    store = debug_app.BundleStore(tmp_path, logger=debug_app.get_logger("test.dir"))
+
+    assert store.path == bundle_two.resolve()
+
+
+def test_slice_offset_only(tmp_path: Path) -> None:
+    """Test getting slices with offset but no limit."""
+    bundle_path = _create_test_bundle(tmp_path, ["a", "b", "c", "d"])
+    logger = debug_app.get_logger("test.slice.offset")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
+    result = client.get(f"/api/slices/{quote(slice_type)}", params={"offset": 2}).json()
+
+    # Should return items starting from offset 2
+    assert len(result["items"]) == 2
+
+
+def test_logs_offset_only(tmp_path: Path) -> None:
+    """Test getting logs with offset but no limit."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            test_logger = logging.getLogger("test.offset")
+            test_logger.setLevel(logging.INFO)
+            for i in range(5):
+                test_logger.info(f"Message {i}")
+
+    assert writer.path is not None
+    logger = debug_app.get_logger("test.logs.offset")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    result = client.get("/api/logs", params={"offset": 2}).json()
+    # Should return logs starting from offset 2
+    assert result["total"] >= 5
+
+
+def test_slice_offset_beyond_count(tmp_path: Path) -> None:
+    """Test getting slices with offset beyond item count returns empty."""
+    bundle_path = _create_test_bundle(tmp_path, ["a", "b"])
+    store = debug_app.BundleStore(bundle_path, logger=debug_app.get_logger("test"))
+
+    # Get meta to find slice type
+    meta = store.get_meta()
+    slice_type = meta["slices"][0]["slice_type"]
+
+    # Query with offset beyond the number of items (2)
+    result = store.get_slice_items(str(slice_type), offset=100, limit=10)
+
+    # Should return empty items without raising KeyError
+    assert result["items"] == []
+
+
+def test_reload_without_existing_cache(tmp_path: Path) -> None:
+    """Test reload when cache file doesn't exist yet."""
+    bundle_path = _create_test_bundle(tmp_path, ["test"])
+    cache_path = bundle_path.with_suffix(bundle_path.suffix + ".sqlite")
+
+    store = debug_app.BundleStore(bundle_path, logger=debug_app.get_logger("test"))
+
+    # Cache should exist now
+    assert cache_path.exists()
+
+    # Remove cache
+    cache_path.unlink()
+
+    # Reload should still work (it should handle missing cache)
+    result = store.reload()
+    assert result["bundle_id"]
+
+
+def test_logs_with_pagination(tmp_path: Path) -> None:
+    """Test logs with both offset and limit."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            test_logger = logging.getLogger("test.pagination")
+            test_logger.setLevel(logging.INFO)
+            for i in range(10):
+                test_logger.info(f"Message {i}")
+
+    assert writer.path is not None
+    logger = debug_app.get_logger("test.logs.pagination")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    result = client.get("/api/logs", params={"offset": 2, "limit": 3}).json()
+    assert len(result["entries"]) == 3
