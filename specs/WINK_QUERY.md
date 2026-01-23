@@ -14,17 +14,21 @@ artifacts.
 wink query <BUNDLE> --schema
 wink query <BUNDLE> "<SQL>"
 wink query <BUNDLE> "<SQL>" --table
+wink query <BUNDLE> "<SQL>" --table --no-truncate
+wink query <BUNDLE> --export-jsonl [logs|session]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--schema` | Output schema as JSON and exit |
 | `--table` | Output as ASCII table (default: JSON) |
+| `--no-truncate` | Disable column truncation in table output |
+| `--export-jsonl` | Export raw JSONL (logs or session) to stdout |
 
 ## Usage
 
 ```bash
-# Always start with schema to discover tables
+# Always start with schema to discover tables and hints
 wink query ./bundle.zip --schema
 
 # Query (JSON output)
@@ -32,6 +36,13 @@ wink query ./bundle.zip "SELECT * FROM errors"
 
 # Query (table output)
 wink query ./bundle.zip "SELECT * FROM errors" --table
+
+# Full values without truncation
+wink query ./bundle.zip "SELECT * FROM tool_calls" --table --no-truncate
+
+# Export raw logs for jq processing
+wink query ./bundle.zip --export-jsonl | jq '.event'
+wink query ./bundle.zip --export-jsonl=session | jq 'select(.__type__)'
 ```
 
 ## Tables
@@ -41,7 +52,7 @@ wink query ./bundle.zip "SELECT * FROM errors" --table
 | Table | Source | Description |
 |-------|--------|-------------|
 | `manifest` | `manifest.json` | Bundle metadata |
-| `logs` | `logs/app.jsonl` | Log entries |
+| `logs` | `logs/app.jsonl` | Log entries (with `seq` column for log_aggregator events) |
 | `tool_calls` | derived from logs | Tool invocations |
 | `errors` | derived | Aggregated errors |
 | `session_slices` | `session/after.jsonl` | Session state items |
@@ -67,6 +78,32 @@ slice_{normalized_type_name}
 
 Example: `myapp.state:AgentPlan` → `slice_agentplan`
 
+### Views
+
+Pre-built views for common query patterns:
+
+| View | Description |
+|------|-------------|
+| `tool_timeline` | Tool calls ordered by timestamp with command extraction |
+| `native_tool_calls` | Claude Code native tools from log_aggregator events |
+| `error_summary` | Errors with truncated traceback |
+
+## Logs Table
+
+The `logs` table includes a `seq` column extracted from `log_aggregator.log_line`
+events. This enables range queries on native tool executions:
+
+```sql
+-- Query native tool logs by sequence range
+SELECT seq, json_extract(context, '$.content') as content
+FROM logs
+WHERE event = 'log_aggregator.log_line'
+  AND seq BETWEEN 360 AND 370
+ORDER BY seq
+```
+
+For non-log_aggregator events, `seq` is NULL.
+
 ## Schema Output
 
 ```bash
@@ -90,20 +127,31 @@ wink query ./bundle.zip --schema
       ]
     },
     {
-      "name": "errors",
-      "description": "Aggregated errors",
-      "row_count": 1,
-      "columns": [
-        {"name": "rowid", "type": "INTEGER", "description": "Sequence"},
-        {"name": "source", "type": "TEXT", "description": "'log', 'error.json', 'tool_call'"},
-        {"name": "error_type", "type": "TEXT", "description": "Exception type"},
-        {"name": "message", "type": "TEXT", "description": "Error message"},
-        {"name": "traceback", "type": "TEXT", "description": "Stack trace"}
-      ]
+      "name": "tool_timeline",
+      "description": "View: Tool calls ordered by timestamp",
+      "row_count": 5,
+      "columns": [...]
     }
-  ]
+  ],
+  "hints": {
+    "json_extraction": [
+      "json_extract(context, '$.tool_name')",
+      "json_extract(context, '$.content')",
+      "json_extract(params, '$.command')"
+    ],
+    "common_queries": {
+      "native_tools": "SELECT seq, json_extract(context, '$.content') as content FROM logs WHERE event = 'log_aggregator.log_line' AND seq BETWEEN 100 AND 200 ORDER BY seq",
+      "tool_timeline": "SELECT * FROM tool_timeline WHERE duration_ms > 1000",
+      "error_context": "SELECT timestamp, message, context FROM logs WHERE level = 'ERROR'"
+    }
+  }
 }
 ```
+
+The `hints` section provides:
+
+- **json_extraction**: Common `json_extract()` patterns for nested JSON data
+- **common_queries**: Ready-to-use SQL queries for typical analysis tasks
 
 ## Example Queries
 
@@ -121,7 +169,7 @@ SELECT tool_name, error_code, params FROM tool_calls WHERE success = 0
 -- Error logs
 SELECT timestamp, message FROM logs WHERE level = 'ERROR'
 
--- JSON extraction
+-- JSON extraction (SQLite native function)
 SELECT json_extract(context, '$.tool_name') FROM logs
 
 -- Token usage
@@ -132,6 +180,30 @@ SELECT slice_type, COUNT(*) FROM session_slices GROUP BY slice_type
 
 -- File search
 SELECT path FROM files WHERE content LIKE '%TODO%'
+
+-- Native tools by sequence (Claude Code Bash, Read, Write, etc.)
+SELECT seq, json_extract(context, '$.content') as content
+FROM logs
+WHERE event = 'log_aggregator.log_line'
+  AND seq BETWEEN 100 AND 200
+ORDER BY seq
+
+-- Use pre-built views
+SELECT * FROM tool_timeline WHERE duration_ms > 1000
+SELECT * FROM error_summary
+SELECT * FROM native_tool_calls LIMIT 10
+```
+
+## Raw JSONL Export
+
+For power users who prefer `jq` over SQL:
+
+```bash
+# Export logs
+wink query ./bundle.zip --export-jsonl | jq 'select(.event == "tool.execution.start")'
+
+# Export session state
+wink query ./bundle.zip --export-jsonl=session | jq 'select(.__type__ | contains("Plan"))'
 ```
 
 ## Caching
@@ -143,16 +215,19 @@ Bundle is parsed once and cached as SQLite:
 ./bundle.zip.sqlite    → cache
 ```
 
-Cache invalidated when bundle mtime > cache mtime.
+Cache invalidated when:
+
+- Bundle mtime > cache mtime
+- Schema version mismatch (ensures upgrades rebuild caches automatically)
 
 ## Implementation
 
 ### Database Creation
 
-1. Check cache validity (mtime comparison)
+1. Check cache validity (mtime + schema version)
 1. If stale/missing, create SQLite at `<bundle>.sqlite`:
    - `manifest.json` → `manifest`
-   - `logs/app.jsonl` → `logs`
+   - `logs/app.jsonl` → `logs` (with `seq` extraction)
    - `session/after.jsonl` → `session_slices` + `slice_*`
    - `config.json` → `config` (flattened)
    - `metrics.json` → `metrics`
@@ -160,6 +235,7 @@ Cache invalidated when bundle mtime > cache mtime.
    - `filesystem/` → `files`
    - Derive `tool_calls` from logs
    - Derive `errors` from logs + `error.json` + failed tools
+   - Create views: `tool_timeline`, `native_tool_calls`, `error_summary`
    - Optional: `prompt_overrides.json`, `eval.json`
 1. Execute query
 1. Return JSON or table
@@ -187,6 +263,8 @@ For each `__type__` in session JSONL:
 - Single bundle only
 - SQLite built-in functions only
 - Entire bundle loaded on first query
+- Native tool call content is in nested JSON (use `json_extract()`)
+- Extended thinking content is signature-encoded (not accessible as plaintext)
 
 ## Related Specifications
 

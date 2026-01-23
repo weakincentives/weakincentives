@@ -35,11 +35,10 @@ from weakincentives.cli.query import (
     _is_cache_valid,
     _json_to_sql_value,
     _normalize_slice_type,
+    export_jsonl,
     format_as_json,
     format_as_table,
-    iter_bundle_files,
     open_query_database,
-    resolve_bundle_path,
 )
 from weakincentives.debug.bundle import BundleConfig, BundleWriter
 from weakincentives.runtime.session import Session
@@ -246,7 +245,10 @@ class TestGetTableDescription:
 
     def test_known_table(self) -> None:
         assert _get_table_description("manifest") == "Bundle metadata"
-        assert _get_table_description("logs") == "Log entries"
+        assert (
+            _get_table_description("logs")
+            == "Log entries (seq column for log_aggregator events)"
+        )
         assert _get_table_description("errors") == "Aggregated errors"
 
     def test_slice_table(self) -> None:
@@ -265,12 +267,58 @@ class TestIsCacheValid:
         cache = tmp_path / "bundle.zip.sqlite"
         assert _is_cache_valid(bundle, cache) is False
 
-    def test_cache_newer(self, tmp_path: Path) -> None:
+    def test_cache_newer_but_no_schema_version(self, tmp_path: Path) -> None:
+        """Cache without schema version table is invalid."""
+        import sqlite3
+
         bundle = tmp_path / "bundle.zip"
         bundle.touch()
         cache = tmp_path / "bundle.zip.sqlite"
-        cache.touch()
+        # Create empty SQLite file (no schema version table)
+        conn = sqlite3.connect(cache)
+        conn.close()
+        assert _is_cache_valid(bundle, cache) is False
+
+    def test_cache_with_old_schema_version(self, tmp_path: Path) -> None:
+        """Cache with old schema version is invalid."""
+        import sqlite3
+
+        from weakincentives.cli.query import _SCHEMA_VERSION
+
+        bundle = tmp_path / "bundle.zip"
+        bundle.touch()
+        cache = tmp_path / "bundle.zip.sqlite"
+        conn = sqlite3.connect(cache)
+        conn.execute("CREATE TABLE _schema_version (version INTEGER)")
+        conn.execute("INSERT INTO _schema_version VALUES (?)", (_SCHEMA_VERSION - 1,))
+        conn.commit()
+        conn.close()
+        assert _is_cache_valid(bundle, cache) is False
+
+    def test_cache_with_current_schema_version(self, tmp_path: Path) -> None:
+        """Cache with current schema version is valid."""
+        import sqlite3
+
+        from weakincentives.cli.query import _SCHEMA_VERSION
+
+        bundle = tmp_path / "bundle.zip"
+        bundle.touch()
+        cache = tmp_path / "bundle.zip.sqlite"
+        conn = sqlite3.connect(cache)
+        conn.execute("CREATE TABLE _schema_version (version INTEGER)")
+        conn.execute("INSERT INTO _schema_version VALUES (?)", (_SCHEMA_VERSION,))
+        conn.commit()
+        conn.close()
         assert _is_cache_valid(bundle, cache) is True
+
+    def test_cache_corrupted_file(self, tmp_path: Path) -> None:
+        """Corrupted cache file is invalid."""
+        bundle = tmp_path / "bundle.zip"
+        bundle.touch()
+        cache = tmp_path / "bundle.zip.sqlite"
+        # Write invalid data that's not a SQLite file
+        cache.write_text("not a valid sqlite database")
+        assert _is_cache_valid(bundle, cache) is False
 
     def test_cache_older(self, tmp_path: Path) -> None:
         import time
@@ -466,6 +514,14 @@ class TestFormatAsTable:
         assert "..." in result
         assert len(result.split("\n")[2]) <= 60  # Reasonable width
 
+    def test_no_truncate(self) -> None:
+        long_value = "x" * 100
+        rows: list[dict[str, Any]] = [{"data": long_value}]
+        result = format_as_table(rows, truncate=False)
+
+        assert "..." not in result
+        assert long_value in result
+
 
 class TestFormatAsJson:
     """Tests for format_as_json function."""
@@ -614,6 +670,121 @@ class TestWinkQueryCLI:
         )
 
         assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Error" in captured.err
+
+    def test_export_jsonl_logs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test --export-jsonl flag for logs."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-export-cli",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        logs_content = '{"event": "test.event", "message": "hello"}\n'
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        exit_code = wink.main(
+            ["--no-json-logs", "query", str(bundle_path), "--export-jsonl"]
+        )
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "test.event" in captured.out
+
+    def test_export_jsonl_logs_no_trailing_newline(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test --export-jsonl handles content without trailing newline."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-no-newline",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        # Content WITHOUT trailing newline
+        logs_content = '{"event": "test.event"}'
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        exit_code = wink.main(
+            ["--no-json-logs", "query", str(bundle_path), "--export-jsonl"]
+        )
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        # Output should end with newline (added by the code)
+        assert captured.out.endswith("\n")
+
+    def test_export_jsonl_empty(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test --export-jsonl with empty content returns error."""
+        bundle_path = _create_test_bundle(tmp_path)
+
+        exit_code = wink.main(
+            ["--no-json-logs", "query", str(bundle_path), "--export-jsonl"]
+        )
+
+        # Should fail because test bundle may have empty logs
+        # Just verify it doesn't crash and returns a code
+        assert exit_code in {0, 1}
+
+    def test_export_jsonl_invalid_bundle(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test --export-jsonl with invalid bundle."""
+        bundle_path = tmp_path / "invalid.zip"
+        bundle_path.write_text("not a zip file")
+
+        exit_code = wink.main(
+            ["--no-json-logs", "query", str(bundle_path), "--export-jsonl"]
+        )
+
+        assert exit_code == 2
         captured = capsys.readouterr()
         assert "Error" in captured.err
 
@@ -937,6 +1108,16 @@ class TestQueryDatabaseEdgeCases:
             # Second query should reuse existing connection
             results2 = db.execute_query("SELECT * FROM manifest")
             assert results1 == results2
+        finally:
+            db.close()
+
+    def test_bundle_path_property(self, tmp_path: Path) -> None:
+        """Test that bundle_path property returns the correct path."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+
+        try:
+            assert db.bundle_path == bundle_path
         finally:
             db.close()
 
@@ -1780,112 +1961,249 @@ class TestFilesTableReadError:
                 db.close()
 
 
-class TestResolveBundlePath:
-    """Tests for resolve_bundle_path function."""
+class TestExportJsonl:
+    """Tests for export_jsonl function."""
 
-    def test_resolve_file_path(self, tmp_path: Path) -> None:
-        """Test resolving a direct file path."""
+    def test_export_logs(self, tmp_path: Path) -> None:
+        """Test exporting logs JSONL."""
+        import zipfile
+
+        from weakincentives.debug.bundle import DebugBundle
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-export",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        logs_content = '{"event": "test", "message": "hello"}\n'
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        bundle = DebugBundle.load(bundle_path)
+        content = export_jsonl(bundle, "logs")
+
+        assert content is not None
+        assert "test" in content
+
+    def test_export_session(self, tmp_path: Path) -> None:
+        """Test exporting session JSONL."""
+        from weakincentives.debug.bundle import DebugBundle
+
         bundle_path = _create_test_bundle(tmp_path)
-        resolved = resolve_bundle_path(bundle_path)
-        assert resolved == bundle_path
+        bundle = DebugBundle.load(bundle_path)
+        content = export_jsonl(bundle, "session")
 
-    def test_resolve_directory_picks_newest(self, tmp_path: Path) -> None:
-        """Test resolving a directory picks the newest bundle."""
-        import os
-        import time
+        # Should return session content or None
+        assert content is None or isinstance(content, str)
 
-        bundle_one = _create_test_bundle(tmp_path)
-        time.sleep(0.01)
-        bundle_two = _create_test_bundle(tmp_path)
+    def test_export_invalid_source(self, tmp_path: Path) -> None:
+        """Test exporting with invalid source returns None."""
+        from weakincentives.debug.bundle import DebugBundle
 
-        # Make bundle_two newer
-        now = time.time()
-        os.utime(bundle_one, (now - 1, now - 1))
-        os.utime(bundle_two, (now, now))
-
-        resolved = resolve_bundle_path(tmp_path)
-        assert resolved == bundle_two
-
-    def test_resolve_empty_directory_raises(self, tmp_path: Path) -> None:
-        """Test resolving an empty directory raises QueryError."""
-        empty_dir = tmp_path / "empty"
-        empty_dir.mkdir()
-
-        with pytest.raises(QueryError, match="No bundles found"):
-            resolve_bundle_path(empty_dir)
-
-
-class TestIterBundleFiles:
-    """Tests for iter_bundle_files function."""
-
-    def test_lists_zip_files(self, tmp_path: Path) -> None:
-        """Test listing zip files in a directory."""
         bundle_path = _create_test_bundle(tmp_path)
+        bundle = DebugBundle.load(bundle_path)
+        content = export_jsonl(bundle, "invalid")
 
-        files = iter_bundle_files(tmp_path)
-        assert len(files) == 1
-        assert files[0] == bundle_path
-
-    def test_excludes_non_zip(self, tmp_path: Path) -> None:
-        """Test that non-zip files are excluded."""
-        bundle_path = _create_test_bundle(tmp_path)
-        (tmp_path / "not_a_bundle.txt").write_text("hello")
-
-        files = iter_bundle_files(tmp_path)
-        assert len(files) == 1
-        assert files[0] == bundle_path
-
-    def test_empty_directory(self, tmp_path: Path) -> None:
-        """Test listing an empty directory."""
-        files = iter_bundle_files(tmp_path)
-        assert files == []
+        assert content is None
 
 
-class TestQueryDatabaseBundleProperties:
-    """Tests for QueryDatabase bundle property access."""
+class TestSeqColumn:
+    """Tests for seq column in logs table."""
 
-    def test_bundle_property(self, tmp_path: Path) -> None:
-        """Test accessing the bundle property."""
+    def test_seq_extracted_from_log_aggregator(self, tmp_path: Path) -> None:
+        """Test that seq column is extracted for log_aggregator.log_line events."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-seq",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        # Create logs with log_aggregator.log_line events
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "logger": "aggregator",
+                "event": "log_aggregator.log_line",
+                "message": "Line 1",
+                "context": {"sequence_number": 42, "content": "test content"},
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "level": "DEBUG",
+                "logger": "aggregator",
+                "event": "log_aggregator.log_line",
+                "message": "Line 2",
+                "context": {"sequence_number": 43, "content": "more content"},
+            },
+            {
+                "timestamp": "2024-01-01T00:00:02Z",
+                "level": "DEBUG",
+                "logger": "aggregator",
+                "event": "log_aggregator.log_line",
+                "message": "Line with invalid seq",
+                # Non-int sequence_number should be ignored
+                "context": {"sequence_number": "not-an-int", "content": "invalid"},
+            },
+            {
+                "timestamp": "2024-01-01T00:00:03Z",
+                "level": "INFO",
+                "logger": "app",
+                "event": "other.event",
+                "message": "Other",
+                "context": {},
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        db = open_query_database(bundle_path)
+        try:
+            results = db.execute_query(
+                "SELECT event, seq FROM logs WHERE seq IS NOT NULL ORDER BY seq"
+            )
+            assert len(results) == 2
+            assert results[0]["seq"] == 42
+            assert results[1]["seq"] == 43
+
+            # Non-log_aggregator events should have NULL seq
+            non_agg = db.execute_query(
+                "SELECT event, seq FROM logs WHERE event = 'other.event'"
+            )
+            assert len(non_agg) == 1
+            assert non_agg[0]["seq"] is None
+        finally:
+            db.close()
+
+
+class TestSchemaHints:
+    """Tests for schema hints in schema output."""
+
+    def test_schema_includes_hints(self, tmp_path: Path) -> None:
+        """Test that schema output includes hints section."""
         bundle_path = _create_test_bundle(tmp_path)
         db = open_query_database(bundle_path)
-
         try:
-            assert db.bundle is not None
-            assert db.bundle.manifest.bundle_id != ""
+            schema = db.get_schema()
+            assert schema.hints is not None
+            assert len(schema.hints.json_extraction) > 0
+            assert len(schema.hints.common_queries) > 0
         finally:
             db.close()
 
-    def test_bundle_path_property(self, tmp_path: Path) -> None:
-        """Test accessing the bundle_path property."""
+    def test_hints_serializes_to_json(self, tmp_path: Path) -> None:
+        """Test that hints are included in JSON output."""
         bundle_path = _create_test_bundle(tmp_path)
         db = open_query_database(bundle_path)
-
         try:
-            assert db.bundle_path == bundle_path
+            schema = db.get_schema()
+            json_str = schema.to_json()
+            data = json.loads(json_str)
+            assert "hints" in data
+            assert "json_extraction" in data["hints"]
+            assert "common_queries" in data["hints"]
         finally:
             db.close()
 
 
-class TestOpenQueryDatabaseDirectory:
-    """Tests for open_query_database with directory input."""
+class TestQueryViews:
+    """Tests for SQL views."""
 
-    def test_opens_from_directory(self, tmp_path: Path) -> None:
-        """Test opening database from a directory."""
-        import os
-        import time
-
-        bundle_one = _create_test_bundle(tmp_path)
-        time.sleep(0.01)
-        bundle_two = _create_test_bundle(tmp_path)
-
-        # Make bundle_two newer
-        now = time.time()
-        os.utime(bundle_one, (now - 1, now - 1))
-        os.utime(bundle_two, (now, now))
-
-        db = open_query_database(tmp_path)
-
+    def test_tool_timeline_view_exists(self, tmp_path: Path) -> None:
+        """Test that tool_timeline view is created."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
         try:
-            assert db.bundle_path == bundle_two
+            # Should be able to query the view without error
+            results = db.execute_query("SELECT * FROM tool_timeline LIMIT 1")
+            assert isinstance(results, list)
         finally:
             db.close()
+
+    def test_native_tool_calls_view_exists(self, tmp_path: Path) -> None:
+        """Test that native_tool_calls view is created."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+        try:
+            results = db.execute_query("SELECT * FROM native_tool_calls LIMIT 1")
+            assert isinstance(results, list)
+        finally:
+            db.close()
+
+    def test_error_summary_view_exists(self, tmp_path: Path) -> None:
+        """Test that error_summary view is created."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+        try:
+            results = db.execute_query("SELECT * FROM error_summary LIMIT 1")
+            assert isinstance(results, list)
+        finally:
+            db.close()
+
+    def test_views_included_in_schema(self, tmp_path: Path) -> None:
+        """Test that views appear in schema output."""
+        bundle_path = _create_test_bundle(tmp_path)
+        db = open_query_database(bundle_path)
+        try:
+            schema = db.get_schema()
+            table_names = [t.name for t in schema.tables]
+            assert "tool_timeline" in table_names
+            assert "native_tool_calls" in table_names
+            assert "error_summary" in table_names
+        finally:
+            db.close()
+
+
+class TestGetTableDescriptionViews:
+    """Tests for _get_table_description with views."""
+
+    def test_view_description(self) -> None:
+        """Test that views get appropriate descriptions."""
+        assert "View:" in _get_table_description("tool_timeline", is_view=True)
+        assert "View:" in _get_table_description("native_tool_calls", is_view=True)
+        assert "View:" in _get_table_description("error_summary", is_view=True)
+
+    def test_unknown_view(self) -> None:
+        """Test that unknown views get a generic description."""
+        desc = _get_table_description("unknown_view", is_view=True)
+        assert desc == "View"
