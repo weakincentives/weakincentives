@@ -92,13 +92,15 @@ class DeadlineFeedback:
 
             [Feedback - Deadline]
 
-            You have 8 minutes remaining.
+            The work so far took 12 minutes. You have 8 minutes remaining
+            to complete the task.
 
         When time is running low::
 
             [Feedback - Deadline]
 
-            You have 90 seconds remaining.
+            The work so far took 18 minutes. You have 90 seconds remaining
+            to complete the task.
 
             → Prioritize completing critical remaining work.
             → Consider summarizing progress and remaining tasks.
@@ -107,7 +109,7 @@ class DeadlineFeedback:
 
             [Feedback - Deadline]
 
-            You have reached the time deadline.
+            The work took 20 minutes. You have reached the time deadline.
 
             → Wrap up immediately.
     """
@@ -125,13 +127,13 @@ class DeadlineFeedback:
         return context.deadline is not None
 
     def provide(self, *, context: FeedbackContext) -> Feedback:
-        """Produce feedback about remaining time.
+        """Produce feedback about elapsed and remaining time.
 
         Args:
             context: Feedback context with deadline access.
 
         Returns:
-            Feedback with time remaining and appropriate severity.
+            Feedback with time elapsed, time remaining, and appropriate severity.
 
         Raises:
             ValueError: If called without a deadline (should_run prevents this).
@@ -140,18 +142,26 @@ class DeadlineFeedback:
             raise ValueError("DeadlineFeedback.provide() requires a deadline")
 
         remaining = context.deadline.remaining().total_seconds()
+        elapsed = context.deadline.elapsed().total_seconds()
+        elapsed_str = _format_duration(elapsed)
 
         # Deadline has passed
         if remaining <= 0:
             return Feedback(
                 provider_name=self.name,
-                summary="You have reached the time deadline.",
+                summary=(
+                    f"The work took {elapsed_str}. You have reached the time deadline."
+                ),
                 suggestions=("Wrap up immediately.",),
                 severity="warning",
             )
 
         # Build feedback based on remaining time
-        summary = f"You have {_format_duration(remaining)} remaining."
+        remaining_str = _format_duration(remaining)
+        summary = (
+            f"The work so far took {elapsed_str}. "
+            f"You have {remaining_str} remaining to complete the task."
+        )
         suggestions: tuple[str, ...] = ()
         severity: Literal["info", "caution", "warning"] = "info"
 

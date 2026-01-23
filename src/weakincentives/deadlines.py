@@ -38,6 +38,9 @@ class Deadline:
         # Check remaining time
         remaining = deadline.remaining()
 
+        # Check elapsed time since deadline was created
+        elapsed = deadline.elapsed()
+
     For testing, inject a controllable clock::
 
         from weakincentives.clock import TestClock
@@ -50,12 +53,16 @@ class Deadline:
             clock=clock,
         )
         assert deadline.remaining() == timedelta(hours=1)
+        assert deadline.elapsed() == timedelta(0)
 
         clock.advance(1800)  # 30 minutes
         assert deadline.remaining() == timedelta(minutes=30)
+        assert deadline.elapsed() == timedelta(minutes=30)
     """
 
     expires_at: datetime
+    started_at: datetime | None = None
+    """When the deadline tracking started. Defaults to creation time."""
     clock: WallClock = field(default=SYSTEM_CLOCK, repr=False, compare=False)
     """Clock for time operations. Defaults to system clock."""
 
@@ -66,6 +73,16 @@ class Deadline:
             raise ValueError(msg)
 
         now = self.clock.utcnow()
+
+        # Default started_at to now if not provided
+        if self.started_at is None:
+            object.__setattr__(self, "started_at", now)
+        else:
+            started_at = self.started_at
+            if started_at.tzinfo is None or started_at.utcoffset() is None:
+                msg = "Deadline started_at must be timezone-aware."
+                raise ValueError(msg)
+
         if expires_at <= now:
             msg = "Deadline expires_at must be in the future."
             raise ValueError(msg)
@@ -93,3 +110,25 @@ class Deadline:
             raise ValueError(msg)
 
         return self.expires_at - current
+
+    def elapsed(self, *, now: datetime | None = None) -> timedelta:
+        """Return the duration since tracking started.
+
+        Args:
+            now: Override current time. If None, uses the clock's utcnow().
+                Must be timezone-aware.
+
+        Returns:
+            Duration since started_at. Always non-negative under normal use.
+
+        Raises:
+            ValueError: If now is provided but not timezone-aware.
+        """
+        current = now if now is not None else self.clock.utcnow()
+        if current.tzinfo is None or current.utcoffset() is None:
+            msg = "Deadline elapsed now must be timezone-aware."
+            raise ValueError(msg)
+
+        # started_at is guaranteed to be set by __post_init__
+        assert self.started_at is not None  # nosec B101
+        return current - self.started_at

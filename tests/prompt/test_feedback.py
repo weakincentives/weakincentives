@@ -707,6 +707,9 @@ class TestDeadlineFeedback:
         assert feedback.provider_name == "Deadline"
         assert feedback.severity == "info"
         assert feedback.suggestions == ()
+        # Check for both elapsed and remaining time in message
+        assert "the work so far took" in feedback.summary.lower()
+        assert "remaining to complete" in feedback.summary.lower()
         assert "hour" in feedback.summary.lower()
 
     def test_provide_returns_warning_when_low_time(self) -> None:
@@ -718,15 +721,21 @@ class TestDeadlineFeedback:
 
         assert feedback.severity == "warning"
         assert len(feedback.suggestions) > 0
-        assert "remaining" in feedback.summary.lower()
+        assert "the work so far took" in feedback.summary.lower()
+        assert "remaining to complete" in feedback.summary.lower()
 
     def test_provide_returns_warning_when_deadline_passed(self) -> None:
         provider = DeadlineFeedback()
         session = make_session()
         prompt = make_prompt()
-        # Mock deadline with negative remaining time
+        # Mock deadline with negative remaining time and elapsed time
         mock_deadline = type(
-            "MockDeadline", (), {"remaining": lambda self: timedelta(seconds=-1)}
+            "MockDeadline",
+            (),
+            {
+                "remaining": lambda self: timedelta(seconds=-1),
+                "elapsed": lambda self: timedelta(minutes=20),
+            },
         )()
         mock_context = FeedbackContext(
             session=session,
@@ -738,6 +747,7 @@ class TestDeadlineFeedback:
 
         assert feedback.severity == "warning"
         assert "deadline" in feedback.summary.lower()
+        assert "20 minutes" in feedback.summary.lower()
 
     def test_custom_warning_threshold(self) -> None:
         provider = DeadlineFeedback(warning_threshold_seconds=300)
