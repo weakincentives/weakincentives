@@ -219,6 +219,7 @@ bundles documentation inside the package and exposes it via CLI for easy access.
 
 ## Next Steps
 
+- [Query](query.md): SQL-based analysis of debug bundles
 - [Testing](testing.md): Write tests that catch issues before they hit
   production
 - [Evaluation](evaluation.md): Systematically test agent behavior
