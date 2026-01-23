@@ -2,21 +2,23 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.22.0 - 2026-01-23
 
-*Commits reviewed: 2026-01-20 (065e76c) through 2026-01-23 (751c221)*
+*Commits reviewed: 2026-01-20 (065e76c) through 2026-01-23 (633507f)*
 
 ### TL;DR
 
 This release delivers significant **debug UI performance improvements** through
 SQLite-backed caching shared with `wink query`, enabling instant startup when
-databases are pre-built and powerful log filtering. **Tool schema auditing**
-captures available tools at each prompt render for debugging and analysis. All
-logs now carry **correlation IDs** from `RunContext` for unified distributed
-tracing. **Environment capture** is now wired into the main loop for automatic
-reproducibility envelopes. New **user guides** cover skills authoring,
-dependency injection, and serialization. The **toolchain** gains enhanced error
-reporting with precise import tracking and better diagnostics.
+databases are pre-built and powerful log filtering. The **query command** gains
+**SQL views** for common analysis patterns, **sequence number tracking** for
+native tool range queries, and **JSONL export** for `jq`-based workflows. **Tool
+schema auditing** captures available tools at each prompt render for debugging
+and analysis. All logs now carry **correlation IDs** from `RunContext` for
+unified distributed tracing. **Environment capture** is now wired into the main
+loop for automatic reproducibility envelopes. New **user guides** cover skills
+authoring, dependency injection, and serialization. The **toolchain** gains
+enhanced error reporting with precise import tracking and better diagnostics.
 
 ### Debug UI SQLite Caching
 
@@ -38,6 +40,40 @@ debug UI starts instantly without re-parsing bundle contents.
 - **Filter facets API**: Returns counts per logger/event/level for UI
   autocomplete
 - **Directory mode**: `wink debug /path/to/dir` auto-selects the newest bundle
+
+### Query Command Enhancements
+
+The `wink query` command gains SQL views, sequence number tracking, and raw JSONL
+export for advanced bundle analysis workflows.
+
+**SQL Views** provide pre-built queries for common analysis patterns:
+
+- **`tool_timeline`**: Tool calls ordered by timestamp with command extraction
+- **`native_tool_calls`**: Claude Code native tools from log_aggregator events
+- **`error_summary`**: Errors with truncated traceback for quick debugging
+
+**Sequence Number Column** adds a `seq` column to the logs table that extracts
+`sequence_number` from `log_aggregator.log_line` events, enabling range queries
+on native tool executions:
+
+```sql
+SELECT * FROM logs WHERE seq BETWEEN 100 AND 200
+```
+
+**JSONL Export** bypasses the SQL layer for power users who prefer `jq`
+processing:
+
+```bash
+wink query bundle.zip --export-jsonl        # Export logs/app.jsonl
+wink query bundle.zip --export-jsonl=session  # Export session/after.jsonl
+```
+
+**Additional improvements:**
+
+- **Schema hints**: Enhanced `--schema` output with `json_extraction` patterns
+  and `common_queries` examples
+- **No truncation mode**: `--no-truncate` flag disables column truncation in
+  ASCII table output
 
 ### Tool Schema Auditing
 
