@@ -360,7 +360,7 @@ assert payload == {"name": "login", "timestamp": "2024-01-01T10:00:00"}
 | `by_alias` | `True` | Use field aliases in output |
 | `exclude_none` | `False` | Omit fields with `None` values |
 | `computed` | `False` | Include computed properties |
-| `include_dataclass_type` | `False` | Add `__type__` for polymorphic deserialization |
+| `include_dataclass_type` | `False` | Add `__type__` for polymorphism |
 | `alias_generator` | `None` | Function to transform field names |
 
 ### Computed Properties
@@ -462,6 +462,50 @@ assert isinstance(parsed, Dog)
 ```
 
 The `__type__` format is `module:qualname` (e.g., `myapp.models:User`).
+
+### Generic Dataclass Serialization
+
+Generic dataclasses like `Wrapper[T]` serialize and deserialize seamlessly when
+using recursive type embedding. The `__type__` field is included in all nested
+dataclass values, enabling round-trip serialization without knowing the type
+parameter at parse time:
+
+```python nocheck
+from dataclasses import dataclass
+from weakincentives.serde import dump, parse
+
+@dataclass
+class Wrapper[T]:
+    payload: T
+
+@dataclass
+class Data:
+    value: int
+
+# Serialize with type info recursively embedded
+wrapper = Wrapper(payload=Data(value=42))
+serialized = dump(wrapper, include_dataclass_type=True)
+# {
+#     "__type__": "mymodule:Wrapper",
+#     "payload": {"__type__": "mymodule:Data", "value": 42}
+# }
+
+# Deserialize without knowing T - type is recovered from nested __type__
+restored = parse(None, serialized, allow_dataclass_type=True)
+assert isinstance(restored, Wrapper)
+assert isinstance(restored.payload, Data)
+assert restored.payload.value == 42
+```
+
+This works because:
+
+1. `dump(include_dataclass_type=True)` recursively embeds `__type__` in all
+   nested dataclass values, not just the root
+1. `parse(allow_dataclass_type=True)` looks for `__type__` in TypeVar-typed
+   fields to determine the concrete type
+
+Without `include_dataclass_type=True`, only the root object gets `__type__`,
+and generic type parameters cannot be recovered during parsing.
 
 ## JSON Schema Generation
 

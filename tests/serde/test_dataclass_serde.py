@@ -950,6 +950,215 @@ def test_parse_requires_reference_when_cls_missing() -> None:
     assert "requires a dataclass type" in str(exc.value)
 
 
+# =============================================================================
+# Recursive Type Embedding Tests (Generic Dataclasses)
+# =============================================================================
+
+
+@dataclass(slots=True, frozen=True)
+class _InnerPayload:
+    message: str
+    priority: int = 1
+
+
+@dataclass(slots=True, frozen=True)
+class _GenericWrapper[T]:
+    payload: T
+    metadata: str = "default"
+
+
+def test_dump_embeds_type_recursively() -> None:
+    """dump() with include_dataclass_type embeds __type__ in nested dataclasses."""
+    inner = _InnerPayload(message="hello", priority=5)
+    wrapper = _GenericWrapper(payload=inner, metadata="test")
+
+    data = dump(wrapper, include_dataclass_type=True)
+
+    # Outer type embedded
+    assert "__type__" in data
+    assert "test_dataclass_serde:_GenericWrapper" in data["__type__"]
+
+    # Nested payload also has __type__
+    payload_data = data["payload"]
+    assert isinstance(payload_data, dict)
+    assert "__type__" in payload_data
+    assert "test_dataclass_serde:_InnerPayload" in payload_data["__type__"]
+
+
+def test_parse_generic_with_recursive_type() -> None:
+    """parse() can deserialize generic dataclasses with embedded __type__."""
+    inner = _InnerPayload(message="hello", priority=5)
+    wrapper = _GenericWrapper(payload=inner, metadata="test")
+
+    # Round-trip serialize and deserialize
+    data = dump(wrapper, include_dataclass_type=True)
+    restored = parse(None, data, allow_dataclass_type=True)
+
+    assert isinstance(restored, _GenericWrapper)
+    assert isinstance(restored.payload, _InnerPayload)
+    assert restored.payload.message == "hello"
+    assert restored.payload.priority == 5
+    assert restored.metadata == "test"
+
+
+def test_parse_generic_requires_allow_dataclass_type() -> None:
+    """Parsing generic dataclass without allow_dataclass_type fails."""
+    data = dump(
+        _GenericWrapper(payload=_InnerPayload("hi")), include_dataclass_type=True
+    )
+
+    with pytest.raises(TypeError) as exc:
+        parse(_GenericWrapper, data, allow_dataclass_type=False)
+
+    assert "cannot parse TypeVar field" in str(exc.value)
+
+
+def test_parse_generic_requires_type_in_nested_value() -> None:
+    """Parsing generic dataclass requires __type__ in nested value."""
+    # Manually construct data without __type__ on nested payload
+    data = {
+        "__type__": f"{__name__}:_GenericWrapper",
+        "payload": {"message": "hello", "priority": 1},  # No __type__
+        "metadata": "test",
+    }
+
+    with pytest.raises(TypeError) as exc:
+        parse(None, data, allow_dataclass_type=True)
+
+    assert "requires __type__" in str(exc.value)
+
+
+def test_parse_generic_rejects_non_dataclass_nested_type() -> None:
+    """Parsing fails if nested __type__ resolves to non-dataclass."""
+    data = {
+        "__type__": f"{__name__}:_GenericWrapper",
+        "payload": {"__type__": "builtins:int", "value": 1},
+        "metadata": "test",
+    }
+
+    with pytest.raises(TypeError) as exc:
+        parse(None, data, allow_dataclass_type=True)
+
+    assert "resolved type is not a dataclass" in str(exc.value)
+
+
+def test_dump_recursive_type_in_lists() -> None:
+    """dump() embeds __type__ in dataclasses within lists."""
+
+    @dataclass(slots=True, frozen=True)
+    class ListWrapper[T]:
+        items: list[T]
+
+    items = [_InnerPayload("one"), _InnerPayload("two")]
+    wrapper = ListWrapper(items=items)
+
+    data = dump(wrapper, include_dataclass_type=True)
+
+    assert "__type__" in data
+    items_data = data["items"]
+    assert isinstance(items_data, list)
+    assert len(items_data) == 2
+    assert all("__type__" in item for item in items_data)
+
+
+def test_dump_recursive_type_in_dicts() -> None:
+    """dump() embeds __type__ in dataclasses within dict values."""
+
+    @dataclass(slots=True, frozen=True)
+    class DictWrapper[T]:
+        mapping: dict[str, T]
+
+    mapping = {"first": _InnerPayload("one"), "second": _InnerPayload("two")}
+    wrapper = DictWrapper(mapping=mapping)
+
+    data = dump(wrapper, include_dataclass_type=True)
+
+    assert "__type__" in data
+    mapping_data = data["mapping"]
+    assert isinstance(mapping_data, dict)
+    assert all("__type__" in v for v in mapping_data.values())
+
+
+def test_parse_typevar_requires_mapping() -> None:
+    """TypeVar field with non-mapping value fails."""
+    data = {
+        "__type__": f"{__name__}:_GenericWrapper",
+        "payload": "not-a-mapping",  # String instead of dict
+        "metadata": "test",
+    }
+
+    with pytest.raises(TypeError) as exc:
+        parse(None, data, allow_dataclass_type=True)
+
+    assert "expected mapping" in str(exc.value)
+
+
+def test_parse_typevar_requires_string_type_ref() -> None:
+    """TypeVar field with non-string __type__ fails."""
+    data = {
+        "__type__": f"{__name__}:_GenericWrapper",
+        "payload": {"__type__": 123, "message": "hello"},  # Non-string __type__
+        "metadata": "test",
+    }
+
+    with pytest.raises(TypeError) as exc:
+        parse(None, data, allow_dataclass_type=True)
+
+    assert "must be a string type reference" in str(exc.value)
+
+
+def test_parse_typevar_invalid_type_identifier() -> None:
+    """TypeVar field with invalid type identifier fails."""
+    # Use a valid module but non-existent class name
+    data = {
+        "__type__": f"{__name__}:_GenericWrapper",
+        "payload": {"__type__": "builtins:NonExistentClass", "message": "hello"},
+        "metadata": "test",
+    }
+
+    with pytest.raises(TypeError) as exc:
+        parse(None, data, allow_dataclass_type=True)
+
+    assert "could not be resolved" in str(exc.value)
+
+
+def test_evaluate_annotations_with_unresolvable_type() -> None:
+    """Annotations that can't be resolved fall back to object."""
+    from weakincentives.serde.parse import _evaluate_annotations_individually
+
+    # Create a class with an annotation that can't be resolved
+    @dataclass(slots=True, frozen=True)
+    class WithBadAnnotation[T]:
+        value: T
+        # Simulate an unresolvable annotation (e.g., TYPE_CHECKING import)
+
+    # Manually add an unresolvable annotation
+    WithBadAnnotation.__annotations__["unresolvable"] = "NonExistentType"
+
+    result = _evaluate_annotations_individually(WithBadAnnotation)
+
+    # The value (TypeVar T) should be preserved
+    assert result["value"] is not object
+    # The unresolvable annotation should fall back to object
+    assert result["unresolvable"] is object
+
+
+def test_evaluate_annotations_with_non_string_annotation() -> None:
+    """Non-string annotations are preserved as-is."""
+    from weakincentives.serde.parse import _evaluate_annotations_individually
+
+    @dataclass(slots=True, frozen=True)
+    class WithDirectAnnotation:
+        value: int  # Non-string annotation (when not using from __future__)
+
+    # Force the annotation to be a type (not a string)
+    WithDirectAnnotation.__annotations__["value"] = int
+
+    result = _evaluate_annotations_individually(WithDirectAnnotation)
+
+    assert result["value"] is int
+
+
 def test_schema_reflects_types_constraints_and_aliases() -> None:
     schema_dict = schema(User, alias_generator=camel, extra="forbid")
     assert schema_dict["title"] == "User"

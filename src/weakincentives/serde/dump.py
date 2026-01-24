@@ -30,12 +30,14 @@ from ..types.dataclass import SupportsDataclass
 from ._utils import MISSING_SENTINEL, TYPE_REF_KEY, _set_extras, _type_identifier
 
 
-def _serialize(
+def _serialize(  # noqa: PLR0913
     value: object,
     *,
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
+    include_dataclass_type: bool,
+    type_key: str,
 ) -> JSONValue | object:
     primitive = _serialize_primitive(value, exclude_none)
     if primitive is not None:
@@ -47,6 +49,8 @@ def _serialize(
             by_alias,
             exclude_none,
             alias_generator,
+            include_dataclass_type,
+            type_key,
         )
     if isinstance(value, Mapping):
         return _serialize_mapping(
@@ -54,6 +58,8 @@ def _serialize(
             by_alias,
             exclude_none,
             alias_generator,
+            include_dataclass_type,
+            type_key,
         )
     if isinstance(value, (set, frozenset)):
         return _serialize_set(
@@ -61,9 +67,18 @@ def _serialize(
             by_alias,
             exclude_none,
             alias_generator,
+            include_dataclass_type,
+            type_key,
         )
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return _serialize_sequence(value, by_alias, exclude_none, alias_generator)
+        return _serialize_sequence(
+            value,
+            by_alias,
+            exclude_none,
+            alias_generator,
+            include_dataclass_type,
+            type_key,
+        )
     return value
 
 
@@ -81,26 +96,32 @@ def _serialize_primitive(
     return None
 
 
-def _serialize_dataclass(
+def _serialize_dataclass(  # noqa: PLR0913, PLR0917
     value: object,
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
+    include_dataclass_type: bool,
+    type_key: str,
 ) -> JSONValue | object:
     return dump(
         value,
         by_alias=by_alias,
         exclude_none=exclude_none,
         computed=False,
+        include_dataclass_type=include_dataclass_type,
+        type_key=type_key,
         alias_generator=alias_generator,
     )
 
 
-def _serialize_mapping(
+def _serialize_mapping(  # noqa: PLR0913, PLR0917
     mapping: Mapping[object, object],
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
+    include_dataclass_type: bool,
+    type_key: str,
 ) -> dict[object, JSONValue]:
     serialized: dict[object, JSONValue] = {}
     for key, item in mapping.items():
@@ -109,6 +130,8 @@ def _serialize_mapping(
             by_alias=by_alias,
             exclude_none=exclude_none,
             alias_generator=alias_generator,
+            include_dataclass_type=include_dataclass_type,
+            type_key=type_key,
         )
         if item_value is MISSING_SENTINEL:
             continue
@@ -116,14 +139,21 @@ def _serialize_mapping(
     return serialized
 
 
-def _serialize_set(
+def _serialize_set(  # noqa: PLR0913, PLR0917
     items: set[object],
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
+    include_dataclass_type: bool,
+    type_key: str,
 ) -> list[JSONValue]:
     serialized_items = _serialize_iterable(
-        items, by_alias, exclude_none, alias_generator
+        items,
+        by_alias,
+        exclude_none,
+        alias_generator,
+        include_dataclass_type,
+        type_key,
     )
     try:
         return sorted(serialized_items, key=repr)
@@ -131,20 +161,31 @@ def _serialize_set(
         return serialized_items
 
 
-def _serialize_sequence(
+def _serialize_sequence(  # noqa: PLR0913, PLR0917
     sequence: Sequence[object],
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
+    include_dataclass_type: bool,
+    type_key: str,
 ) -> list[JSONValue]:
-    return _serialize_iterable(sequence, by_alias, exclude_none, alias_generator)
+    return _serialize_iterable(
+        sequence,
+        by_alias,
+        exclude_none,
+        alias_generator,
+        include_dataclass_type,
+        type_key,
+    )
 
 
-def _serialize_iterable(
+def _serialize_iterable(  # noqa: PLR0913, PLR0917
     items: Iterable[object],
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
+    include_dataclass_type: bool,
+    type_key: str,
 ) -> list[JSONValue]:
     serialized_items: list[JSONValue] = []
     for item in items:
@@ -153,6 +194,8 @@ def _serialize_iterable(
             by_alias=by_alias,
             exclude_none=exclude_none,
             alias_generator=alias_generator,
+            include_dataclass_type=include_dataclass_type,
+            type_key=type_key,
         )
         if item_value is MISSING_SENTINEL:
             continue
@@ -170,7 +213,11 @@ def dump(  # noqa: PLR0913
     type_key: str = TYPE_REF_KEY,
     alias_generator: Callable[[str], str] | None = None,
 ) -> dict[str, JSONValue]:
-    """Serialize a dataclass instance to a JSON-compatible dictionary."""
+    """Serialize a dataclass instance to a JSON-compatible dictionary.
+
+    When include_dataclass_type=True, __type__ is recursively embedded in all
+    nested dataclass values, enabling round-trip serialization of generic types.
+    """
 
     if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
         raise TypeError("dump() requires a dataclass instance")
@@ -179,22 +226,38 @@ def dump(  # noqa: PLR0913
     if include_dataclass_type:
         result[type_key] = _type_identifier(type(obj))
     dataclass_obj = cast(SupportsDataclass, obj)
-    _serialize_fields(dataclass_obj, result, by_alias, exclude_none, alias_generator)
+    _serialize_fields(
+        dataclass_obj,
+        result,
+        by_alias,
+        exclude_none,
+        alias_generator,
+        include_dataclass_type,
+        type_key,
+    )
     if computed and hasattr(obj.__class__, "__computed__"):
         _serialize_computed_fields(
-            dataclass_obj, result, by_alias, exclude_none, alias_generator
+            dataclass_obj,
+            result,
+            by_alias,
+            exclude_none,
+            alias_generator,
+            include_dataclass_type,
+            type_key,
         )
 
     return result
 
 
 @no_type_check
-def _serialize_fields(
+def _serialize_fields(  # noqa: PLR0913, PLR0917
     obj: SupportsDataclass,
     result: dict[str, JSONValue],
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
+    include_dataclass_type: bool,
+    type_key: str,
 ) -> None:
     for field in dataclasses.fields(obj):
         key = _field_key(field, by_alias, alias_generator)
@@ -203,18 +266,22 @@ def _serialize_fields(
             by_alias,
             exclude_none,
             alias_generator,
+            include_dataclass_type,
+            type_key,
         )
         if serialized is MISSING_SENTINEL:
             continue
         result[key] = cast(JSONValue, serialized)
 
 
-def _serialize_computed_fields(
+def _serialize_computed_fields(  # noqa: PLR0913, PLR0917
     obj: SupportsDataclass,
     result: dict[str, JSONValue],
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
+    include_dataclass_type: bool,
+    type_key: str,
 ) -> None:
     computed_fields = cast(Sequence[str], getattr(obj.__class__, "__computed__", ()))
     for name in computed_fields:
@@ -223,6 +290,8 @@ def _serialize_computed_fields(
             by_alias,
             exclude_none,
             alias_generator,
+            include_dataclass_type,
+            type_key,
         )
         if serialized is MISSING_SENTINEL:
             continue
@@ -245,17 +314,21 @@ def _field_key(
     return alias or field.name
 
 
-def _serialize_field_value(
+def _serialize_field_value(  # noqa: PLR0913, PLR0917
     value: object,
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
+    include_dataclass_type: bool,
+    type_key: str,
 ) -> JSONValue | object:
     return _serialize(
         value,
         by_alias=by_alias,
         exclude_none=exclude_none,
         alias_generator=alias_generator,
+        include_dataclass_type=include_dataclass_type,
+        type_key=type_key,
     )
 
 

@@ -92,6 +92,8 @@ class _ParseConfig:
     case_insensitive: bool
     alias_generator: Callable[[str], str] | None
     aliases: Mapping[str, str] | None
+    allow_dataclass_type: bool = False
+    type_key: str = TYPE_REF_KEY
 
 
 def _merge_annotated_meta(

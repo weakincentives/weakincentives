@@ -99,6 +99,33 @@ class Order:
 
 All return new instances (immutable).
 
+## Generic Dataclass Serialization
+
+Generic dataclasses like `Wrapper[T]` serialize and deserialize seamlessly when
+`include_dataclass_type=True`. The `__type__` field is recursively embedded in
+all nested dataclass values.
+
+```python
+@dataclass
+class Wrapper[T]:
+    payload: T
+
+@dataclass
+class Data:
+    value: int
+
+# Serialize with type info
+data = dump(Wrapper(payload=Data(1)), include_dataclass_type=True)
+# {"__type__": "...:Wrapper", "payload": {"__type__": "...:Data", "value": 1}}
+
+# Deserialize without knowing T
+restored = parse(None, data, allow_dataclass_type=True)
+assert isinstance(restored.payload, Data)
+```
+
+When parsing, TypeVar-typed fields look for `__type__` in the nested value to
+determine the concrete type.
+
 ## Limitations
 
 - No discriminated unions or `$ref` schema
