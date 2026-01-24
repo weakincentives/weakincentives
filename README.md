@@ -6,8 +6,10 @@ runtimes change. The planning loop, sandboxing, retries, and orchestration live
 in the execution harness—often a vendor runtime. WINK keeps your agent
 definition portable.
 
-> **New to WINK?** Read the [guides](guides/README.md) for a comprehensive
-> introduction—philosophy, quickstart, and practical patterns for building agents.
+> **New to WINK?** If you're like, "I don't want to read, I just want to build!"—point
+> your favorite agent at a clone of https://github.com/weakincentives/starter and prompt
+> your way into a great unattended agent for your use case. You can prompt better if you
+> read some [guides](guides/README.md).
 
 ## Definition vs. Harness
 
