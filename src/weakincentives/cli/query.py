@@ -184,7 +184,7 @@ class _NativeToolUse:
     tool_use_id: str
     name: str
     input_params: dict[str, Any]
-    seq: int
+    seq: int | None  # None if sequence_number missing from log entry
     timestamp: str
 
 
@@ -195,12 +195,12 @@ class _NativeToolResult:
     tool_use_id: str
     content: Any
     is_error: bool
-    seq: int
+    seq: int | None  # None if sequence_number missing from log entry
     timestamp: str
 
 
 def _parse_tool_use_block(
-    data: dict[str, Any], seq: int, timestamp: str
+    data: dict[str, Any], seq: int | None, timestamp: str
 ) -> _NativeToolUse | None:
     """Parse a tool_use content block."""
     tool_use_id = data.get("id", "")
@@ -221,7 +221,7 @@ def _parse_tool_use_block(
 
 
 def _parse_tool_result_block(
-    data: dict[str, Any], seq: int, timestamp: str
+    data: dict[str, Any], seq: int | None, timestamp: str
 ) -> _NativeToolResult | None:
     """Parse a tool_result content block."""
     tool_use_id = data.get("tool_use_id", "")
@@ -237,7 +237,7 @@ def _parse_tool_result_block(
 
 
 def _parse_native_tool_content(
-    content: str, seq: int, timestamp: str
+    content: str, seq: int | None, timestamp: str
 ) -> _NativeToolUse | _NativeToolResult | None:
     """Parse a native tool content block from log_aggregator.
 
@@ -280,7 +280,7 @@ def _process_log_aggregator_entry(
         return
 
     seq_val: Any = ctx.get("sequence_number")
-    seq = seq_val if isinstance(seq_val, int) else 0
+    seq: int | None = seq_val if isinstance(seq_val, int) else None
     timestamp = str(entry.get("timestamp", ""))
 
     parsed = _parse_native_tool_content(content, seq, timestamp)
@@ -339,7 +339,8 @@ def _collect_native_tool_calls(
         _build_native_tool_record(use, tool_results.get(tool_use_id))
         for tool_use_id, use in tool_uses.items()
     ]
-    results.sort(key=lambda x: x[7] or 0)
+    # Sort by seq, with None values sorted last (missing sequence_number)
+    results.sort(key=lambda x: (x[7] is None, x[7] if x[7] is not None else 0))
     return results
 
 
