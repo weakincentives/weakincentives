@@ -1051,38 +1051,6 @@ def test_get_field_types_with_generic_class() -> None:
     assert result["payload"] in {object, GenericClass.__type_params__[0]}
 
 
-def test_resolve_string_type_builtins() -> None:
-    """_resolve_string_type resolves builtin types."""
-    from weakincentives.serde.parse import _resolve_string_type
-
-    assert _resolve_string_type("str") is str
-    assert _resolve_string_type("int") is int
-    assert _resolve_string_type("float") is float
-    assert _resolve_string_type("bool") is bool
-    assert _resolve_string_type("list") is list
-    assert _resolve_string_type("dict") is dict
-
-
-def test_resolve_string_type_typing_module() -> None:
-    """_resolve_string_type resolves typing module types (non-TypeVar)."""
-    from typing import Any
-
-    from weakincentives.serde.parse import _resolve_string_type
-
-    # Should resolve typing module types that aren't TypeVars
-    assert _resolve_string_type("Any") is Any
-
-
-def test_resolve_string_type_unknown() -> None:
-    """_resolve_string_type returns object for unknown types."""
-    from weakincentives.serde.parse import _resolve_string_type
-
-    # TypeVar names and unknown types fall back to object
-    assert _resolve_string_type("T") is object
-    assert _resolve_string_type("NonExistentType") is object
-    assert _resolve_string_type("SomeRandomName") is object
-
-
 def test_build_typevar_map_unresolved_typevar() -> None:
     """_build_typevar_map skips TypeVar args not in parent map."""
     from typing import TypeVar

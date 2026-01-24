@@ -681,23 +681,6 @@ def _resolve_generic_string_type(
         return simple if simple is not None else object
 
 
-def _resolve_string_type(  # pyright: ignore[reportUnusedFunction]
-    type_str: str,
-) -> object:
-    """Resolve a string type annotation to an actual type without eval().
-
-    Only resolves safe, well-known types from builtins and typing module.
-    Returns object for unresolvable types (e.g., TypeVar names).
-
-    Note: This is a simplified version that doesn't handle complex generics.
-    Use _resolve_generic_string_type for full generic type support.
-
-    Tested via tests/serde/test_dataclass_serde.py.
-    """
-    simple = _resolve_simple_type(type_str)
-    return simple if simple is not None else object
-
-
 def _get_field_types(cls: type[object]) -> dict[str, object]:
     """Get field types for a dataclass, handling generic classes safely.
 
