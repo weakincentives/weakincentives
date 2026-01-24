@@ -132,3 +132,6 @@ Parsing without type arguments raises a helpful error guiding usage.
 - No discriminated unions or `$ref` schema
 - No assignment-time validation
 - No external parsers
+- **No backward compatibility guarantee for persisted data.** This is alpha
+  software; serialization format may change between versions. Rehydrating
+  previously persisted snapshots after schema or serde changes is not supported.

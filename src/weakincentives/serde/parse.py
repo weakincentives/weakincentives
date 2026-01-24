@@ -241,11 +241,17 @@ def _coerce_primitive(
 
 
 def _build_nested_config(base_type: object, config: _ParseConfig) -> _ParseConfig:
-    """Build config with typevar_map for nested generic type parsing."""
+    """Build config with typevar_map for nested generic type parsing.
+
+    Resolves TypeVar arguments through the parent's typevar_map to support
+    nested generics like Outer[int] containing Inner[T] where T is Outer's param.
+    """
     origin = get_origin(base_type)
     if origin is None:
         return config
-    nested_typevar_map = _build_typevar_map(cast(type[object], base_type))
+    nested_typevar_map = _build_typevar_map(
+        cast(type[object], base_type), parent_typevar_map=config.typevar_map
+    )
     if not nested_typevar_map:  # pragma: no cover - always true for PEP 695 generics
         return config
     return _ParseConfig(
@@ -504,32 +510,33 @@ def _resolve_string_type(type_str: str) -> object:
 def _get_field_types(cls: type[object]) -> dict[str, object]:
     """Get field types for a dataclass, handling generic classes safely.
 
-    Tries get_type_hints() first. If that fails (NameError on generic classes
-    with postponed annotations), falls back to resolving field types from
-    dataclasses.fields() with safe name resolution (no eval()).
+    Tries get_type_hints() first with TypeVars from __type_params__ in localns.
+    If that fails (NameError on generic classes with postponed annotations),
+    falls back to resolving field types from dataclasses.fields() with safe
+    name resolution (no eval()).
 
     For TypeVar string annotations (like 'T'), preserves the TypeVar object
     from __type_params__ so that TypeVar error handling still works.
     """
+    # Build mapping of TypeVar names for PEP 695 generic classes
+    # This allows get_type_hints() to resolve annotations like Inner[T]
+    type_params = getattr(cls, "__type_params__", ())
+    localns = {tp.__name__: tp for tp in type_params}
+
     try:
-        return get_type_hints(cls, include_extras=True)
-    except NameError:
+        return get_type_hints(cls, localns=localns, include_extras=True)
+    except NameError:  # pragma: no cover - defensive fallback for edge cases
         # Generic class with unresolved type parameters (and future annotations)
         # Fall back to safe resolution from dataclass fields.
         # Note: When get_type_hints fails with NameError, it's because
         # from __future__ import annotations is used, so all field.type
         # values are strings.
-
-        # Build mapping of TypeVar names to TypeVar objects
-        type_params = getattr(cls, "__type_params__", ())
-        typevar_map = {tp.__name__: tp for tp in type_params}
-
         result: dict[str, object] = {}
         for field in dataclasses.fields(cls):
             type_str = field.type if isinstance(field.type, str) else str(field.type)
             # Check if this is a TypeVar name - preserve the TypeVar
-            if type_str in typevar_map:
-                result[field.name] = typevar_map[type_str]
+            if type_str in localns:
+                result[field.name] = localns[type_str]
             else:
                 result[field.name] = _resolve_string_type(type_str)
         return result
@@ -709,11 +716,19 @@ def _run_validation_hooks(instance: object) -> None:
         _ = post_validator()
 
 
-def _build_typevar_map(cls: type[object]) -> dict[object, type]:
+def _build_typevar_map(
+    cls: type[object],
+    *,
+    parent_typevar_map: Mapping[object, type] | None = None,
+) -> dict[object, type]:
     """Build a mapping from TypeVar to concrete type for a generic alias.
 
     For a generic alias like `MyClass[str, int]`, this maps each TypeVar
     from MyClass.__type_params__ to the corresponding type argument.
+
+    If parent_typevar_map is provided, TypeVar arguments are resolved through
+    it. This supports nested generics like Outer[int] containing Inner[T]
+    where T is Outer's TypeVar - the parent map resolves T to int.
     """
     origin = get_origin(cls)
     if origin is None:
@@ -732,9 +747,12 @@ def _build_typevar_map(cls: type[object]) -> dict[object, type]:
     # Map each TypeVar to its concrete type argument
     typevar_map: dict[object, type] = {}
     for param, arg in zip(type_params, type_args, strict=False):
-        if isinstance(arg, type):
+        # Resolve TypeVar args through parent's map (for nested generics)
+        if _is_typevar(arg) and parent_typevar_map and arg in parent_typevar_map:
+            typevar_map[param] = parent_typevar_map[arg]
+        elif isinstance(arg, type):
             typevar_map[param] = arg
-        elif get_origin(arg) is not None:  # pragma: no branch - defensive
+        elif get_origin(arg) is not None:
             # arg is itself a generic alias (e.g., list[str])
             # Store it for recursive resolution
             typevar_map[param] = arg

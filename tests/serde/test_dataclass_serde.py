@@ -987,6 +987,52 @@ def test_parse_concrete_nested_dataclass() -> None:
     assert restored.nested.message == "test"
 
 
+@dataclass(slots=True, frozen=True)
+class _InnerGeneric[T]:
+    """Inner generic that uses parent's TypeVar."""
+
+    value: T
+
+
+@dataclass(slots=True, frozen=True)
+class _OuterGeneric[T]:
+    """Outer generic with nested Inner[T] referencing same TypeVar."""
+
+    inner: _InnerGeneric[T]
+    label: str = "default"
+
+
+def test_parse_nested_typevar_resolution() -> None:
+    """Inner[T] correctly resolves T from outer generic alias.
+
+    When parsing Outer[int], the field `inner: Inner[T]` should resolve
+    T to int via the parent's typevar_map.
+    """
+    data = {"inner": {"value": 42}, "label": "test"}
+
+    restored = parse(_OuterGeneric[int], data)
+
+    assert isinstance(restored, _OuterGeneric)
+    assert isinstance(restored.inner, _InnerGeneric)
+    assert restored.inner.value == 42
+    assert restored.label == "test"
+
+
+def test_parse_nested_typevar_with_dataclass_value() -> None:
+    """Nested TypeVar resolves to dataclass type correctly."""
+    data = {
+        "inner": {"value": {"message": "hello", "priority": 1}},
+        "label": "test",
+    }
+
+    restored = parse(_OuterGeneric[_InnerPayload], data)
+
+    assert isinstance(restored, _OuterGeneric)
+    assert isinstance(restored.inner, _InnerGeneric)
+    assert isinstance(restored.inner.value, _InnerPayload)
+    assert restored.inner.value.message == "hello"
+
+
 def test_get_field_types_with_generic_class() -> None:
     """_get_field_types falls back to safe resolution for generic classes."""
     from weakincentives.serde.parse import _get_field_types
@@ -1035,6 +1081,36 @@ def test_resolve_string_type_unknown() -> None:
     assert _resolve_string_type("T") is object
     assert _resolve_string_type("NonExistentType") is object
     assert _resolve_string_type("SomeRandomName") is object
+
+
+def test_build_typevar_map_unresolved_typevar() -> None:
+    """_build_typevar_map skips TypeVar args not in parent map."""
+    from typing import TypeVar
+
+    from weakincentives.serde.parse import _build_typevar_map
+
+    # Create a separate TypeVar not defined on _OuterGeneric
+    UnrelatedTypeVar = TypeVar("UnrelatedTypeVar")
+
+    # Build a generic alias with an unrelated TypeVar as the argument
+    # This is an unusual situation but can happen with complex generic patterns
+    @dataclass(slots=True, frozen=True)
+    class SimpleGeneric[T]:
+        value: T
+
+    # Create alias with the unrelated TypeVar
+    alias = SimpleGeneric[UnrelatedTypeVar]  # type: ignore[type-arg]
+
+    # Call _build_typevar_map with parent_typevar_map that doesn't contain
+    # the UnrelatedTypeVar - this exercises the "skip" branch
+    parent_map: dict[object, type] = {}  # Empty map, won't contain UnrelatedTypeVar
+    result = _build_typevar_map(alias, parent_typevar_map=parent_map)
+
+    # The UnrelatedTypeVar should be skipped since:
+    # 1. It's a TypeVar but not in parent_map
+    # 2. It's not a concrete type
+    # 3. get_origin() returns None for TypeVars
+    assert result == {}
 
 
 def test_parse_deeply_nested_generic_with_alias() -> None:
