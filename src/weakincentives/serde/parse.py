@@ -25,7 +25,6 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     Literal,
-    TypeVar,
     Union as _TypingUnion,  # pyright: ignore[reportDeprecated]
     cast,
     get_args as typing_get_args,
@@ -463,98 +462,93 @@ def _coerce_bool(
 
 def _is_typevar(typ: object) -> bool:
     """Check if a type is a TypeVar (unresolved generic parameter)."""
+    from typing import TypeVar
+
     return isinstance(typ, TypeVar)
 
 
-def _build_annotation_namespace(
-    cls: type[object],
-) -> tuple[dict[str, object], dict[str, object]]:
-    """Build globalns and localns for evaluating annotations."""
-    import sys
+def _resolve_string_type(type_str: str) -> object:
+    """Resolve a string type annotation to an actual type without eval().
 
-    # Get module globals
-    module = sys.modules.get(cls.__module__, None)
-    globalns: dict[str, object] = vars(module).copy() if module else {}
+    Only resolves safe, well-known types from builtins and typing module.
+    Returns object for unresolvable types (e.g., TypeVar names).
+    """
+    import builtins
+    import typing
+    from typing import TypeVar
 
-    # Add class type parameters (Python 3.12+ generic syntax)
-    localns: dict[str, object] = {}
-    type_params = getattr(cls, "__type_params__", ())
-    for tp in type_params:
-        localns[tp.__name__] = tp
+    # Try builtins first (str, int, float, bool, list, dict, etc.)
+    builtin_type = getattr(builtins, type_str, None)
+    if builtin_type is not None and isinstance(builtin_type, type):
+        return builtin_type
 
-    return globalns, localns
+    # Try typing module (Any, Optional, etc.) but exclude TypeVars
+    # (typing module has common TypeVar names like T, K, V which we shouldn't use)
+    typing_type = getattr(typing, type_str, None)
+    if typing_type is not None and not isinstance(typing_type, TypeVar):
+        return typing_type
 
-
-def _evaluate_annotations_individually(cls: type[object]) -> dict[str, object]:
-    """Evaluate each annotation individually, preserving TypeVars."""
-    globalns, localns = _build_annotation_namespace(cls)
-
-    # Collect annotations from the class hierarchy
-    raw_annotations: dict[str, object] = {}
-    for base in reversed(cls.__mro__):
-        if hasattr(base, "__annotations__"):
-            raw_annotations.update(base.__annotations__)
-
-    # Evaluate each annotation
-    result: dict[str, object] = {}
-    for name, annotation in raw_annotations.items():
-        if isinstance(annotation, str):
-            try:
-                # Evaluate type annotation string from class definition (safe)
-                result[name] = eval(annotation, globalns, localns)  # nosec B307
-            except NameError:
-                # Unresolvable annotation (e.g., TYPE_CHECKING import)
-                # Use object as fallback - coercion will fail if field is required
-                result[name] = object
-        else:
-            result[name] = annotation
-
-    return result
+    # Unresolvable - return object as fallback
+    # This handles TypeVar names and complex annotations
+    return object
 
 
-def _safe_get_type_hints(cls: type[object]) -> dict[str, object]:
-    """Get type hints, handling generic classes with unbound type parameters.
+def _get_field_types(cls: type[object]) -> dict[str, object]:
+    """Get field types for a dataclass, handling generic classes safely.
 
-    Generic classes with unbound type parameters cause NameError in get_type_hints().
-    This function catches that error and evaluates annotations individually,
-    preserving TypeVar objects for the TypeVar coercer to handle.
+    Tries get_type_hints() first. If that fails (NameError on generic classes
+    with postponed annotations), falls back to resolving field types from
+    dataclasses.fields() with safe name resolution (no eval()).
+
+    For TypeVar string annotations (like 'T'), preserves the TypeVar object
+    from __type_params__ so that TypeVar error handling still works.
     """
     try:
         return get_type_hints(cls, include_extras=True)
     except NameError:
-        # Generic class with unresolved type parameters or TYPE_CHECKING imports
-        # Evaluate annotations individually, preserving TypeVars
-        return _evaluate_annotations_individually(cls)
+        # Generic class with unresolved type parameters (and future annotations)
+        # Fall back to safe resolution from dataclass fields.
+        # Note: When get_type_hints fails with NameError, it's because
+        # from __future__ import annotations is used, so all field.type
+        # values are strings.
+
+        # Build mapping of TypeVar names to TypeVar objects
+        type_params = getattr(cls, "__type_params__", ())
+        typevar_map = {tp.__name__: tp for tp in type_params}
+
+        result: dict[str, object] = {}
+        for field in dataclasses.fields(cls):
+            type_str = field.type if isinstance(field.type, str) else str(field.type)
+            # Check if this is a TypeVar name - preserve the TypeVar
+            if type_str in typevar_map:
+                result[field.name] = typevar_map[type_str]
+            else:
+                result[field.name] = _resolve_string_type(type_str)
+        return result
 
 
-def _coerce_typevar(
+def _coerce_from_embedded_type(
     value: object,
-    base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
     config: _ParseConfig,
 ) -> object:
-    """Handle TypeVar types by looking for __type__ in the value."""
-    if not _is_typevar(base_type):
+    """Resolve type from embedded __type__ if present.
+
+    When allow_dataclass_type is enabled and the value is a mapping containing
+    the type key, use that type directly. This handles TypeVar fields in generic
+    classes without needing to resolve type annotations.
+    """
+    if not config.allow_dataclass_type:
         return _NOT_HANDLED
 
-    # TypeVar fields require __type__ in the value to determine concrete type
-    if not config.allow_dataclass_type:
-        raise TypeError(
-            f"{path}: cannot parse TypeVar field without allow_dataclass_type=True"
-        )
-
     if not isinstance(value, Mapping):
-        raise TypeError(
-            f"{path}: expected mapping with {config.type_key} for TypeVar field"
-        )
+        return _NOT_HANDLED
 
     mapping_value = cast(Mapping[str, object], value)
     type_key = config.type_key
     if type_key not in mapping_value:
-        raise TypeError(
-            f"{path}: TypeVar field requires {type_key} in value to determine type"
-        )
+        return _NOT_HANDLED
 
     # Resolve the concrete type from __type__
     type_identifier = mapping_value[type_key]
@@ -583,6 +577,14 @@ def _coerce_to_type(
 ) -> object:
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
 
+    # For TypeVar or object types (the fallback for unresolved generics),
+    # try to resolve from embedded __type__ if present.
+    # Note: `Any` means "don't coerce", so we DON'T resolve __type__ for Any.
+    if _is_typevar(base_type) or base_type is object:
+        embedded = _coerce_from_embedded_type(value, merged_meta, path, config)
+        if embedded is not _NOT_HANDLED:
+            return embedded
+
     if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
 
@@ -590,7 +592,6 @@ def _coerce_to_type(
         lambda: _coerce_union(value, base_type, merged_meta, path, config),
         lambda: _coerce_none(value, base_type, path),
         lambda: _coerce_literal(value, base_type, merged_meta, path, config),
-        lambda: _coerce_typevar(value, base_type, merged_meta, path, config),
         lambda: _coerce_dataclass(value, base_type, merged_meta, path, config),
         lambda: _coerce_sequence(value, base_type, merged_meta, path, config),
         lambda: _coerce_mapping(value, base_type, merged_meta, path, config),
@@ -603,11 +604,28 @@ def _coerce_to_type(
         if result is not _NOT_HANDLED:
             return result
 
+    # Check for TypeVar - these can only be handled via embedded __type__
+    if _is_typevar(base_type):
+        _raise_typevar_error(value, path, config)
+
     try:
         coerced = base_type(value)
     except Exception as error:
         raise type(error)(str(error)) from error
     return _apply_constraints(coerced, merged_meta, path)
+
+
+def _raise_typevar_error(value: object, path: str, config: _ParseConfig) -> None:
+    """Raise appropriate error for unresolved TypeVar field."""
+    if not config.allow_dataclass_type:
+        raise TypeError(
+            f"{path}: cannot parse TypeVar field without allow_dataclass_type=True"
+        )
+    if isinstance(value, Mapping):
+        raise TypeError(f"{path}: TypeVar field requires {config.type_key} in value")
+    raise TypeError(
+        f"{path}: expected mapping with {config.type_key} for TypeVar field"
+    )
 
 
 def _find_key_exact(
@@ -825,7 +843,7 @@ def parse[T](
         type_key=type_key,
     )
 
-    type_hints = _safe_get_type_hints(target_cls)
+    type_hints = _get_field_types(target_cls)
     kwargs, used_keys = _collect_field_kwargs(
         target_cls,
         mapping_data,

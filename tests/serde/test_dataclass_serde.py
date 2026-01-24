@@ -1136,41 +1136,54 @@ def test_parse_typevar_invalid_type_identifier() -> None:
     assert "could not be resolved" in str(exc.value)
 
 
-def test_evaluate_annotations_with_unresolvable_type() -> None:
-    """Annotations that can't be resolved fall back to object."""
-    from weakincentives.serde.parse import _evaluate_annotations_individually
-
-    # Create a class with an annotation that can't be resolved
-    @dataclass(slots=True, frozen=True)
-    class WithBadAnnotation[T]:
-        value: T
-        # Simulate an unresolvable annotation (e.g., TYPE_CHECKING import)
-
-    # Manually add an unresolvable annotation
-    WithBadAnnotation.__annotations__["unresolvable"] = "NonExistentType"
-
-    result = _evaluate_annotations_individually(WithBadAnnotation)
-
-    # The value (TypeVar T) should be preserved
-    assert result["value"] is not object
-    # The unresolvable annotation should fall back to object
-    assert result["unresolvable"] is object
-
-
-def test_evaluate_annotations_with_non_string_annotation() -> None:
-    """Non-string annotations are preserved as-is."""
-    from weakincentives.serde.parse import _evaluate_annotations_individually
+def test_get_field_types_with_generic_class() -> None:
+    """_get_field_types falls back to safe resolution for generic classes."""
+    from weakincentives.serde.parse import _get_field_types
 
     @dataclass(slots=True, frozen=True)
-    class WithDirectAnnotation:
-        value: int  # Non-string annotation (when not using from __future__)
+    class GenericClass[T]:
+        name: str
+        payload: T
 
-    # Force the annotation to be a type (not a string)
-    WithDirectAnnotation.__annotations__["value"] = int
+    result = _get_field_types(GenericClass)
 
-    result = _evaluate_annotations_individually(WithDirectAnnotation)
+    # Regular types are resolved (str is in builtins)
+    assert result["name"] is str
+    # TypeVar fields get resolved to object (safe fallback)
+    # or to the TypeVar itself if get_type_hints succeeds
+    assert result["payload"] in {object, GenericClass.__type_params__[0]}
 
-    assert result["value"] is int
+
+def test_resolve_string_type_builtins() -> None:
+    """_resolve_string_type resolves builtin types."""
+    from weakincentives.serde.parse import _resolve_string_type
+
+    assert _resolve_string_type("str") is str
+    assert _resolve_string_type("int") is int
+    assert _resolve_string_type("float") is float
+    assert _resolve_string_type("bool") is bool
+    assert _resolve_string_type("list") is list
+    assert _resolve_string_type("dict") is dict
+
+
+def test_resolve_string_type_typing_module() -> None:
+    """_resolve_string_type resolves typing module types (non-TypeVar)."""
+    from typing import Any
+
+    from weakincentives.serde.parse import _resolve_string_type
+
+    # Should resolve typing module types that aren't TypeVars
+    assert _resolve_string_type("Any") is Any
+
+
+def test_resolve_string_type_unknown() -> None:
+    """_resolve_string_type returns object for unknown types."""
+    from weakincentives.serde.parse import _resolve_string_type
+
+    # TypeVar names and unknown types fall back to object
+    assert _resolve_string_type("T") is object
+    assert _resolve_string_type("NonExistentType") is object
+    assert _resolve_string_type("SomeRandomName") is object
 
 
 def test_parse_deeply_nested_generic_dataclasses() -> None:
