@@ -1837,3 +1837,255 @@ def test_schema_enum_mixed_types() -> None:
     finally:
         globals().pop("MixedEnumModel", None)
         globals().pop("MixedEnum", None)
+
+
+def test_resolve_generic_string_type_simple_name() -> None:
+    """_resolve_generic_string_type resolves simple type names."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {}
+
+    # Builtins
+    assert _resolve_generic_string_type("str", localns, module_ns) is str
+    assert _resolve_generic_string_type("int", localns, module_ns) is int
+    assert _resolve_generic_string_type("list", localns, module_ns) is list
+
+
+def test_resolve_generic_string_type_with_localns() -> None:
+    """_resolve_generic_string_type uses localns for TypeVar lookup."""
+    from typing import TypeVar
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    T = TypeVar("T")
+    localns: dict[str, object] = {"T": T}
+    module_ns: dict[str, object] = {}
+
+    # TypeVar from localns
+    assert _resolve_generic_string_type("T", localns, module_ns) is T
+
+
+def test_resolve_generic_string_type_with_module_ns() -> None:
+    """_resolve_generic_string_type uses module_ns for class lookup."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    @dataclass(slots=True, frozen=True)
+    class MyClass:
+        value: str
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {"MyClass": MyClass}
+
+    # Class from module namespace
+    assert _resolve_generic_string_type("MyClass", localns, module_ns) is MyClass
+
+
+def test_resolve_generic_string_type_subscript() -> None:
+    """_resolve_generic_string_type resolves parameterized generic types."""
+    from typing import TypeVar, get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    @dataclass(slots=True, frozen=True)
+    class Container[T]:
+        value: T
+
+    T = TypeVar("T")
+    localns: dict[str, object] = {"T": T}
+    module_ns: dict[str, object] = {"Container": Container}
+
+    # Resolve 'Container[T]'
+    result = _resolve_generic_string_type("Container[T]", localns, module_ns)
+
+    # Should be Container[T]
+    assert get_origin(result) is Container
+    args = get_args(result)
+    assert len(args) == 1
+    assert args[0] is T
+
+
+def test_resolve_generic_string_type_multiple_args() -> None:
+    """_resolve_generic_string_type resolves generics with multiple type args."""
+    from typing import TypeVar, get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    @dataclass(slots=True, frozen=True)
+    class Pair[K, V]:
+        key: K
+        value: V
+
+    K = TypeVar("K")
+    V = TypeVar("V")
+    localns: dict[str, object] = {"K": K, "V": V}
+    module_ns: dict[str, object] = {"Pair": Pair}
+
+    # Resolve 'Pair[K, V]'
+    result = _resolve_generic_string_type("Pair[K, V]", localns, module_ns)
+
+    assert get_origin(result) is Pair
+    args = get_args(result)
+    assert len(args) == 2
+    assert args[0] is K
+    assert args[1] is V
+
+
+def test_resolve_generic_string_type_nested_generic() -> None:
+    """_resolve_generic_string_type resolves nested generic types."""
+    from typing import TypeVar, get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    @dataclass(slots=True, frozen=True)
+    class Wrapper[T]:
+        inner: T
+
+    @dataclass(slots=True, frozen=True)
+    class Inner[T]:
+        value: T
+
+    T = TypeVar("T")
+    localns: dict[str, object] = {"T": T}
+    module_ns: dict[str, object] = {"Wrapper": Wrapper, "Inner": Inner}
+
+    # Resolve 'Wrapper[Inner[T]]'
+    result = _resolve_generic_string_type("Wrapper[Inner[T]]", localns, module_ns)
+
+    assert get_origin(result) is Wrapper
+    outer_args = get_args(result)
+    assert len(outer_args) == 1
+    inner = outer_args[0]
+    assert get_origin(inner) is Inner
+    inner_args = get_args(inner)
+    assert len(inner_args) == 1
+    assert inner_args[0] is T
+
+
+def test_resolve_generic_string_type_builtin_generic() -> None:
+    """_resolve_generic_string_type resolves builtin generic types."""
+    from typing import get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {}
+
+    # Resolve 'list[str]'
+    result = _resolve_generic_string_type("list[str]", localns, module_ns)
+    assert get_origin(result) is list
+    assert get_args(result) == (str,)
+
+    # Resolve 'dict[str, int]'
+    result = _resolve_generic_string_type("dict[str, int]", localns, module_ns)
+    assert get_origin(result) is dict
+    assert get_args(result) == (str, int)
+
+
+def test_resolve_generic_string_type_union() -> None:
+    """_resolve_generic_string_type resolves union types."""
+    from types import UnionType
+    from typing import get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {}
+
+    # Resolve 'str | int' (Python 3.10+ union syntax)
+    result = _resolve_generic_string_type("str | int", localns, module_ns)
+    # The | operator creates a types.UnionType, not typing.Union
+    assert get_origin(result) is UnionType
+    assert set(get_args(result)) == {str, int}
+
+
+def test_resolve_generic_string_type_syntax_error() -> None:
+    """_resolve_generic_string_type falls back on syntax errors."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {}
+
+    # Invalid syntax should fall back to object
+    assert _resolve_generic_string_type("[invalid", localns, module_ns) is object
+
+
+def test_resolve_generic_string_type_unresolvable() -> None:
+    """_resolve_generic_string_type returns object for unresolvable types."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {}
+
+    # Unknown type name
+    assert _resolve_generic_string_type("UnknownType", localns, module_ns) is object
+
+
+def test_resolve_simple_type_returns_none() -> None:
+    """_resolve_simple_type returns None for unknown types."""
+    from weakincentives.serde.parse import _resolve_simple_type
+
+    # Known types
+    assert _resolve_simple_type("str") is str
+    assert _resolve_simple_type("int") is int
+
+    # Unknown types return None
+    assert _resolve_simple_type("UnknownType") is None
+    assert _resolve_simple_type("T") is None
+
+
+def test_resolve_subscript_with_object_base() -> None:
+    """_resolve_subscript returns object when base_type is object."""
+    from weakincentives.serde.parse import _resolve_subscript
+
+    # When base_type is object, return object directly
+    result = _resolve_subscript(object, (str,))
+    assert result is object
+
+
+def test_resolve_subscript_with_non_subscriptable_type() -> None:
+    """_resolve_subscript falls back to base_type on TypeError."""
+    from weakincentives.serde.parse import _resolve_subscript
+
+    # int is not subscriptable, should return int (not raise)
+    result = _resolve_subscript(int, (str,))
+    assert result is int
+
+
+def test_resolve_generic_string_type_unknown_node() -> None:
+    """_resolve_generic_string_type returns object for unknown AST nodes."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {}
+
+    # Attribute access like 'typing.Optional' returns object
+    result = _resolve_generic_string_type("typing.Optional", localns, module_ns)
+    assert result is object
+
+
+def test_resolve_generic_string_type_forward_ref() -> None:
+    """_resolve_generic_string_type handles string constant forward references."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {}
+
+    # String literal evaluates to a forward reference, recursively resolved
+    # Since "int" is a string, it should resolve to int
+    # We need to test the ast.Constant branch
+    # This happens when you have a string annotation like "'int'"
+    result = _resolve_generic_string_type("'int'", localns, module_ns)
+    assert result is int
+
+
+def test_resolve_generic_string_type_unresolvable_subscript() -> None:
+    """_resolve_generic_string_type with unresolvable subscript base."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {}
+
+    # Unknown[str] - Unknown is not in any namespace, so base is object
+    result = _resolve_generic_string_type("Unknown[str]", localns, module_ns)
+    assert result is object

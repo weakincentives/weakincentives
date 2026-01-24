@@ -481,11 +481,11 @@ def _is_typevar(typ: object) -> bool:
     return isinstance(typ, TypeVar)
 
 
-def _resolve_string_type(type_str: str) -> object:
-    """Resolve a string type annotation to an actual type without eval().
+def _resolve_simple_type(type_str: str) -> object | None:
+    """Resolve a simple type name to an actual type.
 
-    Only resolves safe, well-known types from builtins and typing module.
-    Returns object for unresolvable types (e.g., TypeVar names).
+    Looks up type names in builtins and typing module only.
+    Returns None if not found (does not fall back to object).
     """
     import builtins
     import typing
@@ -502,9 +502,110 @@ def _resolve_string_type(type_str: str) -> object:
     if typing_type is not None and not isinstance(typing_type, TypeVar):
         return typing_type
 
-    # Unresolvable - return object as fallback
-    # This handles TypeVar names and complex annotations
-    return object
+    return None
+
+
+def _resolve_name(
+    name: str,
+    localns: dict[str, object],
+    module_ns: dict[str, object],
+) -> object:
+    """Resolve a simple type name from namespaces."""
+    # Check localns first (TypeVars)
+    if name in localns:
+        return localns[name]
+    # Check module namespace (for class definitions like Sample)
+    if name in module_ns:
+        return module_ns[name]
+    # Try builtins/typing
+    simple = _resolve_simple_type(name)
+    return simple if simple is not None else object
+
+
+def _resolve_subscript(
+    base_type: object,
+    type_args: tuple[object, ...],
+) -> object:
+    """Resolve a subscripted generic type like Container[T]."""
+    if base_type is object:
+        return object
+    try:
+        return base_type[type_args]  # pyright: ignore[reportIndexIssue]
+    except TypeError:
+        return base_type
+
+
+def _make_union(left: object, right: object) -> object:
+    """Create a Union type at runtime from two types using the | operator."""
+    # For type objects, | creates a union at runtime (Python 3.10+)
+    # This works because types support the __or__ operator for creating unions
+    return left | right  # pyright: ignore[reportOperatorIssue]  # ty: ignore[unsupported-operator]
+
+
+def _resolve_generic_string_type(
+    type_str: str,
+    localns: dict[str, object],
+    module_ns: dict[str, object],
+) -> object:
+    """Resolve a string type annotation using AST parsing.
+
+    Handles complex generic type expressions like 'Sample[InputT, ExpectedT]'
+    by parsing the string into an AST and resolving each component.
+
+    Args:
+        type_str: The string type annotation to resolve.
+        localns: Local namespace containing TypeVars from __type_params__.
+        module_ns: Module namespace for looking up class definitions.
+
+    Returns:
+        The resolved type, or object if unresolvable.
+    """
+    import ast
+
+    def resolve_node(node: ast.expr) -> object:
+        """Recursively resolve an AST node to a type."""
+        if isinstance(node, ast.Name):
+            return _resolve_name(node.id, localns, module_ns)
+
+        if isinstance(node, ast.Subscript):
+            base = resolve_node(node.value)
+            if isinstance(node.slice, ast.Tuple):
+                args = tuple(resolve_node(elt) for elt in node.slice.elts)
+            else:
+                args = (resolve_node(node.slice),)
+            return _resolve_subscript(base, args)
+
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return _make_union(resolve_node(node.left), resolve_node(node.right))
+
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return _resolve_generic_string_type(node.value, localns, module_ns)
+
+        return object
+
+    try:
+        tree = ast.parse(type_str, mode="eval")
+        return resolve_node(tree.body)
+    except SyntaxError:
+        simple = _resolve_simple_type(type_str)
+        return simple if simple is not None else object
+
+
+def _resolve_string_type(  # pyright: ignore[reportUnusedFunction]
+    type_str: str,
+) -> object:
+    """Resolve a string type annotation to an actual type without eval().
+
+    Only resolves safe, well-known types from builtins and typing module.
+    Returns object for unresolvable types (e.g., TypeVar names).
+
+    Note: This is a simplified version that doesn't handle complex generics.
+    Use _resolve_generic_string_type for full generic type support.
+
+    Tested via tests/serde/test_dataclass_serde.py.
+    """
+    simple = _resolve_simple_type(type_str)
+    return simple if simple is not None else object
 
 
 def _get_field_types(cls: type[object]) -> dict[str, object]:
@@ -512,25 +613,35 @@ def _get_field_types(cls: type[object]) -> dict[str, object]:
 
     Tries get_type_hints() first with TypeVars from __type_params__ in localns.
     If that fails (NameError on generic classes with postponed annotations),
-    falls back to resolving field types from dataclasses.fields() with safe
-    name resolution (no eval()).
+    falls back to resolving field types from dataclasses.fields() using AST
+    parsing to handle complex generic type annotations.
 
     For TypeVar string annotations (like 'T'), preserves the TypeVar object
     from __type_params__ so that TypeVar error handling still works.
     """
+    import sys
+
     # Build mapping of TypeVar names for PEP 695 generic classes
     # This allows get_type_hints() to resolve annotations like Inner[T]
     type_params = getattr(cls, "__type_params__", ())
-    localns = {tp.__name__: tp for tp in type_params}
+    localns: dict[str, object] = {tp.__name__: tp for tp in type_params}
 
     try:
         return get_type_hints(cls, localns=localns, include_extras=True)
     except NameError:  # pragma: no cover - defensive fallback for edge cases
         # Generic class with unresolved type parameters (and future annotations)
-        # Fall back to safe resolution from dataclass fields.
+        # Fall back to AST-based resolution from dataclass fields.
         # Note: When get_type_hints fails with NameError, it's because
         # from __future__ import annotations is used, so all field.type
         # values are strings.
+
+        # Get the module namespace for resolving types defined in the same module
+        module_ns: dict[str, object] = {}
+        module_name = getattr(cls, "__module__", None)
+        if module_name and module_name in sys.modules:
+            module = sys.modules[module_name]
+            module_ns = vars(module)
+
         result: dict[str, object] = {}
         for field in dataclasses.fields(cls):
             type_str = field.type if isinstance(field.type, str) else str(field.type)
@@ -538,7 +649,10 @@ def _get_field_types(cls: type[object]) -> dict[str, object]:
             if type_str in localns:
                 result[field.name] = localns[type_str]
             else:
-                result[field.name] = _resolve_string_type(type_str)
+                # Use AST-based resolution for complex generic types
+                result[field.name] = _resolve_generic_string_type(
+                    type_str, localns, module_ns
+                )
         return result
 
 
