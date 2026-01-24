@@ -268,6 +268,8 @@ def _coerce_dataclass(
             case_insensitive=config.case_insensitive,
             alias_generator=config.alias_generator,
             aliases=config.aliases,
+            allow_dataclass_type=config.allow_dataclass_type,
+            type_key=config.type_key,
         )
     except (TypeError, ValueError) as error:
         message = str(error)

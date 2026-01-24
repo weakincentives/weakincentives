@@ -967,6 +967,13 @@ class _GenericWrapper[T]:
     metadata: str = "default"
 
 
+@dataclass(slots=True, frozen=True)
+class _NestedGenericWrapper[T]:
+    """Wrapper for testing deeply nested generics."""
+
+    child: T
+
+
 def test_dump_embeds_type_recursively() -> None:
     """dump() with include_dataclass_type embeds __type__ in nested dataclasses."""
     inner = _InnerPayload(message="hello", priority=5)
@@ -1157,6 +1164,32 @@ def test_evaluate_annotations_with_non_string_annotation() -> None:
     result = _evaluate_annotations_individually(WithDirectAnnotation)
 
     assert result["value"] is int
+
+
+def test_parse_deeply_nested_generic_dataclasses() -> None:
+    """Config propagates through deeply nested generic dataclass parsing."""
+    # Create deeply nested structure: _NestedGenericWrapper[_GenericWrapper[_InnerPayload]]
+    inner = _InnerPayload(message="deep", priority=99)
+    middle = _GenericWrapper(payload=inner, metadata="mid")
+    outer = _NestedGenericWrapper(child=middle)
+
+    serialized = dump(outer, include_dataclass_type=True)
+
+    # Verify __type__ is embedded at all levels
+    assert "__type__" in serialized
+    assert "__type__" in serialized["child"]
+    assert "__type__" in serialized["child"]["payload"]
+
+    # Round-trip should work - this failed before the fix because
+    # allow_dataclass_type wasn't propagated in recursive parse calls
+    restored = parse(None, serialized, allow_dataclass_type=True)
+
+    assert isinstance(restored, _NestedGenericWrapper)
+    assert isinstance(restored.child, _GenericWrapper)
+    assert isinstance(restored.child.payload, _InnerPayload)
+    assert restored.child.payload.message == "deep"
+    assert restored.child.payload.priority == 99
+    assert restored.child.metadata == "mid"
 
 
 def test_schema_reflects_types_constraints_and_aliases() -> None:
