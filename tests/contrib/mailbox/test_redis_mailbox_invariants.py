@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -41,6 +42,14 @@ except ImportError:
     HAS_HYPOTHESIS = False
 
 pytestmark = pytest.mark.redis_standalone
+
+
+@dataclass(slots=True, frozen=True)
+class _TestEvent:
+    """Module-level dataclass for testing serialization with __type__ embedding."""
+
+    name: str
+    value: int
 
 
 class TestReceiptHandleFreshness:
@@ -522,16 +531,9 @@ class TestDecodeResponsesCompatibility:
         self, redis_client: Redis[bytes]
     ) -> None:
         """Dataclass bodies deserialize correctly with decode_responses=True."""
-        from dataclasses import dataclass
-
         from redis import Redis
 
         from weakincentives.contrib.mailbox import RedisMailbox
-
-        @dataclass
-        class TestEvent:
-            name: str
-            value: int
 
         str_client: Redis[str] = Redis(
             host="localhost",
@@ -545,15 +547,15 @@ class TestDecodeResponsesCompatibility:
         except Exception:
             pytest.skip("Redis not available")
 
-        mailbox: RedisMailbox[TestEvent] = RedisMailbox(
+        mailbox: RedisMailbox[_TestEvent] = RedisMailbox(
             name=f"test-decode-dataclass-{uuid4().hex[:8]}",
             client=str_client,  # type: ignore[arg-type]
-            body_type=TestEvent,
+            body_type=_TestEvent,
             reaper_interval=0.1,
         )
 
         try:
-            event = TestEvent(name="test", value=42)
+            event = _TestEvent(name="test", value=42)
             mailbox.send(event)
 
             msgs = mailbox.receive(visibility_timeout=30)
