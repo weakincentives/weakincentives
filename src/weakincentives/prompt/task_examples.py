@@ -18,7 +18,7 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Self, TypeVar, cast, override
+from typing import Any, Final, Self, cast, override
 
 from ..serde import clone as clone_dataclass, dump
 from ..types.dataclass import (
@@ -37,14 +37,6 @@ _OBJECTIVE_MAX_LENGTH: Final = 500
 _TITLE_TRUNCATE_LENGTH: Final = 60
 
 _TOOL_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
-
-TaskExampleParamsT = TypeVar(
-    "TaskExampleParamsT", bound=SupportsDataclass, covariant=True
-)
-TaskExamplesParamsT = TypeVar(
-    "TaskExamplesParamsT", bound=SupportsDataclass, covariant=True
-)
-OutcomeT = TypeVar("OutcomeT", bound="str | SupportsDataclass", covariant=True)
 
 
 @dataclass(slots=True, frozen=True)
@@ -123,13 +115,20 @@ def _render_outcome(outcome: str | SupportsDataclass) -> str:
     return json.dumps(serialized, ensure_ascii=False)
 
 
-class TaskExample(Section[TaskExampleParamsT]):
+class TaskExample[ParamsT: SupportsDataclass](Section[ParamsT]):
     """Section representing a single task trajectory example.
 
     The outcome type must match the PromptTemplate's output type:
     - For prompts with structured output (PromptTemplate[OutputType]), outcome must be OutputType
     - For prompts without structured output, outcome must be a string
+
+    This class is generic over the params type (ParamsT) for use with enabled predicates.
+    When no params are needed, simply use TaskExample without type arguments.
+    Use TaskExample[YourParamsType] when you need parameterized enabled predicates.
     """
+
+    # Default to no params type - users can specialize via TaskExample[ParamsType]
+    _params_type = None
 
     outcome: str | SupportsDataclass
 
@@ -141,7 +140,7 @@ class TaskExample(Section[TaskExampleParamsT]):
         outcome: str | SupportsDataclass,
         steps: Sequence[TaskStep[Any, Any]],
         title: str | None = None,
-        default_params: TaskExampleParamsT | None = None,
+        default_params: ParamsT | None = None,
         enabled: EnabledPredicate | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
@@ -269,8 +268,15 @@ class TaskExample(Section[TaskExampleParamsT]):
         return cast(Self, clone)
 
 
-class TaskExamplesSection(Section[TaskExamplesParamsT]):
-    """Container section for task example children."""
+class TaskExamplesSection(Section[SupportsDataclass]):
+    """Container section for task example children.
+
+    This class is non-generic as it serves only as a container for TaskExample
+    instances. The individual TaskExample children can still be parameterized.
+    """
+
+    # Override _params_type to None since this container doesn't use params
+    _params_type = None
 
     def __init__(  # noqa: PLR0913
         self,
@@ -278,7 +284,7 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
         key: str = "task-examples",
         title: str = "Task Examples",
         examples: Sequence[TaskExample[Any]],
-        default_params: TaskExamplesParamsT | None = None,
+        default_params: SupportsDataclass | None = None,
         enabled: EnabledPredicate | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
