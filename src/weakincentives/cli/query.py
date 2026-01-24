@@ -1140,6 +1140,7 @@ class QueryDatabase(Closeable):
     def _build_views(conn: sqlite3.Connection) -> None:
         """Create SQL views for common query patterns."""
         # Tool execution timeline - unified view of all tools (native + custom)
+        # Ordered by timestamp to properly interleave native and custom tools
         _ = conn.execute("""
             CREATE VIEW IF NOT EXISTS tool_timeline AS
             SELECT
@@ -1153,8 +1154,7 @@ class QueryDatabase(Closeable):
                 seq,
                 CASE WHEN success = 0 THEN error_code ELSE NULL END as error
             FROM tool_calls
-            ORDER BY
-                CASE WHEN seq IS NOT NULL THEN seq ELSE rowid END
+            ORDER BY timestamp, rowid
         """)
 
         # Error summary with truncated traceback
@@ -1216,7 +1216,7 @@ class QueryDatabase(Closeable):
             common_queries={
                 "all_tools": (
                     "SELECT tool_name, source, success, duration_ms "
-                    "FROM tool_calls ORDER BY seq, rowid"
+                    "FROM tool_calls ORDER BY timestamp"
                 ),
                 "native_tools": (
                     "SELECT tool_name, params, success "

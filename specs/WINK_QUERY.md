@@ -84,7 +84,7 @@ Pre-built views for common query patterns:
 
 | View | Description |
 |------|-------------|
-| `tool_timeline` | All tools ordered by execution sequence (native + custom) |
+| `tool_timeline` | All tools ordered by timestamp (native + custom interleaved) |
 | `error_summary` | Errors with truncated traceback |
 
 ## Tool Calls Table
@@ -101,10 +101,10 @@ Key columns:
 - `tool_use_id`: Unique identifier for deduplication
 
 ```sql
--- All tools in execution order
-SELECT tool_name, source, success FROM tool_calls ORDER BY seq, rowid
+-- All tools in execution order (interleaved by timestamp)
+SELECT tool_name, source, success FROM tool_calls ORDER BY timestamp
 
--- Native tools only
+-- Native tools only (use seq for ordering within native tools)
 SELECT tool_name, params FROM tool_calls WHERE source = 'native' ORDER BY seq
 
 -- Custom tools only
@@ -163,7 +163,7 @@ wink query ./bundle.zip --schema
       "json_extract(params, '$.path')"
     ],
     "common_queries": {
-      "all_tools": "SELECT tool_name, source, success, duration_ms FROM tool_calls ORDER BY seq, rowid",
+      "all_tools": "SELECT tool_name, source, success, duration_ms FROM tool_calls ORDER BY timestamp",
       "native_tools": "SELECT tool_name, params, success FROM tool_calls WHERE source = 'native' ORDER BY seq",
       "custom_tools": "SELECT tool_name, params, result, duration_ms FROM tool_calls WHERE source = 'custom'",
       "tool_timeline": "SELECT * FROM tool_timeline WHERE duration_ms > 1000",

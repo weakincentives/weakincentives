@@ -61,7 +61,7 @@ JSON data:
       "json_extract(params, '$.path')"
     ],
     "common_queries": {
-      "all_tools": "SELECT tool_name, source, success FROM tool_calls ORDER BY seq, rowid",
+      "all_tools": "SELECT tool_name, source, success FROM tool_calls ORDER BY timestamp",
       "native_tools": "SELECT tool_name, params FROM tool_calls WHERE source = 'native' ORDER BY seq",
       "tool_timeline": "SELECT * FROM tool_timeline WHERE duration_ms > 1000",
       "error_context": "SELECT timestamp, message, context FROM logs WHERE level = 'ERROR'"
@@ -187,8 +187,8 @@ The `tool_calls` table provides a unified view of all tool invocations:
 - **Custom tools** (`source = 'custom'`): MCP-bridged and custom tool handlers
 
 ```sql
--- All tools in execution order
-SELECT tool_name, source, success FROM tool_calls ORDER BY seq, rowid
+-- All tools in execution order (interleaved by timestamp)
+SELECT tool_name, source, success FROM tool_calls ORDER BY timestamp
 
 -- Native tools only (Claude Code's built-in tools)
 SELECT tool_name, params, success
@@ -202,8 +202,8 @@ FROM tool_calls
 WHERE source = 'custom'
 ```
 
-The `seq` column provides ordering for native tools; use `seq, rowid` for
-consistent ordering across all tools.
+The `seq` column provides ordering within native tools; use `timestamp` for
+proper interleaving of native and custom tools in the unified timeline.
 
 ### Token Usage
 
