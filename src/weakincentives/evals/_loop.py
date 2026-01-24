@@ -20,23 +20,21 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, override
 
 from ..dataclasses import FrozenDataclass
 from ..runtime.dlq import DeadLetter, DLQPolicy
-from ..runtime.lease_extender import LeaseExtender, LeaseExtenderConfig
-from ..runtime.lifecycle import wait_until
+from ..runtime.lease_extender import LeaseExtenderConfig
 from ..runtime.mailbox import (
     Mailbox,
     Message,
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
 )
-from ..runtime.watchdog import Heartbeat
+from ..runtime.mailbox_worker import MailboxWorker
 from ._evaluators import is_session_aware
 from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
 
@@ -72,7 +70,9 @@ class EvalLoopConfig:
     debug_bundle_dir: Path | None = None
 
 
-class EvalLoop[InputT, OutputT, ExpectedT]:
+class EvalLoop[InputT, OutputT, ExpectedT](
+    MailboxWorker[EvalRequest[InputT, ExpectedT], EvalResult]
+):
     """Mailbox-driven evaluation loop.
 
     Receives EvalRequest messages, executes through MainLoop, scores
@@ -103,14 +103,8 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
     _loop: MainLoop[InputT, OutputT]
     _evaluator: Evaluator | SessionEvaluator
-    _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
     _config: EvalLoopConfig
     _dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None
-    _shutdown_event: threading.Event
-    _running: bool
-    _lock: threading.Lock
-    _heartbeat: Heartbeat
-    _lease_extender: LeaseExtender
 
     def __init__(
         self,
@@ -135,123 +129,31 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 that fail repeatedly are sent to the DLQ mailbox instead of
                 retrying indefinitely.
         """
-        super().__init__()
+        effective_config = config if config is not None else EvalLoopConfig()
+        super().__init__(
+            requests=requests,
+            lease_extender_config=effective_config.lease_extender,
+        )
         self._loop = loop
         self._evaluator = evaluator
-        self._requests = requests
-        self._config = config if config is not None else EvalLoopConfig()
+        self._config = effective_config
         self._dlq = dlq
-        self._shutdown_event = threading.Event()
-        self._running = False
-        self._lock = threading.Lock()
-        self._heartbeat = Heartbeat()
-        # Initialize lease extender with config or defaults
-        lease_config = (
-            self._config.lease_extender
-            if self._config.lease_extender is not None
-            else LeaseExtenderConfig()
-        )
-        self._lease_extender = LeaseExtender(config=lease_config)
 
-    def run(
-        self,
-        *,
-        max_iterations: int | None = None,
-        visibility_timeout: int = 300,
-        wait_time_seconds: int = 20,
+    @override
+    def _process_message(
+        self, msg: Message[EvalRequest[InputT, ExpectedT], EvalResult]
     ) -> None:
-        """Process evaluation requests from mailbox.
+        """Process a single evaluation request message.
 
-        Polls the requests mailbox, evaluates each sample through
-        MainLoop, and sends results via Message.reply().
-
-        The loop exits when:
-        - max_iterations is reached
-        - shutdown() is called
-        - The requests mailbox is closed
-
-        In-flight samples complete before exit. Unprocessed messages from
-        the current batch are nacked for redelivery.
-
-        Args:
-            max_iterations: Stop after N iterations (None = run forever).
-            visibility_timeout: Seconds messages remain invisible during
-                processing. Must exceed maximum expected execution time.
-            wait_time_seconds: Long poll duration (0-20 seconds).
+        Implements the abstract method from MailboxWorker. Called with lease
+        extension already attached by the base class.
         """
-        with self._lock:
-            self._running = True
-            self._shutdown_event.clear()
-
-        iterations = 0
         try:
-            while max_iterations is None or iterations < max_iterations:
-                # Check shutdown before blocking on receive
-                if self._shutdown_event.is_set():
-                    break
-
-                # Exit if mailbox closed
-                if self._requests.closed:
-                    break
-
-                for msg in self._requests.receive(
-                    visibility_timeout=visibility_timeout,
-                    wait_time_seconds=wait_time_seconds,
-                ):
-                    # Check shutdown between messages
-                    if self._shutdown_event.is_set():
-                        # Nack unprocessed message for redelivery
-                        with contextlib.suppress(ReceiptHandleExpiredError):
-                            msg.nack(visibility_timeout=0)
-                        break
-
-                    # Attach lease extender to heartbeat for this message
-                    with self._lease_extender.attach(msg, self._heartbeat):
-                        try:
-                            result = self._evaluate_sample(msg.body)
-                        except Exception as e:
-                            self._handle_failure(msg, e)
-                        else:
-                            self._reply_and_ack(msg, result)
-                iterations += 1
-        finally:
-            with self._lock:
-                self._running = False
-
-    def shutdown(self, *, timeout: float = 30.0) -> bool:
-        """Request graceful shutdown and wait for completion.
-
-        Sets the shutdown flag. If the loop is running, waits up to timeout
-        seconds for it to stop.
-
-        Args:
-            timeout: Maximum seconds to wait for the loop to stop.
-
-        Returns:
-            True if loop stopped cleanly, False if timeout expired.
-        """
-        self._shutdown_event.set()
-        return wait_until(lambda: not self.running, timeout=timeout)
-
-    @property
-    def running(self) -> bool:
-        """True if the loop is currently processing messages."""
-        with self._lock:
-            return self._running
-
-    def __enter__(self) -> Self:
-        """Context manager entry. Returns self for use in with statement."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> None:
-        """Context manager exit. Triggers shutdown and waits for completion."""
-        _ = (exc_type, exc_val, exc_tb)
-        _ = self.shutdown()
+            result = self._evaluate_sample(msg.body)
+        except Exception as e:
+            self._handle_failure(msg, e)
+        else:
+            self._reply_and_ack(msg, result)
 
     def _reply_and_ack(
         self,

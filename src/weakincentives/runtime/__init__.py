@@ -64,6 +64,7 @@ from .mailbox import (
     ReceiptHandleExpiredError,
     SerializationError,
 )
+from .mailbox_worker import MailboxWorker
 from .main_loop import (
     MainLoop,
     MainLoopConfig,
@@ -132,6 +133,7 @@ __all__ = [
     "MailboxConnectionError",
     "MailboxError",
     "MailboxFullError",
+    "MailboxWorker",
     "MainLoop",
     "MainLoopConfig",
     "MainLoopRequest",
