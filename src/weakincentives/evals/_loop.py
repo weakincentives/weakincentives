@@ -317,9 +317,18 @@ class EvalLoop[InputT, OutputT, ExpectedT](
                 # This only happens if _compute_score itself raised, which would
                 # likely fail again - but we try anyway as a last resort.
                 if score is None:  # pragma: no cover - defensive: evaluator failure
-                    score, error = self._compute_score(
-                        ctx.response.output, request.sample.expected, ctx.session
-                    )
+                    try:
+                        score, error = self._compute_score(
+                            ctx.response.output, request.sample.expected, ctx.session
+                        )
+                    except Exception as eval_exc:
+                        # Evaluator failed twice - provide fallback score
+                        score = Score(
+                            value=0.0,
+                            passed=False,
+                            reason=f"Evaluator failed: {eval_exc}",
+                        )
+                        error = str(eval_exc)
                 return EvalResult(
                     sample_id=request.sample.id,
                     experiment_name=request.experiment.name,
