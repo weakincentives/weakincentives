@@ -64,7 +64,7 @@ class TestTTLConfiguration:
             RedisMailbox,
         )
 
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name="test",
             client=mock_redis_client,
             _send_only=True,
@@ -78,7 +78,7 @@ class TestTTLConfiguration:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         custom_ttl = 86400  # 1 day
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name="test",
             client=mock_redis_client,
             default_ttl=custom_ttl,
@@ -92,7 +92,7 @@ class TestTTLConfiguration:
         """Setting TTL to 0 should disable expiration."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name="test",
             client=mock_redis_client,
             default_ttl=0,
@@ -153,7 +153,7 @@ class TestTTLOnOperations:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         custom_ttl = 3600  # 1 hour
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,
@@ -182,7 +182,7 @@ class TestTTLOnOperations:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         custom_ttl = 3600
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,
@@ -212,7 +212,7 @@ class TestTTLOnOperations:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         custom_ttl = 3600
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,
@@ -238,7 +238,7 @@ class TestTTLOnOperations:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         custom_ttl = 3600
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,
@@ -265,7 +265,7 @@ class TestTTLOnOperations:
         """TTL=0 should not set any expiration on keys."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=0,  # Disable TTL
@@ -301,7 +301,7 @@ class TestReaperTTLRefresh:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         custom_ttl = 3600
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,
@@ -343,7 +343,7 @@ class TestReaperTTLRefresh:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         custom_ttl = 3600
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,

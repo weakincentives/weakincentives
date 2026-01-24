@@ -48,7 +48,7 @@ class TestSendOnlyMailbox:
         """Send-only mailboxes should not start a reaper thread."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name="test-send-only",
             client=mock_redis_client,
             _send_only=True,
@@ -66,7 +66,7 @@ class TestSendOnlyMailbox:
         """Send-only mailboxes should not auto-create a reply resolver."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name="test-send-only",
             client=mock_redis_client,
             _send_only=True,
@@ -83,7 +83,7 @@ class TestSendOnlyMailbox:
         """Regular mailboxes should start a reaper thread."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name="test-regular",
             client=mock_redis_client,
             _send_only=False,
@@ -102,7 +102,7 @@ class TestSendOnlyMailbox:
         """Regular mailboxes should auto-create a reply resolver."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mb: RedisMailbox[str, None] = RedisMailbox(
+        mb = RedisMailbox[str, None](
             name="test-regular",
             client=mock_redis_client,
             _send_only=False,
@@ -153,7 +153,7 @@ class TestRedisMailboxFactory:
         )
 
         send_only = factory.create("reply-queue")
-        receiver: RedisMailbox[str, None] = RedisMailbox(
+        receiver = RedisMailbox[str, None](
             name="reply-queue",
             client=redis_client,
         )

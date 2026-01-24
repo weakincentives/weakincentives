@@ -38,7 +38,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast, get_origin
+from typing import TYPE_CHECKING, Any, cast, get_args, get_origin
 from uuid import uuid4
 
 from weakincentives.formal import (
@@ -277,11 +277,22 @@ class RedisMailboxFactory[R]:
     reply_to identifier is resolved, this factory creates a new RedisMailbox
     connected to the same Redis server.
 
+    Type Resolution:
+        The reply type R is resolved from the subscripted factory instantiation::
+
+            # Factory captures R=MyResult from its own generic parameter
+            factory = RedisMailboxFactory[MyResult](client=redis_client)
+
+            # Created mailboxes inherit the type
+            reply_mailbox = factory.create("reply-queue")  # Mailbox[MyResult, None]
+
     Example::
 
-        factory = RedisMailboxFactory(client=redis_client)
+        factory = RedisMailboxFactory[MyResult](client=redis_client)
         resolver = CompositeResolver(registry={}, factory=factory)
-        requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
+        requests = RedisMailbox[MyRequest, MyResult](
+            name="requests", client=redis_client, reply_resolver=resolver
+        )
 
         # Worker can now reply to any queue name
         for msg in requests.receive():
@@ -289,13 +300,13 @@ class RedisMailboxFactory[R]:
             msg.acknowledge()
     """
 
-    __slots__ = ("body_type", "client", "default_ttl")
+    __slots__ = ("__orig_class__", "_body_type", "client", "default_ttl")
 
     client: Redis[bytes] | RedisCluster[bytes]
     """Redis client to use for all created mailboxes."""
 
-    body_type: type[R] | None
-    """Optional type hint for message body deserialization."""
+    _body_type: type[R] | None
+    """Resolved type for message body deserialization (from __orig_class__)."""
 
     default_ttl: int
     """Default TTL in seconds for all Redis keys."""
@@ -304,20 +315,39 @@ class RedisMailboxFactory[R]:
         self,
         client: Redis[bytes] | RedisCluster[bytes],
         *,
-        body_type: type[R] | None = None,
         default_ttl: int = DEFAULT_TTL_SECONDS,
     ) -> None:
         """Initialize factory with shared Redis client.
 
+        Use subscripted instantiation to specify the body type::
+
+            factory = RedisMailboxFactory[MyType](client=redis_client)
+
         Args:
             client: Redis client to use for all created mailboxes.
-            body_type: Optional type hint for message body deserialization.
             default_ttl: Default TTL in seconds for Redis keys (default: 3 days).
         """
         super().__init__()
         self.client = client
-        self.body_type = body_type
+        self._body_type = None  # Will be resolved lazily from __orig_class__
         self.default_ttl = default_ttl
+        # Note: __orig_class__ is set by Python's typing module after __init__ returns
+        # when using subscripted instantiation: RedisMailboxFactory[T](...)
+        self.__orig_class__: type | None = None
+
+    def _get_body_type(self) -> type[R] | None:
+        """Resolve body type from factory's __orig_class__."""
+        if self._body_type is not None:
+            return self._body_type
+
+        orig_class = getattr(self, "__orig_class__", None)
+        if orig_class is not None:
+            args = get_args(orig_class)
+            if args:
+                self._body_type = args[0]  # R is the first (only) type arg
+                return self._body_type
+
+        return None
 
     def create(self, identifier: str) -> Mailbox[R, None]:
         """Create a RedisMailbox for the given identifier.
@@ -333,16 +363,21 @@ class RedisMailboxFactory[R]:
             and do not support nested reply resolution. This prevents resource
             leaks when creating ephemeral reply mailboxes.
         """
-        return RedisMailbox(
+        mailbox: RedisMailbox[R, None] = RedisMailbox(
             name=identifier,
             client=self.client,
-            body_type=self.body_type,
             default_ttl=self.default_ttl,
             _send_only=True,  # Send-only: no reaper thread, no nested resolution
         )
+        # Propagate the resolved body type to the created mailbox
+        body_type = self._get_body_type()
+        if body_type is not None:
+            # Internal: factory propagates type to mailbox it creates (same module)
+            mailbox._resolved_body_type = body_type  # pyright: ignore[reportPrivateUsage]
+        return mailbox
 
 
-@dataclass(slots=True)
+@dataclass
 @formal_spec(
     module="RedisMailbox",
     extends=("Integers", "Sequences", "FiniteSets", "TLC"),
@@ -645,6 +680,18 @@ class RedisMailbox[T, R]:
         T: Message body type.
         R: Reply type (None if no replies expected).
 
+    Type Resolution:
+        The body type T is resolved from the subscripted instantiation syntax::
+
+            # Type is inferred from generic parameter
+            mailbox = RedisMailbox[MyEvent, None](name="requests", client=client)
+
+        Important: The subscripted syntax ``RedisMailbox[T, R](...)`` is required.
+        A plain type annotation does NOT provide runtime type information::
+
+            # This does NOT work - annotation is only for static type checkers
+            mailbox: RedisMailbox[MyEvent, None] = RedisMailbox(name="q", client=c)
+
     Data structures::
 
         {queue:name}:pending    # LIST - messages awaiting delivery (LPUSH/RPOP)
@@ -675,14 +722,10 @@ class RedisMailbox[T, R]:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         client = Redis(host="localhost", port=6379)
-        requests: RedisMailbox[MyEvent, MyResult] = RedisMailbox(
-            name="requests",
-            client=client,
-        )
-        responses: RedisMailbox[MyResult, None] = RedisMailbox(
-            name="responses",
-            client=client,
-        )
+
+        # Create mailboxes using subscripted syntax for automatic type inference
+        requests = RedisMailbox[MyEvent, MyResult](name="requests", client=client)
+        responses = RedisMailbox[MyResult, None](name="responses", client=client)
 
         try:
             # Send with mailbox reference (name is serialized to Redis)
@@ -701,9 +744,6 @@ class RedisMailbox[T, R]:
 
     client: Redis[bytes] | RedisCluster[bytes]
     """Redis client instance. Can be standalone Redis or RedisCluster."""
-
-    body_type: type[T] | None = None
-    """Optional type hint for message body deserialization."""
 
     max_size: int | None = None
     """Maximum queue capacity. None for unlimited (subject to Redis maxmemory)."""
@@ -736,13 +776,16 @@ class RedisMailbox[T, R]:
     reaper threads and don't support reply resolution. Used by RedisMailboxFactory
     to prevent resource leaks when creating ephemeral reply mailboxes."""
 
+    _resolved_body_type: type[T] | None = field(default=None, repr=False, init=False)
+    """Cached resolved body type from __orig_class__ or factory propagation."""
+
     def __post_init__(self) -> None:
         """Initialize keys, register Lua scripts, and optionally start reaper thread.
 
         Send-only mailboxes (created by RedisMailboxFactory for replies) skip
         reaper thread creation and auto-resolver setup to prevent resource leaks.
         """
-        object.__setattr__(self, "_keys", _QueueKeys.for_queue(self.name))
+        self._keys = _QueueKeys.for_queue(self.name)
         self._register_scripts()
 
         # Send-only mailboxes don't need reaper threads or reply resolution
@@ -755,9 +798,7 @@ class RedisMailbox[T, R]:
             factory: RedisMailboxFactory[R] = RedisMailboxFactory(
                 client=self.client, default_ttl=self.default_ttl
             )
-            object.__setattr__(
-                self, "reply_resolver", CompositeResolver(registry={}, factory=factory)
-            )
+            self.reply_resolver = CompositeResolver(registry={}, factory=factory)
 
     def _register_scripts(self) -> None:
         """Register Lua scripts with Redis."""
@@ -813,6 +854,38 @@ class RedisMailbox[T, R]:
         except Exception as e:
             raise SerializationError(f"Failed to serialize message body: {e}") from e
 
+    def _get_body_type(self) -> type[T] | None:
+        """Resolve the body type from __orig_class__.
+
+        Returns the resolved body type, caching the result for performance.
+        The body type comes from __orig_class__ attribute set when using
+        subscripted instantiation: ``RedisMailbox[MyType, None](name="q", client=c)``
+
+        Thread-safety: This method has a benign race condition where multiple
+        threads may resolve and cache the same value concurrently. This is safe
+        because the computed value is always identical (derived from immutable
+        __orig_class__) and assignment is atomic under the GIL.
+
+        Returns:
+            The resolved type for T, or None if not determinable.
+        """
+        # Return cached result if available (fast path)
+        if self._resolved_body_type is not None:
+            return self._resolved_body_type
+
+        # Extract T from __orig_class__ (set by Python when instantiated
+        # via subscripted syntax: RedisMailbox[T, R](...))
+        orig_class = getattr(self, "__orig_class__", None)
+        if orig_class is not None:
+            args = get_args(orig_class)
+            if args:
+                # First type arg is T (body type), second is R (reply type)
+                resolved: type[T] = args[0]
+                self._resolved_body_type = resolved
+                return resolved
+
+        return None
+
     def _deserialize(self, data: bytes | str) -> T:
         """Deserialize message body from JSON bytes or string.
 
@@ -821,13 +894,14 @@ class RedisMailbox[T, R]:
         try:
             json_str = data.decode("utf-8") if isinstance(data, bytes) else data
             json_data = json.loads(json_str)
-            if self.body_type is not None:
+            resolved_type = self._get_body_type()
+            if resolved_type is not None:
                 # Use parse() for dataclass types (including generic aliases)
-                origin = get_origin(self.body_type)
-                if is_dataclass(origin if origin is not None else self.body_type):
-                    return parse(self.body_type, json_data)
+                origin = get_origin(resolved_type)
+                if is_dataclass(origin if origin is not None else resolved_type):
+                    return parse(resolved_type, json_data)
                 # For primitive types (str, int, etc.), construct directly
-                body_type: Any = self.body_type
+                body_type: Any = resolved_type
                 return body_type(json_data)
             # Without a type hint, return raw JSON data
             return cast(T, json_data)
