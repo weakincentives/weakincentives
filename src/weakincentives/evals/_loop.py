@@ -22,8 +22,9 @@ import contextlib
 import logging
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, overload
 
 from ..dataclasses import FrozenDataclass
 from ..runtime.dlq import DeadLetter, DLQPolicy
@@ -37,10 +38,11 @@ from ..runtime.mailbox import (
 )
 from ..runtime.watchdog import Heartbeat
 from ._evaluators import is_session_aware
-from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
+from ._types import EvalRequest, EvalResult, Score
 
 if TYPE_CHECKING:
     from ..runtime import MainLoop
+    from ..runtime.session import SessionProtocol, SessionViewProtocol
 
 _logger = logging.getLogger(__name__)
 
@@ -89,7 +91,10 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     """
 
     _loop: MainLoop[InputT, OutputT]
-    _evaluator: Evaluator | SessionEvaluator
+    _evaluator: (
+        Callable[[OutputT, ExpectedT], Score]
+        | Callable[[OutputT, ExpectedT, SessionProtocol | SessionViewProtocol], Score]
+    )
     _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
     _config: EvalLoopConfig
     _dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None
@@ -99,11 +104,36 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     _heartbeat: Heartbeat
     _lease_extender: LeaseExtender
 
+    @overload
     def __init__(
         self,
         *,
         loop: MainLoop[InputT, OutputT],
-        evaluator: Evaluator | SessionEvaluator,
+        evaluator: Callable[[OutputT, ExpectedT], Score],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
+        config: EvalLoopConfig | None = None,
+        dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None = None,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        loop: MainLoop[InputT, OutputT],
+        evaluator: Callable[
+            [OutputT, ExpectedT, SessionProtocol | SessionViewProtocol], Score
+        ],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
+        config: EvalLoopConfig | None = None,
+        dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None = None,
+    ) -> None: ...
+
+    def __init__(
+        self,
+        *,
+        loop: MainLoop[InputT, OutputT],
+        evaluator: Callable[[OutputT, ExpectedT], Score]
+        | Callable[[OutputT, ExpectedT, SessionProtocol | SessionViewProtocol], Score],
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
         config: EvalLoopConfig | None = None,
         dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None = None,
