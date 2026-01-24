@@ -226,6 +226,15 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         with self._lock:
             return self._running
 
+    @property
+    def heartbeat(self) -> Heartbeat | None:
+        """Heartbeat tracker for watchdog monitoring.
+
+        The loop beats after processing each sample, enabling the watchdog
+        to detect stuck workers.
+        """
+        return self._heartbeat
+
     def __enter__(self) -> Self:
         """Context manager entry. Returns self for use in with statement."""
         return self

@@ -1223,3 +1223,25 @@ def test_eval_loop_dlq_without_reply_to() -> None:
     finally:
         requests.close()
         dlq_mailbox.close()
+
+
+def test_eval_loop_heartbeat_property() -> None:
+    """EvalLoop.heartbeat returns the internal heartbeat for watchdog monitoring."""
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+
+    try:
+        main_loop = _create_test_loop()
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+        )
+
+        # Verify heartbeat property returns the internal heartbeat
+        heartbeat = eval_loop.heartbeat
+        assert heartbeat is not None
+        assert heartbeat is eval_loop._heartbeat
+    finally:
+        requests.close()
