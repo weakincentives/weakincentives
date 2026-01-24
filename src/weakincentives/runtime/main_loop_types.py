@@ -92,7 +92,7 @@ class BundleContext[OutputT]:
 
         with loop.execute_with_bundle(request, bundle_target=dir) as ctx:
             score = compute_score(ctx.response.output)
-            ctx.write_eval({
+            ctx.write_metadata("eval", {
                 "sample_id": "sample-1",
                 "score": {"value": score.value, "passed": score.passed},
             })
@@ -120,16 +120,17 @@ class BundleContext[OutputT]:
         """Path to the created bundle. Available after context manager exits."""
         return self._writer.path
 
-    def write_eval(self, eval_info: Mapping[str, Any]) -> None:
-        """Add eval metadata to the bundle.
+    def write_metadata(self, name: str, data: Mapping[str, Any]) -> None:
+        """Add arbitrary metadata to the bundle.
 
-        Call this before the context manager exits to include eval-specific
-        information (sample_id, experiment, score, etc.) in the bundle.
+        Call this before the context manager exits to include domain-specific
+        metadata in the bundle. The data will be written to {name}.json.
 
         Args:
-            eval_info: Dictionary of eval metadata to write to eval.json.
+            name: The metadata type name (e.g., "eval", "metrics").
+            data: Dictionary of metadata to write.
         """
-        self._writer.write_eval(eval_info)
+        self._writer.write_metadata(name, data)
 
 
 @FrozenDataclass()

@@ -654,15 +654,25 @@ class BundleWriter:
         }
         self.write_error(error_info)
 
-    def write_eval(self, eval_info: Mapping[str, Any]) -> None:
-        """Write eval metadata for EvalLoop bundles."""
+    def write_metadata(self, name: str, data: Mapping[str, Any]) -> None:
+        """Write arbitrary metadata to the bundle.
+
+        Creates a JSON file with the given name containing the provided data.
+        This is a generic mechanism for adding domain-specific metadata to
+        bundles without coupling the bundle layer to those domains.
+
+        Args:
+            name: The metadata type name (e.g., "eval", "metrics"). Will be
+                written to {name}.json in the bundle.
+            data: The metadata to serialize as JSON.
+        """
         try:
-            content = json.dumps(eval_info, indent=2)
-            self._write_artifact("eval.json", content)
+            content = json.dumps(data, indent=2)
+            self._write_artifact(f"{name}.json", content)
         except Exception:
             _logger.exception(
-                "Failed to write eval info",
-                extra={"bundle_id": str(self._bundle_id)},
+                "Failed to write metadata",
+                extra={"bundle_id": str(self._bundle_id), "metadata_name": name},
             )
 
     def write_environment(

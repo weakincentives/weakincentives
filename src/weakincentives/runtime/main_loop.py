@@ -300,14 +300,14 @@ class MainLoop[UserRequestT, OutputT](ABC):
             experiment: Optional experiment for A/B testing.
 
         Yields:
-            BundleContext with response, session, latency_ms, and write_eval().
+            BundleContext with response, session, latency_ms, and write_metadata().
 
         Example::
 
             bundle_dir = Path("./bundles")
             with loop.execute_with_bundle(request, bundle_target=bundle_dir) as ctx:
                 score = compute_score(ctx.response.output)
-                ctx.write_eval({
+                ctx.write_metadata("eval", {
                     "sample_id": "sample-1",
                     "score": {"value": score.value, "passed": score.passed},
                 })

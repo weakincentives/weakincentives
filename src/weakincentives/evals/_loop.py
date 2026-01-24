@@ -388,8 +388,8 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 self._heartbeat.beat()
 
                 # Write eval metadata to bundle
-                ctx.write_eval(
-                    self._build_eval_info(request, score, ctx.latency_ms, error)
+                ctx.write_metadata(
+                    "eval", self._build_eval_info(request, score, ctx.latency_ms, error)
                 )
 
             # Normal exit: bundle finalized, retrieve path
@@ -405,7 +405,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         except Exception as exc:
             # Check if execution completed (ctx was created and has results)
             if ctx is not None:
-                # Execution succeeded but something failed (scoring, write_eval,
+                # Execution succeeded but something failed (scoring, write_metadata,
                 # or finalization). Use the results we have - never re-execute.
                 _logger.warning(
                     "Bundle creation failed after successful execution",
