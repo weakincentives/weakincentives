@@ -2003,6 +2003,11 @@ def test_resolve_generic_string_type_union() -> None:
     assert get_origin(result) is UnionType
     assert set(get_args(result)) == {str, int}
 
+    # Resolve 'str | None' - None should become NoneType, not object
+    result = _resolve_generic_string_type("str | None", localns, module_ns)
+    assert get_origin(result) is UnionType
+    assert set(get_args(result)) == {str, type(None)}
+
 
 def test_resolve_generic_string_type_syntax_error() -> None:
     """_resolve_generic_string_type falls back on syntax errors."""

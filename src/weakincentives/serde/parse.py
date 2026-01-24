@@ -630,8 +630,10 @@ class _ASTResolver:
             # Inside Literal[...], preserve constant values as-is
             if in_literal:
                 return node.value
-            # Outside Literal, string constants are forward refs - fall back to object
-            # (the fallback path can't safely resolve forward refs without eval)
+            # None constant in type context (e.g., T | None) should be NoneType
+            if node.value is None:
+                return type(None)
+            # Outside Literal, other constants are unresolvable - fall back to object
             return object
         # Handle signed literals (always preserve value, used in Literal[-1])
         signed = self._resolve_unary_node(node)
