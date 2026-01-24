@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from ..prompt.tool import Tool
 
 
-ToolChoice = str | Mapping[str, Any] | None
+type ToolChoice = str | Mapping[str, Any] | None
 """Supported tool choice directives for provider APIs."""
 
 

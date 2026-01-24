@@ -106,13 +106,13 @@ class PostToolUseInput:
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "sdk_hooks"})
 
-HookCallback = Callable[
-    [dict[str, Any], str | None, "HookContext"],
+type HookCallback = Callable[
+    [dict[str, Any], str | None, HookContext],
     dict[str, Any],
 ]
 """Type alias for synchronous hook callbacks."""
 
-AsyncHookCallback = Callable[
+type AsyncHookCallback = Callable[
     [Any, str | None, Any],
     Awaitable[dict[str, Any]],
 ]

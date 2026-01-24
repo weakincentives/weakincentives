@@ -21,12 +21,12 @@ from ._types import SupportsDataclass
 if TYPE_CHECKING:
     from ..runtime.session.protocols import SessionProtocol
 
-EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
+type EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
 
-# Normalized callable signature that accepts params and session keyword argument
-NormalizedEnabledPredicate = Callable[
-    [SupportsDataclass | None, "SessionProtocol | None"], bool
+type NormalizedEnabledPredicate = Callable[
+    [SupportsDataclass | None, SessionProtocol | None], bool
 ]
+"""Normalized callable signature that accepts params and session keyword argument."""
 
 
 def callable_requires_positional_argument(callback: EnabledPredicate) -> bool:

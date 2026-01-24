@@ -64,7 +64,7 @@ class _LiteLLMModule(Protocol):
     ) -> ProviderCompletionResponse: ...
 
 
-LiteLLMCompletion = ProviderCompletionCallable
+type LiteLLMCompletion = ProviderCompletionCallable
 
 
 def _load_litellm_module() -> _LiteLLMModule:

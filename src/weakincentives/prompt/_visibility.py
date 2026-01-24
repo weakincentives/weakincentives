@@ -40,16 +40,16 @@ class SectionVisibility(Enum):
     """Render only the summary content."""
 
 
-VisibilitySelector = (
+type VisibilitySelector = (
     Callable[[SupportsDataclass], SectionVisibility]
     | Callable[[], SectionVisibility]
     | SectionVisibility
 )
 
-# Normalized callable signature that accepts params and session keyword argument
-NormalizedVisibilitySelector = Callable[
-    [SupportsDataclass | None, "SessionProtocol | None"], SectionVisibility
+type NormalizedVisibilitySelector = Callable[
+    [SupportsDataclass | None, SessionProtocol | None], SectionVisibility
 ]
+"""Normalized callable signature that accepts params and session keyword argument."""
 
 
 def _coerce_section_visibility(value: object) -> SectionVisibility:

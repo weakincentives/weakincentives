@@ -70,16 +70,14 @@ class Score:
     """Explanation (useful for LLM judges)."""
 
 
-# Type alias for evaluator functions
-Evaluator = Callable[[object, object], Score]
+type Evaluator = Callable[[object, object], Score]
 """An evaluator is any callable: (output, expected) -> Score.
 
 Evaluators are pure functions - no side effects, no state.
 """
 
-# Type alias for session-aware evaluator functions
-SessionEvaluator = Callable[
-    [object, object, "SessionProtocol | SessionViewProtocol"], Score
+type SessionEvaluator = Callable[
+    [object, object, SessionProtocol | SessionViewProtocol], Score
 ]
 """A session-aware evaluator: (output, expected, session) -> Score.
 

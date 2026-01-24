@@ -94,7 +94,7 @@ class _EvaluationContext[OutputT]:
     response_format: dict[str, Any] | None
 
 
-ProviderInvoker = Callable[
+type ProviderInvoker = Callable[
     [
         list[dict[str, Any]],
         Sequence[Mapping[str, Any]],

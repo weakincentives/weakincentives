@@ -115,9 +115,10 @@ target-version = "py312"
 extend-exclude = ["test-repositories", "toolchain"]
 
 [tool.ruff.lint]
+preview = true
 extend-select = [
     "I",
-    "UP",
+    "UP",      # pyupgrade - includes UP040 (PEP 695 type aliases)
     "B",
     "SIM",
     "C4",
@@ -135,7 +136,7 @@ extend-select = [
     "PERF",
 ]
 extend-ignore = ["TRY003", "RUF067"]
-fixable = ["I001", "F401"]
+fixable = ["I001", "F401", "UP040"]  # Allow auto-fix for PEP 695 conversions
 
 [tool.ruff.lint.isort]
 known-first-party = ["weakincentives"]

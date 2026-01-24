@@ -88,7 +88,7 @@ logger: StructuredLogger = get_logger(
 )
 
 
-ProviderCall = Callable[
+type ProviderCall = Callable[
     [
         list[dict[str, Any]],
         Sequence[Mapping[str, Any]],
@@ -100,7 +100,7 @@ ProviderCall = Callable[
 """Callable responsible for invoking the provider with assembled payloads."""
 
 
-ChoiceSelector = Callable[[object], ProviderChoice]
+type ChoiceSelector = Callable[[object], ProviderChoice]
 """Callable that extracts the relevant choice from a provider response."""
 
 

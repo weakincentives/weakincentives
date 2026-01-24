@@ -24,7 +24,7 @@ from ...dataclasses import FrozenDataclass
 from ...types import AdapterName
 from ..run_context import RunContext
 
-EventHandler = Callable[[object], None]
+type EventHandler = Callable[[object], None]
 
 
 class Dispatcher(Protocol):

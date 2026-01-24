@@ -33,6 +33,10 @@ class SupportsDataclass(Protocol):
     __dataclass_fields__: ClassVar[DataclassFieldMapping]
 
 
+# NOTE: These must remain old-style assignments (not PEP 695 type statements)
+# because they are used at runtime in Tool[SupportsDataclassOrNone, SupportsToolResult]
+# subscriptions. PEP 695 creates TypeAliasType objects that don't work with
+# __class_getitem__ validation which expects actual types.
 SupportsDataclassOrNone = SupportsDataclass | None
 SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass] | None
 
