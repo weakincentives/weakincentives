@@ -18,7 +18,6 @@ from typing import cast
 
 import pytest
 
-from weakincentives.dbc import dbc_enabled
 from weakincentives.prompt import Section, SectionVisibility
 from weakincentives.prompt.registry import PromptRegistry, SectionNode
 from weakincentives.serde import clone as clone_dataclass
@@ -138,14 +137,14 @@ def test_prompt_registry_invariants_allow_valid_usage() -> None:
     )
     sibling = OtherSection(title="Sibling", key="sibling")
 
-    with dbc_enabled():
-        registry.register_sections((cast(Section[SupportsDataclass], parent),))
-        registry.register_section(
-            cast(Section[SupportsDataclass], sibling),
-            path=("sibling",),
-            depth=0,
-        )
-        snapshot = registry.snapshot()
+    # DbC is always enabled by default
+    registry.register_sections((cast(Section[SupportsDataclass], parent),))
+    registry.register_section(
+        cast(Section[SupportsDataclass], sibling),
+        path=("sibling",),
+        depth=0,
+    )
+    snapshot = registry.snapshot()
 
     default_params = cast(ExampleParams, snapshot.defaults_by_path["parent",])
     assert default_params.value == "default"
@@ -247,5 +246,6 @@ def test_prompt_registry_invariants_detect_corruption(mutator: Mutation) -> None
     registry = _build_registry_with_sections()
     mutator(registry)
 
-    with pytest.raises(AssertionError), dbc_enabled():
+    # DbC is always enabled by default
+    with pytest.raises(AssertionError):
         registry.snapshot()

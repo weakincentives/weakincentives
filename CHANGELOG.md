@@ -2,6 +2,26 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Breaking Changes
+
+**Design-by-Contract is now always enabled by default.** DbC checks are enforced
+in all contexts (tests and production) and cannot be globally disabled. This
+ensures contracts catch bugs early in production rather than only during testing.
+
+- Removed `enable_dbc()` and `disable_dbc()` global functions
+- Removed `WEAKINCENTIVES_DBC` environment variable
+- Renamed `dbc_enabled()` to `dbc_suspended()` for clarity
+- Added `dbc_suspended()` context manager for temporarily disabling checks in
+  performance-sensitive code paths
+
+**Migration:**
+- Remove calls to `enable_dbc()` and `disable_dbc()` (no longer needed)
+- Replace `with dbc_enabled(False):` with `with dbc_suspended():`
+- Replace `with dbc_enabled():` or `with dbc_enabled(True):` with nothing (DbC
+  is now always active)
+
 ## v0.22.0 - 2026-01-23
 
 *Commits reviewed: 2026-01-20 (065e76c) through 2026-01-23 (633507f)*

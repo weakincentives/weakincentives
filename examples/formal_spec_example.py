@@ -246,11 +246,7 @@ class SimpleMailbox:
 
 def demo_counter() -> None:
     """Demonstrate counter with invariant checking."""
-    from weakincentives.dbc import enable_dbc
-
-    # Enable DbC to see runtime invariant checking
-    enable_dbc()
-
+    # DbC is always enabled by default - no explicit activation needed
     counter = Counter()
     print(f"Initial count: {counter.count}")
 

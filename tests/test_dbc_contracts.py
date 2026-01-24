@@ -28,7 +28,7 @@ import pytest
 
 from weakincentives.dbc import (
     dbc_active,
-    dbc_enabled,
+    dbc_suspended,
     ensure,
     invariant,
     pure,
@@ -47,17 +47,11 @@ pytestmark = pytest.mark.core
 
 
 @pytest.fixture(autouse=True)
-def reset_dbc_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Ensure DbC toggles reset between tests."""
-
-    import weakincentives.dbc as dbc_module
-
-    monkeypatch.delenv("WEAKINCENTIVES_DBC", raising=False)
-    dbc_module._forced_state = None
-    dbc_module.enable_dbc()
+def reset_dbc_state() -> Iterator[None]:
+    """Ensure DbC is active for each test (which is the default)."""
+    # DbC is always enabled by default via ContextVar, no setup needed.
+    # Each test runs in a fresh context.
     yield
-    dbc_module._forced_state = None
-    monkeypatch.delenv("WEAKINCENTIVES_DBC", raising=False)
 
 
 def test_require_allows_valid_inputs() -> None:
@@ -133,7 +127,7 @@ def test_invariant_can_be_skipped_for_helpers() -> None:
         buf.append(1)
 
 
-def test_invariant_is_inert_when_disabled() -> None:
+def test_invariant_is_inert_when_suspended() -> None:
     @invariant(lambda self: self.balance >= 0)
     class Counter:
         def __init__(self) -> None:
@@ -143,19 +137,19 @@ def test_invariant_is_inert_when_disabled() -> None:
             self.balance -= amount
 
     counter = Counter()
-    with dbc_enabled(False):
+    with dbc_suspended():
         counter.withdraw(5)
     assert counter.balance == -5
 
 
-def test_invariant_init_skipped_when_disabled() -> None:
+def test_invariant_init_skipped_when_suspended() -> None:
     @invariant(lambda self: self.balance >= 0)
     class Counter:
         def __init__(self, initial: int) -> None:
             self.balance = initial
 
-    # Instantiate when dbc is disabled - should skip invariant check
-    with dbc_enabled(False):
+    # Instantiate when dbc is suspended - should skip invariant check
+    with dbc_suspended():
         counter = Counter(-10)
     assert counter.balance == -10
 
@@ -255,7 +249,7 @@ def test_pure_patch_depth_is_thread_safe() -> None:
     assert not thread_two.is_alive()
 
 
-def test_pure_is_inert_when_disabled() -> None:
+def test_pure_is_inert_when_suspended() -> None:
     assert dbc_active() is True
 
     @pure
@@ -263,35 +257,41 @@ def test_pure_is_inert_when_disabled() -> None:
         values.append(1)
         return values
 
-    with dbc_enabled(False):
+    with dbc_suspended():
         assert mutate([]) == [1]
 
     with pytest.raises(AssertionError):
         mutate([])
 
 
-def test_dbc_activation_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dbc_is_always_active_by_default() -> None:
+    """DbC is always enabled and cannot be globally disabled."""
     import weakincentives.dbc as dbc_module
 
-    dbc_module.disable_dbc()
-    dbc_module._forced_state = None
-    monkeypatch.delenv("WEAKINCENTIVES_DBC", raising=False)
-    assert dbc_module.dbc_active() is False
-
-    dbc_module.enable_dbc()
+    # DbC is always active by default
     assert dbc_module.dbc_active() is True
-    dbc_module.disable_dbc()
-    assert dbc_module.dbc_active() is False
 
-    with dbc_module.dbc_enabled(True):
-        assert dbc_module.dbc_active() is True
-    assert dbc_module.dbc_active() is False
+    # Can be temporarily suspended via context manager
+    with dbc_module.dbc_suspended():
+        assert dbc_module.dbc_active() is False
 
-    dbc_module._forced_state = None
-    monkeypatch.setenv("WEAKINCENTIVES_DBC", "true")
+    # Automatically restored after context exits
     assert dbc_module.dbc_active() is True
-    monkeypatch.setenv("WEAKINCENTIVES_DBC", "0")
-    assert dbc_module.dbc_active() is False
+
+
+def test_dbc_suspended_is_nestable() -> None:
+    """dbc_suspended() can be nested and restores correctly."""
+    import weakincentives.dbc as dbc_module
+
+    assert dbc_module.dbc_active() is True
+
+    with dbc_module.dbc_suspended():
+        assert dbc_module.dbc_active() is False
+        with dbc_module.dbc_suspended():
+            assert dbc_module.dbc_active() is False
+        assert dbc_module.dbc_active() is False
+
+    assert dbc_module.dbc_active() is True
 
 
 def test_require_raises_without_predicates() -> None:
@@ -335,12 +335,12 @@ def test_ensure_raises_without_predicates() -> None:
         ensure()
 
 
-def test_ensure_skips_when_inactive() -> None:
+def test_ensure_skips_when_suspended() -> None:
     @ensure(lambda value, result: result > value)
     def bump(value: int) -> int:
         return value + 1
 
-    with dbc_enabled(False):
+    with dbc_suspended():
         assert bump(4) == 5
 
 
@@ -455,12 +455,12 @@ def test_session_invariant_helpers_cover_basics() -> None:
     assert _created_at_is_utc(typed_session)
 
 
-def test_require_skips_when_inactive() -> None:
+def test_require_skips_when_suspended() -> None:
     @require(lambda value: value > 0)
     def square(value: int) -> int:
         return value * value
 
-    with dbc_enabled(False):
+    with dbc_suspended():
         assert square(-1) == 1
 
 
