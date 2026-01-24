@@ -12,17 +12,25 @@
 
 """Stdlib dataclass serde utilities."""
 
-from ._utils import TYPE_REF_KEY, resolve_type_identifier, type_identifier
+from ._utils import (
+    TYPE_REF_KEY,
+    UnboundTypeError,
+    resolve_type_identifier,
+    type_identifier,
+    validate_type,
+)
 from .dump import clone, dump
 from .parse import parse
 from .schema import schema
 
 __all__ = [
     "TYPE_REF_KEY",
+    "UnboundTypeError",
     "clone",
     "dump",
     "parse",
     "resolve_type_identifier",
     "schema",
     "type_identifier",
+    "validate_type",
 ]

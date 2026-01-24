@@ -26,6 +26,14 @@ from ..dataclasses import FrozenDataclass
 from ..types import JSONValue
 
 MISSING_SENTINEL: Final[object] = object()
+
+
+class UnboundTypeError(TypeError):
+    """Raised when a type is unbound (Any, object, or unresolved TypeVar)."""
+
+    pass
+
+
 _UNION_TYPE = type(int | str)
 TYPE_REF_KEY: Final[str] = "__type__"
 
@@ -93,6 +101,8 @@ class _ParseConfig:
     case_insensitive: bool
     alias_generator: Callable[[str], str] | None
     aliases: Mapping[str, str] | None
+    strict: bool = False
+    """When True, reject Any/object types and require concrete TypeVar bindings."""
     typevar_map: Mapping[object, type] = field(
         default_factory=lambda: dict[object, type]()
     )
@@ -307,6 +317,54 @@ def _fail(path: str, message: str) -> None:
     raise ValueError(f"{path}: {message}")
 
 
+def _is_unbound_type(typ: object) -> bool:
+    """Check if a type is unbound (Any, object, or TypeVar).
+
+    These types provide no meaningful type information for parsing.
+    """
+    from typing import TypeVar
+
+    if typ is object or typ is _AnyType:
+        return True
+    return isinstance(typ, TypeVar)
+
+
+def _format_type_name(typ: object) -> str:
+    """Format a type for error messages."""
+    if typ is _AnyType:
+        return "Any"
+    if typ is object:
+        return "object"
+    return getattr(typ, "__name__", repr(typ))
+
+
+def validate_type(typ: object, path: str) -> None:
+    """Validate that a type is concrete (not Any, object, or TypeVar).
+
+    Raises:
+        UnboundTypeError: If the type is unbound.
+    """
+    from typing import TypeVar, get_args, get_origin
+
+    if typ is object or typ is _AnyType:
+        msg = f"{path}: type '{_format_type_name(typ)}' is not allowed"
+        raise UnboundTypeError(f"{msg} - use a concrete type instead")
+
+    if isinstance(typ, TypeVar):
+        raise UnboundTypeError(
+            f"{path}: unresolved TypeVar '{typ}' - provide a concrete type binding"
+        )
+
+    # Check type arguments for generic types
+    origin = get_origin(typ)
+    if origin is not None:
+        args = get_args(typ)
+        for i, arg in enumerate(args):
+            if arg is type(None) or arg is Ellipsis:
+                continue
+            validate_type(arg, f"{path}[{i}]")
+
+
 def _type_identifier(cls: type[object]) -> str:
     return f"{cls.__module__}:{cls.__qualname__}"
 
@@ -338,12 +396,15 @@ def type_identifier(cls: type[object]) -> str:
 __all__ = [  # noqa: RUF022
     "MISSING_SENTINEL",
     "TYPE_REF_KEY",
+    "UnboundTypeError",
     "_AnyType",
     "_ExtrasDescriptor",
     "_ParseConfig",
     "_SLOTTED_EXTRAS",
     "_UNION_TYPE",
     "_apply_constraints",
+    "_format_type_name",
+    "_is_unbound_type",
     "_merge_annotated_meta",
     "_ordered_values",
     "_resolve_type_identifier",
@@ -351,4 +412,5 @@ __all__ = [  # noqa: RUF022
     "_type_identifier",
     "resolve_type_identifier",
     "type_identifier",
+    "validate_type",
 ]

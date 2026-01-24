@@ -27,10 +27,18 @@ from uuid import UUID
 
 import pytest
 
-from weakincentives.serde import clone, dump, parse, schema
+from weakincentives.serde import (
+    UnboundTypeError,
+    clone,
+    dump,
+    parse,
+    schema,
+    validate_type,
+)
 from weakincentives.serde._utils import (
     _SLOTTED_EXTRAS,
     _get_or_create_extras_descriptor,
+    _is_unbound_type,
     _merge_annotated_meta,
     _ordered_values,
     _ParseConfig,
@@ -1837,3 +1845,278 @@ def test_schema_enum_mixed_types() -> None:
     finally:
         globals().pop("MixedEnumModel", None)
         globals().pop("MixedEnum", None)
+
+
+# =============================================================================
+# Strict Type Validation Tests
+# =============================================================================
+
+
+def test_parse_strict_rejects_object_type() -> None:
+    """Strict mode rejects fields typed as 'object'."""
+
+    @dataclass
+    class ObjectField:
+        data: object
+
+    # Works in non-strict mode
+    result = parse(ObjectField, {"data": "hello"})
+    assert result.data == "hello"
+
+    # Fails in strict mode
+    with pytest.raises(UnboundTypeError) as exc:
+        parse(ObjectField, {"data": "hello"}, strict=True)
+    assert "type 'object' is not allowed" in str(exc.value)
+    assert "strict mode" in str(exc.value)
+
+
+def test_parse_strict_rejects_any_type() -> None:
+    """Strict mode rejects fields typed as 'Any'."""
+
+    @dataclass
+    class AnyField:
+        data: Any
+
+    # Works in non-strict mode
+    result = parse(AnyField, {"data": "hello"})
+    assert result.data == "hello"
+
+    # Fails in strict mode
+    with pytest.raises(UnboundTypeError) as exc:
+        parse(AnyField, {"data": "hello"}, strict=True)
+    assert "type 'Any' is not allowed" in str(exc.value)
+
+
+def test_parse_strict_rejects_object_typevar_binding() -> None:
+    """Strict mode rejects TypeVars bound to 'object'."""
+
+    @dataclass(slots=True, frozen=True)
+    class GenericModel[T]:
+        value: T
+
+    # Works in non-strict mode
+    result = parse(GenericModel[object], {"value": "hello"})
+    assert result.value == "hello"
+
+    # Fails in strict mode
+    with pytest.raises(UnboundTypeError) as exc:
+        parse(GenericModel[object], {"value": "hello"}, strict=True)
+    assert "TypeVar" in str(exc.value)
+    assert "object" in str(exc.value)
+
+
+def test_parse_strict_rejects_any_typevar_binding() -> None:
+    """Strict mode rejects TypeVars bound to 'Any'."""
+
+    @dataclass(slots=True, frozen=True)
+    class GenericModel[T]:
+        value: T
+
+    # Works in non-strict mode
+    result = parse(GenericModel[Any], {"value": "hello"})
+    assert result.value == "hello"
+
+    # Fails in strict mode
+    with pytest.raises(UnboundTypeError) as exc:
+        parse(GenericModel[Any], {"value": "hello"}, strict=True)
+    assert "TypeVar" in str(exc.value)
+    assert "Any" in str(exc.value)
+
+
+def test_parse_strict_accepts_concrete_types() -> None:
+    """Strict mode accepts concrete types."""
+
+    @dataclass(slots=True, frozen=True)
+    class GenericModel[T]:
+        value: T
+
+    # All these should work in strict mode
+    result_str = parse(GenericModel[str], {"value": "hello"}, strict=True)
+    assert result_str.value == "hello"
+
+    result_int = parse(GenericModel[int], {"value": 42}, strict=True)
+    assert result_int.value == 42
+
+    @dataclass(slots=True, frozen=True)
+    class Inner:
+        name: str
+
+    result_dataclass = parse(
+        GenericModel[Inner], {"value": {"name": "test"}}, strict=True
+    )
+    assert result_dataclass.value.name == "test"
+
+
+def test_parse_strict_with_nested_generics() -> None:
+    """Strict mode validates nested generic type arguments."""
+    # Use module-level classes to avoid get_type_hints issues with
+    # function-local classes and `from __future__ import annotations`
+
+    # Concrete nested generic works
+    result = parse(
+        _OuterGeneric[str], {"inner": {"value": "hello"}, "label": "test"}, strict=True
+    )
+    assert result.inner.value == "hello"
+
+    # object binding in nested generic fails
+    with pytest.raises(UnboundTypeError):
+        parse(
+            _OuterGeneric[object],
+            {"inner": {"value": "hello"}, "label": "test"},
+            strict=True,
+        )
+
+
+def test_parse_strict_with_list_of_any() -> None:
+    """Strict mode validates type arguments in generic containers."""
+
+    @dataclass(slots=True, frozen=True)
+    class ListModel[T]:
+        items: list[T]
+
+    # list[str] works
+    result = parse(ListModel[str], {"items": ["a", "b"]}, strict=True)
+    assert result.items == ["a", "b"]
+
+    # list[Any] fails - Any is the type argument
+    with pytest.raises(UnboundTypeError):
+        parse(ListModel[Any], {"items": ["a", "b"]}, strict=True)
+
+
+def test_validate_type_basic_types() -> None:
+    """validate_type rejects unbound types."""
+    # Should raise for object
+    with pytest.raises(UnboundTypeError) as exc:
+        validate_type(object, "field")
+    assert "object" in str(exc.value)
+
+    # Should raise for Any
+    with pytest.raises(UnboundTypeError) as exc:
+        validate_type(Any, "field")
+    assert "Any" in str(exc.value)
+
+
+def test_validate_type_accepts_concrete_types() -> None:
+    """validate_type accepts concrete types without raising."""
+    # These should not raise
+    validate_type(str, "field")
+    validate_type(int, "field")
+    validate_type(list[str], "field")
+    validate_type(dict[str, int], "field")
+
+
+def test_validate_type_validates_generic_args() -> None:
+    """validate_type recursively checks generic type arguments."""
+    # list[Any] should fail
+    with pytest.raises(UnboundTypeError) as exc:
+        validate_type(list[Any], "field")
+    assert "Any" in str(exc.value)
+
+    # dict[str, object] should fail
+    with pytest.raises(UnboundTypeError) as exc:
+        validate_type(dict[str, object], "field")
+    assert "object" in str(exc.value)
+
+
+def test_validate_type_allows_none_in_optional() -> None:
+    """validate_type allows None type in unions."""
+    # Optional (None | T) should work
+    validate_type(str | None, "field")
+
+
+def test_unbound_type_error_is_type_error() -> None:
+    """UnboundTypeError is a subclass of TypeError."""
+    assert issubclass(UnboundTypeError, TypeError)
+
+
+def test_validate_type_rejects_typevar() -> None:
+    """validate_type rejects unresolved TypeVars."""
+    from typing import TypeVar
+
+    T = TypeVar("T")
+    with pytest.raises(UnboundTypeError) as exc:
+        validate_type(T, "field")
+    assert "TypeVar" in str(exc.value)
+    assert "T" in str(exc.value)
+
+
+def test_parse_strict_validates_nested_generic_alias() -> None:
+    """Strict mode validates nested generic alias type arguments."""
+    # Test with list[Any] as a TypeVar binding to exercise _validate_generic_alias_arg
+    with pytest.raises(UnboundTypeError) as exc:
+        parse(_GenericWrapper[list[Any]], {"payload": []}, strict=True)
+    assert "Any" in str(exc.value)
+
+
+def test_format_type_name_for_custom_types() -> None:
+    """_format_type_name handles custom types with __name__."""
+    from weakincentives.serde._utils import _format_type_name as format_type_name
+
+    # Test with a regular class
+    class MyClass:
+        pass
+
+    assert format_type_name(MyClass) == "MyClass"
+
+    # Test with something that has __name__
+    assert format_type_name(str) == "str"
+    assert format_type_name(int) == "int"
+
+
+def test_is_unbound_type_returns_true_for_any_and_object() -> None:
+    """_is_unbound_type identifies Any and object as unbound."""
+    assert _is_unbound_type(object) is True
+    assert _is_unbound_type(Any) is True
+    assert _is_unbound_type(str) is False
+    assert _is_unbound_type(int) is False
+
+
+def test_parse_strict_nested_generic_with_object_binding() -> None:
+    """Strict mode rejects nested generics where TypeVar resolves to object."""
+    # This tests the case where nested TypeVar is resolved through parent's map
+    # to an unbound type (object)
+    with pytest.raises(UnboundTypeError) as exc:
+        parse(
+            _OuterGeneric[object],
+            {"inner": {"value": "test"}, "label": "test"},
+            strict=True,
+        )
+    assert "object" in str(exc.value)
+
+
+def test_build_typevar_map_strict_with_unbound_parent_resolution() -> None:
+    """_build_typevar_map rejects TypeVar resolution to unbound types."""
+    from weakincentives.serde.parse import _build_typevar_map
+
+    # Create a parent map that has T → object (simulating a non-strict parent build)
+    parent_typevar_map = {_OuterGeneric.__type_params__[0]: object}
+
+    # Now try to build a nested typevar map in strict mode
+    # where the TypeVar resolves through the parent to object
+    with pytest.raises(UnboundTypeError) as exc:
+        _build_typevar_map(
+            _InnerGeneric[_OuterGeneric.__type_params__[0]],  # Inner[T]
+            parent_typevar_map=parent_typevar_map,
+            strict=True,
+        )
+    assert "object" in str(exc.value)
+
+
+def test_build_typevar_map_strict_rejects_unresolved_typevar() -> None:
+    """_build_typevar_map in strict mode rejects unresolved TypeVar arguments."""
+    from typing import TypeVar
+
+    from weakincentives.serde.parse import _build_typevar_map
+
+    # Create an unrelated TypeVar that won't be in any parent map
+    UnrelatedT = TypeVar("UnrelatedT")
+
+    # Try to build a typevar map with an unresolved TypeVar as an argument
+    # This would happen if someone creates a generic alias with an unbound TypeVar
+    with pytest.raises(UnboundTypeError) as exc:
+        _build_typevar_map(
+            _GenericWrapper[UnrelatedT],  # type: ignore[type-arg]
+            parent_typevar_map={},  # Empty parent map
+            strict=True,
+        )
+    assert "UnrelatedT" in str(exc.value)

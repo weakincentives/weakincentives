@@ -36,11 +36,15 @@ from uuid import UUID
 from ..types import JSONValue
 from ._utils import (
     _UNION_TYPE,
+    UnboundTypeError,
     _AnyType,
     _apply_constraints,
+    _format_type_name,
+    _is_unbound_type,
     _merge_annotated_meta,
     _ParseConfig,
     _set_extras,
+    validate_type,
 )
 
 # typing.Union origin (for Optional[X] and Union[X, Y] constructs from type aliases)
@@ -250,7 +254,9 @@ def _build_nested_config(base_type: object, config: _ParseConfig) -> _ParseConfi
     if origin is None:
         return config
     nested_typevar_map = _build_typevar_map(
-        cast(type[object], base_type), parent_typevar_map=config.typevar_map
+        cast(type[object], base_type),
+        parent_typevar_map=config.typevar_map,
+        strict=config.strict,
     )
     if not nested_typevar_map:  # pragma: no cover - always true for PEP 695 generics
         return config
@@ -260,6 +266,7 @@ def _build_nested_config(base_type: object, config: _ParseConfig) -> _ParseConfi
         case_insensitive=config.case_insensitive,
         alias_generator=config.alias_generator,
         aliases=config.aliases,
+        strict=config.strict,
         typevar_map=nested_typevar_map,
     )
 
@@ -555,6 +562,13 @@ def _coerce_to_type(
     if _is_typevar(base_type) and base_type in config.typevar_map:
         base_type = config.typevar_map[base_type]
 
+    # In strict mode, reject Any/object types - they provide no type safety
+    if config.strict and (base_type is object or base_type is _AnyType):
+        type_name = _format_type_name(base_type)
+        raise UnboundTypeError(
+            f"{path}: type '{type_name}' is not allowed in strict mode"
+        )
+
     if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
 
@@ -716,10 +730,44 @@ def _run_validation_hooks(instance: object) -> None:
         _ = post_validator()
 
 
+def _resolve_typevar_from_parent(
+    arg: object,
+    param_name: str,
+    parent_typevar_map: Mapping[object, type],
+    strict: bool,
+) -> type:
+    """Resolve a TypeVar through the parent's map."""
+    resolved_arg = parent_typevar_map[arg]
+    if strict and _is_unbound_type(resolved_arg):
+        type_name = _format_type_name(resolved_arg)
+        raise UnboundTypeError(
+            f"TypeVar '{param_name}' is bound to '{type_name}' - use a concrete type"
+        )
+    return resolved_arg
+
+
+def _validate_type_arg(arg: type, param_name: str, strict: bool) -> type:
+    """Validate a concrete type argument in strict mode."""
+    if strict and (arg is object or arg is _AnyType):
+        type_name = _format_type_name(arg)
+        raise UnboundTypeError(
+            f"TypeVar '{param_name}' is bound to '{type_name}' - use a concrete type"
+        )
+    return arg
+
+
+def _validate_generic_alias_arg(arg: object, param_name: str, strict: bool) -> type:
+    """Validate a generic alias type argument in strict mode."""
+    if strict:
+        validate_type(arg, f"TypeVar '{param_name}'")
+    return cast(type, arg)
+
+
 def _build_typevar_map(
     cls: type[object],
     *,
     parent_typevar_map: Mapping[object, type] | None = None,
+    strict: bool = False,
 ) -> dict[object, type]:
     """Build a mapping from TypeVar to concrete type for a generic alias.
 
@@ -729,35 +777,55 @@ def _build_typevar_map(
     If parent_typevar_map is provided, TypeVar arguments are resolved through
     it. This supports nested generics like Outer[int] containing Inner[T]
     where T is Outer's TypeVar - the parent map resolves T to int.
+
+    If strict is True, validates that type arguments are concrete (not Any,
+    object, or unresolved TypeVar).
     """
     origin = get_origin(cls)
     if origin is None:
-        # Not a generic alias, no typevar mapping needed
         return {}
 
     type_args = get_args(cls)
     if not type_args:
         return {}  # pragma: no cover - defensive
 
-    # Get TypeVar parameters from the origin class
     type_params = getattr(origin, "__type_params__", ())
     if not type_params:
         return {}  # pragma: no cover - defensive for typing module generics
 
-    # Map each TypeVar to its concrete type argument
     typevar_map: dict[object, type] = {}
     for param, arg in zip(type_params, type_args, strict=False):
-        # Resolve TypeVar args through parent's map (for nested generics)
-        if _is_typevar(arg) and parent_typevar_map and arg in parent_typevar_map:
-            typevar_map[param] = parent_typevar_map[arg]
-        elif isinstance(arg, type):
-            typevar_map[param] = arg
-        elif get_origin(arg) is not None:
-            # arg is itself a generic alias (e.g., list[str])
-            # Store it for recursive resolution
-            typevar_map[param] = arg
+        param_name = getattr(param, "__name__", repr(param))
+        resolved = _resolve_single_type_arg(arg, param_name, parent_typevar_map, strict)
+        if resolved is not None:
+            typevar_map[param] = resolved
 
     return typevar_map
+
+
+def _resolve_single_type_arg(
+    arg: object,
+    param_name: str,
+    parent_typevar_map: Mapping[object, type] | None,
+    strict: bool,
+) -> type | None:
+    """Resolve a single type argument to a concrete type."""
+    if _is_typevar(arg) and parent_typevar_map and arg in parent_typevar_map:
+        return _resolve_typevar_from_parent(arg, param_name, parent_typevar_map, strict)
+
+    if isinstance(arg, type):
+        return _validate_type_arg(arg, param_name, strict)
+
+    if get_origin(arg) is not None:
+        return _validate_generic_alias_arg(arg, param_name, strict)
+
+    if strict and _is_typevar(arg):
+        arg_name = getattr(arg, "__name__", repr(arg))
+        raise UnboundTypeError(
+            f"TypeVar '{param_name}' is bound to unresolved TypeVar '{arg_name}'"
+        )
+
+    return None
 
 
 def _parse_dataclass[T](
@@ -798,6 +866,7 @@ def parse[T](
     case_insensitive: bool = False,
     alias_generator: Callable[[str], str] | None = None,
     aliases: Mapping[str, str] | None = None,
+    strict: bool = False,
 ) -> T:
     """Parse a mapping into a dataclass instance.
 
@@ -805,6 +874,23 @@ def parse[T](
         parse(MyGenericClass[str], data)
 
     The type arguments are used to resolve TypeVar fields during parsing.
+
+    Args:
+        cls: The dataclass type to parse into. Can be a generic alias.
+        data: The mapping data to parse.
+        extra: Policy for extra keys ('ignore', 'forbid', or 'allow').
+        coerce: Whether to coerce values to their target types.
+        case_insensitive: Whether to match keys case-insensitively.
+        alias_generator: Function to generate field aliases.
+        aliases: Explicit field alias mapping.
+        strict: When True, reject Any/object types and require concrete
+            TypeVar bindings. Raises UnboundTypeError for violations.
+
+    Raises:
+        TypeError: If cls is not a dataclass or data is not a mapping.
+        ValueError: For invalid field values or extra policy.
+        UnboundTypeError: In strict mode, if Any/object types or unbound
+            TypeVars are encountered.
     """
     if not isinstance(data, Mapping):
         raise TypeError("parse() requires a mapping input")
@@ -819,7 +905,8 @@ def parse[T](
         raise TypeError("parse() requires a dataclass type")
 
     # Build TypeVar mapping from generic alias type arguments
-    typevar_map = _build_typevar_map(cls)
+    # In strict mode, this validates that type arguments are concrete
+    typevar_map = _build_typevar_map(cls, strict=strict)
 
     mapping_data = cast(Mapping[str, object], data)
     config = _ParseConfig(
@@ -828,6 +915,7 @@ def parse[T](
         case_insensitive=case_insensitive,
         alias_generator=alias_generator,
         aliases=aliases,
+        strict=strict,
         typevar_map=typevar_map,
     )
 
