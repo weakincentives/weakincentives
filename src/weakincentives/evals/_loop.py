@@ -354,12 +354,23 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
         Uses MainLoop.execute_with_bundle() to reuse the standard bundle
         creation logic, then adds eval-specific metadata before finalization.
+
+        Exception handling is narrowed to avoid re-executing samples:
+        - If bundle setup/execution fails before ctx is created, fall back to
+          non-bundled execution
+        - If execution succeeds but scoring or bundle writing fails, use the
+          results from the successful execution (never re-execute)
         """
         if self._config.debug_bundle_dir is None:  # pragma: no cover - defensive
             return self._evaluate_sample_without_bundle(request)
 
         # Create per-request directory: {debug_bundle_dir}/{request_id}/
         bundle_target = self._config.debug_bundle_dir / str(request.request_id)
+
+        # Track execution state to avoid re-running on post-execution failures
+        ctx = None
+        score: Score | None = None
+        error: str | None = None
 
         try:
             with self._loop.execute_with_bundle(
@@ -368,19 +379,20 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 heartbeat=self._heartbeat,
                 experiment=request.experiment,
             ) as ctx:
-                # Beat after sample execution to prove progress
-                self._heartbeat.beat()
-
-                # Compute score
+                # Compute score first, then beat to prove progress
                 score, error = self._compute_score(
                     ctx.response.output, request.sample.expected, ctx.session
                 )
 
-                # Add eval metadata to bundle before it's finalized
+                # Beat after scoring to prove progress
+                self._heartbeat.beat()
+
+                # Write eval metadata to bundle
                 ctx.write_eval(
                     self._build_eval_info(request, score, ctx.latency_ms, error)
                 )
 
+            # Normal exit: bundle finalized, retrieve path
             return EvalResult(
                 sample_id=request.sample.id,
                 experiment_name=request.experiment.name,
@@ -391,9 +403,33 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             )
 
         except Exception as exc:
-            # If bundle creation fails, log and continue without bundle
+            # Check if execution completed (ctx was created and has results)
+            if ctx is not None:
+                # Execution succeeded but something failed (scoring, write_eval,
+                # or finalization). Use the results we have - never re-execute.
+                _logger.warning(
+                    "Bundle creation failed after successful execution",
+                    extra={"error": str(exc), "sample_id": request.sample.id},
+                )
+                # If score wasn't computed before the exception, compute it now.
+                # This only happens if _compute_score itself raised, which would
+                # likely fail again - but we try anyway as a last resort.
+                if score is None:  # pragma: no cover - defensive: evaluator failure
+                    score, error = self._compute_score(
+                        ctx.response.output, request.sample.expected, ctx.session
+                    )
+                return EvalResult(
+                    sample_id=request.sample.id,
+                    experiment_name=request.experiment.name,
+                    score=score,
+                    latency_ms=ctx.latency_ms,
+                    error=error,
+                    bundle_path=ctx.bundle_path,  # May be None if finalization failed
+                )
+
+            # Execution itself failed - fall back to non-bundled
             _logger.warning(
-                "Debug bundle creation failed, continuing without bundle",
+                "Bundle execution failed, retrying without bundle",
                 extra={"error": str(exc), "sample_id": request.sample.id},
             )
             return self._evaluate_sample_without_bundle(request)
