@@ -1837,3 +1837,274 @@ def test_schema_enum_mixed_types() -> None:
     finally:
         globals().pop("MixedEnumModel", None)
         globals().pop("MixedEnum", None)
+
+
+# =============================================================================
+# Strict Mode Validation Tests
+# =============================================================================
+
+
+def test_parse_strict_rejects_object_type() -> None:
+    """strict=True rejects fields typed as 'object'."""
+
+    @dataclass
+    class ObjectModel:
+        payload: object
+
+    # Non-strict mode allows object type
+    parsed = parse(ObjectModel, {"payload": "data"})
+    assert parsed.payload == "data"
+
+    # Strict mode rejects object type
+    with pytest.raises(TypeError) as exc:
+        parse(ObjectModel, {"payload": "data"}, strict=True)
+    assert "strict mode rejects unbound type 'object'" in str(exc.value)
+    assert "payload" in str(exc.value)
+
+
+def test_parse_strict_rejects_any_type() -> None:
+    """strict=True rejects fields typed as 'Any'."""
+
+    @dataclass
+    class AnyModel:
+        payload: Any
+
+    # Non-strict mode allows Any type
+    parsed = parse(AnyModel, {"payload": [1, 2, 3]})
+    assert parsed.payload == [1, 2, 3]
+
+    # Strict mode rejects Any type
+    with pytest.raises(TypeError) as exc:
+        parse(AnyModel, {"payload": [1, 2, 3]}, strict=True)
+    assert "strict mode rejects unbound type 'Any'" in str(exc.value)
+    assert "payload" in str(exc.value)
+
+
+def test_parse_strict_rejects_unresolved_typevar() -> None:
+    """strict=True rejects unresolved TypeVar fields."""
+
+    @dataclass(slots=True, frozen=True)
+    class GenericModel[T]:
+        value: T
+
+    # Non-strict mode also rejects unresolved TypeVar (but with different message)
+    with pytest.raises(TypeError) as exc_non_strict:
+        parse(GenericModel, {"value": 42})
+    assert "cannot parse TypeVar field" in str(exc_non_strict.value)
+
+    # Strict mode rejects with strict-specific message
+    with pytest.raises(TypeError) as exc_strict:
+        parse(GenericModel, {"value": 42}, strict=True)
+    assert "strict mode rejects unbound type" in str(exc_strict.value)
+    assert "TypeVar" in str(exc_strict.value)
+
+
+def test_parse_strict_allows_resolved_typevar() -> None:
+    """strict=True allows TypeVars that are resolved via generic alias."""
+
+    @dataclass(slots=True, frozen=True)
+    class GenericModel[T]:
+        value: T
+
+    # Resolved TypeVar should work in strict mode
+    parsed = parse(GenericModel[int], {"value": 42}, strict=True)
+    assert parsed.value == 42
+
+    parsed_str = parse(GenericModel[str], {"value": "hello"}, strict=True)
+    assert parsed_str.value == "hello"
+
+
+def test_parse_strict_with_nested_dataclass() -> None:
+    """strict=True propagates to nested dataclass parsing."""
+
+    @dataclass
+    class StrictInner:
+        data: object
+
+    @dataclass
+    class StrictOuter:
+        inner: StrictInner
+
+    # Register classes for type hint resolution
+    globals()["StrictInner"] = StrictInner
+    globals()["StrictOuter"] = StrictOuter
+    try:
+        # Non-strict mode allows nested object type
+        parsed = parse(StrictOuter, {"inner": {"data": "value"}})
+        assert parsed.inner.data == "value"
+
+        # Strict mode rejects nested object type
+        with pytest.raises(TypeError) as exc:
+            parse(StrictOuter, {"inner": {"data": "value"}}, strict=True)
+        assert "strict mode rejects unbound type 'object'" in str(exc.value)
+        assert "inner.data" in str(exc.value)
+    finally:
+        globals().pop("StrictOuter", None)
+        globals().pop("StrictInner", None)
+
+
+def test_parse_strict_with_optional_object() -> None:
+    """strict=True rejects object within Optional/Union types."""
+
+    @dataclass
+    class OptionalObjectModel:
+        payload: object | None
+
+    # Non-strict mode allows Optional[object]
+    parsed = parse(OptionalObjectModel, {"payload": "data"})
+    assert parsed.payload == "data"
+
+    # Strict mode rejects because object is in the union
+    with pytest.raises(TypeError) as exc:
+        parse(OptionalObjectModel, {"payload": "data"}, strict=True)
+    assert "strict mode rejects unbound type 'object'" in str(exc.value)
+
+
+def test_parse_strict_with_list_of_object() -> None:
+    """strict=True rejects list[object]."""
+
+    @dataclass
+    class ListObjectModel:
+        items: list[object]
+
+    # Non-strict mode allows list[object]
+    parsed = parse(ListObjectModel, {"items": [1, "two", 3.0]})
+    assert parsed.items == [1, "two", 3.0]
+
+    # Strict mode rejects object in list item type
+    with pytest.raises(TypeError) as exc:
+        parse(ListObjectModel, {"items": [1, "two", 3.0]}, strict=True)
+    assert "strict mode rejects unbound type 'object'" in str(exc.value)
+
+
+def test_parse_strict_with_dict_of_any() -> None:
+    """strict=True rejects dict[str, Any]."""
+
+    @dataclass
+    class DictAnyModel:
+        mapping: dict[str, Any]
+
+    # Non-strict mode allows dict[str, Any]
+    parsed = parse(DictAnyModel, {"mapping": {"a": 1, "b": "two"}})
+    assert parsed.mapping == {"a": 1, "b": "two"}
+
+    # Strict mode rejects Any in dict value type
+    with pytest.raises(TypeError) as exc:
+        parse(DictAnyModel, {"mapping": {"a": 1}}, strict=True)
+    assert "strict mode rejects unbound type 'Any'" in str(exc.value)
+
+
+def test_parse_strict_with_untyped_dict() -> None:
+    """strict=True rejects untyped dict (defaults to dict[object, object])."""
+
+    @dataclass
+    class UntypedDictModel:
+        mapping: dict[str, int]  # This is fine
+
+    @dataclass
+    class UntypedDictKeysModel:
+        mapping: Mapping[Any, str]
+
+    # Fully typed dict is allowed in strict mode
+    parsed = parse(UntypedDictModel, {"mapping": {"a": 1}}, strict=True)
+    assert parsed.mapping == {"a": 1}
+
+    # Any in key type is rejected
+    with pytest.raises(TypeError) as exc:
+        parse(UntypedDictKeysModel, {"mapping": {"a": "value"}}, strict=True)
+    assert "strict mode rejects unbound type 'Any'" in str(exc.value)
+
+
+def test_parse_strict_with_nested_generics() -> None:
+    """strict=True works with nested generic types when resolved."""
+    # Use module-level generic classes already defined for other tests
+    # _InnerGeneric[T] and _OuterGeneric[T] are defined at module level
+
+    # Resolved nested generics work in strict mode
+    parsed = parse(
+        _OuterGeneric[int],
+        {"inner": {"value": 42}, "label": "test"},
+        strict=True,
+    )
+    assert parsed.inner.value == 42
+    assert parsed.label == "test"
+
+
+def test_parse_strict_with_concrete_types() -> None:
+    """strict=True works normally with concrete types."""
+
+    @dataclass
+    class ConcreteModel:
+        name: str
+        count: int
+        ratio: float
+        flag: bool
+        items: list[str]
+        mapping: dict[str, int]
+
+    parsed = parse(
+        ConcreteModel,
+        {
+            "name": "test",
+            "count": 42,
+            "ratio": 3.14,
+            "flag": True,
+            "items": ["a", "b"],
+            "mapping": {"x": 1},
+        },
+        strict=True,
+    )
+    assert parsed.name == "test"
+    assert parsed.count == 42
+    assert parsed.ratio == 3.14
+    assert parsed.flag is True
+    assert parsed.items == ["a", "b"]
+    assert parsed.mapping == {"x": 1}
+
+
+def test_parse_strict_with_annotated_object() -> None:
+    """strict=True rejects Annotated[object, ...] types."""
+
+    @dataclass
+    class AnnotatedObjectModel:
+        payload: Annotated[object, {"strip": True}]
+
+    # Non-strict mode allows Annotated[object, ...]
+    parsed = parse(AnnotatedObjectModel, {"payload": "  data  "})
+    assert parsed.payload == "data"
+
+    # Strict mode rejects even with annotations
+    with pytest.raises(TypeError) as exc:
+        parse(AnnotatedObjectModel, {"payload": "  data  "}, strict=True)
+    assert "strict mode rejects unbound type 'object'" in str(exc.value)
+
+
+def test_is_unbound_type_helper() -> None:
+    """Test _is_unbound_type helper function."""
+    from typing import TypeVar
+
+    from weakincentives.serde.parse import _is_unbound_type
+
+    assert _is_unbound_type(object) is True
+    assert _is_unbound_type(Any) is True
+
+    T = TypeVar("T")
+    assert _is_unbound_type(T) is True
+
+    # Concrete types are not unbound
+    assert _is_unbound_type(int) is False
+    assert _is_unbound_type(str) is False
+    assert _is_unbound_type(list) is False
+
+
+def test_get_unbound_type_name_helper() -> None:
+    """Test _get_unbound_type_name helper function."""
+    from typing import TypeVar
+
+    from weakincentives.serde.parse import _get_unbound_type_name
+
+    assert _get_unbound_type_name(object) == "object"
+    assert _get_unbound_type_name(Any) == "Any"
+
+    T = TypeVar("T")
+    assert _get_unbound_type_name(T) == "TypeVar(T)"

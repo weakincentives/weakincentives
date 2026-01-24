@@ -97,6 +97,8 @@ class _ParseConfig:
         default_factory=lambda: dict[object, type]()
     )
     """Mapping from TypeVar objects to their concrete types for generic alias support."""
+    strict: bool = False
+    """When True, reject unbound types (Any, object, unresolved TypeVars)."""
 
 
 def _merge_annotated_meta(

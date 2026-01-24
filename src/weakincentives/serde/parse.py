@@ -261,6 +261,7 @@ def _build_nested_config(base_type: object, config: _ParseConfig) -> _ParseConfi
         alias_generator=config.alias_generator,
         aliases=config.aliases,
         typevar_map=nested_typevar_map,
+        strict=config.strict,
     )
 
 
@@ -481,6 +482,28 @@ def _is_typevar(typ: object) -> bool:
     return isinstance(typ, TypeVar)
 
 
+def _is_unbound_type(typ: object) -> bool:
+    """Check if a type is an unbound type (Any, object, or TypeVar).
+
+    Unbound types accept any value without validation, which can hide
+    type errors. In strict mode, these types are rejected.
+    """
+    if typ is object or typ is _AnyType:
+        return True
+    return _is_typevar(typ)
+
+
+def _get_unbound_type_name(typ: object) -> str:
+    """Get a descriptive name for an unbound type for error messages."""
+    if typ is object:
+        return "object"
+    if typ is _AnyType:
+        return "Any"
+    if _is_typevar(typ):
+        return f"TypeVar({getattr(typ, '__name__', 'unknown')})"
+    return str(typ)  # pragma: no cover - defensive fallback
+
+
 def _resolve_string_type(type_str: str) -> object:
     """Resolve a string type annotation to an actual type without eval().
 
@@ -555,11 +578,21 @@ def _coerce_to_type(
     if _is_typevar(base_type) and base_type in config.typevar_map:
         base_type = config.typevar_map[base_type]
 
+    # Strict mode: reject unbound types (Any, object, unresolved TypeVars)
+    if config.strict and _is_unbound_type(base_type):
+        type_name = _get_unbound_type_name(base_type)
+        msg = (
+            f"{path}: strict mode rejects unbound type '{type_name}' - "
+            f"use a concrete type instead"
+        )
+        raise TypeError(msg)
+
     if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
 
     # Check for unresolved TypeVar - this means the caller didn't provide
-    # a fully specialized generic alias
+    # a fully specialized generic alias (non-strict mode only reaches here
+    # for TypeVars since strict mode already rejected them above)
     if _is_typevar(base_type):
         msg = (
             f"{path}: cannot parse TypeVar field - use a fully specialized "
@@ -798,6 +831,7 @@ def parse[T](
     case_insensitive: bool = False,
     alias_generator: Callable[[str], str] | None = None,
     aliases: Mapping[str, str] | None = None,
+    strict: bool = False,
 ) -> T:
     """Parse a mapping into a dataclass instance.
 
@@ -805,6 +839,17 @@ def parse[T](
         parse(MyGenericClass[str], data)
 
     The type arguments are used to resolve TypeVar fields during parsing.
+
+    Args:
+        cls: The dataclass type to parse into (can be a generic alias).
+        data: The mapping data to parse.
+        extra: How to handle extra keys ("ignore", "forbid", "allow").
+        coerce: Whether to coerce values to target types.
+        case_insensitive: Whether to match keys case-insensitively.
+        alias_generator: Optional function to generate field aliases.
+        aliases: Optional mapping of field name to alias.
+        strict: When True, reject unbound types (Any, object, unresolved TypeVars).
+                This improves type safety by ensuring all fields have concrete types.
     """
     if not isinstance(data, Mapping):
         raise TypeError("parse() requires a mapping input")
@@ -829,6 +874,7 @@ def parse[T](
         alias_generator=alias_generator,
         aliases=aliases,
         typevar_map=typevar_map,
+        strict=strict,
     )
 
     return _parse_dataclass(target_cls, mapping_data, config=config)
