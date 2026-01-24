@@ -560,6 +560,62 @@ def _make_union(left: object, right: object) -> object:
     return left | right  # pyright: ignore[reportOperatorIssue]  # ty: ignore[unsupported-operator]
 
 
+class _ASTResolver:
+    """Helper class to resolve AST nodes to types with namespace context."""
+
+    __slots__ = ("localns", "module_ns")
+
+    def __init__(  # pyright: ignore[reportMissingSuperCall]
+        self, localns: dict[str, object], module_ns: dict[str, object]
+    ) -> None:
+        self.localns = localns
+        self.module_ns = module_ns
+
+    def _resolve_subscript_node(self, node: object) -> object:
+        """Resolve ast.Subscript nodes like Container[T] or dict[str, int]."""
+        import ast
+
+        if not isinstance(node, ast.Subscript):  # pragma: no cover - type guard
+            return object
+        base = self.resolve(node.value)
+        if isinstance(node.slice, ast.Tuple):
+            args = tuple(self.resolve(elt) for elt in node.slice.elts)
+        else:
+            args = (self.resolve(node.slice),)
+        return _resolve_subscript(base, args)
+
+    @staticmethod
+    def _resolve_unary_node(node: object) -> object | None:
+        """Resolve ast.UnaryOp for signed literals like -1 or +1."""
+        import ast
+
+        if not isinstance(node, ast.UnaryOp) or not isinstance(
+            node.operand, ast.Constant
+        ):
+            return None
+        value = node.operand.value
+        if isinstance(node.op, ast.USub):
+            return -value  # pyright: ignore[reportOperatorIssue,reportOptionalOperand]  # ty: ignore[unsupported-operator]
+        if isinstance(node.op, ast.UAdd):
+            return +value  # pyright: ignore[reportOperatorIssue,reportOptionalOperand]  # ty: ignore[unsupported-operator]
+        return None  # pragma: no cover - only USub/UAdd are used in type annotations
+
+    def resolve(self, node: object) -> object:
+        """Recursively resolve an AST node to a type."""
+        import ast
+
+        if isinstance(node, ast.Name):
+            return _resolve_name(node.id, self.localns, self.module_ns)
+        if isinstance(node, ast.Subscript):
+            return self._resolve_subscript_node(node)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return _make_union(self.resolve(node.left), self.resolve(node.right))
+        if isinstance(node, ast.Constant):
+            return node.value
+        signed = self._resolve_unary_node(node)
+        return signed if signed is not None else object
+
+
 def _resolve_generic_string_type(
     type_str: str,
     localns: dict[str, object],
@@ -586,31 +642,9 @@ def _resolve_generic_string_type(
     """
     import ast
 
-    def resolve_node(node: ast.expr) -> object:
-        """Recursively resolve an AST node to a type."""
-        if isinstance(node, ast.Name):
-            return _resolve_name(node.id, localns, module_ns)
-
-        if isinstance(node, ast.Subscript):
-            base = resolve_node(node.value)
-            if isinstance(node.slice, ast.Tuple):
-                args = tuple(resolve_node(elt) for elt in node.slice.elts)
-            else:
-                args = (resolve_node(node.slice),)
-            return _resolve_subscript(base, args)
-
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-            return _make_union(resolve_node(node.left), resolve_node(node.right))
-
-        if isinstance(node, ast.Constant):
-            # Return constant values directly - needed for Literal["foo"], Literal[1], etc.
-            return node.value
-
-        return object
-
     try:
         tree = ast.parse(type_str, mode="eval")
-        return resolve_node(tree.body)
+        return _ASTResolver(localns, module_ns).resolve(tree.body)
     except SyntaxError:
         simple = _resolve_simple_type(type_str)
         return simple if simple is not None else object

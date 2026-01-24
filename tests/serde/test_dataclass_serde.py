@@ -2113,6 +2113,16 @@ def test_resolve_generic_string_type_literal() -> None:
     assert get_origin(result) is Literal
     assert get_args(result) == (True, False)
 
+    # Literal[-1] should preserve negative integer values
+    result = _resolve_generic_string_type("Literal[-1]", localns, module_ns)
+    assert get_origin(result) is Literal
+    assert get_args(result) == (-1,)
+
+    # Literal[-1, 0, +1] should preserve signed integer values
+    result = _resolve_generic_string_type("Literal[-1, 0, +1]", localns, module_ns)
+    assert get_origin(result) is Literal
+    assert get_args(result) == (-1, 0, 1)
+
 
 def test_resolve_generic_string_type_unresolvable_subscript() -> None:
     """_resolve_generic_string_type with unresolvable subscript base."""
