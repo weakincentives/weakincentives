@@ -275,38 +275,36 @@ Query across multiple debug bundles as a single logical dataset. Essential for
 eval analysis where results from many runs need aggregation, comparison, and
 pattern detection.
 
-### CLI Extensions
+### CLI Extension
 
 ```
-wink query <BUNDLE...> "<SQL>"
-wink query <BUNDLE...> --schema
 wink query --bundles-from <FILE> "<SQL>"
-wink query <DIRECTORY> --glob "*.zip" "<SQL>"
+wink query --bundles-from <FILE> --schema
 ```
 
 | Option | Description |
 |--------|-------------|
-| `<BUNDLE...>` | One or more bundle paths (space-separated) |
 | `--bundles-from` | Read bundle paths from file (one per line) |
-| `--glob` | Glob pattern for bundle discovery in directory |
+
+The file contains one bundle path per line. Empty lines and lines starting with
+`#` are ignored.
 
 ### Bundle Resolution
 
-When multiple bundles are specified:
+When `--bundles-from` is specified:
 
 1. Each path is resolved via existing `resolve_bundle_path()` logic
 2. Duplicate bundle IDs are rejected with an error
 3. Bundles with incompatible schema versions are rejected
 
 ```bash
-# Explicit list
-wink query ./run1.zip ./run2.zip ./run3.zip "SELECT * FROM errors"
+# Create bundle list (shell handles discovery)
+ls ./eval-results/debug_bundle_*.zip > bundles.txt
+find ./runs -name "*.zip" -mtime -1 > bundles.txt
 
-# Directory with glob
-wink query ./eval-results/ --glob "debug_bundle_*.zip" "SELECT * FROM metrics"
-
-# From file (useful for large eval runs)
-wink query --bundles-from ./bundle-list.txt "SELECT * FROM tool_calls"
+# Query across bundles
+wink query --bundles-from bundles.txt "SELECT * FROM errors"
+wink query --bundles-from bundles.txt --schema
 ```
 
 ### Schema Additions
@@ -396,7 +394,7 @@ ORDER BY created_at
 ### Multi-Bundle Schema Output
 
 ```bash
-wink query ./run1.zip ./run2.zip --schema
+wink query --bundles-from bundles.txt --schema
 ```
 
 ```json
@@ -532,13 +530,12 @@ CREATE INDEX idx_session_slices_bundle ON session_slices(bundle_id);
 Single-bundle queries work unchanged:
 
 ```bash
-# These are equivalent
+# Single bundle (existing behavior)
 wink query ./bundle.zip "SELECT * FROM errors"
-wink query ./bundle.zip "SELECT * FROM errors"  # bundle_id column present but ignorable
 ```
 
-The `bundle_id` column is always present but can be ignored for single-bundle
-queries. Existing queries continue to work without modification.
+The original CLI syntax is preserved. Multi-bundle mode is only activated when
+`--bundles-from` is specified.
 
 ______________________________________________________________________
 
