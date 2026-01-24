@@ -421,11 +421,14 @@ def _insert_native_tool_calls(
     logs_content: str,
     inserted_ids: set[str],
 ) -> None:
-    """Insert native tool calls from log_aggregator events."""
+    """Insert native tool calls from log_aggregator events.
+
+    Native tools are collected via dict keyed by tool_use_id, guaranteeing
+    uniqueness. We add IDs to inserted_ids for cross-source deduplication
+    (so custom tools won't duplicate native ones).
+    """
     for native_data in _collect_native_tool_calls(logs_content):
         tool_use_id = native_data[8]
-        if tool_use_id in inserted_ids:  # pragma: no cover
-            continue  # Defensive: _collect_native_tool_calls uses dict, merging duplicates
         inserted_ids.add(tool_use_id)
         _ = conn.execute(
             """
