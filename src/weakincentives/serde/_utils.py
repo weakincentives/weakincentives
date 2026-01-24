@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Mapping, Sized
+from dataclasses import field
 from decimal import Decimal
 from importlib import import_module
 from re import Pattern
@@ -92,6 +93,10 @@ class _ParseConfig:
     case_insensitive: bool
     alias_generator: Callable[[str], str] | None
     aliases: Mapping[str, str] | None
+    typevar_map: Mapping[object, type] = field(
+        default_factory=lambda: dict[object, type]()
+    )
+    """Mapping from TypeVar objects to their concrete types for generic alias support."""
 
 
 def _merge_annotated_meta(

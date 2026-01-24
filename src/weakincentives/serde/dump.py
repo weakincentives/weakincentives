@@ -27,7 +27,7 @@ from uuid import UUID
 
 from ..types import JSONValue
 from ..types.dataclass import SupportsDataclass
-from ._utils import MISSING_SENTINEL, TYPE_REF_KEY, _set_extras, _type_identifier
+from ._utils import MISSING_SENTINEL
 
 
 def _serialize(
@@ -42,12 +42,7 @@ def _serialize(
         return primitive
 
     if dataclasses.is_dataclass(value):
-        return _serialize_dataclass(
-            value,
-            by_alias,
-            exclude_none,
-            alias_generator,
-        )
+        return _serialize_dataclass(value, by_alias, exclude_none, alias_generator)
     if isinstance(value, Mapping):
         return _serialize_mapping(
             cast(Mapping[object, object], value),
@@ -57,10 +52,7 @@ def _serialize(
         )
     if isinstance(value, (set, frozenset)):
         return _serialize_set(
-            cast(set[object], value),
-            by_alias,
-            exclude_none,
-            alias_generator,
+            cast(set[object], value), by_alias, exclude_none, alias_generator
         )
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return _serialize_sequence(value, by_alias, exclude_none, alias_generator)
@@ -160,14 +152,12 @@ def _serialize_iterable(
     return serialized_items
 
 
-def dump(  # noqa: PLR0913
+def dump(
     obj: object,
     *,
     by_alias: bool = True,
     exclude_none: bool = False,
     computed: bool = False,
-    include_dataclass_type: bool = False,
-    type_key: str = TYPE_REF_KEY,
     alias_generator: Callable[[str], str] | None = None,
 ) -> dict[str, JSONValue]:
     """Serialize a dataclass instance to a JSON-compatible dictionary."""
@@ -176,8 +166,6 @@ def dump(  # noqa: PLR0913
         raise TypeError("dump() requires a dataclass instance")
 
     result: dict[str, JSONValue] = {}
-    if include_dataclass_type:
-        result[type_key] = _type_identifier(type(obj))
     dataclass_obj = cast(SupportsDataclass, obj)
     _serialize_fields(dataclass_obj, result, by_alias, exclude_none, alias_generator)
     if computed and hasattr(obj.__class__, "__computed__"):
@@ -199,10 +187,7 @@ def _serialize_fields(
     for field in dataclasses.fields(obj):
         key = _field_key(field, by_alias, alias_generator)
         serialized = _serialize_field_value(
-            getattr(obj, field.name),
-            by_alias,
-            exclude_none,
-            alias_generator,
+            getattr(obj, field.name), by_alias, exclude_none, alias_generator
         )
         if serialized is MISSING_SENTINEL:
             continue
@@ -219,10 +204,7 @@ def _serialize_computed_fields(
     computed_fields = cast(Sequence[str], getattr(obj.__class__, "__computed__", ()))
     for name in computed_fields:
         serialized = _serialize_field_value(
-            getattr(obj, name),
-            by_alias,
-            exclude_none,
-            alias_generator,
+            getattr(obj, name), by_alias, exclude_none, alias_generator
         )
         if serialized is MISSING_SENTINEL:
             continue
@@ -259,45 +241,51 @@ def _serialize_field_value(
     )
 
 
-def _extract_extras(obj: object, field_names: set[str]) -> dict[str, object]:
-    """Extract extra attributes from a dataclass instance."""
-    extras_attr = getattr(obj, "__extras__", None)
-    obj_dict = getattr(obj, "__dict__", None)
-    if isinstance(obj_dict, dict):
-        return {key: value for key, value in obj_dict.items() if key not in field_names}
-    if isinstance(extras_attr, Mapping):
-        return dict(extras_attr)
-    return {}  # pragma: no cover - defensive fallback for unusual dataclasses
+def clone[T](obj: T, **overrides: object) -> T:
+    """Create a deep copy of a dataclass by serializing and deserializing.
 
+    This is useful for creating independent copies of frozen dataclasses
+    with optional field overrides. Extra attributes attached via `extra="allow"`
+    parsing are preserved in the clone.
 
-def _apply_extras(cloned: object, extras: dict[str, object]) -> None:
-    """Apply extra attributes to a cloned instance."""
-    if hasattr(cloned, "__dict__"):
-        for key, value in extras.items():
-            object.__setattr__(cloned, key, value)
-    else:
-        _set_extras(cloned, extras)
+    Args:
+        obj: A dataclass instance to clone.
+        **overrides: Optional field values to override in the cloned instance.
 
+    Returns:
+        A new instance of the same dataclass type with field values from
+        the original, optionally overridden by the provided kwargs.
 
-def clone[T](obj: T, **updates: object) -> T:
-    """Clone a dataclass instance and re-run model-level validation hooks."""
+    Raises:
+        TypeError: If obj is not a dataclass instance.
+    """
+    from .parse import parse
+
     if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
         raise TypeError("clone() requires a dataclass instance")
 
-    field_names = {field.name for field in dataclasses.fields(obj)}
-    extras = _extract_extras(obj, field_names)
-    cloned = dataclasses.replace(obj, **updates)
+    serialized = dump(obj)
+    serialized.update(cast(dict[str, JSONValue], overrides))
 
-    if extras:
-        _apply_extras(cloned, extras)
+    # Extract extras from original object (attached via extra="allow" parsing)
+    extras = _extract_extras(obj)
+    serialized.update(cast(dict[str, JSONValue], extras))
 
-    validator = getattr(cloned, "__validate__", None)
-    if callable(validator):
-        _ = validator()
-    post_validator = getattr(cloned, "__post_validate__", None)
-    if callable(post_validator):
-        _ = post_validator()
-    return cloned
+    return parse(type(obj), serialized, extra="allow")
+
+
+def _extract_extras(obj: object) -> dict[str, object]:
+    """Extract extra attributes from a dataclass instance."""
+    dataclass_obj = cast(SupportsDataclass, obj)
+    field_names = {f.name for f in dataclasses.fields(dataclass_obj)}
+
+    extras_attr = getattr(obj, "__extras__", None)
+    obj_dict = getattr(obj, "__dict__", None)
+    if isinstance(obj_dict, dict):
+        return {k: v for k, v in obj_dict.items() if k not in field_names}
+    if isinstance(extras_attr, Mapping):
+        return dict(extras_attr)
+    return {}
 
 
 __all__ = ["clone", "dump"]

@@ -377,12 +377,12 @@ def test_jsonl_slice_handles_empty_lines_in_file() -> None:
         # Manually create file with empty lines
         with path.open("w") as f:
             # Write a valid item
-            data = dump(SimpleItem("a", 1), include_dataclass_type=True)
+            data = dump(SimpleItem("a", 1))
             f.write(json.dumps(data) + "\n")
             # Empty line
             f.write("\n")
             # Another item
-            data = dump(SimpleItem("b", 2), include_dataclass_type=True)
+            data = dump(SimpleItem("b", 2))
             f.write(json.dumps(data) + "\n")
             # Whitespace-only line
             f.write("   \n")
@@ -404,10 +404,10 @@ def test_jsonl_slice_view_iteration_skips_empty_lines() -> None:
         path = Path(tmpdir) / "test.jsonl"
         # Manually create file with empty lines
         with path.open("w") as f:
-            data = dump(SimpleItem("a", 1), include_dataclass_type=True)
+            data = dump(SimpleItem("a", 1))
             f.write(json.dumps(data) + "\n")
             f.write("\n")  # Empty line
-            data = dump(SimpleItem("b", 2), include_dataclass_type=True)
+            data = dump(SimpleItem("b", 2))
             f.write(json.dumps(data) + "\n")
 
         slice_obj = JsonlSlice(path=path, item_type=SimpleItem)

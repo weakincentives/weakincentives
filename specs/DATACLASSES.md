@@ -17,13 +17,15 @@ from weakincentives.serde import parse, dump, clone, schema
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `cls` | - | Target dataclass type |
+| `cls` | - | Target dataclass type (supports generic aliases) |
 | `data` | - | Dict to parse |
 | `extra` | `"ignore"` | `"ignore"`, `"forbid"`, `"allow"` |
 | `coerce` | `True` | Type coercion |
 | `case_insensitive` | `False` | Case-insensitive keys |
 | `aliases` | `None` | Field aliases |
-| `type_key` | `"__type__"` | Polymorphic type field |
+| `alias_generator` | `None` | Function to transform field names |
+
+For generic dataclasses, use generic alias syntax: `parse(Wrapper[Data], data)`.
 
 ### dump
 
@@ -33,7 +35,7 @@ from weakincentives.serde import parse, dump, clone, schema
 | `by_alias` | `True` | Use alias names |
 | `exclude_none` | `False` | Exclude None values |
 | `computed` | `False` | Include `__computed__` props |
-| `include_dataclass_type` | `False` | Include type field |
+| `alias_generator` | `None` | Function to transform field names |
 
 ### clone
 
@@ -99,8 +101,37 @@ class Order:
 
 All return new instances (immutable).
 
+## Generic Dataclass Serialization
+
+Generic dataclasses like `Wrapper[T]` are parsed using **generic alias** syntax.
+The type arguments resolve TypeVar fields during parsing.
+
+```python
+@dataclass
+class Wrapper[T]:
+    payload: T
+
+@dataclass
+class Data:
+    value: int
+
+# Serialize - standard dump
+data = dump(Wrapper(payload=Data(1)))
+# {"payload": {"value": 1}}
+
+# Parse with generic alias to specify type parameter
+restored = parse(Wrapper[Data], data)
+assert isinstance(restored.payload, Data)
+```
+
+When parsing, TypeVar fields are resolved from the generic alias type arguments.
+Parsing without type arguments raises a helpful error guiding usage.
+
 ## Limitations
 
 - No discriminated unions or `$ref` schema
 - No assignment-time validation
 - No external parsers
+- **No backward compatibility guarantee for persisted data.** This is alpha
+  software; serialization format may change between versions. Rehydrating
+  previously persisted snapshots after schema or serde changes is not supported.

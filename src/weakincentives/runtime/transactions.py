@@ -46,7 +46,7 @@ from uuid import UUID, uuid4
 
 from ..dataclasses import FrozenDataclass
 from ..errors import RestoreFailedError
-from ..serde import TYPE_REF_KEY, dump, parse, resolve_type_identifier, type_identifier
+from ..serde import dump, parse, resolve_type_identifier, type_identifier
 from ..types import JSONValue
 from .session.protocols import SessionProtocol
 from .session.snapshots import (
@@ -128,11 +128,7 @@ class CompositeSnapshot:
                 key=lambda item: type_identifier(item[0]),
             ):
                 try:
-                    serialized_snapshot = dump(
-                        resource_snapshot,
-                        include_dataclass_type=True,
-                        type_key=TYPE_REF_KEY,
-                    )
+                    serialized_snapshot = dump(resource_snapshot)
                 except Exception as error:  # pragma: no cover - defensive
                     msg = f"Failed to serialize resource snapshot for {resource_type.__qualname__}"
                     raise SnapshotSerializationError(msg) from error
@@ -140,6 +136,7 @@ class CompositeSnapshot:
                 resource_entries.append(
                     {
                         "resource_type": type_identifier(resource_type),
+                        "snapshot_type": type_identifier(type(resource_snapshot)),
                         "snapshot": cast(JSONValue, serialized_snapshot),
                     }
                 )
@@ -255,12 +252,10 @@ class CompositeSnapshot:
             if not isinstance(snapshot_data, Mapping):  # pragma: no cover - defensive
                 raise SnapshotRestoreError("Resource snapshot must be an object")
 
-            # Determine snapshot type from the data
-            snapshot_type_str = snapshot_data.get(TYPE_REF_KEY)
+            # Determine snapshot type from entry field
+            snapshot_type_str = entry.get("snapshot_type")
             if not isinstance(snapshot_type_str, str):  # pragma: no cover - defensive
-                raise SnapshotRestoreError(
-                    "Resource snapshot must include type reference"
-                )
+                raise SnapshotRestoreError("Resource entry must include snapshot_type")
 
             try:
                 snapshot_type = resolve_type_identifier(snapshot_type_str)
@@ -270,12 +265,7 @@ class CompositeSnapshot:
                 ) from error
 
             try:
-                resource_snapshot = parse(
-                    snapshot_type,
-                    snapshot_data,
-                    allow_dataclass_type=True,
-                    type_key=TYPE_REF_KEY,
-                )
+                resource_snapshot = parse(snapshot_type, snapshot_data)
             except Exception as error:  # pragma: no cover - defensive
                 raise SnapshotRestoreError(
                     f"Failed to parse resource snapshot for {resource_type_str}"

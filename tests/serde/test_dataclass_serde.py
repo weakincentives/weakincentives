@@ -769,6 +769,11 @@ def test_clone_preserves_extras_and_revalidates() -> None:
     cloned_slotted = clone(slotted)
     assert getattr(cloned_slotted, "__extras__", None) == {"nickname": "Ace"}
 
+    # Clone slotted dataclass without extras
+    slotted_no_extras = parse(Slotted, {"name": "Bob"})
+    cloned_no_extras = clone(slotted_no_extras)
+    assert cloned_no_extras.name == "Bob"
+
     with pytest.raises(ValueError):
         clone(user, age=10)
 
@@ -885,69 +890,261 @@ def test_dump_computed_none_excluded() -> None:
     assert "maybe" not in payload
 
 
-@dataclass
-class TypeReferenceModel:
-    value: int
+# =============================================================================
+# Generic Alias Support Tests
+# =============================================================================
 
 
-def test_dump_and_parse_round_trip_with_type_reference() -> None:
-    payload = dump(TypeReferenceModel(1), include_dataclass_type=True)
-
-    expected_type = f"{TypeReferenceModel.__module__}:{TypeReferenceModel.__qualname__}"
-    assert payload["__type__"] == expected_type
-
-    parsed = parse(None, payload, allow_dataclass_type=True)
-    assert isinstance(parsed, TypeReferenceModel)
-    assert parsed.value == 1
+@dataclass(slots=True, frozen=True)
+class _InnerPayload:
+    message: str
+    priority: int = 1
 
 
-def test_parse_rejects_mismatched_type_reference() -> None:
-    @dataclass
-    class AnotherModel:
-        value: int
+@dataclass(slots=True, frozen=True)
+class _GenericWrapper[T]:
+    payload: T
+    metadata: str = "default"
 
-    payload = dump(TypeReferenceModel(2), include_dataclass_type=True)
+
+@dataclass(slots=True, frozen=True)
+class _NestedGenericWrapper[T]:
+    """Wrapper for testing deeply nested generics."""
+
+    child: T
+
+
+@dataclass(slots=True, frozen=True)
+class _ConcreteWrapper:
+    """Wrapper with concrete (non-TypeVar) nested dataclass field."""
+
+    nested: _InnerPayload
+
+
+def test_parse_generic_alias_resolves_typevar() -> None:
+    """parse() with generic alias resolves TypeVar fields."""
+    data = {"payload": {"message": "hello", "priority": 5}, "metadata": "test"}
+
+    # Use generic alias to specify the type argument
+    restored = parse(_GenericWrapper[_InnerPayload], data)
+
+    assert isinstance(restored, _GenericWrapper)
+    assert isinstance(restored.payload, _InnerPayload)
+    assert restored.payload.message == "hello"
+    assert restored.payload.priority == 5
+    assert restored.metadata == "test"
+
+
+def test_parse_generic_alias_round_trip() -> None:
+    """Generic dataclass round-trip through dump/parse with generic alias."""
+    inner = _InnerPayload(message="hello", priority=5)
+    wrapper = _GenericWrapper(payload=inner, metadata="test")
+
+    data = dump(wrapper)
+    restored = parse(_GenericWrapper[_InnerPayload], data)
+
+    assert isinstance(restored, _GenericWrapper)
+    assert isinstance(restored.payload, _InnerPayload)
+    assert restored.payload.message == "hello"
+    assert restored.payload.priority == 5
+    assert restored.metadata == "test"
+
+
+def test_parse_unspecialized_generic_raises_clear_error() -> None:
+    """Parsing generic dataclass without type arguments raises helpful error."""
+    data = {"payload": {"message": "hello", "priority": 1}, "metadata": "test"}
 
     with pytest.raises(TypeError) as exc:
-        parse(AnotherModel, payload, allow_dataclass_type=True)
+        parse(_GenericWrapper, data)
 
-    assert "does not match target dataclass" in str(exc.value)
-
-
-def test_parse_validates_type_reference_shape() -> None:
-    payload = {"__type__": 123, "value": 1}
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, payload, allow_dataclass_type=True)
-
-    assert "must be a string type reference" in str(exc.value)
+    assert "cannot parse TypeVar field" in str(exc.value)
+    assert "fully specialized generic type" in str(exc.value)
 
 
-def test_parse_rejects_invalid_type_identifier() -> None:
-    payload = {"__type__": "invalid", "value": 1}
+def test_parse_nested_generic_alias() -> None:
+    """Nested generic aliases work with specialized types."""
+    data = {
+        "child": {"payload": {"message": "deep", "priority": 99}, "metadata": "mid"}
+    }
 
-    with pytest.raises(TypeError) as exc:
-        parse(None, payload, allow_dataclass_type=True)
+    restored = parse(_NestedGenericWrapper[_GenericWrapper[_InnerPayload]], data)
 
-    assert "Invalid type identifier" in str(exc.value)
-
-
-def test_parse_rejects_nondataclass_type_reference() -> None:
-    payload = {"__type__": "builtins:int", "value": 1}
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, payload, allow_dataclass_type=True)
-
-    assert "resolved type is not a dataclass" in str(exc.value)
+    assert isinstance(restored, _NestedGenericWrapper)
+    assert isinstance(restored.child, _GenericWrapper)
+    assert isinstance(restored.child.payload, _InnerPayload)
+    assert restored.child.payload.message == "deep"
+    assert restored.child.payload.priority == 99
 
 
-def test_parse_requires_reference_when_cls_missing() -> None:
-    payload = {"value": 1}
+def test_parse_concrete_nested_dataclass() -> None:
+    """Concrete (non-generic) nested dataclasses work without generic alias."""
+    data = {"nested": {"message": "test", "priority": 1}}
 
-    with pytest.raises(TypeError) as exc:
-        parse(None, payload, allow_dataclass_type=True)
+    restored = parse(_ConcreteWrapper, data)
 
-    assert "requires a dataclass type" in str(exc.value)
+    assert isinstance(restored, _ConcreteWrapper)
+    assert isinstance(restored.nested, _InnerPayload)
+    assert restored.nested.message == "test"
+
+
+@dataclass(slots=True, frozen=True)
+class _InnerGeneric[T]:
+    """Inner generic that uses parent's TypeVar."""
+
+    value: T
+
+
+@dataclass(slots=True, frozen=True)
+class _OuterGeneric[T]:
+    """Outer generic with nested Inner[T] referencing same TypeVar."""
+
+    inner: _InnerGeneric[T]
+    label: str = "default"
+
+
+def test_parse_nested_typevar_resolution() -> None:
+    """Inner[T] correctly resolves T from outer generic alias.
+
+    When parsing Outer[int], the field `inner: Inner[T]` should resolve
+    T to int via the parent's typevar_map.
+    """
+    data = {"inner": {"value": 42}, "label": "test"}
+
+    restored = parse(_OuterGeneric[int], data)
+
+    assert isinstance(restored, _OuterGeneric)
+    assert isinstance(restored.inner, _InnerGeneric)
+    assert restored.inner.value == 42
+    assert restored.label == "test"
+
+
+def test_parse_nested_typevar_with_dataclass_value() -> None:
+    """Nested TypeVar resolves to dataclass type correctly."""
+    data = {
+        "inner": {"value": {"message": "hello", "priority": 1}},
+        "label": "test",
+    }
+
+    restored = parse(_OuterGeneric[_InnerPayload], data)
+
+    assert isinstance(restored, _OuterGeneric)
+    assert isinstance(restored.inner, _InnerGeneric)
+    assert isinstance(restored.inner.value, _InnerPayload)
+    assert restored.inner.value.message == "hello"
+
+
+def test_get_field_types_with_generic_class() -> None:
+    """_get_field_types falls back to safe resolution for generic classes."""
+    from weakincentives.serde.parse import _get_field_types
+
+    @dataclass(slots=True, frozen=True)
+    class GenericClass[T]:
+        name: str
+        payload: T
+
+    result = _get_field_types(GenericClass)
+
+    # Regular types are resolved (str is in builtins)
+    assert result["name"] is str
+    # TypeVar fields get resolved to object (safe fallback)
+    # or to the TypeVar itself if get_type_hints succeeds
+    assert result["payload"] in {object, GenericClass.__type_params__[0]}
+
+
+def test_resolve_string_type_builtins() -> None:
+    """_resolve_string_type resolves builtin types."""
+    from weakincentives.serde.parse import _resolve_string_type
+
+    assert _resolve_string_type("str") is str
+    assert _resolve_string_type("int") is int
+    assert _resolve_string_type("float") is float
+    assert _resolve_string_type("bool") is bool
+    assert _resolve_string_type("list") is list
+    assert _resolve_string_type("dict") is dict
+
+
+def test_resolve_string_type_typing_module() -> None:
+    """_resolve_string_type resolves typing module types (non-TypeVar)."""
+    from typing import Any
+
+    from weakincentives.serde.parse import _resolve_string_type
+
+    # Should resolve typing module types that aren't TypeVars
+    assert _resolve_string_type("Any") is Any
+
+
+def test_resolve_string_type_unknown() -> None:
+    """_resolve_string_type returns object for unknown types."""
+    from weakincentives.serde.parse import _resolve_string_type
+
+    # TypeVar names and unknown types fall back to object
+    assert _resolve_string_type("T") is object
+    assert _resolve_string_type("NonExistentType") is object
+    assert _resolve_string_type("SomeRandomName") is object
+
+
+def test_build_typevar_map_unresolved_typevar() -> None:
+    """_build_typevar_map skips TypeVar args not in parent map."""
+    from typing import TypeVar
+
+    from weakincentives.serde.parse import _build_typevar_map
+
+    # Create a separate TypeVar not defined on _OuterGeneric
+    UnrelatedTypeVar = TypeVar("UnrelatedTypeVar")
+
+    # Build a generic alias with an unrelated TypeVar as the argument
+    # This is an unusual situation but can happen with complex generic patterns
+    @dataclass(slots=True, frozen=True)
+    class SimpleGeneric[T]:
+        value: T
+
+    # Create alias with the unrelated TypeVar
+    alias = SimpleGeneric[UnrelatedTypeVar]  # type: ignore[type-arg]
+
+    # Call _build_typevar_map with parent_typevar_map that doesn't contain
+    # the UnrelatedTypeVar - this exercises the "skip" branch
+    parent_map: dict[object, type] = {}  # Empty map, won't contain UnrelatedTypeVar
+    result = _build_typevar_map(alias, parent_typevar_map=parent_map)
+
+    # The UnrelatedTypeVar should be skipped since:
+    # 1. It's a TypeVar but not in parent_map
+    # 2. It's not a concrete type
+    # 3. get_origin() returns None for TypeVars
+    assert result == {}
+
+
+def test_parse_deeply_nested_generic_with_alias() -> None:
+    """Deeply nested generic dataclass parsing with generic alias."""
+    inner = _InnerPayload(message="deep", priority=99)
+    middle = _GenericWrapper(payload=inner, metadata="mid")
+    outer = _NestedGenericWrapper(child=middle)
+
+    serialized = dump(outer)
+
+    # Round-trip with fully specified generic alias
+    restored = parse(_NestedGenericWrapper[_GenericWrapper[_InnerPayload]], serialized)
+
+    assert isinstance(restored, _NestedGenericWrapper)
+    assert isinstance(restored.child, _GenericWrapper)
+    assert isinstance(restored.child.payload, _InnerPayload)
+    assert restored.child.payload.message == "deep"
+    assert restored.child.payload.priority == 99
+    assert restored.child.metadata == "mid"
+
+
+def test_parse_nested_dataclass_with_extra_forbid() -> None:
+    """Nested dataclass parsing works with extra='forbid'."""
+    inner = _InnerPayload(message="test", priority=1)
+    wrapper = _ConcreteWrapper(nested=inner)
+
+    serialized = dump(wrapper)
+
+    # Parse with extra="forbid" - should work since no extra fields
+    restored = parse(_ConcreteWrapper, serialized, extra="forbid")
+
+    assert isinstance(restored, _ConcreteWrapper)
+    assert isinstance(restored.nested, _InnerPayload)
+    assert restored.nested.message == "test"
 
 
 def test_schema_reflects_types_constraints_and_aliases() -> None:

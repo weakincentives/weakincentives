@@ -36,14 +36,11 @@ from uuid import UUID
 from ..types import JSONValue
 from ._utils import (
     _UNION_TYPE,
-    TYPE_REF_KEY,
     _AnyType,
     _apply_constraints,
     _merge_annotated_meta,
     _ParseConfig,
-    _resolve_type_identifier,
     _set_extras,
-    _type_identifier,
 )
 
 # typing.Union origin (for Optional[X] and Union[X, Y] constructs from type aliases)
@@ -243,6 +240,40 @@ def _coerce_primitive(
     return _apply_constraints(coerced_value, merged_meta, path)
 
 
+def _build_nested_config(base_type: object, config: _ParseConfig) -> _ParseConfig:
+    """Build config with typevar_map for nested generic type parsing.
+
+    Resolves TypeVar arguments through the parent's typevar_map to support
+    nested generics like Outer[int] containing Inner[T] where T is Outer's param.
+    """
+    origin = get_origin(base_type)
+    if origin is None:
+        return config
+    nested_typevar_map = _build_typevar_map(
+        cast(type[object], base_type), parent_typevar_map=config.typevar_map
+    )
+    if not nested_typevar_map:  # pragma: no cover - always true for PEP 695 generics
+        return config
+    return _ParseConfig(
+        extra=config.extra,
+        coerce=config.coerce,
+        case_insensitive=config.case_insensitive,
+        alias_generator=config.alias_generator,
+        aliases=config.aliases,
+        typevar_map=nested_typevar_map,
+    )
+
+
+def _format_nested_error(error: Exception, path: str) -> str:
+    """Format error message with proper path prefix."""
+    message = str(error)
+    if ":" in message:
+        prefix, suffix = message.split(":", 1)
+        if " " not in prefix:
+            return f"{path}.{prefix}:{suffix}"
+    return f"{path}: {message}"
+
+
 def _coerce_dataclass(
     value: object,
     base_type: object,
@@ -250,35 +281,27 @@ def _coerce_dataclass(
     path: str,
     config: _ParseConfig,
 ) -> object:
-    if not dataclasses.is_dataclass(base_type):
+    # Handle generic aliases like MyClass[int] - extract the origin class
+    origin = get_origin(base_type)
+    target_type = origin if origin is not None else base_type
+
+    if not dataclasses.is_dataclass(target_type):
         return _NOT_HANDLED
-    dataclass_type = base_type if isinstance(base_type, type) else type(base_type)
+
+    dataclass_type = target_type if isinstance(target_type, type) else type(target_type)
     if isinstance(value, dataclass_type):
         return _apply_constraints(value, merged_meta, path)
     if not isinstance(value, Mapping):
         type_name = getattr(dataclass_type, "__name__", type(dataclass_type).__name__)
         raise TypeError(f"{path}: expected mapping for dataclass {type_name}")
+
+    nested_data = cast(Mapping[str, object], value)
+    nested_config = _build_nested_config(base_type, config)
+
     try:
-        parsed = parse(
-            dataclass_type,
-            cast(Mapping[str, object], value),
-            extra=config.extra,
-            coerce=config.coerce,
-            case_insensitive=config.case_insensitive,
-            alias_generator=config.alias_generator,
-            aliases=config.aliases,
-        )
+        parsed = _parse_dataclass(dataclass_type, nested_data, config=nested_config)
     except (TypeError, ValueError) as error:
-        message = str(error)
-        if ":" in message:
-            prefix, suffix = message.split(":", 1)
-            if " " not in prefix:
-                message = f"{path}.{prefix}:{suffix}"
-            else:
-                message = f"{path}: {message}"
-        else:
-            message = f"{path}: {message}"
-        raise type(error)(message) from error
+        raise type(error)(_format_nested_error(error, path)) from error
     return _apply_constraints(parsed, merged_meta, path)
 
 
@@ -451,6 +474,74 @@ def _coerce_bool(
     raise TypeError(f"{path}: expected bool")
 
 
+def _is_typevar(typ: object) -> bool:
+    """Check if a type is a TypeVar (unresolved generic parameter)."""
+    from typing import TypeVar
+
+    return isinstance(typ, TypeVar)
+
+
+def _resolve_string_type(type_str: str) -> object:
+    """Resolve a string type annotation to an actual type without eval().
+
+    Only resolves safe, well-known types from builtins and typing module.
+    Returns object for unresolvable types (e.g., TypeVar names).
+    """
+    import builtins
+    import typing
+    from typing import TypeVar
+
+    # Try builtins first (str, int, float, bool, list, dict, etc.)
+    builtin_type = getattr(builtins, type_str, None)
+    if builtin_type is not None and isinstance(builtin_type, type):
+        return builtin_type
+
+    # Try typing module (Any, Optional, etc.) but exclude TypeVars
+    # (typing module has common TypeVar names like T, K, V which we shouldn't use)
+    typing_type = getattr(typing, type_str, None)
+    if typing_type is not None and not isinstance(typing_type, TypeVar):
+        return typing_type
+
+    # Unresolvable - return object as fallback
+    # This handles TypeVar names and complex annotations
+    return object
+
+
+def _get_field_types(cls: type[object]) -> dict[str, object]:
+    """Get field types for a dataclass, handling generic classes safely.
+
+    Tries get_type_hints() first with TypeVars from __type_params__ in localns.
+    If that fails (NameError on generic classes with postponed annotations),
+    falls back to resolving field types from dataclasses.fields() with safe
+    name resolution (no eval()).
+
+    For TypeVar string annotations (like 'T'), preserves the TypeVar object
+    from __type_params__ so that TypeVar error handling still works.
+    """
+    # Build mapping of TypeVar names for PEP 695 generic classes
+    # This allows get_type_hints() to resolve annotations like Inner[T]
+    type_params = getattr(cls, "__type_params__", ())
+    localns = {tp.__name__: tp for tp in type_params}
+
+    try:
+        return get_type_hints(cls, localns=localns, include_extras=True)
+    except NameError:  # pragma: no cover - defensive fallback for edge cases
+        # Generic class with unresolved type parameters (and future annotations)
+        # Fall back to safe resolution from dataclass fields.
+        # Note: When get_type_hints fails with NameError, it's because
+        # from __future__ import annotations is used, so all field.type
+        # values are strings.
+        result: dict[str, object] = {}
+        for field in dataclasses.fields(cls):
+            type_str = field.type if isinstance(field.type, str) else str(field.type)
+            # Check if this is a TypeVar name - preserve the TypeVar
+            if type_str in localns:
+                result[field.name] = localns[type_str]
+            else:
+                result[field.name] = _resolve_string_type(type_str)
+        return result
+
+
 def _coerce_to_type(
     value: object,
     typ: object,
@@ -460,8 +551,21 @@ def _coerce_to_type(
 ) -> object:
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
 
+    # Resolve TypeVar from typevar_map (populated from generic alias type args)
+    if _is_typevar(base_type) and base_type in config.typevar_map:
+        base_type = config.typevar_map[base_type]
+
     if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
+
+    # Check for unresolved TypeVar - this means the caller didn't provide
+    # a fully specialized generic alias
+    if _is_typevar(base_type):
+        msg = (
+            f"{path}: cannot parse TypeVar field - use a fully specialized "
+            f"generic type like MyClass[ConcreteType] instead of MyClass"
+        )
+        raise TypeError(msg)
 
     coercers = (
         lambda: _coerce_union(value, base_type, merged_meta, path, config),
@@ -612,60 +716,81 @@ def _run_validation_hooks(instance: object) -> None:
         _ = post_validator()
 
 
-def _resolve_type_from_payload(
-    mapping_data: Mapping[str, object], type_key: str
-) -> tuple[type[object], Mapping[str, object]]:
-    """Resolve dataclass type from payload type_key reference."""
-    type_identifier = mapping_data[type_key]
-    if not isinstance(type_identifier, str):
-        raise TypeError(f"{type_key} must be a string type reference")
-    try:
-        resolved_cls = _resolve_type_identifier(type_identifier)
-    except (TypeError, ValueError) as error:
-        raise TypeError(f"{type_key}: {error}") from error
-    if not dataclasses.is_dataclass(resolved_cls):
-        raise TypeError(f"{type_key}: resolved type is not a dataclass")
-    payload = cast(
-        Mapping[str, object],
-        {key: value for key, value in mapping_data.items() if key != type_key},
-    )
-    return resolved_cls, payload
+def _build_typevar_map(
+    cls: type[object],
+    *,
+    parent_typevar_map: Mapping[object, type] | None = None,
+) -> dict[object, type]:
+    """Build a mapping from TypeVar to concrete type for a generic alias.
+
+    For a generic alias like `MyClass[str, int]`, this maps each TypeVar
+    from MyClass.__type_params__ to the corresponding type argument.
+
+    If parent_typevar_map is provided, TypeVar arguments are resolved through
+    it. This supports nested generics like Outer[int] containing Inner[T]
+    where T is Outer's TypeVar - the parent map resolves T to int.
+    """
+    origin = get_origin(cls)
+    if origin is None:
+        # Not a generic alias, no typevar mapping needed
+        return {}
+
+    type_args = get_args(cls)
+    if not type_args:
+        return {}  # pragma: no cover - defensive
+
+    # Get TypeVar parameters from the origin class
+    type_params = getattr(origin, "__type_params__", ())
+    if not type_params:
+        return {}  # pragma: no cover - defensive for typing module generics
+
+    # Map each TypeVar to its concrete type argument
+    typevar_map: dict[object, type] = {}
+    for param, arg in zip(type_params, type_args, strict=False):
+        # Resolve TypeVar args through parent's map (for nested generics)
+        if _is_typevar(arg) and parent_typevar_map and arg in parent_typevar_map:
+            typevar_map[param] = parent_typevar_map[arg]
+        elif isinstance(arg, type):
+            typevar_map[param] = arg
+        elif get_origin(arg) is not None:
+            # arg is itself a generic alias (e.g., list[str])
+            # Store it for recursive resolution
+            typevar_map[param] = arg
+
+    return typevar_map
 
 
-def _resolve_target_dataclass[T](
-    cls: type[T] | None,
+def _parse_dataclass[T](
+    cls: type[T],
     mapping_data: Mapping[str, object],
     *,
-    allow_dataclass_type: bool,
-    type_key: str,
-) -> tuple[type[T], Mapping[str, object]]:
-    target_cls: type[T] | None = cls
-    referenced_cls: type[object] | None = None
-    payload = mapping_data
+    config: _ParseConfig,
+) -> T:
+    """Internal parse implementation that takes pre-built config."""
+    # Resolve generic alias to concrete class
+    origin = get_origin(cls)
+    target_cls = cast(type[T], origin if origin is not None else cls)
 
-    if allow_dataclass_type and type_key in mapping_data:
-        referenced_cls, payload = _resolve_type_from_payload(mapping_data, type_key)
+    type_hints = _get_field_types(target_cls)
+    kwargs, used_keys = _collect_field_kwargs(
+        target_cls,
+        mapping_data,
+        type_hints,
+        config,
+        aliases=config.aliases,
+        alias_generator=config.alias_generator,
+    )
 
-    if target_cls is None:
-        if referenced_cls is None:
-            raise TypeError("parse() requires a dataclass type")
-        target_cls = cast(type[T], referenced_cls)
+    instance = target_cls(**kwargs)
 
-    if not dataclasses.is_dataclass(target_cls) or not isinstance(target_cls, type):
-        raise TypeError("parse() requires a dataclass type")
+    _apply_extra_fields(instance, mapping_data, used_keys, config.extra)
+    _run_validation_hooks(instance)
 
-    if referenced_cls is not None and referenced_cls is not target_cls:
-        expected = _type_identifier(target_cls)
-        found = _type_identifier(referenced_cls)
-        raise TypeError(
-            f"{type_key} does not match target dataclass {expected}; found {found}"
-        )
-
-    return target_cls, payload
+    return instance
 
 
 def parse[T](
-    cls: type[T] | None,
+    cls: type[T],
     data: Mapping[str, object] | object,
     *,
     extra: Literal["ignore", "forbid", "allow"] = "ignore",
@@ -673,48 +798,40 @@ def parse[T](
     case_insensitive: bool = False,
     alias_generator: Callable[[str], str] | None = None,
     aliases: Mapping[str, str] | None = None,
-    allow_dataclass_type: bool = False,
-    type_key: str = TYPE_REF_KEY,
 ) -> T:
-    """Parse a mapping into a dataclass instance."""
+    """Parse a mapping into a dataclass instance.
 
+    Supports generic dataclasses via generic aliases. For example:
+        parse(MyGenericClass[str], data)
+
+    The type arguments are used to resolve TypeVar fields during parsing.
+    """
     if not isinstance(data, Mapping):
         raise TypeError("parse() requires a mapping input")
     if extra not in {"ignore", "forbid", "allow"}:
         raise ValueError("extra must be one of 'ignore', 'forbid', or 'allow'")
 
-    mapping_data = cast(Mapping[str, object], data)
-    target_cls, mapping_data = _resolve_target_dataclass(
-        cls,
-        mapping_data,
-        allow_dataclass_type=allow_dataclass_type,
-        type_key=type_key,
-    )
+    # Resolve generic alias to concrete class
+    origin = get_origin(cls)
+    target_cls = cast(type[T], origin if origin is not None else cls)
 
+    if not dataclasses.is_dataclass(target_cls) or not isinstance(target_cls, type):
+        raise TypeError("parse() requires a dataclass type")
+
+    # Build TypeVar mapping from generic alias type arguments
+    typevar_map = _build_typevar_map(cls)
+
+    mapping_data = cast(Mapping[str, object], data)
     config = _ParseConfig(
         extra=extra,
         coerce=coerce,
         case_insensitive=case_insensitive,
         alias_generator=alias_generator,
         aliases=aliases,
+        typevar_map=typevar_map,
     )
 
-    type_hints = get_type_hints(target_cls, include_extras=True)
-    kwargs, used_keys = _collect_field_kwargs(
-        target_cls,
-        mapping_data,
-        type_hints,
-        config,
-        aliases=aliases,
-        alias_generator=alias_generator,
-    )
-
-    instance = target_cls(**kwargs)
-
-    _apply_extra_fields(instance, mapping_data, used_keys, extra)
-    _run_validation_hooks(instance)
-
-    return instance
+    return _parse_dataclass(target_cls, mapping_data, config=config)
 
 
 __all__ = ["parse"]

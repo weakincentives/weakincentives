@@ -24,7 +24,7 @@ from uuid import UUID
 
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
-from ...serde import TYPE_REF_KEY, dump, parse, resolve_type_identifier, type_identifier
+from ...serde import dump, parse, resolve_type_identifier, type_identifier
 from ...types import JSONValue
 from ...types.dataclass import SupportsDataclass
 from ._slice_types import SessionSlice, SessionSliceType
@@ -421,15 +421,7 @@ class Snapshot:
             item_type = _infer_item_type(slice_type, values)
             try:
                 serialized_items = [
-                    cast(
-                        Mapping[str, JSONValue],
-                        dump(
-                            value,
-                            include_dataclass_type=True,
-                            type_key=TYPE_REF_KEY,
-                        ),
-                    )
-                    for value in values
+                    cast(Mapping[str, JSONValue], dump(value)) for value in values
                 ]
             except Exception as error:
                 msg = f"Failed to serialize slice {slice_type.__qualname__}"
@@ -479,12 +471,7 @@ class Snapshot:
         restored_items: list[SupportsDataclass] = []
         for item_mapping in entry.items:
             try:
-                restored_item = parse(
-                    item_type,
-                    item_mapping,
-                    allow_dataclass_type=True,
-                    type_key=TYPE_REF_KEY,
-                )
+                restored_item = parse(item_type, item_mapping)
             except Exception as error:
                 raise SnapshotRestoreError(
                     f"Failed to restore slice {slice_type.__qualname__}"

@@ -360,7 +360,6 @@ assert payload == {"name": "login", "timestamp": "2024-01-01T10:00:00"}
 | `by_alias` | `True` | Use field aliases in output |
 | `exclude_none` | `False` | Omit fields with `None` values |
 | `computed` | `False` | Include computed properties |
-| `include_dataclass_type` | `False` | Add `__type__` for polymorphic deserialization |
 | `alias_generator` | `None` | Function to transform field names |
 
 ### Computed Properties
@@ -432,36 +431,88 @@ user = User(name="Ada", age=39)
 clone(user, age=-1)  # Raises ValueError
 ```
 
-## Polymorphic Serialization
+## Generic Dataclass Serialization
 
-For union types, include `__type__` to enable round-trip serialization:
+Generic dataclasses like `Wrapper[T]` are parsed using **generic alias** syntax.
+The type arguments are used to resolve TypeVar fields during parsing:
 
 ```python nocheck
 from dataclasses import dataclass
 from weakincentives.serde import dump, parse
 
 @dataclass
-class Dog:
-    breed: str
+class Wrapper[T]:
+    payload: T
 
 @dataclass
-class Cat:
-    indoor: bool
+class Data:
+    value: int
 
-# Serialize with type reference
-dog = Dog(breed="labrador")
-payload = dump(dog, include_dataclass_type=True)
-assert payload == {
-    "__type__": "mymodule:Dog",
-    "breed": "labrador"
-}
+# Serialize - no special options needed
+wrapper = Wrapper(payload=Data(value=42))
+serialized = dump(wrapper)
+# {"payload": {"value": 42}}
 
-# Parse without knowing the type
-parsed = parse(None, payload, allow_dataclass_type=True)
-assert isinstance(parsed, Dog)
+# Parse with generic alias to specify the type parameter
+restored = parse(Wrapper[Data], serialized)
+assert isinstance(restored, Wrapper)
+assert isinstance(restored.payload, Data)
+assert restored.payload.value == 42
 ```
 
-The `__type__` format is `module:qualname` (e.g., `myapp.models:User`).
+This works because:
+
+1. `parse(Wrapper[Data], data)` extracts the type argument (`Data`) from the
+   generic alias
+1. TypeVar fields (`payload: T`) are resolved to the concrete type during parsing
+1. Nested dataclasses are recursively parsed with the resolved types
+
+Parsing a generic dataclass without type arguments raises a helpful error:
+
+```python nocheck
+# Raises: TypeError("payload: cannot parse TypeVar field - use a fully
+#         specialized generic type like MyClass[ConcreteType] instead of MyClass")
+parse(Wrapper, {"payload": {"value": 42}})
+```
+
+### Nested Generic Types
+
+Deeply nested generics work as expected:
+
+```python nocheck
+@dataclass
+class Inner[T]:
+    value: T
+
+@dataclass
+class Outer[T]:
+    inner: T
+
+# Fully specify all type parameters
+data = {"inner": {"value": 42}}
+result = parse(Outer[Inner[int]], data)
+assert result.inner.value == 42
+```
+
+### Type Identification Utilities
+
+For cases where you need to store type information separately (e.g., in
+databases or message queues), use the type identifier utilities:
+
+```python nocheck
+from weakincentives.serde import type_identifier, resolve_type_identifier
+
+# Get a string identifier for a type
+identifier = type_identifier(Data)  # "mymodule:Data"
+
+# Resolve the identifier back to a type
+resolved = resolve_type_identifier(identifier)
+assert resolved is Data
+```
+
+These are useful when building systems that need to store and restore types
+dynamically, but the serde functions themselves require types to be known
+at parse time.
 
 ## JSON Schema Generation
 

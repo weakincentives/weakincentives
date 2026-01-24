@@ -155,6 +155,7 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     restored_executed = restored_executed_slice[0]
     assert restored_executed.event_id == executed_event.event_id
     assert restored_executed.result["prompt_name"] == "example"
+    # Nested dataclasses are serialized without __type__ (type is known from context)
     assert restored_executed.result["output"] == {"text": "complete"}
 
     restored_tool = restored_tool_slice[0]
