@@ -367,8 +367,8 @@ def _extract_tool_call_from_entry(
     success_val: Any = ctx.get("success")
     if success_val is not None:
         success = 1 if success_val else 0
-    elif ctx.get("error"):
-        # Explicit error field with value indicates failure
+    elif "error" in ctx and ctx.get("error"):
+        # Explicit error field with truthy value indicates failure
         success = 0
     else:
         success = 1
