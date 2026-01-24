@@ -163,17 +163,19 @@ def _json_to_sql_value(value: JSONValue) -> object:
 
 @pure
 def _is_tool_event(event: str) -> bool:
-    """Check if an event string represents a tool call event.
+    """Check if an event string represents a completed tool call event.
 
-    Matches events like:
-    - tool.execution.start, tool.execution.complete (actual log events)
-    - tool.execute.*, tool.call.*, tool.result.* (alternative formats)
+    Only matches completion events (not start events) since those contain
+    the full tool call data including result and duration.
     """
     event_lower = event.lower()
+    # Skip start events - they lack result/duration data
+    if "start" in event_lower:
+        return False
     return "tool" in event_lower and (
         "call" in event_lower
         or "result" in event_lower
-        or "execut" in event_lower  # matches both "execute" and "execution"
+        or "execut" in event_lower  # matches "execute" and "execution"
     )
 
 

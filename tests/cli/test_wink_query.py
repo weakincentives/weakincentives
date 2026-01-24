@@ -949,15 +949,15 @@ class TestIsToolEvent:
     def test_tool_execution_events(self) -> None:
         from weakincentives.cli.query import _is_tool_event
 
-        # Actual event names from tool_executor
-        assert _is_tool_event("tool.execution.start") is True
+        # Only complete events are matched (start events lack result/duration)
+        assert _is_tool_event("tool.execution.start") is False
         assert _is_tool_event("tool.execution.complete") is True
 
     def test_tool_call_event(self) -> None:
         from weakincentives.cli.query import _is_tool_event
 
-        # Alternative event formats
-        assert _is_tool_event("tool.call.start") is True
+        # Start events are excluded to avoid incomplete records
+        assert _is_tool_event("tool.call.start") is False
         assert _is_tool_event("tool.result.end") is True
 
     def test_not_tool_event(self) -> None:
