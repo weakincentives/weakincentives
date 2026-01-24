@@ -10,7 +10,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dataclass parsing helpers."""
+"""Dataclass parsing helpers.
+
+Security Note
+-------------
+The type resolution logic in this module (particularly _resolve_generic_string_type
+and _get_field_types) should only be used with trusted code and trusted type
+references that are static at implementation time. The AST-based type resolution
+looks up types from module namespaces and could potentially resolve to unintended
+types if untrusted type annotation strings are processed. Do not use parse() with
+dynamically generated or user-provided type annotations.
+"""
 
 # pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPossiblyUnboundVariable=false, reportPrivateUsage=false
 
@@ -481,11 +491,11 @@ def _is_typevar(typ: object) -> bool:
     return isinstance(typ, TypeVar)
 
 
-def _resolve_string_type(type_str: str) -> object:
-    """Resolve a string type annotation to an actual type without eval().
+def _resolve_simple_type(type_str: str) -> object | None:
+    """Resolve a simple type name to an actual type.
 
-    Only resolves safe, well-known types from builtins and typing module.
-    Returns object for unresolvable types (e.g., TypeVar names).
+    Looks up type names in builtins and typing module only.
+    Returns None if not found (does not fall back to object).
     """
     import builtins
     import typing
@@ -502,9 +512,173 @@ def _resolve_string_type(type_str: str) -> object:
     if typing_type is not None and not isinstance(typing_type, TypeVar):
         return typing_type
 
-    # Unresolvable - return object as fallback
-    # This handles TypeVar names and complex annotations
-    return object
+    return None
+
+
+def _resolve_name(
+    name: str,
+    localns: dict[str, object],
+    module_ns: dict[str, object],
+) -> object:
+    """Resolve a simple type name from namespaces."""
+    # Check localns first (TypeVars)
+    if name in localns:
+        return localns[name]
+    # Check module namespace (for class definitions like Sample)
+    if name in module_ns:
+        return module_ns[name]
+    # Try builtins/typing
+    simple = _resolve_simple_type(name)
+    return simple if simple is not None else object
+
+
+def _resolve_subscript(
+    base_type: object,
+    type_args: tuple[object, ...],
+) -> object:
+    """Resolve a subscripted generic type like Container[T].
+
+    For single type arguments, passes the type directly (not as a tuple)
+    since typing special forms like Optional expect a single type.
+    For multiple arguments, passes them as a tuple.
+    """
+    if base_type is object:
+        return object
+    # Single arg: pass directly (e.g., Optional[str] not Optional[(str,)])
+    # Multiple args: pass as tuple (e.g., Dict[str, int])
+    subscript_arg = type_args[0] if len(type_args) == 1 else type_args
+    try:
+        return base_type[subscript_arg]  # pyright: ignore[reportIndexIssue]
+    except TypeError:
+        return base_type
+
+
+def _make_union(left: object, right: object) -> object:
+    """Create a Union type at runtime from two types using the | operator."""
+    # For type objects, | creates a union at runtime (Python 3.10+)
+    # This works because types support the __or__ operator for creating unions
+    return left | right  # pyright: ignore[reportOperatorIssue]  # ty: ignore[unsupported-operator]
+
+
+class _ASTResolver:
+    """Helper class to resolve AST nodes to types with namespace context."""
+
+    __slots__ = ("localns", "module_ns")
+
+    def __init__(  # pyright: ignore[reportMissingSuperCall]
+        self, localns: dict[str, object], module_ns: dict[str, object]
+    ) -> None:
+        self.localns = localns
+        self.module_ns = module_ns
+
+    @staticmethod
+    def _is_literal_type(base: object) -> bool:
+        """Check if base type is typing.Literal."""
+        from typing import Literal, get_origin
+
+        return base is Literal or get_origin(base) is Literal
+
+    def _resolve_subscript_node(self, node: object, *, in_literal: bool) -> object:
+        """Resolve ast.Subscript nodes like Container[T] or dict[str, int]."""
+        import ast
+
+        if not isinstance(node, ast.Subscript):  # pragma: no cover - type guard
+            return object
+        base = self._resolve(node.value, in_literal=False)
+        # Arguments to Literal should be preserved as values, not resolved as types
+        args_in_literal = self._is_literal_type(base)
+        if isinstance(node.slice, ast.Tuple):
+            args = tuple(
+                self._resolve(elt, in_literal=args_in_literal)
+                for elt in node.slice.elts
+            )
+        else:
+            args = (self._resolve(node.slice, in_literal=args_in_literal),)
+        return _resolve_subscript(base, args)
+
+    @staticmethod
+    def _resolve_unary_node(node: object) -> object | None:
+        """Resolve ast.UnaryOp for signed literals like -1 or +1."""
+        import ast
+
+        if not isinstance(node, ast.UnaryOp) or not isinstance(
+            node.operand, ast.Constant
+        ):
+            return None
+        value = node.operand.value
+        if isinstance(node.op, ast.USub):
+            return -value  # pyright: ignore[reportOperatorIssue,reportOptionalOperand]  # ty: ignore[unsupported-operator]
+        if isinstance(node.op, ast.UAdd):
+            return +value  # pyright: ignore[reportOperatorIssue,reportOptionalOperand]  # ty: ignore[unsupported-operator]
+        return None  # pragma: no cover - only USub/UAdd are used in type annotations
+
+    def _resolve(self, node: object, *, in_literal: bool) -> object:
+        """Recursively resolve an AST node to a type."""
+        import ast
+
+        if isinstance(node, ast.Name):
+            # Inside Literal, names like True/False are resolved normally
+            return _resolve_name(node.id, self.localns, self.module_ns)
+        if isinstance(node, ast.Subscript):
+            return self._resolve_subscript_node(node, in_literal=in_literal)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return _make_union(
+                self._resolve(node.left, in_literal=False),
+                self._resolve(node.right, in_literal=False),
+            )
+        if isinstance(node, ast.Constant):
+            # Inside Literal[...], preserve constant values as-is
+            if in_literal:
+                return node.value
+            # None constant in type context (e.g., T | None) should be NoneType
+            if node.value is None:
+                return type(None)
+            # Ellipsis in type context (e.g., tuple[int, ...]) must be preserved
+            if node.value is ...:
+                return ...
+            # Outside Literal, other constants are unresolvable - fall back to object
+            return object
+        # Handle signed literals (always preserve value, used in Literal[-1])
+        signed = self._resolve_unary_node(node)
+        return signed if signed is not None else object
+
+    def resolve(self, node: object) -> object:
+        """Public entry point - resolve starting outside Literal context."""
+        return self._resolve(node, in_literal=False)
+
+
+def _resolve_generic_string_type(
+    type_str: str,
+    localns: dict[str, object],
+    module_ns: dict[str, object],
+) -> object:
+    """Resolve a string type annotation using AST parsing.
+
+    Handles complex generic type expressions like 'Sample[InputT, ExpectedT]'
+    by parsing the string into an AST and resolving each component.
+
+    Security Warning:
+        This function looks up types from module namespaces based on string
+        names. Only use with trusted type annotation strings that are static
+        at implementation time. Do not pass user-provided or dynamically
+        generated type strings.
+
+    Args:
+        type_str: The string type annotation to resolve.
+        localns: Local namespace containing TypeVars from __type_params__.
+        module_ns: Module namespace for looking up class definitions.
+
+    Returns:
+        The resolved type, or object if unresolvable.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(type_str, mode="eval")
+        return _ASTResolver(localns, module_ns).resolve(tree.body)
+    except SyntaxError:
+        simple = _resolve_simple_type(type_str)
+        return simple if simple is not None else object
 
 
 def _get_field_types(cls: type[object]) -> dict[str, object]:
@@ -512,25 +686,35 @@ def _get_field_types(cls: type[object]) -> dict[str, object]:
 
     Tries get_type_hints() first with TypeVars from __type_params__ in localns.
     If that fails (NameError on generic classes with postponed annotations),
-    falls back to resolving field types from dataclasses.fields() with safe
-    name resolution (no eval()).
+    falls back to resolving field types from dataclasses.fields() using AST
+    parsing to handle complex generic type annotations.
 
     For TypeVar string annotations (like 'T'), preserves the TypeVar object
     from __type_params__ so that TypeVar error handling still works.
     """
+    import sys
+
     # Build mapping of TypeVar names for PEP 695 generic classes
     # This allows get_type_hints() to resolve annotations like Inner[T]
     type_params = getattr(cls, "__type_params__", ())
-    localns = {tp.__name__: tp for tp in type_params}
+    localns: dict[str, object] = {tp.__name__: tp for tp in type_params}
 
     try:
         return get_type_hints(cls, localns=localns, include_extras=True)
     except NameError:  # pragma: no cover - defensive fallback for edge cases
         # Generic class with unresolved type parameters (and future annotations)
-        # Fall back to safe resolution from dataclass fields.
+        # Fall back to AST-based resolution from dataclass fields.
         # Note: When get_type_hints fails with NameError, it's because
         # from __future__ import annotations is used, so all field.type
         # values are strings.
+
+        # Get the module namespace for resolving types defined in the same module
+        module_ns: dict[str, object] = {}
+        module_name = getattr(cls, "__module__", None)
+        if module_name and module_name in sys.modules:
+            module = sys.modules[module_name]
+            module_ns = vars(module)
+
         result: dict[str, object] = {}
         for field in dataclasses.fields(cls):
             type_str = field.type if isinstance(field.type, str) else str(field.type)
@@ -538,7 +722,10 @@ def _get_field_types(cls: type[object]) -> dict[str, object]:
             if type_str in localns:
                 result[field.name] = localns[type_str]
             else:
-                result[field.name] = _resolve_string_type(type_str)
+                # Use AST-based resolution for complex generic types
+                result[field.name] = _resolve_generic_string_type(
+                    type_str, localns, module_ns
+                )
         return result
 
 
