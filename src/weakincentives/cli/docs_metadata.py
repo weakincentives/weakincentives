@@ -25,6 +25,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "DBC": "DbC decorators, exhaustiveness checking, assert_never patterns",
     "DEBUG_BUNDLE": "Debug bundles, log capture, session snapshots, debug web UI",
     "DLQ": "Dead letter queues, poison message handling, MainLoop/EvalLoop DLQ config",
+    "ELEGANT_ROBUST_DESIGN": "Vision for elegant simplicity with industrial durability",
     "EVALS": "Evaluation framework, datasets, evaluators, session evaluators",
     "EXAMPLES": "Code review agent reference implementation",
     "EXPERIMENTS": "Experiment configuration, A/B testing, prompt overrides, feature flags",
