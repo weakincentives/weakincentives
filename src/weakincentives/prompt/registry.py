@@ -349,7 +349,7 @@ class PromptRegistry:
         self._tool_name_registry: dict[str, SectionPath] = {}
         self._numbering_stack: list[int] = []
 
-    def register_sections(self, sections: Sequence[Section[SupportsDataclass]]) -> None:
+    def register_sections(self, sections: Sequence[Section[Any]]) -> None:
         """Register the provided root sections."""
 
         for section in sections:

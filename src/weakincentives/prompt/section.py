@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
     from ..resources import ResourceRegistry
@@ -52,7 +52,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
     _generic_owner_name: ClassVar[str | None] = "Section"
 
     key: str
-    children: tuple[Section[SupportsDataclass], ...]
+    children: tuple[Section[Any], ...]
 
     def __init__(
         self,
@@ -60,7 +60,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         title: str,
         key: str,
         default_params: SectionParamsT | None = None,
-        children: Sequence[Section[SupportsDataclass]] | None = None,
+        children: Sequence[Section[Any]] | None = None,
         enabled: EnabledPredicate | None = None,
         tools: Sequence[object] | None = None,
         policies: Sequence[ToolPolicy] | None = None,
@@ -88,12 +88,12 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         if self.params_type is None and self.default_params is not None:
             raise TypeError("Section without parameters cannot define default_params.")
 
-        normalized_children: list[Section[SupportsDataclass]] = []
+        normalized_children: list[Section[Any]] = []
         raw_children: Sequence[object] = cast(Sequence[object], children or ())
         for child in raw_children:
             if not isinstance(child, Section):
                 raise TypeError("Section children must be Section instances.")
-            normalized_children.append(cast(Section[SupportsDataclass], child))
+            normalized_children.append(cast(Section[Any], child))
         self.children = tuple(normalized_children)
         self._enabled: NormalizedEnabledPredicate | None = normalize_enabled_predicate(
             enabled, params_type

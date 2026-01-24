@@ -109,10 +109,7 @@ class PromptTemplate[OutputT]:
     key: str
     name: str | None = None
     # Field accepts Section sequence as input and stores SectionNode tuple
-    sections: (
-        Sequence[Section[SupportsDataclass]]
-        | tuple[SectionNode[SupportsDataclass], ...]
-    ) = ()
+    sections: Sequence[Section[Any]] | tuple[SectionNode[SupportsDataclass], ...] = ()
     policies: Sequence[ToolPolicy] = ()
     feedback_providers: Sequence[FeedbackProviderConfig] = ()
     allow_extra_keys: bool = False
@@ -154,7 +151,7 @@ class PromptTemplate[OutputT]:
         ns: str | object = MISSING,
         key: str | object = MISSING,
         name: str | object | None = MISSING,
-        sections: Sequence[Section[SupportsDataclass]]
+        sections: Sequence[Section[Any]]
         | tuple[SectionNode[SupportsDataclass], ...]
         | object
         | None = MISSING,
@@ -174,7 +171,7 @@ class PromptTemplate[OutputT]:
         key_str = cast(str, key)
         name_val = cast(str | None, name) if name is not MISSING else None
         sections_input = (
-            cast(Sequence[Section[SupportsDataclass]] | None, sections)
+            cast(Sequence[Section[Any]] | None, sections)
             if sections is not MISSING
             else None
         )

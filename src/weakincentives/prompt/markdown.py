@@ -41,7 +41,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
         template: str,
         key: str,
         default_params: MarkdownParamsT | None = None,
-        children: Sequence[Section[SupportsDataclass]] | None = None,
+        children: Sequence[Section[Any]] | None = None,
         enabled: Callable[[SupportsDataclass], bool] | None = None,
         tools: Sequence[object] | None = None,
         policies: Sequence[ToolPolicy] | None = None,
@@ -169,7 +169,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
 
     @override
     def clone(self, **kwargs: object) -> Self:
-        cloned_children: list[Section[SupportsDataclass]] = []
+        cloned_children: list[Section[Any]] = []
         for child in self.children:
             if not hasattr(child, "clone"):
                 raise TypeError(
