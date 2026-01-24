@@ -260,11 +260,287 @@ For each `__type__` in session JSONL:
 
 ## Limitations
 
-- Single bundle only
 - SQLite built-in functions only
 - Entire bundle loaded on first query
 - Native tool call content is in nested JSON (use `json_extract()`)
 - Extended thinking content is signature-encoded (not accessible as plaintext)
+
+______________________________________________________________________
+
+## Multi-Bundle Queries
+
+### Purpose
+
+Query across multiple debug bundles as a single logical dataset. Essential for
+eval analysis where results from many runs need aggregation, comparison, and
+pattern detection.
+
+### CLI Extensions
+
+```
+wink query <BUNDLE...> "<SQL>"
+wink query <BUNDLE...> --schema
+wink query --bundles-from <FILE> "<SQL>"
+wink query <DIRECTORY> --glob "*.zip" "<SQL>"
+```
+
+| Option | Description |
+|--------|-------------|
+| `<BUNDLE...>` | One or more bundle paths (space-separated) |
+| `--bundles-from` | Read bundle paths from file (one per line) |
+| `--glob` | Glob pattern for bundle discovery in directory |
+
+### Bundle Resolution
+
+When multiple bundles are specified:
+
+1. Each path is resolved via existing `resolve_bundle_path()` logic
+2. Duplicate bundle IDs are rejected with an error
+3. Bundles with incompatible schema versions are rejected
+
+```bash
+# Explicit list
+wink query ./run1.zip ./run2.zip ./run3.zip "SELECT * FROM errors"
+
+# Directory with glob
+wink query ./eval-results/ --glob "debug_bundle_*.zip" "SELECT * FROM metrics"
+
+# From file (useful for large eval runs)
+wink query --bundles-from ./bundle-list.txt "SELECT * FROM tool_calls"
+```
+
+### Schema Additions
+
+#### `bundles` Table
+
+Master table listing all bundles in the query set:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `bundle_id` | TEXT | Unique bundle identifier (PK) |
+| `bundle_path` | TEXT | Resolved path to bundle file |
+| `bundle_idx` | INTEGER | 0-based index in load order |
+| `status` | TEXT | 'success' or 'error' |
+| `created_at` | TEXT | ISO-8601 timestamp |
+| `prompt_ns` | TEXT | Prompt namespace |
+| `prompt_key` | TEXT | Prompt key |
+| `input_tokens` | INTEGER | Total input tokens |
+| `output_tokens` | INTEGER | Total output tokens |
+| `total_ms` | INTEGER | Total execution time |
+
+#### Bundle Identification Columns
+
+All existing tables gain a `bundle_id` column as first column:
+
+```sql
+-- Single bundle (unchanged)
+SELECT tool_name, COUNT(*) FROM tool_calls GROUP BY tool_name
+
+-- Multi-bundle: group by bundle
+SELECT bundle_id, tool_name, COUNT(*)
+FROM tool_calls
+GROUP BY bundle_id, tool_name
+
+-- Multi-bundle: aggregate across all
+SELECT tool_name, COUNT(*), AVG(duration_ms)
+FROM tool_calls
+GROUP BY tool_name
+```
+
+Primary keys become composite: `(bundle_id, <existing_pk>)`.
+
+### Aggregate Views
+
+New views for cross-bundle analysis:
+
+| View | Description |
+|------|-------------|
+| `bundle_summary` | One row per bundle with key metrics |
+| `bundle_errors` | Error counts and types per bundle |
+| `bundle_tools` | Tool usage aggregated per bundle |
+| `bundle_comparison` | Side-by-side metrics for quick comparison |
+
+#### `bundle_summary` View
+
+```sql
+CREATE VIEW bundle_summary AS
+SELECT
+    b.bundle_id,
+    b.status,
+    b.prompt_key,
+    b.input_tokens,
+    b.output_tokens,
+    b.total_ms,
+    (SELECT COUNT(*) FROM tool_calls t WHERE t.bundle_id = b.bundle_id) as tool_count,
+    (SELECT COUNT(*) FROM errors e WHERE e.bundle_id = b.bundle_id) as error_count,
+    (SELECT COUNT(*) FROM tool_calls t WHERE t.bundle_id = b.bundle_id AND t.success = 0) as failed_tools
+FROM bundles b
+```
+
+#### `bundle_comparison` View
+
+```sql
+CREATE VIEW bundle_comparison AS
+SELECT
+    bundle_id,
+    status,
+    prompt_key,
+    input_tokens + output_tokens as total_tokens,
+    total_ms,
+    ROUND(output_tokens * 1000.0 / NULLIF(total_ms, 0), 1) as tokens_per_sec,
+    (SELECT COUNT(*) FROM errors e WHERE e.bundle_id = b.bundle_id) as errors
+FROM bundles b
+ORDER BY created_at
+```
+
+### Multi-Bundle Schema Output
+
+```bash
+wink query ./run1.zip ./run2.zip --schema
+```
+
+```json
+{
+  "bundle_count": 2,
+  "bundles": [
+    {"bundle_id": "abc123", "status": "success", "created_at": "..."},
+    {"bundle_id": "def456", "status": "error", "created_at": "..."}
+  ],
+  "tables": [...],
+  "hints": {
+    "json_extraction": [...],
+    "common_queries": {...},
+    "multi_bundle_queries": {
+      "success_rate": "SELECT COUNT(*) FILTER (WHERE status = 'success') * 100.0 / COUNT(*) as pct FROM bundles",
+      "compare_bundles": "SELECT * FROM bundle_comparison",
+      "error_patterns": "SELECT error_type, COUNT(*) as occurrences, COUNT(DISTINCT bundle_id) as affected_bundles FROM errors GROUP BY error_type ORDER BY occurrences DESC",
+      "tool_performance": "SELECT tool_name, COUNT(*) as calls, AVG(duration_ms) as avg_ms, COUNT(DISTINCT bundle_id) as used_in_bundles FROM tool_calls GROUP BY tool_name"
+    }
+  }
+}
+```
+
+### Example Multi-Bundle Queries
+
+```sql
+-- Success/failure rate across eval
+SELECT
+    status,
+    COUNT(*) as count,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM bundles), 1) as pct
+FROM bundles
+GROUP BY status
+
+-- Most common errors across runs
+SELECT error_type, message, COUNT(*) as occurrences
+FROM errors
+GROUP BY error_type, message
+ORDER BY occurrences DESC
+LIMIT 10
+
+-- Tool reliability
+SELECT
+    tool_name,
+    COUNT(*) as total_calls,
+    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successes,
+    ROUND(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) as success_rate
+FROM tool_calls
+GROUP BY tool_name
+HAVING COUNT(*) >= 5
+ORDER BY success_rate ASC
+
+-- Compare token usage by prompt variant
+SELECT
+    prompt_key,
+    COUNT(*) as runs,
+    AVG(input_tokens) as avg_input,
+    AVG(output_tokens) as avg_output,
+    AVG(total_ms) as avg_ms
+FROM bundles
+GROUP BY prompt_key
+
+-- Find bundles where a specific error occurred
+SELECT b.bundle_id, b.bundle_path, e.message
+FROM bundles b
+JOIN errors e ON e.bundle_id = b.bundle_id
+WHERE e.error_type = 'ValidationError'
+
+-- Session slice counts by type across bundles
+SELECT
+    slice_type,
+    COUNT(*) as total_items,
+    COUNT(DISTINCT bundle_id) as bundles_with_slice,
+    AVG(item_count) as avg_items_per_bundle
+FROM (
+    SELECT bundle_id, slice_type, COUNT(*) as item_count
+    FROM session_slices
+    GROUP BY bundle_id, slice_type
+)
+GROUP BY slice_type
+```
+
+### Caching Strategy
+
+Multi-bundle databases are cached using a composite key:
+
+```
+Cache path: <first_bundle>.multi-<count>-<hash>.sqlite
+Hash input: sorted(bundle_path + ":" + str(mtime) for each bundle)
+```
+
+Cache invalidated when:
+
+- Any bundle's mtime changes
+- Bundle list changes (different hash)
+- Schema version mismatch
+
+For large eval sets (>100 bundles), consider using `--bundles-from` with a
+manifest file that tracks bundle mtimes to avoid repeated stat calls.
+
+### Implementation Notes
+
+#### Database Building
+
+1. Parse bundle list and validate all paths exist
+2. Load each bundle and verify unique `bundle_id`
+3. Create unified schema with `bundle_id` columns
+4. Insert data from each bundle with `bundle_id` foreign key
+5. Create aggregate views after all data loaded
+6. Build indexes on `(bundle_id, ...)` for common join patterns
+
+#### Memory Considerations
+
+For large eval sets:
+
+- Stream bundles one at a time during database build
+- Close each `DebugBundle` after extraction to release memory
+- Consider `--limit N` flag to cap number of bundles loaded
+
+#### Indexes
+
+Automatically created for multi-bundle queries:
+
+```sql
+CREATE INDEX idx_tool_calls_bundle ON tool_calls(bundle_id);
+CREATE INDEX idx_errors_bundle ON errors(bundle_id);
+CREATE INDEX idx_logs_bundle ON logs(bundle_id);
+CREATE INDEX idx_session_slices_bundle ON session_slices(bundle_id);
+```
+
+### Backwards Compatibility
+
+Single-bundle queries work unchanged:
+
+```bash
+# These are equivalent
+wink query ./bundle.zip "SELECT * FROM errors"
+wink query ./bundle.zip "SELECT * FROM errors"  # bundle_id column present but ignorable
+```
+
+The `bundle_id` column is always present but can be ignored for single-bundle
+queries. Existing queries continue to work without modification.
+
+______________________________________________________________________
 
 ## Related Specifications
 
