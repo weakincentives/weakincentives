@@ -10,7 +10,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dataclass parsing helpers."""
+"""Dataclass parsing helpers.
+
+Security Note
+-------------
+The type resolution logic in this module (particularly _resolve_generic_string_type
+and _get_field_types) should only be used with trusted code and trusted type
+references that are static at implementation time. The AST-based type resolution
+looks up types from module namespaces and could potentially resolve to unintended
+types if untrusted type annotation strings are processed. Do not use parse() with
+dynamically generated or user-provided type annotations.
+"""
 
 # pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPossiblyUnboundVariable=false, reportPrivateUsage=false
 
@@ -560,6 +570,12 @@ def _resolve_generic_string_type(
     Handles complex generic type expressions like 'Sample[InputT, ExpectedT]'
     by parsing the string into an AST and resolving each component.
 
+    Security Warning:
+        This function looks up types from module namespaces based on string
+        names. Only use with trusted type annotation strings that are static
+        at implementation time. Do not pass user-provided or dynamically
+        generated type strings.
+
     Args:
         type_str: The string type annotation to resolve.
         localns: Local namespace containing TypeVars from __type_params__.
@@ -586,8 +602,9 @@ def _resolve_generic_string_type(
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
             return _make_union(resolve_node(node.left), resolve_node(node.right))
 
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return _resolve_generic_string_type(node.value, localns, module_ns)
+        if isinstance(node, ast.Constant):
+            # Return constant values directly - needed for Literal["foo"], Literal[1], etc.
+            return node.value
 
         return object
 

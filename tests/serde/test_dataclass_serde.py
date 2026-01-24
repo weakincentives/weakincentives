@@ -2069,19 +2069,49 @@ def test_resolve_generic_string_type_unknown_node() -> None:
     assert result is object
 
 
-def test_resolve_generic_string_type_forward_ref() -> None:
-    """_resolve_generic_string_type handles string constant forward references."""
+def test_resolve_generic_string_type_preserves_constants() -> None:
+    """_resolve_generic_string_type preserves constant values for Literal support."""
     from weakincentives.serde.parse import _resolve_generic_string_type
 
     localns: dict[str, object] = {}
     module_ns: dict[str, object] = {}
 
-    # String literal evaluates to a forward reference, recursively resolved
-    # Since "int" is a string, it should resolve to int
-    # We need to test the ast.Constant branch
-    # This happens when you have a string annotation like "'int'"
-    result = _resolve_generic_string_type("'int'", localns, module_ns)
-    assert result is int
+    # String constants are preserved (needed for Literal["foo"])
+    result = _resolve_generic_string_type("'foo'", localns, module_ns)
+    assert result == "foo"
+
+    # Integer constants are preserved (needed for Literal[1])
+    result = _resolve_generic_string_type("42", localns, module_ns)
+    assert result == 42
+
+    # Boolean constants are preserved (needed for Literal[True])
+    result = _resolve_generic_string_type("True", localns, module_ns)
+    assert result is True
+
+
+def test_resolve_generic_string_type_literal() -> None:
+    """_resolve_generic_string_type correctly handles Literal types."""
+    from typing import Literal, get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    module_ns: dict[str, object] = {}
+
+    # Literal["foo"] should preserve the string value
+    result = _resolve_generic_string_type('Literal["foo"]', localns, module_ns)
+    assert get_origin(result) is Literal
+    assert get_args(result) == ("foo",)
+
+    # Literal[1, 2, 3] should preserve integer values
+    result = _resolve_generic_string_type("Literal[1, 2, 3]", localns, module_ns)
+    assert get_origin(result) is Literal
+    assert get_args(result) == (1, 2, 3)
+
+    # Literal[True, False] should preserve boolean values
+    result = _resolve_generic_string_type("Literal[True, False]", localns, module_ns)
+    assert get_origin(result) is Literal
+    assert get_args(result) == (True, False)
 
 
 def test_resolve_generic_string_type_unresolvable_subscript() -> None:
