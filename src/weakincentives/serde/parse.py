@@ -618,6 +618,11 @@ def _lookup_simple_type(
     import typing
     from typing import TypeVar
 
+    # Handle ellipsis for variadic tuples (tuple[int, ...])
+    # This is a special literal, not a named type
+    if type_str == "...":
+        return ...
+
     # Check localns first (for TypeVars)
     if type_str in localns:
         return localns[type_str]

@@ -2173,6 +2173,38 @@ def test_lookup_simple_type_string_value_in_globalns() -> None:
     assert result is None
 
 
+def test_lookup_simple_type_ellipsis() -> None:
+    """_lookup_simple_type resolves '...' to Ellipsis for variadic tuples."""
+    from weakincentives.serde.parse import _lookup_simple_type
+
+    localns: dict[str, object] = {}
+    globalns: dict[str, object] = {}
+
+    # Should resolve "..." to the Ellipsis singleton
+    result = _lookup_simple_type("...", localns, globalns)
+    assert result is ...
+
+
+def test_resolve_generic_string_type_variadic_tuple() -> None:
+    """_resolve_generic_string_type correctly handles tuple[int, ...]."""
+    from typing import get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    globalns: dict[str, object] = {}
+
+    # Resolve tuple[int, ...]
+    result = _resolve_generic_string_type("tuple[int, ...]", localns, globalns)
+
+    # Should be tuple[int, ...], not tuple[int, object]
+    assert get_origin(result) is tuple
+    args = get_args(result)
+    assert len(args) == 2
+    assert args[0] is int
+    assert args[1] is ...  # Ellipsis, not object
+
+
 def test_construct_parameterized_type_no_class_getitem() -> None:
     """_construct_parameterized_type returns object if base lacks __class_getitem__."""
     from weakincentives.serde.parse import _construct_parameterized_type
