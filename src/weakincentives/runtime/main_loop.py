@@ -344,6 +344,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 writer=writer,
             )
 
+            ended_at = datetime.now(UTC)
+
             # Create context for caller to access results and add metadata
             ctx: BundleContext[OutputT] = BundleContext(
                 writer=writer,
@@ -356,17 +358,18 @@ class MainLoop[UserRequestT, OutputT](ABC):
             yield ctx
 
             # Write remaining artifacts after caller has added metadata
-            self._finalize_bundle(
+            self._write_bundle_artifacts(
                 writer=writer,
                 response=response,
                 session=session,
                 prompt=prompt,
                 started_at=started_at,
+                ended_at=ended_at,
                 budget_tracker=budget_tracker,
             )
 
-        # After BundleWriter context exits, bundle is finalized
-        ctx.finalize_path(writer.path)
+        # BundleWriter context has exited, bundle is finalized
+        # ctx.bundle_path now returns writer.path
 
     def _execute_for_bundle(  # noqa: PLR0913
         self,
@@ -380,48 +383,29 @@ class MainLoop[UserRequestT, OutputT](ABC):
         writer: BundleWriter,
     ) -> tuple[PromptResponse[OutputT], Session, Prompt[OutputT], BudgetTracker | None]:
         """Execute within bundle context with log capture."""
-        # Prepare prompt and session
         prompt, session = self.prepare(request, experiment=experiment)
         writer.write_session_before(session)
         writer.set_prompt_info(
             ns=prompt.ns, key=prompt.key, adapter=self._get_adapter_name()
         )
 
-        # Resolve effective settings
-        eff_budget = budget if budget is not None else self._config.budget
-        eff_deadline = deadline if deadline is not None else self._config.deadline
-        eff_resources = resources if resources is not None else self._config.resources
-
-        if eff_resources is not None:
-            prompt = prompt.bind(resources=eff_resources)  # pragma: no cover
-
-        budget_tracker = BudgetTracker(budget=eff_budget) if eff_budget else None
+        prompt, budget_tracker, eff_deadline = self._resolve_settings(
+            prompt, budget=budget, deadline=deadline, resources=resources
+        )
         eff_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
 
-        # Execute with log capture
         with writer.capture_logs():
-            while True:
-                try:
-                    response = self._adapter.evaluate(
-                        prompt,
-                        session=session,
-                        deadline=eff_deadline,
-                        budget_tracker=budget_tracker,
-                        heartbeat=eff_heartbeat,
-                    )
-                except VisibilityExpansionRequired as e:  # pragma: no cover
-                    # Visibility expansion is tested in _execute tests
-                    for path, visibility in e.requested_overrides.items():
-                        _ = session.dispatch(
-                            SetVisibilityOverride(path=path, visibility=visibility)
-                        )
-                else:
-                    self.finalize(prompt, session)
-                    break
+            response = self._evaluate_with_retries(
+                prompt=prompt,
+                session=session,
+                deadline=eff_deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=eff_heartbeat,
+            )
 
         return response, session, prompt, budget_tracker
 
-    def _finalize_bundle(  # noqa: PLR0913
+    def _write_bundle_artifacts(  # noqa: PLR0913
         self,
         *,
         writer: BundleWriter,
@@ -429,9 +413,14 @@ class MainLoop[UserRequestT, OutputT](ABC):
         session: Session,
         prompt: Prompt[OutputT],
         started_at: datetime,
+        ended_at: datetime,
         budget_tracker: BudgetTracker | None,
+        run_context: RunContext | None = None,
     ) -> None:
-        """Write remaining bundle artifacts after execution."""
+        """Write bundle artifacts after execution.
+
+        Shared by execute_with_bundle and _handle_message_with_bundle.
+        """
         from ..filesystem import Filesystem
         from .session.visibility_overrides import VisibilityOverrides
 
@@ -439,8 +428,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
         writer.write_request_output(response)
         writer.write_config(self._config)
 
-        # Collect and write metrics
-        ended_at = datetime.now(UTC)
+        if run_context is not None:
+            writer.write_run_context(run_context)
+
         writer.write_metrics(
             self._collect_metrics(
                 started_at=started_at,
@@ -450,19 +440,15 @@ class MainLoop[UserRequestT, OutputT](ABC):
             )
         )
 
-        # Write prompt overrides from session if any
         visibility_overrides = session[VisibilityOverrides].latest()
         if visibility_overrides is not None and visibility_overrides.overrides:
-            # Tested in _handle_message_with_bundle tests
-            writer.write_prompt_overrides(  # pragma: no cover
+            writer.write_prompt_overrides(
                 self._format_visibility_overrides(visibility_overrides, session)
             )
 
-        # Write filesystem snapshot if available
         fs = prompt.resources.get_optional(Filesystem)
         if fs is not None:
-            # Tested in _handle_message_with_bundle tests
-            writer.write_filesystem(fs)  # pragma: no cover
+            writer.write_filesystem(fs)
 
         writer.write_environment()
 
@@ -491,43 +477,76 @@ class MainLoop[UserRequestT, OutputT](ABC):
             experiment=request_event.experiment,
         )
 
-        effective_budget = (
-            request_event.budget
-            if request_event.budget is not None
-            else self._config.budget
-        )
-        effective_deadline = (
-            request_event.deadline
-            if request_event.deadline is not None
-            else self._config.deadline
-        )
-        effective_resources = (
-            request_event.resources
-            if request_event.resources is not None
-            else self._config.resources
-        )
-
-        # Bind resources to prompt if provided
-        if effective_resources is not None:
-            prompt = prompt.bind(resources=effective_resources)
-
-        budget_tracker = (
-            BudgetTracker(budget=effective_budget)
-            if effective_budget is not None
-            else None
+        # Resolve and apply effective settings
+        prompt, budget_tracker, deadline = self._resolve_settings(
+            prompt,
+            budget=request_event.budget,
+            deadline=request_event.deadline,
+            resources=request_event.resources,
         )
 
         # Use provided heartbeat or fall back to loop's internal heartbeat
         effective_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
 
+        response = self._evaluate_with_retries(
+            prompt=prompt,
+            session=session,
+            deadline=deadline,
+            budget_tracker=budget_tracker,
+            heartbeat=effective_heartbeat,
+            run_context=run_context,
+        )
+        return response, session, prompt
+
+    def _resolve_settings(
+        self,
+        prompt: Prompt[OutputT],
+        *,
+        budget: Budget | None,
+        deadline: Deadline | None,
+        resources: Mapping[type[object], object] | None,
+    ) -> tuple[Prompt[OutputT], BudgetTracker | None, Deadline | None]:
+        """Resolve effective settings and bind resources to prompt.
+
+        Returns:
+            Tuple of (prompt_with_resources, budget_tracker, effective_deadline).
+        """
+        eff_budget = budget if budget is not None else self._config.budget
+        eff_deadline = deadline if deadline is not None else self._config.deadline
+        eff_resources = resources if resources is not None else self._config.resources
+
+        if eff_resources is not None:
+            prompt = prompt.bind(resources=eff_resources)
+
+        budget_tracker = BudgetTracker(budget=eff_budget) if eff_budget else None
+        return prompt, budget_tracker, eff_deadline
+
+    def _evaluate_with_retries(  # noqa: PLR0913
+        self,
+        *,
+        prompt: Prompt[OutputT],
+        session: Session,
+        deadline: Deadline | None,
+        budget_tracker: BudgetTracker | None,
+        heartbeat: Heartbeat,
+        run_context: RunContext | None = None,
+    ) -> PromptResponse[OutputT]:
+        """Run evaluation with visibility expansion retry loop.
+
+        Handles the core evaluate → catch VisibilityExpansionRequired →
+        dispatch overrides → retry cycle. Calls finalize() on success.
+
+        Returns:
+            The prompt response from successful evaluation.
+        """
         while True:
             try:
                 response = self._adapter.evaluate(
                     prompt,
                     session=session,
-                    deadline=effective_deadline,
+                    deadline=deadline,
                     budget_tracker=budget_tracker,
-                    heartbeat=effective_heartbeat,
+                    heartbeat=heartbeat,
                     run_context=run_context,
                 )
             except VisibilityExpansionRequired as e:
@@ -537,7 +556,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     )
             else:
                 self.finalize(prompt, session)
-                return response, session, prompt
+                return response
 
     def _build_run_context(
         self,
@@ -628,8 +647,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
     ) -> None:
         """Process message with debug bundling enabled."""
         from ..debug.bundle import BundleWriter
-        from ..filesystem import Filesystem
-        from .session.visibility_overrides import VisibilityOverrides
 
         if bundle_config.target is None:  # pragma: no cover
             # Defensive guard: _handle_message only calls this when enabled=True
@@ -684,38 +701,16 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
                 ended_at = datetime.now(UTC)
 
-                # Write session after execution
-                writer.write_session_after(session)
-                writer.write_request_output(response)
-                writer.write_config(self._config)
-
-                # Write final run_context (session_id already set above)
-                writer.write_run_context(run_context)
-
-                # Write metrics: timing, token usage, budget status
-                metrics = self._collect_metrics(
+                self._write_bundle_artifacts(
+                    writer=writer,
+                    response=response,
+                    session=session,
+                    prompt=prompt,
                     started_at=started_at,
                     ended_at=ended_at,
-                    session=session,
                     budget_tracker=budget_tracker,
+                    run_context=run_context,
                 )
-                writer.write_metrics(metrics)
-
-                # Write prompt overrides from session
-                visibility_overrides = session[VisibilityOverrides].latest()
-                if visibility_overrides is not None and visibility_overrides.overrides:
-                    prompt_overrides = self._format_visibility_overrides(
-                        visibility_overrides, session
-                    )
-                    writer.write_prompt_overrides(prompt_overrides)
-
-                # Write filesystem snapshot if available from prompt resources
-                fs = prompt.resources.get_optional(Filesystem)
-                if fs is not None:
-                    writer.write_filesystem(fs)
-
-                # Write environment capture
-                writer.write_environment()
 
             # Bundle path is set after context manager exits (in __exit__ -> _finalize)
             bundle_path = writer.path
@@ -772,53 +767,22 @@ class MainLoop[UserRequestT, OutputT](ABC):
         This helper reduces nesting in _handle_message_with_bundle by
         encapsulating the execution loop with visibility override retry.
         """
-        # Resolve effective settings
-        effective_budget = (
-            request_event.budget
-            if request_event.budget is not None
-            else self._config.budget
-        )
-        effective_deadline = (
-            request_event.deadline
-            if request_event.deadline is not None
-            else self._config.deadline
-        )
-        effective_resources = (
-            request_event.resources
-            if request_event.resources is not None
-            else self._config.resources
+        prompt, budget_tracker, eff_deadline = self._resolve_settings(
+            prompt,
+            budget=request_event.budget,
+            deadline=request_event.deadline,
+            resources=request_event.resources,
         )
 
-        # Bind resources to prompt if provided
-        if effective_resources is not None:
-            prompt = prompt.bind(resources=effective_resources)
-
-        budget_tracker = (
-            BudgetTracker(budget=effective_budget)
-            if effective_budget is not None
-            else None
-        )
-
-        # Use capture_logs from writer
         with writer.capture_logs():  # type: ignore[union-attr]
-            while True:
-                try:
-                    response = self._adapter.evaluate(
-                        prompt,
-                        session=session,
-                        deadline=effective_deadline,
-                        budget_tracker=budget_tracker,
-                        heartbeat=self._heartbeat,
-                        run_context=run_context,
-                    )
-                except VisibilityExpansionRequired as e:
-                    for path, visibility in e.requested_overrides.items():
-                        _ = session.dispatch(
-                            SetVisibilityOverride(path=path, visibility=visibility)
-                        )
-                else:
-                    self.finalize(prompt, session)
-                    break
+            response = self._evaluate_with_retries(
+                prompt=prompt,
+                session=session,
+                deadline=eff_deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=self._heartbeat,
+                run_context=run_context,
+            )
 
         return response, budget_tracker
 

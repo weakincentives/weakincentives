@@ -86,25 +86,20 @@ class BundleContext[OutputT]:
         response: The prompt response from execution.
         session: The session used for execution.
         latency_ms: Execution latency in milliseconds.
+        bundle_path: Path to bundle (available after context manager exits).
 
     Example::
 
-        with loop.execute_with_bundle(request, bundle_config=config) as ctx:
+        with loop.execute_with_bundle(request, bundle_target=dir) as ctx:
             score = compute_score(ctx.response.output)
             ctx.write_eval({
                 "sample_id": "sample-1",
                 "score": {"value": score.value, "passed": score.passed},
             })
-        bundle_path = ctx.bundle_path
+        bundle_path = ctx.bundle_path  # Available after 'with' exits
     """
 
-    __slots__ = ("_bundle_path", "_writer", "latency_ms", "response", "session")
-
-    _writer: BundleWriter
-    response: PromptResponse[OutputT]
-    session: Session
-    latency_ms: int
-    _bundle_path: Path | None
+    __slots__ = ("_writer", "latency_ms", "response", "session")
 
     def __init__(
         self,
@@ -119,16 +114,11 @@ class BundleContext[OutputT]:
         self.response = response
         self.session = session
         self.latency_ms = latency_ms
-        self._bundle_path = None
 
     @property
     def bundle_path(self) -> Path | None:
-        """Path to the created bundle, available after context exits."""
-        return self._bundle_path
-
-    def finalize_path(self, path: Path | None) -> None:
-        """Finalize the bundle path after context exits. Called by MainLoop."""
-        self._bundle_path = path
+        """Path to the created bundle. Available after context manager exits."""
+        return self._writer.path
 
     def write_eval(self, eval_info: Mapping[str, Any]) -> None:
         """Add eval metadata to the bundle.
