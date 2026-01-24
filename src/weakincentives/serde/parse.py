@@ -526,11 +526,19 @@ def _resolve_subscript(
     base_type: object,
     type_args: tuple[object, ...],
 ) -> object:
-    """Resolve a subscripted generic type like Container[T]."""
+    """Resolve a subscripted generic type like Container[T].
+
+    For single type arguments, passes the type directly (not as a tuple)
+    since typing special forms like Optional expect a single type.
+    For multiple arguments, passes them as a tuple.
+    """
     if base_type is object:
         return object
+    # Single arg: pass directly (e.g., Optional[str] not Optional[(str,)])
+    # Multiple args: pass as tuple (e.g., Dict[str, int])
+    subscript_arg = type_args[0] if len(type_args) == 1 else type_args
     try:
-        return base_type[type_args]  # pyright: ignore[reportIndexIssue]
+        return base_type[subscript_arg]  # pyright: ignore[reportIndexIssue]
     except TypeError:
         return base_type
 

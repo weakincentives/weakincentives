@@ -1964,7 +1964,7 @@ def test_resolve_generic_string_type_nested_generic() -> None:
 
 def test_resolve_generic_string_type_builtin_generic() -> None:
     """_resolve_generic_string_type resolves builtin generic types."""
-    from typing import get_args, get_origin
+    from typing import Union, get_args, get_origin
 
     from weakincentives.serde.parse import _resolve_generic_string_type
 
@@ -1980,6 +1980,11 @@ def test_resolve_generic_string_type_builtin_generic() -> None:
     result = _resolve_generic_string_type("dict[str, int]", localns, module_ns)
     assert get_origin(result) is dict
     assert get_args(result) == (str, int)
+
+    # Resolve 'Optional[str]' - single arg typing special form
+    result = _resolve_generic_string_type("Optional[str]", localns, module_ns)
+    assert get_origin(result) is Union
+    assert get_args(result) == (str, type(None))
 
 
 def test_resolve_generic_string_type_union() -> None:
