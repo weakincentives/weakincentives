@@ -36,9 +36,9 @@ import logging
 import threading
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, get_origin
 from uuid import uuid4
 
 from weakincentives.formal import (
@@ -822,8 +822,9 @@ class RedisMailbox[T, R]:
             json_str = data.decode("utf-8") if isinstance(data, bytes) else data
             json_data = json.loads(json_str)
             if self.body_type is not None:
-                # Use parse() only for dataclass types
-                if hasattr(self.body_type, "__dataclass_fields__"):
+                # Use parse() for dataclass types (including generic aliases)
+                origin = get_origin(self.body_type)
+                if is_dataclass(origin if origin is not None else self.body_type):
                     return parse(self.body_type, json_data)
                 # For primitive types (str, int, etc.), construct directly
                 body_type: Any = self.body_type
