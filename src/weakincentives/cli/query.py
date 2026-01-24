@@ -400,12 +400,17 @@ def _extract_tool_call_from_entry(
 
 
 def _extract_tool_use_id(entry: dict[str, Any]) -> str:
-    """Extract tool_use_id from a log entry's context."""
+    """Extract tool_use_id from a log entry's context.
+
+    Checks for tool_use_id first, then falls back to call_id which is
+    used by tool_executor in structured logging.
+    """
     ctx_raw: Any = entry.get("context", {})
     if not isinstance(ctx_raw, dict):
         return ""
     ctx = cast("dict[str, Any]", ctx_raw)
-    id_val: Any = ctx.get("tool_use_id", "")
+    # tool_use_id is the canonical field; call_id is used by tool_executor
+    id_val: Any = ctx.get("tool_use_id") or ctx.get("call_id") or ""
     return str(id_val) if id_val else ""
 
 
