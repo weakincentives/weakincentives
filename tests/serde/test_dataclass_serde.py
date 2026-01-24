@@ -957,8 +957,8 @@ def test_parse_unspecialized_generic_raises_clear_error() -> None:
     with pytest.raises(TypeError) as exc:
         parse(_GenericWrapper, data)
 
-    assert "cannot parse TypeVar field" in str(exc.value)
-    assert "fully specialized generic type" in str(exc.value)
+    assert "unbound type" in str(exc.value)
+    assert "TypeVar" in str(exc.value)
 
 
 def test_parse_nested_generic_alias() -> None:
@@ -1385,14 +1385,7 @@ def test_compiled_regex_and_converter_errors() -> None:
     assert "value: boom" in str(exc.value)
 
 
-def test_object_type_and_union_handling() -> None:
-    @dataclass
-    class ObjectModel:
-        payload: Annotated[object, {"strip": True}]
-
-    parsed = parse(ObjectModel, {"payload": "  data  "})
-    assert parsed.payload == "data"
-
+def test_union_handling() -> None:
     @dataclass
     class OptionalText:
         token: str | None
@@ -1837,3 +1830,205 @@ def test_schema_enum_mixed_types() -> None:
     finally:
         globals().pop("MixedEnumModel", None)
         globals().pop("MixedEnum", None)
+
+
+# =============================================================================
+# Type Validation Tests
+# =============================================================================
+
+
+def test_parse_allows_object_type() -> None:
+    """parse() allows fields typed as 'object' (passthrough)."""
+
+    @dataclass
+    class ObjectModel:
+        payload: object
+
+    parsed = parse(ObjectModel, {"payload": "data"})
+    assert parsed.payload == "data"
+
+    parsed2 = parse(ObjectModel, {"payload": [1, 2, 3]})
+    assert parsed2.payload == [1, 2, 3]
+
+
+def test_parse_allows_any_type() -> None:
+    """parse() allows fields typed as 'Any' (passthrough)."""
+
+    @dataclass
+    class AnyModel:
+        payload: Any
+
+    parsed = parse(AnyModel, {"payload": [1, 2, 3]})
+    assert parsed.payload == [1, 2, 3]
+
+
+def test_parse_rejects_unresolved_typevar() -> None:
+    """parse() rejects unresolved TypeVar fields."""
+
+    @dataclass(slots=True, frozen=True)
+    class GenericModel[T]:
+        value: T
+
+    with pytest.raises(TypeError) as exc:
+        parse(GenericModel, {"value": 42})
+    assert "unbound type" in str(exc.value)
+    assert "TypeVar" in str(exc.value)
+
+
+def test_parse_allows_resolved_typevar() -> None:
+    """parse() allows TypeVars that are resolved via generic alias."""
+
+    @dataclass(slots=True, frozen=True)
+    class GenericModel[T]:
+        value: T
+
+    # Resolved TypeVar should work
+    parsed = parse(GenericModel[int], {"value": 42})
+    assert parsed.value == 42
+
+    parsed_str = parse(GenericModel[str], {"value": "hello"})
+    assert parsed_str.value == "hello"
+
+
+def test_parse_allows_nested_generics_when_resolved() -> None:
+    """parse() works with nested generic types when resolved."""
+    # Use module-level generic classes already defined for other tests
+    # _InnerGeneric[T] and _OuterGeneric[T] are defined at module level
+
+    parsed = parse(
+        _OuterGeneric[int],
+        {"inner": {"value": 42}, "label": "test"},
+    )
+    assert parsed.inner.value == 42
+    assert parsed.label == "test"
+
+
+def test_parse_allows_concrete_types() -> None:
+    """parse() works normally with concrete types."""
+
+    @dataclass
+    class ConcreteModel:
+        name: str
+        count: int
+        ratio: float
+        flag: bool
+        items: list[str]
+        mapping: dict[str, int]
+
+    parsed = parse(
+        ConcreteModel,
+        {
+            "name": "test",
+            "count": 42,
+            "ratio": 3.14,
+            "flag": True,
+            "items": ["a", "b"],
+            "mapping": {"x": 1},
+        },
+    )
+    assert parsed.name == "test"
+    assert parsed.count == 42
+    assert parsed.ratio == 3.14
+    assert parsed.flag is True
+    assert parsed.items == ["a", "b"]
+    assert parsed.mapping == {"x": 1}
+
+
+def test_parse_allows_annotated_object_with_constraints() -> None:
+    """parse() allows Annotated[object, ...] and applies constraints."""
+
+    @dataclass
+    class AnnotatedObjectModel:
+        payload: Annotated[object, {"strip": True}]
+
+    parsed = parse(AnnotatedObjectModel, {"payload": "  data  "})
+    assert parsed.payload == "data"
+
+
+def test_is_unbound_type_helper() -> None:
+    """Test _is_unbound_type helper function (TypeVars only)."""
+    from typing import TypeVar
+
+    from weakincentives.serde.parse import _is_unbound_type
+
+    T = TypeVar("T")
+    assert _is_unbound_type(T) is True
+
+    # object and Any are NOT considered unbound (they pass through)
+    assert _is_unbound_type(object) is False
+    assert _is_unbound_type(Any) is False
+
+    # Concrete types are not unbound
+    assert _is_unbound_type(int) is False
+    assert _is_unbound_type(str) is False
+    assert _is_unbound_type(list) is False
+
+
+def test_get_unbound_type_name_helper() -> None:
+    """Test _get_unbound_type_name helper function."""
+    from typing import TypeVar
+
+    from weakincentives.serde.parse import _get_unbound_type_name
+
+    assert _get_unbound_type_name(object) == "object"
+    assert _get_unbound_type_name(Any) == "Any"
+
+    T = TypeVar("T")
+    assert _get_unbound_type_name(T) == "TypeVar(T)"
+
+
+def test_parse_untyped_collections() -> None:
+    """Test parsing fields with untyped Sequence and Mapping annotations."""
+    from collections.abc import Mapping as MappingABC, Sequence
+
+    @dataclass
+    class UntypedCollections:
+        items: Sequence  # No type args - uses object for elements
+        mapping: MappingABC  # No type args - uses object for keys/values
+
+    result = parse(
+        UntypedCollections,
+        {"items": [1, "two", 3.0], "mapping": {"a": 1, "b": "two"}},
+    )
+    assert list(result.items) == [1, "two", 3.0]
+    assert dict(result.mapping) == {"a": 1, "b": "two"}
+
+
+def test_resolve_type_alias() -> None:
+    """Test that PEP 695 type aliases are resolved correctly."""
+    from weakincentives.serde.parse import _resolve_type_alias
+
+    # Regular types pass through unchanged
+    assert _resolve_type_alias(int) is int
+    assert _resolve_type_alias(str) is str
+
+    # PEP 695 type aliases have __value__ attribute
+    # Create a mock type alias for testing
+    class MockTypeAlias:
+        __value__ = str
+
+    resolved = _resolve_type_alias(MockTypeAlias)
+    assert resolved is str
+
+
+def test_resolve_forward_ref() -> None:
+    """Test forward reference resolution for type strings."""
+    from weakincentives.serde.parse import _resolve_forward_ref
+
+    # Non-string types pass through unchanged
+    assert _resolve_forward_ref(int) is int
+    assert _resolve_forward_ref(str) is str
+
+    # String forward references to known types are resolved
+    resolved = _resolve_forward_ref("JSONValue")
+    # JSONValue has __value__ attribute, so it returns the resolved union type
+    assert resolved is not None
+    assert resolved is not str  # It's not the string "JSONValue"
+
+    # Unknown forward refs pass through as-is
+    unknown = _resolve_forward_ref("SomeUnknownType")
+    assert unknown == "SomeUnknownType"
+
+    # Known type without __value__ attribute (like JSONObject, JSONArray)
+    resolved_object = _resolve_forward_ref("JSONObject")
+    assert resolved_object is not None
