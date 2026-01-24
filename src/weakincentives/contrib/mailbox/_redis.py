@@ -804,11 +804,16 @@ class RedisMailbox[T, R]:
         return int(result) if result else 0
 
     def _serialize(self, body: T) -> str:
-        """Serialize message body to JSON string."""
+        """Serialize message body to JSON string.
+
+        Uses include_dataclass_type=True to embed __type__ recursively in all
+        nested dataclasses, enabling deserialization of generic types like
+        MainLoopRequest[UserRequestT] where the type parameter is unknown.
+        """
         try:
             # dump() works with dataclasses, for primitives use json.dumps
             if hasattr(body, "__dataclass_fields__"):
-                return json.dumps(dump(body))
+                return json.dumps(dump(body, include_dataclass_type=True))
             return json.dumps(body)
         except Exception as e:
             raise SerializationError(f"Failed to serialize message body: {e}") from e
@@ -817,6 +822,8 @@ class RedisMailbox[T, R]:
         """Deserialize message body from JSON bytes or string.
 
         Handles both bytes (default Redis client) and str (decode_responses=True).
+        Uses allow_dataclass_type=True to resolve TypeVar fields from embedded
+        __type__ references in nested dataclasses.
         """
         try:
             json_str = data.decode("utf-8") if isinstance(data, bytes) else data
@@ -824,7 +831,7 @@ class RedisMailbox[T, R]:
             if self.body_type is not None:
                 # Use parse() only for dataclass types
                 if hasattr(self.body_type, "__dataclass_fields__"):
-                    return parse(self.body_type, json_data)
+                    return parse(self.body_type, json_data, allow_dataclass_type=True)
                 # For primitive types (str, int, etc.), construct directly
                 body_type: Any = self.body_type
                 return body_type(json_data)
