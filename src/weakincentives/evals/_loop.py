@@ -25,7 +25,6 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
-from uuid import uuid4
 
 from ..dataclasses import FrozenDataclass
 from ..runtime.dlq import DeadLetter, DLQPolicy
@@ -351,70 +350,44 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     def _evaluate_sample_with_bundle(
         self, request: EvalRequest[InputT, ExpectedT]
     ) -> EvalResult:
-        """Execute and score a sample with debug bundling enabled."""
-        from ..debug.bundle import BundleWriter
+        """Execute and score a sample with debug bundling enabled.
 
+        Uses MainLoop.execute_with_bundle() to reuse the standard bundle
+        creation logic, then adds eval-specific metadata before finalization.
+        """
         if self._config.debug_bundle_dir is None:  # pragma: no cover - defensive
             return self._evaluate_sample_without_bundle(request)
 
         # Create per-request directory: {debug_bundle_dir}/{request_id}/
-        request_dir = self._config.debug_bundle_dir / str(request.request_id)
-        request_dir.mkdir(parents=True, exist_ok=True)
-
-        started_at = datetime.now(UTC)
-        start = time.monotonic()
+        bundle_target = self._config.debug_bundle_dir / str(request.request_id)
 
         try:
-            with BundleWriter(request_dir, bundle_id=uuid4(), trigger="eval") as writer:
-                # Write request input (EvalRequest with sample and experiment)
-                writer.write_request_input(request)
-
-                # Execute with log capture
-                with writer.capture_logs():
-                    response, session = self._loop.execute(
-                        request.sample.input,
-                        heartbeat=self._heartbeat,
-                        experiment=request.experiment,
-                    )
-
-                ended_at = datetime.now(UTC)
-                latency_ms = int((time.monotonic() - start) * 1000)
-
+            with self._loop.execute_with_bundle(
+                request.sample.input,
+                bundle_target=bundle_target,
+                heartbeat=self._heartbeat,
+                experiment=request.experiment,
+            ) as ctx:
                 # Beat after sample execution to prove progress
                 self._heartbeat.beat()
 
-                # Write bundle artifacts
-                writer.write_session_after(session)
-                writer.write_request_output(response)
-                writer.write_metrics(
-                    {
-                        "timing": {
-                            "started_at": started_at.isoformat(),
-                            "ended_at": ended_at.isoformat(),
-                            "duration_ms": (ended_at - started_at).total_seconds()
-                            * 1000,
-                        },
-                    }
-                )
-                writer.write_environment()
-
-                # Compute score and error
+                # Compute score
                 score, error = self._compute_score(
-                    response.output, request.sample.expected, session
+                    ctx.response.output, request.sample.expected, ctx.session
                 )
 
-                # Write eval metadata
-                writer.write_eval(
-                    self._build_eval_info(request, score, latency_ms, error)
+                # Add eval metadata to bundle before it's finalized
+                ctx.write_eval(
+                    self._build_eval_info(request, score, ctx.latency_ms, error)
                 )
 
             return EvalResult(
                 sample_id=request.sample.id,
                 experiment_name=request.experiment.name,
                 score=score,
-                latency_ms=latency_ms,
+                latency_ms=ctx.latency_ms,
                 error=error,
-                bundle_path=writer.path,
+                bundle_path=ctx.bundle_path,
             )
 
         except Exception as exc:

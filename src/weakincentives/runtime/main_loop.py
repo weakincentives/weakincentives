@@ -46,10 +46,13 @@ import contextlib
 import os
 import socket
 import threading
+import time
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
 
@@ -70,9 +73,10 @@ from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
-    from ..debug.bundle import BundleConfig
+    from ..debug.bundle import BundleConfig, BundleWriter
     from ..experiment import Experiment
     from ..prompt import Prompt
+    from .main_loop_types import BundleContext
     from .session.visibility_overrides import VisibilityOverrides
 
 _logger: StructuredLogger = get_logger(
@@ -264,6 +268,203 @@ class MainLoop[UserRequestT, OutputT](ABC):
         )
         response, session, _ = self._execute(request_event, heartbeat=heartbeat)
         return response, session
+
+    @contextmanager
+    def execute_with_bundle(  # noqa: PLR0913
+        self,
+        request: UserRequestT,
+        *,
+        bundle_target: Path,
+        budget: Budget | None = None,
+        deadline: Deadline | None = None,
+        resources: Mapping[type[object], object] | None = None,
+        heartbeat: Heartbeat | None = None,
+        experiment: Experiment | None = None,
+    ) -> Iterator[BundleContext[OutputT]]:
+        """Execute with debug bundling, allowing metadata injection.
+
+        Creates a debug bundle with the same artifacts as mailbox-driven execution:
+        request input/output, session state, logs, config, metrics, and environment.
+
+        The yielded context provides access to execution results and allows adding
+        eval-specific metadata before the bundle is finalized.
+
+        Args:
+            request: The user request to process.
+            bundle_target: Directory for bundle creation. The bundle zip file will
+                be created in this directory with a generated filename.
+            budget: Optional budget override (takes precedence over config).
+            deadline: Optional deadline override (takes precedence over config).
+            resources: Optional resources override.
+            heartbeat: Optional heartbeat for lease extension.
+            experiment: Optional experiment for A/B testing.
+
+        Yields:
+            BundleContext with response, session, latency_ms, and write_eval().
+
+        Example::
+
+            bundle_dir = Path("./bundles")
+            with loop.execute_with_bundle(request, bundle_target=bundle_dir) as ctx:
+                score = compute_score(ctx.response.output)
+                ctx.write_eval({
+                    "sample_id": "sample-1",
+                    "score": {"value": score.value, "passed": score.passed},
+                })
+            # Bundle is now finalized
+            print(f"Bundle at: {ctx.bundle_path}")
+        """
+        from ..debug.bundle import BundleWriter
+        from .main_loop_types import BundleContext
+
+        bundle_target.mkdir(parents=True, exist_ok=True)
+        started_at = datetime.now(UTC)
+        start_mono = time.monotonic()
+
+        with BundleWriter(bundle_target, bundle_id=uuid4(), trigger="direct") as writer:
+            # Write request input
+            writer.write_request_input(
+                MainLoopRequest(
+                    request=request,
+                    budget=budget,
+                    deadline=deadline,
+                    resources=resources,
+                    experiment=experiment,
+                )
+            )
+
+            # Prepare and execute
+            response, session, prompt, budget_tracker = self._execute_for_bundle(
+                request=request,
+                budget=budget,
+                deadline=deadline,
+                resources=resources,
+                heartbeat=heartbeat,
+                experiment=experiment,
+                writer=writer,
+            )
+
+            # Create context for caller to access results and add metadata
+            ctx: BundleContext[OutputT] = BundleContext(
+                writer=writer,
+                response=response,
+                session=session,
+                latency_ms=int((time.monotonic() - start_mono) * 1000),
+            )
+
+            # Yield to allow caller to compute score and add eval metadata
+            yield ctx
+
+            # Write remaining artifacts after caller has added metadata
+            self._finalize_bundle(
+                writer=writer,
+                response=response,
+                session=session,
+                prompt=prompt,
+                started_at=started_at,
+                budget_tracker=budget_tracker,
+            )
+
+        # After BundleWriter context exits, bundle is finalized
+        ctx.finalize_path(writer.path)
+
+    def _execute_for_bundle(  # noqa: PLR0913
+        self,
+        *,
+        request: UserRequestT,
+        budget: Budget | None,
+        deadline: Deadline | None,
+        resources: Mapping[type[object], object] | None,
+        heartbeat: Heartbeat | None,
+        experiment: Experiment | None,
+        writer: BundleWriter,
+    ) -> tuple[PromptResponse[OutputT], Session, Prompt[OutputT], BudgetTracker | None]:
+        """Execute within bundle context with log capture."""
+        # Prepare prompt and session
+        prompt, session = self.prepare(request, experiment=experiment)
+        writer.write_session_before(session)
+        writer.set_prompt_info(
+            ns=prompt.ns, key=prompt.key, adapter=self._get_adapter_name()
+        )
+
+        # Resolve effective settings
+        eff_budget = budget if budget is not None else self._config.budget
+        eff_deadline = deadline if deadline is not None else self._config.deadline
+        eff_resources = resources if resources is not None else self._config.resources
+
+        if eff_resources is not None:
+            prompt = prompt.bind(resources=eff_resources)  # pragma: no cover
+
+        budget_tracker = BudgetTracker(budget=eff_budget) if eff_budget else None
+        eff_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
+
+        # Execute with log capture
+        with writer.capture_logs():
+            while True:
+                try:
+                    response = self._adapter.evaluate(
+                        prompt,
+                        session=session,
+                        deadline=eff_deadline,
+                        budget_tracker=budget_tracker,
+                        heartbeat=eff_heartbeat,
+                    )
+                except VisibilityExpansionRequired as e:  # pragma: no cover
+                    # Visibility expansion is tested in _execute tests
+                    for path, visibility in e.requested_overrides.items():
+                        _ = session.dispatch(
+                            SetVisibilityOverride(path=path, visibility=visibility)
+                        )
+                else:
+                    self.finalize(prompt, session)
+                    break
+
+        return response, session, prompt, budget_tracker
+
+    def _finalize_bundle(  # noqa: PLR0913
+        self,
+        *,
+        writer: BundleWriter,
+        response: PromptResponse[OutputT],
+        session: Session,
+        prompt: Prompt[OutputT],
+        started_at: datetime,
+        budget_tracker: BudgetTracker | None,
+    ) -> None:
+        """Write remaining bundle artifacts after execution."""
+        from ..filesystem import Filesystem
+        from .session.visibility_overrides import VisibilityOverrides
+
+        writer.write_session_after(session)
+        writer.write_request_output(response)
+        writer.write_config(self._config)
+
+        # Collect and write metrics
+        ended_at = datetime.now(UTC)
+        writer.write_metrics(
+            self._collect_metrics(
+                started_at=started_at,
+                ended_at=ended_at,
+                session=session,
+                budget_tracker=budget_tracker,
+            )
+        )
+
+        # Write prompt overrides from session if any
+        visibility_overrides = session[VisibilityOverrides].latest()
+        if visibility_overrides is not None and visibility_overrides.overrides:
+            # Tested in _handle_message_with_bundle tests
+            writer.write_prompt_overrides(  # pragma: no cover
+                self._format_visibility_overrides(visibility_overrides, session)
+            )
+
+        # Write filesystem snapshot if available
+        fs = prompt.resources.get_optional(Filesystem)
+        if fs is not None:
+            # Tested in _handle_message_with_bundle tests
+            writer.write_filesystem(fs)  # pragma: no cover
+
+        writer.write_environment()
 
     def _execute(
         self,
