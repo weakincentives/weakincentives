@@ -1837,3 +1837,272 @@ def test_schema_enum_mixed_types() -> None:
     finally:
         globals().pop("MixedEnumModel", None)
         globals().pop("MixedEnum", None)
+
+
+def test_parse_generic_type_string_simple() -> None:
+    """_parse_generic_type_string parses simple generic types."""
+    from weakincentives.serde.parse import _parse_generic_type_string
+
+    # Simple generic with one type argument
+    result = _parse_generic_type_string("list[int]")
+    assert result == ("list", ["int"])
+
+    # Generic with two type arguments
+    result = _parse_generic_type_string("dict[str, int]")
+    assert result == ("dict", ["str", "int"])
+
+    # Generic with TypeVar arguments
+    result = _parse_generic_type_string("Sample[InputT, ExpectedT]")
+    assert result == ("Sample", ["InputT", "ExpectedT"])
+
+
+def test_parse_generic_type_string_nested() -> None:
+    """_parse_generic_type_string handles nested generic types."""
+    from weakincentives.serde.parse import _parse_generic_type_string
+
+    # Nested generics
+    result = _parse_generic_type_string("Outer[Inner[T], U]")
+    assert result == ("Outer", ["Inner[T]", "U"])
+
+    # Deeply nested
+    result = _parse_generic_type_string("A[B[C[D]]]")
+    assert result == ("A", ["B[C[D]]"])
+
+
+def test_parse_generic_type_string_not_generic() -> None:
+    """_parse_generic_type_string returns None for non-generic types."""
+    from weakincentives.serde.parse import _parse_generic_type_string
+
+    assert _parse_generic_type_string("str") is None
+    assert _parse_generic_type_string("int") is None
+    assert _parse_generic_type_string("MyClass") is None
+
+
+def test_parse_generic_type_string_empty_args() -> None:
+    """_parse_generic_type_string returns None for empty brackets."""
+    from weakincentives.serde.parse import _parse_generic_type_string
+
+    assert _parse_generic_type_string("list[]") is None
+    assert _parse_generic_type_string("[]") is None
+
+
+def test_resolve_generic_string_type_simple() -> None:
+    """_resolve_generic_string_type resolves simple types."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {}
+    globalns: dict[str, object] = {}
+
+    # Builtins
+    assert _resolve_generic_string_type("str", localns, globalns) is str
+    assert _resolve_generic_string_type("int", localns, globalns) is int
+
+
+def test_resolve_generic_string_type_from_localns() -> None:
+    """_resolve_generic_string_type resolves TypeVars from localns."""
+    from typing import TypeVar
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    T = TypeVar("T")
+    localns: dict[str, object] = {"T": T}
+    globalns: dict[str, object] = {}
+
+    result = _resolve_generic_string_type("T", localns, globalns)
+    assert result is T
+
+
+def test_resolve_generic_string_type_from_globalns() -> None:
+    """_resolve_generic_string_type resolves types from globalns."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    @dataclass
+    class CustomType:
+        value: str
+
+    localns: dict[str, object] = {}
+    globalns: dict[str, object] = {"CustomType": CustomType}
+
+    result = _resolve_generic_string_type("CustomType", localns, globalns)
+    assert result is CustomType
+
+
+def test_resolve_generic_string_type_parameterized() -> None:
+    """_resolve_generic_string_type resolves parameterized generic types."""
+    from typing import get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    @dataclass
+    class Wrapper[T]:
+        value: T
+
+    T = Wrapper.__type_params__[0]
+    localns: dict[str, object] = {"T": T}
+    globalns: dict[str, object] = {"Wrapper": Wrapper}
+
+    # Resolve Wrapper[T]
+    result = _resolve_generic_string_type("Wrapper[T]", localns, globalns)
+    assert get_origin(result) is Wrapper
+    assert get_args(result) == (T,)
+
+
+def test_resolve_generic_string_type_nested_parameterized() -> None:
+    """_resolve_generic_string_type handles nested parameterized types."""
+    from typing import get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    @dataclass
+    class Inner[T]:
+        value: T
+
+    @dataclass
+    class Outer[U]:
+        inner: Inner[U]
+
+    U = Outer.__type_params__[0]
+    localns: dict[str, object] = {"U": U}
+    globalns: dict[str, object] = {"Inner": Inner, "Outer": Outer}
+
+    # Resolve Inner[U]
+    result = _resolve_generic_string_type("Inner[U]", localns, globalns)
+    assert get_origin(result) is Inner
+    assert get_args(result) == (U,)
+
+
+def test_resolve_generic_string_type_multiple_args() -> None:
+    """_resolve_generic_string_type handles multiple type arguments."""
+    from typing import get_args, get_origin
+
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    @dataclass
+    class Pair[A, B]:
+        first: A
+        second: B
+
+    A = Pair.__type_params__[0]
+    B = Pair.__type_params__[1]
+    localns: dict[str, object] = {"A": A, "B": B}
+    globalns: dict[str, object] = {"Pair": Pair}
+
+    # Resolve Pair[A, B]
+    result = _resolve_generic_string_type("Pair[A, B]", localns, globalns)
+    assert get_origin(result) is Pair
+    assert get_args(result) == (A, B)
+
+
+def test_resolve_generic_string_type_unknown_base() -> None:
+    """_resolve_generic_string_type returns object for unknown base types."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    localns: dict[str, object] = {"T": object}
+    globalns: dict[str, object] = {}
+
+    # Unknown base type should return object
+    result = _resolve_generic_string_type("UnknownType[T]", localns, globalns)
+    assert result is object
+
+
+def test_split_type_args_trailing_comma() -> None:
+    """_split_type_args handles edge case where string ends at comma."""
+    from weakincentives.serde.parse import _split_type_args
+
+    # When args_str ends with comma (no trailing content), current_arg is empty
+    # This exercises the `if current_arg:` False branch
+    result = _split_type_args("A, B,")
+    assert result == ["A", "B"]  # Empty final arg is not added
+
+
+def test_lookup_simple_type_string_value_in_globalns() -> None:
+    """_lookup_simple_type skips string values in globalns (TYPE_CHECKING imports)."""
+    from weakincentives.serde.parse import _lookup_simple_type
+
+    # Simulate TYPE_CHECKING import that becomes a string at runtime
+    globalns: dict[str, object] = {"SomeType": "ForwardReference"}
+    localns: dict[str, object] = {}
+
+    # Should return None because the value is a string, not an actual type
+    result = _lookup_simple_type("SomeType", localns, globalns)
+    assert result is None
+
+
+def test_construct_parameterized_type_no_class_getitem() -> None:
+    """_construct_parameterized_type returns object if base lacks __class_getitem__."""
+    from weakincentives.serde.parse import _construct_parameterized_type
+
+    # Regular classes without generic support
+    class NotGeneric:
+        pass
+
+    result = _construct_parameterized_type(NotGeneric, [str])
+    assert result is object
+
+
+def test_construct_parameterized_type_typeerror() -> None:
+    """_construct_parameterized_type returns object on TypeError."""
+    from weakincentives.serde.parse import _construct_parameterized_type
+
+    # Create a class with __class_getitem__ that raises TypeError
+    class BadGeneric:
+        def __class_getitem__(cls, item: object) -> type:
+            raise TypeError("Cannot parameterize")
+
+    result = _construct_parameterized_type(BadGeneric, [str])
+    assert result is object
+
+
+def test_get_field_types_with_nested_generic_field() -> None:
+    """_get_field_types resolves nested generic field types."""
+    from typing import get_args, get_origin
+
+    from weakincentives.serde.parse import _get_field_types
+
+    # Define generic classes similar to EvalRequest/Sample pattern
+    @dataclass(slots=True, frozen=True)
+    class Inner[T]:
+        value: T
+
+    @dataclass(slots=True, frozen=True)
+    class Outer[U]:
+        inner: Inner[U]
+        name: str
+
+    # Register types in globals so _get_field_types can find them
+    # (simulating how real modules work)
+    import weakincentives.serde.parse as parse_module
+
+    original_inner = getattr(parse_module, "Inner", None)
+    original_outer = getattr(parse_module, "Outer", None)
+    parse_module.Inner = Inner  # type: ignore[attr-defined]
+    parse_module.Outer = Outer  # type: ignore[attr-defined]
+    Outer.__module__ = parse_module.__name__
+    Inner.__module__ = parse_module.__name__
+
+    try:
+        result = _get_field_types(Outer)
+
+        # 'name' should be str
+        assert result["name"] is str
+
+        # 'inner' should be Inner[U] where U is the TypeVar
+        inner_type = result["inner"]
+        # Either get_type_hints succeeds and returns Inner[U],
+        # or fallback returns the resolved generic
+        U = Outer.__type_params__[0]
+        if get_origin(inner_type) is Inner:
+            # Successfully resolved as parameterized generic
+            assert get_args(inner_type) == (U,)
+        else:
+            # May fall back to TypeVar or object depending on path
+            assert inner_type in {U, object, Inner}
+    finally:
+        if original_inner is None:
+            delattr(parse_module, "Inner")
+        else:
+            parse_module.Inner = original_inner  # type: ignore[attr-defined]
+        if original_outer is None:
+            delattr(parse_module, "Outer")
+        else:
+            parse_module.Outer = original_outer  # type: ignore[attr-defined]

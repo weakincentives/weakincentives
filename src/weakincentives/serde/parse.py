@@ -481,30 +481,168 @@ def _is_typevar(typ: object) -> bool:
     return isinstance(typ, TypeVar)
 
 
-def _resolve_string_type(type_str: str) -> object:
+def _resolve_string_type(  # pyright: ignore[reportUnusedFunction]
+    type_str: str,
+) -> object:
     """Resolve a string type annotation to an actual type without eval().
 
     Only resolves safe, well-known types from builtins and typing module.
     Returns object for unresolvable types (e.g., TypeVar names).
+
+    This is a simple wrapper around _resolve_generic_string_type with
+    empty namespaces, suitable for resolving builtin and typing types.
+
+    Note: Primarily used by tests - production code uses the more
+    comprehensive _resolve_generic_string_type directly.
+    """
+    return _resolve_generic_string_type(type_str, {}, {})
+
+
+def _split_type_args(args_str: str) -> list[str]:
+    """Split comma-separated type arguments, respecting bracket nesting."""
+    args: list[str] = []
+    current_arg: list[str] = []
+    bracket_depth = 0
+
+    for char in args_str:
+        if char == "[":
+            bracket_depth += 1
+            current_arg.append(char)
+        elif char == "]":
+            bracket_depth -= 1
+            current_arg.append(char)
+        elif char == "," and bracket_depth == 0:
+            args.append("".join(current_arg).strip())
+            current_arg = []
+        else:
+            current_arg.append(char)
+
+    # Don't forget the last argument
+    if current_arg:
+        args.append("".join(current_arg).strip())
+
+    return args
+
+
+def _parse_generic_type_string(type_str: str) -> tuple[str, list[str]] | None:
+    """Parse a generic type string into base type and type arguments.
+
+    Returns (base_type_name, [arg1, arg2, ...]) or None if not a generic.
+    Handles nested generics like 'Outer[Inner[T], U]'.
+    """
+    bracket_start = type_str.find("[")
+    if bracket_start == -1:
+        return None
+
+    base_name = type_str[:bracket_start].strip()
+    if not base_name:
+        return None
+
+    # Extract the arguments string (without outer brackets)
+    args_str = type_str[bracket_start + 1 : -1]  # Remove [ and ]
+    if not args_str:
+        return None
+
+    return (base_name, _split_type_args(args_str))
+
+
+def _lookup_simple_type(
+    type_str: str,
+    localns: dict[str, object],
+    globalns: dict[str, object],
+) -> object | None:
+    """Look up a simple (non-generic) type name in namespaces.
+
+    Returns the resolved type, or None if not found.
     """
     import builtins
     import typing
     from typing import TypeVar
 
-    # Try builtins first (str, int, float, bool, list, dict, etc.)
+    # Check localns first (for TypeVars)
+    if type_str in localns:
+        return localns[type_str]
+
+    # Check globalns (class module namespace)
+    if type_str in globalns:
+        result = globalns[type_str]
+        # Don't return TYPE_CHECKING-only imports that are just strings
+        if not isinstance(result, str):
+            return result
+
+    # Try builtins
     builtin_type = getattr(builtins, type_str, None)
     if builtin_type is not None and isinstance(builtin_type, type):
         return builtin_type
 
-    # Try typing module (Any, Optional, etc.) but exclude TypeVars
-    # (typing module has common TypeVar names like T, K, V which we shouldn't use)
+    # Try typing module (but exclude TypeVars)
     typing_type = getattr(typing, type_str, None)
     if typing_type is not None and not isinstance(typing_type, TypeVar):
         return typing_type
 
-    # Unresolvable - return object as fallback
-    # This handles TypeVar names and complex annotations
-    return object
+    return None
+
+
+def _construct_parameterized_type(
+    base_type: object, resolved_args: list[object]
+) -> object:
+    """Construct a parameterized generic type from base type and arguments."""
+    if not hasattr(base_type, "__class_getitem__"):
+        return object
+
+    try:
+        if len(resolved_args) == 1:
+            return base_type[resolved_args[0]]  # type: ignore[index]
+        return base_type[tuple(resolved_args)]  # type: ignore[index]
+    except TypeError:
+        return object
+
+
+def _resolve_generic_string_type(
+    type_str: str,
+    localns: dict[str, object],
+    globalns: dict[str, object],
+) -> object:
+    """Resolve a potentially generic type string using provided namespaces.
+
+    Handles complex type expressions like 'Sample[InputT, ExpectedT]' by:
+    1. Parsing out the base type and type arguments
+    2. Resolving each component using the provided namespaces
+    3. Reconstructing the parameterized generic type
+
+    Args:
+        type_str: The type annotation string to resolve
+        localns: Local namespace (typically TypeVar mappings)
+        globalns: Global namespace (typically the class's module globals)
+
+    Returns:
+        The resolved type, or object if unresolvable.
+    """
+    type_str = type_str.strip()
+
+    # Try simple type lookup first
+    simple_result = _lookup_simple_type(type_str, localns, globalns)
+    if simple_result is not None:
+        return simple_result
+
+    # Try parsing as a generic type expression
+    parsed = _parse_generic_type_string(type_str)
+    if parsed is None:
+        return object
+
+    base_name, arg_strs = parsed
+
+    # Resolve the base type
+    base_type = _resolve_generic_string_type(base_name, localns, globalns)
+    if base_type is object:
+        return object
+
+    # Resolve each type argument recursively
+    resolved_args = [
+        _resolve_generic_string_type(arg_str, localns, globalns) for arg_str in arg_strs
+    ]
+
+    return _construct_parameterized_type(base_type, resolved_args)
 
 
 def _get_field_types(cls: type[object]) -> dict[str, object]:
@@ -517,7 +655,13 @@ def _get_field_types(cls: type[object]) -> dict[str, object]:
 
     For TypeVar string annotations (like 'T'), preserves the TypeVar object
     from __type_params__ so that TypeVar error handling still works.
+
+    For complex generic annotations (like 'Sample[InputT, ExpectedT]'),
+    parses the type expression and resolves components using the class's
+    module namespace and TypeVar mappings.
     """
+    import sys
+
     # Build mapping of TypeVar names for PEP 695 generic classes
     # This allows get_type_hints() to resolve annotations like Inner[T]
     type_params = getattr(cls, "__type_params__", ())
@@ -531,14 +675,19 @@ def _get_field_types(cls: type[object]) -> dict[str, object]:
         # Note: When get_type_hints fails with NameError, it's because
         # from __future__ import annotations is used, so all field.type
         # values are strings.
+
+        # Get the class's module globals for resolving types defined in that module
+        module_name = getattr(cls, "__module__", None)
+        module = sys.modules.get(module_name) if module_name else None
+        globalns = vars(module) if module else {}
+
         result: dict[str, object] = {}
         for field in dataclasses.fields(cls):
             type_str = field.type if isinstance(field.type, str) else str(field.type)
-            # Check if this is a TypeVar name - preserve the TypeVar
-            if type_str in localns:
-                result[field.name] = localns[type_str]
-            else:
-                result[field.name] = _resolve_string_type(type_str)
+            # Use the enhanced resolver that handles generic type expressions
+            result[field.name] = _resolve_generic_string_type(
+                type_str, localns, globalns
+            )
         return result
 
 
