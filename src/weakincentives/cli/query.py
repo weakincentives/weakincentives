@@ -363,15 +363,15 @@ def _extract_tool_call_from_entry(
     if not tool_name:
         return None
 
-    # Use explicit success field if present (from tool.execution.complete logs)
-    # Fall back to inferring from error presence for compatibility
+    # Determine success: explicit field takes precedence, then check for error field
     success_val: Any = ctx.get("success")
     if success_val is not None:
         success = 1 if success_val else 0
+    elif ctx.get("error"):
+        # Explicit error field with value indicates failure
+        success = 0
     else:
-        # Legacy fallback: infer from error text presence
-        context_str = str(ctx)
-        success = 0 if "error" in context_str.lower() else 1
+        success = 1
 
     error_code = ""
     if success == 0:
@@ -454,6 +454,21 @@ def _insert_custom_tool_calls(
             continue
 
 
+def _generate_synthetic_id(
+    tool_data: tuple[str, str, str, str, int, str, float],
+) -> str:
+    """Generate a synthetic ID from tool call data for deduplication.
+
+    Uses timestamp + tool_name + params hash to create a deterministic ID
+    for tools that don't have an explicit tool_use_id.
+    """
+    import hashlib
+
+    timestamp, tool_name, params = tool_data[0], tool_data[1], tool_data[2]
+    content = f"{timestamp}:{tool_name}:{params}"
+    return f"synthetic:{hashlib.sha256(content.encode()).hexdigest()[:16]}"
+
+
 def _process_custom_tool_entry(
     conn: sqlite3.Connection,
     entry: dict[str, Any],
@@ -468,11 +483,13 @@ def _process_custom_tool_entry(
     if tool_data is None:
         return
 
+    # Use explicit ID if present, otherwise generate synthetic ID for deduplication
     ctx_tool_use_id = _extract_tool_use_id(entry)
-    if ctx_tool_use_id and ctx_tool_use_id in inserted_ids:
+    dedup_key = ctx_tool_use_id or _generate_synthetic_id(tool_data)
+
+    if dedup_key in inserted_ids:
         return
-    if ctx_tool_use_id:
-        inserted_ids.add(ctx_tool_use_id)
+    inserted_ids.add(dedup_key)
 
     _ = conn.execute(
         """
