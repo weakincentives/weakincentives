@@ -524,11 +524,33 @@ def _split_type_args(args_str: str) -> list[str]:
     return args
 
 
+def _find_matching_bracket(type_str: str, start: int) -> int:
+    """Find the position of the closing bracket matching the one at start.
+
+    Returns the index of the matching ']', or -1 if not found.
+    Handles nested brackets correctly.
+    """
+    depth = 0
+    for i in range(start, len(type_str)):
+        if type_str[i] == "[":
+            depth += 1
+        elif type_str[i] == "]":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
 def _parse_generic_type_string(type_str: str) -> tuple[str, list[str]] | None:
     """Parse a generic type string into base type and type arguments.
 
     Returns (base_type_name, [arg1, arg2, ...]) or None if not a generic.
     Handles nested generics like 'Outer[Inner[T], U]'.
+
+    Returns None for:
+    - Non-generic types (no brackets)
+    - Malformed input (missing closing bracket)
+    - Complex expressions like 'list[int] | None' (union types)
     """
     bracket_start = type_str.find("[")
     if bracket_start == -1:
@@ -538,8 +560,19 @@ def _parse_generic_type_string(type_str: str) -> tuple[str, list[str]] | None:
     if not base_name:
         return None
 
+    # Find the matching closing bracket
+    bracket_end = _find_matching_bracket(type_str, bracket_start)
+    if bracket_end == -1:
+        # Malformed: no matching closing bracket
+        return None
+
+    # Check if the generic ends the string (ignoring trailing whitespace)
+    # If not, this is a complex expression we can't handle (e.g., union types)
+    if type_str[bracket_end + 1 :].strip():
+        return None
+
     # Extract the arguments string (without outer brackets)
-    args_str = type_str[bracket_start + 1 : -1]  # Remove [ and ]
+    args_str = type_str[bracket_start + 1 : bracket_end]
     if not args_str:
         return None
 

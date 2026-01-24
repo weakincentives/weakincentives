@@ -1886,6 +1886,49 @@ def test_parse_generic_type_string_empty_args() -> None:
     assert _parse_generic_type_string("[]") is None
 
 
+def test_parse_generic_type_string_malformed() -> None:
+    """_parse_generic_type_string returns None for malformed input."""
+    from weakincentives.serde.parse import _parse_generic_type_string
+
+    # Missing closing bracket
+    assert _parse_generic_type_string("Foo[Bar") is None
+    assert _parse_generic_type_string("list[int") is None
+
+    # Nested missing bracket
+    assert _parse_generic_type_string("Outer[Inner[T]") is None
+
+
+def test_parse_generic_type_string_union_types() -> None:
+    """_parse_generic_type_string returns None for PEP 604 union types."""
+    from weakincentives.serde.parse import _parse_generic_type_string
+
+    # Union types have content after the closing bracket
+    assert _parse_generic_type_string("list[int] | None") is None
+    assert _parse_generic_type_string("dict[str, int] | list[str]") is None
+
+    # With trailing whitespace (still valid generic)
+    result = _parse_generic_type_string("list[int]  ")
+    assert result == ("list", ["int"])
+
+
+def test_find_matching_bracket() -> None:
+    """_find_matching_bracket finds the correct closing bracket."""
+    from weakincentives.serde.parse import _find_matching_bracket
+
+    # Simple case
+    assert _find_matching_bracket("list[int]", 4) == 8
+
+    # Nested brackets
+    assert _find_matching_bracket("Outer[Inner[T]]", 5) == 14
+    assert _find_matching_bracket("Outer[Inner[T]]", 11) == 13
+
+    # No matching bracket
+    assert _find_matching_bracket("list[int", 4) == -1
+
+    # Multiple levels
+    assert _find_matching_bracket("A[B[C[D]]]", 1) == 9
+
+
 def test_resolve_generic_string_type_simple() -> None:
     """_resolve_generic_string_type resolves simple types."""
     from weakincentives.serde.parse import _resolve_generic_string_type
