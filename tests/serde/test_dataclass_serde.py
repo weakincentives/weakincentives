@@ -974,6 +974,13 @@ class _NestedGenericWrapper[T]:
     child: T
 
 
+@dataclass(slots=True, frozen=True)
+class _ConcreteWrapper:
+    """Wrapper with concrete (non-TypeVar) nested dataclass field."""
+
+    nested: _InnerPayload
+
+
 def test_dump_embeds_type_recursively() -> None:
     """dump() with include_dataclass_type embeds __type__ in nested dataclasses."""
     inner = _InnerPayload(message="hello", priority=5)
@@ -1190,6 +1197,28 @@ def test_parse_deeply_nested_generic_dataclasses() -> None:
     assert restored.child.payload.message == "deep"
     assert restored.child.payload.priority == 99
     assert restored.child.metadata == "mid"
+
+
+def test_parse_nested_dataclass_with_extra_forbid() -> None:
+    """Nested __type__ is stripped so extra='forbid' works with recursive embedding."""
+    # Use a concrete (non-TypeVar) nested dataclass field to test _coerce_dataclass path
+    inner = _InnerPayload(message="test", priority=1)
+    wrapper = _ConcreteWrapper(nested=inner)
+
+    # Serialize with type info embedded at all levels
+    serialized = dump(wrapper, include_dataclass_type=True)
+    assert "__type__" in serialized
+    assert "__type__" in serialized["nested"]
+
+    # Parse with extra="forbid" - should work because nested __type__ is stripped
+    # before parsing the nested dataclass (we already know the target type)
+    restored = parse(
+        _ConcreteWrapper, serialized, allow_dataclass_type=True, extra="forbid"
+    )
+
+    assert isinstance(restored, _ConcreteWrapper)
+    assert isinstance(restored.nested, _InnerPayload)
+    assert restored.nested.message == "test"
 
 
 def test_schema_reflects_types_constraints_and_aliases() -> None:

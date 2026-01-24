@@ -259,10 +259,17 @@ def _coerce_dataclass(
     if not isinstance(value, Mapping):
         type_name = getattr(dataclass_type, "__name__", type(dataclass_type).__name__)
         raise TypeError(f"{path}: expected mapping for dataclass {type_name}")
+
+    # Strip type_key from nested data if present - we already know the target type,
+    # and leaving it would cause extra="forbid" to fail on recursively embedded types
+    nested_data = cast(Mapping[str, object], value)
+    if config.allow_dataclass_type and config.type_key in nested_data:
+        nested_data = {k: v for k, v in nested_data.items() if k != config.type_key}
+
     try:
         parsed = parse(
             dataclass_type,
-            cast(Mapping[str, object], value),
+            nested_data,
             extra=config.extra,
             coerce=config.coerce,
             case_insensitive=config.case_insensitive,
