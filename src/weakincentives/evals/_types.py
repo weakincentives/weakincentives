@@ -214,6 +214,9 @@ class EvalResult:
     error: str | None = None
     """Error message if evaluation failed."""
 
+    bundle_path: Path | None = None
+    """Path to debug bundle if bundling was enabled."""
+
     @property
     def success(self) -> bool:
         """True if no error occurred."""

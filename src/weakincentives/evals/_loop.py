@@ -23,7 +23,9 @@ import logging
 import threading
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Self
+from uuid import uuid4
 
 from ..dataclasses import FrozenDataclass
 from ..runtime.dlq import DeadLetter, DLQPolicy
@@ -54,9 +56,21 @@ class EvalLoopConfig:
     and after each sample extend the message lease, preventing timeout during
     long evaluation runs. EvalLoop's heartbeat is passed to MainLoop.execute()
     so that all tool/adapter beats extend the evaluation message's lease.
+
+    The ``debug_bundle_dir`` field enables debug bundle creation for each
+    evaluation sample. When set, EvalLoop creates a bundle capturing:
+    - Request input (sample and experiment)
+    - Response output from MainLoop
+    - Session state after execution
+    - Application logs during execution
+    - Evaluation metadata (score, experiment, latency)
+    - Environment information
+
+    Bundles are written to ``{debug_bundle_dir}/{request_id}/{sample_id}_{timestamp}.zip``.
     """
 
     lease_extender: LeaseExtenderConfig | None = None
+    debug_bundle_dir: Path | None = None
 
 
 class EvalLoop[InputT, OutputT, ExpectedT]:
@@ -279,7 +293,23 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
         The experiment from the request is passed to MainLoop.execute() for
         prompt override resolution and feature flag checking.
+
+        When debug_bundle_dir is configured, creates a debug bundle capturing:
+        - Request input (sample and experiment)
+        - Response output from MainLoop
+        - Session state after execution
+        - Application logs during execution
+        - Evaluation metadata (score, experiment, latency)
+        - Environment information
         """
+        if self._config.debug_bundle_dir is not None:
+            return self._evaluate_sample_with_bundle(request)
+        return self._evaluate_sample_without_bundle(request)
+
+    def _evaluate_sample_without_bundle(
+        self, request: EvalRequest[InputT, ExpectedT]
+    ) -> EvalResult:
+        """Execute and score a sample without debug bundling."""
         sample = request.sample
         experiment = request.experiment
         start = time.monotonic()
@@ -317,6 +347,128 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             score=score,  # pyright: ignore[reportUnknownArgumentType]
             latency_ms=latency_ms,
         )
+
+    def _evaluate_sample_with_bundle(
+        self, request: EvalRequest[InputT, ExpectedT]
+    ) -> EvalResult:
+        """Execute and score a sample with debug bundling enabled."""
+        from ..debug.bundle import BundleWriter
+
+        if self._config.debug_bundle_dir is None:  # pragma: no cover - defensive
+            return self._evaluate_sample_without_bundle(request)
+
+        # Create per-request directory: {debug_bundle_dir}/{request_id}/
+        request_dir = self._config.debug_bundle_dir / str(request.request_id)
+        request_dir.mkdir(parents=True, exist_ok=True)
+
+        started_at = datetime.now(UTC)
+        start = time.monotonic()
+
+        try:
+            with BundleWriter(request_dir, bundle_id=uuid4(), trigger="eval") as writer:
+                # Write request input (EvalRequest with sample and experiment)
+                writer.write_request_input(request)
+
+                # Execute with log capture
+                with writer.capture_logs():
+                    response, session = self._loop.execute(
+                        request.sample.input,
+                        heartbeat=self._heartbeat,
+                        experiment=request.experiment,
+                    )
+
+                ended_at = datetime.now(UTC)
+                latency_ms = int((time.monotonic() - start) * 1000)
+
+                # Beat after sample execution to prove progress
+                self._heartbeat.beat()
+
+                # Write bundle artifacts
+                writer.write_session_after(session)
+                writer.write_request_output(response)
+                writer.write_metrics(
+                    {
+                        "timing": {
+                            "started_at": started_at.isoformat(),
+                            "ended_at": ended_at.isoformat(),
+                            "duration_ms": (ended_at - started_at).total_seconds()
+                            * 1000,
+                        },
+                    }
+                )
+                writer.write_environment()
+
+                # Compute score and error
+                score, error = self._compute_score(
+                    response.output, request.sample.expected, session
+                )
+
+                # Write eval metadata
+                writer.write_eval(
+                    self._build_eval_info(request, score, latency_ms, error)
+                )
+
+            return EvalResult(
+                sample_id=request.sample.id,
+                experiment_name=request.experiment.name,
+                score=score,
+                latency_ms=latency_ms,
+                error=error,
+                bundle_path=writer.path,
+            )
+
+        except Exception as exc:
+            # If bundle creation fails, log and continue without bundle
+            _logger.warning(
+                "Debug bundle creation failed, continuing without bundle",
+                extra={"error": str(exc), "sample_id": request.sample.id},
+            )
+            return self._evaluate_sample_without_bundle(request)
+
+    def _compute_score(
+        self,
+        output: OutputT | None,
+        expected: ExpectedT,
+        session: object,
+    ) -> tuple[Score, str | None]:
+        """Compute score for an evaluation result.
+
+        Returns:
+            Tuple of (score, error_message). Error is None on success.
+        """
+        if output is None:
+            return (
+                Score(value=0.0, passed=False, reason="No output from MainLoop"),
+                "No output from MainLoop",
+            )
+
+        if is_session_aware(self._evaluator):
+            score = self._evaluator(output, expected, session)  # type: ignore[call-arg]
+        else:
+            score = self._evaluator(output, expected)  # type: ignore[call-arg]
+        return score, None  # pyright: ignore[reportUnknownVariableType]
+
+    @staticmethod
+    def _build_eval_info(
+        request: EvalRequest[object, object],
+        score: Score,
+        latency_ms: int,
+        error: str | None,
+    ) -> dict[str, object]:
+        """Build eval.json metadata dictionary."""
+        eval_info: dict[str, object] = {
+            "sample_id": request.sample.id,
+            "experiment_name": request.experiment.name,
+            "score": {
+                "value": score.value,
+                "passed": score.passed,
+                "reason": score.reason,
+            },
+            "latency_ms": latency_ms,
+        }
+        if error is not None:
+            eval_info["error"] = error
+        return eval_info
 
     def _handle_failure(
         self,
