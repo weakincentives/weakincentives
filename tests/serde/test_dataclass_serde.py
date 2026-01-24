@@ -1929,6 +1929,82 @@ def test_find_matching_bracket() -> None:
     assert _find_matching_bracket("A[B[C[D]]]", 1) == 9
 
 
+def test_find_matching_bracket_validation() -> None:
+    """_find_matching_bracket validates start position."""
+    from weakincentives.serde.parse import _find_matching_bracket
+
+    # Start not pointing to '['
+    assert _find_matching_bracket("list[int]", 0) == -1  # 'l' not '['
+    assert _find_matching_bracket("list[int]", 5) == -1  # 'i' not '['
+
+    # Invalid start index
+    assert _find_matching_bracket("list[int]", -1) == -1
+    assert _find_matching_bracket("list[int]", 100) == -1
+
+    # Empty string
+    assert _find_matching_bracket("", 0) == -1
+
+
+def test_resolve_generic_string_type_circular_reference() -> None:
+    """_resolve_generic_string_type handles circular references gracefully."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    # Direct self-reference: Foo -> Foo[int] -> Foo -> ...
+    # This would infinite loop without protection
+    globalns: dict[str, object] = {"Foo": "Foo[int]"}
+    localns: dict[str, object] = {}
+
+    # Should return object instead of infinite recursion
+    result = _resolve_generic_string_type("Foo[int]", localns, globalns)
+    assert result is object
+
+
+def test_resolve_generic_string_type_mutual_recursion() -> None:
+    """_resolve_generic_string_type handles mutual recursion gracefully."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    # A references B, B references A
+    globalns: dict[str, object] = {"A": "B", "B": "A"}
+    localns: dict[str, object] = {}
+
+    # Should return object instead of infinite recursion
+    result = _resolve_generic_string_type("A[int]", localns, globalns)
+    assert result is object
+
+
+def test_resolve_generic_string_type_nested_self_reference() -> None:
+    """_resolve_generic_string_type detects circular references via _resolving."""
+    from weakincentives.serde.parse import _resolve_generic_string_type
+
+    # Test circular detection by passing _resolving with current type_str
+    # This simulates the scenario where we're already resolving "Foo[int]"
+    # and encounter it again in nested resolution
+
+    @dataclass
+    class Foo[T]:
+        value: T
+
+    globalns: dict[str, object] = {"Foo": Foo}
+    localns: dict[str, object] = {}
+
+    # Normal case: nested types work fine
+    from typing import get_origin
+
+    result = _resolve_generic_string_type("Foo[int]", localns, globalns)
+    assert get_origin(result) is Foo
+
+    # Circular case: _resolving already contains the type_str
+    # This exercises line 673 (circular reference detection)
+    result = _resolve_generic_string_type(
+        "Foo[int]",
+        localns,
+        globalns,
+        _resolving=frozenset({"Foo[int]"}),
+    )
+    # Should detect circular reference and return object
+    assert result is object
+
+
 def test_resolve_generic_string_type_simple() -> None:
     """_resolve_generic_string_type resolves simple types."""
     from weakincentives.serde.parse import _resolve_generic_string_type

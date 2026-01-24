@@ -527,9 +527,17 @@ def _split_type_args(args_str: str) -> list[str]:
 def _find_matching_bracket(type_str: str, start: int) -> int:
     """Find the position of the closing bracket matching the one at start.
 
-    Returns the index of the matching ']', or -1 if not found.
+    Returns the index of the matching ']', or -1 if not found or invalid.
     Handles nested brackets correctly.
+
+    Args:
+        type_str: The string to search
+        start: Index where the opening '[' should be located
     """
+    # Validate that start points to an opening bracket
+    if start < 0 or start >= len(type_str) or type_str[start] != "[":
+        return -1
+
     depth = 0
     for i in range(start, len(type_str)):
         if type_str[i] == "[":
@@ -635,6 +643,7 @@ def _resolve_generic_string_type(
     type_str: str,
     localns: dict[str, object],
     globalns: dict[str, object],
+    _resolving: frozenset[str] | None = None,
 ) -> object:
     """Resolve a potentially generic type string using provided namespaces.
 
@@ -647,11 +656,21 @@ def _resolve_generic_string_type(
         type_str: The type annotation string to resolve
         localns: Local namespace (typically TypeVar mappings)
         globalns: Global namespace (typically the class's module globals)
+        _resolving: Internal parameter tracking types being resolved
+            to detect circular references. Do not pass explicitly.
 
     Returns:
-        The resolved type, or object if unresolvable.
+        The resolved type, or object if unresolvable or circular.
     """
     type_str = type_str.strip()
+
+    # Initialize tracking set on first call
+    if _resolving is None:
+        _resolving = frozenset()
+
+    # Detect circular references
+    if type_str in _resolving:
+        return object
 
     # Try simple type lookup first
     simple_result = _lookup_simple_type(type_str, localns, globalns)
@@ -663,16 +682,22 @@ def _resolve_generic_string_type(
     if parsed is None:
         return object
 
+    # Add current type to resolving set before recursing
+    resolving_with_current = _resolving | {type_str}
+
     base_name, arg_strs = parsed
 
     # Resolve the base type
-    base_type = _resolve_generic_string_type(base_name, localns, globalns)
+    base_type = _resolve_generic_string_type(
+        base_name, localns, globalns, resolving_with_current
+    )
     if base_type is object:
         return object
 
     # Resolve each type argument recursively
     resolved_args = [
-        _resolve_generic_string_type(arg_str, localns, globalns) for arg_str in arg_strs
+        _resolve_generic_string_type(arg_str, localns, globalns, resolving_with_current)
+        for arg_str in arg_strs
     ]
 
     return _construct_parameterized_type(base_type, resolved_args)
