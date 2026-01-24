@@ -23,14 +23,10 @@ Example::
     from weakincentives.contrib.mailbox import RedisMailbox
 
     client = Redis(host="localhost", port=6379)
-    requests: RedisMailbox[MyEvent, MyResult] = RedisMailbox(
-        name="requests",
-        client=client,
-    )
-    responses: RedisMailbox[MyResult, None] = RedisMailbox(
-        name="responses",
-        client=client,
-    )
+
+    # Use subscripted syntax for automatic type inference
+    requests = RedisMailbox[MyEvent, MyResult](name="requests", client=client)
+    responses = RedisMailbox[MyResult, None](name="responses", client=client)
 
     # Pass mailbox instance as reply_to
     requests.send(MyEvent(data="hello"), reply_to=responses)
