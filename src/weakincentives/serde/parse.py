@@ -571,17 +571,29 @@ class _ASTResolver:
         self.localns = localns
         self.module_ns = module_ns
 
-    def _resolve_subscript_node(self, node: object) -> object:
+    @staticmethod
+    def _is_literal_type(base: object) -> bool:
+        """Check if base type is typing.Literal."""
+        from typing import Literal, get_origin
+
+        return base is Literal or get_origin(base) is Literal
+
+    def _resolve_subscript_node(self, node: object, *, in_literal: bool) -> object:
         """Resolve ast.Subscript nodes like Container[T] or dict[str, int]."""
         import ast
 
         if not isinstance(node, ast.Subscript):  # pragma: no cover - type guard
             return object
-        base = self.resolve(node.value)
+        base = self._resolve(node.value, in_literal=False)
+        # Arguments to Literal should be preserved as values, not resolved as types
+        args_in_literal = self._is_literal_type(base)
         if isinstance(node.slice, ast.Tuple):
-            args = tuple(self.resolve(elt) for elt in node.slice.elts)
+            args = tuple(
+                self._resolve(elt, in_literal=args_in_literal)
+                for elt in node.slice.elts
+            )
         else:
-            args = (self.resolve(node.slice),)
+            args = (self._resolve(node.slice, in_literal=args_in_literal),)
         return _resolve_subscript(base, args)
 
     @staticmethod
@@ -600,20 +612,34 @@ class _ASTResolver:
             return +value  # pyright: ignore[reportOperatorIssue,reportOptionalOperand]  # ty: ignore[unsupported-operator]
         return None  # pragma: no cover - only USub/UAdd are used in type annotations
 
-    def resolve(self, node: object) -> object:
+    def _resolve(self, node: object, *, in_literal: bool) -> object:
         """Recursively resolve an AST node to a type."""
         import ast
 
         if isinstance(node, ast.Name):
+            # Inside Literal, names like True/False are resolved normally
             return _resolve_name(node.id, self.localns, self.module_ns)
         if isinstance(node, ast.Subscript):
-            return self._resolve_subscript_node(node)
+            return self._resolve_subscript_node(node, in_literal=in_literal)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-            return _make_union(self.resolve(node.left), self.resolve(node.right))
+            return _make_union(
+                self._resolve(node.left, in_literal=False),
+                self._resolve(node.right, in_literal=False),
+            )
         if isinstance(node, ast.Constant):
-            return node.value
+            # Inside Literal[...], preserve constant values as-is
+            if in_literal:
+                return node.value
+            # Outside Literal, string constants are forward refs - fall back to object
+            # (the fallback path can't safely resolve forward refs without eval)
+            return object
+        # Handle signed literals (always preserve value, used in Literal[-1])
         signed = self._resolve_unary_node(node)
         return signed if signed is not None else object
+
+    def resolve(self, node: object) -> object:
+        """Public entry point - resolve starting outside Literal context."""
+        return self._resolve(node, in_literal=False)
 
 
 def _resolve_generic_string_type(

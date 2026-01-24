@@ -2069,24 +2069,25 @@ def test_resolve_generic_string_type_unknown_node() -> None:
     assert result is object
 
 
-def test_resolve_generic_string_type_preserves_constants() -> None:
-    """_resolve_generic_string_type preserves constant values for Literal support."""
+def test_resolve_generic_string_type_constants_outside_literal() -> None:
+    """Constants outside Literal context fall back to object."""
     from weakincentives.serde.parse import _resolve_generic_string_type
 
     localns: dict[str, object] = {}
     module_ns: dict[str, object] = {}
 
-    # String constants are preserved (needed for Literal["foo"])
+    # String constants outside Literal are treated as unresolvable forward refs
     result = _resolve_generic_string_type("'foo'", localns, module_ns)
-    assert result == "foo"
+    assert result is object
 
-    # Integer constants are preserved (needed for Literal[1])
+    # Integer constants outside Literal fall back to object
     result = _resolve_generic_string_type("42", localns, module_ns)
-    assert result == 42
+    assert result is object
 
-    # Boolean constants are preserved (needed for Literal[True])
+    # Boolean constants (ast.Constant in Python 3.8+) fall back to object
+    # They're only valid inside Literal[True] or Literal[False]
     result = _resolve_generic_string_type("True", localns, module_ns)
-    assert result is True
+    assert result is object
 
 
 def test_resolve_generic_string_type_literal() -> None:
