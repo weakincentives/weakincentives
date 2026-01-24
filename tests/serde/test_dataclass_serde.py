@@ -1986,6 +1986,11 @@ def test_resolve_generic_string_type_builtin_generic() -> None:
     assert get_origin(result) is Union
     assert get_args(result) == (str, type(None))
 
+    # Resolve 'tuple[int, ...]' - Ellipsis must be preserved for variable-length tuples
+    result = _resolve_generic_string_type("tuple[int, ...]", localns, module_ns)
+    assert get_origin(result) is tuple
+    assert get_args(result) == (int, ...)
+
 
 def test_resolve_generic_string_type_union() -> None:
     """_resolve_generic_string_type resolves union types."""

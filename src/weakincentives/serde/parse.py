@@ -633,6 +633,9 @@ class _ASTResolver:
             # None constant in type context (e.g., T | None) should be NoneType
             if node.value is None:
                 return type(None)
+            # Ellipsis in type context (e.g., tuple[int, ...]) must be preserved
+            if node.value is ...:
+                return ...
             # Outside Literal, other constants are unresolvable - fall back to object
             return object
         # Handle signed literals (always preserve value, used in Literal[-1])
