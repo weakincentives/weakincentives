@@ -2134,6 +2134,32 @@ def test_split_type_args_trailing_comma() -> None:
     assert result == ["A", "B"]  # Empty final arg is not added
 
 
+def test_split_type_args_mismatched_brackets() -> None:
+    """_split_type_args returns None for mismatched brackets."""
+    from weakincentives.serde.parse import _split_type_args
+
+    # More closing brackets than opening
+    assert _split_type_args("A], B") is None
+    assert _split_type_args("A[B], C]") is None
+
+    # Unclosed opening brackets
+    assert _split_type_args("A[B, C") is None
+    assert _split_type_args("A[") is None
+
+    # Valid nested brackets should still work
+    assert _split_type_args("A[B], C[D]") == ["A[B]", "C[D]"]
+    assert _split_type_args("A[B[C]], D") == ["A[B[C]]", "D"]
+
+
+def test_parse_generic_type_string_mismatched_inner_brackets() -> None:
+    """_parse_generic_type_string returns None for mismatched inner brackets."""
+    from weakincentives.serde.parse import _parse_generic_type_string
+
+    # Mismatched brackets in type arguments
+    assert _parse_generic_type_string("Foo[A], B]") is None
+    assert _parse_generic_type_string("Foo[A[B, C]") is None
+
+
 def test_lookup_simple_type_string_value_in_globalns() -> None:
     """_lookup_simple_type skips string values in globalns (TYPE_CHECKING imports)."""
     from weakincentives.serde.parse import _lookup_simple_type

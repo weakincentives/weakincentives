@@ -498,8 +498,11 @@ def _resolve_string_type(  # pyright: ignore[reportUnusedFunction]
     return _resolve_generic_string_type(type_str, {}, {})
 
 
-def _split_type_args(args_str: str) -> list[str]:
-    """Split comma-separated type arguments, respecting bracket nesting."""
+def _split_type_args(args_str: str) -> list[str] | None:
+    """Split comma-separated type arguments, respecting bracket nesting.
+
+    Returns None if brackets are mismatched (e.g., "A], B[" or unclosed brackets).
+    """
     args: list[str] = []
     current_arg: list[str] = []
     bracket_depth = 0
@@ -510,12 +513,20 @@ def _split_type_args(args_str: str) -> list[str]:
             current_arg.append(char)
         elif char == "]":
             bracket_depth -= 1
+            if bracket_depth < 0:
+                # More closing brackets than opening - malformed
+                return None
             current_arg.append(char)
         elif char == "," and bracket_depth == 0:
             args.append("".join(current_arg).strip())
             current_arg = []
         else:
             current_arg.append(char)
+
+    # Validate balanced brackets
+    if bracket_depth != 0:
+        # Unclosed brackets - malformed
+        return None
 
     # Don't forget the last argument
     if current_arg:
@@ -584,7 +595,14 @@ def _parse_generic_type_string(type_str: str) -> tuple[str, list[str]] | None:
     if not args_str:
         return None
 
-    return (base_name, _split_type_args(args_str))
+    # Split the arguments, validating bracket balance
+    split_args = _split_type_args(args_str)
+    if split_args is None:  # pragma: no cover
+        # Defensive: _find_matching_bracket guarantees balanced content,
+        # but check is kept for robustness if caller changes
+        return None
+
+    return (base_name, split_args)
 
 
 def _lookup_simple_type(
