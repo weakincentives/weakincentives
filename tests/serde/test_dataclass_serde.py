@@ -769,6 +769,11 @@ def test_clone_preserves_extras_and_revalidates() -> None:
     cloned_slotted = clone(slotted)
     assert getattr(cloned_slotted, "__extras__", None) == {"nickname": "Ace"}
 
+    # Clone slotted dataclass without extras
+    slotted_no_extras = parse(Slotted, {"name": "Bob"})
+    cloned_no_extras = clone(slotted_no_extras)
+    assert cloned_no_extras.name == "Bob"
+
     with pytest.raises(ValueError):
         clone(user, age=10)
 
@@ -885,73 +890,8 @@ def test_dump_computed_none_excluded() -> None:
     assert "maybe" not in payload
 
 
-@dataclass
-class TypeReferenceModel:
-    value: int
-
-
-def test_dump_and_parse_round_trip_with_type_reference() -> None:
-    payload = dump(TypeReferenceModel(1), include_dataclass_type=True)
-
-    expected_type = f"{TypeReferenceModel.__module__}:{TypeReferenceModel.__qualname__}"
-    assert payload["__type__"] == expected_type
-
-    parsed = parse(None, payload, allow_dataclass_type=True)
-    assert isinstance(parsed, TypeReferenceModel)
-    assert parsed.value == 1
-
-
-def test_parse_rejects_mismatched_type_reference() -> None:
-    @dataclass
-    class AnotherModel:
-        value: int
-
-    payload = dump(TypeReferenceModel(2), include_dataclass_type=True)
-
-    with pytest.raises(TypeError) as exc:
-        parse(AnotherModel, payload, allow_dataclass_type=True)
-
-    assert "does not match target dataclass" in str(exc.value)
-
-
-def test_parse_validates_type_reference_shape() -> None:
-    payload = {"__type__": 123, "value": 1}
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, payload, allow_dataclass_type=True)
-
-    assert "must be a string type reference" in str(exc.value)
-
-
-def test_parse_rejects_invalid_type_identifier() -> None:
-    payload = {"__type__": "invalid", "value": 1}
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, payload, allow_dataclass_type=True)
-
-    assert "Invalid type identifier" in str(exc.value)
-
-
-def test_parse_rejects_nondataclass_type_reference() -> None:
-    payload = {"__type__": "builtins:int", "value": 1}
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, payload, allow_dataclass_type=True)
-
-    assert "resolved type is not a dataclass" in str(exc.value)
-
-
-def test_parse_requires_reference_when_cls_missing() -> None:
-    payload = {"value": 1}
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, payload, allow_dataclass_type=True)
-
-    assert "requires a dataclass type" in str(exc.value)
-
-
 # =============================================================================
-# Recursive Type Embedding Tests (Generic Dataclasses)
+# Generic Alias Support Tests
 # =============================================================================
 
 
@@ -981,32 +921,12 @@ class _ConcreteWrapper:
     nested: _InnerPayload
 
 
-def test_dump_embeds_type_recursively() -> None:
-    """dump() with include_dataclass_type embeds __type__ in nested dataclasses."""
-    inner = _InnerPayload(message="hello", priority=5)
-    wrapper = _GenericWrapper(payload=inner, metadata="test")
+def test_parse_generic_alias_resolves_typevar() -> None:
+    """parse() with generic alias resolves TypeVar fields."""
+    data = {"payload": {"message": "hello", "priority": 5}, "metadata": "test"}
 
-    data = dump(wrapper, include_dataclass_type=True)
-
-    # Outer type embedded
-    assert "__type__" in data
-    assert "test_dataclass_serde:_GenericWrapper" in data["__type__"]
-
-    # Nested payload also has __type__
-    payload_data = data["payload"]
-    assert isinstance(payload_data, dict)
-    assert "__type__" in payload_data
-    assert "test_dataclass_serde:_InnerPayload" in payload_data["__type__"]
-
-
-def test_parse_generic_with_recursive_type() -> None:
-    """parse() can deserialize generic dataclasses with embedded __type__."""
-    inner = _InnerPayload(message="hello", priority=5)
-    wrapper = _GenericWrapper(payload=inner, metadata="test")
-
-    # Round-trip serialize and deserialize
-    data = dump(wrapper, include_dataclass_type=True)
-    restored = parse(None, data, allow_dataclass_type=True)
+    # Use generic alias to specify the type argument
+    restored = parse(_GenericWrapper[_InnerPayload], data)
 
     assert isinstance(restored, _GenericWrapper)
     assert isinstance(restored.payload, _InnerPayload)
@@ -1015,125 +935,56 @@ def test_parse_generic_with_recursive_type() -> None:
     assert restored.metadata == "test"
 
 
-def test_parse_generic_requires_allow_dataclass_type() -> None:
-    """Parsing generic dataclass without allow_dataclass_type fails."""
-    data = dump(
-        _GenericWrapper(payload=_InnerPayload("hi")), include_dataclass_type=True
-    )
+def test_parse_generic_alias_round_trip() -> None:
+    """Generic dataclass round-trip through dump/parse with generic alias."""
+    inner = _InnerPayload(message="hello", priority=5)
+    wrapper = _GenericWrapper(payload=inner, metadata="test")
+
+    data = dump(wrapper)
+    restored = parse(_GenericWrapper[_InnerPayload], data)
+
+    assert isinstance(restored, _GenericWrapper)
+    assert isinstance(restored.payload, _InnerPayload)
+    assert restored.payload.message == "hello"
+    assert restored.payload.priority == 5
+    assert restored.metadata == "test"
+
+
+def test_parse_unspecialized_generic_raises_clear_error() -> None:
+    """Parsing generic dataclass without type arguments raises helpful error."""
+    data = {"payload": {"message": "hello", "priority": 1}, "metadata": "test"}
 
     with pytest.raises(TypeError) as exc:
-        parse(_GenericWrapper, data, allow_dataclass_type=False)
+        parse(_GenericWrapper, data)
 
     assert "cannot parse TypeVar field" in str(exc.value)
+    assert "fully specialized generic type" in str(exc.value)
 
 
-def test_parse_generic_requires_type_in_nested_value() -> None:
-    """Parsing generic dataclass requires __type__ in nested value."""
-    # Manually construct data without __type__ on nested payload
+def test_parse_nested_generic_alias() -> None:
+    """Nested generic aliases work with specialized types."""
     data = {
-        "__type__": f"{__name__}:_GenericWrapper",
-        "payload": {"message": "hello", "priority": 1},  # No __type__
-        "metadata": "test",
+        "child": {"payload": {"message": "deep", "priority": 99}, "metadata": "mid"}
     }
 
-    with pytest.raises(TypeError) as exc:
-        parse(None, data, allow_dataclass_type=True)
+    restored = parse(_NestedGenericWrapper[_GenericWrapper[_InnerPayload]], data)
 
-    assert "requires __type__" in str(exc.value)
-
-
-def test_parse_generic_rejects_non_dataclass_nested_type() -> None:
-    """Parsing fails if nested __type__ resolves to non-dataclass."""
-    data = {
-        "__type__": f"{__name__}:_GenericWrapper",
-        "payload": {"__type__": "builtins:int", "value": 1},
-        "metadata": "test",
-    }
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, data, allow_dataclass_type=True)
-
-    assert "resolved type is not a dataclass" in str(exc.value)
+    assert isinstance(restored, _NestedGenericWrapper)
+    assert isinstance(restored.child, _GenericWrapper)
+    assert isinstance(restored.child.payload, _InnerPayload)
+    assert restored.child.payload.message == "deep"
+    assert restored.child.payload.priority == 99
 
 
-def test_dump_recursive_type_in_lists() -> None:
-    """dump() embeds __type__ in dataclasses within lists."""
+def test_parse_concrete_nested_dataclass() -> None:
+    """Concrete (non-generic) nested dataclasses work without generic alias."""
+    data = {"nested": {"message": "test", "priority": 1}}
 
-    @dataclass(slots=True, frozen=True)
-    class ListWrapper[T]:
-        items: list[T]
+    restored = parse(_ConcreteWrapper, data)
 
-    items = [_InnerPayload("one"), _InnerPayload("two")]
-    wrapper = ListWrapper(items=items)
-
-    data = dump(wrapper, include_dataclass_type=True)
-
-    assert "__type__" in data
-    items_data = data["items"]
-    assert isinstance(items_data, list)
-    assert len(items_data) == 2
-    assert all("__type__" in item for item in items_data)
-
-
-def test_dump_recursive_type_in_dicts() -> None:
-    """dump() embeds __type__ in dataclasses within dict values."""
-
-    @dataclass(slots=True, frozen=True)
-    class DictWrapper[T]:
-        mapping: dict[str, T]
-
-    mapping = {"first": _InnerPayload("one"), "second": _InnerPayload("two")}
-    wrapper = DictWrapper(mapping=mapping)
-
-    data = dump(wrapper, include_dataclass_type=True)
-
-    assert "__type__" in data
-    mapping_data = data["mapping"]
-    assert isinstance(mapping_data, dict)
-    assert all("__type__" in v for v in mapping_data.values())
-
-
-def test_parse_typevar_requires_mapping() -> None:
-    """TypeVar field with non-mapping value fails."""
-    data = {
-        "__type__": f"{__name__}:_GenericWrapper",
-        "payload": "not-a-mapping",  # String instead of dict
-        "metadata": "test",
-    }
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, data, allow_dataclass_type=True)
-
-    assert "expected mapping" in str(exc.value)
-
-
-def test_parse_typevar_requires_string_type_ref() -> None:
-    """TypeVar field with non-string __type__ fails."""
-    data = {
-        "__type__": f"{__name__}:_GenericWrapper",
-        "payload": {"__type__": 123, "message": "hello"},  # Non-string __type__
-        "metadata": "test",
-    }
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, data, allow_dataclass_type=True)
-
-    assert "must be a string type reference" in str(exc.value)
-
-
-def test_parse_typevar_invalid_type_identifier() -> None:
-    """TypeVar field with invalid type identifier fails."""
-    # Use a valid module but non-existent class name
-    data = {
-        "__type__": f"{__name__}:_GenericWrapper",
-        "payload": {"__type__": "builtins:NonExistentClass", "message": "hello"},
-        "metadata": "test",
-    }
-
-    with pytest.raises(TypeError) as exc:
-        parse(None, data, allow_dataclass_type=True)
-
-    assert "could not be resolved" in str(exc.value)
+    assert isinstance(restored, _ConcreteWrapper)
+    assert isinstance(restored.nested, _InnerPayload)
+    assert restored.nested.message == "test"
 
 
 def test_get_field_types_with_generic_class() -> None:
@@ -1186,23 +1037,16 @@ def test_resolve_string_type_unknown() -> None:
     assert _resolve_string_type("SomeRandomName") is object
 
 
-def test_parse_deeply_nested_generic_dataclasses() -> None:
-    """Config propagates through deeply nested generic dataclass parsing."""
-    # Create deeply nested structure: _NestedGenericWrapper[_GenericWrapper[_InnerPayload]]
+def test_parse_deeply_nested_generic_with_alias() -> None:
+    """Deeply nested generic dataclass parsing with generic alias."""
     inner = _InnerPayload(message="deep", priority=99)
     middle = _GenericWrapper(payload=inner, metadata="mid")
     outer = _NestedGenericWrapper(child=middle)
 
-    serialized = dump(outer, include_dataclass_type=True)
+    serialized = dump(outer)
 
-    # Verify __type__ is embedded at all levels
-    assert "__type__" in serialized
-    assert "__type__" in serialized["child"]
-    assert "__type__" in serialized["child"]["payload"]
-
-    # Round-trip should work - this failed before the fix because
-    # allow_dataclass_type wasn't propagated in recursive parse calls
-    restored = parse(None, serialized, allow_dataclass_type=True)
+    # Round-trip with fully specified generic alias
+    restored = parse(_NestedGenericWrapper[_GenericWrapper[_InnerPayload]], serialized)
 
     assert isinstance(restored, _NestedGenericWrapper)
     assert isinstance(restored.child, _GenericWrapper)
@@ -1213,21 +1057,14 @@ def test_parse_deeply_nested_generic_dataclasses() -> None:
 
 
 def test_parse_nested_dataclass_with_extra_forbid() -> None:
-    """Nested __type__ is stripped so extra='forbid' works with recursive embedding."""
-    # Use a concrete (non-TypeVar) nested dataclass field to test _coerce_dataclass path
+    """Nested dataclass parsing works with extra='forbid'."""
     inner = _InnerPayload(message="test", priority=1)
     wrapper = _ConcreteWrapper(nested=inner)
 
-    # Serialize with type info embedded at all levels
-    serialized = dump(wrapper, include_dataclass_type=True)
-    assert "__type__" in serialized
-    assert "__type__" in serialized["nested"]
+    serialized = dump(wrapper)
 
-    # Parse with extra="forbid" - should work because nested __type__ is stripped
-    # before parsing the nested dataclass (we already know the target type)
-    restored = parse(
-        _ConcreteWrapper, serialized, allow_dataclass_type=True, extra="forbid"
-    )
+    # Parse with extra="forbid" - should work since no extra fields
+    restored = parse(_ConcreteWrapper, serialized, extra="forbid")
 
     assert isinstance(restored, _ConcreteWrapper)
     assert isinstance(restored.nested, _InnerPayload)

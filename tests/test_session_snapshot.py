@@ -155,23 +155,14 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     restored_executed = restored_executed_slice[0]
     assert restored_executed.event_id == executed_event.event_id
     assert restored_executed.result["prompt_name"] == "example"
-    # Nested dataclasses include __type__ when serialized with include_dataclass_type=True
-    assert restored_executed.result["output"] == {
-        "__type__": "tests.helpers.session:ExampleOutput",
-        "text": "complete",
-    }
+    # Nested dataclasses are serialized without __type__ (type is known from context)
+    assert restored_executed.result["output"] == {"text": "complete"}
 
     restored_tool = restored_tool_slice[0]
     assert restored_tool.event_id == tool_event.event_id
     assert restored_tool.name == "tool"
-    assert restored_tool.params == {
-        "__type__": "tests.helpers.session:ExampleParams",
-        "value": 4,
-    }
-    assert restored_tool.result["value"] == {
-        "__type__": "tests.helpers.session:ExamplePayload",
-        "value": 4,
-    }
+    assert restored_tool.params == {"value": 4}
+    assert restored_tool.result["value"] == {"value": 4}
 
 
 def test_snapshot_filters_log_slices_by_default(

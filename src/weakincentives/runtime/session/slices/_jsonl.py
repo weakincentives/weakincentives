@@ -107,7 +107,7 @@ class JsonlSliceView[T: SupportsDataclass]:
                     line = line.strip()
                     if line:
                         data = json.loads(line)
-                        yield parse(self.item_type, data, allow_dataclass_type=True)
+                        yield parse(self.item_type, data)
             finally:
                 _unlock(f)
 
@@ -164,9 +164,7 @@ class JsonlSlice[T: SupportsDataclass]:
                     line = line.strip()
                     if line:
                         data = json.loads(line)
-                        items.append(
-                            parse(self.item_type, data, allow_dataclass_type=True)
-                        )
+                        items.append(parse(self.item_type, data))
             finally:
                 _unlock(f)
         return tuple(items)
@@ -187,7 +185,7 @@ class JsonlSlice[T: SupportsDataclass]:
     @staticmethod
     def _write_item(f: IO[str], item: SupportsDataclass) -> None:
         """Write a single item as a JSON line."""
-        data = dump(item, include_dataclass_type=True)
+        data = dump(item)
         _ = f.write(json.dumps(data, separators=(",", ":")) + "\n")
 
     def append(self, item: T) -> None:
