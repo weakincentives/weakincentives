@@ -25,6 +25,7 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     Literal,
+    NoReturn,
     Union as _TypingUnion,  # pyright: ignore[reportDeprecated]
     cast,
     get_args as typing_get_args,
@@ -120,14 +121,51 @@ def _is_empty_string_coercible_to_none(
     )
 
 
-def _raise_union_error(last_error: Exception, path: str) -> None:
-    """Raise an appropriately prefixed error from union coercion."""
-    message = str(last_error)
-    if message.startswith(f"{path}:") or message.startswith(f"{path}."):
-        raise last_error
-    if isinstance(last_error, TypeError):
-        raise TypeError(f"{path}: {message}") from last_error
-    raise ValueError(f"{path}: {message}") from last_error
+def _try_coerce_union_branches(
+    value: object, args: tuple[object, ...], path: str, config: _ParseConfig
+) -> tuple[object, Exception | None]:
+    """Try to coerce value to match any union branch. Returns (result, last_error)."""
+    last_error: Exception | None = None
+    for arg in args:
+        if arg is type(None):
+            if (
+                value is None
+            ):  # pragma: no cover - handled by _non_str_exact_match_in_union
+                return (None, None)
+            continue
+        try:
+            return (_coerce_to_type(value, arg, None, path, config), None)
+        except (TypeError, ValueError) as error:
+            last_error = error
+    return (_NOT_HANDLED, last_error)
+
+
+def _raise_union_coercion_error(last_error: Exception | None, path: str) -> NoReturn:
+    """Raise an appropriately formatted union coercion error."""
+    if last_error is not None:
+        msg = str(last_error)
+        if msg.startswith(f"{path}:") or msg.startswith(f"{path}."):
+            raise last_error
+        raise type(last_error)(f"{path}: {msg}") from last_error
+    raise TypeError(f"{path}: no matching type in Union")
+
+
+def _non_str_exact_match_in_union(value: object, args: tuple[object, ...]) -> bool:
+    """Check if value's exact type matches a non-str type in the union.
+
+    This prevents non-str values (like int 4) from being coerced to str "4".
+    Str values should still try coercion to other types (like int) first.
+    """
+    if isinstance(value, str):
+        # Str values should try coercion to more specific types first
+        return False
+    value_type = type(value)
+    for arg in args:
+        if arg is type(None) and value is None:
+            return True
+        if isinstance(arg, type) and value_type is arg:
+            return True
+    return False
 
 
 def _coerce_union(
@@ -142,21 +180,21 @@ def _coerce_union(
         return _NOT_HANDLED
     if _is_empty_string_coercible_to_none(value, base_type, config):
         return _apply_constraints(None, merged_meta, path)
-    last_error: Exception | None = None
-    for arg in get_args(base_type):
-        if arg is type(None):
-            if value is None:
-                return _apply_constraints(None, merged_meta, path)
-            continue
-        try:
-            coerced = _coerce_to_type(value, arg, None, path, config)
-        except (TypeError, ValueError) as error:
-            last_error = error
-            continue
-        return _apply_constraints(coerced, merged_meta, path)
-    if last_error is not None:
-        _raise_union_error(last_error, path)
-    raise TypeError(f"{path}: no matching type in Union")
+
+    args = get_args(base_type)
+
+    # If the value's exact type matches a non-str union branch, return it directly.
+    # This prevents e.g., int 4 from being coerced to str "4".
+    # Str values still try coercion to other types (like int) first.
+    if _non_str_exact_match_in_union(value, args):
+        return _apply_constraints(value, merged_meta, path)
+
+    # Try each branch with coercion
+    result, last_error = _try_coerce_union_branches(value, args, path, config)
+    if result is not _NOT_HANDLED:
+        return _apply_constraints(result, merged_meta, path)
+
+    _raise_union_coercion_error(last_error, path)
 
 
 def _try_coerce_literal(
@@ -232,6 +270,13 @@ def _coerce_primitive(
     if not config.coerce:
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: expected {type_name}")
+
+    # Don't coerce collections to primitives - this would produce invalid
+    # string representations like "{'key': 'value'}" instead of proper parsing
+    if isinstance(value, (Mapping, Sequence)) and not isinstance(value, (str, bytes)):
+        type_name = getattr(base_type, "__name__", type(base_type).__name__)
+        raise TypeError(f"{path}: expected {type_name}")
+
     try:
         coerced_value = coercer(value)
     except Exception as error:
@@ -261,7 +306,6 @@ def _build_nested_config(base_type: object, config: _ParseConfig) -> _ParseConfi
         alias_generator=config.alias_generator,
         aliases=config.aliases,
         typevar_map=nested_typevar_map,
-        strict=config.strict,
     )
 
 
@@ -367,9 +411,12 @@ def _coerce_sequence_items(
     for index, item in enumerate(items):
         item_path = f"{path}[{index}]"
         if origin is tuple and args:
-            item_type = args[0] if args[-1] is Ellipsis else args[index]
-        else:
-            item_type = args[0] if args else object
+            raw_item_type = args[0] if args[-1] is Ellipsis else args[index]
+        elif args:
+            raw_item_type = args[0]
+        else:  # pragma: no cover - bare Sequence has origin=None, doesn't reach here
+            raw_item_type = object
+        item_type = _resolve_forward_ref(raw_item_type)
         coerced_items.append(_coerce_to_type(item, item_type, None, item_path, config))
     return coerced_items
 
@@ -408,9 +455,13 @@ def _coerce_mapping(
         return _NOT_HANDLED
     if not isinstance(value, Mapping):
         raise TypeError(f"{path}: expected mapping")
-    key_type, value_type = (
-        get_args(base_type) if get_args(base_type) else (object, object)
-    )
+    args = get_args(base_type)
+    if args:
+        key_type = _resolve_forward_ref(args[0])
+        value_type = _resolve_forward_ref(args[1])
+    else:  # pragma: no cover - bare Mapping has origin=None, doesn't reach here
+        key_type = object
+        value_type = object
     mapping_value = cast(Mapping[JSONValue, JSONValue], value)
     result_dict: dict[object, object] = {}
     for key, item in mapping_value.items():
@@ -483,13 +534,11 @@ def _is_typevar(typ: object) -> bool:
 
 
 def _is_unbound_type(typ: object) -> bool:
-    """Check if a type is an unbound type (Any, object, or TypeVar).
+    """Check if a type is an unbound type (unresolved TypeVar).
 
-    Unbound types accept any value without validation, which can hide
-    type errors. In strict mode, these types are rejected.
+    Unresolved TypeVars indicate that a generic type was not fully specialized,
+    which is a programming error that would cause parsing to fail.
     """
-    if typ is object or typ is _AnyType:
-        return True
     return _is_typevar(typ)
 
 
@@ -565,6 +614,41 @@ def _get_field_types(cls: type[object]) -> dict[str, object]:
         return result
 
 
+def _resolve_type_alias(typ: object) -> object:
+    """Resolve PEP 695 type aliases to their underlying type."""
+    # TypeAliasType has __value__ attribute containing the actual type
+    value = getattr(typ, "__value__", None)
+    if value is not None:
+        return value
+    return typ
+
+
+def _resolve_forward_ref(typ: object) -> object:
+    """Resolve forward reference strings to actual types.
+
+    Handles recursive type aliases like JSONValue that reference themselves
+    via forward reference strings like 'JSONValue'.
+    """
+    if not isinstance(typ, str):
+        return typ
+
+    # Check if it's a known type alias from weakincentives.types module
+    try:
+        from ..types import json as json_types
+
+        if hasattr(json_types, typ):
+            resolved = getattr(json_types, typ)
+            # If it's a type alias, resolve it
+            value = getattr(resolved, "__value__", None)
+            if value is not None:
+                return value
+            return resolved  # pragma: no cover - all json types have __value__
+    except ImportError:  # pragma: no cover - defensive
+        pass
+
+    return typ  # pragma: no cover - only reached for unknown forward refs
+
+
 def _coerce_to_type(
     value: object,
     typ: object,
@@ -574,30 +658,21 @@ def _coerce_to_type(
 ) -> object:
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
 
+    # Resolve PEP 695 type aliases (e.g., `type JSONValue = str | int | ...`)
+    base_type = _resolve_type_alias(base_type)
+
     # Resolve TypeVar from typevar_map (populated from generic alias type args)
     if _is_typevar(base_type) and base_type in config.typevar_map:
         base_type = config.typevar_map[base_type]
 
-    # Strict mode: reject unbound types (Any, object, unresolved TypeVars)
-    if config.strict and _is_unbound_type(base_type):
-        type_name = _get_unbound_type_name(base_type)
-        msg = (
-            f"{path}: strict mode rejects unbound type '{type_name}' - "
-            f"use a concrete type instead"
-        )
-        raise TypeError(msg)
-
+    # Any and object types pass through with only constraint validation
     if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
 
-    # Check for unresolved TypeVar - this means the caller didn't provide
-    # a fully specialized generic alias (non-strict mode only reaches here
-    # for TypeVars since strict mode already rejected them above)
-    if _is_typevar(base_type):
-        msg = (
-            f"{path}: cannot parse TypeVar field - use a fully specialized "
-            f"generic type like MyClass[ConcreteType] instead of MyClass"
-        )
+    # Reject unresolved TypeVars - indicates caller forgot to specialize generic
+    if _is_unbound_type(base_type):
+        type_name = _get_unbound_type_name(base_type)
+        msg = f"{path}: unbound type '{type_name}' is not allowed - use a concrete type"
         raise TypeError(msg)
 
     coercers = (
@@ -616,8 +691,11 @@ def _coerce_to_type(
         if result is not _NOT_HANDLED:
             return result
 
+    # At this point, base_type is a concrete type that can be instantiated
+    # (unbound types were rejected above)
+    concrete_type = cast(type[object], base_type)
     try:
-        coerced = base_type(value)
+        coerced = concrete_type(value)
     except Exception as error:
         raise type(error)(str(error)) from error
     return _apply_constraints(coerced, merged_meta, path)
@@ -831,7 +909,6 @@ def parse[T](
     case_insensitive: bool = False,
     alias_generator: Callable[[str], str] | None = None,
     aliases: Mapping[str, str] | None = None,
-    strict: bool = False,
 ) -> T:
     """Parse a mapping into a dataclass instance.
 
@@ -839,6 +916,9 @@ def parse[T](
         parse(MyGenericClass[str], data)
 
     The type arguments are used to resolve TypeVar fields during parsing.
+
+    Unbound types (Any, object, unresolved TypeVars) are rejected for type safety.
+    All fields must have concrete types that can be validated.
 
     Args:
         cls: The dataclass type to parse into (can be a generic alias).
@@ -848,8 +928,6 @@ def parse[T](
         case_insensitive: Whether to match keys case-insensitively.
         alias_generator: Optional function to generate field aliases.
         aliases: Optional mapping of field name to alias.
-        strict: When True, reject unbound types (Any, object, unresolved TypeVars).
-                This improves type safety by ensuring all fields have concrete types.
     """
     if not isinstance(data, Mapping):
         raise TypeError("parse() requires a mapping input")
@@ -874,7 +952,6 @@ def parse[T](
         alias_generator=alias_generator,
         aliases=aliases,
         typevar_map=typevar_map,
-        strict=strict,
     )
 
     return _parse_dataclass(target_cls, mapping_data, config=config)
