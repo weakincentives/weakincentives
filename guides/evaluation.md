@@ -220,6 +220,53 @@ eval_loop.run()
 **Canary deployment:** Before rolling out changes, submit your eval dataset to
 the new worker and verify the pass rate meets your threshold.
 
+## Debug Bundles for Evaluations
+
+When debugging evaluation failures, enable debug bundles to capture session
+state, logs, and execution artifacts:
+
+```python nocheck
+from weakincentives.evals import EvalLoop, EvalLoopConfig
+from pathlib import Path
+
+eval_loop = EvalLoop(
+    loop=main_loop,
+    evaluator=exact_match,
+    requests=eval_requests,
+    config=EvalLoopConfig(
+        debug_bundle_dir=Path("./eval_bundles/"),
+    ),
+)
+```
+
+Each evaluation sample produces a bundle containing:
+
+- Session state before and after execution
+- Log records during evaluation
+- Request input (sample and experiment)
+- Response output from MainLoop
+- Evaluation metadata (`eval.json`): score, experiment name, latency
+
+**Accessing bundle paths:**
+
+```python nocheck
+for result in report.results:
+    if result.bundle_path:
+        print(f"Bundle for {result.sample_id}: {result.bundle_path}")
+```
+
+**Inspecting bundles:**
+
+```bash
+# Open bundle in debug UI
+wink debug ./eval_bundles/<request_id>/<timestamp>.zip
+
+# Query with SQL
+wink query ./eval_bundles/<request_id>/<timestamp>.zip "SELECT * FROM logs"
+```
+
+See [Debugging](debugging.md) for more on the debug UI and bundle analysis.
+
 ## Reply-To Routing
 
 When workers need to send results to dynamic destinations, use the `reply_to`

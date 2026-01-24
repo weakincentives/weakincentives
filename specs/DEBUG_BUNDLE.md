@@ -199,22 +199,44 @@ bundle.
 ## EvalLoop Integration
 
 EvalLoop wraps MainLoop for evaluation datasets. When `EvalLoopConfig.debug_bundle_dir`
-is set:
+is set, EvalLoop uses `MainLoop.execute_with_bundle()` to reuse the standard bundle
+creation logic with eval-specific metadata:
 
-1. MainLoop creates bundle at `{debug_bundle_dir}/{request_id}/{sample_id}.zip`
-1. EvalLoop appends `eval.json` with score, experiment, judge output
-1. Bundle paths returned in `EvalResult.bundle_paths`
+1. EvalLoop creates bundle target at `{debug_bundle_dir}/{request_id}/`
+1. MainLoop creates bundle capturing session, logs, request/response
+1. EvalLoop injects `eval.json` with score, experiment, latency
+1. Bundle path returned in `EvalResult.bundle_path`
 
-For LLM-as-judge evaluators, both sample and judge execution bundles are
-captured:
+### eval.json Schema
+
+```json
+{
+  "sample_id": "sample-123",
+  "experiment_name": "baseline",
+  "score": {
+    "value": 0.85,
+    "passed": true,
+    "reason": "Found expected answer"
+  },
+  "latency_ms": 1500,
+  "error": null
+}
+```
+
+### Example
 
 ```python
-EvalResult(
-    bundle_paths=(
-        Path("debug/req/sample-123.zip"),        # Sample execution
-        Path("debug/req/sample-123-judge.zip"),  # Judge execution
+eval_loop = EvalLoop(
+    loop=main_loop,
+    evaluator=exact_match,
+    requests=requests_mailbox,
+    config=EvalLoopConfig(
+        debug_bundle_dir=Path("./eval_bundles/"),
     ),
 )
+
+# After evaluation:
+# result.bundle_path == Path("./eval_bundles/{request_id}/{timestamp}.zip")
 ```
 
 ## CLI

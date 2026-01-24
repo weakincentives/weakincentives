@@ -111,9 +111,11 @@ Factory: `llm_judge(adapter, criterion)` returns `Evaluator[str, str]`
 | Field | Type | Description |
 |-------|------|-------------|
 | `sample_id` | `str` | Sample identifier |
+| `experiment_name` | `str` | Experiment name |
 | `score` | `Score` | Evaluation score |
 | `latency_ms` | `int` | Processing time |
 | `error` | `str \| None` | Error message |
+| `bundle_path` | `Path \| None` | Debug bundle path (if enabled) |
 
 ### EvalReport
 
@@ -125,6 +127,17 @@ Factory: `llm_judge(adapter, criterion)` returns `Evaluator[str, str]`
 | `mean_score` | Average score |
 | `mean_latency_ms` | Average latency |
 | `failed_samples()` | Non-passing samples |
+
+### EvalLoopConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `lease_extender` | `LeaseExtenderConfig \| None` | `None` | Message visibility extension |
+| `debug_bundle_dir` | `Path \| None` | `None` | Debug bundle output directory |
+
+When `debug_bundle_dir` is set, EvalLoop creates debug bundles for each
+evaluation sample containing session state, logs, and eval metadata. See
+`specs/DEBUG_BUNDLE.md` for bundle format details.
 
 ### EvalLoop
 
@@ -175,6 +188,7 @@ EvalLoop supports distributed evaluation using Redis/SQS mailboxes.
 
 ## Related Specifications
 
+- `specs/DEBUG_BUNDLE.md` - Debug bundle format and EvalLoop integration
 - `specs/DLQ.md` - Dead letter queue for failed samples
 - `specs/MAIN_LOOP.md` - MainLoop orchestration
 - `specs/MAILBOX.md` - Mailbox protocol
