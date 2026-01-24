@@ -2160,13 +2160,21 @@ class TestQueryViews:
         finally:
             db.close()
 
-    def test_native_tool_calls_view_exists(self, tmp_path: Path) -> None:
-        """Test that native_tool_calls view is created."""
+    def test_tool_calls_table_has_source_column(self, tmp_path: Path) -> None:
+        """Test that tool_calls table has source column for native/custom."""
         bundle_path = _create_test_bundle(tmp_path)
         db = open_query_database(bundle_path)
         try:
-            results = db.execute_query("SELECT * FROM native_tool_calls LIMIT 1")
-            assert isinstance(results, list)
+            # Schema should include source column
+            schema = db.get_schema()
+            tool_calls_table = next(
+                (t for t in schema.tables if t.name == "tool_calls"), None
+            )
+            assert tool_calls_table is not None
+            column_names = [c.name for c in tool_calls_table.columns]
+            assert "source" in column_names
+            assert "seq" in column_names
+            assert "tool_use_id" in column_names
         finally:
             db.close()
 
@@ -2188,8 +2196,9 @@ class TestQueryViews:
             schema = db.get_schema()
             table_names = [t.name for t in schema.tables]
             assert "tool_timeline" in table_names
-            assert "native_tool_calls" in table_names
             assert "error_summary" in table_names
+            # native_tool_calls view was removed - unified into tool_calls table
+            assert "native_tool_calls" not in table_names
         finally:
             db.close()
 
@@ -2200,10 +2209,759 @@ class TestGetTableDescriptionViews:
     def test_view_description(self) -> None:
         """Test that views get appropriate descriptions."""
         assert "View:" in _get_table_description("tool_timeline", is_view=True)
-        assert "View:" in _get_table_description("native_tool_calls", is_view=True)
         assert "View:" in _get_table_description("error_summary", is_view=True)
 
     def test_unknown_view(self) -> None:
         """Test that unknown views get a generic description."""
         desc = _get_table_description("unknown_view", is_view=True)
         assert desc == "View"
+
+
+class TestNativeToolParsing:
+    """Tests for native tool parsing from log_aggregator events."""
+
+    def test_parse_tool_use_block(self) -> None:
+        """Test parsing a tool_use content block."""
+        from weakincentives.cli.query import _parse_native_tool_content
+
+        content = json.dumps(
+            {
+                "type": "tool_use",
+                "id": "toolu_123",
+                "name": "Bash",
+                "input": {"command": "ls -la"},
+            }
+        )
+        result = _parse_native_tool_content(content, seq=10, timestamp="2024-01-01")
+        assert result is not None
+        assert result.tool_use_id == "toolu_123"
+        assert result.name == "Bash"
+        assert result.input_params == {"command": "ls -la"}
+        assert result.seq == 10
+
+    def test_parse_tool_result_block(self) -> None:
+        """Test parsing a tool_result content block."""
+        from weakincentives.cli.query import _parse_native_tool_content
+
+        content = json.dumps(
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_123",
+                "content": "file1\nfile2",
+            }
+        )
+        result = _parse_native_tool_content(content, seq=11, timestamp="2024-01-01")
+        assert result is not None
+        assert result.tool_use_id == "toolu_123"
+        assert result.content == "file1\nfile2"
+        assert result.is_error is False
+
+    def test_parse_tool_result_with_error(self) -> None:
+        """Test parsing a tool_result with is_error flag."""
+        from weakincentives.cli.query import _parse_native_tool_content
+
+        content = json.dumps(
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_456",
+                "content": "Permission denied",
+                "is_error": True,
+            }
+        )
+        result = _parse_native_tool_content(content, seq=12, timestamp="2024-01-01")
+        assert result is not None
+        assert result.is_error is True
+        assert result.content == "Permission denied"
+
+    def test_parse_invalid_json(self) -> None:
+        """Test that invalid JSON returns None."""
+        from weakincentives.cli.query import _parse_native_tool_content
+
+        result = _parse_native_tool_content("not json", seq=1, timestamp="2024-01-01")
+        assert result is None
+
+    def test_parse_non_tool_block(self) -> None:
+        """Test that non-tool blocks return None."""
+        from weakincentives.cli.query import _parse_native_tool_content
+
+        content = json.dumps({"type": "text", "text": "Hello"})
+        result = _parse_native_tool_content(content, seq=1, timestamp="2024-01-01")
+        assert result is None
+
+    def test_parse_tool_use_missing_id(self) -> None:
+        """Test tool_use without id returns None."""
+        from weakincentives.cli.query import _parse_native_tool_content
+
+        content = json.dumps({"type": "tool_use", "name": "Bash", "input": {}})
+        result = _parse_native_tool_content(content, seq=1, timestamp="2024-01-01")
+        assert result is None
+
+    def test_parse_tool_result_missing_tool_use_id(self) -> None:
+        """Test tool_result without tool_use_id returns None."""
+        from weakincentives.cli.query import _parse_native_tool_content
+
+        content = json.dumps({"type": "tool_result", "content": "result"})
+        result = _parse_native_tool_content(content, seq=1, timestamp="2024-01-01")
+        assert result is None
+
+    def test_parse_non_dict_json(self) -> None:
+        """Test that non-dict JSON (e.g., array, string) returns None."""
+        from weakincentives.cli.query import _parse_native_tool_content
+
+        # Array
+        result = _parse_native_tool_content("[1, 2, 3]", seq=1, timestamp="2024-01-01")
+        assert result is None
+
+        # String
+        result = _parse_native_tool_content('"hello"', seq=1, timestamp="2024-01-01")
+        assert result is None
+
+    def test_parse_tool_use_non_dict_input(self) -> None:
+        """Test tool_use with non-dict input uses empty dict."""
+        from weakincentives.cli.query import _parse_native_tool_content
+
+        content = json.dumps(
+            {"type": "tool_use", "id": "toolu_123", "name": "Bash", "input": "string"}
+        )
+        result = _parse_native_tool_content(content, seq=1, timestamp="2024-01-01")
+        assert result is not None
+        assert result.input_params == {}
+
+
+class TestCollectNativeToolCalls:
+    """Tests for _collect_native_tool_calls function."""
+
+    def test_collect_matched_tool_calls(self) -> None:
+        """Test collecting and matching tool_use with tool_result."""
+        from weakincentives.cli.query import _collect_native_tool_calls
+
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 1,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_123",
+                            "name": "Read",
+                            "input": {"path": "/test.txt"},
+                        }
+                    ),
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 2,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_123",
+                            "content": "file contents",
+                        }
+                    ),
+                },
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        results = _collect_native_tool_calls(logs_content)
+        assert len(results) == 1
+        (
+            _timestamp,
+            tool_name,
+            params,
+            result,
+            success,
+            _error_code,
+            _,
+            seq,
+            tool_use_id,
+        ) = results[0]
+        assert tool_name == "Read"
+        assert json.loads(params) == {"path": "/test.txt"}
+        assert json.loads(result) == "file contents"
+        assert success == 1
+        assert seq == 1
+        assert tool_use_id == "toolu_123"
+
+    def test_collect_error_tool_result(self) -> None:
+        """Test collecting tool call with error result."""
+        from weakincentives.cli.query import _collect_native_tool_calls
+
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 1,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_err",
+                            "name": "Write",
+                            "input": {"path": "/readonly.txt"},
+                        }
+                    ),
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 2,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_err",
+                            "content": "Permission denied",
+                            "is_error": True,
+                        }
+                    ),
+                },
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        results = _collect_native_tool_calls(logs_content)
+        assert len(results) == 1
+        _, _, _, _, success, error_code, _, _, _ = results[0]
+        assert success == 0
+        assert error_code == "Permission denied"
+
+    def test_collect_skips_non_log_aggregator_events(self) -> None:
+        """Test that non-log_aggregator events are skipped."""
+        from weakincentives.cli.query import _collect_native_tool_calls
+
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "event": "tool.execution.complete",  # Not log_aggregator
+                "context": {
+                    "tool_name": "read_file",
+                    "success": True,
+                },
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        results = _collect_native_tool_calls(logs_content)
+        assert len(results) == 0
+
+    def test_collect_handles_non_dict_context(self) -> None:
+        """Test that entries with non-dict context are skipped."""
+        from weakincentives.cli.query import _collect_native_tool_calls
+
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "event": "log_aggregator.log_line",
+                "context": "not a dict",  # Invalid context
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        results = _collect_native_tool_calls(logs_content)
+        assert len(results) == 0
+
+    def test_collect_handles_non_string_content(self) -> None:
+        """Test that entries with non-string content are skipped."""
+        from weakincentives.cli.query import _collect_native_tool_calls
+
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 1,
+                    "content": 12345,  # Not a string
+                },
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        results = _collect_native_tool_calls(logs_content)
+        assert len(results) == 0
+
+    def test_collect_tool_use_without_result(self) -> None:
+        """Test tool_use without matching result (pending/incomplete)."""
+        from weakincentives.cli.query import _collect_native_tool_calls
+
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 1,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_pending",
+                            "name": "Bash",
+                            "input": {"command": "sleep 100"},
+                        }
+                    ),
+                },
+            },
+            # No matching tool_result
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        results = _collect_native_tool_calls(logs_content)
+        assert len(results) == 1
+        _, _, _, _, success, error_code, _, _, _ = results[0]
+        # Tool without result is treated as success (pending)
+        assert success == 1
+        assert error_code == ""
+
+    def test_duplicate_native_tool_uses_collected_once(self) -> None:
+        """Test that duplicate tool_use blocks with same ID are merged."""
+        from weakincentives.cli.query import _collect_native_tool_calls
+
+        # Same tool_use appearing twice in logs (rare edge case)
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 1,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_dup",
+                            "name": "Bash",
+                            "input": {"command": "echo first"},
+                        }
+                    ),
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 2,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_dup",  # Same ID - will override
+                            "name": "Bash",
+                            "input": {"command": "echo second"},
+                        }
+                    ),
+                },
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        results = _collect_native_tool_calls(logs_content)
+        # Only one result since same tool_use_id
+        assert len(results) == 1
+
+
+class TestExtractToolUseId:
+    """Tests for _extract_tool_use_id function."""
+
+    def test_extract_valid_tool_use_id(self) -> None:
+        """Test extracting tool_use_id from valid context."""
+        from weakincentives.cli.query import _extract_tool_use_id
+
+        entry = {"context": {"tool_use_id": "toolu_abc123"}}
+        assert _extract_tool_use_id(entry) == "toolu_abc123"
+
+    def test_extract_missing_tool_use_id(self) -> None:
+        """Test extracting from context without tool_use_id."""
+        from weakincentives.cli.query import _extract_tool_use_id
+
+        entry = {"context": {"other_field": "value"}}
+        assert _extract_tool_use_id(entry) == ""
+
+    def test_extract_non_dict_context(self) -> None:
+        """Test extracting from non-dict context returns empty string."""
+        from weakincentives.cli.query import _extract_tool_use_id
+
+        entry = {"context": "not a dict"}
+        assert _extract_tool_use_id(entry) == ""
+
+    def test_extract_missing_context(self) -> None:
+        """Test extracting from entry without context."""
+        from weakincentives.cli.query import _extract_tool_use_id
+
+        entry: dict[str, Any] = {}
+        assert _extract_tool_use_id(entry) == ""
+
+
+class TestUnifiedToolCallsIntegration:
+    """Integration tests for unified tool_calls table."""
+
+    def test_native_tools_in_tool_calls_table(self, tmp_path: Path) -> None:
+        """Test that native tools are inserted into tool_calls with source='native'."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-unified",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        # Logs with native tool calls from log_aggregator
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 1,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_native",
+                            "name": "Bash",
+                            "input": {"command": "echo hello"},
+                        }
+                    ),
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "level": "DEBUG",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 2,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_native",
+                            "content": "hello",
+                        }
+                    ),
+                },
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        db = open_query_database(bundle_path)
+        try:
+            results = db.execute_query(
+                "SELECT tool_name, source, seq FROM tool_calls WHERE source = 'native'"
+            )
+            assert len(results) == 1
+            assert results[0]["tool_name"] == "Bash"
+            assert results[0]["source"] == "native"
+            assert results[0]["seq"] == 1
+        finally:
+            db.close()
+
+    def test_custom_tools_in_tool_calls_table(self, tmp_path: Path) -> None:
+        """Test that custom tools are inserted with source='custom'."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-custom",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        # Logs with custom tool execution
+        logs_content = json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "INFO",
+                "event": "tool.execution.complete",
+                "context": {
+                    "tool_name": "my_custom_tool",
+                    "arguments": {"param1": "value1"},
+                    "value": {"result": "success"},
+                    "success": True,
+                    "duration_ms": 50.0,
+                },
+            }
+        )
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        db = open_query_database(bundle_path)
+        try:
+            results = db.execute_query(
+                "SELECT tool_name, source, duration_ms FROM tool_calls WHERE source = 'custom'"
+            )
+            assert len(results) == 1
+            assert results[0]["tool_name"] == "my_custom_tool"
+            assert results[0]["source"] == "custom"
+            assert results[0]["duration_ms"] == 50.0
+        finally:
+            db.close()
+
+    def test_tool_timeline_view_includes_both_sources(self, tmp_path: Path) -> None:
+        """Test that tool_timeline view shows both native and custom tools."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-timeline",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        logs = [
+            # Native tool
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 1,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "Read",
+                            "input": {"path": "/file.txt"},
+                        }
+                    ),
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "level": "DEBUG",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 2,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": "file content",
+                        }
+                    ),
+                },
+            },
+            # Custom tool
+            {
+                "timestamp": "2024-01-01T00:00:02Z",
+                "level": "INFO",
+                "event": "tool.execution.complete",
+                "context": {
+                    "tool_name": "custom_tool",
+                    "success": True,
+                    "duration_ms": 100.0,
+                },
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        db = open_query_database(bundle_path)
+        try:
+            results = db.execute_query("SELECT tool_name, source FROM tool_timeline")
+            sources = {r["source"] for r in results}
+            assert "native" in sources
+            assert "custom" in sources
+        finally:
+            db.close()
+
+    def test_deduplication_of_tool_calls(self, tmp_path: Path) -> None:
+        """Test that duplicate tool calls are deduplicated by tool_use_id."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-dedup",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        # Same tool appearing in both native and custom logs with same tool_use_id
+        logs = [
+            # Native tool (via log_aggregator)
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 1,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_duplicate",
+                            "name": "Read",
+                            "input": {"path": "/file.txt"},
+                        }
+                    ),
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "level": "DEBUG",
+                "event": "log_aggregator.log_line",
+                "context": {
+                    "sequence_number": 2,
+                    "content": json.dumps(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_duplicate",
+                            "content": "content",
+                        }
+                    ),
+                },
+            },
+            # Same tool also appearing as custom event (e.g., bridged tool)
+            {
+                "timestamp": "2024-01-01T00:00:02Z",
+                "level": "INFO",
+                "event": "tool.execution.complete",
+                "context": {
+                    "tool_name": "Read",
+                    "tool_use_id": "toolu_duplicate",  # Same ID
+                    "success": True,
+                    "duration_ms": 50.0,
+                },
+            },
+        ]
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        db = open_query_database(bundle_path)
+        try:
+            # Should only have one entry due to deduplication
+            results = db.execute_query(
+                "SELECT tool_name, tool_use_id FROM tool_calls "
+                "WHERE tool_use_id = 'toolu_duplicate'"
+            )
+            assert len(results) == 1
+            # Native takes precedence (inserted first)
+            assert results[0]["tool_name"] == "Read"
+        finally:
+            db.close()
+
+    def test_custom_tool_with_tool_use_id(self, tmp_path: Path) -> None:
+        """Test that custom tools with tool_use_id get it recorded."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-custom-id",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        logs_content = json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "INFO",
+                "event": "tool.execution.complete",
+                "context": {
+                    "tool_name": "my_tool",
+                    "tool_use_id": "toolu_custom_123",
+                    "success": True,
+                    "duration_ms": 25.0,
+                },
+            }
+        )
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        db = open_query_database(bundle_path)
+        try:
+            results = db.execute_query(
+                "SELECT tool_name, tool_use_id, source FROM tool_calls"
+            )
+            assert len(results) == 1
+            assert results[0]["tool_name"] == "my_tool"
+            assert results[0]["tool_use_id"] == "toolu_custom_123"
+            assert results[0]["source"] == "custom"
+        finally:
+            db.close()

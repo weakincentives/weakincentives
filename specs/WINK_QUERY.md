@@ -53,7 +53,7 @@ wink query ./bundle.zip --export-jsonl=session | jq 'select(.__type__)'
 |-------|--------|-------------|
 | `manifest` | `manifest.json` | Bundle metadata |
 | `logs` | `logs/app.jsonl` | Log entries (with `seq` column for log_aggregator events) |
-| `tool_calls` | derived from logs | Tool invocations |
+| `tool_calls` | derived from logs | Unified tool invocations (native + custom) |
 | `errors` | derived | Aggregated errors |
 | `session_slices` | `session/after.jsonl` | Session state items |
 | `files` | `filesystem/` | Workspace files |
@@ -84,17 +84,40 @@ Pre-built views for common query patterns:
 
 | View | Description |
 |------|-------------|
-| `tool_timeline` | Tool calls ordered by timestamp with command extraction |
-| `native_tool_calls` | Claude Code native tools from log_aggregator events |
+| `tool_timeline` | All tools ordered by execution sequence (native + custom) |
 | `error_summary` | Errors with truncated traceback |
+
+## Tool Calls Table
+
+The `tool_calls` table provides a unified view of all tool invocations:
+
+- **Native tools**: Claude Code's built-in tools (Bash, Read, Write, etc.)
+- **Custom tools**: MCP-bridged tools and custom tool handlers
+
+Key columns:
+
+- `source`: Either `'native'` or `'custom'` - filter when needed
+- `seq`: Sequence number for native tools (NULL for custom tools)
+- `tool_use_id`: Unique identifier for deduplication
+
+```sql
+-- All tools in execution order
+SELECT tool_name, source, success FROM tool_calls ORDER BY seq, rowid
+
+-- Native tools only
+SELECT tool_name, params FROM tool_calls WHERE source = 'native' ORDER BY seq
+
+-- Custom tools only
+SELECT tool_name, duration_ms FROM tool_calls WHERE source = 'custom'
+```
 
 ## Logs Table
 
 The `logs` table includes a `seq` column extracted from `log_aggregator.log_line`
-events. This enables range queries on native tool executions:
+events. For raw log access, use `seq` for ordering:
 
 ```sql
--- Query native tool logs by sequence range
+-- Query raw logs by sequence range
 SELECT seq, json_extract(context, '$.content') as content
 FROM logs
 WHERE event = 'log_aggregator.log_line'
@@ -136,11 +159,13 @@ wink query ./bundle.zip --schema
   "hints": {
     "json_extraction": [
       "json_extract(context, '$.tool_name')",
-      "json_extract(context, '$.content')",
-      "json_extract(params, '$.command')"
+      "json_extract(params, '$.command')",
+      "json_extract(params, '$.path')"
     ],
     "common_queries": {
-      "native_tools": "SELECT seq, json_extract(context, '$.content') as content FROM logs WHERE event = 'log_aggregator.log_line' AND seq BETWEEN 100 AND 200 ORDER BY seq",
+      "all_tools": "SELECT tool_name, source, success, duration_ms FROM tool_calls ORDER BY seq, rowid",
+      "native_tools": "SELECT tool_name, params, success FROM tool_calls WHERE source = 'native' ORDER BY seq",
+      "custom_tools": "SELECT tool_name, params, result, duration_ms FROM tool_calls WHERE source = 'custom'",
       "tool_timeline": "SELECT * FROM tool_timeline WHERE duration_ms > 1000",
       "error_context": "SELECT timestamp, message, context FROM logs WHERE level = 'ERROR'"
     }
@@ -182,16 +207,14 @@ SELECT slice_type, COUNT(*) FROM session_slices GROUP BY slice_type
 SELECT path FROM files WHERE content LIKE '%TODO%'
 
 -- Native tools by sequence (Claude Code Bash, Read, Write, etc.)
-SELECT seq, json_extract(context, '$.content') as content
-FROM logs
-WHERE event = 'log_aggregator.log_line'
-  AND seq BETWEEN 100 AND 200
+SELECT tool_name, params, success
+FROM tool_calls
+WHERE source = 'native'
 ORDER BY seq
 
 -- Use pre-built views
 SELECT * FROM tool_timeline WHERE duration_ms > 1000
 SELECT * FROM error_summary
-SELECT * FROM native_tool_calls LIMIT 10
 ```
 
 ## Raw JSONL Export
@@ -233,9 +256,9 @@ Cache invalidated when:
    - `metrics.json` → `metrics`
    - `run_context.json` → `run_context`
    - `filesystem/` → `files`
-   - Derive `tool_calls` from logs
+   - Derive `tool_calls` from logs (unified native + custom tools)
    - Derive `errors` from logs + `error.json` + failed tools
-   - Create views: `tool_timeline`, `native_tool_calls`, `error_summary`
+   - Create views: `tool_timeline`, `error_summary`
    - Optional: `prompt_overrides.json`, `eval.json`
 1. Execute query
 1. Return JSON or table
@@ -263,7 +286,7 @@ For each `__type__` in session JSONL:
 - Single bundle only
 - SQLite built-in functions only
 - Entire bundle loaded on first query
-- Native tool call content is in nested JSON (use `json_extract()`)
+- Tool params/results stored as JSON (use `json_extract()`)
 - Extended thinking content is signature-encoded (not accessible as plaintext)
 
 ## Related Specifications

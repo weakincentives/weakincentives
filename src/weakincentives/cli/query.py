@@ -43,7 +43,7 @@ class QueryError(WinkError, RuntimeError):
 _MAX_COLUMN_WIDTH = 50
 
 # Schema version for cache invalidation - increment when schema changes
-_SCHEMA_VERSION = 2  # v2: added seq column, views, hints
+_SCHEMA_VERSION = 3  # v3: unified tool_calls table (native + custom tools)
 
 
 @FrozenDataclass()
@@ -177,6 +177,172 @@ def _is_tool_event(event: str) -> bool:
     )
 
 
+@FrozenDataclass()
+class _NativeToolUse:
+    """Parsed tool_use block from native tool content."""
+
+    tool_use_id: str
+    name: str
+    input_params: dict[str, Any]
+    seq: int
+    timestamp: str
+
+
+@FrozenDataclass()
+class _NativeToolResult:
+    """Parsed tool_result block from native tool content."""
+
+    tool_use_id: str
+    content: Any
+    is_error: bool
+    seq: int
+    timestamp: str
+
+
+def _parse_tool_use_block(
+    data: dict[str, Any], seq: int, timestamp: str
+) -> _NativeToolUse | None:
+    """Parse a tool_use content block."""
+    tool_use_id = data.get("id", "")
+    name = data.get("name", "")
+    if not tool_use_id or not name:
+        return None
+    input_raw: Any = data.get("input", {})
+    input_params = (
+        cast("dict[str, Any]", input_raw) if isinstance(input_raw, dict) else {}
+    )
+    return _NativeToolUse(
+        tool_use_id=str(tool_use_id),
+        name=str(name),
+        input_params=input_params,
+        seq=seq,
+        timestamp=timestamp,
+    )
+
+
+def _parse_tool_result_block(
+    data: dict[str, Any], seq: int, timestamp: str
+) -> _NativeToolResult | None:
+    """Parse a tool_result content block."""
+    tool_use_id = data.get("tool_use_id", "")
+    if not tool_use_id:
+        return None
+    return _NativeToolResult(
+        tool_use_id=str(tool_use_id),
+        content=data.get("content", ""),
+        is_error=bool(data.get("is_error")),
+        seq=seq,
+        timestamp=timestamp,
+    )
+
+
+def _parse_native_tool_content(
+    content: str, seq: int, timestamp: str
+) -> _NativeToolUse | _NativeToolResult | None:
+    """Parse a native tool content block from log_aggregator.
+
+    The content is raw JSON from Claude's transcript files containing
+    tool_use or tool_result content blocks.
+    """
+    try:
+        data_raw: Any = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(data_raw, dict):
+        return None
+
+    data = cast("dict[str, Any]", data_raw)
+    block_type: Any = data.get("type")
+    if block_type == "tool_use":
+        return _parse_tool_use_block(data, seq, timestamp)
+    if block_type == "tool_result":
+        return _parse_tool_result_block(data, seq, timestamp)
+    return None
+
+
+def _process_log_aggregator_entry(
+    entry: dict[str, Any],
+    tool_uses: dict[str, _NativeToolUse],
+    tool_results: dict[str, _NativeToolResult],
+) -> None:
+    """Process a single log_aggregator.log_line entry for tool blocks."""
+    if entry.get("event") != "log_aggregator.log_line":
+        return
+
+    ctx_raw = entry.get("context", {})
+    if not isinstance(ctx_raw, dict):
+        return
+    ctx = cast("dict[str, Any]", ctx_raw)
+
+    content: Any = ctx.get("content")
+    if not isinstance(content, str):
+        return
+
+    seq_val: Any = ctx.get("sequence_number")
+    seq = seq_val if isinstance(seq_val, int) else 0
+    timestamp = str(entry.get("timestamp", ""))
+
+    parsed = _parse_native_tool_content(content, seq, timestamp)
+    if isinstance(parsed, _NativeToolUse):
+        tool_uses[parsed.tool_use_id] = parsed
+    elif isinstance(parsed, _NativeToolResult):
+        tool_results[parsed.tool_use_id] = parsed
+
+
+def _build_native_tool_record(
+    use: _NativeToolUse, result: _NativeToolResult | None
+) -> tuple[str, str, str, str, int, str, float, int | None, str]:
+    """Build a tool call record from matched use and result."""
+    if result is not None:
+        success = 0 if result.is_error else 1
+        result_content = result.content
+        error_code = str(result_content) if result.is_error else ""
+    else:
+        success, result_content, error_code = 1, None, ""
+
+    return (
+        use.timestamp,
+        use.name,
+        json.dumps(use.input_params),
+        json.dumps(result_content),
+        success,
+        error_code,
+        0.0,
+        use.seq,
+        use.tool_use_id,
+    )
+
+
+def _collect_native_tool_calls(
+    logs_content: str,
+) -> list[tuple[str, str, str, str, int, str, float, int | None, str]]:
+    """Collect native tool calls from log_aggregator events.
+
+    Parses log_aggregator.log_line events, extracts tool_use and tool_result
+    blocks, matches them by tool_use_id, and returns unified tool call records.
+    """
+    tool_uses: dict[str, _NativeToolUse] = {}
+    tool_results: dict[str, _NativeToolResult] = {}
+
+    for line in logs_content.strip().split("\n"):
+        if not line.strip():
+            continue
+        try:
+            entry: dict[str, Any] = json.loads(line)
+            _process_log_aggregator_entry(entry, tool_uses, tool_results)
+        except json.JSONDecodeError:
+            continue
+
+    # Match tool_use with tool_result by tool_use_id
+    results = [
+        _build_native_tool_record(use, tool_results.get(tool_use_id))
+        for tool_use_id, use in tool_uses.items()
+    ]
+    results.sort(key=lambda x: x[7] or 0)
+    return results
+
+
 def _extract_tool_call_from_entry(
     entry: dict[str, Any],
 ) -> tuple[str, str, str, str, int, str, float] | None:
@@ -229,6 +395,85 @@ def _extract_tool_call_from_entry(
         success,
         error_code,
         duration_ms,
+    )
+
+
+def _extract_tool_use_id(entry: dict[str, Any]) -> str:
+    """Extract tool_use_id from a log entry's context."""
+    ctx_raw: Any = entry.get("context", {})
+    if not isinstance(ctx_raw, dict):
+        return ""
+    ctx = cast("dict[str, Any]", ctx_raw)
+    id_val: Any = ctx.get("tool_use_id", "")
+    return str(id_val) if id_val else ""
+
+
+def _insert_native_tool_calls(
+    conn: sqlite3.Connection,
+    logs_content: str,
+    inserted_ids: set[str],
+) -> None:
+    """Insert native tool calls from log_aggregator events."""
+    for native_data in _collect_native_tool_calls(logs_content):
+        tool_use_id = native_data[8]
+        if tool_use_id in inserted_ids:  # pragma: no cover
+            continue  # Defensive: _collect_native_tool_calls uses dict, merging duplicates
+        inserted_ids.add(tool_use_id)
+        _ = conn.execute(
+            """
+            INSERT INTO tool_calls
+                (timestamp, tool_name, params, result, success,
+                 error_code, duration_ms, source, seq, tool_use_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'native', ?, ?)
+        """,
+            (*native_data[:7], native_data[7], native_data[8]),
+        )
+
+
+def _insert_custom_tool_calls(
+    conn: sqlite3.Connection,
+    logs_content: str,
+    inserted_ids: set[str],
+) -> None:
+    """Insert custom tool calls from tool.execution.* events."""
+    for line in logs_content.strip().split("\n"):
+        if not line.strip():
+            continue
+        try:
+            entry: dict[str, Any] = json.loads(line)
+            _process_custom_tool_entry(conn, entry, inserted_ids)
+        except json.JSONDecodeError:
+            continue
+
+
+def _process_custom_tool_entry(
+    conn: sqlite3.Connection,
+    entry: dict[str, Any],
+    inserted_ids: set[str],
+) -> None:
+    """Process a single log entry for custom tool calls."""
+    event = entry.get("event", "")
+    if not _is_tool_event(event):
+        return
+
+    tool_data = _extract_tool_call_from_entry(entry)
+    if tool_data is None:
+        return
+
+    ctx_tool_use_id = _extract_tool_use_id(entry)
+    if ctx_tool_use_id and ctx_tool_use_id in inserted_ids:
+        return
+    if ctx_tool_use_id:
+        inserted_ids.add(ctx_tool_use_id)
+
+    _ = conn.execute(
+        """
+        INSERT INTO tool_calls
+            (timestamp, tool_name, params, result, success,
+             error_code, duration_ms, source, seq, tool_use_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'custom', NULL, ?)
+    """,
+        (*tool_data, ctx_tool_use_id or None),
     )
 
 
@@ -628,7 +873,12 @@ class QueryDatabase(Closeable):
                 continue
 
     def _build_tool_calls_table(self, conn: sqlite3.Connection) -> None:
-        """Build tool_calls table derived from logs."""
+        """Build unified tool_calls table from both native and custom tools.
+
+        Native tools come from log_aggregator.log_line events (Claude Code's
+        Bash, Read, Write, etc.). Custom tools come from tool.execution.*
+        events (MCP/custom tool handlers).
+        """
         _ = conn.execute("""
             CREATE TABLE IF NOT EXISTS tool_calls (
                 rowid INTEGER PRIMARY KEY,
@@ -638,7 +888,10 @@ class QueryDatabase(Closeable):
                 result TEXT,
                 success INTEGER,
                 error_code TEXT,
-                duration_ms REAL
+                duration_ms REAL,
+                source TEXT,
+                seq INTEGER,
+                tool_use_id TEXT
             )
         """)
 
@@ -646,30 +899,9 @@ class QueryDatabase(Closeable):
         if not logs_content:
             return
 
-        for line in logs_content.strip().split("\n"):
-            if not line.strip():
-                continue
-            try:
-                entry: dict[str, Any] = json.loads(line)
-                event = entry.get("event", "")
-                if not _is_tool_event(event):
-                    continue
-
-                tool_data = _extract_tool_call_from_entry(entry)
-                if tool_data is None:
-                    continue
-
-                _ = conn.execute(
-                    """
-                    INSERT INTO tool_calls
-                        (timestamp, tool_name, params, result, success,
-                         error_code, duration_ms)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                    tool_data,
-                )
-            except json.JSONDecodeError:
-                continue
+        inserted_ids: set[str] = set()
+        _insert_native_tool_calls(conn, logs_content, inserted_ids)
+        _insert_custom_tool_calls(conn, logs_content, inserted_ids)
 
     def _build_errors_table(self, conn: sqlite3.Connection) -> None:
         """Build errors table aggregating errors from multiple sources."""
@@ -906,7 +1138,7 @@ class QueryDatabase(Closeable):
     @staticmethod
     def _build_views(conn: sqlite3.Connection) -> None:
         """Create SQL views for common query patterns."""
-        # Tool execution timeline
+        # Tool execution timeline - unified view of all tools (native + custom)
         _ = conn.execute("""
             CREATE VIEW IF NOT EXISTS tool_timeline AS
             SELECT
@@ -916,23 +1148,12 @@ class QueryDatabase(Closeable):
                 json_extract(params, '$.command') as command,
                 success,
                 duration_ms,
+                source,
+                seq,
                 CASE WHEN success = 0 THEN error_code ELSE NULL END as error
             FROM tool_calls
-            ORDER BY timestamp
-        """)
-
-        # Native tool calls from log aggregator (Claude Code's Bash, Read, etc.)
-        _ = conn.execute("""
-            CREATE VIEW IF NOT EXISTS native_tool_calls AS
-            SELECT
-                seq,
-                timestamp,
-                json_extract(context, '$.file') as source_file,
-                json_extract(context, '$.content') as raw_content
-            FROM logs
-            WHERE event = 'log_aggregator.log_line'
-              AND json_extract(context, '$.content') LIKE '%"type":"tool_%'
-            ORDER BY seq
+            ORDER BY
+                CASE WHEN seq IS NOT NULL THEN seq ELSE rowid END
         """)
 
         # Error summary with truncated traceback
@@ -988,14 +1209,21 @@ class QueryDatabase(Closeable):
         hints = SchemaHints(
             json_extraction=(
                 "json_extract(context, '$.tool_name')",
-                "json_extract(context, '$.content')",
                 "json_extract(params, '$.command')",
+                "json_extract(params, '$.path')",
             ),
             common_queries={
+                "all_tools": (
+                    "SELECT tool_name, source, success, duration_ms "
+                    "FROM tool_calls ORDER BY seq, rowid"
+                ),
                 "native_tools": (
-                    "SELECT seq, json_extract(context, '$.content') as content "
-                    "FROM logs WHERE event = 'log_aggregator.log_line' "
-                    "AND seq BETWEEN 100 AND 200 ORDER BY seq"
+                    "SELECT tool_name, params, success "
+                    "FROM tool_calls WHERE source = 'native' ORDER BY seq"
+                ),
+                "custom_tools": (
+                    "SELECT tool_name, params, result, duration_ms "
+                    "FROM tool_calls WHERE source = 'custom'"
                 ),
                 "tool_timeline": (
                     "SELECT * FROM tool_timeline WHERE duration_ms > 1000"
@@ -1031,7 +1259,7 @@ def _get_table_description(table_name: str, *, is_view: bool = False) -> str:
     descriptions = {
         "manifest": "Bundle metadata",
         "logs": "Log entries (seq column for log_aggregator events)",
-        "tool_calls": "Tool invocations",
+        "tool_calls": "Unified tool invocations (native + custom)",
         "errors": "Aggregated errors",
         "session_slices": "Session state items",
         "files": "Workspace files",
@@ -1041,8 +1269,7 @@ def _get_table_description(table_name: str, *, is_view: bool = False) -> str:
         "prompt_overrides": "Visibility overrides",
         "eval": "Eval metadata",
         # Views
-        "tool_timeline": "View: Tool calls ordered by timestamp",
-        "native_tool_calls": "View: Claude Code native tools from log aggregator",
+        "tool_timeline": "View: All tools ordered by execution sequence",
         "error_summary": "View: Errors with truncated traceback",
     }
     if table_name.startswith("slice_"):

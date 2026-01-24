@@ -57,11 +57,12 @@ JSON data:
   "hints": {
     "json_extraction": [
       "json_extract(context, '$.tool_name')",
-      "json_extract(context, '$.content')",
-      "json_extract(params, '$.command')"
+      "json_extract(params, '$.command')",
+      "json_extract(params, '$.path')"
     ],
     "common_queries": {
-      "native_tools": "SELECT seq, json_extract(context, '$.content') ...",
+      "all_tools": "SELECT tool_name, source, success FROM tool_calls ORDER BY seq, rowid",
+      "native_tools": "SELECT tool_name, params FROM tool_calls WHERE source = 'native' ORDER BY seq",
       "tool_timeline": "SELECT * FROM tool_timeline WHERE duration_ms > 1000",
       "error_context": "SELECT timestamp, message, context FROM logs WHERE level = 'ERROR'"
     }
@@ -79,7 +80,7 @@ These tables are always present:
 |-------|--------|------------------|
 | `manifest` | `manifest.json` | Bundle ID, status, timestamps |
 | `logs` | `logs/app.jsonl` | All log entries with event names and context |
-| `tool_calls` | derived from logs | Tool invocations with params, results, timing |
+| `tool_calls` | derived from logs | Unified tool invocations (native + custom) |
 | `errors` | aggregated | All errors from logs, error.json, and failed tools |
 | `session_slices` | `session/after.jsonl` | Session state items |
 | `files` | `filesystem/` | Workspace files with paths and content |
@@ -112,8 +113,7 @@ Pre-built views for common analysis patterns:
 
 | View | Description |
 |------|-------------|
-| `tool_timeline` | Tool calls ordered by timestamp with extracted commands |
-| `native_tool_calls` | Claude Code native tools (Bash, Read, Write) from log aggregator |
+| `tool_timeline` | All tools ordered by execution sequence (native + custom) |
 | `error_summary` | Errors with truncated tracebacks |
 
 Use views directly in queries:
@@ -121,7 +121,6 @@ Use views directly in queries:
 ```sql
 SELECT * FROM tool_timeline WHERE duration_ms > 1000
 SELECT * FROM error_summary
-SELECT * FROM native_tool_calls LIMIT 20
 ```
 
 ## Common Queries
@@ -180,23 +179,31 @@ FROM logs
 WHERE event = 'tool.execution.complete'
 ```
 
-### Querying Native Tool Calls
+### Querying Tool Calls
 
-When using Claude Code, native tool calls (Bash, Read, Write, etc.) are
-captured via the log aggregator. The `logs` table includes a `seq` column for
-these events, enabling range queries:
+The `tool_calls` table provides a unified view of all tool invocations:
+
+- **Native tools** (`source = 'native'`): Claude Code's Bash, Read, Write, etc.
+- **Custom tools** (`source = 'custom'`): MCP-bridged and custom tool handlers
 
 ```sql
--- Get native tool logs by sequence number
-SELECT seq, json_extract(context, '$.content') as content
-FROM logs
-WHERE event = 'log_aggregator.log_line'
-  AND seq BETWEEN 100 AND 200
+-- All tools in execution order
+SELECT tool_name, source, success FROM tool_calls ORDER BY seq, rowid
+
+-- Native tools only (Claude Code's built-in tools)
+SELECT tool_name, params, success
+FROM tool_calls
+WHERE source = 'native'
 ORDER BY seq
+
+-- Custom tools only (MCP/custom handlers)
+SELECT tool_name, duration_ms, result
+FROM tool_calls
+WHERE source = 'custom'
 ```
 
-The `seq` column is only populated for `log_aggregator.log_line` events; it's
-NULL for other log entries.
+The `seq` column provides ordering for native tools; use `seq, rowid` for
+consistent ordering across all tools.
 
 ### Token Usage
 
@@ -349,11 +356,14 @@ ORDER BY total_ms DESC
 ### "What did the agent actually do?"
 
 ```sql
--- Timeline of all tool calls
+-- Timeline of all tool calls (native + custom unified)
 SELECT * FROM tool_timeline
 
--- For Claude Code native tools
-SELECT * FROM native_tool_calls
+-- Native tools only
+SELECT tool_name, params FROM tool_calls WHERE source = 'native' ORDER BY seq
+
+-- Custom tools only
+SELECT tool_name, params, result FROM tool_calls WHERE source = 'custom'
 ```
 
 ### "What was the session state?"
@@ -371,7 +381,7 @@ SELECT * FROM slice_agentplan
 - Single bundle at a time (no cross-bundle queries)
 - SQLite functions only (no custom functions)
 - Entire bundle is loaded on first query
-- Native tool content is nested JSON (use `json_extract()`)
+- Tool params/results stored as JSON (use `json_extract()`)
 - Extended thinking content is signature-encoded (not readable)
 
 ## Next Steps
