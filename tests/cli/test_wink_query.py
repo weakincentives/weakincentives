@@ -1089,6 +1089,112 @@ class TestToolInvokedExtraction:
         assert not _is_tool_invoked_slice("not a dict")
         assert not _is_tool_invoked_slice(None)
 
+    def test_check_sdk_error_indicators_is_error(self) -> None:
+        """Test SDK error detection for isError flag."""
+        from weakincentives.cli.query import _check_sdk_error_indicators
+
+        # isError flag
+        assert _check_sdk_error_indicators({"isError": True}) == "Tool returned error"
+        assert _check_sdk_error_indicators({"is_error": True}) == "Tool returned error"
+        assert _check_sdk_error_indicators({"isError": False}) is None
+
+    def test_check_sdk_error_indicators_stderr(self) -> None:
+        """Test SDK error detection for stderr field."""
+        from weakincentives.cli.query import _check_sdk_error_indicators
+
+        # stderr field (Bash tool format)
+        result = _check_sdk_error_indicators({"stdout": "ok", "stderr": "error msg"})
+        assert result == "error msg"
+        # Empty stderr is not an error
+        assert _check_sdk_error_indicators({"stdout": "ok", "stderr": ""}) is None
+        assert _check_sdk_error_indicators({"stdout": "ok", "stderr": "  "}) is None
+
+    def test_check_sdk_error_indicators_content_error(self) -> None:
+        """Test SDK error detection for content error text."""
+        from weakincentives.cli.query import _check_sdk_error_indicators
+
+        # Content with error text (Claude Agent SDK format)
+        result = _check_sdk_error_indicators(
+            {"content": [{"type": "text", "text": "Error: something went wrong"}]}
+        )
+        assert result is not None
+        assert "Error: something went wrong" in result
+
+        result = _check_sdk_error_indicators(
+            {"content": [{"type": "text", "text": "error - file not found"}]}
+        )
+        assert result is not None
+
+    def test_check_sdk_error_indicators_no_error(self) -> None:
+        """Test SDK error detection for normal responses."""
+        from weakincentives.cli.query import _check_sdk_error_indicators
+
+        # No error indicators
+        assert _check_sdk_error_indicators({"stdout": "output"}) is None
+        assert _check_sdk_error_indicators({"content": []}) is None
+        assert (
+            _check_sdk_error_indicators({"content": [{"type": "text", "text": "ok"}]})
+            is None
+        )
+
+    def test_check_sdk_error_indicators_content_edge_cases(self) -> None:
+        """Test SDK error detection edge cases in content parsing."""
+        from weakincentives.cli.query import _check_sdk_error_indicators
+
+        # First item not a dict
+        assert _check_sdk_error_indicators({"content": ["string item"]}) is None
+
+        # Text field not a string
+        assert _check_sdk_error_indicators({"content": [{"text": 123}]}) is None
+        assert _check_sdk_error_indicators({"content": [{"text": None}]}) is None
+
+    def test_extract_result_fields_mcp_format(self) -> None:
+        """Test result extraction for MCP/BridgedTool format."""
+        from weakincentives.cli.query import _extract_result_fields
+
+        # MCP format with success field
+        result = _extract_result_fields(
+            {"value": {"data": "test"}, "success": True, "message": "OK"}
+        )
+        assert result[0] == {"data": "test"}
+        assert result[1] is True
+        assert result[2] == "OK"
+
+        # MCP format with failure
+        result = _extract_result_fields(
+            {"value": None, "success": False, "message": "Failed"}
+        )
+        assert result[0] is None
+        assert result[1] is False
+        assert result[2] == "Failed"
+
+    def test_extract_result_fields_native_format(self) -> None:
+        """Test result extraction for native SDK format."""
+        from weakincentives.cli.query import _extract_result_fields
+
+        # Native format with stderr error
+        result = _extract_result_fields({"stdout": "", "stderr": "error output"})
+        assert result[1] is False
+        assert "error output" in result[2]
+
+        # Native format with isError
+        result = _extract_result_fields({"isError": True, "content": []})
+        assert result[1] is False
+
+        # Native format success
+        result = _extract_result_fields({"stdout": "output", "stderr": ""})
+        assert result[1] is True
+        assert result[2] == ""
+
+    def test_extract_result_fields_non_dict(self) -> None:
+        """Test result extraction for non-dict values."""
+        from weakincentives.cli.query import _extract_result_fields
+
+        result = _extract_result_fields("string result")
+        assert result[0] == "string result"
+        assert result[1] is True
+        assert result[2] == ""
+
 
 class TestExtractSlicesFromSnapshot:
     """Tests for _extract_slices_from_snapshot helper function."""

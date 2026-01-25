@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -44,9 +45,27 @@ __all__ = [
     "BridgedTool",
     "create_bridged_tools",
     "create_mcp_server",
+    "get_current_tool_use_id",
+    "set_current_tool_use_id",
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
+
+# ContextVar to store the current tool_use_id from SDK hooks.
+# Set by pre_tool_use_hook, read by BridgedTool, cleared after use.
+_CURRENT_TOOL_USE_ID: ContextVar[str | None] = ContextVar(
+    "weakincentives_current_tool_use_id", default=None
+)
+
+
+def set_current_tool_use_id(tool_use_id: str | None) -> None:
+    """Set the current tool_use_id for BridgedTool to read."""
+    _CURRENT_TOOL_USE_ID.set(tool_use_id)
+
+
+def get_current_tool_use_id() -> str | None:
+    """Get the current tool_use_id set by pre_tool_use_hook."""
+    return _CURRENT_TOOL_USE_ID.get()
 
 
 @dataclass(slots=True, frozen=True)
@@ -322,6 +341,7 @@ class BridgedTool:
         """Dispatch a ToolInvoked event for session reducer dispatch.
 
         The session extracts the value from result.value for slice routing.
+        The call_id is retrieved from the ContextVar set by pre_tool_use_hook.
         """
         event = ToolInvoked(
             prompt_name=self._prompt_name,
@@ -333,7 +353,7 @@ class BridgedTool:
             created_at=datetime.now(UTC),
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
-            call_id=None,
+            call_id=get_current_tool_use_id(),
             run_context=self._run_context,
         )
         self._session.dispatcher.dispatch(event)

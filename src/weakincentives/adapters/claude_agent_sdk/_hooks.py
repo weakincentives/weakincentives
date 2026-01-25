@@ -31,6 +31,7 @@ from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
 from ...runtime.watchdog import Heartbeat
+from ._bridge import set_current_tool_use_id
 from ._task_completion import (
     TaskCompletionChecker,
     TaskCompletionContext,
@@ -240,6 +241,39 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _compute_budget_info(budget_tracker: BudgetTracker | None) -> dict[str, Any]:
+    """Compute budget information for logging."""
+    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):
+        return {}
+    budget = budget_tracker.budget
+    consumed = budget_tracker.consumed
+    consumed_total = (consumed.input_tokens or 0) + (consumed.output_tokens or 0)
+    return {
+        "budget_consumed_input": consumed.input_tokens,
+        "budget_consumed_output": consumed.output_tokens,
+        "budget_consumed_total": consumed_total,
+        "budget_max_total": budget.max_total_tokens,
+        "budget_remaining": (
+            budget.max_total_tokens - consumed_total
+            if budget.max_total_tokens
+            else None
+        ),
+    }
+
+
+def _is_budget_exhausted(budget_tracker: BudgetTracker | None) -> bool:
+    """Check if the token budget is exhausted."""
+    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):
+        return False
+    budget = budget_tracker.budget
+    consumed = budget_tracker.consumed
+    consumed_total = (consumed.input_tokens or 0) + (consumed.output_tokens or 0)
+    return (
+        budget.max_total_tokens is not None
+        and consumed_total >= budget.max_total_tokens
+    )
+
+
 def create_pre_tool_use_hook(
     hook_context: HookContext,
 ) -> AsyncHookCallback:
@@ -277,25 +311,7 @@ def create_pre_tool_use_hook(
                 hook_context.deadline.remaining().total_seconds() * 1000
             )
 
-        budget_info: dict[str, Any] = {}
-        budget_tracker = hook_context.budget_tracker
-        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
-            budget = budget_tracker.budget
-            consumed = budget_tracker.consumed
-            consumed_total = (consumed.input_tokens or 0) + (
-                consumed.output_tokens or 0
-            )
-            budget_info = {
-                "budget_consumed_input": consumed.input_tokens,
-                "budget_consumed_output": consumed.output_tokens,
-                "budget_consumed_total": consumed_total,
-                "budget_max_total": budget.max_total_tokens,
-                "budget_remaining": (
-                    budget.max_total_tokens - consumed_total
-                    if budget.max_total_tokens
-                    else None
-                ),
-            }
+        budget_info = _compute_budget_info(hook_context.budget_tracker)
 
         logger.debug(
             "claude_agent_sdk.hook.pre_tool_use",
@@ -332,33 +348,23 @@ def create_pre_tool_use_hook(
                 }
             }
 
-        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
-            budget = budget_tracker.budget
-            consumed = budget_tracker.consumed
-            consumed_total = (consumed.input_tokens or 0) + (
-                consumed.output_tokens or 0
+        if _is_budget_exhausted(hook_context.budget_tracker):
+            logger.warning(
+                "claude_agent_sdk.hook.budget_exhausted",
+                event="hook.budget_exhausted",
+                context={
+                    "tool_name": tool_name,
+                    "elapsed_ms": hook_context.elapsed_ms,
+                    **budget_info,
+                },
             )
-            if (
-                budget.max_total_tokens is not None
-                and consumed_total >= budget.max_total_tokens
-            ):
-                logger.warning(
-                    "claude_agent_sdk.hook.budget_exhausted",
-                    event="hook.budget_exhausted",
-                    context={
-                        "tool_name": tool_name,
-                        "consumed_total": consumed_total,
-                        "max_total": budget.max_total_tokens,
-                        "elapsed_ms": hook_context.elapsed_ms,
-                    },
-                )
-                return {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": "Token budget exhausted",
-                    }
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Token budget exhausted",
                 }
+            }
 
         # Take snapshot for transactional rollback on native tools
         # Skip MCP-bridged WINK tools - they handle their own transactions
@@ -377,6 +383,11 @@ def create_pre_tool_use_hook(
                     "hook_duration_ms": hook_duration_ms,
                 },
             )
+
+        # Store tool_use_id for MCP-bridged tools so BridgedTool can include it
+        # in ToolInvoked events. Cleared in post_tool_use_hook after dispatch.
+        if tool_name.startswith("mcp__wink__"):
+            set_current_tool_use_id(tool_use_id)
 
         return {}
 
@@ -544,6 +555,8 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         # runs, BridgedTool has already dispatched the event, so tool_call_count
         # in FeedbackContext is accurate. Run feedback providers and return.
         if data.tool_name.startswith("mcp__wink__"):
+            # Clear the tool_use_id stored for BridgedTool
+            set_current_tool_use_id(None)
             feedback_response = _run_feedback_providers(data)
             return feedback_response if feedback_response else {}
 

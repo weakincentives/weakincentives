@@ -214,18 +214,63 @@ def _extract_tool_invoked_items(session_content: str) -> list[dict[str, Any]]:
     return result
 
 
+def _check_sdk_error_indicators(result_dict: dict[str, Any]) -> str | None:
+    """Check for error indicators in native SDK tool responses.
+
+    Returns error message if found, None otherwise.
+    """
+    # Check isError/is_error flag (MCP content format)
+    if result_dict.get("isError") or result_dict.get("is_error"):
+        return "Tool returned error"
+
+    # Check stderr (Bash tool format)
+    stderr: object = result_dict.get("stderr")
+    if stderr and isinstance(stderr, str) and stderr.strip():
+        return stderr.strip()[:200]
+
+    # Check content for error text (Claude Agent SDK format)
+    content: object = result_dict.get("content")
+    if isinstance(content, list) and content:
+        content_list = cast("list[object]", content)
+        first_item: object = content_list[0]
+        if isinstance(first_item, dict):
+            first_dict = cast("dict[str, Any]", first_item)
+            text: object = first_dict.get("text", "")
+            if isinstance(text, str):
+                text_lower = text.lower()
+                if text_lower.startswith("error:") or text_lower.startswith("error -"):
+                    return text[:200]
+
+    return None
+
+
 def _extract_result_fields(
     result_raw: object,
 ) -> tuple[object, object, object]:
-    """Extract value, success, message from a result object."""
-    if isinstance(result_raw, dict):
-        result_dict = cast("dict[str, Any]", result_raw)
+    """Extract value, success, message from a result object.
+
+    Handles both MCP/BridgedTool results (ToolResult with value/success/message)
+    and native SDK tool results (raw dict with stdout/stderr or isError).
+    """
+    if not isinstance(result_raw, dict):
+        return (result_raw, True, "")
+
+    result_dict = cast("dict[str, Any]", result_raw)
+
+    # MCP/BridgedTool format: has explicit success field
+    if "success" in result_dict:
         return (
             result_dict.get("value", result_raw),
             result_dict.get("success", True),
             result_dict.get("message", ""),
         )
-    return (result_raw, True, "")
+
+    # Native SDK format: check for error indicators
+    error_msg = _check_sdk_error_indicators(result_dict)
+    if error_msg:
+        return (result_dict, False, error_msg)
+
+    return (result_dict, True, "")
 
 
 def _tool_invoked_to_row(
