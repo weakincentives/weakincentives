@@ -19,8 +19,8 @@ poison messages from blocking queues while preserving them for inspection.
 |-------|------|---------|-------------|
 | `mailbox` | `Mailbox[DeadLetter[T], None]` | - | Destination |
 | `max_delivery_count` | `int` | `5` | Attempts before dead-lettering |
-| `include_errors` | `frozenset[type] \| None` | `None` | Immediate dead-letter errors |
-| `exclude_errors` | `frozenset[type] \| None` | `None` | Never dead-letter errors |
+| `include_errors` | `frozenset[type[Exception]] \| None` | `None` | Immediate dead-letter errors |
+| `exclude_errors` | `frozenset[type[Exception]] \| None` | `None` | Never dead-letter errors |
 
 `should_dead_letter(message, error)` method determines action. Override for
 custom logic.

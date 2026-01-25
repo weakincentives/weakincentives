@@ -146,7 +146,6 @@ src/weakincentives/docs/
 ├── llms.md
 ├── CHANGELOG.md
 ├── code_reviewer_example.py
-├── metadata.py           # Document descriptions for list command
 ├── guides/
 │   ├── README.md
 │   ├── quickstart.md
@@ -154,31 +153,36 @@ src/weakincentives/docs/
 └── specs/
     ├── ADAPTERS.md
     └── ...
+
+src/weakincentives/cli/
+├── docs_metadata.py      # Document descriptions for list command
+└── ...
 ```
 
 **Note:** The `src/weakincentives/docs/` directory is generated during builds by `hatch_build.py` and is intentionally not committed (listed in `.gitignore`). When browsing the repository, you will not see this directory unless you run the build.
 
 ### Document Metadata
 
-The `metadata.py` module provides document descriptions:
+The `cli/docs_metadata.py` module provides document descriptions:
 
 ```python
 SPEC_DESCRIPTIONS: dict[str, str] = {
     "ADAPTERS": "Provider integrations, structured output, throttling",
-    "CLAUDE_AGENT_SDK": "Claude Agent SDK adapter, MCP tool bridging",
-    # ... sourced from CLAUDE.md spec table
+    "CLAUDE_AGENT_SDK": "Claude Agent SDK adapter, MCP tool bridging, skill mounting",
+    # ... maintained manually, descriptions sourced from CLAUDE.md spec table
 }
 
 GUIDE_DESCRIPTIONS: dict[str, str] = {
     "quickstart": "Get a working agent running quickly",
     "philosophy": "The 'weak incentives' approach and why WINK exists",
-    # ... sourced from guides/README.md tables
+    # ... maintained manually, descriptions sourced from guides/README.md tables
 }
 ```
 
-This metadata is maintained separately from the documents themselves to allow
-easy updates and ensure consistent descriptions across the CLI and
-documentation.
+This metadata is maintained in the CLI module (not the docs package) to keep
+it separate from the generated documentation files. Descriptions should be
+kept in sync with CLAUDE.md and guides/README.md when documents are added or
+updated.
 
 ## Build-Time Synchronization
 
@@ -189,8 +193,12 @@ class DocsSyncHook(BuildHookInterface):
     def initialize(self, version, build_data):
         # Copy llms.md, CHANGELOG.md, code_reviewer_example.py
         # Copy guides/*.md, specs/*.md
-        # Generate metadata.py from CLAUDE.md and guides/README.md
+        # Create __init__.py if needed
+        # Use force_include to bypass .gitignore exclusion
 ```
+
+**Note:** Document descriptions in `cli/docs_metadata.py` are maintained
+manually and must be updated when adding new specs or guides.
 
 ## AI Agent Workflow
 

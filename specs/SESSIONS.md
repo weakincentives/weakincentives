@@ -7,7 +7,7 @@ lifecycle. Core implementation in `src/weakincentives/runtime/session/session.py
 
 ## Principles
 
-- **Pure state transitions**: Reducers never mutate; every event produces a new tuple
+- **Pure state transitions**: Reducers never mutate; every event returns a SliceOp (Append, Extend, Replace, Clear)
 - **Typed dispatch**: Event payloads route by concrete dataclass type
 - **Deterministic playback**: Sessions respond only to supported events
 - **Publisher isolation**: Handler failures are logged and isolated
@@ -21,7 +21,7 @@ Core container at `src/weakincentives/runtime/session/session.py`:
 
 | Method | Description |
 | --- | --- |
-| `__init__` | Initialize with dispatcher, parent, session_id, tags |
+| `__init__` | Initialize with dispatcher, parent, session_id, created_at, tags, slice_config |
 | `dispatch()` | Broadcast event to all matching reducers |
 | `__getitem__()` | Slice accessor via `session[Plan]` |
 | `install()` | Install declarative state slice with @reducer methods |
@@ -94,7 +94,7 @@ Optional `initial` factory enables handling events when slice is empty.
 
 - Class must be frozen dataclass
 - Event types defined before slice class
-- Methods return new instance (validated at runtime)
+- Methods return SliceOp (e.g., `Replace`, `Append`) containing new state
 - One reducer method per event type per slice
 
 ## Event System
@@ -104,6 +104,7 @@ Optional `initial` factory enables handling events when slice is empty.
 At `runtime/events/__init__.py`:
 
 - `subscribe(event_type, handler)` - Register handler
+- `unsubscribe(event_type, handler)` - Remove handler, returns bool
 - `dispatch(event)` → `DispatchResult` with handler results/errors
 
 ### Event Types
@@ -131,7 +132,7 @@ At `runtime/events/types.py`:
 
 ## Snapshots
 
-Capture/restore at `src/weakincentives/runtime/session/session.py`:
+Capture/restore via `Session` methods; `Snapshot` class at `src/weakincentives/runtime/session/snapshots.py`:
 
 - `session.snapshot()` → `Snapshot`
 - `snapshot.to_json()` / `Snapshot.from_json()`
@@ -152,7 +153,7 @@ Wall-clock limits via `Deadline` at `src/weakincentives/deadlines.py`:
 - Must be timezone-aware, >1s in future
 - Checked: before provider calls, before tool execution, during response finalization
 - Propagated via `RenderedPrompt.deadline` and `ToolContext.deadline`
-- Raises `DeadlineExceededError` → converted to `PromptEvaluationError` with `phase="deadline"`
+- Raises `DeadlineExceededError` → converted to `PromptEvaluationError` with `phase="tool"` or `phase="budget"`
 
 ## Budgets
 

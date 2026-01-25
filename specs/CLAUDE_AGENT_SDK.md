@@ -68,6 +68,7 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 |---------|-------------|
 | `IsolationConfig.inherit_host_auth()` | Inherit auth, fail if none configured |
 | `IsolationConfig.with_api_key(key)` | Use explicit API key |
+| `IsolationConfig.for_anthropic_api()` | Require Anthropic API key from env |
 | `IsolationConfig.for_bedrock()` | Require Bedrock, fail if not configured |
 
 **Docker support:** When running in a container, use `aws_config_path` to specify
@@ -206,11 +207,12 @@ Environment variables passed through for Bedrock: `AWS_PROFILE`, `AWS_REGION`,
 
 | Function | Description |
 |----------|-------------|
-| `get_default_model()` | Returns Opus 4.5 in appropriate format for auth mode |
+| `get_default_model()` | Returns Sonnet 4.5 in appropriate format for auth mode |
+| `get_supported_bedrock_models()` | Returns mapping of Anthropic names to Bedrock IDs |
 | `to_bedrock_model_id(name)` | Convert Anthropic model name to Bedrock ID |
 | `to_anthropic_model_name(id)` | Convert Bedrock ID to Anthropic model name |
-| `DEFAULT_MODEL` | Default Anthropic model (Opus 4.5) |
-| `DEFAULT_BEDROCK_MODEL` | Default Bedrock model ID (Opus 4.5) |
+| `DEFAULT_MODEL` | Default Anthropic model (Sonnet 4.5) |
+| `DEFAULT_BEDROCK_MODEL` | Default Bedrock model ID (Sonnet 4.5) |
 
 ### MCP Tool Exposure
 

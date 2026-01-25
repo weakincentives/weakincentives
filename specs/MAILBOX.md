@@ -55,6 +55,7 @@ At `src/weakincentives/runtime/mailbox/_types.py`:
 | `ReplyNotAvailableError` | Cannot resolve reply_to |
 | `MessageFinalizedError` | Already ack'd/nack'd |
 | `MailboxResolutionError` | Cannot resolve identifier |
+| `InvalidParameterError` | Timeout parameters out of range |
 
 ## Message Lifecycle
 
@@ -90,9 +91,12 @@ for msg in requests.receive():
 
 ### Redis Implementation
 
-`reply_to` serializes to mailbox name. `MailboxResolver` reconstructs instance:
+`reply_to` serializes to mailbox name. `MailboxResolver` reconstructs instance.
+RedisMailbox is in `contrib`: `from weakincentives.contrib.mailbox import RedisMailbox, RedisMailboxFactory`
 
 ```python
+from weakincentives.contrib.mailbox import RedisMailbox, RedisMailboxFactory
+
 factory = RedisMailboxFactory(client=redis_client)
 resolver = CompositeResolver(registry={}, factory=factory)
 requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
@@ -131,6 +135,16 @@ def create(self, identifier: str) -> Mailbox[R, None]:
 ```
 
 ### Backend Factories
+
+**InMemoryMailboxFactory** at `src/weakincentives/runtime/mailbox/_in_memory.py`:
+
+```python
+class InMemoryMailboxFactory[R]:
+    def create(self, identifier: str) -> Mailbox[R, None]:
+        return InMemoryMailbox(name=identifier)
+```
+
+**RedisMailboxFactory** at `src/weakincentives/contrib/mailbox/_redis.py`:
 
 ```python
 class RedisMailboxFactory[R]:
@@ -209,18 +223,20 @@ registry = ResourceRegistry.of(
 
 ## Implementations
 
-| Implementation | Backend | Use Case |
-| --- | --- | --- |
-| `InMemoryMailbox` | Dict | Testing, single process |
-| `RedisMailbox` | Redis | Multi-process, self-hosted |
+| Implementation | Location | Backend | Use Case |
+| --- | --- | --- | --- |
+| `InMemoryMailbox` | `runtime/mailbox/` | Dict | Testing, single process |
+| `InMemoryMailboxFactory` | `runtime/mailbox/` | Dict | Reply routing factory |
+| `RedisMailbox` | `contrib/mailbox/` | Redis | Multi-process, self-hosted |
+| `RedisMailboxFactory` | `contrib/mailbox/` | Redis | Reply routing factory |
 
 ### Backend Comparison
 
 | Aspect | Redis | InMemory |
 | --- | --- | --- |
 | Ordering | FIFO | FIFO |
-| Long poll max | ∞ | ∞ |
-| Visibility max | ∞ | ∞ |
+| Long poll max | Unlimited | Unlimited |
+| Visibility max | 43200s (12h) | 43200s (12h) |
 | Count accuracy | Exact | Exact |
 | Durability | Config | None |
 | Reply resolution | Resolver | Direct reference |
@@ -238,11 +254,13 @@ Hash tags ensure co-location in Redis Cluster.
 
 ## Test Utilities
 
+All at `src/weakincentives/runtime/mailbox/_testing.py`:
+
 | Utility | Purpose |
 | --- | --- |
-| `NullMailbox` | Drops all messages |
-| `CollectingMailbox` | Stores sent messages for inspection |
-| `FakeMailbox` | Controllable behavior for edge cases |
+| `NullMailbox` | Drops all messages on send, returns empty on receive |
+| `CollectingMailbox` | Stores sent messages in `.sent` list for inspection |
+| `FakeMailbox` | Full in-memory impl with `expire_handle()`, `set_connection_error()`, `inject_message()` |
 
 ## Limitations
 

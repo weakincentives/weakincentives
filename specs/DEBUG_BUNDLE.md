@@ -236,7 +236,7 @@ eval_loop = EvalLoop(
 )
 
 # After evaluation:
-# result.bundle_path == Path("./eval_bundles/{request_id}/{timestamp}.zip")
+# result.bundle_path == Path("./eval_bundles/{request_id}/{bundle_id}_{timestamp}.zip")
 ```
 
 ## CLI
@@ -292,9 +292,9 @@ Options:
 
 ## Bundle Naming
 
-Standard: `{request_id}_{timestamp}.zip`
+Standard: `{bundle_id}_{timestamp}.zip`
 
-EvalLoop: `{eval_request_id}/{sample_id}_{timestamp}.zip`
+EvalLoop: `{request_id}/{bundle_id}_{timestamp}.zip`
 
 ## Public API
 

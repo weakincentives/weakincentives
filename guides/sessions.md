@@ -41,7 +41,7 @@ latest_fact: Fact | None = session[Fact].latest()
 selected: tuple[Fact, ...] = session[Fact].where(lambda f: f.key == "repo_root")
 ```
 
-The slice accessor `session[T]` gives you a `QueryBuilder` with fluent methods.
+The slice accessor `session[T]` gives you a `SliceAccessor` with fluent methods.
 Queries are read-only; they never mutate the session.
 
 ## What Is a Reducer?
@@ -56,7 +56,7 @@ new_state = reducer(current_state, event)
 
 Reducers never mutate state directly. They always return a new value. This makes
 state changes predictable: given the same inputs, you always get the same
-output. It also makes debugging easier—you can log every event and trace the
+output. It also makes debugging easier--you can log every event and trace the
 exact sequence that led to any state.
 
 In WINK, reducers receive a `SliceView[S]` (read-only access to current values)
@@ -74,7 +74,7 @@ def my_reducer(state: SliceView[Plan], event: AddStep) -> Append[Plan]:
 - `Append[T]`: Add a single value to the slice
 - `Extend[T]`: Add multiple values to the slice
 - `Replace[T]`: Replace all values in the slice
-- `Clear`: Remove all values from the slice
+- `Clear[T]`: Remove items from the slice (all items if no predicate, or filtered by predicate)
 
 WINK ships helper reducers:
 
@@ -101,8 +101,8 @@ assert session[Plan].all() == (Plan(steps=("step 2",)),)
 
 ## Declarative Reducers with @reducer
 
-For complex slices, attach reducers as methods using `@reducer`. Methods must
-return `Replace[T]` wrapping the new value:
+For complex slices, attach reducers as methods using `@reducer`. Methods return
+a `SliceOp[T]` describing the mutation (typically `Replace[T]` for state updates):
 
 ```python nocheck
 from dataclasses import dataclass, replace
@@ -180,8 +180,8 @@ from weakincentives.runtime.session import InitializeSlice, ClearSlice
 session.dispatch(AddStep(step="do something"))
 
 # Convenience methods (dispatch events internally)
-session[Plan].seed(initial_plan)   # → InitializeSlice
-session[Plan].clear()              # → ClearSlice
+session[Plan].seed(initial_plan)   # -> InitializeSlice
+session[Plan].clear()              # -> ClearSlice
 
 # Direct system event dispatch (equivalent to methods above)
 session.dispatch(InitializeSlice(Plan, (initial_plan,)))
@@ -201,18 +201,17 @@ A `Deadline` is a wall-clock time limit for agent execution. When the deadline
 expires, operations raise `DeadlineExceededError`.
 
 ```python nocheck
-from datetime import timedelta
+from datetime import datetime, timedelta, UTC
 from weakincentives import Deadline, DeadlineExceededError
 
-# Create from timeout
-deadline = Deadline.from_timeout(timedelta(seconds=30))
-
-# Or from absolute time
-from datetime import datetime, UTC
+# Create a deadline with an absolute expiration time
 deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
 
-# Check remaining time
-remaining = deadline.remaining()  # timedelta or None if expired
+# Check remaining time (returns timedelta, may be negative if expired)
+remaining = deadline.remaining()
+
+# Check elapsed time since the deadline was created
+elapsed = deadline.elapsed()
 
 # Enforcement happens at checkpoints
 try:
@@ -234,7 +233,7 @@ multiple evaluations.
 ```python nocheck
 from weakincentives import Budget, BudgetTracker, BudgetExceededError
 
-# Budget with token limits
+# Budget with token limits (at least one limit must be set)
 budget = Budget(
     max_input_tokens=10_000,
     max_output_tokens=5_000,
@@ -255,18 +254,21 @@ except BudgetExceededError:
     # Token limit exceeded
     pass
 
-# Check accumulated usage
-print(f"Total tokens used: {tracker.total_tokens}")
-print(f"Input tokens: {tracker.input_tokens}")
-print(f"Output tokens: {tracker.output_tokens}")
+# Check accumulated usage via the consumed property (returns TokenUsage)
+usage = tracker.consumed
+print(f"Total tokens used: {usage.total_tokens}")
+print(f"Input tokens: {usage.input_tokens}")
+print(f"Output tokens: {usage.output_tokens}")
 ```
 
 Budgets and deadlines work together. You can set both to limit time and cost:
 
 ```python nocheck
+from datetime import datetime, timedelta, UTC
+
 response, session = loop.execute(
     request,
-    deadline=Deadline.from_timeout(timedelta(minutes=5)),
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
     budget=Budget(max_total_tokens=20_000),
 )
 ```
@@ -281,11 +283,13 @@ use different backends.
 **JsonlSlice**: Persists to a JSONL file. Each line is one item.
 
 ```python nocheck
-from weakincentives.runtime.session import SliceFactoryConfig, JsonlSliceFactory
+from pathlib import Path
+from weakincentives.runtime.session import SliceFactoryConfig, JsonlSliceFactory, MemorySliceFactory
 
 # Configure session with JSONL storage for logs
 config = SliceFactoryConfig(
-    log_factory=JsonlSliceFactory(directory="./logs"),
+    state_factory=MemorySliceFactory(),
+    log_factory=JsonlSliceFactory(base_dir=Path("./logs")),
 )
 
 session = Session(dispatcher=dispatcher, slice_config=config)
@@ -294,13 +298,16 @@ session = Session(dispatcher=dispatcher, slice_config=config)
 **Common patterns:**
 
 ```python nocheck
+from pathlib import Path
+
 # All state in memory, logs to JSONL (useful for debugging)
 config = SliceFactoryConfig(
-    log_factory=JsonlSliceFactory(directory="./logs"),
+    state_factory=MemorySliceFactory(),
+    log_factory=JsonlSliceFactory(base_dir=Path("./logs")),
 )
 
 # Everything to JSONL (for full replay capability)
-jsonl_factory = JsonlSliceFactory(directory="./data")
+jsonl_factory = JsonlSliceFactory(base_dir=Path("./data"))
 config = SliceFactoryConfig(
     state_factory=jsonl_factory,
     log_factory=jsonl_factory,
