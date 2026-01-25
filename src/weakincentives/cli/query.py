@@ -338,10 +338,10 @@ def _insert_tool_invoked_items(
         if not tool_name:
             continue
 
-        # Deduplicate by call_id if present
+        # Deduplicate by call_id if present and non-None
+        if call_id and call_id in seen_ids:
+            continue
         if call_id:
-            if call_id in seen_ids:
-                continue
             seen_ids.add(call_id)
 
         _ = conn.execute(
