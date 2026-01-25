@@ -139,6 +139,7 @@ class ToolInvoked:
     rendered_output: str = ""
     call_id: str | None = None
     run_context: RunContext | None = None
+    duration_ms: float | None = None
     event_id: UUID = field(default_factory=uuid4)
 
 

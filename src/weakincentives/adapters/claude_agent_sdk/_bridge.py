@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -186,13 +187,15 @@ class BridgedTool:
                 run_context=self._run_context,
             )
 
+            start_time = time.monotonic()
             result = handler(params, context=context)
+            duration_ms = (time.monotonic() - start_time) * 1000
 
             # Restore on tool failure (manual, since we're returning not raising)
             if not result.success:
                 self._restore_snapshot(snapshot, reason="tool_failure")
 
-            return self._format_success_result(args, result)
+            return self._format_success_result(args, result, duration_ms=duration_ms)
 
         except (TypeError, ValueError) as error:
             self._restore_snapshot(snapshot, reason="validation_error")
@@ -271,12 +274,15 @@ class BridgedTool:
         self,
         args: dict[str, Any],
         result: ToolResult[Any],
+        *,
+        duration_ms: float | None = None,
     ) -> dict[str, Any]:
         """Format successful tool result as MCP response.
 
         Args:
             args: Original tool arguments.
             result: Tool execution result.
+            duration_ms: Execution duration in milliseconds.
 
         Returns:
             MCP-format result dict.
@@ -293,7 +299,7 @@ class BridgedTool:
 
         # Dispatch ToolInvoked event with the actual tool result value
         # This enables session reducers to dispatch based on the value type
-        self._dispatch_tool_invoked(args, result, output_text)
+        self._dispatch_tool_invoked(args, result, output_text, duration_ms=duration_ms)
 
         logger.debug(
             "claude_agent_sdk.bridge.tool_call.complete",
@@ -321,6 +327,8 @@ class BridgedTool:
         args: dict[str, Any],
         result: ToolResult[Any],
         rendered_output: str,
+        *,
+        duration_ms: float | None = None,
     ) -> None:
         """Dispatch a ToolInvoked event for session reducer dispatch.
 
@@ -341,6 +349,7 @@ class BridgedTool:
             created_at=datetime.now(UTC),
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
+            duration_ms=duration_ms,
             call_id=call_id,
             run_context=self._run_context,
         )

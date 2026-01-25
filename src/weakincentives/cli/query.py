@@ -275,15 +275,16 @@ def _extract_result_fields(
 
 def _tool_invoked_to_row(
     item: dict[str, Any],
-) -> tuple[str, str, str, str, int, str, str | None]:
+) -> tuple[str, str, str, str, int, str, str | None, float | None]:
     """Convert a ToolInvoked item to a tool_calls row.
 
-    Returns (timestamp, tool_name, params, result, success, error_msg, call_id).
+    Returns (timestamp, tool_name, params, result, success, error_msg, call_id, duration_ms).
     """
     created_at = item.get("created_at", "")
     name = item.get("name", "")
     params = item.get("params", {})
     call_id = item.get("call_id")
+    duration_ms = item.get("duration_ms")
 
     result_value, result_success, result_message = _extract_result_fields(
         item.get("result", {})
@@ -297,6 +298,7 @@ def _tool_invoked_to_row(
         1 if result_success else 0,
         str(result_message) if not result_success and result_message else "",
         str(call_id) if call_id else None,
+        float(duration_ms) if duration_ms is not None else None,
     )
 
 
@@ -310,7 +312,16 @@ def _insert_tool_invoked_items(
 
     for item in items:
         row = _tool_invoked_to_row(item)
-        timestamp, tool_name, params, result, success, error_msg, call_id = row
+        (
+            timestamp,
+            tool_name,
+            params,
+            result,
+            success,
+            error_msg,
+            call_id,
+            duration_ms,
+        ) = row
 
         # Skip if no tool name
         if not tool_name:
@@ -323,17 +334,29 @@ def _insert_tool_invoked_items(
             seen_ids.add(call_id)
 
         # Determine source from adapter field
+        # native = SDK-native tools (Bash, Read, etc.)
+        # custom = weakincentives tools bridged via MCP
         adapter: Any = item.get("adapter", "")
-        source = "native" if adapter == "claude_agent_sdk" else "session"
+        source = "native" if adapter == "claude_agent_sdk" else "custom"
 
         _ = conn.execute(
             """
             INSERT INTO tool_calls
                 (timestamp, tool_name, params, result, success,
                  error_code, duration_ms, source, seq, tool_use_id)
-            VALUES (?, ?, ?, ?, ?, ?, 0.0, ?, NULL, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
         """,
-            (timestamp, tool_name, params, result, success, error_msg, source, call_id),
+            (
+                timestamp,
+                tool_name,
+                params,
+                result,
+                success,
+                error_msg,
+                duration_ms,
+                source,
+                call_id,
+            ),
         )
 
 

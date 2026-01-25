@@ -2553,7 +2553,7 @@ class TestToolCallsFromSession:
             # Second tool call - failed
             assert results[1]["tool_name"] == "write_file"
             assert results[1]["success"] == 0
-            assert results[1]["source"] == "session"  # openai -> session
+            assert results[1]["source"] == "custom"  # openai -> custom (non-native)
             assert results[1]["tool_use_id"] == "call_456"
         finally:
             db.close()

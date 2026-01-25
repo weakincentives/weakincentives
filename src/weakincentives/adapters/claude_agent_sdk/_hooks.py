@@ -184,6 +184,7 @@ class HookContext:
         self.stats: HookStats = HookStats()
         self._start_time = time.monotonic()
         self._pending_call_ids: dict[str, str | None] = {}
+        self._pending_tool_start_times: dict[str, float] = {}
 
     def set_pending_call_id(self, tool_name: str, call_id: str | None) -> None:
         """Store pending call_id for a tool (used by MCP-bridged tools)."""
@@ -196,6 +197,17 @@ class HookContext:
     def clear_pending_call_id(self, tool_name: str) -> None:
         """Clear pending call_id for a tool after use."""
         self._pending_call_ids.pop(tool_name, None)
+
+    def set_tool_start_time(self, tool_use_id: str) -> None:
+        """Record start time for a native tool execution."""
+        self._pending_tool_start_times[tool_use_id] = time.monotonic()
+
+    def get_tool_duration_ms(self, tool_use_id: str) -> float | None:
+        """Get duration in ms since tool execution started and clear the entry."""
+        start_time = self._pending_tool_start_times.pop(tool_use_id, None)
+        if start_time is None:
+            return None
+        return (time.monotonic() - start_time) * 1000
 
     def beat(self) -> None:
         """Record a heartbeat to prove processing is active.
@@ -385,6 +397,8 @@ def create_pre_tool_use_hook(
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
             )
+            # Record start time for duration tracking in post_tool_use_hook
+            hook_context.set_tool_start_time(tool_use_id)
             hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
             logger.debug(
                 "claude_agent_sdk.hook.snapshot_taken",
@@ -577,6 +591,11 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
 
         # For native tools, dispatch ToolInvoked BEFORE running feedback providers
         # so that FeedbackContext.tool_call_count includes this tool call.
+        # Get duration from start time recorded in pre_tool_use_hook.
+        duration_ms: float | None = None
+        if tool_use_id is not None:
+            duration_ms = hook_context.get_tool_duration_ms(tool_use_id)
+
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
             adapter=hook_context.adapter_name,
@@ -589,6 +608,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             rendered_output=data.output_text[:1000] if data.output_text else "",
             call_id=tool_use_id,
             run_context=hook_context.run_context,
+            duration_ms=duration_ms,
         )
         hook_context.session.dispatcher.dispatch(event)
 
