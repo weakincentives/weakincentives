@@ -10,7 +10,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Helper functions for submitting samples and collecting results."""
+"""Helper functions for submitting samples and collecting results.
+
+This module provides high-level functions for common evaluation workflows:
+- ``submit_dataset()`` - Submit all samples from a dataset for evaluation
+- ``submit_experiments()`` - Submit samples under multiple experiments for A/B testing
+- ``collect_results()`` - Collect evaluation results into an EvalReport
+
+These functions work with the mailbox infrastructure to enable distributed
+evaluation across multiple workers.
+"""
 
 from __future__ import annotations
 
@@ -102,15 +111,24 @@ def collect_results(
     """Collect evaluation results into a report.
 
     Polls the results mailbox until all expected results are collected
-    or the timeout expires. Each collected message is acknowledged.
+    or the timeout expires. Each collected message is acknowledged
+    immediately upon receipt.
+
+    Note:
+        If the timeout expires before all results are collected, the
+        returned report will contain only the results received so far.
+        Check ``report.total`` against ``expected_count`` to detect
+        incomplete collection.
 
     Args:
-        results: Mailbox to receive results from.
-        expected_count: Number of results to collect.
-        timeout_seconds: Maximum time to wait for all results.
+        results: Mailbox to receive EvalResult messages from.
+        expected_count: Number of results to collect before returning.
+        timeout_seconds: Maximum time to wait for all results. Defaults
+            to 300 seconds (5 minutes).
 
     Returns:
-        EvalReport with all collected results.
+        EvalReport containing all collected results, which may be fewer
+        than expected_count if the timeout was reached.
 
     Example:
         >>> report = collect_results(
@@ -118,6 +136,8 @@ def collect_results(
         ...     expected_count=len(dataset),
         ...     timeout_seconds=600,
         ... )
+        >>> if report.total < len(dataset):
+        ...     print(f"Warning: only collected {report.total}/{len(dataset)}")
         >>> print(f"Pass rate: {report.pass_rate:.1%}")
     """
     collected: list[EvalResult] = []

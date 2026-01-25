@@ -10,7 +10,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dataclass parsing helpers.
+"""Dataclass parsing with type coercion and validation.
+
+This module provides the :func:`parse` function for converting dictionary-like
+data into typed dataclass instances. It handles:
+
+- Automatic type coercion (strings to ints, ISO dates, UUIDs, etc.)
+- Nested dataclass parsing
+- Generic dataclasses with TypeVar resolution
+- Union types, Optional, and Literal types
+- Enum parsing by name or value
+- Validation constraints via ``Annotated`` metadata
+- Field aliases and case-insensitive matching
+
+Example::
+
+    from dataclasses import dataclass
+    from weakincentives.serde import parse
+
+    @dataclass
+    class User:
+        name: str
+        age: int
+
+    user = parse(User, {"name": "Alice", "age": "30"})  # age coerced to int
 
 Security Note
 -------------
@@ -986,12 +1009,77 @@ def parse[T](
     alias_generator: Callable[[str], str] | None = None,
     aliases: Mapping[str, str] | None = None,
 ) -> T:
-    """Parse a mapping into a dataclass instance.
+    """Parse a mapping into a dataclass instance with type coercion and validation.
 
-    Supports generic dataclasses via generic aliases. For example:
-        parse(MyGenericClass[str], data)
+    Converts dictionary-like data into typed dataclass instances, recursively
+    parsing nested dataclasses and applying type coercion as needed. Supports
+    generic dataclasses, unions, enums, literals, and constrained types.
 
-    The type arguments are used to resolve TypeVar fields during parsing.
+    Args:
+        cls: The dataclass type to parse into. Can be a generic alias like
+            ``MyClass[str]`` to resolve TypeVar fields during parsing.
+        data: A mapping (dict-like) containing field values. Keys should match
+            field names or configured aliases.
+        extra: How to handle keys not matching any field:
+            - ``"ignore"`` (default): Silently discard extra keys
+            - ``"forbid"``: Raise ValueError if extra keys present
+            - ``"allow"``: Store extra keys as instance attributes
+        coerce: If True (default), attempt to convert values to the target type
+            (e.g., ``"123"`` to ``123`` for int fields). If False, require exact
+            type matches.
+        case_insensitive: If True, match field names/aliases case-insensitively.
+            Defaults to False.
+        alias_generator: Optional callable that generates an alias for each field
+            name. Applied when no explicit alias is set. For example, use
+            ``str.upper`` to match uppercase keys to lowercase field names.
+        aliases: Optional mapping of field names to their aliases. Takes precedence
+            over alias_generator and field metadata aliases.
+
+    Returns:
+        A new instance of ``cls`` populated with values from ``data``.
+
+    Raises:
+        TypeError: If ``data`` is not a mapping, ``cls`` is not a dataclass,
+            or a value cannot be coerced to the expected type.
+        ValueError: If a required field is missing, extra keys are present when
+            ``extra="forbid"``, or a value fails validation constraints.
+
+    Examples:
+        Basic parsing::
+
+            @dataclass
+            class User:
+                name: str
+                age: int
+
+            user = parse(User, {"name": "Alice", "age": 30})
+
+        With type coercion (enabled by default)::
+
+            # String "25" is coerced to int
+            user = parse(User, {"name": "Bob", "age": "25"})
+
+        Generic dataclass parsing::
+
+            @dataclass
+            class Container[T]:
+                value: T
+
+            # TypeVar T is resolved to int
+            container = parse(Container[int], {"value": "42"})
+
+        Using aliases::
+
+            @dataclass
+            class Config:
+                api_key: str
+
+            config = parse(Config, {"API_KEY": "secret"},
+                          aliases={"api_key": "API_KEY"})
+
+    Note:
+        Runs ``__validate__`` and ``__post_validate__`` methods on the instance
+        after construction if defined on the dataclass.
     """
     if not isinstance(data, Mapping):
         raise TypeError("parse() requires a mapping input")

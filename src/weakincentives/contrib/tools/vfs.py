@@ -10,13 +10,41 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Virtual filesystem tool suite.
+"""Virtual filesystem tool suite for LLM agents.
 
-This module provides VFS tools for LLM agents, building on top of the
-Filesystem protocol. It defines:
+This module provides filesystem tools that enable LLM agents to interact with
+files safely within a virtual filesystem. The VFS can optionally mount host
+directories for controlled access to real files.
 
-- FilesystemToolHandlers: Reusable handlers for filesystem operations
-- VfsToolsSection: Prompt section exposing VFS tools
+Key components:
+
+- :class:`VfsToolsSection`: Prompt section exposing all VFS tools. Add this
+  to your prompt template to give agents filesystem access.
+
+- :class:`VfsConfig`: Configuration object for VfsToolsSection, consolidating
+  mount points and security settings.
+
+- :class:`FilesystemToolHandlers`: Standalone tool handlers for filesystem
+  operations. Use when building custom tool configurations.
+
+Available tools:
+    - ``ls``: List directory contents
+    - ``read_file``: Read file contents with pagination
+    - ``write_file``: Create new files
+    - ``edit_file``: Modify files via string replacement
+    - ``glob``: Find files matching shell patterns
+    - ``grep``: Search file contents with regex
+    - ``rm``: Remove files or directories
+
+Example::
+
+    from weakincentives.contrib.tools import VfsConfig, VfsToolsSection, HostMount
+
+    config = VfsConfig(
+        mounts=(HostMount(host_path="/path/to/project/src"),),
+        allowed_host_roots=("/path/to/project",),
+    )
+    section = VfsToolsSection(session=session, config=config)
 
 For data types (VfsPath, FileInfo, etc.), see vfs_types.py.
 For host mount logic, see vfs_mounts.py.
@@ -101,16 +129,38 @@ _MAX_READ_LIMIT: Final[int] = 2_000
 
 
 class FilesystemToolHandlers:
-    """Reusable tool handlers that operate on the Filesystem protocol.
+    """Reusable tool handlers for filesystem operations.
 
-    This class provides handlers for common filesystem operations (ls, read,
-    write, edit, glob, grep, rm) that work with any Filesystem implementation.
+    Provides handlers for common filesystem operations that work with any
+    implementation of the Filesystem protocol:
 
-    Handlers get the filesystem from ToolContext.filesystem, allowing the same
-    handlers to be shared across workspace implementations.
+    - ``list_directory``: List directory contents (ls)
+    - ``read_file``: Read file contents with pagination
+    - ``write_file``: Create new files
+    - ``edit_file``: Modify existing files via string replacement
+    - ``glob``: Find files matching shell patterns
+    - ``grep``: Search file contents with regex
+    - ``remove``: Delete files or directories (rm)
 
-    Handlers convert Filesystem protocol results (str paths) to tool result
-    types (VfsPath) for LLM serialization.
+    Handlers obtain the filesystem from ``ToolContext.filesystem``, enabling
+    the same handlers to work across different filesystem implementations
+    (in-memory, host-mounted, sandboxed containers, etc.).
+
+    Example::
+
+        handlers = FilesystemToolHandlers()
+        # Use with Tool definitions:
+        tool = Tool(
+            name="ls",
+            handler=handlers.list_directory,
+            description="List directory contents",
+        )
+
+        # Or call directly in tests:
+        result = handlers.list_directory(
+            ListDirectoryParams(path="src"),
+            context=context,
+        )
     """
 
     def __init__(
@@ -141,7 +191,23 @@ class FilesystemToolHandlers:
     def list_directory(
         self, params: ListDirectoryParams, *, context: ToolContext
     ) -> ToolResult[tuple[FileInfo, ...]]:
-        """List directory contents."""
+        """List directory contents and return file metadata.
+
+        Retrieves all entries (files and subdirectories) under the specified
+        path. Results are sorted alphabetically by path segments.
+
+        Args:
+            params: Parameters containing the directory path to list.
+            context: Tool execution context providing filesystem access.
+
+        Returns:
+            ToolResult containing a tuple of FileInfo objects, each describing
+            a file (with size and modification time) or directory entry.
+
+        Raises:
+            ToolValidationError: If the directory does not exist or if the
+                path points to a file instead of a directory.
+        """
         fs = self._get_filesystem(context)
         path = normalize_string_path(
             params.path, allow_empty=True, field="path", mount_point=self._mount_point
@@ -183,7 +249,25 @@ class FilesystemToolHandlers:
     def read_file(
         self, params: ReadFileParams, *, context: ToolContext
     ) -> ToolResult[ReadFileResult]:
-        """Read file contents with pagination."""
+        """Read file contents with line-based pagination.
+
+        Reads UTF-8 file content and returns lines with line numbers prefixed
+        in the format "   N | content". Supports offset/limit pagination for
+        reading large files in chunks.
+
+        Args:
+            params: Parameters containing file_path, offset (starting line),
+                and limit (max lines to read).
+            context: Tool execution context providing filesystem access.
+
+        Returns:
+            ToolResult containing ReadFileResult with numbered content,
+            pagination metadata (offset, limit, total_lines).
+
+        Raises:
+            ToolValidationError: If the file does not exist or parameters
+                are invalid.
+        """
         fs = self._get_filesystem(context)
         path = normalize_string_path(
             params.file_path, field="file_path", mount_point=self._mount_point
@@ -224,7 +308,24 @@ class FilesystemToolHandlers:
     def write_file(
         self, params: WriteFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
-        """Create a new file (fails if file exists)."""
+        """Create a new file with the specified content.
+
+        Creates a new UTF-8 text file at the given path. This operation
+        fails if the file already exists - use edit_file to modify
+        existing files.
+
+        Args:
+            params: Parameters containing file_path and content to write.
+            context: Tool execution context providing filesystem access.
+
+        Returns:
+            ToolResult containing WriteFile with normalized path, content,
+            and mode="create".
+
+        Raises:
+            ToolValidationError: If the file already exists or the content
+                exceeds MAX_WRITE_LENGTH (48,000 characters).
+        """
         fs = self._get_filesystem(context)
         path = normalize_string_path(
             params.file_path, field="file_path", mount_point=self._mount_point
@@ -252,7 +353,26 @@ class FilesystemToolHandlers:
     def edit_file(
         self, params: EditFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
-        """Edit an existing file using string replacement."""
+        """Edit an existing file using exact string replacement.
+
+        Replaces occurrences of old_string with new_string in the file.
+        By default, old_string must match exactly once; set replace_all=True
+        to replace all occurrences.
+
+        Args:
+            params: Parameters containing file_path, old_string, new_string,
+                and optional replace_all flag.
+            context: Tool execution context providing filesystem access.
+
+        Returns:
+            ToolResult containing WriteFile with the updated content and
+            mode="overwrite".
+
+        Raises:
+            ToolValidationError: If the file does not exist, old_string is
+                empty, old_string is not found, old_string matches multiple
+                times without replace_all=True, or strings exceed 48,000 chars.
+        """
         fs = self._get_filesystem(context)
         path = normalize_string_path(
             params.file_path, field="file_path", mount_point=self._mount_point
@@ -309,7 +429,25 @@ class FilesystemToolHandlers:
     def glob(
         self, params: GlobParams, *, context: ToolContext
     ) -> ToolResult[tuple[GlobMatch, ...]]:
-        """Search for files matching a glob pattern."""
+        """Search for files matching a shell glob pattern.
+
+        Finds all files under the specified path that match the glob pattern.
+        Supports standard patterns like ``*`` (any characters), ``**`` (recursive),
+        and ``?`` (single character). Only returns files, not directories.
+
+        Args:
+            params: Parameters containing pattern (glob expression) and optional
+                path (base directory, defaults to root).
+            context: Tool execution context providing filesystem access.
+
+        Returns:
+            ToolResult containing a tuple of GlobMatch objects sorted by path,
+            each with path, size_bytes, version, and updated_at metadata.
+
+        Raises:
+            ToolValidationError: If the pattern is empty or contains non-ASCII
+                characters.
+        """
         fs = self._get_filesystem(context)
         base = normalize_string_path(
             params.path, allow_empty=True, field="path", mount_point=self._mount_point
@@ -343,7 +481,24 @@ class FilesystemToolHandlers:
     def grep(
         self, params: GrepParams, *, context: ToolContext
     ) -> ToolResult[tuple[GrepMatch, ...]]:
-        """Search for a pattern in file contents."""
+        """Search for a regex pattern in file contents.
+
+        Searches all files under the specified path for lines matching the
+        regular expression pattern. Optionally filter files by glob pattern.
+
+        Args:
+            params: Parameters containing pattern (regex), optional path
+                (base directory), and optional glob (file filter pattern).
+            context: Tool execution context providing filesystem access.
+
+        Returns:
+            ToolResult containing a tuple of GrepMatch objects sorted by
+            (path, line_number), each with the matching line content.
+
+        Note:
+            Returns an error result (success=False) if the regex pattern
+            is invalid, rather than raising an exception.
+        """
         fs = self._get_filesystem(context)
         try:
             _ = re.compile(params.pattern)
@@ -387,7 +542,22 @@ class FilesystemToolHandlers:
     def remove(
         self, params: RemoveParams, *, context: ToolContext
     ) -> ToolResult[DeleteEntry]:
-        """Remove files or directories recursively."""
+        """Remove a file or directory recursively.
+
+        Deletes the specified path. If the path is a directory, all contents
+        are deleted recursively. The root directory cannot be deleted.
+
+        Args:
+            params: Parameters containing the path to remove.
+            context: Tool execution context providing filesystem access.
+
+        Returns:
+            ToolResult containing DeleteEntry with the deleted path.
+
+        Raises:
+            ToolValidationError: If the path does not exist, or if attempting
+                to delete the root directory.
+        """
         fs = self._get_filesystem(context)
         path = normalize_string_path(
             params.path, field="path", mount_point=self._mount_point
@@ -431,8 +601,17 @@ class _VfsSectionParams:
 class VfsConfig:
     """Configuration for :class:`VfsToolsSection`.
 
-    All constructor arguments for VfsToolsSection are consolidated here.
-    This avoids accumulating long argument lists as the section evolves.
+    Consolidates all VfsToolsSection constructor arguments into a single
+    immutable configuration object. This pattern avoids accumulating long
+    argument lists as the section evolves and makes configuration reusable.
+
+    Attributes:
+        mounts: Host directories to mount into the virtual filesystem.
+            Each HostMount specifies a host_path and optional virtual_path.
+        allowed_host_roots: Security boundary - only paths under these roots
+            can be mounted. Prevents agents from accessing arbitrary host files.
+        accepts_overrides: If True, tools accept parameter overrides from
+            the prompt. Default is False for safety.
 
     Example::
 
@@ -460,15 +639,38 @@ class VfsConfig:
 
 
 class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
-    """Prompt section exposing the virtual filesystem tool suite.
+    """Prompt section exposing virtual filesystem tools to LLM agents.
 
-    Use :class:`VfsConfig` to consolidate configuration::
+    Provides a complete set of filesystem tools (ls, read_file, write_file,
+    edit_file, glob, grep, rm) that operate on an in-memory virtual filesystem.
+    Host directories can be mounted into the VFS for controlled access to
+    real files.
 
-        config = VfsConfig(mounts=(HostMount(host_path="src"),))
+    The section includes:
+    - An in-memory filesystem that can be pre-populated with host mounts
+    - ReadBeforeWritePolicy enforcing safe file modification patterns
+    - Resource registration for dependency injection of the filesystem
+
+    Example::
+
+        # Create section with host directory mounted
+        config = VfsConfig(
+            mounts=(HostMount(host_path="src"),),
+            allowed_host_roots=("/home/user/project",),
+        )
         section = VfsToolsSection(session=session, config=config)
 
-    Individual parameters are still accepted for backward compatibility,
-    but config takes precedence when provided.
+        # Add to a prompt template
+        prompt = PromptTemplate(
+            ns="myapp",
+            key="agent",
+            sections=(section,),
+        )
+
+    See Also:
+        - :class:`VfsConfig` for configuration options
+        - :class:`FilesystemToolHandlers` for the underlying tool implementations
+        - :class:`HostMount` for mounting host directories
     """
 
     def __init__(
@@ -482,6 +684,38 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         _filesystem: InMemoryFilesystem | None = None,
         _mount_previews: tuple[HostMountPreview, ...] | None = None,
     ) -> None:
+        """Initialize a VFS tools section with filesystem access.
+
+        Creates a prompt section that exposes virtual filesystem tools (ls,
+        read_file, write_file, edit_file, glob, grep, rm) to LLM agents.
+
+        Args:
+            session: The session managing agent state and event dispatch.
+            config: Optional VfsConfig consolidating all configuration options.
+                Takes precedence over individual parameters when provided.
+            mounts: Host directories to mount into the virtual filesystem.
+                Ignored if config is provided.
+            allowed_host_roots: Allowed root paths for host mounts (security
+                boundary). Ignored if config is provided.
+            accepts_overrides: Whether tools accept parameter overrides.
+                Ignored if config is provided.
+
+        Example::
+
+            # Using VfsConfig (recommended)
+            config = VfsConfig(
+                mounts=(HostMount(host_path="src"),),
+                allowed_host_roots=("/home/user/project",),
+            )
+            section = VfsToolsSection(session=session, config=config)
+
+            # Using individual parameters
+            section = VfsToolsSection(
+                session=session,
+                mounts=(HostMount(host_path="src"),),
+                allowed_host_roots=("/home/user/project",),
+            )
+        """
         # Resolve config - explicit config takes precedence
         if config is not None:
             resolved_mounts = tuple(config.mounts)
@@ -538,23 +772,59 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 
     @property
     def session(self) -> Session:
+        """Return the session managing this section's state.
+
+        The session provides event dispatch and state management for
+        agent interactions with the virtual filesystem.
+        """
         return self._session
 
     @property
     def filesystem(self) -> Filesystem:
-        """Return the filesystem managed by this section."""
+        """Return the filesystem managed by this section.
+
+        Provides direct access to the underlying in-memory filesystem for
+        inspection or programmatic manipulation outside of tool calls.
+
+        Returns:
+            The Filesystem instance containing all mounted files and any
+            files created/modified by agent tool calls.
+        """
         return self._filesystem
 
     @override
     def resources(self) -> ResourceRegistry:
-        """Return resources required by this section.
+        """Return resources contributed by this section for dependency injection.
 
-        VfsToolsSection contributes its filesystem to the prompt's resources.
+        Registers the section's filesystem as a resource, making it available
+        to tools via ToolContext.filesystem. This enables tool handlers to
+        access the VFS without explicit parameter passing.
+
+        Returns:
+            ResourceRegistry containing a binding for the Filesystem protocol
+            to this section's in-memory filesystem instance.
         """
         return ResourceRegistry.build({Filesystem: self._filesystem})
 
     @override
     def clone(self, **kwargs: object) -> VfsToolsSection:
+        """Create a copy of this section bound to a new session.
+
+        Clones the section while preserving the underlying filesystem state.
+        The new section shares the same filesystem instance, allowing
+        continuity of file operations across session boundaries.
+
+        Args:
+            **kwargs: Must include 'session' (Session). Optionally may
+                include 'dispatcher' which must match the session's dispatcher.
+
+        Returns:
+            A new VfsToolsSection bound to the provided session.
+
+        Raises:
+            TypeError: If session is not provided or if dispatcher doesn't
+                match the session's dispatcher.
+        """
         session_obj = kwargs.get("session")
         if not isinstance(session_obj, Session):
             msg = "session is required to clone VfsToolsSection."

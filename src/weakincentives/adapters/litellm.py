@@ -10,7 +10,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Optional LiteLLM adapter utilities."""
+"""LiteLLM adapter for multi-provider LLM access.
+
+This module provides integration with LiteLLM, enabling access to 100+ LLM
+providers through a unified interface. The adapter handles prompt rendering,
+tool orchestration, throttling, and budget tracking.
+
+Key components:
+
+- ``LiteLLMAdapter``: Main adapter class for evaluating prompts via LiteLLM
+- ``LiteLLMClientConfig``: Configuration for LiteLLM client instantiation
+- ``LiteLLMModelConfig``: Model-specific parameters (temperature, max_tokens, etc.)
+- ``create_litellm_completion``: Factory for creating completion callables
+
+Example:
+    >>> from weakincentives.adapters import LiteLLMAdapter, LiteLLMModelConfig
+    >>> adapter = LiteLLMAdapter(
+    ...     model="gpt-4o",
+    ...     model_config=LiteLLMModelConfig(temperature=0.7, max_tokens=1000),
+    ... )
+    >>> with my_prompt.resources:
+    ...     response = adapter.evaluate(my_prompt, session=session)
+
+Note:
+    Requires the optional ``litellm`` dependency. Install with:
+    ``uv sync --extra litellm`` or ``pip install weakincentives[litellm]``
+"""
 
 from __future__ import annotations
 
@@ -65,6 +90,13 @@ class _LiteLLMModule(Protocol):
 
 
 LiteLLMCompletion = ProviderCompletionCallable
+"""Type alias for a LiteLLM completion callable.
+
+A completion callable accepts arbitrary keyword arguments and returns a
+``ProviderCompletionResponse``. This matches the signature of
+``litellm.completion`` and any wrapped variants created by
+``create_litellm_completion``.
+"""
 
 
 def _load_litellm_module() -> _LiteLLMModule:
@@ -76,8 +108,39 @@ def _load_litellm_module() -> _LiteLLMModule:
 
 
 def create_litellm_completion(**kwargs: object) -> LiteLLMCompletion:
-    """Return a LiteLLM completion callable, guarding the optional dependency."""
+    """Create a LiteLLM completion callable with optional default parameters.
 
+    This factory function returns a callable that invokes LiteLLM's completion
+    API. If keyword arguments are provided, they are merged into every request
+    as defaults (request-specific kwargs take precedence).
+
+    Args:
+        **kwargs: Default parameters merged into each completion request.
+            Common options include:
+            - ``api_key``: API key for the underlying provider
+            - ``api_base``: Custom base URL for API requests
+            - ``timeout``: Request timeout in seconds
+            - ``num_retries``: Number of retries on transient failures
+
+    Returns:
+        A completion callable matching the ``LiteLLMCompletion`` protocol.
+        When called, it forwards arguments to ``litellm.completion``.
+
+    Raises:
+        RuntimeError: If the ``litellm`` package is not installed.
+
+    Example:
+        >>> # Basic usage with defaults
+        >>> completion = create_litellm_completion()
+        >>> response = completion(model="gpt-4o", messages=[...])
+
+        >>> # With pre-configured defaults
+        >>> completion = create_litellm_completion(
+        ...     api_key="sk-...",
+        ...     timeout=30.0,
+        ... )
+        >>> response = completion(model="gpt-4o", messages=[...])
+    """
     module = _load_litellm_module()
     if not kwargs:
         return module.completion
@@ -241,22 +304,78 @@ def _prepare_budget_tracking[T](
 
 
 class LiteLLMAdapter(ProviderAdapter[Any]):
-    """Adapter that evaluates prompts via LiteLLM's completion helper.
+    """Adapter that evaluates prompts via LiteLLM's unified completion API.
+
+    LiteLLMAdapter provides access to 100+ LLM providers through LiteLLM's
+    unified interface. It handles the complete prompt evaluation lifecycle:
+
+    - Renders prompts into LiteLLM-compatible message format
+    - Executes API calls with deadline and budget enforcement
+    - Orchestrates multi-turn tool call loops
+    - Normalizes throttle errors across providers
+
+    The adapter supports three ways to configure the completion callable:
+
+    1. **Default**: Uses ``litellm.completion`` directly with optional
+       ``completion_config`` for API settings.
+    2. **Explicit completion**: Pass a pre-configured callable via ``completion``.
+    3. **Factory pattern**: Use ``completion_factory`` with ``completion_kwargs``
+       for test injection or custom wrapping.
 
     Args:
-        model: Model identifier in LiteLLM format (e.g., "gpt-4o", "claude-3-sonnet").
-        model_config: Typed configuration for model parameters like temperature,
-            max_tokens, etc. When provided, these values are merged into each
-            request payload.
-        tool_choice: Tool selection directive. Defaults to "auto".
+        model: Model identifier in LiteLLM format. Provider-prefixed identifiers
+            route to specific backends (e.g., ``"gpt-4o"``, ``"claude-3-sonnet"``,
+            ``"anthropic/claude-3-opus"``).
+        model_config: Typed configuration for model parameters (temperature,
+            max_tokens, top_p, etc.). Values are merged into each request.
+        tool_choice: Tool selection directive controlling how the model uses
+            tools. Options: ``"auto"`` (default), ``"none"``, ``"required"``,
+            or ``{"type": "function", "function": {"name": "..."}}``.
         completion: Pre-configured LiteLLM completion callable. Mutually exclusive
-            with factory inputs.
-        completion_factory: Callable that returns a LiteLLM completion when
-            invoked. Useful in tests to inject instrumented completions.
-        completion_kwargs: Extra kwargs forwarded to ``completion_factory`` when
-            it is used.
-        completion_config: Typed configuration for completion instantiation. Used
-            when neither ``completion`` nor ``completion_factory`` is provided.
+            with ``completion_factory``, ``completion_kwargs``, and
+            ``completion_config``.
+        completion_factory: Callable that returns a completion when invoked.
+            Useful for test injection or instrumentation.
+        completion_kwargs: Extra kwargs forwarded to ``completion_factory``.
+            Merged with ``completion_config`` if both are provided.
+        completion_config: Typed configuration for completion instantiation
+            (api_key, api_base, timeout, num_retries). Used when neither
+            ``completion`` nor ``completion_factory`` is provided.
+
+    Raises:
+        ValueError: If ``completion`` is provided alongside ``completion_factory``,
+            ``completion_kwargs``, or ``completion_config``.
+        RuntimeError: If the ``litellm`` package is not installed.
+
+    Example:
+        >>> from weakincentives.adapters import LiteLLMAdapter, LiteLLMModelConfig
+        >>>
+        >>> # Basic usage
+        >>> adapter = LiteLLMAdapter(model="gpt-4o")
+        >>>
+        >>> # With model configuration
+        >>> adapter = LiteLLMAdapter(
+        ...     model="claude-3-sonnet",
+        ...     model_config=LiteLLMModelConfig(
+        ...         temperature=0.7,
+        ...         max_tokens=2000,
+        ...     ),
+        ...     tool_choice="auto",
+        ... )
+        >>>
+        >>> # Evaluate a prompt
+        >>> with my_prompt.resources:
+        ...     response = adapter.evaluate(
+        ...         my_prompt,
+        ...         session=session,
+        ...         deadline=Deadline.from_timeout(60.0),
+        ...     )
+        >>> print(response.output)
+
+    See Also:
+        - ``LiteLLMClientConfig``: Configuration for client-level settings
+        - ``LiteLLMModelConfig``: Configuration for model-level parameters
+        - ``create_litellm_completion``: Factory for completion callables
     """
 
     def __init__(  # noqa: PLR0913
@@ -327,6 +446,56 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
     ) -> PromptResponse[OutputT]:
+        """Evaluate a prompt via LiteLLM and return the structured response.
+
+        Executes the complete prompt evaluation lifecycle through LiteLLM:
+        rendering the prompt, calling the configured model, parsing responses,
+        and orchestrating tool calls until the model produces a final output.
+
+        Args:
+            prompt: The prompt to evaluate. Must have an active resource context
+                (``with prompt.resources:``). The prompt's output type determines
+                the response format and parsing behavior.
+            session: Session for state management and event dispatch. Tool
+                handlers receive session access via ``ToolContext``.
+            deadline: Optional timeout for the entire evaluation, including all
+                tool call rounds. Raises ``DeadlineExceeded`` if expired.
+            budget: Optional token/cost budget. Creates a new ``BudgetTracker``
+                if ``budget_tracker`` is not provided. The tracker is bound to
+                the prompt's resources for tool handler access.
+            budget_tracker: Optional shared tracker for cross-prompt budget
+                enforcement. Takes precedence over ``budget`` if both provided.
+            heartbeat: Optional liveness callback. The adapter beats before
+                LLM calls and after tool execution. Long-running tool handlers
+                can access via ``context.beat()`` to prevent timeouts.
+            run_context: Optional tracing context for distributed tracing
+                integration. Threaded through all telemetry events.
+
+        Returns:
+            A ``PromptResponse`` containing:
+            - ``prompt_name``: The evaluated prompt's qualified name
+            - ``text``: Raw text from the final model response (may be None)
+            - ``output``: Parsed output matching the prompt's output type
+
+        Raises:
+            PromptEvaluationError: If evaluation fails during request, response
+                parsing, or tool execution phases.
+            ThrottleError: If the provider returns a rate limit, quota exhausted,
+                or timeout error. Includes retry guidance when available.
+            DeadlineExceeded: If the deadline expires during evaluation.
+
+        Example:
+            >>> adapter = LiteLLMAdapter(model="gpt-4o")
+            >>> with my_prompt.resources:
+            ...     response = adapter.evaluate(
+            ...         my_prompt,
+            ...         session=session,
+            ...         deadline=Deadline.from_timeout(30.0),
+            ...         budget=Budget(max_tokens=5000),
+            ...     )
+            >>> if response.output:
+            ...     process_result(response.output)
+        """
         prompt_name_for_log = prompt.name or prompt.template.__class__.__name__
 
         logger.debug(

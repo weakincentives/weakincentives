@@ -29,45 +29,82 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class ModelCheckResult:
-    """Result of TLC model checking."""
+    """Result of running TLC model checker on a formal specification.
+
+    Contains the outcome of model checking along with diagnostic information.
+    Check `passed` to determine if all invariants held. If `passed` is False,
+    examine `stdout` for the counterexample trace showing the invariant violation.
+
+    A timeout (returncode -1) with no violations found is treated as passed,
+    enabling bounded verification within time limits.
+
+    Example:
+        >>> result = model_check(spec)
+        >>> if not result.passed:
+        ...     print(f"Invariant violated! States explored: {result.states_generated}")
+        ...     print(result.stdout)  # Contains counterexample trace
+    """
 
     passed: bool
-    """Whether all invariants held."""
+    """True if all invariants held in every explored state, False if any violation found."""
 
     states_generated: int
-    """Number of states generated during model checking."""
+    """Number of unique states TLC generated during exploration. Useful for gauging coverage."""
 
     stdout: str
-    """Standard output from TLC."""
+    """Complete standard output from TLC, including progress messages and any counterexamples."""
 
     stderr: str
-    """Standard error from TLC."""
+    """Standard error output from TLC, typically contains warnings or configuration errors."""
 
     returncode: int
-    """Exit code from TLC."""
+    """TLC exit code: 0 for success, non-zero for errors, -1 indicates timeout."""
 
 
 class ModelCheckError(Exception):
-    """Model checker found an invariant violation or error."""
+    """Exception raised when TLC model checking fails.
+
+    This exception is raised in the following situations:
+    - TLC is not installed or not found in the expected location
+    - TLC configuration is invalid (e.g., missing JAR file)
+    - An invariant violation was detected during model checking
+    - TLC encountered a fatal error during execution
+
+    The exception message contains details about the failure, including
+    TLC's stdout/stderr output when available.
+
+    Example:
+        >>> try:
+        ...     result = model_check(spec)
+        ... except ModelCheckError as e:
+        ...     print(f"Model checking failed: {e}")
+    """
 
 
 def extract_spec(target_class: type) -> FormalSpec:
-    """Extract TLA+ specification from a class with @formal_spec decorator.
+    """Extract the TLA+ specification from a class decorated with @formal_spec.
+
+    Retrieves the FormalSpec metadata that was attached to a class by the
+    @formal_spec decorator. This is the first step in the verification
+    workflow: extract the spec, then write it to files or run model checking.
 
     Args:
-        target_class: Class decorated with @formal_spec
+        target_class: A class that has been decorated with @formal_spec.
+            The class must have the `__formal_spec__` attribute.
 
     Returns:
-        The extracted FormalSpec
+        The FormalSpec instance containing all specification metadata.
 
     Raises:
-        ValueError: If target_class does not have @formal_spec decorator
+        ValueError: If target_class was not decorated with @formal_spec
+            (i.e., missing the `__formal_spec__` attribute).
 
     Example:
         >>> from weakincentives.contrib.mailbox._redis import RedisMailbox
         >>> spec = extract_spec(RedisMailbox)
         >>> spec.module
         'RedisMailbox'
+        >>> print(spec.to_tla())  # Generate TLA+ source
     """
     spec = getattr(target_class, "__formal_spec__", None)
     if spec is None:
@@ -81,18 +118,29 @@ def write_spec(
     spec: FormalSpec,
     output_dir: Path,
 ) -> tuple[Path, Path]:
-    """Write TLA+ specification and config to files.
+    """Write a TLA+ specification and its TLC config to files.
+
+    Generates both the `.tla` module file and the `.cfg` configuration file
+    in the specified output directory. Creates the directory if it doesn't
+    exist. Files are named after the module name from the spec.
+
+    The generated files can be opened in the TLA+ Toolbox or verified with
+    the TLC command-line tool.
 
     Args:
-        spec: The formal specification to write
-        output_dir: Directory to write files to
+        spec: The FormalSpec to write. Uses `spec.module` for file names.
+        output_dir: Directory path where files will be written. Created with
+            `mkdir -p` semantics if it doesn't exist.
 
     Returns:
-        Tuple of (tla_file_path, cfg_file_path)
+        A tuple of (tla_file_path, cfg_file_path) with absolute paths to
+        the generated files.
 
     Example:
         >>> spec = extract_spec(RedisMailbox)
         >>> tla_file, cfg_file = write_spec(spec, Path("specs/tla/extracted"))
+        >>> print(f"Generated: {tla_file}, {cfg_file}")
+        Generated: specs/tla/extracted/RedisMailbox.tla, specs/tla/extracted/RedisMailbox.cfg
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -111,26 +159,44 @@ def model_check(
     *,
     tlc_config: dict[str, Any] | None = None,
 ) -> ModelCheckResult:
-    """Run TLC model checker on a specification with 3-minute timeout.
+    """Run the TLC model checker on a formal specification.
 
-    If TLC times out without finding violations, the check is considered passed.
-    This allows bounded verification within reasonable time limits.
+    Executes TLC to exhaustively explore the state space defined by the
+    specification and verify that all invariants hold. The check runs with
+    a 3-minute timeout; if TLC times out without finding violations, the
+    result is considered passed (bounded verification).
+
+    TLC is located automatically: first checks for `/usr/local/lib/tla2tools.jar`,
+    then falls back to the `tlc` command (e.g., from `brew install tlaplus`).
+
+    The specification is written to a temporary directory, checked, and then
+    cleaned up automatically.
 
     Args:
-        spec: The formal specification to check
-        tlc_config: Optional TLC configuration (workers, cleanup, etc.)
+        spec: The FormalSpec to verify. Must have at least state_vars and
+            actions defined for meaningful verification.
+        tlc_config: Optional dict with TLC configuration:
+            - "workers": Number of worker threads ("auto" or integer, default "auto")
+            - "cleanup": Whether to clean up TLC state files (default True)
 
     Returns:
-        Model checking result
+        ModelCheckResult with pass/fail status, state count, and TLC output.
 
     Raises:
-        ModelCheckError: If TLC is not found or checking fails
-        FileNotFoundError: If TLA+ files don't exist
+        ModelCheckError: If TLC is not installed, configuration is invalid,
+            or a fatal error occurs during model checking.
 
     Example:
         >>> spec = extract_spec(RedisMailbox)
-        >>> result = model_check(spec, tlc_config={"workers": "auto"})
-        >>> assert result.passed
+        >>> result = model_check(spec, tlc_config={"workers": 4})
+        >>> if result.passed:
+        ...     print(f"Verified {result.states_generated} states")
+        ... else:
+        ...     print(f"Violation found:\\n{result.stdout}")
+
+    Note:
+        Model checking is computationally expensive. Use state constraints
+        in your specification to bound the state space for faster checking.
     """
     # Write spec to temporary location for checking
     import tempfile
@@ -253,31 +319,54 @@ def extract_and_verify(
     model_check_enabled: bool = False,
     tlc_config: dict[str, Any] | None = None,
 ) -> tuple[FormalSpec, Path, Path, ModelCheckResult | None]:
-    """Extract TLA+ spec from class and optionally verify with TLC.
+    """Extract a TLA+ specification from a class and optionally verify it with TLC.
 
-    This is the main entry point for formal verification tests.
+    This is the primary entry point for formal verification in tests. It combines
+    extraction, file generation, and optional model checking into a single call.
+
+    The workflow is:
+    1. Extract the FormalSpec from the decorated class
+    2. Write the .tla and .cfg files to the output directory
+    3. Optionally run TLC model checking
+    4. Raise ModelCheckError if any invariant is violated
+
+    Use this in pytest tests to verify that implementations match their formal
+    specifications.
 
     Args:
-        target_class: Class decorated with @formal_spec
-        output_dir: Directory to write extracted files
-        model_check_enabled: Whether to run TLC model checker
-        tlc_config: Optional TLC configuration
+        target_class: A class decorated with @formal_spec. The FormalSpec
+            metadata will be extracted from its `__formal_spec__` attribute.
+        output_dir: Directory where .tla and .cfg files will be written.
+            Created if it doesn't exist.
+        model_check_enabled: If True, runs TLC model checker after generating
+            files. If False (default), only generates files without verification.
+        tlc_config: Optional TLC configuration dict passed to model_check().
+            See model_check() for available options.
 
     Returns:
-        Tuple of (spec, tla_file, cfg_file, model_check_result)
-        model_check_result is None if model_check_enabled is False
+        A 4-tuple containing:
+        - spec: The extracted FormalSpec
+        - tla_file: Path to the generated .tla file
+        - cfg_file: Path to the generated .cfg file
+        - result: ModelCheckResult if model_check_enabled is True, else None
 
     Raises:
-        ValueError: If target_class doesn't have @formal_spec
-        ModelCheckError: If model checking fails
+        ValueError: If target_class is not decorated with @formal_spec.
+        ModelCheckError: If model_check_enabled is True and TLC finds an
+            invariant violation or encounters a fatal error.
 
     Example:
-        >>> spec, tla, cfg, result = extract_and_verify(
-        ...     RedisMailbox,
-        ...     output_dir=Path("specs/tla/extracted"),
-        ...     model_check_enabled=True,
-        ... )
-        >>> assert result.passed
+        >>> # In a pytest test
+        >>> def test_mailbox_formal_spec(tmp_path):
+        ...     spec, tla, cfg, result = extract_and_verify(
+        ...         RedisMailbox,
+        ...         output_dir=tmp_path / "specs",
+        ...         model_check_enabled=True,
+        ...         tlc_config={"workers": "auto"},
+        ...     )
+        ...     assert result is not None
+        ...     assert result.passed
+        ...     assert result.states_generated > 0
     """
     # Extract spec
     spec = extract_spec(target_class)

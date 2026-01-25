@@ -10,7 +10,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Sandboxed Python expression evaluation backed by :mod:`asteval`."""
+"""Sandboxed Python expression evaluation backed by :mod:`asteval`.
+
+This module provides a secure Python evaluation tool for use in AI agent prompts.
+Code is executed in a restricted sandbox with limited builtins (abs, len, max, min,
+print, range, round, sum, str) plus math and statistics helpers.
+
+Key components:
+
+- :class:`AstevalSection`: A prompt section that exposes the ``evaluate_python`` tool.
+- :class:`AstevalConfig`: Configuration container for AstevalSection settings.
+- :class:`EvalParams`: Input parameters for the evaluation tool.
+- :class:`EvalResult`: Structured output from the evaluation tool.
+- :class:`EvalFileRead` / :class:`EvalFileWrite`: File I/O descriptors for VFS operations.
+
+Example usage::
+
+    from weakincentives.contrib.tools import AstevalConfig, AstevalSection
+
+    config = AstevalConfig(accepts_overrides=True)
+    section = AstevalSection(session=session, config=config)
+
+The evaluation tool supports:
+
+- Multi-line Python scripts up to 2,000 characters
+- Pre-loading VFS files via the ``reads`` parameter
+- Writing files via the ``writes`` parameter or ``write_text()`` helper
+- Injecting globals as JSON-encoded strings
+- 5-second execution timeout with stdout/stderr capture
+"""
 
 from __future__ import annotations
 
@@ -132,7 +160,21 @@ def _str_set_factory() -> set[str]:
 
 @FrozenDataclass()
 class EvalFileRead:
-    """File that should be read from the virtual filesystem before execution."""
+    """Descriptor for a file to read from the virtual filesystem before execution.
+
+    When included in :attr:`EvalParams.reads`, the file content is loaded and made
+    available to the sandbox via the ``vfs_reads`` dictionary and also directly
+    as a global variable keyed by the file path.
+
+    Attributes:
+        path: Relative VFS path to load. Must follow VFS path constraints:
+            16 segments max, 80 ASCII characters per segment.
+
+    Example::
+
+        read_spec = EvalFileRead(path=VfsPath(segments=("data", "config.json")))
+        params = EvalParams(code="print(vfs_reads['data/config.json'])", reads=(read_spec,))
+    """
 
     path: VfsPath = field(
         metadata={
@@ -144,12 +186,41 @@ class EvalFileRead:
     )
 
     def render(self) -> str:
+        """Format this read operation as a human-readable string.
+
+        Returns:
+            A string in the format ``read <path>``.
+        """
         return f"read {_format_vfs_path(self.path)}"
 
 
 @FrozenDataclass()
 class EvalFileWrite:
-    """File that should be written back to the virtual filesystem."""
+    """Descriptor for a file to write to the virtual filesystem after execution.
+
+    Writes are applied only if evaluation succeeds (no stderr output). The ``mode``
+    parameter controls behavior when the target file exists:
+
+    - ``create``: Write only if file does not exist (skipped otherwise).
+    - ``overwrite``: Replace existing content (skipped if file doesn't exist).
+    - ``append``: Append to existing content (skipped if file doesn't exist).
+
+    Attributes:
+        path: Relative VFS path to create or update.
+        content: ASCII text to persist. Maximum 48,000 characters. May contain
+            template variables (e.g., ``{variable}``) resolved from the sandbox
+            symbol table after execution.
+        mode: Write strategy for the file. Defaults to ``"create"``.
+
+    Example::
+
+        write_spec = EvalFileWrite(
+            path=VfsPath(segments=("output.txt",)),
+            content="Result: {result}",
+            mode="create",
+        )
+        params = EvalParams(code="result = 42", writes=(write_spec,))
+    """
 
     path: VfsPath = field(
         metadata={"description": "Relative VFS path to create or update."}
@@ -173,13 +244,45 @@ class EvalFileWrite:
     )
 
     def render(self) -> str:
+        """Format this write operation as a human-readable string.
+
+        Returns:
+            A string in the format ``<mode> <path> (<size> chars)``.
+        """
         size = len(self.content)
         return f"{self.mode} {_format_vfs_path(self.path)} ({size} chars)"
 
 
 @FrozenDataclass()
 class EvalParams:
-    """Parameter payload passed to the Python evaluation tool."""
+    """Input parameters for the ``evaluate_python`` tool.
+
+    This dataclass defines the complete input schema for Python evaluation requests.
+    It supports code execution with optional file I/O and global variable injection.
+
+    Attributes:
+        code: Python script to execute. Maximum 2,000 characters. Control characters
+            other than newlines and tabs are rejected.
+        globals: Mapping of variable names to JSON-encoded values. Keys must be valid
+            Python identifiers. Values are parsed as JSON before injection into the
+            sandbox namespace.
+        reads: Files to load from the VFS before execution. Contents are available
+            via the ``vfs_reads`` dictionary and as direct global variables.
+        writes: Files to write after successful execution. Content may include
+            template variables resolved from the sandbox symbol table.
+
+    Example::
+
+        params = EvalParams(
+            code="total = sum(numbers)\\nprint(total)\\ntotal",
+            globals={"numbers": "[1, 2, 3, 4, 5]"},
+            reads=(),
+            writes=(),
+        )
+
+    Note:
+        Reads and writes must not target the same path in a single request.
+    """
 
     code: str = field(
         metadata={"description": "Python script to execute (<=2,000 characters)."}
@@ -215,7 +318,34 @@ class EvalParams:
 
 @FrozenDataclass()
 class EvalResult:
-    """Structured result produced by the Python evaluation tool."""
+    """Structured output from the ``evaluate_python`` tool.
+
+    Contains all outputs captured during sandboxed execution: the final expression
+    value, stdout/stderr streams, modified globals, and file I/O summaries.
+
+    Attributes:
+        value_repr: String representation (via ``repr()``) of the final expression
+            result. ``None`` when the code produces no value or errors occur.
+        stdout: Captured standard output, truncated to 4,096 characters.
+        stderr: Captured standard error including interpreter errors, truncated
+            to 4,096 characters. Non-empty stderr indicates evaluation failure.
+        globals: Sandbox variables after execution. Includes user-defined variables,
+            injected globals, and VFS file contents (keyed as ``vfs:<path>``).
+            Values are JSON-encoded strings.
+        reads: File read descriptors that were fulfilled during execution.
+        writes: File write operations that were applied (empty if execution failed).
+
+    Example result structure::
+
+        EvalResult(
+            value_repr="15",
+            stdout="Computing sum...\\n",
+            stderr="",
+            globals={"total": "15", "vfs:data.txt": "1 2 3 4 5"},
+            reads=(EvalFileRead(path=VfsPath(segments=("data.txt",))),),
+            writes=(),
+        )
+    """
 
     value_repr: str | None = field(
         metadata={
@@ -254,6 +384,12 @@ class EvalResult:
     )
 
     def render(self) -> str:
+        """Format this result as a multi-line human-readable summary.
+
+        Returns:
+            A formatted string containing the result value, stdout, stderr,
+            file operations, and globals.
+        """
         lines: list[str] = ["Python evaluation result:"]
         if self.value_repr is not None:
             lines.append(f"Result: {self.value_repr}")
@@ -282,10 +418,15 @@ class _AstevalSectionParams:
 
 @FrozenDataclass()
 class AstevalConfig:
-    """Configuration for :class:`AstevalSection`.
+    """Configuration container for :class:`AstevalSection`.
 
-    All constructor arguments for AstevalSection are consolidated here.
-    This avoids accumulating long argument lists as the section evolves.
+    Consolidates all configuration options for AstevalSection in a single
+    immutable object. Using a config object avoids accumulating long argument
+    lists as the section evolves and makes configuration reusable.
+
+    Attributes:
+        accepts_overrides: Whether the ``evaluate_python`` tool accepts parameter
+            overrides from the caller. Defaults to ``False``.
 
     Example::
 
@@ -293,6 +434,9 @@ class AstevalConfig:
 
         config = AstevalConfig(accepts_overrides=True)
         section = AstevalSection(session=session, config=config)
+
+        # Reuse the same config for multiple sections
+        section2 = AstevalSection(session=other_session, config=config)
     """
 
     accepts_overrides: bool = field(
@@ -476,11 +620,33 @@ def _parse_user_globals(payload: Mapping[str, str]) -> dict[str, object]:
 
 
 class InterpreterProtocol(Protocol):
+    """Protocol defining the interface for asteval-compatible interpreters.
+
+    This protocol abstracts over the asteval ``Interpreter`` class, enabling
+    type-safe usage and testing with mock implementations.
+
+    Attributes:
+        symtable: Mutable symbol table containing global variables accessible
+            during evaluation.
+        node_handlers: Optional mapping of AST node type names to handler
+            functions. Used to disable dangerous operations.
+        error: List of errors accumulated during evaluation.
+    """
+
     symtable: MutableMapping[str, object]
     node_handlers: MutableMapping[str, object] | None
     error: list[object]
 
-    def eval(self, expression: str) -> object: ...
+    def eval(self, expression: str) -> object:
+        """Evaluate a Python expression or statement.
+
+        Args:
+            expression: Python code to evaluate.
+
+        Returns:
+            The result of evaluating the expression, or None for statements.
+        """
+        ...
 
 
 def _sanitize_interpreter(interpreter: InterpreterProtocol) -> None:
@@ -943,41 +1109,161 @@ class _AstevalToolSuite:
 
 
 def normalize_eval_reads(reads: Iterable[EvalFileRead]) -> tuple[EvalFileRead, ...]:
+    """Normalize and validate a collection of file read descriptors.
+
+    Validates each path against VFS constraints and ensures no duplicate targets.
+
+    Args:
+        reads: Iterable of :class:`EvalFileRead` instances to normalize.
+
+    Returns:
+        A tuple of normalized read descriptors with validated paths.
+
+    Raises:
+        ToolValidationError: If paths are invalid or duplicates are detected.
+    """
     return _normalize_reads(reads)
 
 
 def normalize_eval_writes(
     writes: Iterable[EvalFileWrite],
 ) -> tuple[EvalFileWrite, ...]:
+    """Normalize and validate a collection of file write descriptors.
+
+    Validates paths, content (ASCII-only, max 48k chars), and modes. Rejects
+    duplicate write targets.
+
+    Args:
+        writes: Iterable of :class:`EvalFileWrite` instances to normalize.
+
+    Returns:
+        A tuple of normalized write descriptors with validated paths and content.
+
+    Raises:
+        ToolValidationError: If validation fails for any write descriptor.
+    """
     return _normalize_writes(writes)
 
 
 def normalize_eval_write(write: EvalFileWrite) -> EvalFileWrite:
+    """Normalize and validate a single file write descriptor.
+
+    Validates the path against VFS constraints, ensures content is ASCII-only
+    and within the 48,000 character limit, and verifies the mode is valid.
+
+    Args:
+        write: The :class:`EvalFileWrite` instance to normalize.
+
+    Returns:
+        A new :class:`EvalFileWrite` with normalized path.
+
+    Raises:
+        ToolValidationError: If the path, content, or mode is invalid.
+    """
     return _normalize_write(write)
 
 
 def parse_eval_globals(payload: Mapping[str, str]) -> dict[str, object]:
+    """Parse a mapping of JSON-encoded global variables.
+
+    Validates that each key is a valid Python identifier and each value is
+    valid JSON.
+
+    Args:
+        payload: Mapping of variable names to JSON-encoded string values.
+
+    Returns:
+        Dictionary mapping variable names to their parsed Python values.
+
+    Raises:
+        ToolValidationError: If any name is not a valid identifier or any
+            value is not valid JSON.
+
+    Example::
+
+        globals_dict = parse_eval_globals({"numbers": "[1, 2, 3]", "name": '"Alice"'})
+        # Returns: {"numbers": [1, 2, 3], "name": "Alice"}
+    """
     return _parse_user_globals(payload)
 
 
 def alias_for_eval_path(path: VfsPath) -> str:
+    """Convert a VFS path to its string alias form.
+
+    The alias is used as the key in ``vfs_reads`` and when reporting file
+    operations.
+
+    Args:
+        path: The :class:`VfsPath` to convert.
+
+    Returns:
+        The path segments joined by forward slashes (e.g., ``"data/config.json"``).
+
+    Example::
+
+        path = VfsPath(segments=("data", "config.json"))
+        alias = alias_for_eval_path(path)  # Returns "data/config.json"
+    """
     return _alias_for_path(path)
 
 
 def summarize_eval_writes(writes: Sequence[EvalFileWrite]) -> str | None:
+    """Generate a human-readable summary of pending write operations.
+
+    Creates a compact summary showing the count and paths of writes, suitable
+    for including in tool result messages.
+
+    Args:
+        writes: Sequence of :class:`EvalFileWrite` instances to summarize.
+
+    Returns:
+        A summary string like ``"writes=3 file(s): a.txt, b.txt, c.txt"``,
+        or ``None`` if the sequence is empty.
+
+    Example::
+
+        writes = [
+            EvalFileWrite(path=VfsPath(segments=("a.txt",)), content="..."),
+            EvalFileWrite(path=VfsPath(segments=("b.txt",)), content="..."),
+        ]
+        summary = summarize_eval_writes(writes)
+        # Returns: "writes=2 file(s): a.txt, b.txt"
+    """
     return _summarize_writes(writes)
 
 
 class AstevalSection(MarkdownSection[_AstevalSectionParams]):
-    """Prompt section exposing the :mod:`asteval` evaluation tool.
+    """Prompt section that provides the ``evaluate_python`` sandboxed execution tool.
 
-    Use :class:`AstevalConfig` to consolidate configuration::
+    This section exposes a tool for running Python code in a restricted sandbox
+    backed by the :mod:`asteval` library. The sandbox provides:
+
+    - Limited builtins: ``abs``, ``len``, ``max``, ``min``, ``print``, ``range``,
+      ``round``, ``sum``, ``str``, plus ``math`` and ``statistics`` modules.
+    - VFS integration via ``read_text()`` and ``write_text()`` helpers.
+    - 5-second execution timeout with stdout/stderr capture.
+    - Global variable injection via JSON-encoded payloads.
+
+    Example::
+
+        from weakincentives.contrib.tools import AstevalConfig, AstevalSection
 
         config = AstevalConfig(accepts_overrides=True)
         section = AstevalSection(session=session, config=config)
 
-    Individual parameters are still accepted for backward compatibility,
-    but config takes precedence when provided.
+        # Add to a prompt template
+        prompt = PromptTemplate(
+            ns="myapp",
+            key="computation",
+            sections=(section,),
+        )
+
+    The section can share a filesystem with :class:`VfsToolsSection` by passing
+    the same ``filesystem`` instance to both.
+
+    Attributes:
+        session: The session instance used by this section.
+        filesystem: The virtual filesystem for file I/O operations.
     """
 
     def __init__(
@@ -988,6 +1274,18 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
         filesystem: Filesystem | None = None,
         accepts_overrides: bool = False,
     ) -> None:
+        """Initialize the asteval section.
+
+        Args:
+            session: The session instance for state management.
+            config: Optional configuration container. Takes precedence over
+                individual parameters when provided.
+            filesystem: Optional filesystem for VFS operations. Defaults to a
+                new :class:`InMemoryFilesystem` if not provided. Pass the same
+                instance to multiple sections to share file state.
+            accepts_overrides: Whether the tool accepts parameter overrides.
+                Ignored if ``config`` is provided.
+        """
         # Resolve config - explicit config takes precedence
         if config is not None:
             resolved_accepts_overrides = config.accepts_overrides
@@ -1057,15 +1355,41 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
 
     @property
     def session(self) -> Session:
+        """The session instance used by this section."""
         return self._session
 
     @property
     def filesystem(self) -> Filesystem:
-        """Return the filesystem managed by this section."""
+        """The virtual filesystem used for file I/O operations.
+
+        Returns the filesystem instance that was provided during construction
+        or the auto-created :class:`InMemoryFilesystem`. This filesystem is
+        shared with the ``evaluate_python`` tool for ``read_text()`` and
+        ``write_text()`` operations.
+        """
         return self._filesystem
 
     @override
     def clone(self, **kwargs: object) -> AstevalSection:
+        """Create a copy of this section with a new session.
+
+        This method is used internally when a prompt template creates section
+        instances for a specific session context.
+
+        Args:
+            **kwargs: Must include ``session`` (required) as a :class:`Session`
+                instance. May include ``filesystem`` as a :class:`Filesystem`
+                instance to share file state; if not provided, the current
+                filesystem is reused.
+
+        Returns:
+            A new :class:`AstevalSection` with the provided session and the
+            same configuration as this section.
+
+        Raises:
+            TypeError: If ``session`` is missing or not a Session, or if
+                ``filesystem`` is provided but not a Filesystem instance.
+        """
         session = kwargs.get("session")
         if not isinstance(session, Session):
             msg = "session is required to clone AstevalSection."

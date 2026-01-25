@@ -154,11 +154,22 @@ BUNDLE_ROOT_DIR = "debug_bundle"
 
 
 class BundleError(WinkError, RuntimeError):
-    """Base error for bundle operations."""
+    """Base error for bundle operations.
+
+    All bundle-related errors inherit from this class, allowing callers to
+    catch all bundle errors with a single except clause.
+    """
 
 
 class BundleValidationError(BundleError):
-    """Raised when bundle validation fails."""
+    """Raised when bundle validation fails.
+
+    This error indicates structural problems with a bundle, such as:
+    - Missing required files (manifest.json, etc.)
+    - Invalid manifest format or schema violations
+    - Checksum mismatches during integrity verification
+    - Attempting to read non-existent artifacts
+    """
 
 
 @FrozenDataclass()
@@ -186,7 +197,10 @@ class BundleConfig:
         max_total_size: int = 52_428_800,
         compression: str = "deflate",
     ) -> Mapping[str, object]:
-        """Normalize inputs before construction."""
+        """Normalize inputs before construction.
+
+        Converts string target paths to Path objects.
+        """
         normalized_target = Path(target) if isinstance(target, str) else target
         return {
             "target": normalized_target,
@@ -197,13 +211,28 @@ class BundleConfig:
 
     @property
     def enabled(self) -> bool:
-        """Return True if bundling is enabled (target is set)."""
+        """Check if bundling is enabled.
+
+        Returns:
+            True if target is set (bundles will be created),
+            False if target is None (bundling disabled).
+        """
         return self.target is not None
 
 
 @FrozenDataclass()
 class CaptureInfo:
-    """Capture metadata for manifest."""
+    """Capture metadata for manifest.
+
+    Records how and why a bundle was captured, along with any size limits
+    that were applied during capture.
+
+    Attributes:
+        mode: Capture mode, typically "full" for complete captures.
+        trigger: What triggered the capture (e.g., "config", "env", "request").
+        limits_applied: Dict of limit flags, e.g. {"filesystem_truncated": True}
+            if the filesystem snapshot was truncated due to size limits.
+    """
 
     mode: str
     trigger: str
@@ -214,7 +243,15 @@ class CaptureInfo:
 
 @FrozenDataclass()
 class PromptInfo:
-    """Prompt metadata for manifest."""
+    """Prompt metadata for manifest.
+
+    Identifies which prompt template was used during the captured execution.
+
+    Attributes:
+        ns: The prompt namespace (e.g., "my_app.prompts").
+        key: The prompt key within the namespace (e.g., "chat_v2").
+        adapter: The adapter type used (e.g., "openai", "anthropic").
+    """
 
     ns: str = ""
     key: str = ""
@@ -223,7 +260,17 @@ class PromptInfo:
 
 @FrozenDataclass()
 class RequestInfo:
-    """Request metadata for manifest."""
+    """Request metadata for manifest.
+
+    Captures identifying information and outcome of the MainLoop request.
+
+    Attributes:
+        request_id: Unique identifier for this request (UUID string).
+        session_id: Session identifier if the request used a session.
+        status: Execution outcome, either "success" or "error".
+        started_at: ISO 8601 timestamp when execution began.
+        ended_at: ISO 8601 timestamp when execution completed.
+    """
 
     request_id: str
     session_id: str | None = None
@@ -234,7 +281,16 @@ class RequestInfo:
 
 @FrozenDataclass()
 class IntegrityInfo:
-    """Integrity metadata for manifest."""
+    """Integrity metadata for manifest.
+
+    Contains cryptographic checksums for verifying bundle artifacts have not
+    been modified or corrupted. Use DebugBundle.verify_integrity() to validate.
+
+    Attributes:
+        algorithm: Hash algorithm used, currently always "sha256".
+        checksums: Mapping of relative file paths to their hex-encoded checksums.
+            Example: {"request/input.json": "a1b2c3...", "config.json": "d4e5f6..."}
+    """
 
     algorithm: str = "sha256"
     checksums: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
@@ -242,7 +298,15 @@ class IntegrityInfo:
 
 @FrozenDataclass()
 class BuildInfo:
-    """Build metadata for manifest."""
+    """Build metadata for manifest.
+
+    Records the software version that created the bundle, useful for
+    debugging compatibility issues when loading older bundles.
+
+    Attributes:
+        version: Software version string (e.g., "1.2.3").
+        commit: Git commit hash of the build, if available.
+    """
 
     version: str = ""
     commit: str = ""
@@ -280,12 +344,28 @@ class BundleManifest:
     build: BuildInfo = field(default_factory=BuildInfo)
 
     def to_json(self) -> str:
-        """Serialize manifest to JSON string."""
+        """Serialize manifest to a formatted JSON string.
+
+        Returns:
+            JSON string with 2-space indentation, suitable for writing to
+            manifest.json in the bundle.
+        """
         return json.dumps(dump(self), indent=2)
 
     @classmethod
     def from_json(cls, raw: str) -> BundleManifest:
-        """Deserialize manifest from JSON string."""
+        """Deserialize manifest from a JSON string.
+
+        Args:
+            raw: JSON string containing manifest data.
+
+        Returns:
+            Parsed BundleManifest instance.
+
+        Raises:
+            BundleValidationError: If the JSON is not a valid object.
+            json.JSONDecodeError: If the string is not valid JSON.
+        """
         from ..serde import parse
 
         data: JSONValue = json.loads(raw)
@@ -455,16 +535,33 @@ class BundleWriter:
 
     @property
     def bundle_id(self) -> UUID:
-        """Return the bundle ID."""
+        """Return the unique identifier for this bundle.
+
+        This ID is included in the bundle filename and manifest, enabling
+        correlation with external systems.
+        """
         return self._bundle_id
 
     @property
     def path(self) -> Path | None:
-        """Return path to the created bundle, or None if not finalized."""
+        """Return path to the finalized bundle zip file.
+
+        Returns:
+            Path to the created zip file after context exit, or None if
+            the writer has not been finalized (still inside ``with`` block
+            or finalization failed).
+        """
         return self._path
 
     def __enter__(self) -> Self:
-        """Enter context and create temporary directory."""
+        """Enter context and create temporary directory.
+
+        Sets up the temporary directory structure for accumulating artifacts.
+        Must be called (via ``with`` statement) before writing artifacts.
+
+        Returns:
+            Self, for use in ``with`` statement.
+        """
         self._temp_dir = Path(tempfile.mkdtemp(prefix="debug_bundle_"))
         # Create directory structure
         (self._temp_dir / BUNDLE_ROOT_DIR).mkdir()
@@ -480,7 +577,17 @@ class BundleWriter:
         exc_val: BaseException | None,
         exc_tb: object,
     ) -> None:
-        """Exit context, finalize bundle, and clean up."""
+        """Exit context, finalize bundle, and clean up.
+
+        On exit (normal or exceptional):
+        1. If an exception occurred, records error status and writes error.json
+        2. Generates README.txt and manifest.json
+        3. Creates the final zip archive atomically
+        4. Cleans up the temporary directory
+
+        The bundle is written to ``self.path`` on successful finalization.
+        Finalization errors are logged but do not propagate.
+        """
         try:
             if exc_type is not None:
                 # Record error status
@@ -516,7 +623,15 @@ class BundleWriter:
         self._checksums[rel_path] = _compute_checksum(content_bytes)
 
     def write_request_input(self, request: object) -> None:
-        """Write the MainLoop request input."""
+        """Write the MainLoop request input.
+
+        Serializes and stores the request that was submitted to MainLoop.
+        Accepts dataclasses (serialized via serde.dump) or plain dicts.
+
+        Args:
+            request: The request object to serialize. Typically a dataclass
+                or dict containing the prompt and configuration.
+        """
         try:
             content = json.dumps(_serialize_object(request), indent=2)
             self._write_artifact("request/input.json", content)
@@ -527,7 +642,15 @@ class BundleWriter:
             )
 
     def write_request_output(self, response: object) -> None:
-        """Write the MainLoop response output."""
+        """Write the MainLoop response output.
+
+        Serializes and stores the response returned by MainLoop.
+        Call this after execution completes (successfully or with error).
+
+        Args:
+            response: The response object to serialize. Typically a dataclass
+                containing the model output and any metadata.
+        """
         try:
             content = json.dumps(_serialize_object(response), indent=2)
             self._write_artifact("request/output.json", content)
@@ -538,7 +661,15 @@ class BundleWriter:
             )
 
     def write_session_before(self, session: Session) -> None:
-        """Write session state before execution."""
+        """Write session state before execution.
+
+        Captures a snapshot of all session slices before MainLoop runs.
+        Call this immediately before execution to establish baseline state.
+
+        Args:
+            session: The Session instance to snapshot. Its session_id will
+                be recorded in the bundle manifest.
+        """
         try:
             self._session_id = session.session_id
             snapshot = session.snapshot(include_all=True)
@@ -552,7 +683,15 @@ class BundleWriter:
             )
 
     def write_session_after(self, session: Session) -> None:
-        """Write session state after execution."""
+        """Write session state after execution.
+
+        Captures a snapshot of all session slices after MainLoop completes.
+        Call this after execution to record final state for debugging.
+
+        Args:
+            session: The Session instance to snapshot. Comparing before/after
+                snapshots reveals what changed during execution.
+        """
         try:
             self._session_id = session.session_id
             snapshot = session.snapshot(include_all=True)
@@ -567,7 +706,24 @@ class BundleWriter:
 
     @contextmanager
     def capture_logs(self) -> Iterator[None]:
-        """Context manager to capture logs during execution."""
+        """Context manager to capture logs during execution.
+
+        Attaches a handler to the root logger that writes all log records
+        (DEBUG and above) to logs/app.jsonl as newline-delimited JSON.
+
+        Example::
+
+            with writer.capture_logs():
+                # All logging output during this block is captured
+                response = adapter.evaluate(prompt, session=session)
+
+        Yields:
+            None. The captured logs are automatically included in the bundle.
+
+        Note:
+            If the writer was not entered (via ``with BundleWriter(...)``),
+            this context manager yields immediately without capturing.
+        """
         if self._temp_dir is None:
             yield
             return
@@ -586,7 +742,15 @@ class BundleWriter:
             raise  # Re-raise to allow bundle finalization to capture error status
 
     def write_config(self, config: object) -> None:
-        """Write MainLoop and adapter configuration."""
+        """Write MainLoop and adapter configuration.
+
+        Stores the configuration used for this execution, enabling
+        reproduction of the exact setup.
+
+        Args:
+            config: Configuration object (dataclass or dict) containing
+                MainLoop settings, model parameters, adapter options, etc.
+        """
         try:
             content = json.dumps(_serialize_object(config), indent=2)
             self._write_artifact("config.json", content)
@@ -597,7 +761,16 @@ class BundleWriter:
             )
 
     def write_run_context(self, run_context: RunContext) -> None:
-        """Write execution context."""
+        """Write execution context.
+
+        Stores identifiers and tracing information for correlating this
+        bundle with external systems (logging, tracing, etc.).
+
+        Args:
+            run_context: RunContext instance containing request_id, session_id,
+                and other execution metadata. These IDs are also recorded in
+                the bundle manifest.
+        """
         try:
             self._request_id = run_context.request_id
             self._session_id = run_context.session_id
@@ -610,7 +783,14 @@ class BundleWriter:
             )
 
     def write_metrics(self, metrics: object) -> None:
-        """Write timing phases, token consumption, and budget state."""
+        """Write timing phases, token consumption, and budget state.
+
+        Stores performance and resource usage data for analysis.
+
+        Args:
+            metrics: Metrics object (dataclass or dict) containing timing
+                information, token counts, cost data, and budget state.
+        """
         try:
             content = json.dumps(_serialize_object(metrics), indent=2)
             self._write_artifact("metrics.json", content)
@@ -621,7 +801,15 @@ class BundleWriter:
             )
 
     def write_prompt_overrides(self, overrides: object) -> None:
-        """Write visibility overrides accumulated during execution."""
+        """Write visibility overrides accumulated during execution.
+
+        Stores any prompt section visibility changes that occurred during
+        execution, useful for understanding dynamic prompt behavior.
+
+        Args:
+            overrides: Object containing visibility override data, typically
+                a dict or dataclass recording which sections were shown/hidden.
+        """
         try:
             content = json.dumps(_serialize_object(overrides), indent=2)
             self._write_artifact("prompt_overrides.json", content)
@@ -632,7 +820,17 @@ class BundleWriter:
             )
 
     def write_error(self, error_info: Mapping[str, Any]) -> None:
-        """Write error details."""
+        """Write error details.
+
+        Records error information when execution fails. This method
+        automatically sets the bundle status to "error".
+
+        Args:
+            error_info: Dict containing error details. Recommended keys:
+                - "type": Exception class name
+                - "message": Error message string
+                - "traceback": List of traceback lines (optional)
+        """
         try:
             self._status = "error"
             content = json.dumps(error_info, indent=2)
@@ -761,7 +959,18 @@ class BundleWriter:
         *,
         root_path: str = ".",
     ) -> None:
-        """Write workspace filesystem snapshot."""
+        """Write workspace filesystem snapshot.
+
+        Archives the contents of a Filesystem to the bundle's filesystem/
+        directory. Files are subject to size limits from BundleConfig:
+        - Files larger than max_file_size are skipped
+        - Total capture stops at max_total_size (truncation flagged in manifest)
+
+        Args:
+            fs: Filesystem instance to archive (e.g., VFS, real filesystem).
+            root_path: Starting path for recursive file collection.
+                Defaults to "." (current directory).
+        """
         try:
             self._archive_filesystem(fs, root_path)
         except Exception:
@@ -830,7 +1039,16 @@ class BundleWriter:
     def set_prompt_info(
         self, *, ns: str = "", key: str = "", adapter: str = ""
     ) -> None:
-        """Set prompt metadata for manifest."""
+        """Set prompt metadata for manifest.
+
+        Records which prompt template was used, helping identify the
+        execution context when reviewing bundles later.
+
+        Args:
+            ns: Prompt namespace (e.g., "my_app.prompts").
+            key: Prompt key within namespace (e.g., "chat_v2").
+            adapter: Adapter type name (e.g., "openai", "anthropic").
+        """
         self._prompt_info = PromptInfo(ns=ns, key=key, adapter=adapter)
 
     def _finalize(self) -> None:
@@ -939,12 +1157,23 @@ class BundleWriter:
 class DebugBundle:
     """Load and inspect existing debug bundles.
 
+    DebugBundle provides read-only access to bundles created by BundleWriter.
+    Use the class method ``load()`` to open a bundle, then access artifacts
+    via properties or ``read_file()``.
+
     Example::
 
         bundle = DebugBundle.load("./debug/bundle.zip")
-        print(bundle.manifest)
-        print(bundle.metrics)
-        print(bundle.session_after)
+        print(f"Status: {bundle.manifest.request.status}")
+        print(f"Metrics: {bundle.metrics}")
+
+        # Access raw artifacts
+        if bundle.error:
+            print(f"Error: {bundle.error}")
+
+        # Verify integrity
+        if not bundle.verify_integrity():
+            print("Warning: bundle may be corrupted")
     """
 
     _zip_path: Path
@@ -952,7 +1181,14 @@ class DebugBundle:
     _zip_file: zipfile.ZipFile | None
 
     def __init__(self, zip_path: Path, manifest: BundleManifest) -> None:
-        """Initialize bundle from path and manifest."""
+        """Initialize bundle from path and manifest.
+
+        Prefer using ``DebugBundle.load()`` instead of calling this directly.
+
+        Args:
+            zip_path: Path to the bundle zip file.
+            manifest: Pre-parsed bundle manifest.
+        """
         super().__init__()
         self._zip_path = zip_path
         self._manifest = manifest
@@ -960,12 +1196,23 @@ class DebugBundle:
 
     @property
     def path(self) -> Path:
-        """Return path to the bundle zip file."""
+        """Return path to the bundle zip file.
+
+        This is the path that was passed to ``load()``.
+        """
         return self._zip_path
 
     @property
     def manifest(self) -> BundleManifest:
-        """Return the bundle manifest."""
+        """Return the bundle manifest.
+
+        The manifest contains metadata about the bundle including:
+        - bundle_id and creation timestamp
+        - request information (IDs, status, timing)
+        - capture mode and limits applied
+        - prompt info (namespace, key, adapter)
+        - file list and integrity checksums
+        """
         return self._manifest
 
     @classmethod
@@ -1027,17 +1274,29 @@ class DebugBundle:
 
     @property
     def request_input(self) -> JSONValue:
-        """Return the request input."""
+        """Return the request input as parsed JSON.
+
+        Raises:
+            BundleValidationError: If request/input.json is missing.
+        """
         return self._read_json("request/input.json")
 
     @property
     def request_output(self) -> JSONValue:
-        """Return the request output."""
+        """Return the request output as parsed JSON.
+
+        Raises:
+            BundleValidationError: If request/output.json is missing.
+        """
         return self._read_json("request/output.json")
 
     @property
     def session_before(self) -> str | None:
-        """Return session state before execution, or None if not captured."""
+        """Return session state before execution as JSONL string.
+
+        Returns:
+            JSONL content of session/before.jsonl, or None if not captured.
+        """
         try:
             content = self._read_artifact("session/before.jsonl")
             return content.decode("utf-8")
@@ -1046,7 +1305,11 @@ class DebugBundle:
 
     @property
     def session_after(self) -> str | None:
-        """Return session state after execution."""
+        """Return session state after execution as JSONL string.
+
+        Returns:
+            JSONL content of session/after.jsonl, or None if not captured.
+        """
         try:
             content = self._read_artifact("session/after.jsonl")
             return content.decode("utf-8")
@@ -1055,7 +1318,14 @@ class DebugBundle:
 
     @property
     def logs(self) -> str | None:
-        """Return log records, or None if not captured."""
+        """Return log records as JSONL string.
+
+        Each line is a JSON object with: timestamp, level, logger, event,
+        message, and context fields.
+
+        Returns:
+            JSONL content of logs/app.jsonl, or None if not captured.
+        """
         try:
             content = self._read_artifact("logs/app.jsonl")
             return content.decode("utf-8")
@@ -1064,7 +1334,11 @@ class DebugBundle:
 
     @property
     def config(self) -> JSONValue | None:
-        """Return configuration, or None if not present."""
+        """Return configuration as parsed JSON.
+
+        Returns:
+            Parsed config.json content, or None if not present.
+        """
         try:
             return self._read_json("config.json")
         except BundleValidationError:
@@ -1072,7 +1346,11 @@ class DebugBundle:
 
     @property
     def run_context(self) -> JSONValue | None:
-        """Return run context, or None if not present."""
+        """Return run context as parsed JSON.
+
+        Returns:
+            Parsed run_context.json content, or None if not present.
+        """
         try:
             return self._read_json("run_context.json")
         except BundleValidationError:
@@ -1080,7 +1358,13 @@ class DebugBundle:
 
     @property
     def metrics(self) -> JSONValue | None:
-        """Return metrics, or None if not present."""
+        """Return metrics as parsed JSON.
+
+        Contains timing, token usage, and budget information.
+
+        Returns:
+            Parsed metrics.json content, or None if not present.
+        """
         try:
             return self._read_json("metrics.json")
         except BundleValidationError:
@@ -1088,7 +1372,11 @@ class DebugBundle:
 
     @property
     def prompt_overrides(self) -> JSONValue | None:
-        """Return prompt overrides, or None if not present."""
+        """Return prompt overrides as parsed JSON.
+
+        Returns:
+            Parsed prompt_overrides.json content, or None if not present.
+        """
         try:
             return self._read_json("prompt_overrides.json")
         except BundleValidationError:
@@ -1096,7 +1384,13 @@ class DebugBundle:
 
     @property
     def error(self) -> JSONValue | None:
-        """Return error details, or None if not present."""
+        """Return error details as parsed JSON.
+
+        Contains type, message, and traceback when execution failed.
+
+        Returns:
+            Parsed error.json content, or None if execution succeeded.
+        """
         try:
             return self._read_json("error.json")
         except BundleValidationError:
@@ -1104,7 +1398,13 @@ class DebugBundle:
 
     @property
     def eval(self) -> JSONValue | None:
-        """Return eval metadata, or None if not present."""
+        """Return eval metadata as parsed JSON.
+
+        Present only for bundles created during evaluation runs.
+
+        Returns:
+            Parsed eval.json content, or None if not present.
+        """
         try:
             return self._read_json("eval.json")
         except BundleValidationError:
@@ -1153,7 +1453,12 @@ class DebugBundle:
         return result
 
     def list_files(self) -> list[str]:
-        """Return list of files in the bundle."""
+        """Return list of all files in the bundle.
+
+        Returns:
+            List of relative paths (e.g., ["manifest.json", "request/input.json"]).
+            Directory entries are excluded.
+        """
         with zipfile.ZipFile(self._zip_path, "r") as zf:
             prefix = f"{BUNDLE_ROOT_DIR}/"
             return [
@@ -1180,10 +1485,20 @@ class DebugBundle:
         return target_path / BUNDLE_ROOT_DIR
 
     def verify_integrity(self) -> bool:
-        """Verify bundle integrity using checksums.
+        """Verify bundle integrity using SHA-256 checksums.
+
+        Compares each artifact's current checksum against the value recorded
+        in the manifest at bundle creation time. Detects corruption, tampering,
+        or missing files.
 
         Returns:
-            True if all checksums match, False otherwise.
+            True if all checksums match and all files exist.
+            False if any checksum mismatches or files are missing.
+            Warnings are logged for specific failures.
+
+        Note:
+            manifest.json itself is not checksummed (would create circular
+            dependency), so only data files are verified.
         """
         for rel_path, expected in self._manifest.integrity.checksums.items():
             try:

@@ -80,7 +80,41 @@ ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
 
 @dataclass(slots=True, frozen=True)
 class ToolExample[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
-    """Representative invocation for a tool documenting inputs and outputs."""
+    """Representative invocation for a tool documenting inputs and outputs.
+
+    Tool examples provide concrete input/output pairs that help language models
+    understand how to use a tool correctly. They appear in the tool definition
+    sent to the model.
+
+    Attributes:
+        description: Brief description of what this example demonstrates
+            (1-200 ASCII characters).
+        input: A dataclass instance matching the tool's ParamsT type,
+            or None if the tool takes no parameters.
+        output: A dataclass instance (or sequence of instances) matching
+            the tool's ResultT type, or None if the tool returns no result.
+
+    Example::
+
+        @dataclass(frozen=True)
+        class SearchParams:
+            query: str
+            limit: int = 10
+
+        @dataclass(frozen=True)
+        class SearchResult:
+            title: str
+            url: str
+
+        example = ToolExample(
+            description="Search for Python documentation",
+            input=SearchParams(query="asyncio tutorial"),
+            output=SearchResult(
+                title="Asyncio Documentation",
+                url="https://docs.python.org/3/library/asyncio.html",
+            ),
+        )
+    """
 
     description: str
     input: ParamsT
@@ -202,7 +236,38 @@ def _coerce_none_type(candidate: object) -> object:
 
 
 class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
-    """Callable protocol implemented by tool handlers."""
+    """Callable protocol for tool handler functions.
+
+    Tool handlers are functions that execute tool logic when invoked by the
+    runtime. Every handler must accept exactly two arguments:
+
+    1. A positional parameter typed as the tool's ParamsT (a dataclass or None)
+    2. A keyword-only ``context`` parameter of type ToolContext
+
+    The handler must return a ToolResult wrapping the output value.
+
+    Example::
+
+        @dataclass(frozen=True)
+        class CalculateParams:
+            expression: str
+
+        def calculate(
+            params: CalculateParams,
+            *,
+            context: ToolContext,
+        ) -> ToolResult[float]:
+            try:
+                result = eval(params.expression)  # noqa: S307
+                return ToolResult.ok(float(result))
+            except Exception as e:
+                return ToolResult.error(str(e))
+
+    Note:
+        The Protocol uses contravariant ParamsT to allow handlers accepting
+        broader parameter types to substitute for those requiring narrower
+        types (Liskov substitution principle).
+    """
 
     def __call__(
         self, params: ParamsT_contra, *, context: ToolContext
@@ -211,7 +276,55 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
 
 @dataclass(slots=True)
 class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
-    """Describe a callable tool exposed by prompt sections."""
+    """A callable tool exposed by prompt sections to the language model.
+
+    Tools enable language models to perform actions by calling structured
+    functions. Each Tool defines a name, description, parameter schema,
+    and handler function that executes when the model invokes the tool.
+
+    There are two ways to create a Tool:
+
+    1. **Explicit instantiation** with type parameters::
+
+        tool = Tool[CreateFileParams, None](
+            name="create_file",
+            description="Create a new file with the given content.",
+            handler=create_file_handler,
+        )
+
+    2. **Using Tool.wrap()** to infer metadata from the handler::
+
+        @dataclass(frozen=True)
+        class ReadParams:
+            path: str
+
+        def read_file(params: ReadParams, *, context: ToolContext) -> ToolResult[str]:
+            \"\"\"Read the contents of a file at the given path.\"\"\"
+            content = Path(params.path).read_text()
+            return ToolResult.ok(content)
+
+        tool = Tool.wrap(read_file)
+
+    Tools are attached to prompt sections via the ``tools`` parameter::
+
+        class MySection(Section):
+            tools = (my_tool,)
+
+    Attributes:
+        name: Tool identifier matching pattern ``^[a-z0-9_-]{1,64}$``.
+        description: Human-readable description (1-200 ASCII characters).
+        handler: Function to execute when the tool is invoked.
+        examples: Optional tuple of ToolExample instances for documentation.
+        params_type: Inferred dataclass type for input parameters.
+        result_type: Inferred dataclass type for output (or None).
+        result_container: Whether result is "object" or "array" (sequence).
+        accepts_overrides: Whether this tool allows parameter overrides
+            from the adapter (default True).
+
+    Note:
+        Tool names must follow OpenAI function naming constraints: 1-64
+        lowercase ASCII letters, digits, underscores, or hyphens.
+    """
 
     name: str
     description: str
@@ -613,7 +726,55 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     ](
         fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
     ) -> Tool[ParamsT_runtime, ResultT_runtime]:
-        """Create a Tool from a handler using its name and docstring."""
+        """Create a Tool by introspecting a handler function.
+
+        This factory method extracts tool metadata from the handler:
+
+        - **name**: Derived from the function's ``__name__`` attribute
+        - **description**: Extracted from the function's docstring
+        - **params_type**: Inferred from the first parameter's type annotation
+        - **result_type**: Inferred from the ToolResult[T] return annotation
+
+        Args:
+            fn: A tool handler function with the signature
+                ``(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]``.
+                Must have a docstring and full type annotations.
+
+        Returns:
+            A fully configured Tool instance ready for use in a prompt section.
+
+        Raises:
+            PromptValidationError: If the handler lacks a docstring, has
+                incorrect parameter count, or missing type annotations.
+
+        Example::
+
+            @dataclass(frozen=True)
+            class GrepParams:
+                pattern: str
+                path: str
+
+            @dataclass(frozen=True)
+            class GrepMatch:
+                line_number: int
+                content: str
+
+            def grep(
+                params: GrepParams,
+                *,
+                context: ToolContext,
+            ) -> ToolResult[list[GrepMatch]]:
+                \"\"\"Search for a pattern in a file.\"\"\"
+                matches = []
+                path = Path(params.path)
+                for i, line in enumerate(path.read_text().splitlines(), 1):
+                    if params.pattern in line:
+                        matches.append(GrepMatch(line_number=i, content=line))
+                return ToolResult.ok(matches)
+
+            # Creates Tool with name="grep", description="Search for a pattern..."
+            grep_tool = Tool.wrap(grep)
+        """
 
         description = Tool._resolve_wrapped_description(fn)
 

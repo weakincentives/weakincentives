@@ -97,16 +97,48 @@ ProviderCall = Callable[
     ],
     object,
 ]
-"""Callable responsible for invoking the provider with assembled payloads."""
+"""Callable that invokes the provider API with assembled request payloads.
+
+The callable signature accepts four positional arguments:
+    messages: List of message dictionaries in provider format (role, content, etc.)
+    tool_specs: Sequence of tool specification dictionaries for function calling.
+    tool_choice: Optional tool selection constraint (e.g., "auto", "none", or
+        a mapping specifying a required function).
+    response_format: Optional response format specification for structured output.
+
+Returns the raw provider response object for subsequent parsing.
+"""
 
 
 ChoiceSelector = Callable[[object], ProviderChoice]
-"""Callable that extracts the relevant choice from a provider response."""
+"""Callable that extracts the relevant choice from a raw provider response.
+
+Given the raw response object returned by the provider API, this callable
+extracts and returns a ProviderChoice containing the message content and
+any tool calls. Used to normalize different provider response formats into
+a common structure for processing by the inner loop.
+"""
 
 
 @FrozenDataclass()
 class InnerLoopInputs[OutputT]:
-    """Inputs required to start a conversation with a provider."""
+    """Inputs required to start a conversation with a provider.
+
+    This frozen dataclass bundles all the information needed to initiate
+    a provider conversation, including the prompt definition, its rendered
+    form, and the initial message history.
+
+    Attributes:
+        adapter_name: Identifier for the provider adapter (e.g., "openai", "litellm").
+        adapter: The provider adapter instance handling API communication.
+        prompt: The prompt template definition with output type specification.
+        prompt_name: Human-readable name for the prompt, used in logging and errors.
+        rendered: The fully rendered prompt with resolved sections and tools.
+        render_inputs: Tuple of dataclass instances used to render the prompt,
+            preserved for event dispatch and debugging.
+        initial_messages: Starting message history in provider format, typically
+            containing the system message and any prior conversation context.
+    """
 
     adapter_name: AdapterName
     adapter: ProviderAdapter[OutputT]
@@ -121,12 +153,38 @@ class InnerLoopInputs[OutputT]:
 class InnerLoopConfig:
     """Configuration and collaborators required to run the inner loop.
 
-    Provides access to session for transactional tool execution. Prompt
-    resources are accessed via the prompt in InnerLoopInputs.
+    This frozen dataclass provides all runtime dependencies and behavioral
+    settings for the conversation loop. It separates configuration concerns
+    from the input data in InnerLoopInputs.
 
-    When ``heartbeat`` is provided, the inner loop beats at key execution
-    points (each iteration, before/after provider calls) to prove liveness.
-    Tool handlers receive the heartbeat via ToolContext.beat().
+    Attributes:
+        session: Session protocol providing transaction management and event
+            dispatch for tool execution.
+        tool_choice: Initial tool selection constraint ("auto", "none", "required",
+            or a mapping forcing a specific function call).
+        response_format: Optional JSON schema for structured output responses.
+            When set, the provider constrains output to match the schema.
+        require_structured_output_text: If True, raises an error when structured
+            output parsing fails to extract text content.
+        call_provider: Callable that invokes the provider API with messages,
+            tools, and format specifications.
+        select_choice: Callable that extracts the relevant choice from raw
+            provider responses.
+        serialize_tool_message_fn: Function to serialize tool results into
+            message format for the conversation history.
+        format_dispatch_failures: Function to format handler failure messages
+            for logging and error reporting.
+        parse_arguments: Function to parse tool call arguments from the provider
+            response into typed parameter objects.
+        logger_override: Optional custom logger; if None, uses the module logger.
+        deadline: Optional execution deadline; requests fail if exceeded.
+        throttle_policy: Configuration for retry behavior on rate-limited requests.
+        budget_tracker: Optional tracker for token usage limits across evaluations.
+        heartbeat: Optional heartbeat interface for proving liveness during
+            long-running operations. When provided, the loop beats at each
+            iteration and tool handlers receive it via ToolContext.beat().
+        run_context: Optional context for tracking execution across related
+            operations (e.g., eval runs).
     """
 
     session: SessionProtocol
@@ -148,8 +206,18 @@ class InnerLoopConfig:
     run_context: RunContext | None = None
 
     def with_defaults(self, rendered: RenderedPrompt[object]) -> InnerLoopConfig:
-        """Fill in optional settings using rendered prompt metadata."""
+        """Create a new config with optional settings filled from rendered prompt.
 
+        Uses the rendered prompt's metadata to supply default values for any
+        optional configuration fields that were not explicitly set.
+
+        Args:
+            rendered: The rendered prompt containing default metadata values.
+
+        Returns:
+            A new InnerLoopConfig with defaults applied. Currently fills in
+            the deadline from the rendered prompt if not already set.
+        """
         return replace(self, deadline=self.deadline or rendered.deadline)
 
 
@@ -157,13 +225,35 @@ class InnerLoopConfig:
 class InnerLoop[OutputT]:
     """Coordinate the inner loop of a conversational exchange with a provider.
 
-    This class orchestrates the conversation lifecycle:
-    1. Prepare initial messages and tool specifications
-    2. Call the provider repeatedly until a final response is produced
-    3. Execute tools as requested by the provider
-    4. Parse and return structured output when configured
+    This class orchestrates the complete conversation lifecycle between the
+    application and an AI provider. It manages the iterative process of
+    sending messages, receiving responses, and executing tool calls until
+    the provider produces a final response.
 
-    The loop handles throttling, deadline enforcement, and budget tracking.
+    Lifecycle stages:
+        1. Preparation: Initialize message history, build tool specifications,
+           dispatch PromptRendered and RenderedTools events.
+        2. Provider loop: Repeatedly call the provider until no tool calls
+           are returned. Each iteration may trigger tool execution.
+        3. Tool execution: When the provider requests tools, execute them
+           transactionally and append results to the message history.
+        4. Finalization: Parse the final response, extract structured output
+           if configured, and dispatch PromptExecuted event.
+
+    The loop automatically handles:
+        - Throttling with exponential backoff on rate-limited requests
+        - Deadline enforcement with clear error messages on timeout
+        - Budget tracking to prevent runaway token consumption
+        - Heartbeat signals for liveness monitoring in long operations
+
+    Attributes:
+        inputs: The conversation inputs including prompt, adapter, and messages.
+        config: Runtime configuration and collaborator dependencies.
+
+    Example:
+        >>> loop = InnerLoop(inputs=inputs, config=config)
+        >>> response = loop.run()
+        >>> print(response.output)  # Structured output if configured
     """
 
     inputs: InnerLoopInputs[OutputT]
@@ -239,8 +329,21 @@ class InnerLoop[OutputT]:
             ) from error
 
     def run(self) -> PromptResponse[OutputT]:
-        """Execute the inner loop and return the final response."""
+        """Execute the inner loop and return the final response.
 
+        This is the main entry point for running the conversation. It
+        initializes execution state, then iteratively calls the provider
+        and executes tool calls until a final response is produced.
+
+        Returns:
+            PromptResponse containing the final text response and optional
+            structured output parsed according to the prompt's output type.
+
+        Raises:
+            PromptEvaluationError: If the provider returns an invalid response,
+                the deadline is exceeded, or budget limits are reached.
+            ThrottleError: If retry attempts are exhausted after rate limiting.
+        """
         self._prepare()
 
         while True:
@@ -598,10 +701,32 @@ def run_inner_loop[
 ) -> PromptResponse[OutputT]:
     """Execute the inner loop of a conversation with a provider.
 
-    This is the primary entry point for running a conversation. It creates
-    an InnerLoop instance and executes it.
-    """
+    This is the primary entry point for running a provider conversation.
+    It creates an InnerLoop instance, executes it, and returns the result.
+    Prefer this function over instantiating InnerLoop directly for simple
+    use cases.
 
+    Args:
+        inputs: Conversation inputs including the prompt, adapter, rendered
+            prompt, and initial message history.
+        config: Runtime configuration including session, provider callables,
+            throttling policy, and optional deadline/budget constraints.
+
+    Returns:
+        PromptResponse containing the final text response from the provider
+        and optional structured output parsed according to the prompt's
+        output type specification.
+
+    Raises:
+        PromptEvaluationError: If the provider returns an invalid response,
+            the configured deadline is exceeded, or budget limits are reached.
+        ThrottleError: If retry attempts are exhausted after rate limiting.
+
+    Example:
+        >>> response = run_inner_loop(inputs=inputs, config=config)
+        >>> if response.output is not None:
+        ...     process_structured_output(response.output)
+    """
     loop = InnerLoop[OutputT](inputs=inputs, config=config)
     return loop.run()
 

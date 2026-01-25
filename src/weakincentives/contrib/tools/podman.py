@@ -10,7 +10,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Podman-backed tool surface exposing the ``shell_execute`` command."""
+"""Podman-backed sandbox providing isolated shell and filesystem tools.
+
+This module provides :class:`PodmanSandboxSection`, a prompt section that exposes
+an isolated Linux container as a tool surface. Agents can execute shell commands,
+read and write files, search with glob/grep, and run Python scripts inside the
+container without affecting the host system.
+
+Key features:
+
+- **Isolation**: Containers run with no network access, restricted CPU/memory,
+  and a non-root user.
+- **Filesystem tools**: ``ls``, ``read_file``, ``write_file``, ``edit_file``,
+  ``glob``, ``grep``, and ``rm`` operate on ``/workspace``.
+- **Shell execution**: ``shell_execute`` runs arbitrary commands with timeout
+  enforcement.
+- **Python evaluation**: ``evaluate_python`` runs short scripts via ``python3 -c``.
+- **Host mounts**: Optionally copy host files into the container at startup.
+
+Example usage::
+
+    from weakincentives.contrib.tools import PodmanSandboxConfig, PodmanSandboxSection
+    from weakincentives.runtime.session import Session
+
+    session = Session()
+    config = PodmanSandboxConfig(
+        image="python:3.12-bookworm",
+        mounts=(HostMount(host_path="src"),),
+        allowed_host_roots=(Path.cwd(),),
+    )
+    section = PodmanSandboxSection(session=session, config=config)
+
+    # Add to prompt and use tools...
+
+    section.close()  # Clean up when done
+
+Requirements:
+
+- The ``podman`` CLI must be installed and accessible.
+- For the Python API, install ``weakincentives[podman]``.
+"""
 
 from __future__ import annotations
 
@@ -167,11 +206,42 @@ class _PodmanSectionParams:
 class PodmanSandboxConfig:
     """Configuration for :class:`PodmanSandboxSection`.
 
+    This dataclass consolidates all settings needed to create an isolated Podman
+    container workspace. Common use cases include mounting host directories,
+    setting environment variables, and configuring remote Podman connections.
+
+    Attributes:
+        image: Container image to use. Defaults to ``python:3.12-bookworm``.
+        mounts: Sequence of :class:`HostMount` specifications describing files
+            or directories to copy into the container's ``/workspace``.
+        allowed_host_roots: Paths on the host that mounts may reference. Mounts
+            with ``host_path`` values outside these roots will be rejected.
+        base_url: Podman socket URL (e.g., ``unix:///run/podman/podman.sock``).
+            If omitted, the default connection is used.
+        identity: SSH key path for remote Podman connections. Ignored for local
+            sockets.
+        base_environment: Environment variables injected into every command
+            executed inside the container.
+        cache_dir: Directory for overlay storage. Defaults to
+            ``~/.cache/weakincentives/podman``.
+        client_factory: Callable returning a Podman client. Primarily for
+            testing; leave ``None`` for production use.
+        clock: Callable returning the current UTC datetime. Defaults to
+            ``datetime.now(UTC)``.
+        connection_name: Named Podman connection from ``podman system connection``.
+            Takes precedence over ``base_url`` and ``identity``.
+        exec_runner: Callable to execute subprocess commands. For testing only.
+        accepts_overrides: If ``True``, tools accept runtime parameter overrides.
+
     Example::
 
         from weakincentives.contrib.tools import PodmanSandboxConfig, PodmanSandboxSection
 
-        config = PodmanSandboxConfig(mounts=(HostMount(host_path="src"),))
+        config = PodmanSandboxConfig(
+            mounts=(HostMount(host_path="src"),),
+            allowed_host_roots=(Path.cwd(),),
+            base_environment={"PYTHONDONTWRITEBYTECODE": "1"},
+        )
         section = PodmanSandboxSection(session=session, config=config)
     """
 
@@ -191,7 +261,26 @@ class PodmanSandboxConfig:
 
 @FrozenDataclass()
 class PodmanShellParams:
-    """Parameter payload accepted by the ``shell_execute`` tool."""
+    """Parameter payload accepted by the ``shell_execute`` tool.
+
+    Use this dataclass to invoke shell commands inside the Podman container.
+    Commands run in an isolated environment with no network access.
+
+    Attributes:
+        command: Tuple of command arguments. The first element is the executable;
+            subsequent elements are arguments. Example: ``("ls", "-la", "/workspace")``.
+            Total length must not exceed 4,096 characters.
+        cwd: Working directory relative to ``/workspace``. Must not start with
+            ``/`` or contain ``.`` or ``..`` segments. Defaults to ``/workspace``.
+        env: Environment variables merged with the container's base environment.
+            Keys are uppercased automatically. Maximum 64 variables; each value
+            limited to 512 characters.
+        stdin: Text piped to the command's standard input. Must be ASCII.
+        timeout_seconds: Maximum execution time in seconds. Clamped to the range
+            [1.0, 120.0]. Defaults to 30 seconds.
+        capture_output: If ``True`` (default), stdout and stderr are captured and
+            returned. Set to ``False`` for commands with large output.
+    """
 
     command: tuple[str, ...]
     cwd: str | None = None
@@ -203,7 +292,23 @@ class PodmanShellParams:
 
 @FrozenDataclass()
 class PodmanShellResult:
-    """Structured command summary returned by the ``shell_execute`` tool."""
+    """Structured result returned by the ``shell_execute`` tool.
+
+    Instances are immutable and capture the complete outcome of a command,
+    including output streams, timing, and exit status.
+
+    Attributes:
+        command: The normalized command tuple that was executed.
+        cwd: Absolute path of the working directory inside the container.
+        exit_code: Process exit code. Zero indicates success; 124 indicates
+            the command was terminated due to timeout.
+        stdout: Captured standard output (truncated to 32 KB). Contains
+            ``"capture disabled"`` if ``capture_output`` was ``False``.
+        stderr: Captured standard error (truncated to 32 KB). Contains
+            ``"capture disabled"`` if ``capture_output`` was ``False``.
+        duration_ms: Wall-clock execution time in milliseconds.
+        timed_out: ``True`` if the command exceeded ``timeout_seconds``.
+    """
 
     command: tuple[str, ...]
     cwd: str
@@ -214,6 +319,12 @@ class PodmanShellResult:
     timed_out: bool
 
     def render(self) -> str:
+        """Format the result as a human-readable multi-line string.
+
+        Returns:
+            A string containing the command, exit code, timing, and output
+            streams, suitable for display or logging.
+        """
         command_str = " ".join(self.command)
         lines = [
             "Shell command result:",
@@ -232,7 +343,22 @@ class PodmanShellResult:
 
 @FrozenDataclass()
 class PodmanWorkspace:
-    """Active Podman container backing the session."""
+    """Descriptor for an active Podman container backing a session.
+
+    This immutable dataclass is stored in the session slice and updated
+    whenever the container is used. It provides metadata for introspection
+    and debugging but should not be modified directly.
+
+    Attributes:
+        container_id: Podman container ID (full SHA256 hash).
+        container_name: Human-readable container name (e.g., ``wink-<session_id>``).
+        image: Container image used to create the workspace.
+        workdir: Default working directory inside the container (``/workspace``).
+        overlay_path: Host filesystem path where the overlay is mounted.
+        env: Tuple of ``(key, value)`` pairs representing environment variables.
+        started_at: UTC timestamp when the container was started.
+        last_used_at: UTC timestamp of the most recent command execution.
+    """
 
     container_id: str
     container_name: str
@@ -492,12 +618,40 @@ def _truncate_stream(value: str) -> str:
 
 
 class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
-    """Prompt section exposing the Podman ``shell_execute`` tool.
+    """Prompt section exposing an isolated Podman container as a tool surface.
 
-    Use :class:`PodmanSandboxConfig` to consolidate configuration::
+    This section provides filesystem tools (``ls``, ``read_file``, ``write_file``,
+    ``edit_file``, ``glob``, ``grep``, ``rm``), a ``shell_execute`` tool for
+    running arbitrary commands, and an ``evaluate_python`` tool for quick
+    Python expressions. All operations execute inside a sandboxed container
+    with no network access and strict resource limits.
 
-        config = PodmanSandboxConfig(mounts=(HostMount(host_path="src"),))
+    The container is started lazily on first tool invocation and persists for
+    the lifetime of the section. Files are stored in a host overlay directory,
+    allowing inspection and persistence across restarts.
+
+    Typical usage::
+
+        from weakincentives.contrib.tools import PodmanSandboxConfig, PodmanSandboxSection
+
+        config = PodmanSandboxConfig(
+            mounts=(HostMount(host_path="src"),),
+            allowed_host_roots=(Path.cwd(),),
+        )
         section = PodmanSandboxSection(session=session, config=config)
+        prompt.add_section(section)
+
+        # Later, clean up the container
+        section.close()
+
+    Notes:
+        - The ``podman`` CLI must be installed and accessible.
+        - For remote Podman hosts, configure ``connection_name`` or ``base_url``.
+        - Call :meth:`close` to stop the container when finished.
+
+    Args:
+        session: The session instance for slice storage and event dispatch.
+        config: Optional configuration; defaults are used if omitted.
     """
 
     def __init__(
@@ -843,10 +997,28 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
 
     @property
     def session(self) -> Session:
+        """Return the session associated with this sandbox section."""
         return self._session
 
     @override
     def clone(self, **kwargs: object) -> PodmanSandboxSection:  # pragma: no cover
+        """Create a copy of this section bound to a different session.
+
+        The cloned section shares the same overlay directory and filesystem,
+        allowing multiple sessions to operate on the same workspace.
+
+        Args:
+            **kwargs: Must include ``session`` (a :class:`Session` instance).
+                An optional ``dispatcher`` may be provided but must match the
+                session's dispatcher.
+
+        Returns:
+            A new :class:`PodmanSandboxSection` using the provided session.
+
+        Raises:
+            TypeError: If ``session`` is missing or ``dispatcher`` does not
+                match the session's dispatcher.
+        """
         session = kwargs.get("session")
         if not isinstance(session, Session):
             msg = "session is required to clone PodmanSandboxSection."
@@ -874,6 +1046,28 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     def resolve_connection(
         connection_name: str | None = None,
     ) -> dict[str, str | None] | None:
+        """Resolve Podman connection settings from the system configuration.
+
+        Queries ``podman system connection list`` to find connection details.
+        Useful for validating configuration before creating a sandbox section.
+
+        Args:
+            connection_name: Specific connection name to look up. If ``None``,
+                the default connection is returned.
+
+        Returns:
+            A dictionary with keys ``base_url``, ``identity``, and
+            ``connection_name``, or ``None`` if no connection is found.
+
+        Example::
+
+            conn = PodmanSandboxSection.resolve_connection("my-remote")
+            if conn:
+                config = PodmanSandboxConfig(
+                    base_url=conn["base_url"],
+                    identity=conn["identity"],
+                )
+        """
         resolved = resolve_podman_connection(preferred_name=connection_name)
         if resolved is None:
             return None
@@ -1070,15 +1264,61 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 client.close()
 
     def ensure_workspace(self) -> _WorkspaceHandle:
+        """Start the container if not already running and return its handle.
+
+        This method is idempotent: calling it multiple times returns the same
+        workspace. The container is created with resource limits (1 GB memory,
+        1 CPU) and no network access.
+
+        Returns:
+            An internal handle containing the workspace descriptor and overlay
+            path. Most callers should use the tool methods rather than this
+            handle directly.
+
+        Raises:
+            ToolValidationError: If the container fails to start or pass
+                readiness checks.
+        """
         return self._ensure_workspace()
 
     def workspace_environment(self) -> dict[str, str]:
+        """Return the current environment variables for the workspace.
+
+        If the workspace is running, returns the container's environment.
+        Otherwise, returns the base environment from configuration.
+
+        Returns:
+            A mutable dictionary of environment variable key-value pairs.
+        """
         return self._workspace_env()
 
     def touch_workspace(self) -> None:
+        """Update the workspace's ``last_used_at`` timestamp to now.
+
+        Call this after executing commands to keep the workspace metadata
+        current. This is done automatically by the shell and eval tools.
+        """
         self._touch_workspace()
 
     def run_cli_exec(self, *, config: _ExecConfig) -> subprocess.CompletedProcess[str]:
+        """Execute a command inside the container using the Podman CLI.
+
+        This low-level method builds a ``podman exec`` command and runs it via
+        subprocess. It handles stdin, environment variables, and timeouts.
+
+        Args:
+            config: Execution configuration specifying the command, stdin,
+                working directory, environment overrides, timeout, and whether
+                to capture output.
+
+        Returns:
+            A :class:`subprocess.CompletedProcess` with return code and
+            captured stdout/stderr (if capture was enabled).
+
+        Raises:
+            subprocess.TimeoutExpired: If the command exceeds the timeout.
+            FileNotFoundError: If the ``podman`` CLI is not installed.
+        """
         handle = self.ensure_workspace()
         env = self.workspace_environment()
         if config.environment:
@@ -1111,6 +1351,25 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         destination: str,
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        """Copy files between the host and container using ``podman cp``.
+
+        Args:
+            source: Source path. Use ``<container>:<path>`` for container paths.
+            destination: Destination path. Use ``<container>:<path>`` for
+                container paths.
+            timeout: Optional timeout in seconds for the copy operation.
+
+        Returns:
+            A :class:`subprocess.CompletedProcess` with return code and output.
+
+        Example::
+
+            # Copy from host to container
+            section.run_cli_cp(
+                source="/tmp/script.py",
+                destination="my-container:/workspace/script.py",
+            )
+        """
         cmd: list[str] = ["podman"]
         if self._connection_name:
             cmd.extend(["--connection", self._connection_name])
@@ -1130,6 +1389,29 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         args: Sequence[str],
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        """Execute a Python script inside the container via ``python3 -c``.
+
+        This is a convenience wrapper around :meth:`run_cli_exec` for running
+        inline Python code.
+
+        Args:
+            script: Python source code to execute.
+            args: Command-line arguments passed to the script (accessible via
+                ``sys.argv[1:]``).
+            timeout: Optional timeout in seconds. Defaults to no timeout.
+
+        Returns:
+            A :class:`subprocess.CompletedProcess` with return code and
+            captured stdout/stderr.
+
+        Example::
+
+            result = section.run_python_script(
+                script="import sys; print(sys.argv[1])",
+                args=["hello"],
+            )
+            assert result.stdout.strip() == "hello"
+        """
         return self.run_cli_exec(
             config=_ExecConfig(
                 command=["python3", "-c", script, *args], timeout=timeout
@@ -1143,6 +1425,21 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         content: str,
         mode: str,
     ) -> None:
+        """Write content to a file inside the container workspace.
+
+        Creates parent directories as needed. For append mode, reads the
+        existing file content and appends the new content.
+
+        Args:
+            path: Virtual filesystem path relative to ``/workspace``.
+            content: UTF-8 text content to write.
+            mode: Write mode - ``"create"`` for new files, ``"overwrite"`` to
+                replace existing content, or ``"append"`` to add to the end.
+
+        Raises:
+            ToolValidationError: If the file is not valid UTF-8 (append mode),
+                the parent directory cannot be created, or the copy fails.
+        """
         handle = self.ensure_workspace()
         host_path = _host_path_for(handle.overlay_path, path)
         payload = content
@@ -1190,17 +1487,39 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             raise ToolValidationError(message)
 
     def new_client(self) -> _PodmanClient:
+        """Create a new Podman client using the configured connection settings.
+
+        Each call returns a fresh client instance. The caller is responsible
+        for calling ``close()`` on the returned client when finished.
+
+        Returns:
+            A Podman client instance implementing the ``_PodmanClient`` protocol.
+
+        Raises:
+            RuntimeError: If the ``podman`` package is not installed.
+        """
         return self._client_factory()
 
     @property
     def connection_name(self) -> str | None:
+        """Return the Podman connection name, if configured."""
         return self._connection_name
 
     @property
     def exec_runner(self) -> _ExecRunner:
+        """Return the subprocess execution function used for CLI commands."""
         return self._exec_runner
 
     def close(self) -> None:
+        """Stop and remove the container, releasing resources.
+
+        This method is idempotent: calling it multiple times has no additional
+        effect. The overlay directory is preserved on disk for inspection.
+
+        After calling ``close()``, the section cannot be used to run commands
+        until a new workspace is created (which happens automatically on the
+        next tool invocation).
+        """
         finalizer = self._finalizer
         if finalizer.alive:
             _ = finalizer()

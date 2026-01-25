@@ -10,7 +10,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Core types for the evaluation framework."""
+"""Core types for the evaluation framework.
+
+This module defines the foundational types used throughout the evaluation
+system:
+
+- ``Sample`` - A single evaluation input with expected output
+- ``Score`` - Result of scoring one output (value, passed, reason)
+- ``Dataset`` - Immutable collection of samples with JSONL loading
+- ``EvalResult`` - Result for one sample including score and latency
+- ``EvalReport`` - Aggregate results with computed metrics
+- ``EvalRequest`` - Request to evaluate a sample under an experiment
+- ``ExperimentComparison`` - Statistical comparison between experiments
+
+Type aliases:
+- ``Evaluator`` - Standard evaluator: ``(output, expected) -> Score``
+- ``SessionEvaluator`` - Session-aware: ``(output, expected, session) -> Score``
+"""
 
 from __future__ import annotations
 
@@ -72,20 +88,37 @@ class Score:
 
 # Type alias for evaluator functions
 Evaluator = Callable[[object, object], Score]
-"""An evaluator is any callable: (output, expected) -> Score.
+"""Standard evaluator function type: ``(output, expected) -> Score``.
 
-Evaluators are pure functions - no side effects, no state.
+Evaluators are pure functions that compare an output to an expected value
+and return a Score. They should have no side effects and no internal state.
+
+Example:
+    >>> def my_evaluator(output: str, expected: str) -> Score:
+    ...     passed = output.lower() == expected.lower()
+    ...     return Score(value=1.0 if passed else 0.0, passed=passed)
 """
 
 # Type alias for session-aware evaluator functions
 SessionEvaluator = Callable[
     [object, object, "SessionProtocol | SessionViewProtocol"], Score
 ]
-"""A session-aware evaluator: (output, expected, session) -> Score.
+"""Session-aware evaluator function type: ``(output, expected, session) -> Score``.
 
 Session-aware evaluators receive a SessionProtocol or SessionViewProtocol
-providing access to session state for behavioral assertions (tool calls,
-token usage, custom slices).
+as a third parameter, providing access to session state for behavioral
+assertions such as tool call verification, token usage checks, and custom
+slice queries.
+
+Example:
+    >>> def my_session_evaluator(
+    ...     output: str,
+    ...     expected: str,
+    ...     session: SessionProtocol | SessionViewProtocol,
+    ... ) -> Score:
+    ...     tool_calls = session[ToolInvoked].all()
+    ...     passed = len(tool_calls) > 0
+    ...     return Score(value=1.0 if passed else 0.0, passed=passed)
 """
 
 
@@ -219,7 +252,11 @@ class EvalResult:
 
     @property
     def success(self) -> bool:
-        """True if no error occurred."""
+        """True if evaluation completed without error.
+
+        When True, the ``score`` field contains valid evaluation results.
+        When False, check the ``error`` field for the failure reason.
+        """
         return self.error is None
 
 
@@ -248,7 +285,11 @@ class ExperimentComparison:
 
     @property
     def baseline_pass_rate(self) -> float:
-        """Pass rate for the baseline experiment."""
+        """Pass rate for the baseline experiment.
+
+        Calculated as (passed samples) / (successful samples) for the
+        baseline results. Returns 0.0 if there are no successful samples.
+        """
         successful = [r for r in self.baseline_results if r.error is None]
         if not successful:
             return 0.0
@@ -256,7 +297,11 @@ class ExperimentComparison:
 
     @property
     def treatment_pass_rate(self) -> float:
-        """Pass rate for the treatment experiment."""
+        """Pass rate for the treatment experiment.
+
+        Calculated as (passed samples) / (successful samples) for the
+        treatment results. Returns 0.0 if there are no successful samples.
+        """
         successful = [r for r in self.treatment_results if r.error is None]
         if not successful:
             return 0.0
@@ -264,12 +309,23 @@ class ExperimentComparison:
 
     @property
     def pass_rate_delta(self) -> float:
-        """Treatment pass rate minus baseline pass rate."""
+        """Absolute difference in pass rates (treatment - baseline).
+
+        Positive values indicate improvement, negative values indicate
+        regression. For example, a delta of 0.1 means the treatment has
+        a 10 percentage point higher pass rate.
+        """
         return self.treatment_pass_rate - self.baseline_pass_rate
 
     @property
     def relative_improvement(self) -> float | None:
-        """Percentage improvement over baseline. None if baseline is 0."""
+        """Relative improvement as a fraction of baseline pass rate.
+
+        Calculated as: pass_rate_delta / baseline_pass_rate.
+        Returns None if baseline pass rate is 0.0 (division undefined).
+
+        A value of 0.5 means 50% relative improvement over baseline.
+        """
         if self.baseline_pass_rate == 0:
             return None
         return self.pass_rate_delta / self.baseline_pass_rate
@@ -296,17 +352,24 @@ class EvalReport:
 
     @property
     def total(self) -> int:
-        """Total number of samples."""
+        """Total number of evaluation results in this report."""
         return len(self.results)
 
     @property
     def successful(self) -> int:
-        """Samples that completed without error."""
+        """Count of samples that completed without error.
+
+        Returns the number of results where ``error`` is None.
+        """
         return sum(1 for r in self.results if r.success)
 
     @property
     def pass_rate(self) -> float:
-        """Fraction of successful samples that passed."""
+        """Fraction of successful samples that passed the evaluator.
+
+        Calculated as: (passed samples) / (successful samples).
+        Returns 0.0 if there are no successful samples.
+        """
         successful = [r for r in self.results if r.success]
         if not successful:
             return 0.0
@@ -314,7 +377,11 @@ class EvalReport:
 
     @property
     def mean_score(self) -> float:
-        """Mean score across successful samples."""
+        """Mean score value across successful samples.
+
+        Calculated from ``score.value`` for all results where ``error``
+        is None. Returns 0.0 if there are no successful samples.
+        """
         successful = [r for r in self.results if r.success]
         if not successful:
             return 0.0
@@ -322,13 +389,29 @@ class EvalReport:
 
     @property
     def mean_latency_ms(self) -> float:
-        """Mean latency per sample."""
+        """Mean latency in milliseconds across all samples.
+
+        Includes both successful and failed samples. Returns 0.0 if
+        there are no results.
+        """
         if not self.results:
             return 0.0
         return sum(r.latency_ms for r in self.results) / len(self.results)
 
     def failed_samples(self) -> tuple[EvalResult, ...]:
-        """Samples that did not pass."""
+        """Return samples that completed successfully but did not pass.
+
+        Filters to results where ``success`` is True (no error) but
+        ``score.passed`` is False. Useful for debugging and analysis
+        of incorrect outputs.
+
+        Returns:
+            Tuple of EvalResult objects that failed the evaluator.
+
+        Example:
+            >>> for result in report.failed_samples():
+            ...     print(f"Sample {result.sample_id}: {result.score.reason}")
+        """
         return tuple(r for r in self.results if r.success and not r.score.passed)
 
     def by_experiment(self) -> dict[str, tuple[EvalResult, ...]]:
@@ -424,6 +507,16 @@ class EvalRequest[InputT, ExpectedT]:
     Wraps a sample with an experiment configuration for evaluation.
     The experiment field is required to ensure every evaluation is
     associated with a specific experimental configuration.
+
+    EvalRequests are typically created by helper functions like
+    ``submit_dataset()`` or ``submit_experiments()`` and sent to
+    an EvalLoop via a mailbox.
+
+    Example:
+        >>> from weakincentives.experiment import Experiment
+        >>> sample = Sample(id="1", input="What is 2+2?", expected="4")
+        >>> experiment = Experiment(name="baseline")
+        >>> request = EvalRequest(sample=sample, experiment=experiment)
     """
 
     sample: Sample[InputT, ExpectedT]
@@ -433,10 +526,10 @@ class EvalRequest[InputT, ExpectedT]:
     """The experiment to evaluate under. Required for eval requests."""
 
     request_id: UUID = field(default_factory=uuid4)
-    """Unique request identifier."""
+    """Unique request identifier for tracking and deduplication."""
 
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    """When the request was created."""
+    """UTC timestamp when the request was created."""
 
 
 __all__ = [

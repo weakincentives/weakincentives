@@ -29,11 +29,26 @@ from ...types.dataclass import SupportsDataclass
 
 @FrozenDataclass()
 class WorkspaceDigest(SupportsDataclass):
-    """Digest entry persisted within a :class:`Session` slice.
+    """Immutable digest entry persisted within a Session slice.
 
-    The digest contains a short summary and the full body content. By default,
-    sections render the summary, and models can use the ``read_section`` tool
-    to access the full body when needed.
+    A workspace digest captures documentation about a workspace (repository,
+    project, etc.) in two forms: a short summary for quick context in prompts,
+    and a full body for detailed reference via the ``read_section`` tool.
+
+    Attributes:
+        section_key: Normalized key identifying the section this digest belongs
+            to. Must match pattern ``^[a-z0-9][a-z0-9._-]{0,63}$``.
+        summary: Short summary (typically 1 paragraph) shown by default when
+            the section renders with SUMMARY visibility.
+        body: Full digest content accessible via ``read_section`` tool or when
+            rendered with FULL visibility.
+
+    Example:
+        >>> digest = WorkspaceDigest(
+        ...     section_key="workspace-digest",
+        ...     summary="Python library for prompt composition.",
+        ...     body="Full documentation including setup, usage, and API reference.",
+        ... )
     """
 
     section_key: str
@@ -86,8 +101,19 @@ def _default_summary(body: str) -> str:
 
 
 def clear_workspace_digest(session: SessionProtocol, section_key: str) -> None:
-    """Remove cached digests for ``section_key``."""
+    """Remove all cached digests for the specified section key.
 
+    Clears any WorkspaceDigest entries matching the given section key from
+    session state. Safe to call even if no digest exists for the key.
+
+    Args:
+        session: The session containing the digest slice to clear from.
+        section_key: The key identifying which digest(s) to remove. Will be
+            normalized before matching against stored entries.
+
+    Example:
+        >>> clear_workspace_digest(session, "workspace-digest")
+    """
     normalized_key = _normalized_key(section_key)
     session[WorkspaceDigest].clear(
         lambda digest: getattr(digest, "section_key", None) == normalized_key
@@ -98,8 +124,26 @@ def latest_workspace_digest(
     session: SessionProtocol,
     section_key: str,
 ) -> WorkspaceDigest | None:
-    """Return the freshest digest for ``section_key`` when present."""
+    """Retrieve the most recent workspace digest for a given section key.
 
+    Searches session state for WorkspaceDigest entries matching the specified
+    key and returns the most recently added one. Useful for checking if a
+    digest exists before rendering or for accessing digest content directly.
+
+    Args:
+        session: The session to search for digest entries.
+        section_key: The key identifying the digest to retrieve. Will be
+            normalized before matching against stored entries.
+
+    Returns:
+        The most recent WorkspaceDigest for the key, or None if no digest
+        exists for that key in the session.
+
+    Example:
+        >>> digest = latest_workspace_digest(session, "workspace-digest")
+        >>> if digest:
+        ...     print(digest.summary)
+    """
     normalized_key = _normalized_key(section_key)
 
     entries = session[WorkspaceDigest].all()
@@ -121,17 +165,33 @@ _DEFAULT_PLACEHOLDER = textwrap.dedent(
 
 
 class WorkspaceDigestSection(Section[SupportsDataclass]):
-    """Render a cached workspace digest sourced from the active session.
+    """Section that renders workspace digest content from session state.
 
-    This section renders content from a WorkspaceDigest stored in session state.
-    The visibility is determined dynamically based on whether a digest exists:
+    This section dynamically sources its content from a WorkspaceDigest stored
+    in the session, providing a two-tier content model:
 
-    - When a digest exists: SUMMARY visibility shows the digest summary, FULL
-      visibility shows the complete digest body
-    - When no digest exists: FULL visibility shows a placeholder message
+    - **SUMMARY visibility**: Shows the digest's short summary, suitable for
+      including in prompts without overwhelming context.
+    - **FULL visibility**: Shows the complete digest body with all details.
 
-    Models can use the ``read_section`` tool to access the full digest content
-    when the section is rendered with SUMMARY visibility.
+    When no digest exists in session state, a configurable placeholder message
+    is shown instead.
+
+    The section integrates with the ``read_section`` tool, allowing models to
+    request the full digest body when only the summary is rendered initially.
+
+    Example:
+        >>> from weakincentives.runtime.session import Session
+        >>> session = Session()
+        >>> section = WorkspaceDigestSection(session=session, title="Project Info")
+        >>> # Initially renders placeholder until digest is set
+        >>> set_workspace_digest(
+        ...     session,
+        ...     section.key,
+        ...     body="Full project documentation...",
+        ...     summary="A Python library for X.",
+        ... )
+        >>> # Now renders the digest content
     """
 
     params_type: type[SupportsDataclass] | None
@@ -144,6 +204,21 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         key: str = "workspace-digest",
         placeholder: str = _DEFAULT_PLACEHOLDER,
     ) -> None:
+        """Initialize a workspace digest section.
+
+        Args:
+            session: The session instance to read digest content from. The
+                section will look up WorkspaceDigest entries by key from this
+                session's state.
+            title: Display title for the section heading. Defaults to
+                "Workspace Digest".
+            key: Unique section key used to identify and look up the digest.
+                Must match pattern ``^[a-z0-9][a-z0-9._-]{0,63}$``. Defaults
+                to "workspace-digest".
+            placeholder: Message shown when no digest exists in session state.
+                Defaults to a prompt suggesting the user explore the repository
+                and run optimization.
+        """
         self._session = session
         self._placeholder = placeholder.strip()
         self._key = key  # Store key before super().__init__ for _get_current_summary
@@ -178,12 +253,17 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
     def summary(  # pyright: ignore[reportImplicitOverride]
         self,
     ) -> str | None:
-        """Return the current summary from session state, or None if no digest."""
+        """The current digest summary, or None if no digest exists.
+
+        This property is computed dynamically from session state on each access,
+        ensuring it always reflects the latest digest content. Returns None when
+        no WorkspaceDigest exists for this section's key.
+        """
         return self._get_current_summary()
 
     @summary.setter
     def summary(self, value: str | None) -> None:
-        """Ignore setter - summary is computed dynamically from session state."""
+        """No-op setter; summary is computed dynamically from session state."""
         # Parent's __init__ sets self.summary, but we compute it dynamically
         pass
 
@@ -225,11 +305,20 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
 
     @override
     def original_body_template(self) -> str:
+        """Return the placeholder text as the original body template.
+
+        Used for template hashing and comparison. Returns the configured
+        placeholder since actual content is sourced dynamically from session.
+        """
         return self._placeholder
 
     @override
     def original_summary_template(self) -> str | None:
-        # Return a placeholder for hashing purposes; actual summary is dynamic
+        """Return a static placeholder string for template hashing.
+
+        Returns a fixed string rather than the dynamic summary, since the
+        actual summary is computed from session state at render time.
+        """
         return "Workspace digest summary."
 
     @override
@@ -241,6 +330,22 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         path: tuple[str, ...] = (),
         session: object = None,
     ) -> str:
+        """Render the section body content based on visibility level.
+
+        Returns content from the session digest when available, respecting the
+        visibility setting (summary for SUMMARY, full body for FULL). Returns
+        the placeholder message when no digest exists.
+
+        Args:
+            params: Unused; included for API compatibility.
+            visibility: Visibility level controlling content detail. If None,
+                effective visibility is computed from the section's selector.
+            path: Unused; included for API compatibility.
+            session: Unused; included for API compatibility.
+
+        Returns:
+            The rendered body content: digest summary, full body, or placeholder.
+        """
         del params, path, session
         return self._get_content_for_visibility(visibility)
 
@@ -253,15 +358,25 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         number: str,
         path: tuple[str, ...] = (),
     ) -> str:
-        """Render the section with an override body.
+        """Render the section with heading and content, using override as fallback.
 
-        When a digest exists in session state, the content is sourced from the
-        session digest (respecting visibility - summary for SUMMARY, full body
-        for FULL). The override_body is ignored in this case.
+        Content priority:
+        1. Session digest (if exists) - visibility determines summary vs full body
+        2. Override body (if no digest but override provided)
+        3. Placeholder message (if neither digest nor override exists)
 
-        When NO digest exists, the override_body is used as fallback content,
-        allowing pre-seeded overrides to populate the section before the first
-        optimization run.
+        This allows pre-seeded overrides to populate the section before the first
+        optimization run populates the digest.
+
+        Args:
+            override_body: Fallback content used when no digest exists in session.
+            params: Unused; included for API compatibility.
+            depth: Heading depth level (e.g., 1 for ``#``, 2 for ``##``).
+            number: Section number string (e.g., "1.2.3").
+            path: Section path for context in visibility resolution.
+
+        Returns:
+            Formatted section with heading and body content.
         """
         del params
         heading = self.format_heading(depth, number, path)
@@ -289,6 +404,21 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
 
     @override
     def clone(self, **kwargs: object) -> WorkspaceDigestSection:
+        """Create a copy of this section bound to a different session.
+
+        Creates a new WorkspaceDigestSection with the same title, key, and
+        placeholder, but bound to a new session instance. This is useful when
+        forking sessions or creating isolated section instances.
+
+        Args:
+            **kwargs: Must include ``session`` with a Session instance.
+
+        Returns:
+            A new WorkspaceDigestSection bound to the provided session.
+
+        Raises:
+            TypeError: If ``session`` is not provided or is not a Session instance.
+        """
         session_obj = kwargs.get("session")
         if not isinstance(session_obj, Session):
             msg = "session is required to clone WorkspaceDigestSection."

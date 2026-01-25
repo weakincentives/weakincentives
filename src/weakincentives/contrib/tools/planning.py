@@ -37,7 +37,22 @@ _MAX_TITLE_LENGTH: Final[int] = 500
 
 @FrozenDataclass()
 class PlanStep:
-    """Single actionable step tracked within a plan."""
+    """Single actionable step tracked within a plan.
+
+    Each step has a unique integer identifier, a descriptive title, and a
+    status indicating its progress. Steps are created via :class:`SetupPlan`
+    or :class:`AddStep` and updated via :class:`UpdateStep`.
+
+    Attributes:
+        step_id: Stable integer identifier for the step (1, 2, 3, ...).
+        title: Concise summary of the work item (max 500 characters).
+        status: Current progress state - one of "pending", "in_progress", or "done".
+
+    Example::
+
+        step = PlanStep(step_id=1, title="Review requirements", status="pending")
+        print(step.render())  # "1 [pending] Review requirements"
+    """
 
     step_id: int = field(
         metadata={"description": "Stable identifier for the step (integer)."}
@@ -52,12 +67,34 @@ class PlanStep:
     )
 
     def render(self) -> str:
+        """Return a human-readable representation of the step.
+
+        Returns:
+            A string in the format "{step_id} [{status}] {title}".
+        """
         return f"{self.step_id} [{self.status}] {self.title}"
 
 
 @FrozenDataclass()
 class SetupPlan:
-    """Initialise or replace the session plan."""
+    """Event to initialize or replace the session plan.
+
+    Dispatching this event creates a new :class:`Plan` with the given objective
+    and optional initial steps. Any existing plan is completely replaced.
+
+    Attributes:
+        objective: The goal the plan should accomplish.
+        initial_steps: Optional tuple of step titles to seed the plan with.
+            Each title becomes a :class:`PlanStep` with status "pending".
+
+    Example::
+
+        event = SetupPlan(
+            objective="Deploy new feature",
+            initial_steps=("Write tests", "Update docs"),
+        )
+        session.dispatch(event)
+    """
 
     objective: str = field(
         metadata={"description": "Objective the plan should accomplish."}
@@ -68,6 +105,11 @@ class SetupPlan:
     )
 
     def render(self) -> str:
+        """Return a human-readable description of the setup event.
+
+        Returns:
+            A multi-line string showing the objective and initial steps.
+        """
         lines = [f"Setup plan: {self.objective}"]
         if self.initial_steps:
             lines.append("Initial steps:")
@@ -79,11 +121,32 @@ class SetupPlan:
 
 @FrozenDataclass()
 class AddStep:
-    """Append new steps to the current plan."""
+    """Event to append new steps to the current plan.
+
+    Dispatching this event adds one or more steps to an existing active plan.
+    Each new step receives a unique ID (continuing from the highest existing ID)
+    and starts with status "pending".
+
+    Attributes:
+        steps: Tuple of step titles to add. At least one title is required.
+
+    Raises:
+        ToolValidationError: If no plan exists or the plan is not active.
+
+    Example::
+
+        event = AddStep(steps=("Implement feature", "Write tests"))
+        session.dispatch(event)
+    """
 
     steps: tuple[str, ...] = field(metadata={"description": "Step titles to add."})
 
     def render(self) -> str:
+        """Return a human-readable description of the add-step event.
+
+        Returns:
+            A multi-line string listing the steps to be added.
+        """
         if not self.steps:
             return "AddStep: <no steps provided>"
         lines = ["AddStep:"]
@@ -93,7 +156,30 @@ class AddStep:
 
 @FrozenDataclass()
 class UpdateStep:
-    """Modify a step's title or status."""
+    """Event to modify a step's title or status.
+
+    Dispatching this event updates an existing step in the active plan. At least
+    one of ``title`` or ``status`` must be provided. When all steps reach "done"
+    status, the plan automatically transitions to "completed".
+
+    Attributes:
+        step_id: Integer identifier of the step to update.
+        title: New title for the step, or None to keep the existing title.
+        status: New status ("pending", "in_progress", or "done"), or None to
+            keep the existing status.
+
+    Raises:
+        ToolValidationError: If no plan exists, the plan is not active, the step
+            does not exist, or neither title nor status is provided.
+
+    Example::
+
+        # Mark step 1 as in progress
+        session.dispatch(UpdateStep(step_id=1, status="in_progress"))
+
+        # Rename and complete step 2
+        session.dispatch(UpdateStep(step_id=2, title="Revised title", status="done"))
+    """
 
     step_id: int = field(metadata={"description": "Identifier of the step to update."})
     title: str | None = field(
@@ -108,6 +194,11 @@ class UpdateStep:
     )
 
     def render(self) -> str:
+        """Return a human-readable description of the update event.
+
+        Returns:
+            A string showing the step ID and what fields are being changed.
+        """
         changes: list[str] = []
         if self.title is not None:
             changes.append(f"title='{self.title}'")
@@ -119,7 +210,29 @@ class UpdateStep:
 
 @FrozenDataclass()
 class Plan:
-    """Immutable snapshot of the active plan."""
+    """Immutable snapshot of a session plan.
+
+    A plan tracks progress toward an objective through a sequence of steps.
+    Plans are created via :class:`SetupPlan`, modified via :class:`AddStep`
+    and :class:`UpdateStep`, and read via :class:`ReadPlan`.
+
+    The plan status transitions automatically:
+    - "active": At least one step is not "done"
+    - "completed": All steps have reached "done" status
+
+    Attributes:
+        objective: Single-sentence description of what the plan accomplishes.
+        status: Lifecycle state - either "active" or "completed".
+        steps: Ordered tuple of :class:`PlanStep` instances.
+
+    Example::
+
+        plan = session[Plan].latest()
+        if plan is not None:
+            print(f"Working on: {plan.objective}")
+            for step in plan.steps:
+                print(step.render())
+    """
 
     objective: str = field(
         metadata={"description": "Single-sentence objective for the session."}
@@ -133,6 +246,11 @@ class Plan:
     )
 
     def render(self) -> str:
+        """Return a human-readable representation of the entire plan.
+
+        Returns:
+            A multi-line string showing the objective, status, and all steps.
+        """
         lines = [f"Objective: {self.objective}", f"Status: {self.status}", ""]
         if not self.steps:
             lines.append("<no steps>")
@@ -142,7 +260,17 @@ class Plan:
 
     @reducer(on=SetupPlan)
     def handle_setup(self, event: SetupPlan) -> Replace[Plan]:
-        """Create or replace the plan with a new objective and initial steps."""
+        """Handle a SetupPlan event by creating a fresh plan.
+
+        This reducer ignores the current plan state and creates an entirely
+        new plan with the given objective and initial steps.
+
+        Args:
+            event: The setup event containing the objective and initial steps.
+
+        Returns:
+            A Replace operation containing the new Plan instance.
+        """
         del self  # SetupPlan creates a new plan, ignoring current state
         steps = tuple(
             PlanStep(step_id=index + 1, title=title, status="pending")
@@ -153,7 +281,17 @@ class Plan:
 
     @reducer(on=AddStep)
     def handle_add_step(self, event: AddStep) -> Replace[Plan]:
-        """Append new steps to the current plan."""
+        """Handle an AddStep event by appending new steps to the plan.
+
+        New steps receive sequential IDs starting from the highest existing
+        ID plus one. All new steps start with "pending" status.
+
+        Args:
+            event: The add-step event containing titles for new steps.
+
+        Returns:
+            A Replace operation containing the updated Plan with new steps.
+        """
         existing = list(self.steps)
         next_id = max((step.step_id for step in existing), default=0) + 1
         for title in event.steps:
@@ -168,7 +306,17 @@ class Plan:
 
     @reducer(on=UpdateStep)
     def handle_update_step(self, event: UpdateStep) -> Replace[Plan]:
-        """Modify a step's title or status."""
+        """Handle an UpdateStep event by modifying a step's title or status.
+
+        If all steps reach "done" status after the update, the plan's status
+        automatically transitions to "completed".
+
+        Args:
+            event: The update event specifying which step to modify and how.
+
+        Returns:
+            A Replace operation containing the updated Plan.
+        """
         updated_steps: list[PlanStep] = []
         for step in self.steps:
             if step.step_id != event.step_id:
@@ -194,9 +342,27 @@ class Plan:
 
 @FrozenDataclass()
 class ReadPlan:
-    """Request the most recent plan snapshot from the session store."""
+    """Request to retrieve the most recent plan snapshot from the session.
+
+    This is a read-only operation that does not modify the plan state.
+    Use the ``planning_read_plan`` tool to inspect current progress.
+
+    Raises:
+        ToolValidationError: If no plan has been initialized.
+
+    Example::
+
+        result = tool_context.invoke(ReadPlan())
+        plan = result.value
+        print(plan.render())
+    """
 
     def render(self) -> str:  # noqa: PLR6301 - mirrors Request semantics
+        """Return a human-readable description of the read request.
+
+        Returns:
+            A static string indicating a plan read operation.
+        """
         return "Read latest plan snapshot."
 
 
@@ -208,7 +374,27 @@ class _PlanningSectionParams:
 
 
 class PlanningStrategy(Enum):
-    """Predefined guidance templates for the planning section."""
+    """Predefined guidance templates for the planning section.
+
+    Each strategy provides different instructions to the LLM about how to
+    approach planning and execution. Choose based on the agent's workflow.
+
+    Attributes:
+        REACT: Minimal guidance - just the basic tool usage instructions.
+            Best for agents that already have strong reasoning patterns.
+        PLAN_ACT_REFLECT: Encourages a structured workflow where the agent
+            outlines the full plan before execution, then updates status
+            after each action. Good for methodical, step-by-step work.
+        GOAL_DECOMPOSE_ROUTE_SYNTHESISE: Emphasizes goal clarification,
+            decomposition into sub-problems, and synthesis of results.
+            Suitable for complex tasks requiring careful analysis.
+
+    Example::
+
+        from weakincentives.contrib.tools import PlanningStrategy, PlanningConfig
+
+        config = PlanningConfig(strategy=PlanningStrategy.PLAN_ACT_REFLECT)
+    """
 
     REACT = "react"
     PLAN_ACT_REFLECT = "plan_act_reflect"
@@ -219,14 +405,23 @@ class PlanningStrategy(Enum):
 class PlanningConfig:
     """Configuration for :class:`PlanningToolsSection`.
 
-    All constructor arguments for PlanningToolsSection are consolidated here.
-    This avoids accumulating long argument lists as the section evolves.
+    Consolidates constructor arguments for PlanningToolsSection into a single
+    configuration object. This avoids accumulating long argument lists as the
+    section evolves and enables configuration reuse across sections.
+
+    Attributes:
+        strategy: The planning guidance template to use. Defaults to REACT.
+        accepts_overrides: Whether the section allows parameter overrides from
+            parent prompts. Defaults to False.
 
     Example::
 
         from weakincentives.contrib.tools import PlanningConfig, PlanningToolsSection
 
-        config = PlanningConfig(strategy=PlanningStrategy.PLAN_ACT_REFLECT)
+        config = PlanningConfig(
+            strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+            accepts_overrides=True,
+        )
         section = PlanningToolsSection(session=session, config=config)
     """
 
@@ -278,7 +473,17 @@ def _template_for_strategy(strategy: PlanningStrategy) -> str:
 
 
 class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
-    """Prompt section exposing the planning tool suite.
+    """Prompt section that provides planning tools for multi-step task execution.
+
+    This section registers four tools with the prompt:
+
+    - ``planning_setup_plan``: Initialize a plan with an objective and steps
+    - ``planning_add_step``: Append additional steps to the active plan
+    - ``planning_update_step``: Modify a step's title or status
+    - ``planning_read_plan``: Retrieve the current plan state
+
+    The section also installs the :class:`Plan` slice into the provided session,
+    enabling plan state to persist across tool calls.
 
     Use :class:`PlanningConfig` to consolidate configuration::
 
@@ -287,6 +492,13 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
 
     Individual parameters are still accepted for backward compatibility,
     but config takes precedence when provided.
+
+    Attributes:
+        session: The session instance where plan state is stored.
+
+    Note:
+        Skip planning for trivial single-step tasks. Planning is most valuable
+        for complex, multi-step workflows where tracking progress matters.
     """
 
     def __init__(
@@ -297,6 +509,18 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         strategy: PlanningStrategy = PlanningStrategy.REACT,
         accepts_overrides: bool = False,
     ) -> None:
+        """Initialize the planning tools section.
+
+        Args:
+            session: The session instance where plan state will be stored.
+                The section installs the Plan slice automatically.
+            config: Configuration object. When provided, strategy and
+                accepts_overrides arguments are ignored.
+            strategy: Planning guidance template when config is not provided.
+                Defaults to REACT.
+            accepts_overrides: Whether to allow parameter overrides when
+                config is not provided. Defaults to False.
+        """
         # Resolve config - explicit config takes precedence
         if config is not None:
             resolved_strategy = config.strategy
@@ -330,6 +554,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
 
     @property
     def session(self) -> Session:
+        """The session instance where plan state is stored."""
         return self._session
 
     @staticmethod
@@ -345,6 +570,19 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
 
     @override
     def clone(self, **kwargs: object) -> PlanningToolsSection:
+        """Create a copy of this section bound to a different session.
+
+        Args:
+            **kwargs: Must include ``session`` with a :class:`Session` instance.
+                Other kwargs are ignored.
+
+        Returns:
+            A new PlanningToolsSection with the same configuration but
+            bound to the provided session.
+
+        Raises:
+            TypeError: If ``session`` is not provided or is not a Session.
+        """
         session = kwargs.get("session")
         if not isinstance(session, Session):
             msg = "session is required to clone PlanningToolsSection."
@@ -363,6 +601,20 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         path: tuple[str, ...] = (),
         session: object = None,
     ) -> str:
+        """Render the section body with the configured strategy template.
+
+        Args:
+            params: Must be a _PlanningSectionParams instance (internal).
+            visibility: Ignored - included for interface compatibility.
+            path: Ignored - included for interface compatibility.
+            session: Ignored - included for interface compatibility.
+
+        Returns:
+            The rendered markdown body containing planning tool instructions.
+
+        Raises:
+            PromptRenderError: If params is not the expected type.
+        """
         del visibility, path, session
         if not isinstance(params, _PlanningSectionParams):
             raise PromptRenderError(
@@ -374,6 +626,11 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
 
     @override
     def original_body_template(self) -> str:
+        """Return the raw template string for this section.
+
+        Returns:
+            The strategy-specific template before any rendering.
+        """
         return _template_for_strategy(self._strategy)
 
 

@@ -44,13 +44,36 @@ _TEMPLATE_PREVIEW_LIMIT: Final[int] = 10
 
 
 class WorkspaceBudgetExceededError(WinkError):
-    """Raised when a workspace mount exceeds its byte budget."""
+    """Raised when a workspace mount exceeds its byte budget.
+
+    This error occurs during workspace creation when the total bytes of files
+    being copied from a host mount exceeds the `max_bytes` limit specified in
+    the HostMount configuration. The workspace creation is rolled back (temp
+    directory removed) when this error is raised.
+
+    Example:
+        A mount configured with `max_bytes=1_000_000` will raise this error
+        if the files to be copied total more than 1MB.
+    """
 
     pass
 
 
 class WorkspaceSecurityError(WinkError):
-    """Raised when a workspace mount violates security constraints."""
+    """Raised when a workspace mount violates security constraints.
+
+    This error occurs when a HostMount's `host_path` resolves to a location
+    outside the configured `allowed_host_roots`. This prevents accidental or
+    malicious access to sensitive system files.
+
+    Example:
+        If `allowed_host_roots=[Path("/project")]` and a mount tries to access
+        `/etc/passwd`, this error is raised because `/etc` is outside `/project`.
+
+    Note:
+        When no `allowed_host_roots` are specified, all paths are allowed.
+        Always configure allowed roots in production to enforce security boundaries.
+    """
 
     pass
 
@@ -61,16 +84,35 @@ def _utcnow() -> datetime:
 
 @FrozenDataclass()
 class HostMount:
-    """Configuration for mounting host files into the workspace.
+    """Configuration for mounting host files into the Claude Agent SDK workspace.
+
+    Use HostMount to specify which files or directories from the host filesystem
+    should be copied into the temporary workspace where the Claude agent operates.
+    Files are copied (not linked), so agent modifications don't affect originals.
 
     Attributes:
         host_path: Absolute or relative path to the host file or directory.
-        mount_path: Relative path within the temp directory. Defaults to the
-            basename of host_path.
-        include_glob: Glob patterns to include (empty = include all).
-        exclude_glob: Glob patterns to exclude.
-        max_bytes: Maximum total bytes to copy. None means unlimited.
+            Relative paths are resolved from the current working directory.
+        mount_path: Relative path within the temp directory where files will be
+            placed. Defaults to the basename of host_path (e.g., "/foo/bar" -> "bar").
+        include_glob: Glob patterns to include (e.g., ("*.py", "*.json")).
+            Empty tuple means include all files. Patterns match against relative
+            paths from the source directory.
+        exclude_glob: Glob patterns to exclude (e.g., ("*.pyc", "__pycache__/*")).
+            Exclusions are checked before inclusions.
+        max_bytes: Maximum total bytes to copy for this mount. Raises
+            WorkspaceBudgetExceededError if exceeded. None means unlimited.
         follow_symlinks: Whether to follow symbolic links when copying.
+            Defaults to False for security.
+
+    Example:
+        >>> mount = HostMount(
+        ...     host_path="/path/to/project",
+        ...     mount_path="project",
+        ...     include_glob=("*.py", "*.md"),
+        ...     exclude_glob=("*_test.py",),
+        ...     max_bytes=10_000_000,  # 10MB limit
+        ... )
     """
 
     host_path: str
@@ -83,15 +125,25 @@ class HostMount:
 
 @FrozenDataclass()
 class HostMountPreview:
-    """Summary of a materialized host mount.
+    """Summary of a materialized host mount after workspace creation.
+
+    HostMountPreview provides visibility into what was actually copied during
+    workspace creation. Use this to verify mounts were resolved correctly and
+    to display workspace contents to users or in logs.
 
     Attributes:
-        host_path: Original host path from mount configuration.
-        resolved_host: Resolved absolute path on the host.
-        mount_path: Relative path within the temp directory.
-        entries: Preview of copied entries (limited to first 20).
-        is_directory: Whether the source was a directory.
-        bytes_copied: Total bytes copied for this mount.
+        host_path: Original host path from the HostMount configuration.
+        resolved_host: Resolved absolute path on the host after symlink resolution.
+        mount_path: Relative path within the temp directory where files were placed.
+        entries: Preview of copied file entries (limited to first 20 entries).
+            For large mounts, this provides a sample without overwhelming output.
+        is_directory: True if the source was a directory, False if a single file.
+        bytes_copied: Total bytes copied for this mount. Useful for monitoring
+            workspace size and debugging budget issues.
+
+    Note:
+        The `entries` field is truncated for large directories. Check the actual
+        workspace directory if you need the complete file list.
     """
 
     host_path: str
@@ -314,17 +366,46 @@ def _render_workspace_template(previews: tuple[HostMountPreview, ...]) -> str:
 
 
 class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionParams]):
-    """Prompt section describing the Claude Agent SDK workspace.
+    """Prompt section that manages the Claude Agent SDK workspace filesystem.
 
-    This section manages workspace state directly: temp directory, mount previews,
-    and creation timestamp. It renders information about mounted host files without
-    providing custom tools - the SDK's native tools (Read, Write, Edit, Glob, Grep,
-    Bash) are used directly.
+    This section creates and manages a temporary directory workspace where the
+    Claude agent can read, write, and modify files. Host files are copied into
+    the workspace via HostMount configurations, and the agent uses the SDK's
+    native tools (Read, Write, Edit, Glob, Grep, Bash) to interact with them.
+
+    The section renders a description of the workspace contents into the prompt,
+    helping the agent understand what files are available. It also provides the
+    `Filesystem` resource for tools that need filesystem access.
 
     Attributes:
-        temp_dir: Path to the temporary directory.
-        mount_previews: Summaries of each materialized mount.
+        temp_dir: Path to the temporary workspace directory.
+        mount_previews: Summaries of each materialized host mount.
         created_at: UTC timestamp when the workspace was created.
+        filesystem: HostFilesystem instance rooted at the temp directory.
+
+    Lifecycle:
+        1. Create the section with HostMount configurations
+        2. Workspace is materialized immediately (files copied to temp dir)
+        3. Use in a PromptTemplate to provide workspace context to the agent
+        4. Call `cleanup()` when done to remove the temp directory
+
+    Example:
+        >>> workspace = ClaudeAgentWorkspaceSection(
+        ...     session=session,
+        ...     mounts=[
+        ...         HostMount(host_path="/path/to/code", mount_path="src"),
+        ...     ],
+        ...     allowed_host_roots=[Path("/path/to")],
+        ... )
+        >>> try:
+        ...     # Use workspace in prompt template
+        ...     prompt = MyPrompt(sections=[workspace])
+        ... finally:
+        ...     workspace.cleanup()  # Always clean up temp directory
+
+    Warning:
+        Always call `cleanup()` when finished to avoid leaving temporary
+        directories on disk. Consider using try/finally or a context manager.
     """
 
     def __init__(
@@ -339,17 +420,36 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         _created_at: datetime | None = None,
         _filesystem: Filesystem | None = None,
     ) -> None:
-        """Initialize the workspace section.
+        """Initialize the workspace section and materialize host mounts.
+
+        Creates a temporary directory and copies files from each HostMount
+        into it. The workspace is ready for agent use immediately after
+        initialization.
 
         Args:
-            session: Session for state management.
-            mounts: Host mount configurations.
-            allowed_host_roots: Security boundary for host paths.
-            accepts_overrides: Whether section accepts prompt overrides.
-            _temp_dir: Internal - pre-existing temp directory (for cloning).
-            _mount_previews: Internal - pre-existing mount previews (for cloning).
-            _created_at: Internal - pre-existing creation timestamp (for cloning).
-            _filesystem: Internal - pre-existing filesystem (for cloning).
+            session: Session instance for state management and event dispatch.
+            mounts: Sequence of HostMount configurations specifying which host
+                files to copy into the workspace. Empty sequence creates an
+                empty workspace.
+            allowed_host_roots: Security boundary paths. If non-empty, all mount
+                host_paths must resolve to locations under one of these roots.
+                Empty sequence allows all paths (not recommended for production).
+            accepts_overrides: If True, allows prompt parameters to override
+                section content at render time.
+            _temp_dir: Internal parameter for cloning - do not use directly.
+            _mount_previews: Internal parameter for cloning - do not use directly.
+            _created_at: Internal parameter for cloning - do not use directly.
+            _filesystem: Internal parameter for cloning - do not use directly.
+
+        Raises:
+            WorkspaceSecurityError: If a mount path is outside allowed_host_roots.
+            WorkspaceBudgetExceededError: If a mount exceeds its max_bytes limit.
+            FileNotFoundError: If a mount's host_path does not exist.
+
+        Note:
+            The workspace is created synchronously during __init__. For large
+            mounts, this may take noticeable time. Consider the performance
+            implications when mounting large directories.
         """
         self._session = session
         self._mounts = tuple(mounts)
@@ -395,35 +495,86 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
 
     @property
     def session(self) -> Session:
-        """Return the session associated with this section."""
+        """Return the session associated with this workspace section.
+
+        The session manages state and event dispatch for the workspace.
+        """
         return self._session
 
     @property
     def temp_dir(self) -> Path:
-        """Return the path to the temporary workspace directory."""
+        """Return the path to the temporary workspace directory.
+
+        This is the root directory where all mounted files are placed.
+        Use this path to access workspace files directly or to configure
+        external tools that need the workspace location.
+
+        Returns:
+            Absolute Path to the temporary workspace directory.
+        """
         return self._temp_dir
 
     @property
     def mount_previews(self) -> tuple[HostMountPreview, ...]:
-        """Return summaries of each materialized mount."""
+        """Return summaries of each materialized mount.
+
+        Provides visibility into what files were copied during workspace
+        creation. Useful for debugging, logging, and verifying mount
+        configuration.
+
+        Returns:
+            Tuple of HostMountPreview objects, one per configured mount.
+        """
         return self._mount_previews
 
     @property
     def created_at(self) -> datetime:
-        """Return the UTC timestamp when the workspace was created."""
+        """Return the UTC timestamp when the workspace was created.
+
+        Returns:
+            Timezone-aware datetime in UTC.
+        """
         return self._created_at
 
     @property
     def filesystem(self) -> Filesystem:
-        """Return the filesystem managed by this workspace section.
+        """Return the filesystem interface for this workspace.
 
-        Returns a HostFilesystem backed by the temporary workspace directory.
-        Tools can use this to read/write files in the workspace.
+        Provides a HostFilesystem instance rooted at the temporary workspace
+        directory. Tools and other components can use this to perform
+        file operations within the workspace.
+
+        Returns:
+            Filesystem instance (HostFilesystem) for workspace file operations.
+
+        Note:
+            This filesystem is contributed to the prompt's ResourceRegistry
+            via the `resources()` method, making it available to tools.
         """
         return self._filesystem
 
     def cleanup(self) -> None:
-        """Remove the temporary workspace directory and associated resources."""
+        """Remove the temporary workspace directory and associated resources.
+
+        Deletes the temp directory and all its contents, and cleans up any
+        external resources used by the filesystem (e.g., git snapshot directories).
+
+        This method is idempotent - calling it multiple times is safe.
+        Errors during deletion are silently ignored to ensure cleanup completes.
+
+        Warning:
+            Always call this method when finished with the workspace to avoid
+            leaving temporary files on disk. Use try/finally to ensure cleanup
+            happens even if an exception occurs.
+
+        Example:
+            >>> workspace = ClaudeAgentWorkspaceSection(session=session, mounts=[...])
+            >>> try:
+            ...     # Use workspace
+            ...     pass
+            ... finally:
+            ...     workspace.cleanup()
+        """
         if self._temp_dir.exists():
             shutil.rmtree(self._temp_dir, ignore_errors=True)
         # HostFilesystem.cleanup() removes external git directories used for snapshots
@@ -432,25 +583,50 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
 
     @override
     def resources(self) -> ResourceRegistry:
-        """Return resources required by this workspace section.
+        """Return the resource registry for this workspace section.
 
-        Contributes the filesystem managed by this section to the prompt's
-        resource registry.
+        Contributes a Filesystem binding to the prompt's resource registry,
+        allowing tools to access the workspace filesystem via dependency
+        injection.
+
+        Returns:
+            ResourceRegistry containing a Filesystem binding to this
+            workspace's HostFilesystem instance.
+
+        Note:
+            When this section is included in a PromptTemplate, tools can
+            request `Filesystem` as a dependency and receive the workspace
+            filesystem automatically.
         """
         return ResourceRegistry.build({Filesystem: self._filesystem})
 
     @override
     def clone(self, **kwargs: Any) -> ClaudeAgentWorkspaceSection:
-        """Clone the section with a new session.
+        """Clone the section with a new session, sharing the same workspace.
+
+        Creates a new ClaudeAgentWorkspaceSection that shares the same underlying
+        temporary directory and filesystem. This is used when creating derived
+        prompts that need to operate on the same workspace.
 
         Args:
-            **kwargs: Must include 'session' key with a Session value.
+            **kwargs: Keyword arguments for cloning. Required keys:
+                - session: Session instance for the cloned section.
+                Optional keys:
+                - dispatcher: If provided, must match the session's dispatcher.
 
         Returns:
-            New ClaudeAgentWorkspaceSection with the same workspace config.
+            New ClaudeAgentWorkspaceSection sharing the same temp directory,
+            mount previews, and filesystem as the original.
 
         Raises:
-            TypeError: If session is not provided or dispatcher doesn't match.
+            TypeError: If 'session' is not provided or is not a Session instance.
+            TypeError: If 'dispatcher' is provided but doesn't match the session's
+                dispatcher.
+
+        Note:
+            The cloned section shares the same workspace state. Changes made
+            through either section affect the same files. Call cleanup() only
+            once (on either the original or clone) to avoid double-cleanup.
         """
         session_obj = kwargs.get("session")
         if not isinstance(session_obj, Session):

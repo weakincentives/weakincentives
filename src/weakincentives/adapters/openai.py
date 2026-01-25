@@ -80,6 +80,19 @@ class _OpenAIClientFactory(Protocol):
 
 
 OpenAIProtocol = _OpenAIProtocol
+"""Protocol describing the minimal interface required from an OpenAI client.
+
+This protocol allows type-safe usage of OpenAI clients without requiring
+the openai package at runtime. Any object implementing a `responses`
+attribute with a `create` method matching the expected signature will
+satisfy this protocol.
+
+Example:
+    To check if a custom client satisfies the protocol::
+
+        def my_function(client: OpenAIProtocol) -> None:
+            response = client.responses.create(model="gpt-4o", input=[...])
+"""
 
 
 class _OpenAIModule(Protocol):
@@ -103,6 +116,22 @@ ProviderInvoker = Callable[
     ],
     object,
 ]
+"""Type alias for a callable that invokes the OpenAI provider.
+
+A ProviderInvoker is a function that sends a request to the OpenAI API
+and returns the raw response object. It is used internally by the adapter
+to abstract the actual API call.
+
+Args:
+    messages: List of message dictionaries in OpenAI format.
+    tool_specs: Sequence of tool specification mappings.
+    tool_choice: Optional tool selection directive ("auto", "none", "required",
+        or a specific tool name mapping).
+    response_format: Optional response format configuration for structured outputs.
+
+Returns:
+    The raw response object from the OpenAI API.
+"""
 
 
 def _load_openai_module() -> _OpenAIModule:
@@ -114,8 +143,40 @@ def _load_openai_module() -> _OpenAIModule:
 
 
 def create_openai_client(**kwargs: object) -> _OpenAIProtocol:
-    """Create an OpenAI client, raising a helpful error if the extra is missing."""
+    """Create an OpenAI client instance with automatic dependency checking.
 
+    This factory function creates an OpenAI client and provides a clear error
+    message if the optional 'openai' dependency is not installed.
+
+    Args:
+        **kwargs: Keyword arguments passed directly to the OpenAI client
+            constructor. Common options include:
+            - api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
+            - organization: Organization ID for API requests
+            - base_url: Custom API endpoint URL
+            - timeout: Request timeout in seconds
+            - max_retries: Maximum number of retry attempts
+
+    Returns:
+        An OpenAI client instance satisfying the OpenAIProtocol interface.
+
+    Raises:
+        RuntimeError: If the 'openai' package is not installed. Install it
+            with `uv sync --extra openai` or `pip install weakincentives[openai]`.
+
+    Example:
+        Create a client with default settings::
+
+            client = create_openai_client()
+
+        Create a client with custom configuration::
+
+            client = create_openai_client(
+                api_key="sk-...",
+                timeout=30.0,
+                max_retries=3,
+            )
+    """
     openai_module = _load_openai_module()
     return openai_module.OpenAI(**kwargs)
 
@@ -558,16 +619,56 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "adapter.o
 class OpenAIAdapter(ProviderAdapter[Any]):
     """Adapter that evaluates prompts against OpenAI's Responses API.
 
+    OpenAIAdapter is the primary interface for executing prompts against OpenAI
+    models. It handles message formatting, tool execution, structured output
+    parsing, and automatic retry logic for rate limits and throttling.
+
+    The adapter uses OpenAI's Responses API which provides a unified interface
+    for both standard completions and tool-calling workflows.
+
     Args:
-        model: Model identifier (e.g., "gpt-4o").
+        model: Model identifier (e.g., "gpt-4o", "gpt-4o-mini", "o1-preview").
         model_config: Typed configuration for model parameters like temperature,
-            max_tokens, etc. When provided, these values are merged into each
-            request payload.
-        tool_choice: Tool selection directive. Defaults to "auto".
-        client: Pre-configured OpenAI client instance. Mutually exclusive with
-            client_config.
-        client_config: Typed configuration for client instantiation. Used when
-            client is not provided.
+            max_tokens, reasoning effort, etc. When provided, these values are
+            merged into each request payload. See OpenAIModelConfig for options.
+        tool_choice: Tool selection directive controlling how the model uses tools.
+            - "auto" (default): Model decides whether to call tools
+            - "none": Model will not call any tools
+            - "required": Model must call at least one tool
+            - {"type": "function", "name": "tool_name"}: Force specific tool
+        client: Pre-configured OpenAI client instance. Use this when you need
+            custom client configuration not supported by client_config.
+            Mutually exclusive with client_config.
+        client_config: Typed configuration for client instantiation (API key,
+            base URL, timeouts, etc.). Used when client is not provided.
+            See OpenAIClientConfig for available options.
+
+    Raises:
+        ValueError: If both client and client_config are provided.
+        RuntimeError: If the openai package is not installed.
+
+    Example:
+        Basic usage with default client::
+
+            adapter = OpenAIAdapter(model="gpt-4o")
+            response = adapter.evaluate(my_prompt, session=session)
+
+        With custom model configuration::
+
+            from weakincentives.adapters.config import OpenAIModelConfig
+
+            adapter = OpenAIAdapter(
+                model="gpt-4o",
+                model_config=OpenAIModelConfig(
+                    temperature=0.7,
+                    max_tokens=4096,
+                ),
+            )
+
+        With a pre-configured client::
+
+            client = create_openai_client(api_key="sk-...")
+            adapter = OpenAIAdapter(model="gpt-4o", client=client)
     """
 
     def __init__(
@@ -622,6 +723,62 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
     ) -> PromptResponse[OutputT]:
+        """Evaluate a prompt against the OpenAI model and return the response.
+
+        This method renders the prompt, sends it to the OpenAI API, handles any
+        tool calls in the response, and returns the final parsed output. It
+        manages the full conversation loop including multiple tool call rounds.
+
+        Args:
+            prompt: The prompt to evaluate. Must be a Prompt instance with an
+                associated template and optional parameters. The prompt's output
+                type determines the structure of the parsed response.
+            session: Session providing state management and event dispatch for
+                tool execution. Tools declared on the prompt will use this
+                session for state access.
+            deadline: Optional deadline for the evaluation. If the deadline
+                expires before completion, a PromptEvaluationError is raised.
+                Useful for enforcing timeout constraints on long-running prompts.
+            budget: Optional token/cost budget for this evaluation. If provided
+                without a budget_tracker, a new tracker is created automatically.
+            budget_tracker: Optional pre-existing budget tracker for accumulating
+                costs across multiple evaluations. Takes precedence over budget
+                if both are provided.
+            heartbeat: Optional heartbeat callback for long-running evaluations.
+                Called periodically to indicate the evaluation is still active,
+                useful for watchdog systems.
+            run_context: Optional context for correlating logs and traces across
+                a run. Provides structured logging context for debugging.
+
+        Returns:
+            PromptResponse containing the model's output, parsed according to
+            the prompt's output type. The response includes the final message
+            content, any tool call results, and usage statistics.
+
+        Raises:
+            PromptEvaluationError: If the evaluation fails due to API errors,
+                invalid responses, deadline expiration, or other issues.
+            ThrottleError: If the API returns a rate limit or quota error.
+                Contains retry information when available.
+
+        Example:
+            Basic evaluation::
+
+                response = adapter.evaluate(my_prompt, session=session)
+                result = response.output  # Parsed output of type OutputT
+
+            With deadline and budget::
+
+                from weakincentives.deadlines import Deadline
+                from weakincentives.budget import Budget
+
+                response = adapter.evaluate(
+                    my_prompt,
+                    session=session,
+                    deadline=Deadline.from_timeout(timedelta(seconds=30)),
+                    budget=Budget(max_tokens=10000),
+                )
+        """
         prompt_name = prompt.name or prompt.template.__class__.__name__
 
         logger.debug(

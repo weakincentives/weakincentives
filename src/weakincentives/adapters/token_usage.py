@@ -30,7 +30,39 @@ def _coerce_token_count(value: object) -> int | None:
 
 
 def token_usage_from_payload(payload: Mapping[str, Any] | None) -> TokenUsage | None:
-    """Extract token usage metrics from a provider payload when present."""
+    """Extract token usage metrics from a provider API response payload.
+
+    Parses the ``usage`` field from provider responses, supporting both
+    Anthropic-style (``input_tokens``, ``output_tokens``) and OpenAI-style
+    (``prompt_tokens``, ``completion_tokens``) naming conventions.
+
+    Args:
+        payload: The raw API response mapping from a provider. Expected to
+            contain a nested ``usage`` mapping with token count fields.
+            May be ``None`` or lack usage data.
+
+    Returns:
+        A ``TokenUsage`` instance if any valid token counts were found,
+        or ``None`` if the payload is missing, malformed, or contains
+        no extractable usage data.
+
+    Example:
+        >>> from weakincentives.adapters.token_usage import token_usage_from_payload
+        >>> # Anthropic-style response
+        >>> payload = {"usage": {"input_tokens": 100, "output_tokens": 50}}
+        >>> usage = token_usage_from_payload(payload)
+        >>> usage.input_tokens
+        100
+        >>> # OpenAI-style response
+        >>> payload = {"usage": {"prompt_tokens": 80, "completion_tokens": 40}}
+        >>> usage = token_usage_from_payload(payload)
+        >>> usage.input_tokens
+        80
+
+    Note:
+        Negative token counts are treated as invalid and converted to ``None``.
+        The ``cached_tokens`` field is extracted if present in the usage data.
+    """
 
     if not isinstance(payload, Mapping):
         return None

@@ -96,12 +96,37 @@ class NetworkPolicy:
 
     @classmethod
     def no_network(cls) -> NetworkPolicy:
-        """Create a policy that blocks all network access."""
+        """Create a policy that blocks all network access.
+
+        This is the most secure option and is recommended for most use cases.
+        Tools will not be able to make any outbound network connections.
+
+        Returns:
+            NetworkPolicy with no allowed domains.
+
+        Example:
+            >>> policy = NetworkPolicy.no_network()
+            >>> config = IsolationConfig(network_policy=policy)
+        """
         return cls(allowed_domains=())
 
     @classmethod
     def with_domains(cls, *domains: str) -> NetworkPolicy:
-        """Create a policy allowing specific domains."""
+        """Create a policy allowing access to specific domains.
+
+        Use this when tools need network access to a known set of services.
+        Domain matching is exact (no wildcards within domains).
+
+        Args:
+            *domains: Domain names to allow (e.g., "api.github.com", "pypi.org").
+
+        Returns:
+            NetworkPolicy with the specified domains allowed.
+
+        Example:
+            >>> policy = NetworkPolicy.with_domains("api.github.com", "pypi.org")
+            >>> config = IsolationConfig(network_policy=policy)
+        """
         return cls(allowed_domains=domains)
 
 
@@ -136,22 +161,46 @@ class SandboxConfig:
 class IsolationAuthError(Exception):
     """Raised when required authentication is not available.
 
-    See module docstring for troubleshooting common errors.
+    This exception is raised during IsolationConfig validation or EphemeralHome
+    creation when the requested authentication mode cannot be satisfied.
+
+    Common causes:
+        - ANTHROPIC_API_KEY not set when using Anthropic API mode
+        - Bedrock not configured (missing CLAUDE_CODE_USE_BEDROCK or AWS_REGION)
+        - AWS config directory not found when Bedrock is configured
+        - HOME environment variable not set in container environments
+
+    See module-level docstring for detailed troubleshooting guidance.
     """
 
 
 class AuthMode(Enum):
     """Authentication mode for isolated SDK execution.
 
+    Defines how the isolated SDK subprocess authenticates with Claude.
+    Each mode corresponds to an IsolationConfig factory method that
+    validates the required authentication is available.
+
     Attributes:
         INHERIT_HOST: Inherit authentication from host environment.
-            Works with both Anthropic API and AWS Bedrock.
+            Works with both Anthropic API and AWS Bedrock. Use
+            ``IsolationConfig.inherit_host_auth()`` for this mode.
         EXPLICIT_API_KEY: Use an explicitly provided Anthropic API key.
-            Disables Bedrock authentication.
+            Disables Bedrock authentication. Use
+            ``IsolationConfig.with_api_key(key)`` for this mode.
         ANTHROPIC_API: Require Anthropic API key from environment.
-            Fails fast if ANTHROPIC_API_KEY is not set.
+            Fails fast if ANTHROPIC_API_KEY is not set. Use
+            ``IsolationConfig.for_anthropic_api()`` for this mode.
         BEDROCK: Require AWS Bedrock authentication.
-            Fails fast if Bedrock is not configured.
+            Fails fast if CLAUDE_CODE_USE_BEDROCK and AWS_REGION are not set.
+            Use ``IsolationConfig.for_bedrock()`` for this mode.
+
+    Example:
+        >>> # Check which mode would be used
+        >>> if os.environ.get("ANTHROPIC_API_KEY"):
+        ...     mode = AuthMode.ANTHROPIC_API
+        ... elif os.environ.get("CLAUDE_CODE_USE_BEDROCK") == "1":
+        ...     mode = AuthMode.BEDROCK
     """
 
     INHERIT_HOST = "inherit_host"
@@ -207,11 +256,26 @@ class BedrockConfig:
     ) -> BedrockConfig | None:
         """Detect Bedrock configuration from the environment.
 
+        Checks for Bedrock authentication in the following order:
+        1. Shell environment variables (CLAUDE_CODE_USE_BEDROCK, AWS_REGION)
+        2. Host ~/.claude/settings.json env section (if check_host_settings=True)
+
+        Bedrock is considered configured when CLAUDE_CODE_USE_BEDROCK=1 and
+        AWS_REGION is set. AWS_PROFILE is optional.
+
         Args:
-            check_host_settings: If True, also check ~/.claude/settings.json.
+            check_host_settings: If True, also check ~/.claude/settings.json
+                for environment variable overrides. Set to False for strict
+                shell-only detection.
 
         Returns:
-            BedrockConfig if Bedrock is configured, None otherwise.
+            BedrockConfig with detected settings if Bedrock is configured,
+            None if Bedrock is not configured or required variables are missing.
+
+        Example:
+            >>> config = BedrockConfig.from_environment()
+            >>> if config:
+            ...     print(f"Using Bedrock in {config.region}")
         """
         host_settings = _read_host_claude_settings() if check_host_settings else {}
 
@@ -306,11 +370,23 @@ def _is_bedrock_configured(*, check_host_settings: bool = True) -> bool:
 def get_default_model() -> str:
     """Get the default model ID for the current authentication mode.
 
-    Returns the appropriate model ID format based on whether Bedrock
-    is configured. Both default to Claude Sonnet 4.5.
+    Automatically detects whether Bedrock is configured and returns the
+    appropriate model ID format. Both configurations default to Claude
+    Sonnet 4.5, but with different ID formats.
+
+    This function checks the environment at call time, so changes to
+    CLAUDE_CODE_USE_BEDROCK will be reflected in subsequent calls.
 
     Returns:
-        Model ID string in the appropriate format.
+        Model ID string in the appropriate format:
+        - Anthropic API: "claude-sonnet-4-5-20250929"
+        - Bedrock: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+    Example:
+        >>> os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        >>> os.environ["AWS_REGION"] = "us-east-1"
+        >>> get_default_model()
+        'us.anthropic.claude-sonnet-4-5-20250929-v1:0'
     """
     if _is_bedrock_configured():
         return DEFAULT_BEDROCK_MODEL
@@ -320,9 +396,20 @@ def get_default_model() -> str:
 def get_supported_bedrock_models() -> dict[str, str]:
     """Get the mapping of supported Anthropic models to Bedrock model IDs.
 
+    Use this to discover which models have known Bedrock mappings. Models not
+    in this mapping can still be used with ``to_bedrock_model_id()``, but will
+    be passed through unchanged.
+
     Returns:
-        Dictionary mapping Anthropic model names to Bedrock model IDs.
-        Example: {"claude-opus-4-5-20251101": "us.anthropic.claude-opus-4-5-20251101-v1:0"}
+        Dictionary mapping Anthropic model names to their Bedrock model IDs.
+        Keys are Anthropic-style names (e.g., "claude-opus-4-5-20251101"),
+        values are Bedrock cross-region inference IDs
+        (e.g., "us.anthropic.claude-opus-4-5-20251101-v1:0").
+
+    Example:
+        >>> models = get_supported_bedrock_models()
+        >>> for anthropic_name, bedrock_id in models.items():
+        ...     print(f"{anthropic_name} -> {bedrock_id}")
     """
     return dict(_ANTHROPIC_TO_BEDROCK)
 
@@ -330,12 +417,23 @@ def get_supported_bedrock_models() -> dict[str, str]:
 def to_bedrock_model_id(anthropic_model: str) -> str:
     """Convert an Anthropic model name to Bedrock model ID.
 
+    Performs automatic conversion for known models. If the input is already
+    a Bedrock model ID (starts with "us." or "anthropic.") or is not in the
+    known mapping, it is returned unchanged.
+
     Args:
         anthropic_model: Anthropic model name (e.g., "claude-opus-4-5-20251101")
+            or an existing Bedrock model ID.
 
     Returns:
-        Bedrock model ID with cross-region inference prefix.
-        Returns the input unchanged if already a Bedrock ID or not in mapping.
+        Bedrock model ID with cross-region inference prefix for known models,
+        or the input unchanged if already a Bedrock ID or not in mapping.
+
+    Example:
+        >>> to_bedrock_model_id("claude-opus-4-5-20251101")
+        'us.anthropic.claude-opus-4-5-20251101-v1:0'
+        >>> to_bedrock_model_id("us.anthropic.claude-opus-4-5-20251101-v1:0")
+        'us.anthropic.claude-opus-4-5-20251101-v1:0'  # unchanged
     """
     # Already a Bedrock model ID
     if anthropic_model.startswith(("us.", "anthropic.")):
@@ -354,12 +452,24 @@ def to_bedrock_model_id(anthropic_model: str) -> str:
 def to_anthropic_model_name(bedrock_model_id: str) -> str:
     """Convert a Bedrock model ID to Anthropic model name.
 
+    Performs the reverse of ``to_bedrock_model_id()``. If the input does not
+    look like a Bedrock model ID or is not in the known mapping, it is
+    returned unchanged.
+
     Args:
-        bedrock_model_id: Bedrock model ID (e.g., "us.anthropic.claude-opus-4-5-20251101-v1:0")
+        bedrock_model_id: Bedrock model ID
+            (e.g., "us.anthropic.claude-opus-4-5-20251101-v1:0") or an
+            Anthropic model name.
 
     Returns:
-        Anthropic model name.
-        Returns the input unchanged if not a Bedrock ID or not in mapping.
+        Anthropic model name for known Bedrock IDs, or the input unchanged
+        if not a Bedrock ID or not in the mapping.
+
+    Example:
+        >>> to_anthropic_model_name("us.anthropic.claude-opus-4-5-20251101-v1:0")
+        'claude-opus-4-5-20251101'
+        >>> to_anthropic_model_name("claude-opus-4-5-20251101")
+        'claude-opus-4-5-20251101'  # unchanged (not a Bedrock ID)
     """
     # Not a Bedrock model ID
     if not bedrock_model_id.startswith(("us.", "anthropic.")):
@@ -717,11 +827,17 @@ def _copy_skill(
 
 
 class AwsConfigResolution(NamedTuple):
-    """Result of resolving AWS config directory path.
+    """Result of resolving the AWS config directory path.
+
+    Used internally by EphemeralHome to determine whether and where to copy
+    AWS configuration files for Bedrock authentication.
 
     Attributes:
-        path: Path to AWS config directory, or None if not available.
-        skip_reason: Reason for skipping, if path is None.
+        path: Resolved path to AWS config directory (~/.aws or custom path),
+            or None if AWS config is not available or not needed.
+        skip_reason: Human-readable reason for skipping AWS config copy when
+            path is None. Common values: "HOME_not_set", "aws_dir_not_found".
+            None when path is successfully resolved.
     """
 
     path: Path | None
@@ -733,17 +849,30 @@ class EphemeralHome:
 
     Creates and manages a temporary directory that serves as HOME for the
     Claude Agent SDK subprocess. This prevents the SDK from reading or
-    modifying the user's ~/.claude configuration.
+    modifying the user's ~/.claude configuration, ensuring full isolation.
 
     The ephemeral home contains:
-    - .claude/settings.json: Generated from IsolationConfig
-    - Any workspace files if a workspace_path is provided
+        - .claude/settings.json: Generated sandbox/network/auth settings
+        - .claude/skills/: Mounted skills (if configured)
+        - .aws/: Copied AWS config (for Bedrock authentication)
 
-    Example:
-        >>> isolation = IsolationConfig(
-        ...     network_policy=NetworkPolicy.no_network(),
-        ...     api_key="sk-ant-...",
-        ... )
+    Lifecycle:
+        1. Create with IsolationConfig
+        2. Call ``get_env()`` to get environment variables for subprocess
+        3. Call ``cleanup()`` when done (or use as context manager)
+
+    The recommended pattern is to use EphemeralHome as a context manager,
+    which ensures automatic cleanup even if exceptions occur.
+
+    Example (context manager - recommended):
+        >>> isolation = IsolationConfig.with_api_key("sk-ant-...")
+        >>> with EphemeralHome(isolation) as ephemeral:
+        ...     env = ephemeral.get_env()
+        ...     # Pass env to SDK subprocess
+        ...     # Automatic cleanup on exit
+
+    Example (manual management):
+        >>> isolation = IsolationConfig.inherit_host_auth()
         >>> ephemeral = EphemeralHome(isolation)
         >>> try:
         ...     env = ephemeral.get_env()
@@ -761,10 +890,24 @@ class EphemeralHome:
     ) -> None:
         """Initialize ephemeral home directory.
 
+        Creates a temporary directory and populates it with:
+        - Generated settings.json based on IsolationConfig
+        - Mounted skills (if configured in isolation.skills)
+        - Copied AWS config (if using Bedrock authentication)
+
         Args:
-            isolation: Isolation configuration to apply.
-            workspace_path: Optional workspace directory to include.
-            temp_dir_prefix: Prefix for the temporary directory name.
+            isolation: Isolation configuration specifying auth mode, network
+                policy, sandbox settings, and skills to mount.
+            workspace_path: Optional workspace directory path. Currently unused
+                but reserved for future workspace isolation features.
+            temp_dir_prefix: Prefix for the temporary directory name. Useful
+                for identifying ephemeral homes in /tmp during debugging.
+
+        Raises:
+            IsolationAuthError: If Bedrock is configured but AWS config cannot
+                be copied (e.g., ~/.aws doesn't exist).
+            SkillMountError: If skill mounting fails (e.g., skill not found,
+                duplicate names, or size limit exceeded).
         """
         self._isolation = isolation
         self._workspace_path = workspace_path
@@ -1037,10 +1180,28 @@ class EphemeralHome:
     def get_env(self) -> dict[str, str]:
         """Build environment variables for SDK subprocess.
 
+        Constructs a complete environment dictionary for the Claude Agent SDK
+        subprocess. The returned dictionary should be passed directly to the
+        subprocess (not merged with os.environ) to ensure hermetic isolation.
+
+        Environment variable precedence (highest to lowest):
+            1. User-provided env vars from IsolationConfig.env
+            2. Authentication variables (API key or AWS/Bedrock vars)
+            3. Base variables (HOME, PATH, DISABLE_AUTOUPDATER)
+            4. Host environment (if include_host_env=True, filtered)
+
+        The HOME variable always points to the ephemeral directory, ensuring
+        the SDK reads the generated settings.json.
+
         Returns:
-            Dictionary of environment variables to pass to the SDK subprocess.
-            Includes HOME pointing to the ephemeral directory and authentication
-            settings based on the configuration mode.
+            Dictionary of environment variables for the SDK subprocess.
+            Always includes HOME, PATH, and authentication-related variables.
+            Sensitive variables (API keys, tokens) are included but not logged.
+
+        Example:
+            >>> with EphemeralHome(config) as ephemeral:
+            ...     env = ephemeral.get_env()
+            ...     subprocess.run(["claude", "..."], env=env)
         """
         env: dict[str, str] = {}
 
@@ -1173,10 +1334,24 @@ class EphemeralHome:
         return ["user"]
 
     def cleanup(self) -> None:
-        """Remove ephemeral home directory.
+        """Remove the ephemeral home directory and all its contents.
 
-        Safe to call multiple times. After cleanup, the ephemeral home
-        should not be used.
+        Recursively deletes the temporary directory created during
+        initialization, including all generated settings, copied AWS config,
+        and mounted skills.
+
+        This method is idempotent - safe to call multiple times. Subsequent
+        calls after the first successful cleanup are no-ops.
+
+        Note:
+            After calling cleanup(), the EphemeralHome instance should not be
+            used. Accessing properties like ``home_path`` or calling
+            ``get_env()`` may return stale data or fail.
+
+        Warning:
+            If using the context manager pattern (``with EphemeralHome(...) as e:``),
+            cleanup is called automatically on exit. Do not call cleanup()
+            manually in that case unless you need early cleanup.
         """
         if not getattr(self, "_cleaned_up", True):
             shutil.rmtree(self._temp_dir, ignore_errors=True)
@@ -1184,32 +1359,87 @@ class EphemeralHome:
 
     @property
     def home_path(self) -> str:
-        """Absolute path to the ephemeral home directory."""
+        """Absolute path to the ephemeral home directory.
+
+        This path is used as the HOME environment variable for the SDK
+        subprocess. It contains the .claude and .aws directories with
+        generated configuration.
+
+        Returns:
+            Absolute path string (e.g., "/tmp/claude-agent-xyz123").
+        """
         return self._temp_dir
 
     @property
     def claude_dir(self) -> Path:
-        """Path to the .claude directory within ephemeral home."""
+        """Path to the .claude directory within ephemeral home.
+
+        Contains settings.json and skills/ subdirectory. This mirrors the
+        structure of ~/.claude on the host system.
+
+        Returns:
+            Path object pointing to {home_path}/.claude
+        """
         return self._claude_dir
 
     @property
     def settings_path(self) -> Path:
-        """Path to the generated settings.json file."""
+        """Path to the generated settings.json file.
+
+        The settings file contains sandbox configuration, network policy,
+        and authentication environment variables. It is generated during
+        EphemeralHome initialization based on the IsolationConfig.
+
+        Useful for debugging to inspect the actual settings being used.
+
+        Returns:
+            Path object pointing to {home_path}/.claude/settings.json
+        """
         return self._claude_dir / "settings.json"
 
     @property
     def skills_dir(self) -> Path:
-        """Path to the skills directory within ephemeral home."""
+        """Path to the skills directory within ephemeral home.
+
+        Skills configured in IsolationConfig.skills are copied to this
+        directory during initialization. Each skill is stored in a
+        subdirectory named after the skill.
+
+        Note:
+            This directory may not exist if no skills were configured.
+
+        Returns:
+            Path object pointing to {home_path}/.claude/skills
+        """
         return self._claude_dir / "skills"
 
     def __enter__(self) -> EphemeralHome:
-        """Context manager entry."""
+        """Enter context manager, returning self.
+
+        Returns:
+            This EphemeralHome instance for use in the with block.
+
+        Example:
+            >>> with EphemeralHome(config) as ephemeral:
+            ...     env = ephemeral.get_env()
+        """
         return self
 
     def __exit__(self, *_: object) -> None:
-        """Context manager exit with automatic cleanup."""
+        """Exit context manager, cleaning up the ephemeral home.
+
+        Automatically calls cleanup() to remove the temporary directory
+        and all its contents. This is called regardless of whether an
+        exception occurred in the with block.
+        """
         self.cleanup()
 
     def __del__(self) -> None:
-        """Destructor that attempts cleanup if not already done."""
+        """Destructor that attempts cleanup if not already done.
+
+        Provides a safety net for cases where cleanup() was not called
+        and the context manager was not used. However, relying on __del__
+        is not recommended - always use the context manager or call
+        cleanup() explicitly.
+        """
         self.cleanup()

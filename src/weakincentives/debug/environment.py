@@ -133,7 +133,18 @@ _SENSITIVE_FILE_PATTERNS = (
 
 @FrozenDataclass()
 class SystemInfo:
-    """System/OS information.
+    """System and OS information captured for debug reproducibility.
+
+    Contains hardware and operating system details that may affect program
+    behavior, such as available memory, CPU architecture, and OS version.
+    Used by ``EnvironmentCapture`` to record the execution environment.
+
+    Example::
+
+        info = capture_environment().system
+        print(f"Running on {info.os_name} {info.architecture}")
+        if info.memory_total_bytes:
+            print(f"Memory: {info.memory_total_bytes // (1024**3)} GB")
 
     Attributes:
         os_name: Operating system name (e.g., 'Linux', 'Darwin', 'Windows').
@@ -158,14 +169,27 @@ class SystemInfo:
 
 @FrozenDataclass()
 class PythonInfo:
-    """Python runtime information.
+    """Python runtime information for debug reproducibility.
+
+    Captures details about the Python interpreter executing the code,
+    including version, implementation, and virtual environment state.
+    Essential for reproducing issues that depend on Python version or
+    interpreter-specific behavior.
+
+    Example::
+
+        info = capture_environment().python
+        if info.version_info < (3, 11, 0):
+            print("Warning: Python 3.11+ recommended")
+        if info.is_virtualenv:
+            print(f"Running in venv at {info.prefix}")
 
     Attributes:
-        version: Full Python version string.
-        version_info: Tuple of (major, minor, micro).
+        version: Full Python version string (e.g., '3.11.4 (main, ...)').
+        version_info: Tuple of (major, minor, micro) for version comparison.
         implementation: Python implementation (e.g., 'CPython', 'PyPy').
-        executable: Path to the Python executable.
-        prefix: sys.prefix value.
+        executable: Absolute path to the Python executable.
+        prefix: sys.prefix value (installation or venv directory).
         base_prefix: sys.base_prefix value (differs from prefix in venvs).
         is_virtualenv: True if running in a virtual environment.
     """
@@ -181,16 +205,32 @@ class PythonInfo:
 
 @FrozenDataclass()
 class GitInfo:
-    """Git repository state.
+    """Git repository state for debug reproducibility.
+
+    Captures the exact git state when code is executed, enabling precise
+    reproduction of issues. Includes commit SHA, branch, dirty state, and
+    remote URLs (with credentials redacted for security).
+
+    Note:
+        Remote URLs containing credentials (e.g., ``https://token@host/repo``)
+        are automatically redacted to ``https://[REDACTED]@host/repo``.
+
+    Example::
+
+        env = capture_environment()
+        if env.git:
+            print(f"Commit: {env.git.commit_short}")
+            if env.git.is_dirty:
+                print("Warning: uncommitted changes present")
 
     Attributes:
-        repo_root: Path to the repository root.
-        commit_sha: Current HEAD commit SHA.
+        repo_root: Absolute path to the repository root directory.
+        commit_sha: Current HEAD commit SHA (40-character hex string).
         commit_short: Short commit SHA (first 8 characters).
-        branch: Current branch name, or None if detached HEAD.
+        branch: Current branch name, or None if in detached HEAD state.
         is_dirty: True if working tree has uncommitted changes.
-        remotes: Mapping of remote names to URLs.
-        tags: List of tags pointing to HEAD.
+        remotes: Mapping of remote names to URLs (credentials redacted).
+        tags: Tuple of tag names pointing to HEAD.
     """
 
     repo_root: str = ""
@@ -204,14 +244,35 @@ class GitInfo:
 
 @FrozenDataclass()
 class ContainerInfo:
-    """Container runtime information.
+    """Container runtime information for debug reproducibility.
+
+    Captures containerization details when code runs inside Docker,
+    Kubernetes, or other container runtimes. Helps diagnose issues
+    specific to containerized environments.
+
+    Detection methods:
+        - Docker: Checks for ``/.dockerenv`` and cgroup entries
+        - Kubernetes: Checks for ``/var/run/secrets/kubernetes.io``
+        - containerd: Parses cgroup paths
+
+    Note:
+        Image name and digest are read from ``CONTAINER_IMAGE`` and
+        ``CONTAINER_IMAGE_DIGEST`` environment variables if present.
+
+    Example::
+
+        env = capture_environment()
+        if env.container and env.container.is_containerized:
+            print(f"Running in {env.container.runtime} container")
+            if env.container.container_id:
+                print(f"Container ID: {env.container.container_id[:12]}")
 
     Attributes:
-        runtime: Container runtime (e.g., 'docker', 'podman', 'containerd').
-        container_id: Container ID if running inside a container.
-        image: Container image name/tag.
-        image_digest: Image digest (sha256:...) if available.
-        cgroup_path: Cgroup path for the process.
+        runtime: Container runtime (e.g., 'docker', 'kubernetes', 'containerd').
+        container_id: Container ID (64-char hex) if detectable, else None.
+        image: Container image name/tag from environment, or None.
+        image_digest: Image digest (sha256:...) from environment, or None.
+        cgroup_path: Raw cgroup path for the process.
         is_containerized: True if running inside a container.
     """
 
@@ -225,13 +286,23 @@ class ContainerInfo:
 
 @FrozenDataclass()
 class CommandInfo:
-    """Command invocation details.
+    """Command invocation details for debug reproducibility.
+
+    Captures how the Python program was invoked, including command-line
+    arguments, working directory, and entry point. Useful for reproducing
+    the exact command that triggered an issue.
+
+    Example::
+
+        info = capture_environment().command
+        print(f"Invoked as: {' '.join(info.argv)}")
+        print(f"From directory: {info.working_dir}")
 
     Attributes:
-        argv: Command line arguments.
-        working_dir: Current working directory.
-        entrypoint: The main entry point script/module.
-        executable: Python executable used.
+        argv: Command line arguments as a tuple (from ``sys.argv``).
+        working_dir: Absolute path to the current working directory.
+        entrypoint: The main entry point script or module (``sys.argv[0]``).
+        executable: Absolute path to the Python executable used.
     """
 
     argv: tuple[str, ...] = ()
@@ -242,21 +313,47 @@ class CommandInfo:
 
 @FrozenDataclass()
 class EnvironmentCapture:
-    """Complete environment capture for reproducibility.
+    """Complete environment capture for debug reproducibility.
 
-    This is the main data structure capturing all environment information
-    needed to reproduce a debug bundle's execution context.
+    The primary data structure containing all environment information needed
+    to reproduce a debug bundle's execution context. Created by calling
+    ``capture_environment()``.
+
+    Security:
+        - Environment variables are filtered to an allowlist of safe prefixes
+        - Sensitive variable values (API keys, tokens, etc.) are redacted
+        - Git remote URLs have credentials redacted
+        - Sensitive files (credentials, keys) are excluded from git diff
+
+    Example::
+
+        from weakincentives.debug.environment import capture_environment
+
+        env = capture_environment()
+
+        # Access system info
+        print(f"OS: {env.system.os_name} {env.system.architecture}")
+        print(f"Python: {env.python.version}")
+
+        # Check git state
+        if env.git:
+            print(f"Commit: {env.git.commit_sha}")
+            if env.git.is_dirty:
+                print("Uncommitted changes detected")
+
+        # View captured timestamp
+        print(f"Captured at: {env.captured_at}")
 
     Attributes:
-        system: System/OS information.
-        python: Python runtime information.
-        packages: Frozen package list (pip freeze output).
-        env_vars: Filtered and redacted environment variables.
-        git: Git repository state, or None if not in a repo.
-        git_diff: Uncommitted changes diff (capped), or None.
-        command: Command invocation details.
-        container: Container runtime info, or None if not containerized.
-        captured_at: ISO timestamp when capture occurred.
+        system: System and OS information (``SystemInfo``).
+        python: Python runtime information (``PythonInfo``).
+        packages: Frozen package list (pip/uv freeze output as string).
+        env_vars: Filtered and redacted environment variables mapping.
+        git: Git repository state (``GitInfo``), or None if not in a repo.
+        git_diff: Uncommitted changes as unified diff (capped at 100KB), or None.
+        command: Command invocation details (``CommandInfo``).
+        container: Container runtime info (``ContainerInfo``), or None.
+        captured_at: ISO 8601 timestamp (UTC) when capture occurred.
     """
 
     system: SystemInfo = field(default_factory=SystemInfo)
@@ -663,15 +760,53 @@ def capture_environment(
     include_packages: bool = True,
     include_git_diff: bool = True,
 ) -> EnvironmentCapture:
-    """Capture complete environment information.
+    """Capture complete environment information for debug reproducibility.
+
+    Collects system, Python runtime, git state, environment variables, and
+    package information needed to reproduce the current execution context.
+    This is the main entry point for environment capture.
+
+    Security notes:
+        - Environment variables are filtered to safe prefixes only (PATH,
+          PYTHON*, CI variables, etc.). Variables with names matching
+          sensitive patterns (api_key, token, secret, etc.) are redacted.
+        - Git remote URLs have credentials redacted.
+        - Sensitive files (.env, *.pem, credentials.json, etc.) are excluded
+          from git diff capture.
+
+    Performance notes:
+        - Package capture runs ``uv pip freeze`` or ``pip freeze`` (30s timeout)
+        - Git diff is capped at 100KB to prevent memory issues
+        - Capture order is optimized: fast operations first, slow ones last
+
+    Example::
+
+        from weakincentives.debug.environment import capture_environment
+
+        # Full capture (default)
+        env = capture_environment()
+
+        # Fast capture without packages or diff
+        env = capture_environment(include_packages=False, include_git_diff=False)
+
+        # Capture from a specific directory
+        env = capture_environment(working_dir=Path("/path/to/repo"))
 
     Args:
-        working_dir: Working directory for git operations. Defaults to cwd.
-        include_packages: Whether to capture installed packages (slower).
-        include_git_diff: Whether to capture git diff (may be large).
+        working_dir: Working directory for git operations. Defaults to the
+            current working directory. Useful when capturing from a different
+            repository than the one you're running in.
+        include_packages: Whether to capture installed packages via pip/uv
+            freeze. Set to False for faster capture when package info is
+            not needed. Defaults to True.
+        include_git_diff: Whether to capture git diff of uncommitted changes.
+            Set to False if the diff is not needed or to avoid capturing
+            large diffs. Defaults to True.
 
     Returns:
-        EnvironmentCapture containing all collected information.
+        An ``EnvironmentCapture`` instance containing all collected
+        information. Fields for unavailable data (e.g., git when not in a
+        repo, container when not containerized) will be None.
     """
     from datetime import UTC, datetime
 

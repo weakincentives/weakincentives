@@ -33,6 +33,10 @@ __all__ = [
     "parse_structured_output",
 ]
 
+#: Key used when wrapping array outputs in an object container.
+#: When a prompt expects an array of dataclasses, some models may return
+#: `{"items": [...]}` instead of a bare array. This key is used to unwrap
+#: such payloads automatically during parsing.
 ARRAY_WRAPPER_KEY: Final[str] = "items"
 
 _JSON_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -41,7 +45,27 @@ _JSON_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 
 class OutputParseError(WinkError):
-    """Raised when structured output parsing fails."""
+    """Raised when structured output parsing fails.
+
+    This exception is raised when the model's response cannot be parsed into
+    the expected dataclass type. Common causes include:
+
+    - No JSON found in the response text
+    - Invalid JSON syntax in fenced code blocks
+    - JSON structure doesn't match the expected container type (object vs array)
+    - Field validation errors during dataclass deserialization
+
+    Attributes:
+        message: Human-readable description of the parsing failure.
+        dataclass_type: The target dataclass type that parsing was attempting
+            to produce, or None if parsing failed before the type was determined.
+
+    Example:
+        >>> try:
+        ...     result = parse_structured_output(response, rendered_prompt)
+        ... except OutputParseError as e:
+        ...     print(f"Failed to parse {e.dataclass_type}: {e.message}")
+    """
 
     def __init__(
         self,
@@ -56,7 +80,37 @@ class OutputParseError(WinkError):
 
 @FrozenDataclass()
 class PayloadParsingConfig:
-    """Configuration for parsing structured payloads into dataclasses."""
+    """Configuration for parsing structured JSON payloads into dataclasses.
+
+    This configuration controls how raw JSON payloads are validated and parsed
+    into typed dataclass instances. It specifies the expected container type,
+    whether extra keys are permitted, and custom error messages for various
+    failure modes.
+
+    Attributes:
+        container: Expected top-level JSON structure. Use ``"object"`` when
+            expecting a single dataclass instance, or ``"array"`` when expecting
+            a list of dataclass instances.
+        allow_extra_keys: If True, extra keys in the JSON that don't map to
+            dataclass fields are silently ignored. If False, extra keys raise
+            a validation error.
+        object_error: Error message to display when ``container="object"`` but
+            the payload is not a JSON object.
+        array_error: Error message to display when ``container="array"`` but
+            the payload is not a JSON array (or wrapped array).
+        array_item_error: Error message template for invalid array items. Use
+            ``{index}`` placeholder for the item's position (e.g.,
+            ``"Item at index {index} is not an object."``).
+
+    Example:
+        >>> config = PayloadParsingConfig(
+        ...     container="array",
+        ...     allow_extra_keys=False,
+        ...     object_error="Expected a JSON object.",
+        ...     array_error="Expected a JSON array.",
+        ...     array_item_error="Array item {index} is invalid.",
+        ... )
+    """
 
     container: Literal["object", "array"]
     allow_extra_keys: bool
@@ -68,7 +122,43 @@ class PayloadParsingConfig:
 def parse_structured_output[PayloadT](
     output_text: str, rendered: RenderedPromptProtocol[PayloadT]
 ) -> PayloadT:
-    """Parse a model response into the structured output type declared by the prompt."""
+    """Parse a model response into the structured output type declared by the prompt.
+
+    Extracts JSON from the model's response text and deserializes it into the
+    dataclass type specified by the rendered prompt's structured output config.
+    Supports multiple JSON formats:
+
+    1. Fenced code blocks: ````` ```json {...} ``` `````
+    2. Raw JSON as the entire response
+    3. Embedded JSON objects/arrays within prose text
+
+    For array containers, automatically unwraps payloads wrapped in an object
+    with the key specified by :data:`ARRAY_WRAPPER_KEY` (``"items"``).
+
+    Args:
+        output_text: The raw text response from the model, potentially containing
+            JSON within prose, code fences, or as the complete response.
+        rendered: A rendered prompt that declares a structured output type via
+            its ``structured_output`` configuration. The prompt's output type
+            determines the target dataclass for deserialization.
+
+    Returns:
+        The parsed dataclass instance (for object containers) or list of
+        instances (for array containers), typed according to the prompt's
+        declared output type.
+
+    Raises:
+        OutputParseError: If the prompt has no structured output config, no valid
+            JSON is found in the response, the JSON structure doesn't match the
+            expected container type, or dataclass validation fails.
+
+    Example:
+        >>> rendered = my_prompt.bind(resources).render()
+        >>> response_text = '```json\\n{"name": "test", "value": 42}\\n```'
+        >>> result = parse_structured_output(response_text, rendered)
+        >>> print(result.name)
+        test
+    """
 
     config = rendered.structured_output
     if config is None:
@@ -153,6 +243,53 @@ def parse_dataclass_payload(
     payload: JSONValue,
     config: PayloadParsingConfig,
 ) -> ParseableDataclassT | list[ParseableDataclassT]:
+    """Parse a JSON payload into a dataclass instance or list of instances.
+
+    Lower-level parsing function that converts already-extracted JSON data into
+    typed dataclass instances. Unlike :func:`parse_structured_output`, this
+    function expects pre-parsed JSON (not raw text) and requires explicit
+    configuration rather than deriving it from a rendered prompt.
+
+    For object containers, parses a single JSON object into one dataclass
+    instance. For array containers, parses each item in the array into a
+    separate dataclass instance, returning a list.
+
+    Array payloads may be provided directly as a JSON array or wrapped in an
+    object with the :data:`ARRAY_WRAPPER_KEY` (``"items"``) key. Both formats
+    are accepted and unwrapped automatically.
+
+    Args:
+        dataclass_type: The target dataclass type for deserialization. Must be
+            a dataclass compatible with the serde parsing system.
+        payload: Pre-parsed JSON value (dict, list, or primitive). For object
+            containers, should be a mapping. For array containers, should be
+            a sequence or a mapping with an ``"items"`` key.
+        config: Parsing configuration specifying the expected container type,
+            extra key handling, and error messages.
+
+    Returns:
+        For ``container="object"``: A single dataclass instance.
+        For ``container="array"``: A list of dataclass instances.
+
+    Raises:
+        TypeError: If the payload structure doesn't match the expected container
+            type, array items aren't objects, or the container type is unknown.
+        ValueError: If dataclass field validation fails during parsing.
+
+    Example:
+        >>> from weakincentives.prompt.structured_output import (
+        ...     PayloadParsingConfig, parse_dataclass_payload
+        ... )
+        >>> config = PayloadParsingConfig(
+        ...     container="object",
+        ...     allow_extra_keys=True,
+        ...     object_error="Expected object",
+        ...     array_error="Expected array",
+        ...     array_item_error="Invalid item at {index}",
+        ... )
+        >>> payload = {"name": "example", "count": 5}
+        >>> result = parse_dataclass_payload(MyDataclass, payload, config)
+    """
     if config.container not in {"object", "array"}:
         raise TypeError("Unknown output container declared.")
 

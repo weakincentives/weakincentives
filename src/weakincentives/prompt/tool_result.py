@@ -30,7 +30,33 @@ _SEQUENCE_EXCLUSIONS = (str, bytes, bytearray)
 
 @dataclass(slots=True)
 class ToolResult[ResultValueT]:
-    """Structured response emitted by a tool handler."""
+    """Structured response returned by tool handlers to the runtime.
+
+    Tool handlers return ToolResult to communicate both a typed value for
+    programmatic access and a human-readable message for the LLM context.
+    Use the class methods `ok()` and `error()` to construct results.
+
+    Attributes:
+        message: Human-readable text included in the LLM conversation context.
+            Should describe the outcome clearly for the model.
+        value: Typed payload accessible programmatically. May be None on error
+            or when no return value is meaningful.
+        success: Whether the tool invocation succeeded. Failed results trigger
+            automatic rollback in transactional contexts.
+        exclude_value_from_context: If True, the rendered value is omitted from
+            the LLM context while still being available programmatically. Useful
+            for large payloads that would consume excessive tokens.
+
+    Example:
+        >>> def read_file(params: ReadParams, *, context: ToolContext) -> ToolResult[str]:
+        ...     content = Path(params.path).read_text()
+        ...     return ToolResult.ok(content, message=f"Read {len(content)} bytes")
+        ...
+        >>> def validate(params: Params, *, context: ToolContext) -> ToolResult[None]:
+        ...     if not params.valid:
+        ...         return ToolResult.error("Validation failed: missing required field")
+        ...     return ToolResult.ok(None, message="Validation passed")
+    """
 
     message: str
     value: ResultValueT | None
@@ -63,14 +89,46 @@ class ToolResult[ResultValueT]:
         return ToolResult(message=message, value=None, success=False)
 
     def render(self) -> str:
-        """Return the canonical textual representation of the payload."""
+        """Convert the result value to a string for LLM context inclusion.
 
+        Delegates to `render_tool_payload()` to produce a text representation
+        suitable for including in the conversation. Dataclasses with a custom
+        `render()` method use that; otherwise values are serialized to JSON.
+
+        Returns:
+            String representation of `self.value`. Returns empty string if
+            value is None.
+        """
         return render_tool_payload(self.value)
 
 
 def render_tool_payload(value: object) -> str:
-    """Convert tool payloads into textual output for adapters and telemetry."""
+    """Convert a tool result payload to a string for LLM context and telemetry.
 
+    Transforms arbitrary Python values into text suitable for including in
+    conversation context. The rendering strategy depends on the value type:
+
+    - **None**: Returns empty string.
+    - **Dataclass with render()**: Calls the custom `render()` method. If the
+      dataclass lacks `render()`, logs a warning and falls back to JSON.
+    - **Mapping (dict, etc.)**: Serializes to JSON with nested dataclasses
+      converted recursively.
+    - **Sequence (list, tuple)**: Renders each item and combines as JSON array,
+      or newline-separated text if JSON parsing fails.
+    - **bytes**: Decodes as UTF-8 with replacement for invalid characters.
+    - **Other types**: Converts via `str()`.
+
+    Args:
+        value: The payload to render. Accepts any object type.
+
+    Returns:
+        String representation suitable for LLM consumption. Empty string for None.
+
+    Note:
+        Dataclass results should implement a `render()` method returning a string
+        to control their text representation. Without it, the dataclass is
+        serialized to JSON, which may be verbose or expose internal structure.
+    """
     if value is None:
         return ""
 

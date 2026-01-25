@@ -10,7 +10,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Built-in evaluators and combinators for the evaluation framework."""
+"""Built-in evaluators and combinators for the evaluation framework.
+
+This module provides:
+- Basic evaluators: ``exact_match``, ``contains``
+- Evaluator combinators: ``all_of``, ``any_of``
+- Utilities: ``is_session_aware``, ``adapt``
+
+Evaluators are functions with signature ``(output, expected) -> Score``.
+Session-aware evaluators add a third ``session`` parameter for behavioral
+assertions against session state (tool calls, token usage, etc.).
+"""
 
 from __future__ import annotations
 
@@ -118,20 +128,29 @@ def _check_string_annotation(hint: str, fn_globals: dict[str, object]) -> bool:
 
 
 def is_session_aware(fn: Callable[..., Score]) -> bool:
-    """Check if evaluator accepts session parameter.
+    """Check if evaluator accepts a session parameter.
 
     Inspects the function's type hints to determine if it expects a session
     parameter. A session-aware evaluator has a third parameter typed as
     SessionProtocol, SessionViewProtocol, or a union containing them.
 
     Requires explicit type hints - functions without session type annotations
-    are not considered session-aware.
+    are not considered session-aware. This allows runtime dispatch between
+    standard and session-aware evaluators in ``EvalLoop`` and combinators.
 
     Args:
         fn: The evaluator function to check.
 
     Returns:
-        True if the evaluator has an explicit session type hint.
+        True if the evaluator has an explicit session type hint as its
+        third parameter.
+
+    Example:
+        >>> from weakincentives.evals import exact_match, tool_called
+        >>> is_session_aware(exact_match)  # False - standard evaluator
+        False
+        >>> is_session_aware(tool_called("search"))  # True - session-aware
+        True
     """
     sig = inspect.signature(fn)
     params = list(sig.parameters.values())

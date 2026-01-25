@@ -90,6 +90,14 @@ class MainLoop[UserRequestT, OutputT](
     via Message.reply(). This pattern supports durable, distributed processing
     with at-least-once delivery semantics.
 
+    To implement a MainLoop, subclass and implement the ``prepare()`` method.
+    Optionally override ``finalize()`` for post-processing. See the module
+    docstring for a complete example.
+
+    Type Parameters:
+        UserRequestT: The domain-specific request type (e.g., ReviewRequest).
+        OutputT: The expected output type from the prompt (e.g., ReviewResult).
+
     Features:
         - Polls requests mailbox for incoming work
         - Uses Message.reply() for response routing (derives from reply_to)
@@ -97,6 +105,7 @@ class MainLoop[UserRequestT, OutputT](
         - Visibility timeout prevents duplicate processing
         - Automatic retry with backoff on response send failure
         - Graceful shutdown with in-flight message completion
+        - Optional debug bundling for execution artifacts
 
     Execution flow:
         1. Receive message from requests mailbox
@@ -111,6 +120,7 @@ class MainLoop[UserRequestT, OutputT](
         - On success: reply with result, acknowledge request
         - On failure: reply with error result, acknowledge request
         - On reply send failure: nack with backoff (will retry)
+        - Dead letter queue support via ``dlq`` parameter
 
     Lifecycle:
         - Use ``run()`` to start processing messages
@@ -170,12 +180,23 @@ class MainLoop[UserRequestT, OutputT](
 
         The loop beats after receiving messages and after processing each
         message, enabling the watchdog to detect stuck workers.
+
+        Returns:
+            The Heartbeat instance used by this loop. Can be passed to other
+            components (like EvalLoop) to share lease extension signals.
         """
         return self._heartbeat
 
     @property
     def worker_id(self) -> str:
-        """Identifier for this worker instance."""
+        """Unique identifier for this worker instance.
+
+        Used for distributed tracing and debugging. Automatically generated
+        as "{hostname}-{pid}" if not provided to __init__.
+
+        Returns:
+            The worker ID string for this loop instance.
+        """
         return self._worker_id
 
     @abstractmethod
@@ -188,7 +209,8 @@ class MainLoop[UserRequestT, OutputT](
         """Prepare prompt and session for the given request.
 
         Subclasses must implement this method to construct the prompt
-        and session appropriate for their domain.
+        and session appropriate for their domain. This is called once
+        per request before evaluation begins.
 
         Args:
             request: The user request to process.
@@ -200,18 +222,38 @@ class MainLoop[UserRequestT, OutputT](
 
         Returns:
             A tuple of (prompt, session) ready for evaluation.
+
+        Example::
+
+            def prepare(
+                self,
+                request: ReviewRequest,
+                *,
+                experiment: Experiment | None = None,
+            ) -> tuple[Prompt[ReviewResult], Session]:
+                prompt = Prompt(self._template).bind(
+                    ReviewParams.from_request(request)
+                )
+                session = Session(tags={"request_id": request.id})
+                return prompt, session
         """
         ...
 
     def finalize(self, prompt: Prompt[OutputT], session: Session) -> None:
-        """Finalize after execution completes.
+        """Hook called after successful evaluation completes.
 
-        Called after successful evaluation. Override to perform cleanup,
-        logging, or post-processing tasks.
+        Override this method to perform cleanup, logging, metrics collection,
+        or any post-processing tasks. This is called before the result is
+        sent to the reply mailbox.
+
+        Note:
+            This method is only called on successful evaluation. If evaluation
+            raises an exception, finalize is not invoked. The session contains
+            all events dispatched during evaluation.
 
         Args:
-            prompt: The prompt that was evaluated.
-            session: The session used for evaluation.
+            prompt: The prompt that was evaluated (with all bindings applied).
+            session: The session containing all events from evaluation.
         """
         _ = (self, prompt, session)
 
@@ -225,10 +267,15 @@ class MainLoop[UserRequestT, OutputT](
         heartbeat: Heartbeat | None = None,
         experiment: Experiment | None = None,
     ) -> tuple[PromptResponse[OutputT], Session]:
-        """Execute directly without mailbox routing.
+        """Execute a request directly without mailbox routing.
 
-        Convenience method for synchronous execution. For durable processing
-        with at-least-once semantics, use ``run()`` with mailboxes instead.
+        Convenience method for synchronous, in-process execution. Useful for:
+        - Testing and development
+        - One-off requests that don't need durability
+        - Embedding MainLoop in other orchestration systems
+
+        For production workloads requiring durable processing with at-least-once
+        semantics, use ``run()`` with mailboxes instead.
 
         Args:
             request: The user request to process.
@@ -242,7 +289,13 @@ class MainLoop[UserRequestT, OutputT](
             experiment: Optional experiment for A/B testing. Passed to prepare().
 
         Returns:
-            Tuple of (PromptResponse, Session) from the evaluation.
+            Tuple of (PromptResponse, Session) from the evaluation. The response
+            contains the model output; the session contains all events dispatched
+            during execution.
+
+        Raises:
+            Exception: Any exception from prepare(), the adapter, or finalize()
+                propagates directly to the caller.
         """
         request_event = MainLoopRequest(
             request=request,
@@ -286,6 +339,12 @@ class MainLoop[UserRequestT, OutputT](
 
         Yields:
             BundleContext with response, session, latency_ms, and write_metadata().
+            The bundle is finalized when the context manager exits.
+
+        Raises:
+            Exception: Any exception from execution propagates after the bundle
+                is written. The bundle still contains partial execution data
+                for debugging.
 
         Example::
 

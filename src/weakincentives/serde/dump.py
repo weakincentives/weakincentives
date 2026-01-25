@@ -10,7 +10,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dataclass serialization helpers."""
+"""Dataclass serialization to JSON-compatible dictionaries.
+
+This module provides utilities for converting dataclass instances into
+JSON-serializable dictionaries, with support for field aliases, computed
+fields, and various Python types.
+
+Supported types for serialization:
+    - Primitives: None, bool, int, float, str
+    - Temporal: datetime, date, time (serialized as ISO 8601 strings)
+    - Special: UUID, Decimal, Path (serialized as strings)
+    - Enums: Serialized as their value attribute
+    - Collections: list, tuple, set, frozenset, dict
+    - Nested dataclasses: Recursively serialized
+"""
 
 # pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportCallIssue=false, reportArgumentType=false, reportPrivateUsage=false
 
@@ -160,8 +173,45 @@ def dump(
     computed: bool = False,
     alias_generator: Callable[[str], str] | None = None,
 ) -> dict[str, JSONValue]:
-    """Serialize a dataclass instance to a JSON-compatible dictionary."""
+    """Serialize a dataclass instance to a JSON-compatible dictionary.
 
+    Converts a dataclass instance into a dictionary suitable for JSON
+    serialization. Handles nested dataclasses, collections, and special
+    types like datetime, UUID, Decimal, Path, and Enum values.
+
+    Args:
+        obj: A dataclass instance to serialize. Must be an instance,
+            not a dataclass type.
+        by_alias: If True (default), use field aliases from metadata
+            (``field(metadata={"alias": "name"})``) or apply the
+            alias_generator. If False, use the original field names.
+        exclude_none: If True, omit fields with None values from output.
+            Defaults to False.
+        computed: If True, include computed fields defined in the class's
+            ``__computed__`` attribute. Defaults to False.
+        alias_generator: Optional callable that transforms field names
+            into aliases. Applied when by_alias=True and no explicit
+            alias is set in field metadata.
+
+    Returns:
+        A dictionary with string keys and JSON-compatible values. Nested
+        dataclasses are recursively serialized to nested dictionaries.
+
+    Raises:
+        TypeError: If obj is not a dataclass instance (e.g., a class type
+            or non-dataclass object).
+
+    Example:
+        >>> from dataclasses import dataclass, field
+        >>> @dataclass
+        ... class User:
+        ...     user_name: str = field(metadata={"alias": "userName"})
+        ...     age: int
+        >>> dump(User("alice", 30))
+        {'userName': 'alice', 'age': 30}
+        >>> dump(User("alice", 30), by_alias=False)
+        {'user_name': 'alice', 'age': 30}
+    """
     if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
         raise TypeError("dump() requires a dataclass instance")
 
@@ -245,19 +295,39 @@ def clone[T](obj: T, **overrides: object) -> T:
     """Create a deep copy of a dataclass by serializing and deserializing.
 
     This is useful for creating independent copies of frozen dataclasses
-    with optional field overrides. Extra attributes attached via `extra="allow"`
-    parsing are preserved in the clone.
+    with optional field overrides. The clone is created via a full
+    serialize/deserialize round-trip, ensuring deep copying of nested
+    structures.
+
+    Extra attributes attached via ``extra="allow"`` parsing are preserved
+    in the clone.
 
     Args:
-        obj: A dataclass instance to clone.
-        **overrides: Optional field values to override in the cloned instance.
+        obj: A dataclass instance to clone. Must be an instance, not a
+            dataclass type.
+        **overrides: Field values to override in the cloned instance.
+            Keys must match field names (not aliases). Overrides are
+            applied after serialization, so they replace serialized values.
 
     Returns:
-        A new instance of the same dataclass type with field values from
-        the original, optionally overridden by the provided kwargs.
+        A new instance of the same dataclass type with field values copied
+        from the original, optionally overridden by the provided kwargs.
 
     Raises:
         TypeError: If obj is not a dataclass instance.
+
+    Example:
+        >>> from dataclasses import dataclass
+        >>> @dataclass(frozen=True)
+        ... class Config:
+        ...     host: str
+        ...     port: int
+        >>> original = Config("localhost", 8080)
+        >>> modified = clone(original, port=9000)
+        >>> modified
+        Config(host='localhost', port=9000)
+        >>> original is modified
+        False
     """
     from .parse import parse
 

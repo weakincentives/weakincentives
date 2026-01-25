@@ -10,23 +10,60 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Semantic adapter name definitions shared across provider integrations."""
+"""Adapter name constants for LLM provider integrations.
+
+This module defines canonical string identifiers for each supported LLM provider
+adapter. Use these constants instead of hardcoded strings when checking or
+configuring which adapter is in use.
+
+Constants:
+    OPENAI_ADAPTER_NAME: Identifier for the OpenAI API adapter.
+    LITELLM_ADAPTER_NAME: Identifier for the LiteLLM proxy adapter.
+    CLAUDE_AGENT_SDK_ADAPTER_NAME: Identifier for the Claude Agent SDK adapter.
+
+Type Aliases:
+    AdapterName: String type alias for adapter identifiers.
+
+Example:
+    >>> from weakincentives.types import AdapterName, OPENAI_ADAPTER_NAME
+    >>> def get_client(adapter: AdapterName) -> Client:
+    ...     if adapter == OPENAI_ADAPTER_NAME:
+    ...         return OpenAIClient()
+    ...     raise ValueError(f"Unknown adapter: {adapter}")
+"""
 
 from __future__ import annotations
 
 from typing import Final
 
 AdapterName = str
-"""Adapter identifier for provider integrations."""
+"""String type alias for adapter identifiers.
+
+Use this type in function signatures that accept or return adapter names,
+ensuring type checkers recognize the semantic meaning of the string.
+"""
 
 OPENAI_ADAPTER_NAME: Final[AdapterName] = "openai"
-"""Canonical label for the OpenAI adapter."""
+"""Canonical identifier for the OpenAI adapter.
+
+Use this constant when configuring or detecting the OpenAI API integration
+in ``weakincentives.adapters.openai``.
+"""
 
 LITELLM_ADAPTER_NAME: Final[AdapterName] = "litellm"
-"""Canonical label for the LiteLLM adapter."""
+"""Canonical identifier for the LiteLLM adapter.
+
+Use this constant when configuring or detecting the LiteLLM proxy integration
+in ``weakincentives.adapters.litellm``, which provides unified access to
+multiple LLM providers through a common interface.
+"""
 
 CLAUDE_AGENT_SDK_ADAPTER_NAME: Final[AdapterName] = "claude_agent_sdk"
-"""Canonical label for the Claude Agent SDK adapter."""
+"""Canonical identifier for the Claude Agent SDK adapter.
+
+Use this constant when configuring or detecting the Claude Agent SDK integration
+in ``weakincentives.adapters.claude_agent_sdk``.
+"""
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",

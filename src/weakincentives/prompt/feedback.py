@@ -83,12 +83,22 @@ class Observation:
 
     Observations provide structured evidence for feedback. Each observation
     has a category (e.g., "Pattern", "Resource") and a description of what
-    was observed.
+    was observed. Observations are typically created within a FeedbackProvider
+    and included in the Feedback.observations tuple.
 
     Attributes:
-        category: Classification of the observation (e.g., "Loop", "Drift").
+        category: Classification of the observation (e.g., "Loop", "Drift",
+            "Resource", "Pattern"). Used as a prefix when rendering feedback.
         description: Human-readable description of what was observed.
-        evidence: Optional supporting evidence (e.g., file path, tool name).
+        evidence: Optional supporting evidence (e.g., file path, tool name,
+            or other context). Not rendered directly but useful for debugging.
+
+    Example:
+        >>> obs = Observation(
+        ...     category="Pattern",
+        ...     description="Agent has called read_file 5 times on the same path",
+        ...     evidence="/path/to/file.py",
+        ... )
     """
 
     category: str
@@ -102,16 +112,44 @@ class Feedback:
 
     Feedback is delivered immediately to the agent via the adapter's hook
     mechanism and stored in the session's Feedback slice for history tracking.
+    Use the ``render()`` method to convert feedback to text for injection
+    into the agent's context.
 
     Attributes:
         provider_name: Name of the provider that produced this feedback.
+            Used as a header when rendering (e.g., "[Feedback - DeadlineFeedback]").
         summary: Brief description of the feedback (shown prominently).
+            Should be 1-2 sentences explaining the main point.
         observations: Supporting observations with categorized evidence.
-        suggestions: Actionable suggestions for the agent.
-        severity: Urgency level - "info", "caution", or "warning".
-        timestamp: When the feedback was produced.
-        call_index: Tool call count when feedback was produced (set by runner).
-        prompt_name: Name of the prompt that produced this feedback (set by runner).
+            Each observation is rendered as a bullet point.
+        suggestions: Actionable suggestions for the agent. Each suggestion
+            is rendered with an arrow prefix (e.g., "-> Focus on tests").
+        severity: Urgency level - "info" for status updates, "caution" for
+            potential issues, "warning" for urgent course corrections.
+        timestamp: When the feedback was produced (defaults to current UTC time).
+        call_index: Tool call count when feedback was produced. Set automatically
+            by ``run_feedback_providers()``; do not set manually.
+        prompt_name: Name of the prompt that produced this feedback. Set
+            automatically by ``run_feedback_providers()``; do not set manually.
+
+    Example:
+        >>> feedback = Feedback(
+        ...     provider_name="DeadlineFeedback",
+        ...     summary="50% of allocated time has elapsed.",
+        ...     observations=(
+        ...         Observation("Progress", "3 of 5 tasks completed"),
+        ...     ),
+        ...     suggestions=("Focus on remaining critical tasks",),
+        ...     severity="caution",
+        ... )
+        >>> print(feedback.render())
+        [Feedback - DeadlineFeedback]
+        <BLANKLINE>
+        50% of allocated time has elapsed.
+        <BLANKLINE>
+        * Progress: 3 of 5 tasks completed
+        <BLANKLINE>
+        -> Focus on remaining critical tasks
     """
 
     provider_name: str
@@ -126,8 +164,17 @@ class Feedback:
     def render(self) -> str:
         """Render feedback as text for context injection.
 
+        Produces a human-readable text block with the following structure:
+
+        1. Header line: ``[Feedback - {provider_name}]``
+        2. Blank line
+        3. Summary text
+        4. Observations (if any): bullet points with category prefix
+        5. Suggestions (if any): arrow-prefixed actionable items
+
         Returns:
             Formatted text suitable for injection into agent context.
+            The output is designed to be clear and actionable for LLM agents.
         """
         lines = [
             f"[Feedback - {self.provider_name}]",
@@ -155,20 +202,31 @@ class Feedback:
 
 @dataclass(slots=True, frozen=True)
 class FeedbackContext:
-    """Context provided to feedback providers.
+    """Context provided to feedback providers for state access and analysis.
 
     Provides access to session state, prompt resources, and helper methods
     for analyzing agent trajectory. Mirrors the ToolContext interface for
-    consistency.
+    consistency across the library.
 
     Tool call counts and recent tool calls are scoped to the current prompt
     to ensure triggers behave consistently when sessions are reused across
     multiple prompt evaluations.
 
     Attributes:
-        session: The current session for state access.
-        prompt: The prompt being executed.
-        deadline: Optional deadline for time-aware feedback.
+        session: The current session for state access. Use this to query
+            slices (e.g., ``context.session[ToolInvoked].all()``).
+        prompt: The prompt being executed. Provides access to prompt
+            configuration and resources.
+        deadline: Optional deadline for time-aware feedback providers.
+            Providers can use this to calculate remaining time.
+
+    Example:
+        >>> # Inside a FeedbackProvider.provide() method:
+        >>> def provide(self, *, context: FeedbackContext) -> Feedback:
+        ...     call_count = context.tool_call_count
+        ...     recent = context.recent_tool_calls(5)
+        ...     # Analyze recent tool usage patterns...
+        ...     return Feedback(provider_name=self.name, summary="...")
     """
 
     session: SessionProtocol
@@ -186,12 +244,33 @@ class FeedbackContext:
 
     @property
     def resources(self) -> PromptResources:
-        """Access resources from the prompt's resource context."""
+        """Access resources from the prompt's resource context.
+
+        Returns the PromptResources instance configured on the prompt,
+        allowing feedback providers to access injected dependencies like
+        filesystems, clocks, or custom services.
+
+        Returns:
+            The prompt's resource container for dependency resolution.
+
+        Example:
+            >>> fs = context.resources.get_optional(Filesystem)
+            >>> if fs:
+            ...     # Use filesystem for analysis
+            ...     pass
+        """
         return self.prompt.resources
 
     @property
     def filesystem(self) -> Filesystem | None:
-        """Return the filesystem resource if available, otherwise None."""
+        """Return the filesystem resource if available, otherwise None.
+
+        Convenience accessor for the Filesystem resource. Useful for feedback
+        providers that need to inspect file state or working directory.
+
+        Returns:
+            The Filesystem instance if configured, None otherwise.
+        """
         from ..filesystem import Filesystem
 
         return self.resources.get_optional(Filesystem)
@@ -265,27 +344,38 @@ class FeedbackContext:
 
 
 class FeedbackProvider(Protocol):
-    """Protocol for feedback providers.
+    """Protocol for feedback providers that analyze agent trajectory.
 
     Feedback providers analyze session state and produce contextual feedback
-    for agents. They run after tool execution when trigger conditions are met.
+    for agents. They run after tool execution when trigger conditions are met,
+    allowing for soft course-correction without blocking tool execution.
 
-    Implement this protocol to create custom feedback providers:
+    Implement this protocol to create custom feedback providers. Providers
+    should be immutable (frozen dataclass) and stateless - all state should
+    be accessed via the FeedbackContext.
 
-        @dataclass(frozen=True)
-        class MyProvider:
-            @property
-            def name(self) -> str:
-                return "MyProvider"
-
-            def should_run(self, *, context: FeedbackContext) -> bool:
-                return True  # Additional filtering beyond trigger
-
-            def provide(self, *, context: FeedbackContext) -> Feedback:
-                return Feedback(
-                    provider_name=self.name,
-                    summary="Status update",
-                )
+    Example:
+        >>> @dataclass(frozen=True)
+        ... class LoopDetector:
+        ...     '''Detects repetitive tool call patterns.'''
+        ...
+        ...     threshold: int = 3
+        ...
+        ...     @property
+        ...     def name(self) -> str:
+        ...         return "LoopDetector"
+        ...
+        ...     def should_run(self, *, context: FeedbackContext) -> bool:
+        ...         return context.tool_call_count >= self.threshold
+        ...
+        ...     def provide(self, *, context: FeedbackContext) -> Feedback:
+        ...         recent = context.recent_tool_calls(self.threshold)
+        ...         # Analyze for loops...
+        ...         return Feedback(
+        ...             provider_name=self.name,
+        ...             summary="Potential loop detected",
+        ...             severity="caution",
+        ...         )
 
     Access session state via ``context.session`` for consistency with the
     ToolContext pattern used elsewhere in the library.
@@ -293,7 +383,14 @@ class FeedbackProvider(Protocol):
 
     @property
     def name(self) -> str:
-        """Return a unique identifier for this provider."""
+        """Return a unique identifier for this provider.
+
+        The name is used in the feedback header (e.g., "[Feedback - MyProvider]")
+        and for debugging/logging. Should be descriptive and consistent.
+
+        Returns:
+            A short, descriptive name for this provider (e.g., "DeadlineFeedback").
+        """
         ...
 
     def should_run(self, *, context: FeedbackContext) -> bool:
@@ -337,13 +434,25 @@ class FeedbackTrigger:
     provider is evaluated. If no conditions are specified, the trigger
     never fires.
 
+    Time-based triggers fire on the first opportunity (before the interval
+    elapses) to ensure providers run at least once early in execution.
+    Call-based triggers wait until the specified number of calls occur.
+
     Attributes:
         every_n_calls: Run after this many tool calls since last feedback.
+            Set to 10 to run after every 10 tool calls. None to disable.
         every_n_seconds: Run after this many seconds since last feedback.
+            Set to 60.0 to run every minute. None to disable.
 
     Example:
-        >>> # Run every 10 tool calls OR every 60 seconds
+        >>> # Run every 10 tool calls OR every 60 seconds (whichever comes first)
         >>> trigger = FeedbackTrigger(every_n_calls=10, every_n_seconds=60)
+        >>>
+        >>> # Run only on time interval (e.g., for deadline tracking)
+        >>> time_trigger = FeedbackTrigger(every_n_seconds=30)
+        >>>
+        >>> # Run only on call count (e.g., for loop detection)
+        >>> call_trigger = FeedbackTrigger(every_n_calls=5)
     """
 
     every_n_calls: int | None = None
@@ -354,14 +463,27 @@ class FeedbackTrigger:
 class FeedbackProviderConfig:
     """Configuration pairing a feedback provider with its trigger.
 
+    Used to configure feedback providers on a PromptTemplate via the
+    ``feedback_providers`` parameter. Multiple providers can be configured,
+    and they are evaluated in order (first match wins).
+
     Attributes:
-        provider: The feedback provider instance.
-        trigger: Conditions that determine when the provider runs.
+        provider: The feedback provider instance implementing FeedbackProvider.
+        trigger: Conditions that determine when the provider runs. The provider's
+            ``should_run()`` method is called only after trigger conditions are met.
 
     Example:
+        >>> from weakincentives.prompt import PromptTemplate
+        >>>
         >>> config = FeedbackProviderConfig(
         ...     provider=DeadlineFeedback(),
         ...     trigger=FeedbackTrigger(every_n_seconds=30),
+        ... )
+        >>>
+        >>> template = PromptTemplate[str](
+        ...     ns="my-agent",
+        ...     key="main",
+        ...     feedback_providers=(config,),
         ... )
     """
 
@@ -415,19 +537,28 @@ def run_feedback_providers(
     """Run feedback providers and return rendered feedback if triggered.
 
     Iterates through configured providers in order. For each provider:
-    1. Check if trigger conditions are met
-    2. Check if provider.should_run() returns True
-    3. Call provider.provide() to get feedback
+
+    1. Check if trigger conditions are met (call count or time elapsed)
+    2. Check if ``provider.should_run()`` returns True (additional filtering)
+    3. Call ``provider.provide()`` to generate feedback
     4. Store feedback in session and return rendered text
 
     First matching provider wins; subsequent providers are not evaluated.
+    This allows providers to be ordered by priority.
+
+    Note:
+        This function automatically sets ``call_index`` and ``prompt_name``
+        on the returned Feedback before storing it in the session. Providers
+        do not need to set these fields.
 
     Args:
-        providers: Sequence of provider configurations to evaluate.
-        context: Feedback context with session state.
+        providers: Sequence of provider configurations to evaluate, in priority
+            order. Earlier providers take precedence.
+        context: Feedback context with session state and helper methods.
 
     Returns:
-        Rendered feedback text if a provider triggered, None otherwise.
+        Rendered feedback text (from ``Feedback.render()``) if a provider
+        triggered, None if no providers matched.
     """
     for config in providers:
         if _should_trigger(config.trigger, context) and config.provider.should_run(
@@ -456,17 +587,26 @@ def collect_feedback(
     """Collect feedback from providers configured on the prompt.
 
     This is the primary entry point for running feedback providers. It creates
-    the FeedbackContext and invokes run_feedback_providers.
+    a FeedbackContext from the provided arguments and delegates to
+    ``run_feedback_providers()``.
+
+    Typically called by adapter hooks after each tool execution to check if
+    any feedback should be injected into the agent's context.
 
     Args:
-        prompt: The prompt with feedback_providers configured.
+        prompt: The prompt with ``feedback_providers`` configured. Providers
+            are evaluated in the order they appear in the tuple.
         session: The current session for state access and feedback storage.
-        deadline: Optional deadline for time-aware feedback providers.
+            Feedback is automatically dispatched to the session when produced.
+        deadline: Optional deadline for time-aware feedback providers (e.g.,
+            DeadlineFeedback). Providers can access this via ``context.deadline``.
 
     Returns:
         Rendered feedback text if a provider triggered, None otherwise.
+        The returned text is suitable for injection into the agent's context.
 
     Example:
+        >>> # Called from an adapter's post-tool hook:
         >>> feedback_text = collect_feedback(
         ...     prompt=prompt,
         ...     session=session,
@@ -474,7 +614,7 @@ def collect_feedback(
         ... )
         >>> if feedback_text:
         ...     # Inject feedback into agent context
-        ...     pass
+        ...     adapter.inject_context(feedback_text)
     """
     context = FeedbackContext(
         session=session,

@@ -71,6 +71,20 @@ logger: StructuredLogger = get_logger(
 
 
 class ToolMessageSerializer(Protocol):
+    """Protocol for serializing tool results into provider-specific message formats.
+
+    Implementations convert a ToolResult into the format expected by a specific
+    provider's API (e.g., OpenAI, Anthropic). The optional payload parameter
+    allows passing additional provider-specific context.
+
+    Args:
+        result: The tool execution result to serialize.
+        payload: Optional provider-specific payload for serialization context.
+
+    Returns:
+        A provider-specific message object (typically a dict or string).
+    """
+
     def __call__(
         self,
         result: ToolResult[SupportsToolResult],
@@ -81,7 +95,17 @@ class ToolMessageSerializer(Protocol):
 
 @FrozenDataclass()
 class RejectedToolParams:
-    """Dataclass used when provider arguments fail validation."""
+    """Represents failed tool parameter validation.
+
+    Created when provider-supplied arguments cannot be parsed or validated
+    against the tool's expected parameter schema. This preserves the raw
+    arguments for debugging and error reporting while capturing the
+    validation error message.
+
+    Attributes:
+        raw_arguments: The original unparsed arguments from the provider.
+        error: Human-readable description of the validation failure.
+    """
 
     raw_arguments: dict[str, Any]
     error: str
@@ -89,7 +113,23 @@ class RejectedToolParams:
 
 @FrozenDataclass()
 class ToolExecutionOutcome:
-    """Result of executing a tool handler."""
+    """Complete result of a tool handler execution.
+
+    Captures all information needed for post-execution processing, including
+    event dispatch, state restoration on failure, and logging correlation.
+    Yielded by the ``tool_execution`` context manager.
+
+    Attributes:
+        tool: The tool definition that was executed.
+        params: Parsed parameters passed to the handler, or RejectedToolParams
+            on validation failure. None only for parameterless tools.
+        result: The ToolResult returned by the handler (success or failure).
+        call_id: Provider-assigned identifier for this tool call, used to
+            correlate tool results with requests. May be None for some providers.
+        log: Logger with bound context (adapter, prompt, tool, call_id) for
+            correlated logging.
+        snapshot: Pre-execution state snapshot for rollback on failure.
+    """
 
     tool: Tool[SupportsDataclassOrNone, SupportsToolResult]
     params: SupportsDataclass | None
@@ -101,13 +141,31 @@ class ToolExecutionOutcome:
 
 @dataclass(slots=True)
 class ToolExecutionContext:
-    """Inputs and collaborators required to execute a provider tool call.
+    """Configuration and dependencies for executing provider tool calls.
 
-    Provides unified access to session and prompt resources for transactional
-    tool execution.
+    Groups all inputs needed to execute tools within a transactional context,
+    including session state, prompt resources, and execution policies. Used
+    by ``tool_execution`` and ``ToolExecutor`` to maintain consistent behavior.
 
     When ``heartbeat`` is provided, beats occur before and after each tool
-    execution to prove liveness.
+    execution to prove liveness to external watchdogs.
+
+    Attributes:
+        adapter_name: Identifier for the provider adapter (e.g., "openai").
+        adapter: The provider adapter instance handling LLM communication.
+        prompt: The prompt template being evaluated.
+        rendered_prompt: Pre-rendered prompt content, or None if not yet rendered.
+        tool_registry: Mapping of tool names to Tool definitions.
+        session: Session managing state and event dispatch.
+        prompt_name: Human-readable prompt identifier for logging/errors.
+        parse_arguments: Callable to parse raw argument strings from the provider.
+        format_dispatch_failures: Callable to format handler failures into messages.
+        deadline: Optional execution deadline for timeout enforcement.
+        provider_payload: Raw response from the provider for the current turn.
+        logger_override: Custom logger; if None, uses module-level logger.
+        budget_tracker: Optional tracker for token/cost budgets.
+        heartbeat: Optional watchdog heartbeat for liveness proofs.
+        run_context: Optional context for distributed tracing/correlation.
     """
 
     adapter_name: AdapterName
@@ -129,13 +187,27 @@ class ToolExecutionContext:
     def with_provider_payload(
         self, provider_payload: dict[str, Any] | None
     ) -> ToolExecutionContext:
-        """Return a copy of the context with a new provider payload."""
+        """Create a new context with an updated provider payload.
+
+        Returns a shallow copy of this context with the provider_payload
+        replaced. All other fields remain unchanged.
+
+        Args:
+            provider_payload: New provider response payload, or None.
+
+        Returns:
+            A new ToolExecutionContext instance with the updated payload.
+        """
         from dataclasses import replace
 
         return replace(self, provider_payload=provider_payload)
 
     def beat(self) -> None:
-        """Record a heartbeat if available."""
+        """Record a heartbeat to prove liveness.
+
+        Signals the watchdog that execution is progressing. Safe to call
+        even when no heartbeat is configured (no-op in that case).
+        """
         if self.heartbeat is not None:
             self.heartbeat.beat()
 
@@ -207,6 +279,29 @@ def parse_tool_params(
     tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
     arguments_mapping: Mapping[str, Any],
 ) -> SupportsDataclass | None:
+    """Parse and validate provider arguments into typed tool parameters.
+
+    Converts raw argument mappings from the provider into the tool's
+    expected parameter dataclass. Uses strict parsing that rejects
+    unknown fields (extra="forbid").
+
+    Args:
+        tool: The tool definition containing the expected params_type.
+        arguments_mapping: Raw arguments from the provider's tool call.
+
+    Returns:
+        Parsed parameter dataclass instance, or None for parameterless tools
+        (where params_type is type(None)).
+
+    Raises:
+        ToolValidationError: If arguments are provided for a parameterless tool,
+            or if parsing/validation fails against the params_type schema.
+
+    Example:
+        >>> tool = Tool(name="greet", params_type=GreetParams, ...)
+        >>> params = parse_tool_params(tool=tool, arguments_mapping={"name": "World"})
+        >>> assert isinstance(params, GreetParams)
+    """
     if tool.params_type is type(None):
         if arguments_mapping:
             raise ToolValidationError("Tool does not accept any arguments.")
@@ -577,11 +672,38 @@ def tool_execution(
     context: ToolExecutionContext,
     tool_call: ProviderToolCall,
 ) -> Iterator[ToolExecutionOutcome]:
-    """Context manager that executes a tool call and standardizes logging.
+    """Execute a tool call with transactional state management.
 
-    Uses transactional semantics to ensure both session state and
-    resources are rolled back on tool failure. When heartbeat is available,
-    beats occur before and after tool execution.
+    Context manager that resolves the tool from the registry, parses arguments,
+    executes the handler, and yields the outcome. Provides automatic rollback
+    of session state and prompt resources if the tool fails or raises an
+    exception.
+
+    Args:
+        context: Execution context with session, prompt, and tool registry.
+        tool_call: Provider-formatted tool call with function name and arguments.
+
+    Yields:
+        ToolExecutionOutcome containing the tool result and execution metadata.
+        The outcome is yielded once before the context manager exits.
+
+    Raises:
+        PromptEvaluationError: If the tool is not found in the registry, has
+            no handler, or a deadline is exceeded.
+        VisibilityExpansionRequired: If the tool requires expanding prompt
+            visibility (re-raised without rollback).
+
+    Note:
+        - Heartbeat beats occur before and after tool execution when available.
+        - Tool policies are checked before handler execution; denied tools
+          return a failure result without invoking the handler.
+        - On handler failure, the pre-execution snapshot is restored before
+          the outcome is yielded.
+
+    Example:
+        >>> with tool_execution(context=ctx, tool_call=call) as outcome:
+        ...     if outcome.result.success:
+        ...         dispatch_tool_invocation(context=ctx, outcome=outcome)
     """
     tool, handler = _resolve_tool_and_handler(
         tool_call=tool_call,
@@ -639,7 +761,27 @@ def dispatch_tool_invocation(
     context: ToolExecutionContext,
     outcome: ToolExecutionOutcome,
 ) -> ToolInvoked:
-    """Send a tool invocation event to the session dispatcher."""
+    """Dispatch a ToolInvoked event to session handlers.
+
+    Creates a ToolInvoked event from the execution outcome and dispatches it
+    through the session's event system. If any handler fails, the session
+    state is rolled back to the pre-tool snapshot and the result message is
+    updated with failure information.
+
+    Args:
+        context: Execution context containing the session dispatcher.
+        outcome: Completed tool execution outcome from ``tool_execution``.
+
+    Returns:
+        The ToolInvoked event that was dispatched (useful for logging or
+        correlation, regardless of handler success).
+
+    Note:
+        - If dispatch fails and the tool succeeded, state is rolled back.
+        - The outcome's result.message may be mutated to include dispatch
+          failure information.
+        - Token usage is extracted from the provider payload if available.
+    """
     session_id = getattr(context.session, "session_id", None)
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
@@ -725,10 +867,29 @@ def execute_tool_call(
     context: ToolExecutionContext,
     tool_call: ProviderToolCall,
 ) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
-    """Execute a provider tool call and dispatch the resulting event.
+    """Execute a tool call, dispatch the event, and collect feedback.
 
-    After tool execution, runs feedback providers and appends any feedback
-    to the tool result message.
+    Combines tool execution with event dispatch and feedback collection into
+    a single high-level operation. This is the primary entry point for
+    executing individual tool calls when not using the batched ToolExecutor.
+
+    Args:
+        context: Execution context with session, prompt, and tool registry.
+        tool_call: Provider-formatted tool call to execute.
+
+    Returns:
+        A tuple of:
+        - ToolInvoked: The dispatched event for logging/correlation.
+        - ToolResult: The tool result with any feedback appended to the message.
+
+    Raises:
+        PromptEvaluationError: If the tool is not found, has no handler, or
+            a deadline is exceeded.
+        VisibilityExpansionRequired: If the tool requires visibility expansion.
+
+    Note:
+        Feedback providers registered on the prompt are run after tool
+        completion, and their output is appended to the result message.
     """
     with tool_execution(
         context=context,
@@ -752,14 +913,42 @@ def execute_tool_call(
 
 @dataclass(slots=True)
 class ToolExecutor:
-    """Handles execution of tool calls and event dispatching.
+    """Batch executor for provider tool calls with event dispatch.
 
-    Provides unified access to session and prompt resources for transactional
-    tool execution.
+    Manages execution of multiple tool calls from a single LLM response turn,
+    handling transactional state management, event dispatch, feedback collection,
+    and message serialization. Tracks execution records for debugging and audit.
 
     When ``heartbeat`` is provided, beats occur before and after each tool
     execution to prove liveness. Tool handlers receive the heartbeat via
-    ToolContext.beat() for additional beats during long-running operations.
+    ``ToolContext.beat()`` for additional beats during long-running operations.
+
+    Attributes:
+        adapter_name: Provider adapter identifier for logging.
+        adapter: The provider adapter handling LLM communication.
+        prompt: The prompt template being evaluated.
+        prompt_name: Human-readable prompt identifier.
+        rendered: Pre-rendered prompt content.
+        session: Session managing state and event dispatch.
+        tool_registry: Mapping of tool names to Tool definitions.
+        serialize_tool_message_fn: Serializer for converting results to messages.
+        format_dispatch_failures: Formatter for handler failure messages.
+        parse_arguments: Parser for raw provider arguments.
+        logger_override: Custom logger; if None, uses module-level logger.
+        deadline: Optional execution deadline.
+        budget_tracker: Optional token/cost budget tracker.
+        heartbeat: Optional watchdog heartbeat.
+        run_context: Optional distributed tracing context.
+
+    Example:
+        >>> executor = ToolExecutor(
+        ...     adapter_name="openai",
+        ...     adapter=adapter,
+        ...     prompt=prompt,
+        ...     # ... other required fields
+        ... )
+        >>> messages, choice = executor.execute(tool_calls, payload)
+        >>> # messages ready to send back to provider
     """
 
     adapter_name: AdapterName
@@ -811,7 +1000,33 @@ class ToolExecutor:
         tool_calls: Sequence[ProviderToolCall],
         provider_payload: dict[str, Any] | None,
     ) -> tuple[list[dict[str, Any]], ToolChoice]:
-        """Execute tool calls and return resulting messages and next tool choice."""
+        """Execute a batch of tool calls and return serialized result messages.
+
+        Processes each tool call sequentially: executes the handler, dispatches
+        the ToolInvoked event, collects feedback, and serializes the result
+        into a provider message format. Results are recorded in
+        ``tool_message_records`` for inspection.
+
+        Args:
+            tool_calls: Sequence of provider-formatted tool calls to execute.
+            provider_payload: Raw provider response for the current turn,
+                used for token usage extraction and error context.
+
+        Returns:
+            A tuple of:
+            - List of serialized tool result messages (role="tool" format).
+            - ToolChoice for the next turn (currently always "auto").
+
+        Raises:
+            PromptEvaluationError: If a tool is not found, has no handler, or
+                a deadline is exceeded before/during execution.
+
+        Note:
+            - Tool calls are executed sequentially in order.
+            - Each result message includes the tool_call_id for correlation.
+            - Feedback from providers is appended to result messages.
+            - Records are available via ``tool_message_records`` property.
+        """
         messages: list[dict[str, Any]] = []
         next_tool_choice: ToolChoice = "auto"
 
@@ -862,6 +1077,16 @@ class ToolExecutor:
     def tool_message_records(
         self,
     ) -> list[tuple[ToolResult[SupportsToolResult], dict[str, Any]]]:
+        """Access records of executed tool calls and their serialized messages.
+
+        Returns a list of (result, message) tuples for each tool call processed
+        by ``execute()``. Useful for debugging, testing, or audit logging.
+
+        Returns:
+            List of tuples where each tuple contains:
+            - ToolResult: The original tool result (with feedback appended).
+            - dict: The serialized message sent to the provider.
+        """
         return self._tool_message_records
 
 

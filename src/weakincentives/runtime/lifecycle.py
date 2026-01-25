@@ -15,6 +15,15 @@
 This module provides primitives for coordinating graceful shutdown across
 multiple MainLoop and EvalLoop instances running in the same process.
 
+Key components:
+
+- ``LoopGroup``: High-level coordinator that runs multiple loops in threads
+  with integrated health endpoints and watchdog monitoring.
+- ``ShutdownCoordinator``: Low-level signal handler that triggers registered
+  callbacks on SIGTERM/SIGINT.
+- ``Runnable``: Protocol defining the interface for loops managed by this module.
+- ``wait_until``: Utility for polling until a condition becomes true or timeout.
+
 Example::
 
     from weakincentives.runtime import LoopGroup, ShutdownCoordinator
@@ -64,6 +73,13 @@ class Runnable(Protocol):
 
     Both MainLoop and EvalLoop implement this protocol, enabling them to be
     managed by LoopGroup and ShutdownCoordinator.
+
+    Implementers must provide:
+    - run(): Start processing, blocking until stopped
+    - shutdown(): Signal stop and wait for completion
+    - running: Property indicating active state
+    - heartbeat: Optional Heartbeat for watchdog monitoring
+    - Context manager support (__enter__/__exit__)
     """
 
     def run(
@@ -104,7 +120,12 @@ class Runnable(Protocol):
 
     @property
     def running(self) -> bool:
-        """True if the loop is currently processing messages."""
+        """True if the loop is currently processing messages.
+
+        This property transitions to True when run() begins and back to False
+        when the loop exits (either normally or due to shutdown). Use this to
+        check loop status from other threads.
+        """
         ...
 
     @property
@@ -113,12 +134,20 @@ class Runnable(Protocol):
 
         Returns None if the loop does not support heartbeat monitoring.
         Loops that support monitoring should return a Heartbeat instance
-        and call ``beat()`` at regular intervals during processing.
+        and call ``heartbeat.beat()`` at regular intervals during processing
+        (typically at least once per poll iteration).
+
+        The LoopGroup watchdog uses this to detect stuck workers. If no beat
+        is recorded within the watchdog_threshold, the process is terminated.
         """
         ...
 
     def __enter__(self) -> Self:
-        """Context manager entry (no-op, returns self)."""
+        """Context manager entry.
+
+        Returns self unchanged. The context manager pattern ensures shutdown()
+        is called on exit, even if an exception occurs.
+        """
         ...
 
     def __exit__(
@@ -127,7 +156,11 @@ class Runnable(Protocol):
         exc_val: BaseException | None,
         exc_tb: object,
     ) -> None:
-        """Context manager exit triggers shutdown."""
+        """Context manager exit triggers shutdown.
+
+        Calls shutdown() to gracefully stop the loop. Does not suppress
+        exceptions (always returns None/False).
+        """
         ...
 
 
@@ -135,14 +168,30 @@ class ShutdownCoordinator:
     """Coordinates graceful shutdown across multiple loops.
 
     Installs signal handlers for SIGTERM and SIGINT. When a signal arrives,
-    all registered callbacks are invoked. Thread-safe for concurrent
-    registration and signal delivery.
+    all registered callbacks are invoked in registration order. Thread-safe
+    for concurrent registration and signal delivery.
+
+    This is a singleton: call install() to get the shared instance. Multiple
+    install() calls return the same instance (signal handlers are only
+    installed once).
+
+    Note:
+        Signal handlers can only be installed from the main thread. If you
+        need shutdown coordination from non-main threads, use LoopGroup with
+        install_signals=False and trigger shutdown programmatically.
 
     Example::
 
         coordinator = ShutdownCoordinator.install()
         coordinator.register(loop.shutdown)
         loop.run()
+
+    Example with multiple loops::
+
+        coordinator = ShutdownCoordinator.install()
+        coordinator.register(loop1.shutdown)
+        coordinator.register(loop2.shutdown)
+        # Both loops shut down when SIGTERM/SIGINT received
     """
 
     _instance: ShutdownCoordinator | None = None
@@ -185,15 +234,30 @@ class ShutdownCoordinator:
 
     @classmethod
     def get(cls) -> ShutdownCoordinator | None:
-        """Return the installed coordinator, or None if not installed."""
+        """Return the installed coordinator, or None if not installed.
+
+        Use this to check if signal handlers have been installed, or to access
+        the coordinator without installing handlers (e.g., in library code that
+        should not install handlers without the caller's consent).
+
+        Returns:
+            The singleton instance if install() has been called, None otherwise.
+        """
         with cls._instance_lock:
             return cls._instance
 
     @classmethod
     def reset(cls) -> None:
-        """Reset the singleton instance.
+        """Reset the singleton instance for testing.
 
-        Primarily for testing. Does not restore original signal handlers.
+        Clears all registered callbacks and the triggered flag, then removes
+        the singleton instance. The next install() call will create a fresh
+        instance.
+
+        Warning:
+            Does not restore original signal handlers. After reset(), signals
+            will still be delivered to the old (now orphaned) handler until
+            install() is called again. Use only in test teardown.
         """
         with cls._instance_lock:
             if cls._instance is not None:
@@ -219,14 +283,28 @@ class ShutdownCoordinator:
     def unregister(self, callback: Callable[[], object]) -> None:
         """Remove a callback from the shutdown list.
 
+        Safe to call with a callback that was never registered or has already
+        been unregistered (no-op in both cases).
+
         Args:
-            callback: Previously registered callback.
+            callback: Previously registered callback to remove.
         """
         with self._callbacks_lock, contextlib.suppress(ValueError):
             self._callbacks.remove(callback)
 
     def trigger(self) -> None:
-        """Manually trigger shutdown (for testing or programmatic control)."""
+        """Manually trigger shutdown.
+
+        Invokes all registered callbacks in registration order. This is useful
+        for testing shutdown behavior without sending actual signals, or for
+        programmatic shutdown triggered by application logic (e.g., after
+        processing a specific number of messages).
+
+        Safe to call multiple times; callbacks are only invoked once per
+        registration (subsequent trigger() calls still invoke callbacks, but
+        the triggered flag prevents re-registration from causing duplicate
+        invocations).
+        """
         self._triggered.set()
         with self._callbacks_lock:
             callbacks = list(self._callbacks)
@@ -235,7 +313,12 @@ class ShutdownCoordinator:
 
     @property
     def triggered(self) -> bool:
-        """True if shutdown has been triggered."""
+        """True if shutdown has been triggered.
+
+        Once set, this remains True until reset() is called. Callbacks
+        registered after shutdown has been triggered are invoked immediately
+        upon registration.
+        """
         return self._triggered.is_set()
 
     def _handle_signal(self, signum: int, frame: FrameType | None) -> None:
@@ -294,14 +377,21 @@ class LoopGroup:
         """Initialize the LoopGroup.
 
         Args:
-            loops: Sequence of Runnable loops to coordinate.
-            shutdown_timeout: Maximum seconds to wait for each loop during shutdown.
-            health_port: Port for health endpoints. None disables health server.
-            health_host: Host for health endpoint. Defaults to all interfaces.
-            watchdog_threshold: Seconds without heartbeat before process termination.
-                None disables watchdog. Default 720s (12 min) calibrated for
-                10-minute prompt evaluations.
-            watchdog_interval: Seconds between watchdog checks. Default 60s.
+            loops: Sequence of Runnable loops to coordinate. Each loop runs in
+                its own thread when run() is called.
+            shutdown_timeout: Maximum seconds to wait for each loop during
+                shutdown. If a loop doesn't stop within this time, shutdown()
+                returns False but does not forcibly terminate threads.
+            health_port: Port for HTTP health endpoints (``/health/live`` and
+                ``/health/ready``). None disables the health server. Useful for
+                Kubernetes liveness and readiness probes.
+            health_host: Interface to bind the health server to. Defaults to
+                all interfaces (0.0.0.0) for container environments.
+            watchdog_threshold: Seconds without heartbeat before the watchdog
+                terminates the process (via os._exit). None disables watchdog.
+                Default 720s (12 min) provides headroom for 10-minute evaluations.
+                Only effective if loops provide heartbeat support.
+            watchdog_interval: Seconds between watchdog health checks. Default 60s.
         """
         super().__init__()
         self.loops = loops
@@ -324,15 +414,25 @@ class LoopGroup:
     ) -> None:
         """Run all loops until shutdown.
 
-        Blocks until all loops exit or shutdown is triggered. Each loop
-        runs in a dedicated thread.
+        Blocks until all loops exit or shutdown is triggered. Each loop runs
+        in a dedicated thread from a ThreadPoolExecutor.
+
+        When shutdown is triggered (via signal or explicit call), each loop's
+        shutdown() method is called. The method returns only after all loops
+        have exited.
 
         Args:
-            install_signals: If True, install SIGTERM/SIGINT handlers.
+            install_signals: If True, install SIGTERM/SIGINT handlers via
+                ShutdownCoordinator. Set False if you manage signals yourself
+                or are running in a context where signal handling is not allowed
+                (e.g., non-main threads).
             visibility_timeout: Passed to each loop's run() method.
                 Default 1800s (30 min) calibrated for 10-min evaluations.
             wait_time_seconds: Passed to each loop's run() method.
                 Default 30s for long poll.
+
+        Raises:
+            Exception: Re-raises any exception from loop threads after cleanup.
         """
         if install_signals:
             coordinator = ShutdownCoordinator.install()
@@ -419,11 +519,19 @@ class LoopGroup:
     def shutdown(self, *, timeout: float | None = None) -> bool:
         """Shutdown all loops gracefully.
 
+        Signals each loop to stop and waits for them to complete. Safe to call
+        even if loops are not running (each loop handles this gracefully).
+
+        This method is automatically called by the context manager exit and
+        by the ShutdownCoordinator when signals are received.
+
         Args:
-            timeout: Maximum seconds to wait per loop. Defaults to shutdown_timeout.
+            timeout: Maximum seconds to wait per loop. Defaults to the
+                shutdown_timeout provided at construction.
 
         Returns:
-            True if all loops stopped cleanly, False if any timeout expired.
+            True if all loops stopped cleanly within their timeouts,
+            False if any loop's timeout expired.
         """
         effective_timeout = timeout if timeout is not None else self.shutdown_timeout
         return all(loop.shutdown(timeout=effective_timeout) for loop in self.loops)
@@ -456,17 +564,32 @@ def wait_until(
 ) -> bool:
     """Wait until predicate returns True or timeout expires.
 
+    Polls the predicate at regular intervals until it returns True or the
+    timeout is reached. Performs one final predicate check at timeout to
+    avoid missing a just-in-time True result.
+
     Args:
-        predicate: Zero-argument callable that returns True when done.
-        timeout: Maximum seconds to wait.
-        poll_interval: Seconds between predicate checks.
-        clock: Clock for time operations. Defaults to system clock.
-            Inject TestClock for deterministic testing.
+        predicate: Zero-argument callable that returns True when the waited
+            condition is satisfied. Should be side-effect free or idempotent
+            since it may be called multiple times.
+        timeout: Maximum seconds to wait before returning False.
+        poll_interval: Seconds between predicate checks. Lower values provide
+            faster response but consume more CPU.
+        clock: Clock for time and sleep operations. Defaults to system clock.
+            Inject TestClock for deterministic, instant testing.
 
     Returns:
-        True if predicate returned True, False if timeout expired.
+        True if predicate returned True before or at timeout, False otherwise.
 
-    Example (testing)::
+    Example::
+
+        # Wait for a background thread to set a flag
+        ready = threading.Event()
+        success = wait_until(ready.is_set, timeout=5.0)
+        if not success:
+            raise TimeoutError("Background task did not complete")
+
+    Example (testing with TestClock)::
 
         from weakincentives.clock import TestClock
 

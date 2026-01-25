@@ -58,11 +58,27 @@ _logger = logging.getLogger(__name__)
 class DeadLetter[T]:
     """Dead-lettered message with failure metadata.
 
-    Preserves the original message body along with context about why
-    and when it was dead-lettered.
+    Wraps a message that exhausted retry attempts or matched an immediate
+    dead-letter condition. Preserves the original message body along with
+    diagnostic context for inspection, alerting, or manual remediation.
 
-    Type parameters:
-        T: Original message body type.
+    Use the ``request_id`` and ``trace_id`` fields to correlate dead letters
+    with logs and distributed traces. The ``last_error`` and ``last_error_type``
+    fields help identify root causes without needing to reproduce the failure.
+
+    Type Parameters:
+        T: Original message body type (e.g., ``MainLoopRequest``).
+
+    Example::
+
+        def alert_on_dead_letter(dl: DeadLetter[MyRequest]) -> None:
+            logger.error(
+                "Dead letter: %s failed %d times with %s",
+                dl.message_id,
+                dl.delivery_count,
+                dl.last_error_type,
+            )
+            metrics.increment("dlq.messages", tags={"error": dl.last_error_type})
     """
 
     message_id: str
@@ -105,14 +121,35 @@ class DeadLetter[T]:
 
 @dataclass(slots=True, frozen=True)
 class DLQPolicy[T, R]:
-    """Dead letter queue policy.
+    """Dead letter queue policy for failed message handling.
 
-    Combines destination mailbox with decision logic for when to
-    dead-letter failed messages. Subclass to customize behavior.
+    Configures when and where to route messages that fail processing.
+    Pass an instance to ``MainLoop`` or ``EvalLoop`` via the ``dlq``
+    parameter to enable automatic dead-lettering.
 
-    Type parameters:
-        T: Original message body type.
-        R: Original reply type.
+    The default behavior dead-letters after ``max_delivery_count`` failures.
+    Use ``include_errors`` for immediate dead-lettering of non-retryable
+    errors (e.g., validation failures), and ``exclude_errors`` for errors
+    that should always retry (e.g., transient network issues).
+
+    For custom logic, subclass and override ``should_dead_letter()``.
+
+    Type Parameters:
+        T: Original message body type (e.g., ``MainLoopRequest``).
+        R: Reply type from the source mailbox (usually ``MainLoopResponse``).
+
+    Example::
+
+        # Basic policy: dead-letter after 5 failures
+        policy = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=5)
+
+        # Immediate dead-letter for validation errors, never for timeouts
+        policy = DLQPolicy(
+            mailbox=dlq_mailbox,
+            max_delivery_count=3,
+            include_errors=frozenset({ValidationError}),
+            exclude_errors=frozenset({TimeoutError}),
+        )
     """
 
     mailbox: Mailbox[DeadLetter[T], None]
@@ -146,16 +183,32 @@ class DLQPolicy[T, R]:
     """
 
     def should_dead_letter(self, message: Message[T, Any], error: Exception) -> bool:
-        """Determine if the message should be dead-lettered.
+        """Determine whether a failed message should be dead-lettered.
 
-        Override this method for custom dead-letter logic.
+        Called by the loop after each processing failure. The default
+        implementation checks ``exclude_errors``, then ``include_errors``,
+        then ``max_delivery_count``. Override for custom logic such as
+        error message pattern matching or per-request retry budgets.
 
         Args:
-            message: The failed message.
-            error: The exception that caused the failure.
+            message: The failed message, including ``delivery_count``.
+            error: The exception raised during processing.
 
         Returns:
-            True to dead-letter, False to retry with backoff.
+            ``True`` to move the message to the DLQ immediately.
+            ``False`` to return it to the source queue for retry.
+
+        Example::
+
+            @dataclass(frozen=True)
+            class CustomDLQPolicy(DLQPolicy[MyRequest, MyResponse]):
+                def should_dead_letter(
+                    self, message: Message[MyRequest, Any], error: Exception
+                ) -> bool:
+                    # Custom logic: dead-letter after 10 attempts for specific errors
+                    if isinstance(error, RateLimitError):
+                        return message.delivery_count >= 10
+                    return super().should_dead_letter(message, error)
         """
         error_type = type(error)
 
@@ -172,20 +225,37 @@ class DLQPolicy[T, R]:
 
 
 class DLQConsumer[T]:
-    """Runnable consumer for dead letter queues.
+    """Runnable consumer for processing dead-lettered messages.
 
-    Processes dead-lettered messages with a custom handler. Designed
-    to run alongside MainLoop workers in a LoopGroup.
+    Polls a dead letter mailbox and invokes a handler for each message.
+    Designed for alerting, logging, metrics collection, or manual review
+    workflows. Integrates with ``LoopGroup`` for coordinated lifecycle
+    management alongside ``MainLoop`` and ``EvalLoop`` workers.
+
+    The consumer is thread-safe: call ``run()`` from a worker thread and
+    ``shutdown()`` from any thread to request graceful termination. The
+    ``heartbeat`` property enables watchdog monitoring in production.
+
+    Handler exceptions are logged and the message is returned to the queue
+    with a 1-hour visibility timeout (long backoff). Handlers should avoid
+    raising exceptions for expected conditions.
+
+    Type Parameters:
+        T: Original message body type wrapped in ``DeadLetter[T]``.
 
     Example::
 
         from weakincentives.runtime import LoopGroup, DLQConsumer
+
+        def alert_handler(dl: DeadLetter[MyRequest]) -> None:
+            send_alert(f"Message {dl.message_id} failed: {dl.last_error}")
 
         dlq_consumer = DLQConsumer(
             mailbox=dead_letters,
             handler=alert_handler,
         )
 
+        # Run alongside main application loops
         group = LoopGroup(
             loops=[main_loop, eval_loop, dlq_consumer],
             health_port=8080,
@@ -208,13 +278,17 @@ class DLQConsumer[T]:
         handler: Callable[[DeadLetter[T]], None],
         visibility_timeout: int = 300,
     ) -> None:
-        """Initialize the DLQ consumer.
+        """Initialize a DLQ consumer.
 
         Args:
-            mailbox: Mailbox containing dead-lettered messages.
-            handler: Callback to process each dead letter. Should not raise;
-                exceptions are logged and the message is nacked with long backoff.
-            visibility_timeout: Default visibility timeout for messages.
+            mailbox: Source mailbox containing dead-lettered messages.
+                Must be a ``Mailbox[DeadLetter[T], None]`` (no reply type).
+            handler: Callback invoked for each dead letter. Receives the
+                ``DeadLetter[T]`` body (not the raw ``Message``). Should
+                handle its own errors; uncaught exceptions are logged and
+                the message returns to the queue with 1-hour backoff.
+            visibility_timeout: Default seconds messages stay invisible
+                during processing. Can be overridden per ``run()`` call.
         """
         super().__init__()
         self._mailbox = mailbox
@@ -227,7 +301,11 @@ class DLQConsumer[T]:
 
     @property
     def heartbeat(self) -> Heartbeat:
-        """Heartbeat tracker for watchdog monitoring."""
+        """Heartbeat tracker for watchdog monitoring.
+
+        Updated automatically during polling and after each message is
+        processed. Use with ``LoopGroup`` watchdog to detect stuck consumers.
+        """
         return self._heartbeat
 
     def run(
@@ -237,13 +315,23 @@ class DLQConsumer[T]:
         visibility_timeout: int | None = None,
         wait_time_seconds: int = 20,
     ) -> None:
-        """Process dead letters until shutdown.
+        """Process dead letters until shutdown or iteration limit.
+
+        Blocks the calling thread, polling the mailbox and invoking the
+        handler for each dead letter. Exits when ``shutdown()`` is called,
+        the mailbox closes, or ``max_iterations`` is reached.
 
         Args:
-            max_iterations: Maximum polling iterations. None for unlimited.
-            visibility_timeout: Seconds messages remain invisible during
-                processing. Defaults to the value passed to __init__.
-            wait_time_seconds: Long poll duration for receiving messages.
+            max_iterations: Maximum polling iterations before returning.
+                ``None`` (default) runs until shutdown. Useful for testing.
+            visibility_timeout: Seconds messages remain invisible while
+                being processed. Defaults to the constructor value (300s).
+                Set high enough for handler execution plus buffer time.
+            wait_time_seconds: Long-poll duration in seconds. Higher values
+                reduce API calls but increase shutdown latency.
+
+        Note:
+            Call from a dedicated thread. This method blocks until shutdown.
         """
         with self._lock:
             self._running = True
@@ -302,25 +390,39 @@ class DLQConsumer[T]:
                 self._running = False
 
     def shutdown(self, *, timeout: float = 30.0) -> bool:
-        """Signal shutdown and wait for completion.
+        """Signal shutdown and wait for the run loop to exit.
+
+        Thread-safe. Can be called from any thread, including signal
+        handlers. The consumer finishes processing the current message
+        (if any) before exiting.
 
         Args:
-            timeout: Maximum seconds to wait for the loop to stop.
+            timeout: Maximum seconds to wait for ``run()`` to return.
+                If exceeded, returns ``False`` but the shutdown signal
+                remains set (the consumer will still stop eventually).
 
         Returns:
-            True if loop stopped cleanly, False if timeout expired.
+            ``True`` if the consumer stopped within the timeout,
+            ``False`` if still running when timeout expired.
         """
         self._shutdown_event.set()
         return wait_until(lambda: not self.running, timeout=timeout)
 
     @property
     def running(self) -> bool:
-        """True if the consumer is currently processing messages."""
+        """Whether the consumer's run loop is currently active.
+
+        Thread-safe. Returns ``True`` between the start of ``run()``
+        and its return. Use to check if shutdown completed.
+        """
         with self._lock:
             return self._running
 
     def __enter__(self) -> Self:
-        """Context manager entry. Returns self for use in with statement."""
+        """Enter context manager, returning self.
+
+        Does not start the consumer; call ``run()`` separately.
+        """
         return self
 
     def __exit__(
@@ -329,7 +431,11 @@ class DLQConsumer[T]:
         exc_val: BaseException | None,
         exc_tb: object,
     ) -> None:
-        """Context manager exit. Triggers shutdown and waits for completion."""
+        """Exit context manager, triggering graceful shutdown.
+
+        Calls ``shutdown()`` and waits for the run loop to complete.
+        Exceptions from the ``with`` block are not suppressed.
+        """
         _ = (exc_type, exc_val, exc_tb)
         _ = self.shutdown()
 

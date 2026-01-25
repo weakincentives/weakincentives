@@ -163,19 +163,69 @@ class ResourceRegistry:
     # === Query Methods ===
 
     def __contains__(self, protocol: type[object]) -> bool:
-        """Check if protocol has a binding."""
+        """Check if a protocol type has a registered binding.
+
+        Args:
+            protocol: The protocol type to check.
+
+        Returns:
+            True if the protocol has a binding, False otherwise.
+
+        Example::
+
+            registry = ResourceRegistry.build({Config: config})
+
+            if Config in registry:
+                print("Config is bound")
+        """
         return protocol in self._bindings
 
     def __len__(self) -> int:
-        """Return number of bindings."""
+        """Return the number of registered bindings.
+
+        Returns:
+            The count of protocol-to-binding mappings in this registry.
+        """
         return len(self._bindings)
 
     def __iter__(self) -> Iterator[type[object]]:
-        """Iterate over all bound protocol types."""
+        """Iterate over all bound protocol types.
+
+        Yields:
+            Each protocol type that has a registered binding.
+
+        Example::
+
+            registry = ResourceRegistry.build({Config: config, Logger: logger})
+
+            for protocol in registry:
+                print(f"Bound: {protocol.__name__}")
+        """
         yield from self._bindings
 
     def binding_for[T](self, protocol: type[T]) -> Binding[T] | None:
-        """Return the binding for a protocol, or None if unbound."""
+        """Look up the binding for a protocol type.
+
+        Use this to inspect binding configuration (scope, eager flag) without
+        resolving the resource. For actual resource resolution, use
+        ``ScopedResourceContext.get()`` instead.
+
+        Args:
+            protocol: The protocol type to look up.
+
+        Returns:
+            The Binding for the protocol, or None if no binding exists.
+
+        Example::
+
+            registry = ResourceRegistry.of(
+                Binding(Config, lambda r: Config(), scope=Scope.SINGLETON),
+            )
+
+            binding = registry.binding_for(Config)
+            if binding:
+                print(f"Scope: {binding.scope}")
+        """
         binding = self._bindings.get(protocol)
         return cast(Binding[T], binding) if binding else None
 
@@ -220,13 +270,27 @@ class ResourceRegistry:
         return ResourceRegistry(_bindings=MappingProxyType(merged_bindings))
 
     def conflicts(self, other: ResourceRegistry) -> frozenset[type[object]]:
-        """Return protocols bound in both registries.
+        """Find protocol types that are bound in both registries.
 
-        Useful for debugging merge conflicts without enabling strict mode.
+        Use this to detect potential conflicts before merging, or to debug
+        merge failures. Protocols returned here would be overwritten if
+        ``merge(strict=False)`` is used.
+
+        Args:
+            other: The registry to compare against.
+
+        Returns:
+            Frozenset of protocol types that appear in both registries.
+            Empty if there are no conflicts.
 
         Example::
 
+            base = ResourceRegistry.build({Config: config1, Logger: logger})
+            override = ResourceRegistry.build({Config: config2})
+
             conflicts = base.conflicts(override)
+            # conflicts == frozenset({Config})
+
             if conflicts:
                 print(f"Warning: {len(conflicts)} bindings will be overridden")
         """
@@ -235,7 +299,29 @@ class ResourceRegistry:
     # === Provider-Based Resolution ===
 
     def eager_bindings(self) -> Sequence[Binding[object]]:
-        """Return all bindings marked as eager."""
+        """Return all bindings marked for eager initialization.
+
+        Eager bindings are instantiated immediately when the resource context
+        starts, rather than lazily on first access. This is useful for:
+
+        - Resources that perform slow initialization (warm up early)
+        - Resources with side effects that must happen before other work
+        - Fail-fast validation of configuration or connectivity
+
+        Returns:
+            Sequence of Binding objects where ``eager=True``.
+
+        Example::
+
+            registry = ResourceRegistry.of(
+                Binding(DBPool, lambda r: DBPool(), eager=True),
+                Binding(Config, lambda r: Config()),  # Lazy (default)
+            )
+
+            # DBPool will be in eager_bindings, Config will not
+            for binding in registry.eager_bindings():
+                print(f"Eager: {binding.protocol.__name__}")
+        """
         return [b for b in self._bindings.values() if b.eager]
 
     def _create_context(
@@ -260,20 +346,33 @@ class ResourceRegistry:
 
     @contextmanager
     def open(self) -> Iterator[ScopedResourceContext]:
-        """Context manager for resource lifecycle.
+        """Open a resource context with automatic lifecycle management.
 
-        Creates a context, starts it, and ensures cleanup on exit.
+        This is the primary way to access resources from a registry. The context
+        manager handles:
+
+        1. Creating a fresh ScopedResourceContext
+        2. Starting the context (initializes eager bindings)
+        3. Providing access to resolve resources via ``ctx.get()``
+        4. Cleaning up all resources on exit (calls close on Closeable resources)
+
+        Resources are resolved lazily on first ``get()`` call unless marked
+        ``eager=True`` in their binding.
+
+        Yields:
+            A started ScopedResourceContext for resolving resources.
 
         Example::
 
-            registry = ResourceRegistry.build({Config: config})
+            registry = ResourceRegistry.build({
+                Config: config,
+                HTTPClient: Binding(HTTPClient, lambda r: HTTPClient()),
+            })
 
             with registry.open() as ctx:
-                service = ctx.get(MyService)
-            # Resources cleaned up automatically
-
-        Yields:
-            Started ScopedResourceContext for resolving resources.
+                client = ctx.get(HTTPClient)  # Resolved here
+                response = client.fetch("/api/data")
+            # HTTPClient.close() called automatically if it implements Closeable
         """
         ctx = self._create_context()
         ctx.start()

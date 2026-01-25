@@ -10,7 +10,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Task example sections for trajectory-based demonstrations."""
+"""Task example sections for trajectory-based demonstrations.
+
+This module provides section types for embedding task trajectory examples
+into prompts. Task examples demonstrate how to accomplish specific objectives
+through sequences of tool invocations, helping LLMs understand expected
+tool usage patterns.
+
+Classes:
+    TaskStep: A single tool invocation step within a trajectory.
+    TaskExample: A section containing a complete task trajectory.
+    TaskExamplesSection: A container grouping multiple TaskExample children.
+
+Example:
+    Create a task example showing file search workflow::
+
+        from weakincentives.prompt import TaskExample, TaskStep, ToolExample
+
+        example = TaskExample(
+            key="search-example",
+            objective="Find all configuration files",
+            steps=[
+                TaskStep(
+                    tool_name="glob_files",
+                    example=ToolExample(
+                        description="Search for config files",
+                        input=GlobParams(pattern="*.yaml"),
+                        output=GlobResult(files=["config.yaml"]),
+                    ),
+                ),
+            ],
+            outcome="Found 1 configuration file",
+        )
+"""
 
 from __future__ import annotations
 
@@ -49,7 +81,26 @@ OutcomeT = TypeVar("OutcomeT", bound="str | SupportsDataclass", covariant=True)
 
 @dataclass(slots=True, frozen=True)
 class TaskStep[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
-    """Single tool invocation in a task trajectory."""
+    """A single tool invocation step within a task trajectory.
+
+    TaskStep pairs a tool name with a ToolExample demonstrating its usage.
+    Multiple TaskSteps form the trajectory showing how to accomplish a task.
+
+    Attributes:
+        tool_name: Name of the tool to invoke. Must match pattern ``^[a-z0-9_-]{1,64}$``.
+        example: A ToolExample containing the input parameters and expected output
+            for this tool invocation.
+
+    Example:
+        >>> step = TaskStep(
+        ...     tool_name="search_files",
+        ...     example=ToolExample(
+        ...         description="Search for Python files",
+        ...         input=SearchParams(pattern="*.py"),
+        ...         output=SearchResult(files=["main.py"]),
+        ...     ),
+        ... )
+    """
 
     tool_name: str
     example: ToolExample[ParamsT, ResultT]
@@ -124,11 +175,38 @@ def _render_outcome(outcome: str | SupportsDataclass) -> str:
 
 
 class TaskExample(Section[TaskExampleParamsT]):
-    """Section representing a single task trajectory example.
+    """A section representing a complete task trajectory example.
+
+    TaskExample demonstrates how to accomplish a specific objective through
+    a sequence of tool invocations. It renders as structured markdown showing
+    the objective, each step with its tool inputs/outputs, and the final outcome.
 
     The outcome type must match the PromptTemplate's output type:
-    - For prompts with structured output (PromptTemplate[OutputType]), outcome must be OutputType
+    - For prompts with structured output (PromptTemplate[OutputType]), outcome
+      must be an instance of OutputType
     - For prompts without structured output, outcome must be a string
+
+    Attributes:
+        objective: The task objective (1-500 ASCII characters).
+        outcome: The final result after completing all steps.
+        steps: Tuple of TaskStep instances forming the trajectory.
+
+    Example:
+        >>> example = TaskExample(
+        ...     key="file-search-example",
+        ...     objective="Find and list all Python test files",
+        ...     steps=[
+        ...         TaskStep(
+        ...             tool_name="glob_files",
+        ...             example=ToolExample(
+        ...                 description="Search for test files",
+        ...                 input=GlobParams(pattern="test_*.py"),
+        ...                 output=GlobResult(files=["test_main.py"]),
+        ...             ),
+        ...         ),
+        ...     ],
+        ...     outcome="Found 1 test file: test_main.py",
+        ... )
     """
 
     outcome: str | SupportsDataclass
@@ -147,6 +225,27 @@ class TaskExample(Section[TaskExampleParamsT]):
         summary: str | None = None,
         visibility: VisibilitySelector = SectionVisibility.FULL,
     ) -> None:
+        """Initialize a TaskExample section.
+
+        Args:
+            key: Unique identifier for this section.
+            objective: Description of the task goal (1-500 ASCII characters).
+            outcome: The expected result after completing all steps. Must match
+                the PromptTemplate's output type.
+            steps: Non-empty sequence of TaskStep instances defining the trajectory.
+            title: Display title for the section. Defaults to a truncated objective
+                (max 60 characters).
+            default_params: Default parameters for this section.
+            enabled: Predicate controlling whether this section is enabled.
+            accepts_overrides: Whether parameter overrides are allowed.
+            summary: Short summary shown when visibility is SUMMARY.
+            visibility: Controls section visibility (FULL, SUMMARY, or HIDDEN).
+
+        Raises:
+            PromptValidationError: If objective is empty, too long, or contains
+                non-ASCII characters; if steps is empty or contains non-TaskStep
+                items; or if any step has an invalid tool name.
+        """
         # Validate objective
         validated_objective = _validate_ascii_text(
             objective,
@@ -208,6 +307,22 @@ class TaskExample(Section[TaskExampleParamsT]):
         path: tuple[str, ...] = (),
         session: object = None,
     ) -> str:
+        """Render the task example body as markdown.
+
+        Produces structured markdown with the objective, numbered steps showing
+        tool invocations with JSON-formatted inputs/outputs, and the final outcome.
+
+        Args:
+            params: Section parameters (unused for rendering, but checked for
+                visibility determination).
+            visibility: Override for section visibility.
+            path: Section path (unused).
+            session: Session context (unused).
+
+        Returns:
+            Markdown string. Returns the summary if visibility is SUMMARY and
+            a summary is defined; otherwise returns the full rendered body.
+        """
         del path, session
         effective = self.effective_visibility(override=visibility, params=params)
         if effective == SectionVisibility.SUMMARY and self.summary is not None:
@@ -247,6 +362,18 @@ class TaskExample(Section[TaskExampleParamsT]):
 
     @override
     def clone(self, **kwargs: object) -> Self:
+        """Create a deep copy of this TaskExample.
+
+        Creates a new TaskExample instance with cloned default_params.
+        The steps tuple is shared (immutable) but all other mutable state
+        is copied.
+
+        Args:
+            **kwargs: Unused keyword arguments (accepted for API compatibility).
+
+        Returns:
+            A new TaskExample instance with the same configuration.
+        """
         cloned_default = (
             clone_dataclass(self.default_params)
             if self.default_params is not None
@@ -270,7 +397,35 @@ class TaskExample(Section[TaskExampleParamsT]):
 
 
 class TaskExamplesSection(Section[TaskExamplesParamsT]):
-    """Container section for task example children."""
+    """Container section that groups multiple TaskExample children.
+
+    TaskExamplesSection organizes related task examples under a common heading.
+    It renders only the heading; the individual TaskExample children are rendered
+    separately by the section registry.
+
+    Use this to group task trajectory demonstrations that illustrate how to
+    accomplish various objectives using the available tools.
+
+    Example:
+        >>> section = TaskExamplesSection(
+        ...     key="examples",
+        ...     title="Example Tasks",
+        ...     examples=[
+        ...         TaskExample(
+        ...             key="example-1",
+        ...             objective="Find files",
+        ...             steps=[...],
+        ...             outcome="Found 5 files",
+        ...         ),
+        ...         TaskExample(
+        ...             key="example-2",
+        ...             objective="Edit config",
+        ...             steps=[...],
+        ...             outcome="Config updated",
+        ...         ),
+        ...     ],
+        ... )
+    """
 
     def __init__(  # noqa: PLR0913
         self,
@@ -284,6 +439,22 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
         summary: str | None = None,
         visibility: VisibilitySelector = SectionVisibility.FULL,
     ) -> None:
+        """Initialize a TaskExamplesSection.
+
+        Args:
+            key: Unique identifier for this section. Defaults to "task-examples".
+            title: Display title for the section. Defaults to "Task Examples".
+            examples: Non-empty sequence of TaskExample instances to include.
+            default_params: Default parameters for this section.
+            enabled: Predicate controlling whether this section is enabled.
+            accepts_overrides: Whether parameter overrides are allowed.
+            summary: Short summary shown when visibility is SUMMARY.
+            visibility: Controls section visibility (FULL, SUMMARY, or HIDDEN).
+
+        Raises:
+            PromptValidationError: If examples is empty or contains non-TaskExample
+                items.
+        """
         # Validate examples
         if not examples:
             raise PromptValidationError(
@@ -329,6 +500,21 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
         path: tuple[str, ...] = (),
         session: object = None,
     ) -> str:
+        """Render the section body.
+
+        As a container section, this renders only the heading. Individual
+        TaskExample children are rendered separately by the section registry.
+
+        Args:
+            params: Section parameters (used for visibility determination).
+            visibility: Override for section visibility.
+            path: Section path (unused).
+            session: Session context (unused).
+
+        Returns:
+            Empty string for FULL visibility (children render separately),
+            or the summary string if visibility is SUMMARY and summary is defined.
+        """
         del path, session
         effective = self.effective_visibility(override=visibility, params=params)
         if effective == SectionVisibility.SUMMARY and self.summary is not None:
@@ -338,6 +524,21 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
 
     @override
     def clone(self, **kwargs: object) -> Self:
+        """Create a deep copy of this TaskExamplesSection.
+
+        Creates a new TaskExamplesSection with cloned children and default_params.
+        Each TaskExample child is recursively cloned.
+
+        Args:
+            **kwargs: Keyword arguments passed to each child's clone method.
+
+        Returns:
+            A new TaskExamplesSection instance with the same configuration
+            and deeply cloned children.
+
+        Raises:
+            TypeError: If any child is not a TaskExample instance.
+        """
         cloned_children: list[TaskExample[Any]] = []
         for child in self.children:
             if not isinstance(child, TaskExample):  # pragma: no cover

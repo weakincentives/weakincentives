@@ -78,12 +78,36 @@ class HostFilesystem:
     Provides sandboxed access to a root directory on the host filesystem.
     All paths are resolved relative to the root and validated to ensure
     they cannot escape the sandbox via symlinks or path traversal.
-    Supports snapshot and restore operations via git commits.
 
-    The git repository used for snapshots is stored outside the workspace
-    root to prevent agents from accessing or modifying it. By default,
-    a temporary directory is created using Python's ``tempfile.mkdtemp()``
-    (e.g., ``/tmp/wink-git-abc12345``).
+    Supports snapshot and restore operations via git commits. The git
+    repository is stored outside the workspace root to prevent agents
+    from accessing or modifying it directly.
+
+    Args:
+        _root: Absolute path to the workspace root directory.
+        _read_only: If True, all write operations raise PermissionError.
+        _git_initialized: Internal flag tracking git initialization state.
+        _git_dir: External git directory path for snapshot storage.
+            If None, a temporary directory is created on first snapshot.
+
+    Example::
+
+        from weakincentives.filesystem import HostFilesystem
+
+        # Create sandboxed filesystem
+        fs = HostFilesystem(_root="/path/to/workspace")
+
+        # Perform operations
+        fs.write("src/main.py", "print('hello')")
+        result = fs.read("src/main.py")
+
+        # Snapshot and restore
+        snapshot = fs.snapshot(tag="initial")
+        fs.write("src/main.py", "print('modified')")
+        fs.restore(snapshot)  # Reverts to "print('hello')"
+
+        # Clean up git storage when done
+        fs.cleanup()
     """
 
     _root: str
@@ -93,12 +117,21 @@ class HostFilesystem:
 
     @property
     def root(self) -> str:
-        """Workspace root path."""
+        """Absolute path to the workspace root directory.
+
+        All relative paths in filesystem operations are resolved against
+        this root. Attempts to access paths outside the root raise
+        PermissionError.
+        """
         return self._root
 
     @property
     def read_only(self) -> bool:
-        """True if write operations are disabled."""
+        """Whether write operations are disabled.
+
+        When True, write(), write_bytes(), delete(), and mkdir() raise
+        PermissionError instead of performing the operation.
+        """
         return self._read_only
 
     @staticmethod
@@ -178,7 +211,24 @@ class HostFilesystem:
         limit: int | None = None,
         encoding: str = "utf-8",
     ) -> ReadResult:
-        """Read file content with optional pagination."""
+        """Read file content as text with optional line-based pagination.
+
+        Args:
+            path: Relative path from workspace root.
+            offset: Line number to start reading (0-indexed).
+            limit: Maximum lines to return. None uses DEFAULT_READ_LIMIT (2000).
+                Pass READ_ENTIRE_FILE (-1) to read without truncation.
+            encoding: Text encoding (default "utf-8").
+
+        Returns:
+            ReadResult containing content and pagination metadata.
+
+        Raises:
+            FileNotFoundError: Path does not exist.
+            IsADirectoryError: Path is a directory.
+            PermissionError: Path escapes workspace root.
+            ValueError: File contains binary content that cannot be decoded.
+        """
         resolved = self._resolve_path(path)
 
         if not resolved.exists():
@@ -232,7 +282,25 @@ class HostFilesystem:
         offset: int = 0,
         limit: int | None = None,
     ) -> ReadBytesResult:
-        """Read file content as raw bytes with optional pagination."""
+        """Read file content as raw bytes with optional byte-based pagination.
+
+        Recommended for binary files or exact file copying to preserve
+        content exactly without encoding/decoding overhead.
+
+        Args:
+            path: Relative path from workspace root.
+            offset: Byte offset to start reading (0-indexed, must be non-negative).
+            limit: Maximum bytes to return. None reads entire file.
+
+        Returns:
+            ReadBytesResult containing raw bytes and pagination metadata.
+
+        Raises:
+            FileNotFoundError: Path does not exist.
+            IsADirectoryError: Path is a directory.
+            PermissionError: Path escapes workspace root.
+            ValueError: offset or limit is negative.
+        """
         if offset < 0:
             msg = f"offset must be non-negative, got {offset}"
             raise ValueError(msg)
@@ -273,7 +341,15 @@ class HostFilesystem:
         )
 
     def exists(self, path: str) -> bool:
-        """Check if a path exists."""
+        """Check if a path exists within the workspace.
+
+        Args:
+            path: Relative path from workspace root.
+
+        Returns:
+            True if the path exists (file or directory), False otherwise.
+            Returns False for paths that would escape the workspace root.
+        """
         try:
             resolved = self._resolve_path(path)
             return resolved.exists()
@@ -281,7 +357,18 @@ class HostFilesystem:
             return False
 
     def stat(self, path: str) -> FileStat:
-        """Get metadata for a path."""
+        """Get metadata for a file or directory.
+
+        Args:
+            path: Relative path from workspace root.
+
+        Returns:
+            FileStat with size, timestamps, and type information.
+
+        Raises:
+            FileNotFoundError: Path does not exist.
+            PermissionError: Path escapes workspace root.
+        """
         resolved = self._resolve_path(path)
 
         if not resolved.exists():
@@ -301,7 +388,19 @@ class HostFilesystem:
         )
 
     def list(self, path: str = ".") -> Sequence[FileEntry]:
-        """List directory contents."""
+        """List directory contents.
+
+        Args:
+            path: Directory to list. Defaults to workspace root.
+
+        Returns:
+            Sequence of FileEntry objects sorted alphabetically by name.
+
+        Raises:
+            FileNotFoundError: Path does not exist.
+            NotADirectoryError: Path is a file.
+            PermissionError: Path escapes workspace root.
+        """
         resolved = self._resolve_path(path)
 
         if not resolved.exists():
@@ -336,7 +435,19 @@ class HostFilesystem:
         *,
         path: str = ".",
     ) -> Sequence[GlobMatch]:
-        """Match files by glob pattern."""
+        """Match files by glob pattern.
+
+        Recursively searches for files matching the pattern starting from
+        the specified base directory.
+
+        Args:
+            pattern: Glob pattern (e.g., "**/*.py", "*.txt", "src/*.js").
+            path: Base directory for matching. Defaults to workspace root.
+
+        Returns:
+            Sequence of GlobMatch objects sorted by path. Returns empty
+            sequence if base path doesn't exist.
+        """
         resolved_base = self._resolve_path(path)
         root_path = Path(self._root)
 
@@ -367,7 +478,25 @@ class HostFilesystem:
         glob: str | None = None,
         max_matches: int | None = None,
     ) -> Sequence[GrepMatch]:
-        """Search file contents by regex."""
+        """Search file contents by regex pattern.
+
+        Recursively searches file contents for the regex pattern. Binary
+        files and files that cannot be decoded as UTF-8 are silently skipped.
+
+        Args:
+            pattern: Regular expression pattern to search for.
+            path: Base directory for search. Defaults to workspace root.
+            glob: Optional glob pattern to filter which files to search.
+            max_matches: Maximum total matches to return. Defaults to
+                MAX_GREP_MATCHES (1000).
+
+        Returns:
+            Sequence of GrepMatch objects sorted by (path, line_number).
+            Returns empty sequence if base path doesn't exist.
+
+        Raises:
+            ValueError: Invalid regex pattern.
+        """
         resolved_base = self._resolve_path(path)
         root_path = Path(self._root)
 
@@ -407,7 +536,18 @@ class HostFilesystem:
     def _grep_file(
         file_path: Path, regex: re.Pattern[str], rel_path: str, max_remaining: int
     ) -> list[GrepMatch]:  # ty: ignore[invalid-type-form]  # ty bug: resolves list to class method
-        """Search a single file for regex matches."""
+        """Search a single file for regex matches.
+
+        Args:
+            file_path: Absolute path to the file to search.
+            regex: Compiled regex pattern to match.
+            rel_path: Relative path for inclusion in match results.
+            max_remaining: Maximum matches to return from this file.
+
+        Returns:
+            List of GrepMatch objects for lines containing matches.
+            Returns empty list for binary or inaccessible files.
+        """
         matches: list[GrepMatch] = []
         try:
             with file_path.open(encoding="utf-8") as f:
@@ -439,7 +579,25 @@ class HostFilesystem:
         mode: Literal["create", "overwrite", "append"] = "overwrite",
         create_parents: bool = True,
     ) -> WriteResult:
-        """Write content to a file."""
+        """Write text content to a file.
+
+        Args:
+            path: Relative path from workspace root.
+            content: UTF-8 text content to write.
+            mode: Write behavior - "create" (fail if exists), "overwrite"
+                (replace content, default), or "append" (add to end).
+            create_parents: Create parent directories if missing (default True).
+
+        Returns:
+            WriteResult confirming path, bytes written, and mode used.
+
+        Raises:
+            FileExistsError: mode="create" and file already exists.
+            FileNotFoundError: Parent missing and create_parents=False.
+            PermissionError: Filesystem is read-only or path escapes root.
+            ValueError: Content exceeds MAX_WRITE_LENGTH (48000 chars) or
+                path is root directory.
+        """
         if self._read_only:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
@@ -493,7 +651,28 @@ class HostFilesystem:
         mode: Literal["create", "overwrite", "append"] = "overwrite",
         create_parents: bool = True,
     ) -> WriteResult:
-        """Write raw bytes to a file."""
+        """Write raw bytes to a file.
+
+        Recommended for binary files or exact file copying to preserve
+        content exactly without encoding/decoding overhead.
+
+        Args:
+            path: Relative path from workspace root.
+            content: Raw bytes to write.
+            mode: Write behavior - "create" (fail if exists), "overwrite"
+                (replace content, default), or "append" (add to end).
+            create_parents: Create parent directories if missing (default True).
+
+        Returns:
+            WriteResult confirming path, bytes written, and mode used.
+
+        Raises:
+            FileExistsError: mode="create" and file already exists.
+            FileNotFoundError: Parent missing and create_parents=False.
+            PermissionError: Filesystem is read-only or path escapes root.
+            ValueError: Content exceeds MAX_WRITE_BYTES (48000 bytes) or
+                path is root directory.
+        """
         if self._read_only:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
@@ -545,7 +724,19 @@ class HostFilesystem:
         *,
         recursive: bool = False,
     ) -> None:
-        """Delete a file or directory."""
+        """Delete a file or directory.
+
+        Args:
+            path: Relative path from workspace root.
+            recursive: If True, delete directories and all their contents.
+                Required for non-empty directories.
+
+        Raises:
+            FileNotFoundError: Path does not exist.
+            IsADirectoryError: Path is a non-empty directory and recursive=False.
+            PermissionError: Filesystem is read-only, path is root, or
+                path escapes workspace root.
+        """
         if self._read_only:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
@@ -581,7 +772,18 @@ class HostFilesystem:
         parents: bool = True,
         exist_ok: bool = True,
     ) -> None:
-        """Create a directory."""
+        """Create a directory.
+
+        Args:
+            path: Relative path from workspace root.
+            parents: Create parent directories if missing (default True).
+            exist_ok: Don't raise error if directory exists (default True).
+
+        Raises:
+            FileExistsError: Directory or file exists and exist_ok=False.
+            FileNotFoundError: Parent missing and parents=False.
+            PermissionError: Filesystem is read-only or path escapes root.
+        """
         if self._read_only:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
@@ -769,10 +971,13 @@ class HostFilesystem:
         _ = self._run_git(["clean", "-xfd"], check=False)
 
     def cleanup(self) -> None:
-        """Remove the external git directory.
+        """Remove the external git directory used for snapshot storage.
 
-        Call this when the filesystem is no longer needed to clean up
-        the snapshot storage. Safe to call multiple times.
+        Call this when the filesystem is no longer needed to free disk space
+        used by snapshot storage. Safe to call multiple times - subsequent
+        calls are no-ops if already cleaned up.
+
+        After cleanup, new snapshots will create a fresh git directory.
         """
         if self._git_dir is not None and Path(self._git_dir).exists():
             shutil.rmtree(self._git_dir)
@@ -780,5 +985,10 @@ class HostFilesystem:
 
     @property
     def git_dir(self) -> str | None:
-        """External git directory path, if initialized."""
+        """External git directory path used for snapshot storage.
+
+        Returns None if no snapshots have been created yet. After the first
+        snapshot, returns the path to the git repository used for storing
+        filesystem state. This directory is outside the workspace root.
+        """
         return self._git_dir

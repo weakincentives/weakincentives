@@ -10,7 +10,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Section registration helpers for :mod:`weakincentives.prompt`."""
+"""Section registration and validation for prompt templates.
+
+This module provides the registry infrastructure for collecting, validating,
+and snapshotting prompt sections before rendering. The main entry points are:
+
+- `PromptRegistry`: Mutable collector for sections with validation.
+- `RegistrySnapshot`: Immutable view with precomputed indices for rendering.
+- `SectionNode`: Flattened representation of a section in the hierarchy.
+- `clone_dataclass`: Utility for shallow-copying dataclass instances.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +42,27 @@ from .tool import Tool
 
 @FrozenDataclass()
 class SectionNode[ParamsT: SupportsDataclass]:
-    """Flattened view of a section within a prompt."""
+    """Flattened view of a section within a prompt's hierarchy.
+
+    When sections are registered with a PromptRegistry, each section (including
+    nested children) is flattened into a SectionNode that captures its position
+    in the tree structure.
+
+    Attributes:
+        section: The underlying Section instance containing template and tools.
+        depth: Nesting level in the section tree (0 for root sections).
+        path: Tuple of section keys forming the path from root to this section.
+        number: Hierarchical numbering string (e.g., "1", "1.1", "2.3.1").
+
+    Example:
+        A section tree like::
+
+            root_section (key="main")
+                child_section (key="details")
+
+        Produces nodes with paths ("main",) and ("main", "details") and numbers
+        "1" and "1.1" respectively.
+    """
 
     section: Section[ParamsT]
     depth: int
@@ -43,7 +72,23 @@ class SectionNode[ParamsT: SupportsDataclass]:
 
 @FrozenDataclass()
 class RegistrySnapshot:
-    """Immutable view over registered prompt sections."""
+    """Immutable view over registered prompt sections.
+
+    Created by calling `PromptRegistry.snapshot()` after all sections have been
+    registered. Provides read-only access to sections, parameters, defaults,
+    placeholders, and tools with precomputed indices for efficient lookups.
+
+    Attributes:
+        sections: All registered section nodes in depth-first order.
+        params_registry: Maps parameter dataclass types to the sections using them.
+        defaults_by_path: Default parameter instances keyed by section path.
+        defaults_by_type: Default parameter instances keyed by parameter type.
+        placeholders: Template placeholder names for each section path.
+        tool_name_registry: Maps tool names to the section path that declared them.
+        node_by_path: O(1) lookup from section path to its SectionNode.
+        children_by_path: Direct child keys for each section path.
+        subtree_has_tools: Whether a section or any descendant has tools.
+    """
 
     sections: tuple[SectionNode[SupportsDataclass], ...]
     params_registry: Mapping[
@@ -63,7 +108,27 @@ class RegistrySnapshot:
         node: SectionNode[SupportsDataclass],
         param_lookup: MutableMapping[type[SupportsDataclass], SupportsDataclass],
     ) -> SupportsDataclass | None:
-        """Return parameters for a section, applying defaults when necessary."""
+        """Resolve parameters for a section using lookup, defaults, or construction.
+
+        Resolution order:
+        1. Check `param_lookup` for an existing instance of the params type.
+        2. Check for path-specific defaults in `defaults_by_path`.
+        3. Check for type-based defaults in `defaults_by_type`.
+        4. Attempt zero-argument construction of the params type.
+
+        Args:
+            node: The section node requiring parameters.
+            param_lookup: Mutable mapping of pre-supplied parameter instances,
+                keyed by their dataclass type.
+
+        Returns:
+            The resolved parameter instance, or None if the section has no
+            params_type defined.
+
+        Raises:
+            PromptRenderError: If the section requires parameters but none could
+                be resolved (no defaults and construction fails).
+        """
 
         params_type = node.section.params_type
         if params_type is None:
@@ -122,13 +187,25 @@ class RegistrySnapshot:
 
     @property
     def params_types(self) -> set[type[SupportsDataclass]]:
-        """Return the set of parameter dataclasses registered for sections."""
+        """Return the set of all parameter dataclass types used by sections.
+
+        Returns:
+            Set of dataclass types that are used as params_type by at least one
+            registered section. Useful for determining what parameter types need
+            to be supplied when rendering the prompt.
+        """
 
         return set(self.params_registry.keys())
 
     @property
     def section_paths(self) -> frozenset[SectionPath]:
-        """Return the set of all registered section paths."""
+        """Return all registered section paths as a frozen set.
+
+        Returns:
+            Immutable set of SectionPath tuples representing every section in
+            the registry, including nested children. Each path is a tuple of
+            section keys from root to the section.
+        """
 
         return frozenset(node.path for node in self.sections)
 
@@ -335,7 +412,24 @@ def _build_registry_indices(
     _params_registry_is_consistent,
 )
 class PromptRegistry:
-    """Collect and validate prompt sections prior to rendering."""
+    """Mutable registry for collecting and validating prompt sections.
+
+    Use this class to register sections (and their nested children) before
+    creating an immutable RegistrySnapshot for rendering. The registry validates
+    section parameters, defaults, placeholders, and tools during registration.
+
+    Example:
+        >>> registry = PromptRegistry()
+        >>> registry.register_sections([intro_section, main_section])
+        >>> snapshot = registry.snapshot()
+
+    The registry enforces several invariants:
+    - All referenced paths must correspond to registered sections.
+    - Parameter types must be dataclasses.
+    - Default values must match their declared parameter types.
+    - Placeholders must reference valid parameter fields.
+    - Tool names must be unique across the entire prompt.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -350,7 +444,21 @@ class PromptRegistry:
         self._numbering_stack: list[int] = []
 
     def register_sections(self, sections: Sequence[Section[SupportsDataclass]]) -> None:
-        """Register the provided root sections."""
+        """Register multiple root-level sections and all their children.
+
+        Each section's children are recursively registered with incrementing
+        depth and extended paths. Validates parameters, defaults, placeholders,
+        and tools for each section during registration.
+
+        Args:
+            sections: Sequence of Section instances to register as root sections
+                (depth=0). Each section's key becomes the first element of its path.
+
+        Raises:
+            PromptValidationError: If any section has invalid configuration, such
+                as non-dataclass params, mismatched defaults, unknown placeholders,
+                or duplicate tool names.
+        """
 
         for section in sections:
             self._register_section(section, path=(section.key,), depth=0)
@@ -362,7 +470,21 @@ class PromptRegistry:
         path: SectionPath,
         depth: int,
     ) -> None:
-        """Register a single section at the supplied path and depth."""
+        """Register a single section at an explicit path and depth.
+
+        Unlike `register_sections`, this method allows manual control over the
+        section's position in the hierarchy. The section's children are still
+        registered recursively with incremented depth.
+
+        Args:
+            section: The Section instance to register.
+            path: Explicit path tuple for this section. Must include the section's
+                key as the final element.
+            depth: Nesting level (0 for root sections, increments for children).
+
+        Raises:
+            PromptValidationError: If the section has invalid configuration.
+        """
 
         self._register_section(section, path=path, depth=depth)
 
@@ -545,7 +667,26 @@ class PromptRegistry:
         self,
         structured_output_type: type[SupportsDataclass] | None = None,
     ) -> RegistrySnapshot:
-        """Return an immutable snapshot of the registered sections."""
+        """Create an immutable snapshot of all registered sections.
+
+        Finalizes the registry by validating task examples and building
+        precomputed indices for efficient lookups. The returned snapshot is
+        safe for concurrent access and should be used for all rendering
+        operations.
+
+        Args:
+            structured_output_type: Optional dataclass type for the prompt's
+                structured output. Used to validate that TaskExample outcomes
+                match the expected output type.
+
+        Returns:
+            A frozen RegistrySnapshot containing all sections, defaults,
+            placeholders, and tools with O(1) lookup indices.
+
+        Raises:
+            PromptValidationError: If any TaskExample references unknown tools
+                or has mismatched input/output types.
+        """
 
         # Validate task examples after all sections are registered
         self._validate_task_examples(structured_output_type)
@@ -799,7 +940,19 @@ def _validate_array_output(
 
 
 def clone_dataclass(instance: SupportsDataclass) -> SupportsDataclass:
-    """Return a shallow copy of the provided dataclass instance."""
+    """Create a shallow copy of a dataclass instance.
+
+    Uses `dataclasses.replace()` with no field overrides to produce a new
+    instance with the same field values. Useful for cloning default parameter
+    instances to avoid mutation of shared defaults.
+
+    Args:
+        instance: Any dataclass instance to clone.
+
+    Returns:
+        A new dataclass instance of the same type with identical field values.
+        Note that field values themselves are not deep-copied.
+    """
 
     return cast(SupportsDataclass, replace(cast(Any, instance)))
 

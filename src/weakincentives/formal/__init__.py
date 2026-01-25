@@ -293,13 +293,38 @@ T = TypeVar("T")
 
 @dataclass(frozen=True, slots=True)
 class StateVar:
-    """TLA+ state variable metadata.
+    """TLA+ state variable declaration for formal specifications.
 
-    Attributes:
-        name: Variable name (e.g., "pending", "invisible")
-        type: TLA+ type annotation (e.g., "Seq", "Function", "Set")
-        description: Human-readable description
-        initial_value: Optional custom TLA+ expression for initial value
+    Represents a mutable state variable in the TLA+ model. Each state variable
+    tracks a piece of system state that can change across transitions.
+
+    The `type` field is used to infer default initial values when `initial_value`
+    is not specified:
+    - Types containing "Seq" default to `<<>>` (empty sequence)
+    - Types containing "Set" default to `{}` (empty set)
+    - Types containing "Function" default to `[x \\in {} |-> 0]`
+    - Types containing "Nat" or "Int" default to `0`
+    - Other types default to `NULL`
+
+    Args:
+        name: Variable name in the TLA+ module (e.g., "pending", "invisible").
+        type: TLA+ type annotation used for documentation and initial value
+            inference (e.g., "Seq(Message)", "Set(Consumer)", "Nat").
+        description: Human-readable description included as a TLA+ comment.
+        initial_value: Custom TLA+ expression for the initial state. If None,
+            the initial value is inferred from the type.
+
+    Example:
+        >>> # Simple counter variable
+        >>> count = StateVar("count", "Nat", "Current counter value")
+        >>>
+        >>> # Queue with custom initial value
+        >>> queue = StateVar(
+        ...     "queue",
+        ...     "Seq(Message)",
+        ...     "Message queue",
+        ...     initial_value="<<[id |-> 1, body |-> \"init\"]>>",
+        ... )
     """
 
     name: str
@@ -310,11 +335,25 @@ class StateVar:
 
 @dataclass(frozen=True, slots=True)
 class ActionParameter:
-    """TLA+ action parameter with domain.
+    """Parameter for a parameterized TLA+ action with its domain.
 
-    Attributes:
-        name: Parameter name (e.g., "consumer", "timeout")
-        domain: TLA+ domain expression (e.g., "1..NumConsumers", "{\"a\", \"b\", \"c\"}")
+    When an action has parameters, TLC explores all combinations of parameter
+    values from their domains. In the generated TLA+, parameterized actions
+    are existentially quantified in the Next formula.
+
+    Args:
+        name: Parameter name used in the action's preconditions and updates
+            (e.g., "consumer", "msg_id", "timeout").
+        domain: TLA+ set expression defining valid parameter values. This can be
+            a range (e.g., "1..NumConsumers"), a finite set (e.g., '{"a", "b"}'),
+            or any TLA+ set expression.
+
+    Example:
+        >>> # Parameter for consumer ID
+        >>> consumer_param = ActionParameter("consumer", "1..NumConsumers")
+        >>>
+        >>> # Parameter for message selection
+        >>> msg_param = ActionParameter("msg", "pending")
     """
 
     name: str
@@ -323,14 +362,48 @@ class ActionParameter:
 
 @dataclass(frozen=True, slots=True)
 class Action:
-    """TLA+ action metadata.
+    """TLA+ action representing a state transition.
 
-    Attributes:
-        name: Action name (e.g., "Receive", "Send")
-        parameters: Action parameters with domains (e.g., [ActionParameter("consumer", "1..NumConsumers")])
-        preconditions: List of TLA+ precondition expressions
-        updates: Mapping from state variable to TLA+ update expression
-        description: Human-readable description
+    An action defines a possible state transition in the formal model. Each action
+    specifies preconditions that must hold for the action to be enabled, and
+    updates that define how state variables change. State variables not listed
+    in `updates` are automatically marked as UNCHANGED.
+
+    Actions are combined into a Next formula as a disjunction, meaning any
+    enabled action can fire in any state.
+
+    Args:
+        name: Action name used in the generated TLA+ module (e.g., "Send",
+            "Receive", "AcknowledgeMessage").
+        parameters: Tuple of action parameters for parameterized actions.
+            Each parameter has a domain that TLC explores exhaustively.
+        preconditions: Tuple of TLA+ boolean expressions that must all be true
+            for the action to be enabled. These become conjuncts in the action
+            definition.
+        updates: Mapping from state variable name to its next-state TLA+
+            expression. Use primed variables in the expression if referencing
+            other updated variables (e.g., {"count": "count + 1"}).
+        description: Human-readable description included as a TLA+ comment.
+
+    Example:
+        >>> # Simple increment action
+        >>> increment = Action(
+        ...     name="Increment",
+        ...     preconditions=("count < MaxCount",),
+        ...     updates={"count": "count + 1"},
+        ... )
+        >>>
+        >>> # Parameterized receive action
+        >>> receive = Action(
+        ...     name="Receive",
+        ...     parameters=(ActionParameter("consumer", "1..NumConsumers"),),
+        ...     preconditions=("Len(pending) > 0",),
+        ...     updates={
+        ...         "pending": "Tail(pending)",
+        ...         "processing": "processing \\cup {<<consumer, Head(pending)>>}",
+        ...     },
+        ...     description="Consumer receives next pending message",
+        ... )
     """
 
     name: str
@@ -342,13 +415,40 @@ class Action:
 
 @dataclass(frozen=True, slots=True)
 class Invariant:
-    """TLA+ invariant metadata.
+    """TLA+ invariant that must hold in every reachable state.
 
-    Attributes:
-        id: Unique identifier (e.g., "INV-1", "INV-MessageStateExclusive")
-        name: Invariant name (e.g., "MessageStateExclusive")
-        predicate: TLA+ predicate expression
-        description: Human-readable description
+    An invariant is a safety property that TLC verifies holds in every state
+    reachable from the initial state through valid transitions. If TLC finds
+    any state where the invariant predicate evaluates to FALSE, model checking
+    fails with a counterexample trace.
+
+    Args:
+        id: Unique identifier for the invariant, used for tracking and
+            documentation (e.g., "INV-1", "INV-MessageStateExclusive").
+        name: TLA+ operator name for the invariant. This becomes a named
+            operator in the generated module and is referenced in the TLC
+            configuration file.
+        predicate: TLA+ boolean expression that must evaluate to TRUE in every
+            reachable state. Can be multi-line for complex predicates.
+        description: Human-readable description included as a TLA+ comment
+            to explain the invariant's purpose.
+
+    Example:
+        >>> # Simple non-negativity invariant
+        >>> non_negative = Invariant(
+        ...     id="INV-1",
+        ...     name="NonNegative",
+        ...     predicate="count >= 0",
+        ...     description="Counter is never negative",
+        ... )
+        >>>
+        >>> # Complex invariant with universal quantifier
+        >>> exclusive = Invariant(
+        ...     id="INV-2",
+        ...     name="MessageStateExclusive",
+        ...     predicate="\\A m \\in messages: ~(m \\in pending /\\ m \\in processing)",
+        ...     description="Messages cannot be pending and processing simultaneously",
+        ... )
     """
 
     id: str
@@ -359,19 +459,50 @@ class Invariant:
 
 @dataclass(frozen=True, slots=True)
 class FormalSpec:
-    """Complete formal specification metadata.
+    """Complete TLA+ formal specification that can be generated and model-checked.
 
-    This represents a TLA+ module that can be extracted and validated.
+    A FormalSpec contains all the metadata needed to generate a complete TLA+
+    module and TLC configuration file. Use `to_tla()` to generate the module
+    source and `to_tla_config()` to generate the model checker configuration.
 
-    Attributes:
-        module: TLA+ module name
-        extends: Modules to extend (e.g., ["Integers", "Sequences"])
-        constants: Constant definitions with default values
-        state_vars: State variable declarations
-        actions: Action definitions
-        invariants: Invariant definitions
-        helpers: Helper operator definitions (raw TLA+)
-        constraint: Optional state constraint to limit TLC exploration (e.g., "now <= 3")
+    The generated TLA+ module includes:
+    - EXTENDS clause for standard modules
+    - CONSTANTS declarations with values from `constants`
+    - VARIABLES declarations from `state_vars`
+    - Helper operators from `helpers`
+    - Init formula with initial values for all state variables
+    - Action operators from `actions`
+    - Next formula as disjunction of all actions
+    - Spec formula as `Init /\\ [][Next]_vars`
+    - Invariant operators from `invariants`
+
+    Args:
+        module: TLA+ module name. Must be a valid TLA+ identifier.
+        extends: Tuple of standard modules to extend. Defaults to
+            ("Integers", "Sequences", "FiniteSets").
+        constants: Dict mapping constant names to their default values for TLC.
+            Values are written to the config file, not the TLA+ module.
+        state_vars: Tuple of state variable declarations.
+        actions: Tuple of action definitions representing state transitions.
+        invariants: Tuple of invariants that TLC will verify.
+        helpers: Dict mapping operator names to TLA+ definitions. Use for
+            auxiliary operators referenced by actions or invariants.
+        constraint: Optional TLA+ state constraint to limit TLC state space
+            exploration (e.g., "Len(queue) <= 5"). Generates a StateConstraint
+            operator and adds CONSTRAINT to the config.
+
+    Example:
+        >>> spec = FormalSpec(
+        ...     module="Counter",
+        ...     constants={"MaxCount": 10},
+        ...     state_vars=(StateVar("count", "Nat"),),
+        ...     actions=(
+        ...         Action("Increment", updates={"count": "count + 1"}),
+        ...         Action("Reset", updates={"count": "0"}),
+        ...     ),
+        ...     invariants=(Invariant("INV-1", "Bounded", "count <= MaxCount"),),
+        ... )
+        >>> print(spec.to_tla())  # Generates complete TLA+ module
     """
 
     module: str
@@ -384,10 +515,33 @@ class FormalSpec:
     constraint: str | None = None
 
     def to_tla(self) -> str:
-        """Generate TLA+ module from metadata.
+        """Generate a complete TLA+ module from this specification.
+
+        Produces a valid TLA+ module with proper formatting including:
+        - Module header and footer lines (77 characters wide)
+        - EXTENDS clause with specified modules
+        - CONSTANTS and VARIABLES declarations
+        - Helper operator definitions
+        - Init formula with initial values for all state variables
+        - Individual Action operators
+        - Next formula combining all actions with disjunction
+        - Spec formula as `Init /\\ [][Next]_vars`
+        - Invariant operators with comments
+
+        The generated module can be saved to a `.tla` file and processed by
+        TLC or the TLA+ Toolbox.
 
         Returns:
-            Complete TLA+ module as a string
+            Complete TLA+ module source code as a string.
+
+        Example:
+            >>> spec = FormalSpec(
+            ...     module="Counter",
+            ...     state_vars=(StateVar("count", "Nat"),),
+            ...     actions=(Action("Inc", updates={"count": "count + 1"}),),
+            ... )
+            >>> tla_source = spec.to_tla()
+            >>> Path("Counter.tla").write_text(tla_source)
         """
         # Generate header line with consistent width (77 chars total)
         # Format: "---- MODULE ModuleName ----" with padding to 77 chars
@@ -590,16 +744,36 @@ class FormalSpec:
         check_deadlock: bool = False,
         state_constraint: str | None = None,
     ) -> str:
-        """Generate TLC model checker configuration.
+        """Generate a TLC model checker configuration file.
+
+        Produces a `.cfg` file for TLC with the specification mode, constant
+        assignments, invariants to check, and optional constraints.
+
+        By default, generates a SPECIFICATION directive using the `Spec`
+        operator. If both `init` and `next` are provided, generates separate
+        INIT and NEXT directives instead (useful for simulation mode or
+        custom specifications).
 
         Args:
-            init: Initial state formula (optional, for simulation mode)
-            next: Next-state formula (optional, for simulation mode)
-            check_deadlock: Whether to check for deadlocks
-            state_constraint: Optional state constraint expression
+            init: Custom initial state formula name. If provided along with
+                `next`, uses INIT/NEXT directives instead of SPECIFICATION.
+            next: Custom next-state formula name. Must be provided with `init`.
+            check_deadlock: If True, enables TLC deadlock checking. Defaults to
+                False, which adds `CHECK_DEADLOCK FALSE` to the config.
+            state_constraint: Custom TLA+ state constraint expression. If
+                provided, overrides the `constraint` field from the spec.
 
         Returns:
-            TLC configuration file content
+            TLC configuration file content as a string.
+
+        Example:
+            >>> spec = FormalSpec(
+            ...     module="Counter",
+            ...     constants={"MaxCount": 10},
+            ...     invariants=(Invariant("INV-1", "Bounded", "count <= MaxCount"),),
+            ... )
+            >>> cfg_content = spec.to_tla_config()
+            >>> Path("Counter.cfg").write_text(cfg_content)
         """
         lines: list[str] = []
 
@@ -655,32 +829,55 @@ def formal_spec(
     helpers: dict[str, str] | None = None,
     constraint: str | None = None,
 ) -> Callable[[type[T]], type[T]]:
-    """Attach formal specification metadata to a class.
+    """Attach TLA+ formal specification metadata to a Python class.
 
-    This decorator associates TLA+ formal specification metadata with a Python
-    class. The metadata can be extracted by pytest plugins to generate and
-    validate TLA+ modules.
+    This decorator embeds a complete TLA+ specification as metadata on a class.
+    The specification can later be extracted using `extract_spec()` from the
+    testing module, then generated and verified with TLC.
+
+    Use this to document the formal model of a class's behavior directly in
+    the source code, enabling automated extraction and verification in tests.
 
     Args:
-        module: TLA+ module name
-        extends: Modules to extend (default: Integers, Sequences, FiniteSets)
-        constants: Constant definitions with default values
-        state_vars: State variable declarations
-        actions: Action definitions
-        invariants: Invariant definitions
-        helpers: Helper operator definitions (raw TLA+)
+        module: TLA+ module name for the generated specification. Should match
+            the class name by convention.
+        extends: Tuple of TLA+ standard modules to extend. Defaults to
+            ("Integers", "Sequences", "FiniteSets") if not specified.
+        constants: Dict mapping constant names to default values for TLC
+            model checking.
+        state_vars: List of StateVar declarations defining the model's state.
+        actions: List of Action definitions representing state transitions.
+        invariants: List of Invariant definitions that TLC will verify.
+        helpers: Dict mapping helper operator names to TLA+ definitions for
+            auxiliary operators used in actions or invariants.
+        constraint: Optional TLA+ state constraint to bound the state space
+            during model checking (e.g., "Len(queue) <= 10").
 
     Returns:
-        Decorator that attaches __formal_spec__ attribute
+        A class decorator that attaches the `__formal_spec__` attribute
+        containing a FormalSpec instance.
 
     Example:
         >>> @formal_spec(
         ...     module="Counter",
         ...     state_vars=[StateVar("count", "Nat", "Current count")],
+        ...     actions=[
+        ...         Action("Increment", updates={"count": "count + 1"}),
+        ...     ],
         ...     invariants=[Invariant("INV-1", "NonNegative", "count >= 0")],
+        ...     constraint="count <= 100",
         ... )
         ... class Counter:
-        ...     pass
+        ...     def __init__(self):
+        ...         self.count = 0
+        ...
+        ...     def increment(self):
+        ...         self.count += 1
+
+    See Also:
+        - `FormalSpec`: The metadata class stored on decorated classes.
+        - `extract_spec()`: Extract the FormalSpec from a decorated class.
+        - `model_check()`: Run TLC on an extracted specification.
     """
 
     def decorator(cls: type[T]) -> type[T]:

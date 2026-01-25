@@ -36,14 +36,45 @@ __all__ = [
 BudgetExceededDimension = Literal[
     "deadline", "total_tokens", "input_tokens", "output_tokens"
 ]
-"""Dimension that caused a budget limit to be exceeded."""
+"""Dimension that caused a budget limit to be exceeded.
+
+Values:
+    - "deadline": Time limit was reached
+    - "total_tokens": Combined input + output tokens exceeded the limit
+    - "input_tokens": Input token count exceeded the limit
+    - "output_tokens": Output token count exceeded the limit
+"""
 
 
 @FrozenDataclass()
 class Budget:
     """Resource envelope combining time and token limits.
 
+    A Budget defines constraints on LLM API usage, including time-based deadlines
+    and token consumption limits. Use with `BudgetTracker` to enforce limits
+    during execution.
+
     At least one limit must be set. Token limits must be positive when provided.
+
+    Attributes:
+        deadline: Optional time limit as a `Deadline` object. When set, operations
+            must complete before this deadline or `BudgetExceededError` is raised.
+        max_total_tokens: Optional limit on combined input + output tokens.
+        max_input_tokens: Optional limit on input (prompt) tokens consumed.
+        max_output_tokens: Optional limit on output (completion) tokens generated.
+
+    Raises:
+        ValueError: If no limits are set, or if any token limit is non-positive.
+
+    Example:
+        >>> from weakincentives.deadlines import Deadline
+        >>> # Budget with 1-hour deadline and 100k total tokens
+        >>> budget = Budget(
+        ...     deadline=Deadline.from_timeout(timedelta(hours=1)),
+        ...     max_total_tokens=100_000,
+        ... )
+        >>> # Budget with only token limits
+        >>> budget = Budget(max_input_tokens=50_000, max_output_tokens=10_000)
     """
 
     deadline: Deadline | None = None
@@ -76,7 +107,25 @@ class Budget:
 
 @FrozenDataclass()
 class BudgetExceededError(WinkError, RuntimeError):
-    """Raised when a budget limit is breached."""
+    """Raised when a budget limit is breached.
+
+    This error is raised by `BudgetTracker.check()` when any configured limit
+    in the associated `Budget` has been exceeded. The error provides full
+    context about which limit was breached and current consumption.
+
+    Attributes:
+        budget: The Budget instance whose limit was exceeded.
+        consumed: TokenUsage snapshot at the time the limit was breached,
+            showing input_tokens, output_tokens, and cached_tokens consumed.
+        exceeded_dimension: Which specific limit was breached (deadline,
+            total_tokens, input_tokens, or output_tokens).
+
+    Example:
+        >>> try:
+        ...     tracker.check()
+        ... except BudgetExceededError as e:
+        ...     print(f"Exceeded {e.exceeded_dimension}: {e.consumed}")
+    """
 
     budget: Budget
     consumed: TokenUsage
@@ -89,9 +138,28 @@ class BudgetExceededError(WinkError, RuntimeError):
 
 @dataclass
 class BudgetTracker:
-    """Tracks cumulative TokenUsage per evaluation against a Budget.
+    """Tracks cumulative token usage across multiple evaluations against a Budget.
 
-    Thread-safe for concurrent execution.
+    BudgetTracker aggregates TokenUsage from concurrent evaluations and enforces
+    the limits defined in the associated Budget. Each evaluation reports its
+    cumulative usage via `record_cumulative()`, and `check()` validates against
+    all configured limits.
+
+    Thread-safe: all operations are protected by an internal lock, allowing
+    concurrent evaluations to safely report usage.
+
+    Attributes:
+        budget: The Budget defining the limits to enforce.
+
+    Example:
+        >>> budget = Budget(max_total_tokens=100_000)
+        >>> tracker = BudgetTracker(budget=budget)
+        >>> # Record usage from evaluation "eval-1"
+        >>> tracker.record_cumulative("eval-1", TokenUsage(input_tokens=1000))
+        >>> # Check if any limits exceeded
+        >>> tracker.check()  # Raises BudgetExceededError if over limit
+        >>> # Get aggregated consumption across all evaluations
+        >>> print(tracker.consumed.total_tokens)
     """
 
     budget: Budget
@@ -99,13 +167,35 @@ class BudgetTracker:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def record_cumulative(self, evaluation_id: str, usage: TokenUsage) -> None:
-        """Record cumulative usage for an evaluation (replaces previous)."""
+        """Record cumulative token usage for a specific evaluation.
+
+        Each call replaces any previously recorded usage for the given evaluation.
+        This is designed for evaluations that report their total cumulative usage
+        rather than incremental deltas.
+
+        Args:
+            evaluation_id: Unique identifier for the evaluation (e.g., "eval-123").
+            usage: The cumulative TokenUsage for this evaluation so far.
+
+        Note:
+            This method is thread-safe. Multiple evaluations can record
+            concurrently without data races.
+        """
         with self._lock:
             self._per_evaluation[evaluation_id] = usage
 
     @property
     def consumed(self) -> TokenUsage:
-        """Sum usage across all evaluations."""
+        """Aggregate token usage across all tracked evaluations.
+
+        Returns:
+            TokenUsage: Combined usage with summed input_tokens, output_tokens,
+                and cached_tokens from all evaluations. Fields default to 0
+                if not set on individual usages.
+
+        Note:
+            This property is thread-safe and computes a fresh sum on each access.
+        """
         # Import lazily to avoid circular import
         from .runtime.events import TokenUsage as TokenUsageClass
 
@@ -123,7 +213,23 @@ class BudgetTracker:
             )
 
     def check(self) -> None:
-        """Raise BudgetExceededError if any limit is breached."""
+        """Validate that all budget limits are satisfied.
+
+        Checks all configured limits in the following order:
+        1. Deadline (if set) - raises immediately if deadline has passed
+        2. Input tokens (if max_input_tokens set)
+        3. Output tokens (if max_output_tokens set)
+        4. Total tokens (if max_total_tokens set)
+
+        Raises:
+            BudgetExceededError: If any configured limit has been exceeded.
+                The error's `exceeded_dimension` indicates which limit was
+                breached first (in check order above).
+
+        Note:
+            Call this periodically during long-running operations to enforce
+            budget constraints. The check is thread-safe.
+        """
         budget = self.budget
 
         # Check deadline first

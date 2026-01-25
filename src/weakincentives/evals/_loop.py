@@ -64,41 +64,59 @@ class EvalLoopConfig:
     - Environment information
 
     Bundles are written to ``{debug_bundle_dir}/{request_id}/{sample_id}_{timestamp}.zip``.
+
+    Example:
+        >>> from weakincentives.runtime.lease_extender import LeaseExtenderConfig
+        >>> config = EvalLoopConfig(
+        ...     lease_extender=LeaseExtenderConfig(interval_seconds=30),
+        ...     debug_bundle_dir=Path("/tmp/eval-bundles"),
+        ... )
     """
 
     lease_extender: LeaseExtenderConfig | None = None
+    """Configuration for automatic lease extension. None disables extension."""
+
     debug_bundle_dir: Path | None = None
+    """Directory for debug bundles. None disables bundle creation."""
 
 
 class EvalLoop[InputT, OutputT, ExpectedT](
     MailboxWorker[EvalRequest[InputT, ExpectedT], EvalResult]
 ):
-    """Mailbox-driven evaluation loop.
+    """Mailbox-driven evaluation loop for running evaluation samples.
 
-    Receives EvalRequest messages, executes through MainLoop, scores
-    with evaluator, and sends EvalResult via Message.reply(). Designed
-    to run alongside MainLoop workers in distributed deployments.
+    EvalLoop orchestrates evaluation by receiving EvalRequest messages from
+    a mailbox, executing each sample through a MainLoop instance, scoring
+    the output with an evaluator, and sending EvalResult responses via
+    Message.reply(). Designed for distributed evaluation deployments.
 
-    Supports both standard and session-aware evaluators. Session-aware
-    evaluators receive a SessionViewProtocol for behavioral assertions.
+    Type Parameters:
+        InputT: Type of sample input (passed to MainLoop).
+        OutputT: Type of MainLoop output (passed to evaluator).
+        ExpectedT: Type of expected value (passed to evaluator).
+
+    Supports both standard and session-aware evaluators. Standard evaluators
+    receive ``(output, expected)`` while session-aware evaluators also receive
+    a SessionViewProtocol for behavioral assertions (tool usage, token counts).
 
     The single mailbox pattern with reply_to routing:
     - requests mailbox: receives EvalRequest messages with reply_to
     - Workers use msg.reply(result) to route responses
 
     Lifecycle:
-        - Use ``run()`` to start processing messages
+        - Use ``run()`` to start processing messages (inherited from MailboxWorker)
         - Call ``shutdown()`` to request graceful stop
         - In-flight samples complete before exit
         - Supports context manager protocol for automatic cleanup
 
     Example:
+        >>> from weakincentives.evals import EvalLoop, exact_match
         >>> eval_loop = EvalLoop(
         ...     loop=main_loop,
         ...     evaluator=exact_match,
         ...     requests=requests_mailbox,
         ... )
-        >>> eval_loop.run(max_iterations=1)
+        >>> eval_loop.run(max_iterations=100)  # Process up to 100 samples
     """
 
     _loop: MainLoop[InputT, OutputT]
@@ -118,16 +136,20 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         """Initialize the EvalLoop.
 
         Args:
-            loop: MainLoop instance for executing samples.
-            evaluator: Scoring function. Can be either:
-                - Standard: (output, expected) -> Score
-                - Session-aware: (output, expected, session) -> Score
+            loop: MainLoop instance for executing samples. The MainLoop handles
+                prompt execution, tool invocation, and session management.
+            evaluator: Scoring function for comparing outputs to expected values.
+                Can be either:
+                - Standard: ``(output, expected) -> Score``
+                - Session-aware: ``(output, expected, session) -> Score``
+                Session-aware evaluators are auto-detected via type hints.
             requests: Mailbox to receive EvalRequest messages from.
                 Response routing derives from each message's reply_to field.
-            config: Optional configuration for evaluation defaults.
+            config: Optional configuration for lease extension and debug bundling.
+                Defaults to EvalLoopConfig() with all features disabled.
             dlq: Optional dead letter queue policy. When configured, messages
                 that fail repeatedly are sent to the DLQ mailbox instead of
-                retrying indefinitely.
+                retrying indefinitely. Useful for preventing infinite retry loops.
         """
         effective_config = config if config is not None else EvalLoopConfig()
         super().__init__(

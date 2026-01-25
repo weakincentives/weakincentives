@@ -72,10 +72,13 @@ class SnapshotMetadata:
     part of tool transaction boundaries.
 
     Attributes:
-        tag: Optional human-readable label for the snapshot.
-        tool_call_id: ID of the tool call that triggered this snapshot.
-        tool_name: Name of the tool being executed.
-        phase: When the snapshot was taken relative to tool execution.
+        tag: Optional human-readable label for the snapshot (e.g., tool name).
+        tool_call_id: ID of the tool call that triggered this snapshot, if any.
+        tool_name: Name of the tool being executed, if applicable.
+        phase: When the snapshot was taken relative to tool execution:
+            - "pre_tool": Before tool execution begins (for rollback on failure).
+            - "post_tool": After tool execution completes.
+            - "manual": Created explicitly via create_snapshot() or tool_transaction().
     """
 
     tag: str | None = None
@@ -89,14 +92,21 @@ class CompositeSnapshot:
     """Consistent snapshot of session and snapshotable resources.
 
     CompositeSnapshot captures a point-in-time view of session slices and all
-    registered snapshotable resources (e.g., filesystem). This enables atomic
-    rollback on tool failure.
+    registered snapshotable resources (e.g., virtual filesystem). This enables
+    atomic rollback on tool failure.
+
+    Use create_snapshot() to capture a snapshot, and restore_snapshot() to
+    restore state. For automatic rollback on exceptions, use the
+    tool_transaction() context manager.
+
+    The snapshot can be serialized to JSON via to_json() and deserialized
+    via from_json() for persistence or debugging.
 
     Attributes:
-        snapshot_id: Unique identifier for this snapshot.
-        created_at: Timestamp when the snapshot was taken.
-        session: Snapshot of session slice state.
-        resources: Mapping of resource types to their snapshots.
+        snapshot_id: Unique identifier for this snapshot (UUID).
+        created_at: UTC timestamp when the snapshot was taken.
+        session: Snapshot of session slice state (all registered slices).
+        resources: Mapping of resource protocol types to their snapshot objects.
         metadata: Optional context about when/why this snapshot was taken.
     """
 
@@ -111,11 +121,17 @@ class CompositeSnapshot:
     def to_json(self) -> str:
         """Serialize the composite snapshot to a JSON string.
 
+        Produces a portable JSON representation that can be stored, logged,
+        or transmitted for later restoration via from_json(). The output
+        includes the schema version for forward compatibility.
+
         Returns:
-            JSON representation of the composite snapshot.
+            JSON string representation of the composite snapshot, including
+            session state, all resource snapshots, and metadata.
 
         Raises:
-            SnapshotSerializationError: If serialization fails.
+            SnapshotSerializationError: If serialization of the session or
+                any resource snapshot fails.
         """
         try:
             # Serialize session snapshot
@@ -170,14 +186,21 @@ class CompositeSnapshot:
     def from_json(cls, raw: str) -> CompositeSnapshot:  # noqa: C901, PLR0912, PLR0915
         """Deserialize a composite snapshot from its JSON representation.
 
+        Parses a JSON string produced by to_json() and reconstructs the
+        CompositeSnapshot object. Validates the schema version and all
+        required fields during deserialization.
+
         Args:
-            raw: JSON string to deserialize.
+            raw: JSON string to deserialize, as produced by to_json().
 
         Returns:
-            Deserialized CompositeSnapshot.
+            Deserialized CompositeSnapshot instance that can be passed to
+            restore_snapshot() to roll back state.
 
         Raises:
-            SnapshotRestoreError: If deserialization fails.
+            SnapshotRestoreError: If the JSON is malformed, the schema version
+                is unsupported, required fields are missing, or type resolution
+                fails for any resource or snapshot type.
         """
         try:
             payload_obj: JSONValue = json.loads(raw)
@@ -317,16 +340,18 @@ class CompositeSnapshot:
 
 @dataclass(slots=True, frozen=True)
 class PendingToolExecution:
-    """Metadata for an in-flight native tool execution.
+    """Metadata and snapshot for an in-flight native tool execution.
 
-    Stored by PendingToolTracker between begin_tool_execution()
-    and end_tool_execution() calls.
+    Created by PendingToolTracker.begin_tool_execution() and stored until
+    end_tool_execution() or abort_tool_execution() is called. Contains the
+    pre-execution snapshot needed for rollback on failure.
 
     Attributes:
-        tool_use_id: Unique identifier for this tool invocation.
+        tool_use_id: Unique identifier for this tool invocation (from adapter).
         tool_name: Name of the tool being executed.
-        snapshot: Composite snapshot taken before tool execution.
-        started_at: Timestamp when tool execution began.
+        snapshot: Composite snapshot taken before tool execution, used for
+            automatic rollback if the tool fails.
+        started_at: UTC timestamp when tool execution began.
     """
 
     tool_use_id: str
@@ -344,15 +369,23 @@ def create_snapshot(
     """Capture consistent snapshot of session and all snapshotable resources.
 
     Takes a point-in-time snapshot of the session state and all registered
-    resources that implement the Snapshotable protocol.
+    singleton resources that implement the Snapshotable protocol. Resources
+    that do not implement Snapshotable are silently skipped.
 
     Args:
-        session: Session to snapshot.
-        resources: Resource context containing snapshotable resources.
-        tag: Optional human-readable label for the snapshot.
+        session: Session to snapshot (captures all registered slices).
+        resources: Resource context (ScopedResourceContext) containing
+            snapshotable resources. Access via prompt.resources.context.
+        tag: Optional human-readable label for the snapshot, useful for
+            debugging and logging.
 
     Returns:
-        CompositeSnapshot containing session and resource snapshots.
+        CompositeSnapshot containing session and resource snapshots that
+        can be passed to restore_snapshot() to roll back state.
+
+    Note:
+        Only singleton-scoped resources are included in the snapshot.
+        TOOL_CALL and PROTOTYPE scoped resources are not snapshotted.
     """
     resource_snapshots: dict[type[object], object] = {}
 
@@ -378,16 +411,25 @@ def restore_snapshot(
 ) -> None:
     """Restore session and all snapshotable resources from a composite snapshot.
 
-    Restores the session state first, then restores each snapshotable resource.
-    If any restore operation fails, a RestoreFailedError is raised.
+    Restores the session state first, then restores each snapshotable resource
+    that was captured in the snapshot. Resources present in the snapshot but
+    no longer in the resource context are silently skipped.
 
     Args:
-        session: Session to restore.
-        resources: Resource context containing snapshotable resources.
-        snapshot: The composite snapshot to restore from.
+        session: Session to restore (same instance used in create_snapshot).
+        resources: Resource context (ScopedResourceContext) containing
+            snapshotable resources. Access via prompt.resources.context.
+        snapshot: The composite snapshot to restore from, as returned by
+            create_snapshot() or the tool_transaction() context manager.
 
     Raises:
-        RestoreFailedError: If restoring any component fails.
+        RestoreFailedError: If restoring the session or any resource fails.
+            The error message indicates which component failed.
+
+    Note:
+        Restoration is not atomic across resources. If a resource restore
+        fails, the session and any previously restored resources will
+        remain in their restored state.
     """
     # Restore session first
     try:
@@ -417,7 +459,7 @@ def tool_transaction(
     *,
     tag: str | None = None,
 ) -> Iterator[CompositeSnapshot]:
-    """Context manager for transactional tool execution.
+    """Context manager for transactional tool execution with automatic rollback.
 
     Takes a snapshot before the block executes. On any exception, the
     snapshot is automatically restored before re-raising. For explicit
@@ -435,14 +477,18 @@ def tool_transaction(
 
     Args:
         session: Session to snapshot and potentially restore.
-        resources: Resource context containing snapshotable resources.
-        tag: Optional human-readable label for the snapshot.
+        resources: Resource context (ScopedResourceContext) containing
+            snapshotable resources. Access via prompt.resources.context.
+        tag: Optional human-readable label for the snapshot, useful for
+            debugging and logging.
 
     Yields:
-        CompositeSnapshot that can be used for manual restoration.
+        CompositeSnapshot that can be used for manual restoration via
+        restore_snapshot() if the tool fails without raising an exception.
 
     Raises:
-        Any exception from the block, after state restoration.
+        Any exception from the block is re-raised after state restoration.
+        RestoreFailedError: If automatic restoration fails (wraps original).
     """
     snapshot = create_snapshot(session, resources, tag=tag)
     try:
@@ -456,12 +502,28 @@ def tool_transaction(
 class PendingToolTracker:
     """Tracks pending tool executions for hook-based transaction management.
 
-    Used by hooks to manage tool execution state across pre_tool_use and
-    post_tool_use hook calls. Provides thread-safe begin/end/abort methods.
+    Used by adapter hooks to manage tool execution state across pre_tool_use
+    and post_tool_use hook calls. Provides thread-safe begin/end/abort methods
+    for managing snapshots during native tool execution.
+
+    Typical usage in hooks::
+
+        tracker = PendingToolTracker(session, prompt.resources.context)
+
+        # In pre_tool_use hook:
+        tracker.begin_tool_execution(tool_use_id, tool_name)
+
+        # In post_tool_use hook:
+        restored = tracker.end_tool_execution(tool_use_id, success=result.success)
+        if restored:
+            log.info("Tool failed, state restored")
+
+        # For timeouts/interrupts:
+        tracker.abort_tool_execution(tool_use_id)
 
     Attributes:
         session: Session for snapshot/restore operations.
-        resources: Resource context for snapshot/restore operations.
+        resources: Resource context (ScopedResourceContext) for snapshot/restore.
     """
 
     session: SessionProtocol
@@ -560,9 +622,16 @@ class PendingToolTracker:
 
     @property
     def pending_tool_executions(self) -> Mapping[str, PendingToolExecution]:
-        """Read-only view of pending tool executions.
+        """Read-only view of currently pending tool executions.
 
-        Useful for debugging and monitoring in-flight tool calls.
+        Useful for debugging and monitoring in-flight tool calls. The mapping
+        keys are tool_use_id strings and values are PendingToolExecution objects
+        containing the pre-execution snapshot and metadata.
+
+        Returns:
+            Immutable mapping of tool_use_id to PendingToolExecution. This is
+            a snapshot copy, so subsequent changes to pending tools won't
+            affect the returned mapping.
 
         Thread Safety:
             Returns a snapshot copy wrapped in MappingProxyType under the lock

@@ -63,9 +63,30 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
     """Generate a workspace digest for prompts containing WorkspaceDigestSection.
 
     This optimizer composes an internal prompt that explores the mounted
-    workspace and produces a task-agnostic summary. The result can be
-    persisted to the session (SESSION scope) or the override store
-    (GLOBAL scope).
+    workspace (via VFS tools and optional asteval) and produces a task-agnostic
+    summary. The digest captures build commands, dependencies, testing
+    instructions, and key technical details to reduce token usage in
+    subsequent prompt evaluations.
+
+    The result can be persisted to:
+        - SESSION scope: Stored in the session for immediate use, lost when
+          the session ends. Good for single-run scenarios.
+        - GLOBAL scope: Persisted to the override store, available across
+          sessions. Requires an overrides_store in the context.
+
+    Requirements:
+        The target prompt must contain:
+        - A WorkspaceDigestSection (receives the generated digest)
+        - A section implementing WorkspaceSection protocol (provides filesystem)
+
+    Example:
+        >>> context = OptimizationContext(adapter=adapter, dispatcher=dispatcher)
+        >>> optimizer = WorkspaceDigestOptimizer(
+        ...     context,
+        ...     store_scope=PersistenceScope.GLOBAL,
+        ... )
+        >>> result = optimizer.optimize(prompt, session=session)
+        >>> print(f"Generated digest: {result.digest[:100]}...")
     """
 
     def __init__(
@@ -75,6 +96,17 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         config: OptimizerConfig | None = None,
         store_scope: PersistenceScope = PersistenceScope.SESSION,
     ) -> None:
+        """Initialize the workspace digest optimizer.
+
+        Args:
+            context: Optimization context providing adapter, dispatcher, and
+                optional deadline/override store configuration.
+            config: Optional configuration overriding default behavior. Set
+                accepts_overrides=False to disable override store integration.
+            store_scope: Where to persist the generated digest. SESSION stores
+                in the current session only; GLOBAL persists to the override
+                store (requires overrides_store in context). Defaults to SESSION.
+        """
         super().__init__(context, config=config)
         self._store_scope = store_scope
 
@@ -92,9 +124,27 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
     ) -> WorkspaceDigestResult:
         """Generate and persist a workspace digest for the given prompt.
 
+        Explores the workspace using VFS tools (and asteval if available),
+        extracts README/docs/workflow files, and generates a task-agnostic
+        digest summarizing build commands, dependencies, and key details.
+
+        The digest is persisted according to the configured store_scope:
+            - SESSION: Calls set_workspace_digest() to store in session
+            - GLOBAL: Writes a SectionOverride to the overrides_store
+
+        Args:
+            prompt: The prompt to optimize. Must contain a WorkspaceDigestSection
+                and a section implementing WorkspaceSection protocol.
+            session: Session context for event dispatch and result storage.
+
+        Returns:
+            WorkspaceDigestResult containing the generated digest, provider
+            response, persistence scope, and updated section key.
+
         Raises:
             PromptEvaluationError: If the prompt lacks required sections
-                or digest extraction fails.
+                (WorkspaceDigestSection or WorkspaceSection), digest extraction
+                fails, or GLOBAL scope is requested without an overrides_store.
         """
         prompt_name = prompt.name or prompt.key
         outer_session = session

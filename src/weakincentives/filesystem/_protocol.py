@@ -50,7 +50,25 @@ from ._types import (
 class Filesystem(Protocol):
     """Unified filesystem protocol for workspace operations.
 
-    All paths are relative strings. Backends normalize paths internally.
+    This protocol abstracts over workspace backends (host filesystem, in-memory,
+    containers) so tool handlers can perform file operations without coupling
+    to a specific storage implementation.
+
+    All paths are relative strings from the workspace root. Backends normalize
+    paths internally and validate they don't escape the workspace boundary.
+
+    Implementations:
+
+    - ``HostFilesystem``: Sandboxed access to a host directory
+    - ``InMemoryFilesystem``: Session-scoped in-memory storage (in contrib)
+
+    Example::
+
+        def read_config(fs: Filesystem) -> dict[str, Any]:
+            if fs.exists("config.json"):
+                result = fs.read("config.json")
+                return json.loads(result.content)
+            return {}
     """
 
     # --- Read Operations ---
@@ -74,6 +92,9 @@ class Filesystem(Protocol):
             limit: Maximum lines to return. None means backend default (2000).
                 Use READ_ENTIRE_FILE (-1) to read entire file without truncation.
             encoding: Text encoding. Only "utf-8" is guaranteed.
+
+        Returns:
+            ReadResult containing the content and pagination metadata.
 
         Raises:
             FileNotFoundError: Path does not exist.
@@ -101,6 +122,9 @@ class Filesystem(Protocol):
                 which uses line offset, this operates on bytes.
             limit: Maximum bytes to return. None means read entire file.
 
+        Returns:
+            ReadBytesResult containing the raw bytes and pagination metadata.
+
         Raises:
             FileNotFoundError: Path does not exist.
             IsADirectoryError: Path is a directory.
@@ -109,14 +133,29 @@ class Filesystem(Protocol):
         ...
 
     def exists(self, path: str) -> bool:
-        """Check if a path exists."""
+        """Check if a path exists in the filesystem.
+
+        Args:
+            path: Relative path from workspace root.
+
+        Returns:
+            True if the path exists (file or directory), False otherwise.
+            Returns False for paths that escape the workspace root.
+        """
         ...
 
     def stat(self, path: str) -> FileStat:
-        """Get metadata for a path.
+        """Get metadata for a file or directory.
+
+        Args:
+            path: Relative path from workspace root.
+
+        Returns:
+            FileStat containing size, timestamps, and type information.
 
         Raises:
             FileNotFoundError: Path does not exist.
+            PermissionError: Path escapes workspace root.
         """
         ...
 
@@ -124,11 +163,15 @@ class Filesystem(Protocol):
         """List directory contents.
 
         Args:
-            path: Directory to list. Defaults to root.
+            path: Directory to list. Defaults to workspace root.
+
+        Returns:
+            Sequence of FileEntry objects sorted by name.
 
         Raises:
             FileNotFoundError: Path does not exist.
             NotADirectoryError: Path is a file.
+            PermissionError: Path escapes workspace root.
         """
         ...
 
@@ -184,18 +227,21 @@ class Filesystem(Protocol):
 
         Args:
             path: Relative path from workspace root.
-            content: UTF-8 text content.
+            content: UTF-8 text content to write.
             mode: Write behavior.
                 - "create": Fail if file exists.
-                - "overwrite": Replace existing content.
+                - "overwrite": Replace existing content (default).
                 - "append": Add to end of file.
-            create_parents: Create parent directories if missing.
+            create_parents: Create parent directories if missing (default True).
+
+        Returns:
+            WriteResult confirming path, bytes written, and mode used.
 
         Raises:
             FileExistsError: mode="create" and file exists.
             FileNotFoundError: Parent directory missing and create_parents=False.
-            PermissionError: Write access denied.
-            ValueError: Content exceeds backend limits.
+            PermissionError: Write access denied or filesystem is read-only.
+            ValueError: Content exceeds backend limits (typically 48000 chars).
         """
         ...
 
@@ -214,18 +260,21 @@ class Filesystem(Protocol):
 
         Args:
             path: Relative path from workspace root.
-            content: Raw byte content.
+            content: Raw byte content to write.
             mode: Write behavior.
                 - "create": Fail if file exists.
-                - "overwrite": Replace existing content.
+                - "overwrite": Replace existing content (default).
                 - "append": Add to end of file.
-            create_parents: Create parent directories if missing.
+            create_parents: Create parent directories if missing (default True).
+
+        Returns:
+            WriteResult confirming path, bytes written, and mode used.
 
         Raises:
             FileExistsError: mode="create" and file exists.
             FileNotFoundError: Parent directory missing and create_parents=False.
-            PermissionError: Write access denied.
-            ValueError: Content exceeds backend limits.
+            PermissionError: Write access denied or filesystem is read-only.
+            ValueError: Content exceeds backend limits (typically 48000 bytes).
         """
         ...
 
@@ -272,12 +321,20 @@ class Filesystem(Protocol):
 
     @property
     def root(self) -> str:
-        """Workspace root path (may be "/" for virtual filesystems)."""
+        """Workspace root path.
+
+        Returns the absolute path to the workspace root directory.
+        For virtual filesystems, this may be "/" or an abstract path.
+        """
         ...
 
     @property
     def read_only(self) -> bool:
-        """True if write operations are disabled."""
+        """Whether write operations are disabled.
+
+        When True, all write operations (write, write_bytes, delete, mkdir)
+        will raise PermissionError.
+        """
         ...
 
 
@@ -285,9 +342,20 @@ class Filesystem(Protocol):
 class SnapshotableFilesystem(Filesystem, Protocol):
     """Filesystem that supports snapshot and restore operations.
 
-    This protocol extends ``Filesystem`` with methods for capturing and
-    restoring filesystem state. Snapshots are immutable and can be stored
-    in session state for later rollback.
+    Extends ``Filesystem`` with methods for capturing and restoring state.
+    Snapshots are immutable and can be stored in session state for rollback
+    after failed tool invocations or exploratory changes.
+
+    Example::
+
+        # Take snapshot before risky operation
+        snapshot = fs.snapshot(tag="before-delete")
+
+        # Perform operation
+        fs.delete("important_file.txt")
+
+        # Oops, restore if needed
+        fs.restore(snapshot)
     """
 
     def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:

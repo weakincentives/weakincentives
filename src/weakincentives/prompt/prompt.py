@@ -92,17 +92,49 @@ def _resolve_output_spec(
 
 @FrozenDataclass(slots=False)
 class PromptTemplate[OutputT]:
-    """Coordinate prompt sections and their parameter bindings.
+    """Immutable template defining prompt structure, sections, and output type.
 
-    PromptTemplate is an immutable dataclass that coordinates prompt sections
-    and their parameter bindings. All construction logic runs through
-    ``__pre_init__`` to derive internal state before the instance is frozen.
+    PromptTemplate coordinates prompt sections, parameter bindings, and output
+    type declarations. It is an immutable dataclass where all construction logic
+    runs through ``__pre_init__`` to derive internal state before freezing.
 
-    Copy helpers ``update()``, ``merge()``, and ``map()`` are available for
-    producing modified copies when needed.
+    Type Parameters:
+        OutputT: The structured output type. Use ``PromptTemplate[MyDataclass]``
+            for object output or ``PromptTemplate[list[MyDataclass]]`` for array
+            output. The dataclass must be decorated with ``@dataclass``.
 
-    Resources can be declared at the template level and will be combined with
-    resources contributed by individual sections.
+    Attributes:
+        ns: Namespace identifier for the prompt (e.g., "myapp", "evals").
+        key: Unique key within the namespace (e.g., "main", "qa-review").
+        name: Optional human-readable display name.
+        sections: Tuple of Section instances defining prompt content and tools.
+        policies: Tool policies applied at the template level.
+        feedback_providers: Feedback provider configurations.
+        allow_extra_keys: Whether to allow extra keys in structured output.
+        resources: ResourceRegistry for dependency injection.
+
+    Example::
+
+        @dataclass
+        class ReviewOutput:
+            rating: int
+            comments: str
+
+        template = PromptTemplate[ReviewOutput](
+            ns="evals",
+            key="code-review",
+            sections=[
+                SystemSection(),
+                InstructionsSection(),
+            ],
+        )
+
+        # For array output:
+        batch_template = PromptTemplate[list[ReviewOutput]](
+            ns="evals",
+            key="batch-review",
+            sections=[...],
+        )
     """
 
     ns: str
@@ -126,6 +158,30 @@ class PromptTemplate[OutputT]:
     _output_dataclass_candidate: ClassVar[Any] = None
 
     def __class_getitem__(cls, item: object) -> type[PromptTemplate[Any]]:
+        """Create a specialized PromptTemplate subclass for structured output.
+
+        This method enables type specialization syntax for declaring structured
+        output types. The specialization creates a new subclass with metadata
+        used during rendering to enforce output schema.
+
+        Args:
+            item: A dataclass type for object output, or ``list[DataclassType]``
+                for array output. The type must be a dataclass.
+
+        Returns:
+            A new PromptTemplate subclass configured for the specified output type.
+
+        Example::
+
+            # Object output - single dataclass instance
+            PromptTemplate[ReviewResult]
+
+            # Array output - list of dataclass instances
+            PromptTemplate[list[ReviewResult]]
+
+        Raises:
+            PromptValidationError: During instantiation if the type is not a dataclass.
+        """
         origin = get_origin(item)
         candidate = item
         container: Literal["object", "array"] | None = "object"
@@ -163,7 +219,30 @@ class PromptTemplate[OutputT]:
         allow_extra_keys: bool | object = MISSING,
         resources: ResourceRegistry | object = MISSING,
     ) -> dict[str, Any]:
-        """Normalize inputs and derive internal state before construction."""
+        """Normalize inputs and derive internal state before construction.
+
+        This method is called by the ``@FrozenDataclass`` decorator before
+        ``__init__``. It validates inputs, builds the section registry, and
+        resolves structured output configuration.
+
+        Args:
+            ns: Namespace identifier (required, must be non-empty after stripping).
+            key: Prompt key (required, must be non-empty after stripping).
+            name: Optional human-readable display name.
+            sections: Sequence of Section instances to include in the template.
+            policies: Tool policies to apply at the template level.
+            feedback_providers: Feedback provider configurations.
+            allow_extra_keys: Whether structured output allows extra keys.
+            resources: ResourceRegistry for dependency injection.
+
+        Returns:
+            Dict of normalized field values for dataclass construction.
+
+        Raises:
+            TypeError: If required arguments ``ns`` or ``key`` are missing.
+            PromptValidationError: If ``ns`` or ``key`` are empty strings,
+                or if structured output type is not a valid dataclass.
+        """
         # Validate required inputs
         if ns is MISSING:
             raise TypeError("PromptTemplate() missing required argument: 'ns'")
@@ -227,7 +306,24 @@ class PromptTemplate[OutputT]:
 
     @property
     def params_types(self) -> set[type[SupportsDataclass]]:
-        """Return the set of parameter types used by this prompt's sections."""
+        """Return the set of parameter dataclass types required by sections.
+
+        Each section declares a ``_params_type`` that specifies which dataclass
+        type it expects for template variable substitution. This property
+        collects all unique types across all sections.
+
+        Use this to understand what parameters must be bound before rendering::
+
+            template = PromptTemplate[Output](ns="app", key="main", sections=[...])
+            for param_type in template.params_types:
+                print(f"Requires: {param_type.__name__}")
+
+        Returns:
+            Set of dataclass types that must be provided via ``Prompt.bind()``.
+
+        Raises:
+            RuntimeError: If called before template initialization completes.
+        """
         snapshot = self._snapshot
         if snapshot is None:  # pragma: no cover
             raise RuntimeError("PromptTemplate._snapshot not initialized")
@@ -235,12 +331,35 @@ class PromptTemplate[OutputT]:
 
     @cached_property
     def descriptor(self) -> PromptDescriptor:
-        """Return the prompt descriptor for this template, computed lazily."""
+        """Return the prompt descriptor for override resolution.
+
+        The descriptor uniquely identifies this prompt template and is used
+        by the overrides system to look up prompt-specific configuration.
+        It captures the namespace, key, and structural fingerprint of the
+        template.
+
+        Computed lazily on first access and cached for subsequent calls.
+
+        Returns:
+            PromptDescriptor containing identifying information for this template.
+        """
         return PromptDescriptor.from_prompt(cast("PromptLike", self))
 
     @property
     def placeholders(self) -> Mapping[SectionPath, frozenset[str]]:
-        """Return the placeholders for each section path."""
+        """Return template variable placeholders for each section.
+
+        Placeholders are ``{variable_name}`` tokens in section bodies that
+        are substituted with values from bound parameters during rendering.
+        This mapping shows which placeholders exist in each section.
+
+        Returns:
+            Mapping from SectionPath to frozenset of placeholder names found
+            in that section's body template.
+
+        Raises:
+            RuntimeError: If called before template initialization completes.
+        """
         snapshot = self._snapshot
         if snapshot is None:  # pragma: no cover
             raise RuntimeError("PromptTemplate._snapshot not initialized")
@@ -248,7 +367,24 @@ class PromptTemplate[OutputT]:
 
     @property
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
-        """Resolved structured output declaration, when present."""
+        """Return the structured output configuration, if declared.
+
+        When the template is specialized with a type (e.g., ``PromptTemplate[MyOutput]``),
+        this property returns the resolved configuration containing the dataclass type,
+        container format (object or array), and validation settings.
+
+        Returns:
+            StructuredOutputConfig if a type was specified during specialization,
+            None otherwise.
+
+        Example::
+
+            template = PromptTemplate[ReviewOutput](ns="app", key="review", ...)
+            config = template.structured_output
+            if config:
+                print(f"Output type: {config.dataclass_type.__name__}")
+                print(f"Container: {config.container}")  # "object" or "array"
+        """
         return self._structured_output
 
     def find_section(
@@ -256,7 +392,31 @@ class PromptTemplate[OutputT]:
         selector: type[Section[SupportsDataclass]]
         | tuple[type[Section[SupportsDataclass]], ...],
     ) -> Section[SupportsDataclass]:
-        """Return the first section matching ``selector``."""
+        """Find and return the first section matching the given type(s).
+
+        Searches the template's section tree for a section that is an instance
+        of the specified type(s). Useful for accessing section-specific
+        configuration or properties.
+
+        Args:
+            selector: A Section subclass type, or a tuple of types to match.
+                The first section matching any of the types is returned.
+
+        Returns:
+            The first Section instance matching the selector.
+
+        Raises:
+            TypeError: If selector is an empty tuple.
+            KeyError: If no section matches the selector.
+
+        Example::
+
+            # Find by single type
+            workspace = template.find_section(WorkspaceSection)
+
+            # Find by multiple types (first match wins)
+            section = template.find_section((SystemSection, InstructionsSection))
+        """
 
         if isinstance(selector, tuple):
             if not selector:
@@ -278,20 +438,47 @@ class PromptTemplate[OutputT]:
 
 
 class Prompt[OutputT]:
-    """Bind a prompt template with overrides and parameters for rendering.
+    """Runtime prompt instance that binds parameters and renders templates.
 
-    Prompt is the only way to render a PromptTemplate. It holds the runtime
-    configuration (overrides store, tag, params) and performs all rendering
-    and override resolution.
+    Prompt wraps a PromptTemplate with runtime configuration including parameter
+    bindings, resource instances, and override settings. It is the only way to
+    render a PromptTemplate into messages for LLM consumption.
 
-    Resource lifecycle is managed via ``prompt.resources``::
+    Type Parameters:
+        OutputT: The structured output type, inherited from the template.
 
-        prompt = Prompt(template).bind(params, resources={Filesystem: fs})
+    Attributes:
+        template: The underlying PromptTemplate being rendered.
+        ns: Namespace identifier (copied from template).
+        key: Prompt key (copied from template).
+        name: Display name (copied from template).
+        overrides_store: Optional store for prompt overrides.
+        overrides_tag: Tag for selecting override version (default: "latest").
 
-        with prompt.resources:  # Resources initialized
+    Basic Usage::
+
+        template = PromptTemplate[Output](ns="app", key="main", sections=[...])
+        prompt = Prompt(template)
+        prompt.bind(MyParams(value=42))
+        rendered = prompt.render()
+
+    With Resources::
+
+        prompt = Prompt(template).bind(
+            params,
+            resources={Filesystem: fs, Logger: logger},
+        )
+
+        with prompt.resources:  # Initialize resources
             rendered = prompt.render()
-            filesystem = prompt.resources.get(Filesystem)
-        # Resources cleaned up
+            fs = prompt.resources.get(Filesystem)
+        # Resources cleaned up automatically
+
+    With Overrides::
+
+        store = FileOverridesStore("/path/to/overrides")
+        prompt = Prompt(template, overrides_store=store, overrides_tag="v2")
+        rendered = prompt.render()  # Uses overrides from store
     """
 
     def __init__(
@@ -300,6 +487,17 @@ class Prompt[OutputT]:
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str = "latest",
     ) -> None:
+        """Create a Prompt instance from a template.
+
+        Args:
+            template: The PromptTemplate to render. Defines structure, sections,
+                and output type.
+            overrides_store: Optional store for loading prompt overrides. When
+                provided, the store is queried during render() to apply section
+                body and tool overrides.
+            overrides_tag: Version tag for selecting overrides (default: "latest").
+                Passed to the overrides store during resolution.
+        """
         super().__init__()
         self.template = template
         self.ns: str = template.ns
@@ -313,32 +511,89 @@ class Prompt[OutputT]:
 
     @property
     def params(self) -> tuple[SupportsDataclass, ...]:
-        """Return the parameters bound to this prompt instance."""
+        """Return all parameter instances bound to this prompt.
+
+        Parameters are dataclass instances passed to ``bind()`` that provide
+        values for template variable substitution in section bodies. Each
+        section's ``_params_type`` determines which parameter instance it uses.
+
+        Returns:
+            Tuple of bound dataclass instances in binding order.
+        """
 
         return self._params
 
     @property
     def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
+        """Return the registered section nodes from the template.
+
+        Each SectionNode wraps a Section with additional registry metadata
+        including the section's path, computed placeholders, and child nodes.
+
+        Returns:
+            Tuple of SectionNode instances representing the prompt structure.
+        """
         # sections is always SectionNode tuple after construction
         return cast(tuple[SectionNode[SupportsDataclass], ...], self.template.sections)
 
     @property
     def descriptor(self) -> PromptDescriptor:
+        """Return the prompt descriptor for override resolution.
+
+        Delegates to the underlying template's descriptor. See
+        ``PromptTemplate.descriptor`` for details.
+
+        Returns:
+            PromptDescriptor identifying this prompt for the overrides system.
+        """
         return self.template.descriptor
 
     @property
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
+        """Return structured output configuration from the template.
+
+        Delegates to the underlying template's structured_output. See
+        ``PromptTemplate.structured_output`` for details.
+
+        Returns:
+            StructuredOutputConfig if declared, None otherwise.
+        """
         return self.template.structured_output
 
     @property
     def feedback_providers(self) -> tuple[FeedbackProviderConfig, ...]:
-        """Return feedback providers configured on this prompt."""
+        """Return feedback provider configurations from the template.
+
+        Feedback providers generate additional context or guidance based on
+        runtime state. They are invoked during prompt rendering to augment
+        section content.
+
+        Returns:
+            Tuple of FeedbackProviderConfig instances from the template.
+        """
         return tuple(self.template.feedback_providers)
 
     def policies_for_tool(self, tool_name: str) -> tuple[ToolPolicy, ...]:
-        """Collect policies that apply to a tool from sections and template.
+        """Collect all tool policies that apply to a specific tool.
 
-        Returns policies in order: section policies first, then prompt-level.
+        Searches for the tool by name in the prompt's sections and collects
+        applicable policies from both the containing section and the template.
+        Policies are returned in precedence order: section-level first, then
+        template-level.
+
+        Args:
+            tool_name: The name of the tool to find policies for.
+
+        Returns:
+            Tuple of ToolPolicy instances applicable to the tool, ordered by
+            precedence (section policies before template policies).
+
+        Example::
+
+            policies = prompt.policies_for_tool("write_file")
+            for policy in policies:
+                if not policy.allows(tool_call):
+                    raise PolicyViolation(policy.message)
         """
         result: list[ToolPolicy] = []
 
@@ -358,7 +613,19 @@ class Prompt[OutputT]:
 
     @cached_property
     def renderer(self) -> PromptRenderer[OutputT]:
-        """Return the prompt renderer, created lazily on first access."""
+        """Return the prompt renderer for this template.
+
+        The renderer handles template variable substitution, section body
+        assembly, and override application. It is created lazily on first
+        access and cached for subsequent renders.
+
+        Returns:
+            PromptRenderer configured with the template's registry snapshot
+            and structured output settings.
+
+        Raises:
+            RuntimeError: If the template was not properly initialized.
+        """
         snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
         if snapshot is None:  # pragma: no cover
             raise RuntimeError("PromptTemplate._snapshot not initialized")
@@ -477,6 +744,21 @@ class Prompt[OutputT]:
         selector: type[Section[SupportsDataclass]]
         | tuple[type[Section[SupportsDataclass]], ...],
     ) -> Section[SupportsDataclass]:
+        """Find and return the first section matching the given type(s).
+
+        Convenience method that delegates to ``template.find_section()``.
+        See ``PromptTemplate.find_section()`` for full documentation.
+
+        Args:
+            selector: A Section subclass type, or tuple of types to match.
+
+        Returns:
+            The first Section instance matching the selector.
+
+        Raises:
+            TypeError: If selector is an empty tuple.
+            KeyError: If no section matches the selector.
+        """
         return self.template.find_section(selector)
 
     def filesystem(self) -> Filesystem | None:

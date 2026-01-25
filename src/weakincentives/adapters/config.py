@@ -59,7 +59,16 @@ class LLMConfig:
     seed: int | None = None
 
     def to_request_params(self) -> dict[str, Any]:
-        """Convert non-None fields to request parameters."""
+        """Convert non-None fields to request parameters.
+
+        Returns a dictionary containing only the configuration fields that have
+        been explicitly set (non-None). This dictionary can be unpacked directly
+        into LLM API calls.
+
+        Returns:
+            Dictionary of parameter names to values, suitable for passing to
+            an LLM completion API. Empty if all fields are None.
+        """
         params: dict[str, Any] = {}
         if self.temperature is not None:
             params["temperature"] = self.temperature
@@ -99,7 +108,19 @@ class OpenAIClientConfig:
     max_retries: int | None = None
 
     def to_client_kwargs(self) -> dict[str, Any]:
-        """Convert non-None fields to client constructor kwargs."""
+        """Convert non-None fields to OpenAI client constructor kwargs.
+
+        Returns a dictionary suitable for unpacking into the ``OpenAI()``
+        client constructor.
+
+        Returns:
+            Dictionary of keyword arguments for ``OpenAI()``. Only includes
+            fields that have been explicitly set (non-None).
+
+        Example:
+            >>> config = OpenAIClientConfig(api_key="sk-...", timeout=30.0)
+            >>> client = OpenAI(**config.to_client_kwargs())
+        """
         kwargs: dict[str, Any] = {}
         if self.api_key is not None:
             kwargs["api_key"] = self.api_key
@@ -184,10 +205,20 @@ class OpenAIModelConfig(LLMConfig):
 
     @override
     def to_request_params(self) -> dict[str, Any]:
-        """Convert non-None fields to request parameters.
+        """Convert non-None fields to OpenAI Responses API parameters.
 
         The Responses API uses ``max_output_tokens`` instead of ``max_tokens``,
-        so this override renames the key accordingly.
+        so this override renames the key accordingly. It also includes
+        OpenAI-specific parameters like ``logprobs`` and ``parallel_tool_calls``.
+
+        Returns:
+            Dictionary of parameter names to values, suitable for passing to
+            the OpenAI Responses API. Empty if all fields are None.
+
+        Raises:
+            ValueError: If instantiated with unsupported parameters (seed, stop,
+                presence_penalty, or frequency_penalty). This check happens in
+                ``__post_init__``, not here.
         """
         params: dict[str, Any] = {}
         self._add_core_params(params)
@@ -214,7 +245,22 @@ class LiteLLMClientConfig:
     num_retries: int | None = None
 
     def to_completion_kwargs(self) -> dict[str, Any]:
-        """Convert non-None fields to completion kwargs."""
+        """Convert non-None fields to LiteLLM completion call kwargs.
+
+        Returns a dictionary suitable for passing to ``litellm.completion()``
+        or ``litellm.acompletion()``. These parameters configure the client
+        connection rather than the model behavior.
+
+        Returns:
+            Dictionary of keyword arguments for LiteLLM completion calls.
+            Only includes fields that have been explicitly set (non-None).
+
+        Example:
+            >>> config = LiteLLMClientConfig(api_key="...", timeout=60.0)
+            >>> response = litellm.completion(
+            ...     model="gpt-4", messages=messages, **config.to_completion_kwargs()
+            ... )
+        """
         kwargs: dict[str, Any] = {}
         if self.api_key is not None:
             kwargs["api_key"] = self.api_key
@@ -244,7 +290,15 @@ class LiteLLMModelConfig(LLMConfig):
 
     @override
     def to_request_params(self) -> dict[str, Any]:
-        """Convert non-None fields to request parameters."""
+        """Convert non-None fields to LiteLLM request parameters.
+
+        Includes all base ``LLMConfig`` parameters plus LiteLLM-specific
+        fields like ``n`` (number of completions) and ``user``.
+
+        Returns:
+            Dictionary of parameter names to values, suitable for passing to
+            LiteLLM completion calls. Empty if all fields are None.
+        """
         params = LLMConfig.to_request_params(self)
         if self.n is not None:
             params["n"] = self.n
@@ -259,7 +313,27 @@ def merge_config_params(
 ) -> dict[str, Any]:
     """Merge config parameters into a base request payload.
 
-    Parameters from config override those in base when both are present.
+    Creates a new dictionary starting with ``base`` parameters, then overlays
+    any non-None values from ``config``. This allows callers to provide
+    request-specific overrides while respecting a baseline configuration.
+
+    Args:
+        base: Base request parameters (e.g., model, messages). These are
+            copied, not modified.
+        config: Optional LLM configuration to overlay. If None, returns a
+            copy of ``base`` unchanged. If provided, its non-None fields
+            override corresponding keys in ``base``.
+
+    Returns:
+        New dictionary with merged parameters. Always a fresh dict, never
+        a reference to ``base``.
+
+    Example:
+        >>> base_params = {"model": "gpt-4", "temperature": 0.5}
+        >>> config = LLMConfig(temperature=0.7, max_tokens=100)
+        >>> merged = merge_config_params(base_params, config)
+        >>> merged
+        {'model': 'gpt-4', 'temperature': 0.7, 'max_tokens': 100}
     """
     result = dict(base)
     if config is not None:

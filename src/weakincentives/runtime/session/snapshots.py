@@ -40,11 +40,29 @@ type PayloadPolicies = Mapping[str, SlicePolicy]
 
 
 class SnapshotSerializationError(WinkError, RuntimeError):
-    """Raised when snapshot capture fails due to unsupported payloads."""
+    """Raised when snapshot capture fails due to unsupported payloads.
+
+    This error indicates that one or more session slices contain values
+    that cannot be serialized to JSON. Common causes include:
+
+    - Non-dataclass values in a slice
+    - Dataclass fields with non-serializable types
+    - Mixed dataclass types within a single slice
+    """
 
 
 class SnapshotRestoreError(WinkError, RuntimeError):
-    """Raised when snapshot restoration fails due to incompatible payloads."""
+    """Raised when snapshot restoration fails due to incompatible payloads.
+
+    This error indicates that a serialized snapshot cannot be restored.
+    Common causes include:
+
+    - Invalid or corrupted JSON payload
+    - Schema version mismatch
+    - Missing or unresolvable type identifiers
+    - Invalid UUID or timestamp formats
+    - Dataclass deserialization failures
+    """
 
 
 def _normalize_tags(
@@ -67,7 +85,19 @@ def normalize_snapshot_state(
 ) -> SnapshotState:
     """Validate snapshot state and return an immutable copy.
 
-    Empty slices (those with no values) are excluded from the result.
+    Ensures all slice keys are dataclass types and all values are
+    serializable dataclass instances. Empty slices (those with no values)
+    are excluded from the result.
+
+    Args:
+        state: Mapping from dataclass types to tuples of dataclass instances.
+
+    Returns:
+        An immutable mapping proxy containing only non-empty, validated slices.
+
+    Raises:
+        ValueError: If slice keys are not dataclass types, values are not
+            dataclass instances, or values cannot be serialized.
     """
 
     normalized: dict[SessionSliceType, SessionSlice] = {}
@@ -103,7 +133,21 @@ def normalize_snapshot_state(
 def normalize_snapshot_policies(
     policies: Mapping[SessionSliceType, object],
 ) -> SnapshotPolicies:
-    """Validate snapshot policies and return an immutable copy."""
+    """Validate snapshot policies and return an immutable copy.
+
+    Ensures all policy keys are dataclass types and all values are
+    valid SlicePolicy instances.
+
+    Args:
+        policies: Mapping from dataclass types to SlicePolicy instances.
+
+    Returns:
+        An immutable mapping proxy containing validated policies.
+
+    Raises:
+        TypeError: If keys are not dataclass types or values are not
+            SlicePolicy instances.
+    """
     normalized: dict[SessionSliceType, SlicePolicy] = {}
     for slice_key, policy in policies.items():
         if not _is_dataclass_type(slice_key):
@@ -281,7 +325,19 @@ def _is_dataclass_type(value: object) -> TypeGuard[type[SupportsDataclass]]:
 
 @FrozenDataclass()
 class SnapshotSlicePayload:
-    """Typed representation of a serialized snapshot slice entry."""
+    """Typed representation of a serialized snapshot slice entry.
+
+    This dataclass holds the intermediate JSON-compatible representation
+    of a session slice before type resolution occurs. It captures:
+
+    Attributes:
+        slice_type: Fully-qualified type identifier for the slice key
+            (e.g., "mymodule.MyEvent").
+        item_type: Fully-qualified type identifier for the actual item
+            type stored in the slice.
+        items: Tuple of JSON object mappings representing serialized
+            dataclass instances.
+    """
 
     slice_type: str
     item_type: str
@@ -289,6 +345,19 @@ class SnapshotSlicePayload:
 
     @classmethod
     def from_object(cls, obj: object) -> SnapshotSlicePayload:
+        """Parse a slice entry from a raw JSON object.
+
+        Args:
+            obj: A mapping containing 'slice_type', 'item_type', and
+                'items' fields from a serialized snapshot.
+
+        Returns:
+            A validated SnapshotSlicePayload instance.
+
+        Raises:
+            SnapshotRestoreError: If the object structure is invalid or
+                contains malformed fields.
+        """
         if not isinstance(obj, Mapping):
             raise SnapshotRestoreError("Slice entry must be an object")
 
@@ -321,7 +390,24 @@ class SnapshotSlicePayload:
 
 @FrozenDataclass()
 class SnapshotPayload:
-    """Typed representation of the serialized snapshot envelope."""
+    """Typed representation of the serialized snapshot envelope.
+
+    This dataclass represents the JSON structure of a serialized snapshot
+    before full type resolution. It serves as an intermediate form between
+    raw JSON and the fully-resolved Snapshot object.
+
+    Use SnapshotPayload.from_json() to parse JSON into this intermediate
+    form, then Snapshot.from_json() for full restoration with type resolution.
+
+    Attributes:
+        version: Schema version string for compatibility checking.
+        created_at: ISO 8601 timestamp string when the snapshot was created.
+        slices: Tuple of SnapshotSlicePayload entries containing session data.
+        parent_id: Optional UUID string of the parent snapshot in the tree.
+        children_ids: Tuple of UUID strings for child snapshots.
+        tags: Immutable string key-value metadata pairs.
+        policies: Mapping of type identifier strings to SlicePolicy values.
+    """
 
     version: str
     created_at: str
@@ -340,13 +426,58 @@ class SnapshotPayload:
 
     @classmethod
     def from_json(cls, raw: str) -> SnapshotPayload:
+        """Parse a snapshot payload from a JSON string.
+
+        This method performs structural validation but does not resolve
+        type identifiers. Use Snapshot.from_json() for full restoration.
+
+        Args:
+            raw: JSON string containing the serialized snapshot payload.
+
+        Returns:
+            A validated SnapshotPayload instance.
+
+        Raises:
+            SnapshotRestoreError: If the JSON is malformed or contains
+                invalid field values.
+        """
         payload = _load_snapshot_object(raw)
         return _construct_snapshot_payload(cls, payload)
 
 
 @FrozenDataclass()
 class Snapshot:
-    """Frozen value object representing session slice state."""
+    """Frozen value object representing session slice state at a point in time.
+
+    A Snapshot captures the complete state of all session slices, enabling
+    serialization to JSON for persistence and later restoration. Snapshots
+    form a tree structure through parent_id and children_ids for tracking
+    state evolution.
+
+    Create snapshots directly for capturing state, or use from_json() to
+    restore previously serialized snapshots.
+
+    Example:
+        >>> from datetime import datetime, UTC
+        >>> snapshot = Snapshot(
+        ...     created_at=datetime.now(UTC),
+        ...     slices={MyEvent: (event1, event2)},
+        ...     tags={"branch": "feature-x"},
+        ... )
+        >>> json_str = snapshot.to_json()
+        >>> restored = Snapshot.from_json(json_str)
+
+    Attributes:
+        created_at: UTC timestamp when the snapshot was created. Naive
+            datetimes are assumed to be UTC.
+        parent_id: Optional UUID of the parent snapshot in the tree.
+        children_ids: Tuple of UUIDs for child snapshots branching from this.
+        slices: Immutable mapping from dataclass types to tuples of
+            dataclass instances representing session state.
+        tags: Immutable string key-value metadata for categorization.
+        policies: Immutable mapping from slice types to SlicePolicy values
+            controlling snapshot behavior per slice.
+    """
 
     created_at: datetime
     parent_id: UUID | None = None
@@ -412,7 +543,25 @@ class Snapshot:
         )
 
     def to_json(self) -> str:
-        """Serialize the snapshot to a JSON string."""
+        """Serialize the snapshot to a JSON string.
+
+        Converts all slice data to a portable JSON representation that can
+        be stored and later restored with from_json(). The output includes:
+
+        - Schema version for compatibility checking
+        - ISO 8601 timestamp
+        - Parent/children UUIDs for tree structure
+        - All slices with type identifiers and serialized items
+        - Tags and policies
+
+        Returns:
+            A deterministically-ordered JSON string suitable for storage
+            or transmission.
+
+        Raises:
+            SnapshotSerializationError: If any slice contains values that
+                cannot be serialized or mixed dataclass types.
+        """
 
         payload_slices: list[dict[str, JSONValue]] = []
         for slice_type, values in sorted(
@@ -483,7 +632,27 @@ class Snapshot:
 
     @classmethod
     def from_json(cls, raw: str) -> Snapshot:
-        """Deserialize a snapshot from its JSON representation."""
+        """Deserialize a snapshot from its JSON representation.
+
+        Parses a JSON string produced by to_json() and fully restores the
+        Snapshot with resolved types. This includes:
+
+        - Schema version validation
+        - Timestamp and UUID parsing
+        - Type identifier resolution to actual dataclass types
+        - Dataclass instance restoration via serde.parse()
+
+        Args:
+            raw: JSON string from a previous to_json() call.
+
+        Returns:
+            A fully restored Snapshot with all types resolved.
+
+        Raises:
+            SnapshotRestoreError: If the JSON is invalid, the schema version
+                is incompatible, type identifiers cannot be resolved, or
+                dataclass deserialization fails.
+        """
         payload = SnapshotPayload.from_json(raw)
         _validate_schema_version(payload.version)
 

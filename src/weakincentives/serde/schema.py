@@ -10,7 +10,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dataclass schema generation helpers."""
+"""JSON Schema generation for Python dataclasses.
+
+This module provides utilities to convert Python dataclasses into JSON Schema
+dictionaries. The generated schemas follow JSON Schema draft conventions and
+can be used for validation, documentation, or API specifications.
+
+Supported Types
+---------------
+- Primitive types: bool, int, float, Decimal, str
+- Date/time types: datetime, date, time (as ISO 8601 strings)
+- UUID: serialized as string with "uuid" format
+- Path: serialized as string
+- Enums: serialized with their values
+- Literal types: constrained to enumerated values
+- Optional/Union types: represented as anyOf schemas
+- Collections: list, set, tuple, dict, Sequence, Mapping
+- Nested dataclasses: recursively converted to object schemas
+
+Example
+-------
+    >>> from dataclasses import dataclass
+    >>> from weakincentives.serde.schema import schema
+    >>>
+    >>> @dataclass
+    ... class User:
+    ...     name: str
+    ...     age: int
+    ...
+    >>> schema(User)
+    {'title': 'User', 'type': 'object', 'properties': {...}, ...}
+
+See Also
+--------
+weakincentives.serde.parse : Parse JSON data into dataclass instances.
+weakincentives.serde.dump : Serialize dataclass instances to JSON-compatible dicts.
+"""
 
 # pyright: reportUnknownArgumentType=false
 # pyright: reportUnknownVariableType=false
@@ -34,15 +69,35 @@ from uuid import UUID
 from ..types import JSONValue
 from ._utils import _UNION_TYPE, _AnyType, _merge_annotated_meta, _ordered_values
 
+#: The Python type representing None (NoneType).
 NULL_TYPE = type(None)
+
+#: JSON Schema type string for null values.
 NULL_JSON_TYPE = "null"
+
+#: Sentinel value used to detect variadic tuple types (e.g., tuple[int, ...]).
 ELLIPSIS_SENTINEL = Ellipsis
+
+#: Extra fields mode: ignore unknown fields during parsing (default behavior).
 IGNORE_EXTRA = "ignore"
+
+#: Extra fields mode: raise an error if unknown fields are present.
 FORBID_EXTRA = "forbid"
+
+#: Extra fields mode: allow and preserve unknown fields.
 ALLOW_EXTRA = "allow"
+
+#: Set of valid extra field handling modes for schema generation.
 EXTRA_MODES = {IGNORE_EXTRA, FORBID_EXTRA, ALLOW_EXTRA}
+
+#: JSON Schema representation of a null type.
 NULL_TYPE_SCHEMA: dict[str, JSONValue] = {"type": NULL_JSON_TYPE}
 
+#: Mapping of Python primitive types to their JSON Schema representations.
+#:
+#: Each entry maps a Python type to a dict containing the JSON Schema "type"
+#: and optional "format" fields. Used internally to generate schemas for
+#: primitive field types.
 PRIMITIVE_FORMATS: dict[type[object], dict[str, JSONValue]] = {
     bool: {"type": "boolean"},
     int: {"type": "integer"},
@@ -363,7 +418,93 @@ def schema(
     alias_generator: Callable[[str], str] | None = None,
     extra: Literal["ignore", "forbid", "allow"] = IGNORE_EXTRA,
 ) -> dict[str, JSONValue]:
-    """Produce a minimal JSON Schema description for a dataclass."""
+    """Generate a JSON Schema dictionary from a dataclass type.
+
+    Converts a Python dataclass into a JSON Schema object specification.
+    The schema includes property definitions for all init-able fields,
+    required field lists, and nested schemas for complex types.
+
+    Parameters
+    ----------
+    cls : type
+        The dataclass type to generate a schema for. Must be decorated
+        with ``@dataclass``.
+    alias_generator : Callable[[str], str] | None, optional
+        A function that transforms field names to property names in the
+        schema. For example, ``lambda s: s.upper()`` would convert all
+        field names to uppercase. Field-level ``alias`` metadata takes
+        precedence over the generator.
+    extra : {"ignore", "forbid", "allow"}, default="ignore"
+        How to handle additional properties not defined in the dataclass:
+
+        - ``"ignore"``: Sets ``additionalProperties: true`` (default)
+        - ``"forbid"``: Sets ``additionalProperties: false``
+        - ``"allow"``: Sets ``additionalProperties: true``
+
+    Returns
+    -------
+    dict[str, JSONValue]
+        A JSON Schema dictionary with the following structure:
+
+        - ``title``: The class name
+        - ``type``: Always ``"object"``
+        - ``properties``: Dict mapping property names to their schemas
+        - ``required``: List of required property names (if any)
+        - ``additionalProperties``: Boolean based on ``extra`` parameter
+
+    Raises
+    ------
+    TypeError
+        If ``cls`` is not a dataclass type.
+    ValueError
+        If ``extra`` is not one of the valid modes.
+
+    Examples
+    --------
+    Basic usage with a simple dataclass:
+
+        >>> from dataclasses import dataclass
+        >>> @dataclass
+        ... class Person:
+        ...     name: str
+        ...     age: int
+        ...
+        >>> schema(Person)
+        {'title': 'Person', 'type': 'object',
+         'properties': {'name': {'type': 'string'}, 'age': {'type': 'integer'}},
+         'additionalProperties': True, 'required': ['name', 'age']}
+
+    Using field constraints via ``Annotated``:
+
+        >>> from typing import Annotated
+        >>> @dataclass
+        ... class Product:
+        ...     price: Annotated[float, {"ge": 0}]
+        ...
+        >>> schema(Product)["properties"]["price"]
+        {'type': 'number', 'minimum': 0}
+
+    Using an alias generator for camelCase conversion:
+
+        >>> def to_camel(s: str) -> str:
+        ...     parts = s.split("_")
+        ...     return parts[0] + "".join(p.title() for p in parts[1:])
+        ...
+        >>> @dataclass
+        ... class Config:
+        ...     max_retries: int
+        ...
+        >>> schema(Config, alias_generator=to_camel)["properties"]
+        {'maxRetries': {'type': 'integer'}}
+
+    Notes
+    -----
+    - Fields with ``init=False`` are excluded from the schema.
+    - Fields with default values or default factories are not marked required.
+    - Nested dataclasses are recursively converted to object schemas.
+    - Union types produce ``anyOf`` schemas.
+    - Optional types (``X | None``) include null in the ``anyOf``.
+    """
     if not dataclasses.is_dataclass(cls):
         raise TypeError("schema() requires a dataclass type")
     if extra not in EXTRA_MODES:

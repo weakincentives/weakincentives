@@ -109,9 +109,13 @@ class Heartbeat:
     def beat(self) -> None:
         """Record a heartbeat and invoke all registered callbacks.
 
+        Call this method regularly from worker loops to signal liveness.
+        The heartbeat timestamp is updated atomically, then all registered
+        callbacks are invoked in registration order.
+
         Callbacks are invoked outside the lock to avoid deadlock.
         Exceptions in callbacks are logged but do not prevent other
-        callbacks from running.
+        callbacks from running or the heartbeat from being recorded.
         """
         with self._lock:
             self._last_beat = self.clock.monotonic()
@@ -125,7 +129,15 @@ class Heartbeat:
                 logger.exception("Heartbeat callback failed")
 
     def elapsed(self) -> float:
-        """Seconds since last heartbeat."""
+        """Return seconds elapsed since the last heartbeat.
+
+        This method is thread-safe and typically called by the watchdog
+        to detect stalled workers.
+
+        Returns:
+            Time in seconds since the most recent ``beat()`` call, or since
+            construction if ``beat()`` has never been called.
+        """
         with self._lock:
             return self.clock.monotonic() - self._last_beat
 
@@ -204,11 +216,24 @@ class Watchdog:
 
     @property
     def stall_threshold(self) -> float:
-        """Seconds without heartbeat before termination."""
+        """Return the stall threshold in seconds.
+
+        If any monitored heartbeat exceeds this elapsed time without
+        a beat, the watchdog will terminate the process.
+        """
         return self._stall_threshold
 
     def start(self) -> None:
-        """Start the watchdog thread."""
+        """Start the watchdog monitoring thread.
+
+        The watchdog runs as a daemon thread, so it will not prevent
+        process exit. If the watchdog is already running, this method
+        is a no-op.
+
+        Once started, the watchdog periodically checks all monitored
+        heartbeats. If any heartbeat exceeds the stall threshold, the
+        process is terminated via SIGKILL.
+        """
         if self._thread is not None:
             return
 
@@ -221,7 +246,14 @@ class Watchdog:
         self._thread.start()
 
     def stop(self) -> None:
-        """Stop the watchdog thread gracefully."""
+        """Stop the watchdog thread gracefully.
+
+        Signals the watchdog to stop and waits for the thread to exit.
+        The wait timeout is twice the check interval. If the watchdog
+        is not running, this method is a no-op.
+
+        This method is safe to call multiple times.
+        """
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=self._check_interval * 2)
@@ -297,7 +329,15 @@ class HealthServer:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        """Start health server in a daemon thread."""
+        """Start the health server in a daemon thread.
+
+        The server runs as a daemon thread, so it will not prevent
+        process exit. If the server is already running, this method
+        is a no-op.
+
+        Once started, the server listens for HTTP requests on the
+        configured host and port.
+        """
         if self._server is not None:
             return
 
@@ -339,7 +379,14 @@ class HealthServer:
         self._thread.start()
 
     def stop(self) -> None:
-        """Stop the health server."""
+        """Stop the health server.
+
+        Shuts down the HTTP server and releases the listening socket.
+        This method blocks until the server thread has exited. If the
+        server is not running, this method is a no-op.
+
+        This method is safe to call multiple times.
+        """
         if self._server is not None:
             self._server.shutdown()
             self._server = None
@@ -347,7 +394,14 @@ class HealthServer:
 
     @property
     def address(self) -> tuple[str, int] | None:
-        """Return (host, port) if running, None otherwise."""
+        """Return the bound address of the running server.
+
+        Returns:
+            A tuple of (host, port) if the server is running, or None
+            if the server has not been started or has been stopped.
+            The port may differ from the configured port if port 0
+            was specified (ephemeral port assignment).
+        """
         if self._server is None:
             return None
         result: tuple[str, int] = self._server.socket.getsockname()

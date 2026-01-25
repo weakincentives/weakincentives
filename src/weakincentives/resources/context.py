@@ -12,7 +12,15 @@
 
 # pyright: reportImportCycles=false
 
-"""Scoped resource resolution context."""
+"""Scoped resource resolution context.
+
+This module provides ``ScopedResourceContext``, the runtime component responsible
+for resolving resources from a ``ResourceRegistry``. It manages instance caching
+per scope, lifecycle hooks (``PostConstruct``, ``Closeable``), and cleanup.
+
+Typical usage is via ``registry.open()`` which returns a context manager that
+handles ``start()`` and ``close()`` automatically.
+"""
 
 from __future__ import annotations
 
@@ -37,8 +45,18 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "resources
 class ScopedResourceContext:
     """Scoped resolution context with lifecycle management.
 
-    Manages resource construction, caching per scope, and cleanup.
-    Use ``tool_scope()`` to enter per-tool-call scopes.
+    Manages resource construction, caching per scope, and cleanup. Implements
+    the ``ResourceResolver`` protocol, allowing it to be passed to providers
+    that need to resolve their own dependencies.
+
+    Scope Behavior:
+        - ``SINGLETON``: One instance per context, cached for lifetime.
+        - ``TOOL_CALL``: Fresh instance per ``tool_scope()`` block, disposed on exit.
+        - ``PROTOTYPE``: New instance on every ``get()`` call, never cached.
+
+    Typical Usage:
+        Use ``registry.open()`` rather than constructing directly. The context
+        manager handles ``start()`` and ``close()`` automatically.
 
     Example::
 
@@ -82,16 +100,33 @@ class ScopedResourceContext:
     """Tracks instantiation order for cleanup."""
 
     def get[T](self, protocol: type[T]) -> T:
-        """Resolve and return resource for protocol.
+        """Resolve and return a resource instance for the given protocol.
 
-        Resolution order:
-        1. Scope-specific cache (singleton or tool-call)
-        2. Invoke provider and cache per scope
+        Looks up the binding registered for ``protocol``, constructs the
+        instance if not cached, and returns it. Caching behavior depends
+        on the binding's scope.
+
+        Args:
+            protocol: The protocol (typically a ``typing.Protocol`` or ABC)
+                identifying the resource to resolve.
+
+        Returns:
+            The resolved resource instance, cast to type ``T``.
 
         Raises:
-            UnboundResourceError: No binding exists.
-            CircularDependencyError: Dependency cycle detected.
-            ProviderError: Provider raised an exception.
+            UnboundResourceError: No binding registered for ``protocol``.
+            CircularDependencyError: A dependency cycle was detected during
+                resolution (e.g., A depends on B, B depends on A).
+            ProviderError: The provider factory raised an exception during
+                construction or ``post_construct()`` failed.
+
+        Resolution Order:
+            1. Check scope-specific cache (singleton or tool-call).
+            2. If not cached, invoke the provider and cache per scope.
+
+        Example::
+
+            http_client = ctx.get(HTTPClient)  # Returns cached or new instance
         """
         binding = self.registry.binding_for(protocol)
         if binding is None:
@@ -122,7 +157,29 @@ class ScopedResourceContext:
         return constructed
 
     def get_optional[T](self, protocol: type[T]) -> T | None:
-        """Resolve if bound, return None otherwise."""
+        """Resolve a resource if bound, otherwise return None.
+
+        Unlike ``get()``, this method does not raise ``UnboundResourceError``
+        when no binding exists. Other resolution errors (circular dependencies,
+        provider failures) are still raised.
+
+        Args:
+            protocol: The protocol identifying the resource to resolve.
+
+        Returns:
+            The resolved resource instance, or ``None`` if no binding exists.
+
+        Raises:
+            CircularDependencyError: A dependency cycle was detected.
+            ProviderError: The provider factory raised an exception.
+
+        Example::
+
+            # Conditionally use a resource if available
+            tracer = ctx.get_optional(Tracer)
+            if tracer is not None:
+                tracer.log("operation started")
+        """
         if protocol not in self.registry:
             return None
         return self.get(protocol)
@@ -184,17 +241,46 @@ class ScopedResourceContext:
     def start(self) -> None:
         """Initialize context and instantiate eager singletons.
 
-        Call before first use to fail fast on configuration errors.
+        Eagerly resolves all bindings marked with ``eager=True``, causing
+        their providers to be invoked immediately. This is useful for:
+
+        - Validating configuration at startup (fail fast).
+        - Pre-warming expensive resources like connection pools.
+        - Ensuring critical services are available before handling requests.
+
+        This method is called automatically by ``registry.open()``. Only call
+        directly if managing the context lifecycle manually.
+
+        Raises:
+            UnboundResourceError: An eager binding has an unbound dependency.
+            CircularDependencyError: Circular dependency among eager bindings.
+            ProviderError: A provider raised an exception during construction.
         """
         for binding in self.registry.eager_bindings():
             _ = self.get(binding.protocol)
 
     def close(self) -> None:
-        """Dispose all instantiated resources implementing Closeable.
+        """Dispose all instantiated resources implementing ``Closeable``.
 
-        Resources are closed in reverse instantiation order.
-        Only SINGLETON and TOOL_CALL scoped resources are tracked and closed;
-        PROTOTYPE resources are not cached and thus not tracked.
+        Iterates through all cached resources in reverse instantiation order
+        and calls ``close()`` on each that implements the ``Closeable``
+        protocol. This ensures proper cleanup of file handles, connections,
+        and other system resources.
+
+        Behavior:
+            - Resources are closed in reverse instantiation order (LIFO).
+            - Only ``SINGLETON`` and ``TOOL_CALL`` scoped resources are tracked.
+            - ``PROTOTYPE`` resources are not cached and must be closed manually.
+            - Errors during individual ``close()`` calls are logged but do not
+              prevent other resources from being closed.
+            - All caches are cleared after closing.
+
+        This method is called automatically by ``registry.open()``. Only call
+        directly if managing the context lifecycle manually.
+
+        Note:
+            After calling ``close()``, the context should not be reused.
+            Create a new context via ``registry.open()`` if needed.
         """
         logger.debug(
             "resource.context.close.start",
@@ -236,17 +322,36 @@ class ScopedResourceContext:
 
     @contextmanager
     def tool_scope(self) -> Iterator[ResourceResolver]:
-        """Enter a tool-call scope.
+        """Enter a tool-call scope for isolated resource resolution.
 
-        Resources with TOOL_CALL scope are fresh within this context
-        and disposed on exit.
+        Creates an isolated scope where ``TOOL_CALL``-scoped resources are
+        freshly instantiated and automatically disposed when the scope exits.
+        This is typically used to provide per-request or per-operation isolation.
+
+        Yields:
+            A ``ResourceResolver`` (this context) for resolving resources
+            within the tool scope.
+
+        Behavior:
+            - ``SINGLETON`` resources remain shared across all scopes.
+            - ``TOOL_CALL`` resources get fresh instances within this scope.
+            - ``PROTOTYPE`` resources are always fresh (unaffected by scoping).
+            - On exit, all ``TOOL_CALL`` resources created in this scope that
+              implement ``Closeable`` are closed in reverse instantiation order.
+            - Nested ``tool_scope()`` calls are supported; each gets its own
+              isolated ``TOOL_CALL`` cache.
 
         Example::
 
             with ctx.tool_scope() as resolver:
                 tracer = resolver.get(Tracer)  # Fresh instance
-                # ... use tracer ...
-            # tracer.close() called automatically
+                db_conn = resolver.get(DBConnection)  # Fresh instance
+                # ... perform tool operation ...
+            # tracer.close() and db_conn.close() called automatically
+
+            # Outside the scope, a new tool_scope gets fresh instances
+            with ctx.tool_scope() as resolver:
+                tracer2 = resolver.get(Tracer)  # Different instance
         """
         logger.debug(
             "resource.tool_scope.enter",

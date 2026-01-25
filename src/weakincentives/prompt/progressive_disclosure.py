@@ -40,7 +40,23 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True, frozen=True)
 class OpenSectionsParams:
-    """Parameters for the open_sections tool."""
+    """Parameters for the open_sections tool.
+
+    This dataclass defines the input schema for the builtin open_sections tool,
+    which models use to request expansion of summarized prompt sections. When a
+    model calls open_sections, the framework raises VisibilityExpansionRequired
+    to signal the caller to re-render with expanded sections.
+
+    Attributes:
+        section_keys: Section keys to expand (dot-notation for nested sections).
+        reason: Explanation of why the model needs the expanded content.
+
+    Example:
+        A model might call open_sections with::
+
+            {"section_keys": ["tools.filesystem", "context.project"],
+             "reason": "Need file operations and project structure details"}
+    """
 
     section_keys: tuple[str, ...] = field(
         metadata={
@@ -63,7 +79,21 @@ class OpenSectionsParams:
 
 @dataclass(slots=True, frozen=True)
 class ReadSectionParams:
-    """Parameters for the read_section tool."""
+    """Parameters for the read_section tool.
+
+    This dataclass defines the input schema for the builtin read_section tool,
+    which models use to retrieve full content of a summarized section without
+    permanently expanding it. Unlike open_sections, this is a read-only operation
+    that returns rendered markdown content directly.
+
+    Attributes:
+        section_key: The key of the section to read (dot-notation for nested).
+
+    Example:
+        A model might call read_section with::
+
+            {"section_key": "guidelines.code-style"}
+    """
 
     section_key: str = field(
         metadata={
@@ -78,7 +108,15 @@ class ReadSectionParams:
 
 @dataclass(slots=True, frozen=True)
 class ReadSectionResult:
-    """Result of the read_section tool."""
+    """Result returned by the read_section tool.
+
+    Contains the fully rendered markdown content of a summarized section.
+    Child sections within the result may still appear summarized depending
+    on their own visibility settings.
+
+    Attributes:
+        content: The rendered markdown content of the section and its children.
+    """
 
     content: str = field(
         metadata={
@@ -87,7 +125,14 @@ class ReadSectionResult:
     )
 
     def render(self) -> str:
-        """Return the canonical textual representation of the result."""
+        """Return the canonical textual representation of this result.
+
+        Called by the framework when serializing tool results for the model.
+        Returns the raw markdown content without additional formatting.
+
+        Returns:
+            The section's rendered markdown content.
+        """
         return self.content
 
 
@@ -172,12 +217,27 @@ def create_open_sections_handler(
 ) -> Tool[OpenSectionsParams, None]:
     """Create an open_sections tool bound to the current prompt state.
 
+    The open_sections tool enables progressive disclosure by allowing models
+    to request expansion of summarized sections. When invoked, the handler
+    validates the requested section keys and raises VisibilityExpansionRequired,
+    which signals the caller to re-render the prompt with expanded visibility.
+
+    This tool is automatically registered when a prompt contains sections with
+    SUMMARY visibility. Sections with tools attached should use open_sections
+    (not read_section) so the tools become available after expansion.
+
     Args:
-        registry: The prompt's section registry snapshot.
-        current_visibility: Current visibility state for all sections.
+        registry: The prompt's section registry snapshot containing all
+            registered sections and their metadata.
+        current_visibility: Mapping from section paths to their current
+            visibility state. Sections already at FULL are silently skipped.
 
     Returns:
-        A Tool instance configured for progressive disclosure.
+        A Tool instance that raises VisibilityExpansionRequired on invocation.
+
+    Raises:
+        PromptValidationError: Via the tool handler if section keys are invalid
+            or all requested sections are already expanded.
     """
 
     def handler(
@@ -215,16 +275,28 @@ def create_read_section_handler(
     The read_section tool allows models to retrieve the full markdown content
     of a summarized section without permanently changing visibility state.
     Unlike open_sections, this is a read-only operation - the section remains
-    summarized in subsequent turns.
+    summarized in subsequent turns, and no VisibilityExpansionRequired is raised.
+
+    Use read_section for sections that have no tools attached, or when you want
+    the model to peek at content without committing to expansion. Use open_sections
+    when the section has tools that should become available after expansion.
 
     Args:
-        registry: The prompt's section registry snapshot.
-        current_visibility: Current visibility state for all sections.
-        param_lookup: Optional parameter lookup for section rendering.
-        session: Optional session for visibility callables that inspect state.
+        registry: The prompt's section registry snapshot containing all
+            registered sections and their metadata.
+        current_visibility: Mapping from section paths to their current
+            visibility state. Reading an already-expanded section raises an error.
+        param_lookup: Optional mapping from parameter types to parameter instances,
+            used to resolve section parameters during rendering.
+        session: Optional session for visibility callables that inspect state
+            and for checking section enablement conditions.
 
     Returns:
-        A Tool instance configured for reading section content.
+        A Tool instance that returns ReadSectionResult with rendered markdown.
+
+    Raises:
+        PromptValidationError: Via the tool handler if the section key is invalid
+            or the section is not currently summarized.
     """
     section_params_lookup = dict(param_lookup or {})
 
@@ -409,14 +481,26 @@ def build_summary_suffix(
 ) -> str:
     """Build the instruction suffix appended to summarized sections.
 
+    Creates the bracketed instruction text that tells models how to expand
+    a summarized section. The suffix is appended after a horizontal rule
+    following the section's summary content.
+
     Args:
-        section_key: The dot-notation key for the summarized section.
-        child_keys: Keys of child sections that would be revealed on expansion.
-        has_tools: Whether the section has tools attached. When False, the suffix
-            directs the model to use read_section instead of open_sections.
+        section_key: The dot-notation key for the summarized section
+            (e.g., "tools.filesystem").
+        child_keys: Keys of direct child sections that would be revealed
+            on expansion. Included in the instruction if non-empty.
+        has_tools: Whether the section has tools attached. When True, the suffix
+            directs the model to use open_sections (which triggers re-rendering).
+            When False, directs to read_section (read-only, returns content).
 
     Returns:
-        Formatted instruction text for the model.
+        Formatted instruction text starting with newlines, horizontal rule,
+        and bracketed expansion instructions.
+
+    Example:
+        >>> build_summary_suffix("tools", ("tools.fs", "tools.git"), has_tools=True)
+        '\\n\\n---\\n[This section is summarized. Call `open_sections` with key "tools" to view full content including subsections: tools.fs, tools.git.]'
     """
     if has_tools:
         # Section has tools - use open_sections to expand and access tools
@@ -456,18 +540,29 @@ def has_summarized_sections(
 ) -> bool:
     """Check if the prompt contains any sections that will render as SUMMARY.
 
+    This function determines whether the progressive disclosure tools should be
+    registered. It evaluates the effective visibility of each section, taking into
+    account base visibility settings, visibility callables, and any overrides stored
+    in session state.
+
+    A section is considered summarized only if:
+    1. Its effective visibility is SUMMARY
+    2. It has a summary defined (summary is not None)
+
     Visibility overrides are managed exclusively via Session state using the
     VisibilityOverrides state slice.
 
     Args:
-        registry: The prompt's section registry snapshot.
-        param_lookup: Optional parameter lookup used to evaluate visibility
-            selectors that depend on section parameters.
+        registry: The prompt's section registry snapshot containing all
+            registered sections and their metadata.
+        param_lookup: Optional mapping from parameter types to parameter instances,
+            used to evaluate visibility selectors that depend on section parameters.
         session: Optional session for visibility callables that inspect state.
             Also used to query VisibilityOverrides from session state.
 
     Returns:
-        True if at least one section renders with SUMMARY visibility.
+        True if at least one enabled section renders with SUMMARY visibility
+        and has a summary defined. False otherwise.
     """
     params = dict(param_lookup or {})
 
@@ -491,20 +586,33 @@ def compute_current_visibility(
     *,
     session: SessionProtocol | None = None,
 ) -> dict[SectionPath, SectionVisibility]:
-    """Compute the effective visibility for all sections.
+    """Compute the effective visibility for all sections in a prompt.
+
+    Iterates over all registered sections and determines their effective visibility
+    by evaluating base visibility settings, visibility callables, and any overrides
+    stored in session state. The result is used by progressive disclosure tools to
+    track which sections are summarized vs expanded.
 
     Visibility overrides are managed exclusively via Session state using the
-    VisibilityOverrides state slice.
+    VisibilityOverrides state slice. Direct visibility_overrides parameters are
+    no longer supported.
 
     Args:
-        registry: The prompt's section registry snapshot.
-        param_lookup: Optional parameter lookup used to evaluate visibility
-            selectors that depend on section parameters.
+        registry: The prompt's section registry snapshot containing all
+            registered sections and their metadata.
+        param_lookup: Optional mapping from parameter types to parameter instances,
+            used to evaluate visibility selectors that depend on section parameters.
         session: Optional session for visibility callables that inspect state.
             Also used to query VisibilityOverrides from session state.
 
     Returns:
-        Mapping from section paths to their effective visibility.
+        Dictionary mapping section paths (tuples of key segments) to their
+        effective SectionVisibility (FULL, SUMMARY, or HIDDEN).
+
+    Example:
+        >>> visibility = compute_current_visibility(registry, session=session)
+        >>> visibility[("tools", "filesystem")]
+        <SectionVisibility.SUMMARY: 'summary'>
     """
     params = dict(param_lookup or {})
     result: dict[SectionPath, SectionVisibility] = {}

@@ -15,6 +15,21 @@
 Provides categorical rating-based evaluation using an LLM to judge outputs.
 Rather than asking for numerical scores (which LLMs calibrate poorly),
 the judge selects from a fixed set of rating labels that map to values.
+
+Key components:
+- ``Rating`` - Literal type for categorical labels (excellent, good, fair, poor, wrong)
+- ``RATING_VALUES`` - Mapping from labels to normalized scores (0.0 to 1.0)
+- ``PASSING_RATINGS`` - Set of ratings that count as passing (excellent, good)
+- ``JudgeOutput`` - Structured output dataclass from judge prompt
+- ``JudgeParams`` - Parameters for the judge prompt template
+- ``JUDGE_TEMPLATE`` - Pre-built prompt template for LLM judging
+- ``llm_judge()`` - Factory function to create LLM-based evaluators
+
+Example usage:
+    >>> from weakincentives.adapters.openai import OpenAIAdapter
+    >>> adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
+    >>> evaluator = llm_judge(adapter, "factual accuracy")
+    >>> score = evaluator("Paris is the capital.", "Paris")
 """
 
 from __future__ import annotations
@@ -32,7 +47,11 @@ if TYPE_CHECKING:
 
 
 Rating = Literal["excellent", "good", "fair", "poor", "wrong"]
-"""Categorical rating labels for LLM-as-judge evaluation."""
+"""Categorical rating labels for LLM-as-judge evaluation.
+
+These labels provide a discrete scale that LLMs can reliably select from,
+avoiding the calibration issues that arise with direct numerical scoring.
+"""
 
 RATING_VALUES: dict[Rating, float] = {
     "excellent": 1.0,  # Fully meets criterion
@@ -41,36 +60,65 @@ RATING_VALUES: dict[Rating, float] = {
     "poor": 0.25,  # Mostly fails criterion
     "wrong": 0.0,  # Completely fails criterion
 }
-"""Mapping from rating labels to normalized score values."""
+"""Mapping from rating labels to normalized score values (0.0 to 1.0).
+
+Use this to convert categorical ratings to numeric scores for aggregation:
+    >>> score_value = RATING_VALUES["good"]  # 0.75
+"""
 
 _PASSING: set[Rating] = {"excellent", "good"}
 PASSING_RATINGS: frozenset[Rating] = frozenset(_PASSING)
-"""Ratings that count as passing."""
+"""Ratings that count as passing for pass/fail determination.
+
+Contains "excellent" and "good". A rating is considered passing if it
+appears in this set.
+"""
 
 
 @dataclass(slots=True, frozen=True)
 class JudgeOutput:
-    """Structured output from judge prompt."""
+    """Structured output from LLM judge evaluation.
+
+    This dataclass defines the expected structured output format when using
+    an LLM as a judge. The rating is a categorical label that maps to a
+    numeric score via ``RATING_VALUES``.
+
+    Example:
+        >>> output = JudgeOutput(rating="good", reason="Mostly correct with minor issues")
+        >>> score_value = RATING_VALUES[output.rating]  # 0.75
+    """
 
     rating: Rating
-    """Categorical label from the rating scale."""
+    """Categorical label from the rating scale (excellent, good, fair, poor, wrong)."""
 
     reason: str
-    """Brief explanation of the rating."""
+    """Brief explanation justifying the rating decision."""
 
 
 @dataclass(slots=True, frozen=True)
 class JudgeParams:
-    """Parameters for the judge prompt."""
+    """Parameters for the LLM judge prompt template.
+
+    These parameters are bound to ``JUDGE_TEMPLATE`` to construct the
+    evaluation prompt. The criterion defines what aspect to evaluate,
+    while output and expected provide the comparison targets.
+
+    Example:
+        >>> params = JudgeParams(
+        ...     criterion="factual accuracy",
+        ...     output="The capital of France is Paris.",
+        ...     expected="Paris is the capital of France.",
+        ... )
+    """
 
     criterion: str
-    """The criterion to evaluate against."""
+    """The evaluation criterion (e.g., "factual accuracy", "clarity")."""
 
     output: str
-    """The output to evaluate."""
+    """The model output to evaluate."""
 
     expected: str
-    """The expected/reference answer."""
+    """The reference/expected answer for comparison."""
 
 
 JUDGE_TEMPLATE: PromptTemplate[JudgeOutput] = PromptTemplate[JudgeOutput](
@@ -103,7 +151,13 @@ Select one rating and explain your reasoning briefly.""",
         ),
     ],
 )
-"""Prompt template for LLM-as-judge evaluation."""
+"""Pre-built prompt template for LLM-as-judge evaluation.
+
+This template is used by ``llm_judge()`` to construct evaluation prompts.
+It expects ``JudgeParams`` for binding and produces ``JudgeOutput``.
+The template instructs the LLM to select a categorical rating and provide
+a brief explanation.
+"""
 
 
 def llm_judge(

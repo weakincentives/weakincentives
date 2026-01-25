@@ -15,6 +15,18 @@
 Session-aware evaluators enable assertions against session state, checking
 not just what the agent produced, but how it got there. This includes
 verifying tool usage patterns, token budgets, and custom state invariants.
+
+All evaluators in this module return factory functions that create
+SessionEvaluator instances. They access session state via the slice
+accessor pattern: ``session[EventType].all()``.
+
+Available evaluators:
+- ``tool_called(name)`` - Assert a tool was called at least once
+- ``tool_not_called(name)`` - Assert a tool was never called
+- ``tool_call_count(name, min_count, max_count)`` - Assert call count bounds
+- ``all_tools_succeeded()`` - Assert no tool failures occurred
+- ``token_usage_under(max_tokens)`` - Assert total tokens within budget
+- ``slice_contains(type, predicate)`` - Assert slice contains matching items
 """
 
 from __future__ import annotations
@@ -216,22 +228,31 @@ def slice_contains[T](
     *,
     min_count: int = 1,
 ) -> SessionEvaluator:
-    """Assert slice contains items matching predicate.
+    """Assert a session slice contains items matching a predicate.
+
+    Queries the session for all items of the specified slice type and
+    counts how many match the predicate. Useful for asserting against
+    custom slice types beyond the built-in ToolInvoked/PromptExecuted.
 
     Args:
-        slice_type: The slice type to query.
-        predicate: Function to test each item.
-        min_count: Minimum matching items required.
+        slice_type: The slice type to query from the session. Must be a
+            type registered as a session slice.
+        predicate: Function that receives each item and returns True if
+            it matches the assertion criteria.
+        min_count: Minimum number of matching items required for the
+            evaluator to pass. Defaults to 1.
 
     Returns:
-        SessionEvaluator that passes if enough items match.
+        SessionEvaluator that passes if at least ``min_count`` items match.
 
     Example:
+        >>> from myapp.slices import PlanStep
         >>> evaluator = slice_contains(
         ...     PlanStep,
         ...     lambda step: step.status == "completed",
-        ...     min_count=1,
+        ...     min_count=3,
         ... )
+        >>> # Passes if at least 3 PlanStep items have status="completed"
     """
 
     def evaluate(

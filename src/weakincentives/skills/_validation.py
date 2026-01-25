@@ -14,6 +14,20 @@
 
 This module provides functions for validating skill structure and resolving
 skill names according to the Agent Skills specification.
+
+The validation functions check that skills conform to the SKILL.md format
+standard, including YAML frontmatter requirements and file/directory
+structure constraints.
+
+Public API:
+    - :func:`resolve_skill_name`: Derive skill name from a mount configuration
+    - :func:`validate_skill_name`: Check that a skill name is valid
+    - :func:`validate_skill`: Validate skill structure and frontmatter
+
+Note:
+    Validation requires the ``pyyaml`` package. Install it with::
+
+        pip install 'weakincentives[skills]'
 """
 
 from __future__ import annotations
@@ -74,19 +88,24 @@ _MAX_COMPATIBILITY_LENGTH = 500
 
 
 def resolve_skill_name(mount: SkillMount) -> str:
-    """Resolve the effective skill name from a mount.
+    """Resolve the effective skill name from a mount configuration.
 
-    The skill name is determined in the following order:
+    The skill name is determined in priority order:
 
-    1. Explicit name from ``mount.name`` if provided
-    2. Directory name if source is a directory
-    3. File stem (without .md extension) if source is a file
+    1. **Explicit name**: Use ``mount.name`` if provided
+    2. **Directory name**: Use the directory name if source is a directory
+    3. **File stem**: Use filename without .md extension if source is a file
+
+    This function does NOT validate that the resolved name follows the Agent
+    Skills naming convention. Use :func:`validate_skill_name` to check validity.
 
     Args:
-        mount: The skill mount to resolve a name for.
+        mount: The skill mount configuration to resolve a name for. The source
+            path should exist, though this function does not verify existence.
 
     Returns:
-        The skill name to use for the destination directory.
+        The skill name string to use for the destination directory. This is
+        used as the skill's identifier for deduplication and discovery.
 
     Example::
 
@@ -101,9 +120,13 @@ def resolve_skill_name(mount: SkillMount) -> str:
         mount = SkillMount(Path("./my-skill.md"))
         assert resolve_skill_name(mount) == "my-skill"
 
-        # Explicit name override
+        # Explicit name override (useful for versioning)
         mount = SkillMount(Path("./v2/review"), name="code-review")
         assert resolve_skill_name(mount) == "code-review"
+
+    Note:
+        The resolved name should be validated with :func:`validate_skill_name`
+        before use in mounting operations to ensure it follows the naming rules.
     """
     if mount.name is not None:
         return mount.name
@@ -116,30 +139,44 @@ def resolve_skill_name(mount: SkillMount) -> str:
 def validate_skill_name(name: str) -> None:
     """Validate that a skill name follows Agent Skills specification.
 
-    According to the Agent Skills spec, skill names must:
+    This function checks that a skill name conforms to the naming rules
+    defined in the Agent Skills specification. Call this after
+    :func:`resolve_skill_name` to ensure the resolved name is valid.
 
-    - Be 1-64 characters long
-    - Contain only lowercase letters, numbers, and hyphens
-    - Not start or end with a hyphen
-    - Not contain consecutive hyphens
+    Naming rules (per Agent Skills spec):
+
+    - Length: 1-64 characters
+    - Characters: lowercase letters (a-z), numbers (0-9), and hyphens (-)
+    - Start/end: must start and end with alphanumeric character
+    - No consecutive hyphens: ``skill--name`` is invalid
+
+    These rules prevent path traversal attacks and ensure consistent naming
+    across different filesystems and platforms.
 
     Args:
-        name: The skill name to validate.
+        name: The skill name to validate. Typically obtained from
+            :func:`resolve_skill_name` or from user input.
 
     Raises:
-        SkillMountError: If the name doesn't meet the specification.
+        SkillMountError: If the name is empty, too long, or contains
+            invalid characters/patterns. The error message describes
+            what rule was violated.
 
     Example::
 
-        from weakincentives.skills import validate_skill_name
+        from weakincentives.skills import validate_skill_name, SkillMountError
 
+        # Valid names
         validate_skill_name("code-review")  # OK
         validate_skill_name("my-skill-2")   # OK
+        validate_skill_name("a")            # OK (minimum length)
 
-        validate_skill_name("My-Skill")     # Raises (uppercase)
-        validate_skill_name("-skill")       # Raises (starts with hyphen)
-        validate_skill_name("skill--v2")    # Raises (consecutive hyphens)
-        validate_skill_name("../escape")    # Raises (invalid characters)
+        # Invalid names raise SkillMountError
+        validate_skill_name("My-Skill")     # Raises: uppercase not allowed
+        validate_skill_name("-skill")       # Raises: starts with hyphen
+        validate_skill_name("skill--v2")    # Raises: consecutive hyphens
+        validate_skill_name("../escape")    # Raises: invalid characters
+        validate_skill_name("")             # Raises: empty name
     """
     if not name:
         msg = "Skill name cannot be empty"
@@ -355,38 +392,61 @@ def _validate_frontmatter(frontmatter: dict[str, Any], dir_name: str | None) -> 
 
 
 def validate_skill(source: Path) -> None:
-    """Validate skill structure before mounting.
+    """Validate skill structure and content before mounting.
 
-    This function checks that a skill path meets the requirements of the
-    Agent Skills specification:
+    This function performs comprehensive validation of a skill according to
+    the Agent Skills specification. It checks both the file/directory structure
+    and the SKILL.md frontmatter content.
 
-    - **Directory skills** must contain a SKILL.md file at the root
-    - **File skills** must have a .md extension and not exceed size limits
-    - **SKILL.md** must have valid YAML frontmatter with required fields
+    Structure validation:
 
-    The frontmatter is validated for:
+    - **Directory skills**: Must contain a SKILL.md file at the root
+    - **File skills**: Must have .md extension and size <= 1 MiB
 
-    - Required fields: ``name`` and ``description``
-    - Optional fields: ``license``, ``compatibility``, ``metadata``, ``allowed-tools``
-    - Field constraints (length, format, types)
-    - For directory skills, ``name`` must match the directory name
+    Frontmatter validation (in SKILL.md):
+
+    - Must start with YAML frontmatter delimited by ``---``
+    - Required fields: ``name`` (str, 1-64 chars) and ``description`` (str, 1-1024 chars)
+    - Optional fields: ``license`` (str), ``compatibility`` (str, max 500 chars),
+      ``metadata`` (dict[str, str]), ``allowed-tools`` (str)
+    - For directory skills, ``name`` must exactly match the directory name
+
+    This function is called automatically during mounting when
+    :attr:`SkillConfig.validate_on_mount` is True (the default).
 
     Args:
-        source: Path to the skill file or directory.
+        source: Path to the skill file or directory. Must exist on the
+            filesystem. Use :meth:`Path.resolve` to get absolute paths
+            if needed.
 
     Raises:
-        SkillValidationError: If the skill structure is invalid.
+        SkillValidationError: If any validation check fails. The error
+            message describes which check failed and why.
+        RuntimeError: If pyyaml is not installed (required for frontmatter parsing).
 
     Example::
 
         from pathlib import Path
-        from weakincentives.skills import validate_skill
+        from weakincentives.skills import validate_skill, SkillValidationError
 
-        # Validates a directory skill has SKILL.md with valid frontmatter
-        validate_skill(Path("./skills/code-review"))
+        # Validate a directory skill
+        try:
+            validate_skill(Path("./skills/code-review"))
+            print("Skill is valid")
+        except SkillValidationError as e:
+            print(f"Invalid skill: {e}")
 
-        # Validates a file skill is markdown with valid frontmatter
+        # Validate a file skill
         validate_skill(Path("./my-skill.md"))
+
+    Note:
+        This function reads the SKILL.md file content to parse frontmatter.
+        For large skill directories, only the SKILL.md file is read during
+        validation; other files are checked during mounting.
+
+    See Also:
+        :class:`SkillValidationError`: Exception raised on validation failure.
+        :data:`MAX_SKILL_FILE_BYTES`: Maximum file size for file skills.
     """
     if source.is_dir():
         # Directory skill must contain SKILL.md

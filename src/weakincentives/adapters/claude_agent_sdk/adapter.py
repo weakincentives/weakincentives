@@ -10,7 +10,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Claude Agent SDK adapter implementation."""
+"""Claude Agent SDK adapter for executing prompts with full agentic capabilities.
+
+This module provides the ``ClaudeAgentSDKAdapter`` which wraps Anthropic's Claude
+Agent SDK to enable prompt execution with tool use, session state management, and
+structured output parsing.
+
+Key features:
+- Hook-based bidirectional state synchronization with Session
+- Automatic MCP server bridging for custom tools defined on prompts
+- Ephemeral home isolation to prevent host configuration interference
+- Progressive disclosure support via visibility expansion signals
+- Budget and deadline enforcement with graceful termination
+- Task completion verification to ensure work is finished before returning
+
+Typical usage:
+    >>> adapter = ClaudeAgentSDKAdapter(model="claude-sonnet-4-5-20250929")
+    >>> response = adapter.evaluate(prompt, session=session)
+"""
 
 from __future__ import annotations
 
@@ -178,12 +195,26 @@ def _extract_message_content(message: Any) -> dict[str, Any]:
 
 
 class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
-    """Adapter using Claude Agent SDK with hook-based state synchronization.
+    """Adapter for executing prompts via the Claude Agent SDK with agentic capabilities.
 
-    This adapter uses the Claude Agent SDK's ClaudeSDKClient to execute
-    prompts with full agentic capabilities. Hooks synchronize state
-    bidirectionally between the SDK's internal execution and the
-    weakincentives Session.
+    This adapter wraps Anthropic's Claude Agent SDK to provide:
+
+    - **Agentic execution**: Full tool use with file editing, bash commands, and
+      web browsing capabilities via the SDK's native toolset.
+    - **State synchronization**: Hooks synchronize state bidirectionally between
+      the SDK's internal execution and the weakincentives Session.
+    - **Custom tools**: Tools defined on prompt sections are bridged to the SDK
+      via an MCP server, making them available alongside native tools.
+    - **Structured output**: Automatic parsing of JSON responses into typed
+      dataclasses via the prompt's output type.
+    - **Isolation**: Each execution runs in an ephemeral home directory to
+      prevent interference from host configuration.
+
+    The adapter implements ``ProviderAdapter[OutputT]`` where ``OutputT`` is the
+    structured output type defined by the prompt template.
+
+    Attributes:
+        CLAUDE_AGENT_SDK_ADAPTER_NAME: Canonical adapter name ("claude_agent_sdk").
 
     Example:
         >>> from weakincentives import Prompt, PromptTemplate, MarkdownSection
@@ -224,6 +255,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         >>> prompt = Prompt(template)
         >>>
         >>> response = adapter.evaluate(prompt, session=session)
+        >>> print(response.output.message)  # Typed access to structured output
     """
 
     def __init__(
@@ -237,13 +269,29 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
     ) -> None:
         """Initialize the Claude Agent SDK adapter.
 
+        Creates an adapter configured for executing prompts via the Claude Agent
+        SDK. The adapter can be reused across multiple ``evaluate()`` calls.
+
         Args:
-            model: Claude model identifier.
-            client_config: SDK client configuration. Defaults to
-                bypassPermissions mode.
-            model_config: Model parameter configuration.
-            allowed_tools: Tools Claude can use (None = all available).
-            disallowed_tools: Tools to explicitly block.
+            model: Claude model identifier (e.g., "claude-sonnet-4-5-20250929",
+                "claude-opus-4-5-20251101"). Determines capabilities, speed, and cost.
+            client_config: SDK client configuration controlling execution behavior.
+                Includes permission mode, working directory, turn limits, and
+                budget constraints. Defaults to ``ClaudeAgentSDKClientConfig()``
+                with bypassPermissions mode for automated execution.
+            model_config: Model-specific parameters like max_thinking_tokens for
+                extended thinking mode. Defaults to ``ClaudeAgentSDKModelConfig()``
+                with the specified model.
+            allowed_tools: Tuple of tool names Claude is permitted to use. When
+                ``None`` (default), all available tools are allowed. Use this to
+                restrict the agent to a specific subset of capabilities.
+            disallowed_tools: Tuple of tool names to explicitly block. Takes
+                precedence over allowed_tools. Useful for disabling dangerous
+                operations like ``Bash`` or ``Write`` in untrusted contexts.
+
+        Note:
+            Tool filtering applies to both SDK-native tools and custom tools
+            bridged from the prompt's sections.
         """
         self._model = model
         self._client_config = client_config or ClaudeAgentSDKClientConfig()
@@ -283,33 +331,54 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
     ) -> PromptResponse[OutputT]:
-        """Evaluate prompt using Claude Agent SDK with hook-based state sync.
+        """Execute a prompt using the Claude Agent SDK with full agentic capabilities.
 
-        Visibility overrides are managed exclusively via Session state using the
-        VisibilityOverrides state slice. Use session[VisibilityOverrides]
-        to set visibility overrides before calling evaluate().
+        This method renders the prompt, invokes the Claude Agent SDK, and returns
+        the structured response. During execution, hooks synchronize state between
+        the SDK and the session, dispatch events, and enforce constraints.
 
+        **State Management**:
+        - Visibility overrides are read from ``session[VisibilityOverrides]``
+        - Tool results and events are dispatched to the session during execution
+        - The session can be inspected after evaluation for state changes
+
+        **Resource Binding**:
         Resources should be bound to the prompt via ``prompt.bind(resources=...)``
-        before calling evaluate(). The adapter will merge workspace resources
-        (filesystem) with any pre-bound resources.
+        before calling evaluate(). If no filesystem is bound, the adapter creates
+        a temporary workspace directory. The adapter manages resource lifecycle
+        via the prompt's resource context.
 
-        When ``heartbeat`` is provided, the adapter beats at key execution
-        points (tool calls via hooks) to prove liveness. Bridged tool handlers
-        receive the heartbeat via ToolContext.beat().
+        **Execution Control**:
+        - ``deadline``: Hard timeout after which execution is terminated
+        - ``budget``: Token limits; execution stops when exhausted
+        - ``heartbeat``: Called during tool execution to prove liveness
 
         Args:
-            prompt: The prompt to evaluate.
-            session: Session for state management and event dispatching.
-            deadline: Optional deadline for execution timeout.
-            budget: Optional token budget constraints.
-            budget_tracker: Optional shared budget tracker.
-            heartbeat: Optional heartbeat for lease extension.
+            prompt: The prompt to evaluate. Must be a ``Prompt[OutputT]`` instance
+                with sections defining the task and optionally custom tools.
+            session: Session for state management and event dispatching. Events
+                like ``PromptRendered`` and ``PromptExecuted`` are dispatched here.
+            deadline: Optional deadline for execution timeout. If expired before
+                or during execution, raises ``PromptEvaluationError``.
+            budget: Optional token budget constraints. Creates a new tracker if
+                ``budget_tracker`` is not provided.
+            budget_tracker: Optional shared budget tracker for cumulative usage
+                across multiple evaluations. Takes precedence over ``budget``.
+            heartbeat: Optional heartbeat callback for lease extension in
+                distributed settings. Called during tool execution.
+            run_context: Optional context for run-level metadata propagation.
 
         Returns:
-            PromptResponse with structured output and events dispatched.
+            ``PromptResponse[OutputT]`` containing:
+            - ``text``: Raw text response from the agent (may be None)
+            - ``output``: Parsed structured output matching the prompt's OutputT
+            - ``prompt_name``: Identifier for logging and debugging
 
         Raises:
-            PromptEvaluationError: If SDK execution fails.
+            PromptEvaluationError: If SDK execution fails, deadline expires,
+                or task completion verification fails.
+            VisibilityExpansionRequired: If progressive disclosure is triggered
+                and the prompt needs re-rendering with expanded visibility.
         """
         if budget and not budget_tracker:
             budget_tracker = BudgetTracker(budget)

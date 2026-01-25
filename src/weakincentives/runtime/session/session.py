@@ -84,8 +84,26 @@ SESSION_ID_BYTE_LENGTH: Final[int] = 16
 
 
 def iter_sessions_bottom_up(root: Session) -> Iterator[Session]:
-    """Yield sessions from the leaves up to the provided root session."""
+    """Yield sessions from the leaves up to the provided root session.
 
+    Traverses the session tree in post-order (children before parents),
+    useful for cleanup operations where child resources must be released
+    before parent resources.
+
+    Args:
+        root: The root session of the tree to traverse. All descendants
+            are visited before the root itself.
+
+    Yields:
+        Session instances in bottom-up order: deepest leaves first,
+        then their parents, until the root is yielded last.
+
+    Example::
+
+        for session in iter_sessions_bottom_up(root_session):
+            session.reset()  # Clean up children before parents
+
+    """
     visited: set[Session] = set()
 
     def _walk(node: Session) -> Iterator[Session]:
@@ -209,6 +227,40 @@ class Session(SessionProtocol):
         tags: Mapping[object, object] | None = None,
         slice_config: SliceFactoryConfig | None = None,
     ) -> None:
+        """Initialize a new session with optional configuration.
+
+        Args:
+            dispatcher: Event dispatcher for telemetry events. If None,
+                creates a new InProcessDispatcher.
+            parent: Optional parent session for hierarchical organization.
+                Child sessions are automatically registered with their parent.
+            session_id: Explicit UUID for the session. If None, generates
+                a new UUID4. Useful for deterministic testing or restoring
+                from a persisted state.
+            created_at: Explicit creation timestamp (must be timezone-aware).
+                If None, uses the current UTC time.
+            tags: String key/value pairs for session metadata. The session_id
+                and parent_session_id (if applicable) are automatically added.
+            slice_config: Factory configuration for creating slice storage.
+                If None, uses the default configuration.
+
+        Raises:
+            ValueError: If created_at is not timezone-aware, or if the
+                session is set as its own parent.
+            TypeError: If tags contain non-string keys or values.
+
+        Example::
+
+            # Basic session
+            session = Session()
+
+            # Session with parent and custom tags
+            child = Session(
+                parent=parent_session,
+                tags={"workflow": "analysis", "stage": "planning"},
+            )
+
+        """
         super().__init__()
         resolved_session_id = session_id if session_id is not None else uuid4()
         resolved_created_at = (
@@ -254,6 +306,24 @@ class Session(SessionProtocol):
 
     @contextmanager
     def locked(self) -> Iterator[None]:
+        """Acquire the session's reentrant lock for thread-safe operations.
+
+        Use this context manager when performing multiple operations that
+        must be atomic. Individual public methods already acquire the lock
+        internally, so this is only needed for compound operations.
+
+        Yields:
+            None. The lock is held for the duration of the context.
+
+        Example::
+
+            with session.locked():
+                # These operations are atomic
+                current = session[Plan].latest()
+                if current is not None:
+                    session[Plan].clear()
+
+        """
         with self._lock:
             yield
 
@@ -277,7 +347,39 @@ class Session(SessionProtocol):
         tags: Mapping[object, object] | None = None,
         slice_config: SliceFactoryConfig | None = None,
     ) -> Session:
-        """Return a new session that mirrors the current state and reducers."""
+        """Create a new session that mirrors this session's state and reducers.
+
+        The clone receives a deep copy of all slice data and reducer
+        registrations. Changes to the clone do not affect the original,
+        and vice versa. Useful for branching execution paths or creating
+        isolated test scenarios.
+
+        Args:
+            dispatcher: Event dispatcher for the cloned session. Required
+                because sharing dispatchers between sessions can cause
+                unexpected event routing.
+            parent: Parent session for the clone. If None, inherits this
+                session's parent (not this session itself).
+            session_id: UUID for the clone. If None, inherits this session's
+                ID (useful for continuation scenarios).
+            created_at: Creation timestamp for the clone. If None, inherits
+                this session's timestamp.
+            tags: Tags for the clone. If None, inherits this session's tags.
+            slice_config: Slice factory configuration. If None, inherits
+                this session's configuration.
+
+        Returns:
+            A new Session instance with copied state and reducer registrations.
+
+        Example::
+
+            from weakincentives.runtime.events import InProcessDispatcher
+
+            # Branch execution for parallel exploration
+            branch = session.clone(dispatcher=InProcessDispatcher())
+            branch.dispatch(ExploreAlternative(option="B"))
+
+        """
         reducer_snapshot, state_snapshot, policy_snapshot = snapshot_reducers_and_state(
             self
         )
@@ -558,29 +660,75 @@ class Session(SessionProtocol):
     @property
     @override
     def dispatcher(self) -> TelemetryDispatcher:
-        """Return the dispatcher backing this session."""
+        """Return the telemetry dispatcher for this session.
 
+        The dispatcher routes events to registered subscribers and is used
+        internally by ``dispatch()`` to emit telemetry. Access this property
+        when you need to subscribe to events or inspect dispatcher state.
+
+        Returns:
+            The TelemetryDispatcher instance (InProcessDispatcher by default).
+
+        """
         return self._dispatcher
 
     @property
     @override
     def parent(self) -> Session | None:
-        """Return the parent session if one was provided."""
+        """Return the parent session, if this session has one.
 
+        Parent sessions form a hierarchy for organizing related execution
+        contexts. A session's parent is set at construction time and cannot
+        be changed afterward.
+
+        Returns:
+            The parent Session, or None if this is a root session.
+
+        """
         return self._parent
 
     @property
     @override
     def tags(self) -> Mapping[str, str]:
-        """Return immutable tags associated with this session."""
+        """Return immutable metadata tags for this session.
 
+        Tags are string key/value pairs useful for filtering, logging,
+        and correlation. The session automatically includes ``session_id``
+        and ``parent_session_id`` (if applicable) in the tags.
+
+        Returns:
+            An immutable mapping of tag names to values. Always includes
+            at least ``session_id``.
+
+        Example::
+
+            session = Session(tags={"workflow": "planning"})
+            assert "session_id" in session.tags
+            assert session.tags["workflow"] == "planning"
+
+        """
         return self._tags
 
     @property
     @override
     def children(self) -> tuple[Session, ...]:
-        """Return direct child sessions in registration order."""
+        """Return direct child sessions in the order they were created.
 
+        Child sessions are automatically registered when created with this
+        session as their parent. Use ``iter_sessions_bottom_up()`` to
+        traverse the full session tree.
+
+        Returns:
+            A tuple of child Session instances. Empty if no children exist.
+
+        Example::
+
+            parent = Session()
+            child1 = Session(parent=parent)
+            child2 = Session(parent=parent)
+            assert parent.children == (child1, child2)
+
+        """
         with self.locked():
             return tuple(self._children)
 
@@ -594,10 +742,35 @@ class Session(SessionProtocol):
     ) -> SnapshotProtocol:
         """Capture an immutable snapshot of the current session state.
 
+        Snapshots preserve slice data for later restoration. By default,
+        only STATE slices are captured; LOG slices are excluded to avoid
+        duplicating append-only telemetry data.
+
         Args:
-            tag: Optional label for the snapshot (unused, reserved for future use).
-            policies: Slice policies to include when include_all is False.
-            include_all: If True, snapshot all slices regardless of policy.
+            tag: Optional label for the snapshot (reserved for future use).
+            policies: Set of SlicePolicy values to include. Default is
+                ``{SlicePolicy.STATE}``. Slices with policies not in this
+                set are excluded unless ``include_all`` is True.
+            include_all: If True, captures all slices regardless of their
+                policy, including LOG slices.
+
+        Returns:
+            A SnapshotProtocol containing the captured state, metadata,
+            and policy information needed for restoration.
+
+        Raises:
+            SnapshotSerializationError: If slice data cannot be serialized.
+
+        Example::
+
+            # Capture state before risky operation
+            checkpoint = session.snapshot()
+
+            try:
+                session.dispatch(RiskyOperation())
+            except OperationFailed:
+                session.restore(checkpoint)  # Rollback on failure
+
         """
         del tag
 

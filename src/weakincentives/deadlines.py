@@ -10,7 +10,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Deadline utilities for orchestrating prompt evaluations."""
+"""Deadline utilities for time-bound operations.
+
+This module provides the ``Deadline`` class, an immutable value object for
+tracking wall-clock expirations. Deadlines are useful for setting time limits
+on operations, tracking elapsed time, and ensuring timezone-aware time handling.
+
+All datetime values must be timezone-aware (typically UTC). The module integrates
+with the clock abstraction layer to support both production use with real time
+and testing with controllable fake clocks.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +34,25 @@ __all__ = ["Deadline"]
 
 @FrozenDataclass()
 class Deadline:
-    """Immutable value object describing a wall-clock expiration.
+    """Immutable value object representing a wall-clock expiration time.
+
+    A Deadline tracks when an operation should expire and how much time has
+    elapsed since tracking began. All datetime values must be timezone-aware
+    to ensure correct behavior across timezones.
+
+    Args:
+        expires_at: When the deadline expires. Must be timezone-aware and
+            at least 1 second in the future at creation time.
+        started_at: When deadline tracking started. Defaults to the current
+            time at creation. Must be timezone-aware if provided.
+        clock: Clock implementation for time operations. Defaults to
+            ``SYSTEM_CLOCK``. Inject a ``TestClock`` for deterministic testing.
+
+    Raises:
+        ValueError: If ``expires_at`` is not timezone-aware.
+        ValueError: If ``expires_at`` is not in the future.
+        ValueError: If ``expires_at`` is less than 1 second in the future.
+        ValueError: If ``started_at`` is provided but not timezone-aware.
 
     Example::
 
@@ -35,7 +62,7 @@ class Deadline:
         # Create a deadline 1 hour from now
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1))
 
-        # Check remaining time
+        # Check remaining time until expiration
         remaining = deadline.remaining()
 
         # Check elapsed time since deadline was created
@@ -61,10 +88,12 @@ class Deadline:
     """
 
     expires_at: datetime
+    """The timezone-aware datetime when this deadline expires."""
     started_at: datetime | None = None
-    """When the deadline tracking started. Defaults to creation time."""
+    """When deadline tracking started. Defaults to creation time if not provided."""
     clock: WallClock = field(default=SYSTEM_CLOCK, repr=False, compare=False)
-    """Clock for time operations. Defaults to system clock."""
+    """Clock used for ``remaining()`` and ``elapsed()`` calculations. Inject a
+    ``TestClock`` for deterministic testing. Excluded from repr and equality."""
 
     def __post_init__(self) -> None:
         expires_at = self.expires_at
@@ -92,17 +121,27 @@ class Deadline:
             raise ValueError(msg)
 
     def remaining(self, *, now: datetime | None = None) -> timedelta:
-        """Return the remaining duration before expiration.
+        """Return the time remaining until this deadline expires.
+
+        Use this to check how much time is left for an operation, implement
+        timeouts, or decide whether to continue or abort.
 
         Args:
-            now: Override current time. If None, uses the clock's utcnow().
-                Must be timezone-aware.
+            now: Override current time for calculation. If ``None``, uses the
+                clock's ``utcnow()``. Must be timezone-aware if provided.
 
         Returns:
-            Duration until expiration. May be negative if deadline has passed.
+            A timedelta representing time until expiration. Positive if the
+            deadline is still in the future, negative if it has passed.
 
         Raises:
-            ValueError: If now is provided but not timezone-aware.
+            ValueError: If ``now`` is provided but not timezone-aware.
+
+        Example::
+
+            if deadline.remaining() < timedelta(seconds=30):
+                # Not enough time, abort operation
+                raise TimeoutError("Insufficient time remaining")
         """
         current = now if now is not None else self.clock.utcnow()
         if current.tzinfo is None or current.utcoffset() is None:
@@ -112,17 +151,26 @@ class Deadline:
         return self.expires_at - current
 
     def elapsed(self, *, now: datetime | None = None) -> timedelta:
-        """Return the duration since tracking started.
+        """Return the time elapsed since this deadline started tracking.
+
+        Use this to measure how long an operation has been running, for
+        logging, metrics, or progress reporting.
 
         Args:
-            now: Override current time. If None, uses the clock's utcnow().
-                Must be timezone-aware.
+            now: Override current time for calculation. If ``None``, uses the
+                clock's ``utcnow()``. Must be timezone-aware if provided.
 
         Returns:
-            Duration since started_at. Always non-negative under normal use.
+            A timedelta representing time since ``started_at``. Always
+            non-negative under normal operation (when ``now >= started_at``).
 
         Raises:
-            ValueError: If now is provided but not timezone-aware.
+            ValueError: If ``now`` is provided but not timezone-aware.
+
+        Example::
+
+            elapsed = deadline.elapsed()
+            logger.info(f"Operation running for {elapsed.total_seconds():.1f}s")
         """
         current = now if now is not None else self.clock.utcnow()
         if current.tzinfo is None or current.utcoffset() is None:

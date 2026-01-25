@@ -10,7 +10,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Structured logging helpers for :mod:`weakincentives`."""
+"""Structured logging helpers for :mod:`weakincentives`.
+
+This module provides structured logging infrastructure that enforces a consistent
+event-based schema across all log messages. Key features:
+
+- **Structured events**: All logs require an ``event`` field for categorization
+- **Contextual binding**: Logger instances can carry bound context across calls
+- **Dual formatters**: JSON output for production, human-readable text for development
+- **Environment configuration**: Control level and format via environment variables
+
+Example:
+    >>> from weakincentives.runtime.logging import get_logger, configure_logging
+    >>> configure_logging(level="DEBUG")
+    >>> log = get_logger("myapp").bind(user_id="u123")
+    >>> log.info("User logged in", event="auth.login", extra={"ip": "10.0.0.1"})
+"""
 
 from __future__ import annotations
 
@@ -27,11 +42,27 @@ from ..types import JSONValue
 if TYPE_CHECKING:
     from .run_context import RunContext
 
+#: Type alias for structured log context payloads.
+#:
+#: A StructuredLogPayload is an immutable mapping of string keys to JSON-serializable
+#: values. It represents the contextual data attached to log records, including
+#: bound context from :meth:`StructuredLogger.bind` and inline context passed
+#: to log calls.
+#:
+#: Supported value types: str, int, float, bool, None, list, dict (nested).
 type StructuredLogPayload = Mapping[str, JSONValue]
 
 
 class SupportsLogMessage(Protocol):
-    """Protocol describing values that logging can stringify."""
+    """Protocol for objects that can be used as log message arguments.
+
+    Any object implementing ``__str__`` satisfies this protocol. The logging
+    infrastructure calls ``str()`` on message arguments to produce the final
+    log output.
+
+    This protocol enables type-safe logging with custom message objects that
+    defer string formatting until the log level is actually enabled.
+    """
 
     @override
     def __str__(self) -> str: ...
@@ -60,7 +91,32 @@ _LEVEL_NAMES = {
 
 
 class StructuredLogger(logging.LoggerAdapter[logging.Logger]):
-    """Logger adapter enforcing a minimal structured event schema."""
+    """Logger adapter enforcing a minimal structured event schema.
+
+    StructuredLogger wraps a standard :class:`logging.Logger` and enforces that
+    all log calls include an ``event`` field for categorization. Context can be
+    bound at construction time or via :meth:`bind` to create child loggers with
+    additional fields.
+
+    Log calls support three ways to pass structured data:
+
+    1. **event** (required): Pass as keyword argument or in ``extra``
+    2. **context**: Merged from bound context + inline ``context=`` kwarg + ``extra`` fields
+    3. **extra**: Additional fields merged into context (except ``event``)
+
+    Example:
+        >>> log = StructuredLogger(logging.getLogger("myapp"))
+        >>> log.info("Request received", event="http.request", context={"path": "/api"})
+        >>> child = log.bind(request_id="req-123")
+        >>> child.info("Processing", event="http.process")  # includes request_id
+
+    Args:
+        logger: The underlying :class:`logging.Logger` to wrap.
+        context: Optional initial context payload bound to all log calls.
+
+    Raises:
+        TypeError: If a log call is made without an ``event`` field.
+    """
 
     def __init__(
         self,
@@ -68,6 +124,13 @@ class StructuredLogger(logging.LoggerAdapter[logging.Logger]):
         *,
         context: StructuredLogPayload | None = None,
     ) -> None:
+        """Initialize the structured logger with optional bound context.
+
+        Args:
+            logger: The underlying Logger instance to wrap.
+            context: Optional mapping of key-value pairs to include in every
+                log record emitted by this adapter.
+        """
         base_context: dict[str, JSONValue] = (
             dict(context) if context is not None else {}
         )
@@ -75,8 +138,28 @@ class StructuredLogger(logging.LoggerAdapter[logging.Logger]):
         self._context: dict[str, JSONValue] = base_context
 
     def bind(self, **context: JSONValue) -> StructuredLogger:
-        """Return a new adapter with ``context`` merged into the baseline payload."""
+        """Create a child logger with additional bound context.
 
+        Returns a new StructuredLogger that inherits all context from this logger
+        plus the additional key-value pairs provided. The original logger is
+        unchanged. Context keys in ``context`` override keys from the parent.
+
+        This is the primary mechanism for adding correlation IDs, request metadata,
+        or other contextual information that should appear in all subsequent logs.
+
+        Args:
+            **context: Key-value pairs to add to the bound context. Values must
+                be JSON-serializable (str, int, float, bool, None, list, dict).
+
+        Returns:
+            A new StructuredLogger with merged context.
+
+        Example:
+            >>> log = get_logger("myapp")
+            >>> request_log = log.bind(request_id="req-123", user_id="u456")
+            >>> request_log.info("Starting", event="request.start")
+            >>> # All logs from request_log include request_id and user_id
+        """
         merged: dict[str, JSONValue] = {**dict(self._context), **context}
         return type(self)(self.logger, context=merged)
 
@@ -113,6 +196,23 @@ class StructuredLogger(logging.LoggerAdapter[logging.Logger]):
     def process(
         self, msg: SupportsLogMessage, kwargs: MutableMapping[str, object]
     ) -> tuple[SupportsLogMessage, MutableMapping[str, object]]:
+        """Process log call arguments into the structured schema.
+
+        This method is called by the logging framework before each log emission.
+        It merges bound context with inline context, extracts the required
+        ``event`` field, and restructures ``extra`` to contain exactly
+        ``{"event": ..., "context": {...}}``.
+
+        Args:
+            msg: The log message (supports lazy string formatting).
+            kwargs: Mutable mapping of keyword arguments from the log call.
+
+        Returns:
+            Tuple of (message, modified kwargs) for the underlying logger.
+
+        Raises:
+            TypeError: If no ``event`` field is provided in kwargs or extra.
+        """
         extra_mapping = self._get_extra_mapping(kwargs)
         context_payload: dict[str, JSONValue] = dict(self._context)
 
@@ -141,12 +241,36 @@ def get_logger(
     | None = None,
     context: StructuredLogPayload | None = None,
 ) -> StructuredLogger:
-    """Return a :class:`StructuredLogger` scoped to ``name``.
+    """Create or wrap a logger as a StructuredLogger.
 
-    When ``logger_override`` is provided, the returned adapter reuses the supplied
-    logger and merges its contextual ``extra`` payload when available.
+    This is the primary entry point for obtaining a structured logger. It either
+    creates a new logger with the given name or wraps an existing logger/adapter,
+    preserving any bound context from the original.
+
+    Args:
+        name: Logger name, typically ``__name__`` for module-scoped loggers.
+            Ignored if ``logger_override`` is provided.
+        logger_override: Optional existing logger or adapter to wrap. If a
+            StructuredLogger or LoggerAdapter with ``extra``, its context is
+            preserved and merged with ``context``.
+        context: Optional initial context to bind to the returned logger.
+            Merged with any context from ``logger_override`` (override wins).
+
+    Returns:
+        A StructuredLogger wrapping the resolved underlying Logger.
+
+    Example:
+        >>> # Module-scoped logger
+        >>> log = get_logger(__name__)
+        >>>
+        >>> # Wrap existing logger with added context
+        >>> stdlib_logger = logging.getLogger("legacy")
+        >>> log = get_logger("wrapped", logger_override=stdlib_logger, context={"v": 2})
+        >>>
+        >>> # Chain from existing StructuredLogger
+        >>> parent = get_logger("parent").bind(trace_id="abc")
+        >>> child = get_logger("child", logger_override=parent)  # inherits trace_id
     """
-
     base_context: dict[str, JSONValue] = dict(context or {})
     base_logger: logging.Logger
 
@@ -213,17 +337,43 @@ def configure_logging(
     env: Mapping[str, str] | None = None,
     force: bool = False,
 ) -> None:
-    """Configure the root logger with sensible defaults.
+    """Configure the root logger with sensible defaults for structured logging.
 
-    ``level`` and ``json_mode`` can be supplied directly or via the
-    ``WEAKINCENTIVES_LOG_LEVEL`` and ``WEAKINCENTIVES_LOG_FORMAT`` environment
-    variables respectively (``json`` enables structured output, ``text`` keeps the
-    plain formatter).
+    Sets up the root logger with either a human-readable text formatter (default)
+    or a machine-parseable JSON formatter. Configuration can be provided via
+    arguments or environment variables.
 
-    The function avoids installing duplicate handlers when the host application has
-    already configured logging unless ``force=True`` is supplied.
+    Environment Variables:
+        WEAKINCENTIVES_LOG_LEVEL: Log level name (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        WEAKINCENTIVES_LOG_FORMAT: Output format ("json" or "text")
+
+    Args:
+        level: Log level as int (e.g., ``logging.DEBUG``) or string (e.g., "DEBUG").
+            Falls back to ``WEAKINCENTIVES_LOG_LEVEL`` env var, then INFO.
+        json_mode: If True, use JSON formatter; if False, use text formatter.
+            Falls back to ``WEAKINCENTIVES_LOG_FORMAT`` env var (``json`` = True).
+        env: Environment mapping for variable lookup. Defaults to ``os.environ``.
+        force: If True, reconfigure even if handlers already exist. If False
+            (default), only set the level when handlers are already configured
+            to avoid disrupting the host application's logging setup.
+
+    Example:
+        >>> # Basic setup for development
+        >>> configure_logging(level="DEBUG")
+        >>>
+        >>> # Production setup with JSON output
+        >>> configure_logging(level="INFO", json_mode=True)
+        >>>
+        >>> # Let environment control configuration
+        >>> import os
+        >>> os.environ["WEAKINCENTIVES_LOG_LEVEL"] = "WARNING"
+        >>> os.environ["WEAKINCENTIVES_LOG_FORMAT"] = "json"
+        >>> configure_logging()
+
+    Note:
+        Call this once at application startup. Library code should not call
+        this function; let the application configure logging.
     """
-
     env = env or os.environ
 
     if level is not None:

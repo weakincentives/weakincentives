@@ -31,7 +31,36 @@ class OptimizationContext:
     """Immutable context bundle for optimization algorithms.
 
     Optimizers that require provider evaluation receive dependencies through
-    this context rather than direct adapter references.
+    this context rather than direct adapter references. This decouples optimizer
+    implementations from specific provider configurations and enables consistent
+    handling of deadlines, overrides, and telemetry.
+
+    All fields are immutable after construction, ensuring thread-safety and
+    predictable behavior when the same context is shared across multiple
+    optimization calls.
+
+    Attributes:
+        adapter: Provider adapter used to evaluate optimization prompts.
+            The adapter handles model invocation and response parsing.
+        dispatcher: Event dispatcher for emitting optimization telemetry.
+            Optimization events flow through this dispatcher for observability.
+        deadline: Optional time limit for the optimization operation. When set,
+            the optimizer will abort if the deadline expires.
+        overrides_store: Optional store for caching optimization results.
+            When provided with GLOBAL scope, results persist across sessions.
+        overrides_tag: Version tag for override lookups (default: "latest").
+            Use different tags to maintain multiple optimization versions.
+        optimization_session: Optional pre-configured session for evaluation.
+            When None, optimizers create fresh isolated sessions internally.
+
+    Example:
+        >>> context = OptimizationContext(
+        ...     adapter=my_adapter,
+        ...     dispatcher=session.dispatcher,
+        ...     deadline=Deadline.from_timeout(timedelta(seconds=30)),
+        ...     overrides_store=my_store,
+        ... )
+        >>> optimizer = WorkspaceDigestOptimizer(context)
     """
 
     adapter: ProviderAdapter[object]

@@ -52,7 +52,25 @@ _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyTy
 
 @FrozenDataclass()
 class RenderedPrompt[OutputT_co]:
-    """Rendered prompt text paired with structured output metadata."""
+    """The result of rendering a prompt template with parameters.
+
+    Contains the rendered text, collected tools from enabled sections,
+    structured output configuration, and optional deadline constraints.
+
+    This is an immutable dataclass returned by `PromptRenderer.render()`.
+
+    Attributes:
+        text: The fully rendered prompt text with all sections joined.
+        structured_output: Configuration for structured output parsing, if any.
+        deadline: Optional deadline constraint for the prompt execution.
+        descriptor: Metadata identifying the prompt template that was rendered.
+
+    Example:
+        rendered = renderer.render(param_lookup)
+        print(rendered.text)           # The prompt text
+        print(rendered.tools)          # Tools contributed by sections
+        print(rendered.output_type)    # Expected output dataclass type
+    """
 
     text: str
     structured_output: StructuredOutputConfig[SupportsDataclass] | None = None
@@ -71,7 +89,16 @@ class RenderedPrompt[OutputT_co]:
 
     @property
     def tools(self) -> tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]:
-        """Tools contributed by enabled sections in traversal order."""
+        """Tools contributed by enabled sections in traversal order.
+
+        Returns all tools declared on sections that were rendered with
+        non-SUMMARY visibility. Tools are collected during rendering and
+        may include dynamically injected tools like `open_sections` or
+        `read_section` for progressive disclosure.
+
+        Returns:
+            Tuple of Tool instances in the order they were collected.
+        """
 
         return self._tools
 
@@ -79,13 +106,29 @@ class RenderedPrompt[OutputT_co]:
     def tool_param_descriptions(
         self,
     ) -> Mapping[str, Mapping[str, str]]:
-        """Description patches keyed by tool name."""
+        """Parameter description overrides keyed by tool name.
+
+        When tool overrides specify custom parameter descriptions, those
+        patches are collected here. Adapters can use these to override
+        the default parameter descriptions in the tool schema.
+
+        Returns:
+            Nested mapping of {tool_name: {param_name: description}}.
+            Empty mapping if no overrides were applied.
+        """
 
         return self._tool_param_descriptions
 
     @property
     def output_type(self) -> type[SupportsDataclass] | None:
-        """Return the declared dataclass type for structured output."""
+        """The dataclass type expected for structured output parsing.
+
+        When the prompt template declares a structured output type, this
+        returns the dataclass class that responses should be parsed into.
+
+        Returns:
+            The dataclass type if structured output is configured, else None.
+        """
 
         if self.structured_output is None:
             return None
@@ -93,7 +136,15 @@ class RenderedPrompt[OutputT_co]:
 
     @property
     def container(self) -> Literal["object", "array"] | None:
-        """Return the declared container for structured output."""
+        """The container type for structured output.
+
+        Indicates whether the structured output should be parsed as a
+        single object or an array of objects.
+
+        Returns:
+            "object" for single item, "array" for multiple items,
+            or None if no structured output is configured.
+        """
 
         if self.structured_output is None:
             return None
@@ -101,7 +152,15 @@ class RenderedPrompt[OutputT_co]:
 
     @property
     def allow_extra_keys(self) -> bool | None:
-        """Return whether extra keys are allowed in structured output."""
+        """Whether extra keys are permitted in structured output.
+
+        When True, the parser will ignore unrecognized keys in the response.
+        When False, unrecognized keys will cause parsing to fail.
+
+        Returns:
+            True if extra keys are allowed, False if strict, or None
+            if no structured output is configured.
+        """
 
         if self.structured_output is None:
             return None
@@ -120,7 +179,28 @@ def _freeze_tool_param_descriptions(
 
 
 class PromptRenderer[OutputT]:
-    """Render prompts using a registry snapshot."""
+    """Renders prompt templates into final prompt text with tools.
+
+    The renderer traverses sections from a registry snapshot, evaluates
+    which sections are enabled based on parameters and session state,
+    collects tools from visible sections, and produces a RenderedPrompt.
+
+    The rendering process:
+    1. Iterates through sections in registry order
+    2. Skips disabled sections and their children
+    3. Applies visibility rules (FULL, SUMMARY, HIDDEN)
+    4. Collects tools from non-summarized sections
+    5. Injects progressive disclosure tools when needed
+    6. Joins rendered section text with double newlines
+
+    Example:
+        renderer = PromptRenderer(
+            registry=snapshot,
+            structured_output=config,
+        )
+        param_lookup = renderer.build_param_lookup((my_params,))
+        rendered = renderer.render(param_lookup)
+    """
 
     def __init__(
         self,
@@ -128,6 +208,14 @@ class PromptRenderer[OutputT]:
         registry: RegistrySnapshot,
         structured_output: StructuredOutputConfig[SupportsDataclass] | None,
     ) -> None:
+        """Initialize the renderer with a registry snapshot.
+
+        Args:
+            registry: Snapshot of registered sections to render.
+            structured_output: Optional configuration for structured output
+                parsing. When set, the rendered prompt's output_type will
+                be available for response parsing.
+        """
         super().__init__()
         self._registry = registry
         self._structured_output = structured_output
@@ -135,6 +223,27 @@ class PromptRenderer[OutputT]:
     def build_param_lookup(
         self, params: tuple[SupportsDataclass, ...]
     ) -> dict[type[SupportsDataclass], SupportsDataclass]:
+        """Build a type-to-instance mapping from parameter dataclasses.
+
+        Validates that all provided parameters are dataclass instances
+        (not types), checks for duplicates, and verifies each type is
+        expected by sections in the registry.
+
+        Args:
+            params: Tuple of dataclass instances to use as section parameters.
+
+        Returns:
+            Dictionary mapping each dataclass type to its instance.
+
+        Raises:
+            PromptValidationError: If a parameter is not a dataclass instance,
+                if duplicate types are provided, or if a type is not expected
+                by any section in the registry.
+
+        Example:
+            lookup = renderer.build_param_lookup((UserContext(...), TaskParams(...)))
+            # Returns {UserContext: instance, TaskParams: instance}
+        """
         lookup: dict[type[SupportsDataclass], SupportsDataclass] = {}
         for value in params:
             if isinstance(value, type):
@@ -169,6 +278,34 @@ class PromptRenderer[OutputT]:
         descriptor: PromptDescriptor | None = None,
         session: SessionProtocol | None = None,
     ) -> RenderedPrompt[OutputT]:
+        """Render the prompt with the given parameters and overrides.
+
+        Traverses all registered sections, evaluates enabled state and
+        visibility, renders each section's content, collects tools, and
+        returns a complete RenderedPrompt.
+
+        Args:
+            param_lookup: Mapping from dataclass types to instances, as
+                returned by `build_param_lookup()`.
+            overrides: Optional mapping from section paths to override text.
+                When a section path is present, the override text replaces
+                the section's normal rendered output.
+            tool_overrides: Optional mapping from tool names to override
+                configurations. Allows customizing tool descriptions and
+                parameter descriptions at render time.
+            descriptor: Optional metadata identifying this prompt for
+                logging and debugging purposes.
+            session: Optional session for accessing state used by section
+                enabled predicates and visibility rules.
+
+        Returns:
+            A RenderedPrompt containing the rendered text, collected tools,
+            structured output configuration, and metadata.
+
+        Raises:
+            PromptRenderError: If any section fails to render or if an
+                enabled predicate raises an exception.
+        """
         logger.debug(
             "prompt.render.start",
             event="prompt.render.start",
