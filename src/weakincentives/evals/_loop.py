@@ -20,22 +20,21 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import threading
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Self
+from pathlib import Path
+from typing import TYPE_CHECKING, override
 
 from ..dataclasses import FrozenDataclass
 from ..runtime.dlq import DeadLetter, DLQPolicy
-from ..runtime.lease_extender import LeaseExtender, LeaseExtenderConfig
-from ..runtime.lifecycle import wait_until
+from ..runtime.lease_extender import LeaseExtenderConfig
 from ..runtime.mailbox import (
     Mailbox,
     Message,
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
 )
-from ..runtime.watchdog import Heartbeat
+from ..runtime.mailbox_worker import MailboxWorker
 from ._evaluators import is_session_aware
 from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
 
@@ -54,12 +53,26 @@ class EvalLoopConfig:
     and after each sample extend the message lease, preventing timeout during
     long evaluation runs. EvalLoop's heartbeat is passed to MainLoop.execute()
     so that all tool/adapter beats extend the evaluation message's lease.
+
+    The ``debug_bundle_dir`` field enables debug bundle creation for each
+    evaluation sample. When set, EvalLoop creates a bundle capturing:
+    - Request input (sample and experiment)
+    - Response output from MainLoop
+    - Session state after execution
+    - Application logs during execution
+    - Evaluation metadata (score, experiment, latency)
+    - Environment information
+
+    Bundles are written to ``{debug_bundle_dir}/{request_id}/{sample_id}_{timestamp}.zip``.
     """
 
     lease_extender: LeaseExtenderConfig | None = None
+    debug_bundle_dir: Path | None = None
 
 
-class EvalLoop[InputT, OutputT, ExpectedT]:
+class EvalLoop[InputT, OutputT, ExpectedT](
+    MailboxWorker[EvalRequest[InputT, ExpectedT], EvalResult]
+):
     """Mailbox-driven evaluation loop.
 
     Receives EvalRequest messages, executes through MainLoop, scores
@@ -90,14 +103,8 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
     _loop: MainLoop[InputT, OutputT]
     _evaluator: Evaluator | SessionEvaluator
-    _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
     _config: EvalLoopConfig
     _dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None
-    _shutdown_event: threading.Event
-    _running: bool
-    _lock: threading.Lock
-    _heartbeat: Heartbeat
-    _lease_extender: LeaseExtender
 
     def __init__(
         self,
@@ -122,123 +129,31 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 that fail repeatedly are sent to the DLQ mailbox instead of
                 retrying indefinitely.
         """
-        super().__init__()
+        effective_config = config if config is not None else EvalLoopConfig()
+        super().__init__(
+            requests=requests,
+            lease_extender_config=effective_config.lease_extender,
+        )
         self._loop = loop
         self._evaluator = evaluator
-        self._requests = requests
-        self._config = config if config is not None else EvalLoopConfig()
+        self._config = effective_config
         self._dlq = dlq
-        self._shutdown_event = threading.Event()
-        self._running = False
-        self._lock = threading.Lock()
-        self._heartbeat = Heartbeat()
-        # Initialize lease extender with config or defaults
-        lease_config = (
-            self._config.lease_extender
-            if self._config.lease_extender is not None
-            else LeaseExtenderConfig()
-        )
-        self._lease_extender = LeaseExtender(config=lease_config)
 
-    def run(
-        self,
-        *,
-        max_iterations: int | None = None,
-        visibility_timeout: int = 300,
-        wait_time_seconds: int = 20,
+    @override
+    def _process_message(
+        self, msg: Message[EvalRequest[InputT, ExpectedT], EvalResult]
     ) -> None:
-        """Process evaluation requests from mailbox.
+        """Process a single evaluation request message.
 
-        Polls the requests mailbox, evaluates each sample through
-        MainLoop, and sends results via Message.reply().
-
-        The loop exits when:
-        - max_iterations is reached
-        - shutdown() is called
-        - The requests mailbox is closed
-
-        In-flight samples complete before exit. Unprocessed messages from
-        the current batch are nacked for redelivery.
-
-        Args:
-            max_iterations: Stop after N iterations (None = run forever).
-            visibility_timeout: Seconds messages remain invisible during
-                processing. Must exceed maximum expected execution time.
-            wait_time_seconds: Long poll duration (0-20 seconds).
+        Implements the abstract method from MailboxWorker. Called with lease
+        extension already attached by the base class.
         """
-        with self._lock:
-            self._running = True
-            self._shutdown_event.clear()
-
-        iterations = 0
         try:
-            while max_iterations is None or iterations < max_iterations:
-                # Check shutdown before blocking on receive
-                if self._shutdown_event.is_set():
-                    break
-
-                # Exit if mailbox closed
-                if self._requests.closed:
-                    break
-
-                for msg in self._requests.receive(
-                    visibility_timeout=visibility_timeout,
-                    wait_time_seconds=wait_time_seconds,
-                ):
-                    # Check shutdown between messages
-                    if self._shutdown_event.is_set():
-                        # Nack unprocessed message for redelivery
-                        with contextlib.suppress(ReceiptHandleExpiredError):
-                            msg.nack(visibility_timeout=0)
-                        break
-
-                    # Attach lease extender to heartbeat for this message
-                    with self._lease_extender.attach(msg, self._heartbeat):
-                        try:
-                            result = self._evaluate_sample(msg.body)
-                        except Exception as e:
-                            self._handle_failure(msg, e)
-                        else:
-                            self._reply_and_ack(msg, result)
-                iterations += 1
-        finally:
-            with self._lock:
-                self._running = False
-
-    def shutdown(self, *, timeout: float = 30.0) -> bool:
-        """Request graceful shutdown and wait for completion.
-
-        Sets the shutdown flag. If the loop is running, waits up to timeout
-        seconds for it to stop.
-
-        Args:
-            timeout: Maximum seconds to wait for the loop to stop.
-
-        Returns:
-            True if loop stopped cleanly, False if timeout expired.
-        """
-        self._shutdown_event.set()
-        return wait_until(lambda: not self.running, timeout=timeout)
-
-    @property
-    def running(self) -> bool:
-        """True if the loop is currently processing messages."""
-        with self._lock:
-            return self._running
-
-    def __enter__(self) -> Self:
-        """Context manager entry. Returns self for use in with statement."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> None:
-        """Context manager exit. Triggers shutdown and waits for completion."""
-        _ = (exc_type, exc_val, exc_tb)
-        _ = self.shutdown()
+            result = self._evaluate_sample(msg.body)
+        except Exception as e:
+            self._handle_failure(msg, e)
+        else:
+            self._reply_and_ack(msg, result)
 
     def _reply_and_ack(
         self,
@@ -279,7 +194,23 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
         The experiment from the request is passed to MainLoop.execute() for
         prompt override resolution and feature flag checking.
+
+        When debug_bundle_dir is configured, creates a debug bundle capturing:
+        - Request input (sample and experiment)
+        - Response output from MainLoop
+        - Session state after execution
+        - Application logs during execution
+        - Evaluation metadata (score, experiment, latency)
+        - Environment information
         """
+        if self._config.debug_bundle_dir is not None:
+            return self._evaluate_sample_with_bundle(request)
+        return self._evaluate_sample_without_bundle(request)
+
+    def _evaluate_sample_without_bundle(
+        self, request: EvalRequest[InputT, ExpectedT]
+    ) -> EvalResult:
+        """Execute and score a sample without debug bundling."""
         sample = request.sample
         experiment = request.experiment
         start = time.monotonic()
@@ -317,6 +248,147 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             score=score,  # pyright: ignore[reportUnknownArgumentType]
             latency_ms=latency_ms,
         )
+
+    def _evaluate_sample_with_bundle(
+        self, request: EvalRequest[InputT, ExpectedT]
+    ) -> EvalResult:
+        """Execute and score a sample with debug bundling enabled.
+
+        Uses MainLoop.execute_with_bundle() to reuse the standard bundle
+        creation logic, then adds eval-specific metadata before finalization.
+
+        Exception handling is narrowed to avoid re-executing samples:
+        - If bundle setup/execution fails before ctx is created, fall back to
+          non-bundled execution
+        - If execution succeeds but scoring or bundle writing fails, use the
+          results from the successful execution (never re-execute)
+        """
+        if self._config.debug_bundle_dir is None:  # pragma: no cover - defensive
+            return self._evaluate_sample_without_bundle(request)
+
+        # Create per-request directory: {debug_bundle_dir}/{request_id}/
+        bundle_target = self._config.debug_bundle_dir / str(request.request_id)
+
+        # Track execution state to avoid re-running on post-execution failures
+        ctx = None
+        score: Score | None = None
+        error: str | None = None
+
+        try:
+            with self._loop.execute_with_bundle(
+                request.sample.input,
+                bundle_target=bundle_target,
+                heartbeat=self._heartbeat,
+                experiment=request.experiment,
+            ) as ctx:
+                # Compute score first, then beat to prove progress
+                score, error = self._compute_score(
+                    ctx.response.output, request.sample.expected, ctx.session
+                )
+
+                # Beat after scoring to prove progress
+                self._heartbeat.beat()
+
+                # Write eval metadata to bundle
+                ctx.write_metadata(
+                    "eval", self._build_eval_info(request, score, ctx.latency_ms, error)
+                )
+
+            # Normal exit: bundle finalized, retrieve path
+            return EvalResult(
+                sample_id=request.sample.id,
+                experiment_name=request.experiment.name,
+                score=score,
+                latency_ms=ctx.latency_ms,
+                error=error,
+                bundle_path=ctx.bundle_path,
+            )
+
+        except Exception as exc:
+            # Check if execution completed (ctx was created and has results)
+            if ctx is not None:
+                # Execution succeeded but something failed (scoring, write_metadata,
+                # or finalization). Use the results we have - never re-execute.
+                _logger.warning(
+                    "Bundle creation failed after successful execution",
+                    extra={"error": str(exc), "sample_id": request.sample.id},
+                )
+                # If score wasn't computed before the exception, compute it now.
+                # This only happens if _compute_score itself raised, which would
+                # likely fail again - but we try anyway as a last resort.
+                if score is None:  # pragma: no cover - defensive: evaluator failure
+                    try:
+                        score, error = self._compute_score(
+                            ctx.response.output, request.sample.expected, ctx.session
+                        )
+                    except Exception as eval_exc:
+                        # Evaluator failed twice - provide fallback score
+                        score = Score(
+                            value=0.0,
+                            passed=False,
+                            reason=f"Evaluator failed: {eval_exc}",
+                        )
+                        error = str(eval_exc)
+                return EvalResult(
+                    sample_id=request.sample.id,
+                    experiment_name=request.experiment.name,
+                    score=score,
+                    latency_ms=ctx.latency_ms,
+                    error=error,
+                    bundle_path=ctx.bundle_path,  # May be None if finalization failed
+                )
+
+            # Execution itself failed - fall back to non-bundled
+            _logger.warning(
+                "Bundle execution failed, retrying without bundle",
+                extra={"error": str(exc), "sample_id": request.sample.id},
+            )
+            return self._evaluate_sample_without_bundle(request)
+
+    def _compute_score(
+        self,
+        output: OutputT | None,
+        expected: ExpectedT,
+        session: object,
+    ) -> tuple[Score, str | None]:
+        """Compute score for an evaluation result.
+
+        Returns:
+            Tuple of (score, error_message). Error is None on success.
+        """
+        if output is None:
+            return (
+                Score(value=0.0, passed=False, reason="No output from MainLoop"),
+                "No output from MainLoop",
+            )
+
+        if is_session_aware(self._evaluator):
+            score = self._evaluator(output, expected, session)  # type: ignore[call-arg]
+        else:
+            score = self._evaluator(output, expected)  # type: ignore[call-arg]
+        return score, None  # pyright: ignore[reportUnknownVariableType]
+
+    @staticmethod
+    def _build_eval_info(
+        request: EvalRequest[object, object],
+        score: Score,
+        latency_ms: int,
+        error: str | None,
+    ) -> dict[str, object]:
+        """Build eval.json metadata dictionary."""
+        eval_info: dict[str, object] = {
+            "sample_id": request.sample.id,
+            "experiment_name": request.experiment.name,
+            "score": {
+                "value": score.value,
+                "passed": score.passed,
+                "reason": score.reason,
+            },
+            "latency_ms": latency_ms,
+        }
+        if error is not None:
+            eval_info["error"] = error
+        return eval_info
 
     def _handle_failure(
         self,

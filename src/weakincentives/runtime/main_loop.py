@@ -42,25 +42,25 @@ Example::
 
 from __future__ import annotations
 
-import contextlib
 import os
 import socket
-import threading
-from abc import ABC, abstractmethod
-from collections.abc import Mapping
+import time
+from abc import abstractmethod
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Self
+from pathlib import Path
+from typing import TYPE_CHECKING, override
 from uuid import UUID, uuid4
 
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
 from .dlq import DLQPolicy
-from .lease_extender import LeaseExtender, LeaseExtenderConfig
-from .lifecycle import wait_until
 from .logging import StructuredLogger, bind_run_context, get_logger
-from .mailbox import Mailbox, Message, ReceiptHandleExpiredError
+from .mailbox import Mailbox, Message
+from .mailbox_worker import MailboxWorker
 from .main_loop_types import MainLoopConfig, MainLoopRequest, MainLoopResult
 from .message_handlers import handle_failure, reply_and_ack
 from .run_context import RunContext
@@ -70,9 +70,10 @@ from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
-    from ..debug.bundle import BundleConfig
+    from ..debug.bundle import BundleConfig, BundleWriter
     from ..experiment import Experiment
     from ..prompt import Prompt
+    from .main_loop_types import BundleContext
     from .session.visibility_overrides import VisibilityOverrides
 
 _logger: StructuredLogger = get_logger(
@@ -80,7 +81,9 @@ _logger: StructuredLogger = get_logger(
 )
 
 
-class MainLoop[UserRequestT, OutputT](ABC):
+class MainLoop[UserRequestT, OutputT](
+    MailboxWorker[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
+):
     """Abstract orchestrator for mailbox-based agent workflow execution.
 
     MainLoop processes requests from a mailbox queue and sends responses
@@ -117,14 +120,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
     """
 
     _adapter: ProviderAdapter[OutputT]
-    _requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
     _config: MainLoopConfig
     _dlq: DLQPolicy[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]] | None
-    _shutdown_event: threading.Event
-    _running: bool
-    _lock: threading.Lock
-    _heartbeat: Heartbeat
-    _lease_extender: LeaseExtender
     _worker_id: str
 
     def __init__(
@@ -152,22 +149,14 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 that fail repeatedly are sent to the DLQ mailbox instead of
                 retrying indefinitely.
         """
-        super().__init__()
-        self._adapter = adapter
-        self._requests = requests
-        self._config = config if config is not None else MainLoopConfig()
-        self._dlq = dlq
-        self._shutdown_event = threading.Event()
-        self._running = False
-        self._lock = threading.Lock()
-        self._heartbeat = Heartbeat()
-        # Initialize lease extender with config or defaults
-        lease_config = (
-            self._config.lease_extender
-            if self._config.lease_extender is not None
-            else LeaseExtenderConfig()
+        effective_config = config if config is not None else MainLoopConfig()
+        super().__init__(
+            requests=requests,
+            lease_extender_config=effective_config.lease_extender,
         )
-        self._lease_extender = LeaseExtender(config=lease_config)
+        self._adapter = adapter
+        self._config = effective_config
+        self._dlq = dlq
         # Auto-generate worker_id if not provided
         if worker_id:
             self._worker_id = worker_id
@@ -265,6 +254,189 @@ class MainLoop[UserRequestT, OutputT](ABC):
         response, session, _ = self._execute(request_event, heartbeat=heartbeat)
         return response, session
 
+    @contextmanager
+    def execute_with_bundle(  # noqa: PLR0913
+        self,
+        request: UserRequestT,
+        *,
+        bundle_target: Path,
+        budget: Budget | None = None,
+        deadline: Deadline | None = None,
+        resources: Mapping[type[object], object] | None = None,
+        heartbeat: Heartbeat | None = None,
+        experiment: Experiment | None = None,
+    ) -> Iterator[BundleContext[OutputT]]:
+        """Execute with debug bundling, allowing metadata injection.
+
+        Creates a debug bundle with the same artifacts as mailbox-driven execution:
+        request input/output, session state, logs, config, metrics, and environment.
+
+        The yielded context provides access to execution results and allows adding
+        eval-specific metadata before the bundle is finalized.
+
+        Args:
+            request: The user request to process.
+            bundle_target: Directory for bundle creation. The bundle zip file will
+                be created in this directory with a generated filename.
+            budget: Optional budget override (takes precedence over config).
+            deadline: Optional deadline override (takes precedence over config).
+            resources: Optional resources override.
+            heartbeat: Optional heartbeat for lease extension.
+            experiment: Optional experiment for A/B testing.
+
+        Yields:
+            BundleContext with response, session, latency_ms, and write_metadata().
+
+        Example::
+
+            bundle_dir = Path("./bundles")
+            with loop.execute_with_bundle(request, bundle_target=bundle_dir) as ctx:
+                score = compute_score(ctx.response.output)
+                ctx.write_metadata("eval", {
+                    "sample_id": "sample-1",
+                    "score": {"value": score.value, "passed": score.passed},
+                })
+            # Bundle is now finalized
+            print(f"Bundle at: {ctx.bundle_path}")
+        """
+        from ..debug.bundle import BundleWriter
+        from .main_loop_types import BundleContext
+
+        bundle_target.mkdir(parents=True, exist_ok=True)
+        started_at = datetime.now(UTC)
+        start_mono = time.monotonic()
+
+        with BundleWriter(bundle_target, bundle_id=uuid4(), trigger="direct") as writer:
+            # Write request input
+            writer.write_request_input(
+                MainLoopRequest(
+                    request=request,
+                    budget=budget,
+                    deadline=deadline,
+                    resources=resources,
+                    experiment=experiment,
+                )
+            )
+
+            # Prepare and execute
+            response, session, prompt, budget_tracker = self._execute_for_bundle(
+                request=request,
+                budget=budget,
+                deadline=deadline,
+                resources=resources,
+                heartbeat=heartbeat,
+                experiment=experiment,
+                writer=writer,
+            )
+
+            ended_at = datetime.now(UTC)
+
+            # Create context for caller to access results and add metadata
+            ctx: BundleContext[OutputT] = BundleContext(
+                writer=writer,
+                response=response,
+                session=session,
+                latency_ms=int((time.monotonic() - start_mono) * 1000),
+            )
+
+            # Yield to allow caller to compute score and add eval metadata
+            yield ctx
+
+            # Write remaining artifacts after caller has added metadata
+            self._write_bundle_artifacts(
+                writer=writer,
+                response=response,
+                session=session,
+                prompt=prompt,
+                started_at=started_at,
+                ended_at=ended_at,
+                budget_tracker=budget_tracker,
+            )
+
+        # BundleWriter context has exited, bundle is finalized
+        # ctx.bundle_path now returns writer.path
+
+    def _execute_for_bundle(  # noqa: PLR0913
+        self,
+        *,
+        request: UserRequestT,
+        budget: Budget | None,
+        deadline: Deadline | None,
+        resources: Mapping[type[object], object] | None,
+        heartbeat: Heartbeat | None,
+        experiment: Experiment | None,
+        writer: BundleWriter,
+    ) -> tuple[PromptResponse[OutputT], Session, Prompt[OutputT], BudgetTracker | None]:
+        """Execute within bundle context with log capture."""
+        prompt, session = self.prepare(request, experiment=experiment)
+        writer.write_session_before(session)
+        writer.set_prompt_info(
+            ns=prompt.ns, key=prompt.key, adapter=self._get_adapter_name()
+        )
+
+        prompt, budget_tracker, eff_deadline = self._resolve_settings(
+            prompt, budget=budget, deadline=deadline, resources=resources
+        )
+        eff_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
+
+        with writer.capture_logs():
+            response = self._evaluate_with_retries(
+                prompt=prompt,
+                session=session,
+                deadline=eff_deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=eff_heartbeat,
+            )
+
+        return response, session, prompt, budget_tracker
+
+    def _write_bundle_artifacts(  # noqa: PLR0913
+        self,
+        *,
+        writer: BundleWriter,
+        response: PromptResponse[OutputT],
+        session: Session,
+        prompt: Prompt[OutputT],
+        started_at: datetime,
+        ended_at: datetime,
+        budget_tracker: BudgetTracker | None,
+        run_context: RunContext | None = None,
+    ) -> None:
+        """Write bundle artifacts after execution.
+
+        Shared by execute_with_bundle and _handle_message_with_bundle.
+        """
+        from ..filesystem import Filesystem
+        from .session.visibility_overrides import VisibilityOverrides
+
+        writer.write_session_after(session)
+        writer.write_request_output(response)
+        writer.write_config(self._config)
+
+        if run_context is not None:
+            writer.write_run_context(run_context)
+
+        writer.write_metrics(
+            self._collect_metrics(
+                started_at=started_at,
+                ended_at=ended_at,
+                session=session,
+                budget_tracker=budget_tracker,
+            )
+        )
+
+        visibility_overrides = session[VisibilityOverrides].latest()
+        if visibility_overrides is not None and visibility_overrides.overrides:
+            writer.write_prompt_overrides(
+                self._format_visibility_overrides(visibility_overrides, session)
+            )
+
+        fs = prompt.resources.get_optional(Filesystem)
+        if fs is not None:
+            writer.write_filesystem(fs)
+
+        writer.write_environment()
+
     def _execute(
         self,
         request_event: MainLoopRequest[UserRequestT],
@@ -290,43 +462,76 @@ class MainLoop[UserRequestT, OutputT](ABC):
             experiment=request_event.experiment,
         )
 
-        effective_budget = (
-            request_event.budget
-            if request_event.budget is not None
-            else self._config.budget
-        )
-        effective_deadline = (
-            request_event.deadline
-            if request_event.deadline is not None
-            else self._config.deadline
-        )
-        effective_resources = (
-            request_event.resources
-            if request_event.resources is not None
-            else self._config.resources
-        )
-
-        # Bind resources to prompt if provided
-        if effective_resources is not None:
-            prompt = prompt.bind(resources=effective_resources)
-
-        budget_tracker = (
-            BudgetTracker(budget=effective_budget)
-            if effective_budget is not None
-            else None
+        # Resolve and apply effective settings
+        prompt, budget_tracker, deadline = self._resolve_settings(
+            prompt,
+            budget=request_event.budget,
+            deadline=request_event.deadline,
+            resources=request_event.resources,
         )
 
         # Use provided heartbeat or fall back to loop's internal heartbeat
         effective_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
 
+        response = self._evaluate_with_retries(
+            prompt=prompt,
+            session=session,
+            deadline=deadline,
+            budget_tracker=budget_tracker,
+            heartbeat=effective_heartbeat,
+            run_context=run_context,
+        )
+        return response, session, prompt
+
+    def _resolve_settings(
+        self,
+        prompt: Prompt[OutputT],
+        *,
+        budget: Budget | None,
+        deadline: Deadline | None,
+        resources: Mapping[type[object], object] | None,
+    ) -> tuple[Prompt[OutputT], BudgetTracker | None, Deadline | None]:
+        """Resolve effective settings and bind resources to prompt.
+
+        Returns:
+            Tuple of (prompt_with_resources, budget_tracker, effective_deadline).
+        """
+        eff_budget = budget if budget is not None else self._config.budget
+        eff_deadline = deadline if deadline is not None else self._config.deadline
+        eff_resources = resources if resources is not None else self._config.resources
+
+        if eff_resources is not None:
+            prompt = prompt.bind(resources=eff_resources)
+
+        budget_tracker = BudgetTracker(budget=eff_budget) if eff_budget else None
+        return prompt, budget_tracker, eff_deadline
+
+    def _evaluate_with_retries(  # noqa: PLR0913
+        self,
+        *,
+        prompt: Prompt[OutputT],
+        session: Session,
+        deadline: Deadline | None,
+        budget_tracker: BudgetTracker | None,
+        heartbeat: Heartbeat,
+        run_context: RunContext | None = None,
+    ) -> PromptResponse[OutputT]:
+        """Run evaluation with visibility expansion retry loop.
+
+        Handles the core evaluate → catch VisibilityExpansionRequired →
+        dispatch overrides → retry cycle. Calls finalize() on success.
+
+        Returns:
+            The prompt response from successful evaluation.
+        """
         while True:
             try:
                 response = self._adapter.evaluate(
                     prompt,
                     session=session,
-                    deadline=effective_deadline,
+                    deadline=deadline,
                     budget_tracker=budget_tracker,
-                    heartbeat=effective_heartbeat,
+                    heartbeat=heartbeat,
                     run_context=run_context,
                 )
             except VisibilityExpansionRequired as e:
@@ -336,7 +541,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     )
             else:
                 self.finalize(prompt, session)
-                return response, session, prompt
+                return response
 
     def _build_run_context(
         self,
@@ -376,10 +581,15 @@ class MainLoop[UserRequestT, OutputT](ABC):
             span_id=span_id,
         )
 
-    def _handle_message(
+    @override
+    def _process_message(
         self, msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
     ) -> None:
-        """Process a single message from the requests mailbox."""
+        """Process a single message from the requests mailbox.
+
+        Implements the abstract method from MailboxWorker. Called with lease
+        extension already attached by the base class.
+        """
         request_event = msg.body
 
         # Build RunContext ONCE before execution. Session_id will be added
@@ -406,16 +616,13 @@ class MainLoop[UserRequestT, OutputT](ABC):
             else self._config.debug_bundle
         )
 
-        # Attach lease extender to heartbeat for this message
-        with self._lease_extender.attach(msg, self._heartbeat):
-            if bundle_config is not None and bundle_config.enabled:
-                self._handle_message_with_bundle(
-                    msg, request_event, run_context, log, bundle_config
-                )
-            else:
-                self._handle_message_without_bundle(msg, request_event, run_context)
-
-        # Result is created and replied in the helper methods
+        # Lease extension is handled by MailboxWorker.run()
+        if bundle_config is not None and bundle_config.enabled:
+            self._handle_message_with_bundle(
+                msg, request_event, run_context, log, bundle_config
+            )
+        else:
+            self._handle_message_without_bundle(msg, request_event, run_context)
 
     def _handle_message_with_bundle(
         self,
@@ -427,8 +634,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
     ) -> None:
         """Process message with debug bundling enabled."""
         from ..debug.bundle import BundleWriter
-        from ..filesystem import Filesystem
-        from .session.visibility_overrides import VisibilityOverrides
 
         if bundle_config.target is None:  # pragma: no cover
             # Defensive guard: _handle_message only calls this when enabled=True
@@ -483,38 +688,16 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
                 ended_at = datetime.now(UTC)
 
-                # Write session after execution
-                writer.write_session_after(session)
-                writer.write_request_output(response)
-                writer.write_config(self._config)
-
-                # Write final run_context (session_id already set above)
-                writer.write_run_context(run_context)
-
-                # Write metrics: timing, token usage, budget status
-                metrics = self._collect_metrics(
+                self._write_bundle_artifacts(
+                    writer=writer,
+                    response=response,
+                    session=session,
+                    prompt=prompt,
                     started_at=started_at,
                     ended_at=ended_at,
-                    session=session,
                     budget_tracker=budget_tracker,
+                    run_context=run_context,
                 )
-                writer.write_metrics(metrics)
-
-                # Write prompt overrides from session
-                visibility_overrides = session[VisibilityOverrides].latest()
-                if visibility_overrides is not None and visibility_overrides.overrides:
-                    prompt_overrides = self._format_visibility_overrides(
-                        visibility_overrides, session
-                    )
-                    writer.write_prompt_overrides(prompt_overrides)
-
-                # Write filesystem snapshot if available from prompt resources
-                fs = prompt.resources.get_optional(Filesystem)
-                if fs is not None:
-                    writer.write_filesystem(fs)
-
-                # Write environment capture
-                writer.write_environment()
 
             # Bundle path is set after context manager exits (in __exit__ -> _finalize)
             bundle_path = writer.path
@@ -571,53 +754,22 @@ class MainLoop[UserRequestT, OutputT](ABC):
         This helper reduces nesting in _handle_message_with_bundle by
         encapsulating the execution loop with visibility override retry.
         """
-        # Resolve effective settings
-        effective_budget = (
-            request_event.budget
-            if request_event.budget is not None
-            else self._config.budget
-        )
-        effective_deadline = (
-            request_event.deadline
-            if request_event.deadline is not None
-            else self._config.deadline
-        )
-        effective_resources = (
-            request_event.resources
-            if request_event.resources is not None
-            else self._config.resources
+        prompt, budget_tracker, eff_deadline = self._resolve_settings(
+            prompt,
+            budget=request_event.budget,
+            deadline=request_event.deadline,
+            resources=request_event.resources,
         )
 
-        # Bind resources to prompt if provided
-        if effective_resources is not None:
-            prompt = prompt.bind(resources=effective_resources)
-
-        budget_tracker = (
-            BudgetTracker(budget=effective_budget)
-            if effective_budget is not None
-            else None
-        )
-
-        # Use capture_logs from writer
         with writer.capture_logs():  # type: ignore[union-attr]
-            while True:
-                try:
-                    response = self._adapter.evaluate(
-                        prompt,
-                        session=session,
-                        deadline=effective_deadline,
-                        budget_tracker=budget_tracker,
-                        heartbeat=self._heartbeat,
-                        run_context=run_context,
-                    )
-                except VisibilityExpansionRequired as e:
-                    for path, visibility in e.requested_overrides.items():
-                        _ = session.dispatch(
-                            SetVisibilityOverride(path=path, visibility=visibility)
-                        )
-                else:
-                    self.finalize(prompt, session)
-                    break
+            response = self._evaluate_with_retries(
+                prompt=prompt,
+                session=session,
+                deadline=eff_deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=self._heartbeat,
+                run_context=run_context,
+            )
 
         return response, budget_tracker
 
@@ -792,109 +944,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
         """
         _ = self  # Instance method for API compatibility
         reply_and_ack(msg, result)
-
-    def run(
-        self,
-        *,
-        max_iterations: int | None = None,
-        visibility_timeout: int = 300,
-        wait_time_seconds: int = 20,
-    ) -> None:
-        """Run the worker loop, processing messages from the requests mailbox.
-
-        Polls the requests mailbox for messages and processes each one.
-        Messages are acknowledged after successful processing or after
-        sending an error response.
-
-        The loop exits when:
-        - max_iterations is reached
-        - shutdown() is called
-        - The requests mailbox is closed
-
-        In-flight messages complete before exit. Unprocessed messages from
-        the current batch are nacked for redelivery.
-
-        Args:
-            max_iterations: Maximum polling iterations. None for unlimited.
-            visibility_timeout: Seconds messages remain invisible during processing.
-                Should exceed maximum expected execution time.
-            wait_time_seconds: Long poll duration for receiving messages.
-        """
-        with self._lock:
-            self._running = True
-            self._shutdown_event.clear()
-
-        iterations = 0
-        try:
-            while max_iterations is None or iterations < max_iterations:
-                # Check shutdown before blocking on receive
-                if self._shutdown_event.is_set():
-                    break
-
-                # Exit if mailbox closed
-                if self._requests.closed:
-                    break
-
-                messages = self._requests.receive(
-                    visibility_timeout=visibility_timeout,
-                    wait_time_seconds=wait_time_seconds,
-                )
-
-                # Beat after receive (proves we're not stuck waiting)
-                self._heartbeat.beat()
-
-                for msg in messages:
-                    # Check shutdown between messages
-                    if self._shutdown_event.is_set():
-                        # Nack unprocessed message for redelivery
-                        with contextlib.suppress(ReceiptHandleExpiredError):
-                            msg.nack(visibility_timeout=0)
-                        break
-
-                    self._handle_message(msg)
-
-                    # Beat after each message (proves processing completes)
-                    self._heartbeat.beat()
-
-                iterations += 1
-        finally:
-            with self._lock:
-                self._running = False
-
-    def shutdown(self, *, timeout: float = 30.0) -> bool:
-        """Request graceful shutdown and wait for completion.
-
-        Sets the shutdown flag. If the loop is running, waits up to timeout
-        seconds for it to stop.
-
-        Args:
-            timeout: Maximum seconds to wait for the loop to stop.
-
-        Returns:
-            True if loop stopped cleanly, False if timeout expired.
-        """
-        self._shutdown_event.set()
-        return wait_until(lambda: not self.running, timeout=timeout)
-
-    @property
-    def running(self) -> bool:
-        """True if the loop is currently processing messages."""
-        with self._lock:
-            return self._running
-
-    def __enter__(self) -> Self:
-        """Context manager entry. Returns self for use in with statement."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> None:
-        """Context manager exit. Triggers shutdown and waits for completion."""
-        _ = (exc_type, exc_val, exc_tb)
-        _ = self.shutdown()
 
 
 __all__ = [

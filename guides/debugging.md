@@ -83,7 +83,18 @@ config = MainLoopConfig(
         target="./debug_bundles/",
     ),
 )
+
+# Or for evaluations via EvalLoop
+from weakincentives.evals import EvalLoopConfig
+
+eval_config = EvalLoopConfig(
+    debug_bundle_dir=Path("./eval_bundles/"),
+)
 ```
+
+EvalLoop bundles include all standard bundle contents plus an `eval.json` file
+with score, experiment name, and latency. See [Evaluation](evaluation.md) for
+details on eval-specific debugging.
 
 **What's captured:**
 

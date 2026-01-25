@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from ..budget import Budget
@@ -33,7 +33,9 @@ from .lease_extender import LeaseExtenderConfig
 from .run_context import RunContext
 
 if TYPE_CHECKING:
-    from ..debug.bundle import BundleConfig
+    from ..adapters.core import PromptResponse
+    from ..debug.bundle import BundleConfig, BundleWriter
+    from .session import Session
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +71,66 @@ class MainLoopResult[OutputT]:
     def success(self) -> bool:
         """Return True if this result represents successful completion."""
         return self.error is None
+
+
+class BundleContext[OutputT]:
+    """Context for bundled execution with metadata injection.
+
+    Provides access to execution results and allows adding eval-specific
+    metadata before the bundle is finalized.
+
+    This class is yielded by MainLoop.execute_with_bundle() and should not
+    be instantiated directly.
+
+    Attributes:
+        response: The prompt response from execution.
+        session: The session used for execution.
+        latency_ms: Execution latency in milliseconds.
+        bundle_path: Path to bundle (available after context manager exits).
+
+    Example::
+
+        with loop.execute_with_bundle(request, bundle_target=dir) as ctx:
+            score = compute_score(ctx.response.output)
+            ctx.write_metadata("eval", {
+                "sample_id": "sample-1",
+                "score": {"value": score.value, "passed": score.passed},
+            })
+        bundle_path = ctx.bundle_path  # Available after 'with' exits
+    """
+
+    __slots__ = ("_writer", "latency_ms", "response", "session")
+
+    def __init__(
+        self,
+        writer: BundleWriter,
+        response: PromptResponse[OutputT],
+        session: Session,
+        latency_ms: int,
+    ) -> None:
+        """Initialize bundle context."""
+        super().__init__()
+        self._writer = writer
+        self.response = response
+        self.session = session
+        self.latency_ms = latency_ms
+
+    @property
+    def bundle_path(self) -> Path | None:
+        """Path to the created bundle. Available after context manager exits."""
+        return self._writer.path
+
+    def write_metadata(self, name: str, data: Mapping[str, Any]) -> None:
+        """Add arbitrary metadata to the bundle.
+
+        Call this before the context manager exits to include domain-specific
+        metadata in the bundle. The data will be written to {name}.json.
+
+        Args:
+            name: The metadata type name (e.g., "eval", "metrics").
+            data: Dictionary of metadata to write.
+        """
+        self._writer.write_metadata(name, data)
 
 
 @FrozenDataclass()
@@ -117,6 +179,7 @@ class MainLoopRequest[UserRequestT]:
 
 
 __all__ = [
+    "BundleContext",
     "MainLoopConfig",
     "MainLoopRequest",
     "MainLoopResult",

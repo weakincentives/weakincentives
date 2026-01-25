@@ -205,12 +205,12 @@ class TestBundleWriter:
         assert bundle.error is not None
         assert bundle.error["type"] == "ValueError"
 
-    def test_writer_writes_eval(self, tmp_path: Path) -> None:
-        """Test writing eval information."""
+    def test_writer_writes_metadata(self, tmp_path: Path) -> None:
+        """Test writing arbitrary metadata."""
         eval_info = {"sample_id": "sample-1", "score": 0.95}
 
         with BundleWriter(tmp_path) as writer:
-            writer.write_eval(eval_info)
+            writer.write_metadata("eval", eval_info)
 
         assert writer.path is not None
         bundle = DebugBundle.load(writer.path)
@@ -717,17 +717,17 @@ class TestWriteExceptionHandling:
         assert writer.path is not None
         assert "Failed to write error" in caplog.text
 
-    def test_write_eval_handles_error(
+    def test_write_metadata_handles_error(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test write_eval handles serialization errors gracefully."""
-        eval_info = {"circular": object()}
+        """Test write_metadata handles serialization errors gracefully."""
+        metadata = {"circular": object()}
 
         with BundleWriter(tmp_path) as writer:
-            writer.write_eval(eval_info)  # type: ignore[arg-type]
+            writer.write_metadata("eval", metadata)  # type: ignore[arg-type]
 
         assert writer.path is not None
-        assert "Failed to write eval info" in caplog.text
+        assert "Failed to write metadata" in caplog.text
 
     def test_capture_logs_handles_error(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
