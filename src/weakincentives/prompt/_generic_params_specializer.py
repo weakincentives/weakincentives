@@ -18,10 +18,52 @@ from ._types import SupportsDataclass
 
 
 class GenericParamsSpecializer[ParamsT: SupportsDataclass]:
-    """Mixin providing ``ParamsT`` specialization for prompt components."""
+    """Mixin providing ``ParamsT`` specialization for prompt components.
+
+    This mixin automatically infers ``_params_type`` from generic type arguments.
+    When creating a subclass like ``MySection(Section[MyParams])``, the
+    ``_params_type`` class variable is automatically set to ``MyParams``.
+
+    The inference works through two mechanisms:
+    1. ``__class_getitem__`` sets ``_params_type`` on dynamic specialized classes
+    2. ``__init_subclass__`` propagates ``_params_type`` to user-defined subclasses
+
+    This means users never need to explicitly set ``_params_type``::
+
+        @dataclass
+        class MyParams:
+            value: str
+
+        # _params_type is automatically inferred - no need to set it manually
+        class MySection(MarkdownSection[MyParams]):
+            pass
+    """
 
     _params_type: ClassVar[type[SupportsDataclass] | None] = None
     _generic_owner_name: ClassVar[str | None] = None
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        """Propagate _params_type to subclasses automatically.
+
+        When a subclass is created, this hook ensures ``_params_type`` is set
+        by inheriting from the first base class in the MRO that has it defined.
+        This covers dynamic specialized classes created by ``__class_getitem__``.
+
+        If a subclass explicitly defines ``_params_type`` in its own ``__dict__``,
+        that value is preserved and not overwritten.
+        """
+        super().__init_subclass__(**kwargs)
+
+        # Check if subclass explicitly defines _params_type in its own __dict__
+        if "_params_type" in cls.__dict__:
+            return
+
+        # Inherit _params_type from MRO (covers dynamic base classes from __class_getitem__)
+        for base in cls.__mro__[1:]:
+            base_params = getattr(base, "_params_type", None)
+            if base_params is not None:
+                cls._params_type = base_params
+                return
 
     @classmethod
     def __class_getitem__(cls, item: object) -> type[Self]:

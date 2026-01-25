@@ -306,6 +306,88 @@ def test_section_specialization_preserves_metadata() -> None:
     assert specialized.__name__ == Section.__name__
 
 
+def test_params_type_auto_inference_for_subclass() -> None:
+    """_params_type is automatically inferred from generic base class."""
+
+    class CustomSection(Section[ExampleParams]):
+        def render(
+            self,
+            params: ExampleParams,
+            depth: int,
+            number: str,
+            *,
+            visibility: SectionVisibility | None = None,
+        ) -> str:
+            del params, depth, number, visibility
+            return ""
+
+        def clone(self, **kwargs: object) -> CustomSection:
+            return CustomSection(title=self.title, key=self.key)
+
+    section = CustomSection(title="Custom", key="custom")
+    assert section.params_type is ExampleParams
+
+
+def test_params_type_auto_inference_for_nested_subclass() -> None:
+    """_params_type propagates through inheritance chain."""
+
+    class BaseSection(Section[ExampleParams]):
+        def render(
+            self,
+            params: ExampleParams,
+            depth: int,
+            number: str,
+            *,
+            visibility: SectionVisibility | None = None,
+        ) -> str:
+            del params, depth, number, visibility
+            return ""
+
+        def clone(self, **kwargs: object) -> BaseSection:
+            return BaseSection(title=self.title, key=self.key)
+
+    class DerivedSection(BaseSection):
+        def clone(self, **kwargs: object) -> DerivedSection:
+            return DerivedSection(title=self.title, key=self.key)
+
+    class DeepSection(DerivedSection):
+        def clone(self, **kwargs: object) -> DeepSection:
+            return DeepSection(title=self.title, key=self.key)
+
+    section = DeepSection(title="Deep", key="deep")
+    assert section.params_type is ExampleParams
+
+
+def test_params_type_explicit_override_respected() -> None:
+    """Explicit _params_type class variable takes precedence."""
+
+    class OverriddenSection(Section[ExampleParams]):
+        _params_type = GenericParams  # type: ignore[assignment]
+
+        def render(
+            self,
+            params: object,
+            depth: int,
+            number: str,
+            *,
+            visibility: SectionVisibility | None = None,
+        ) -> str:
+            del params, depth, number, visibility
+            return ""
+
+        def clone(self, **kwargs: object) -> OverriddenSection:
+            return OverriddenSection(title=self.title, key=self.key)
+
+    section = OverriddenSection(title="Override", key="override")
+    assert section.params_type is GenericParams
+
+
+def test_params_type_none_for_plain_section() -> None:
+    """Sections without type parameter have params_type=None."""
+    section = PlainSection(title="Plain", key="plain")
+    assert section.params_type is None
+
+
 def test_generic_params_specializer_defaults_to_class_name() -> None:
     with pytest.raises(TypeError) as excinfo:
         bad_args = (GenericParams, GenericParams)
