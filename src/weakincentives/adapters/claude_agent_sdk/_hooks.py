@@ -31,7 +31,6 @@ from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
 from ...runtime.watchdog import Heartbeat
-from ._bridge import set_current_tool_use_id
 from ._task_completion import (
     TaskCompletionChecker,
     TaskCompletionContext,
@@ -184,6 +183,19 @@ class HookContext:
         self._tool_tracker: PendingToolTracker | None = None
         self.stats: HookStats = HookStats()
         self._start_time = time.monotonic()
+        self._pending_call_ids: dict[str, str | None] = {}
+
+    def set_pending_call_id(self, tool_name: str, call_id: str | None) -> None:
+        """Store pending call_id for a tool (used by MCP-bridged tools)."""
+        self._pending_call_ids[tool_name] = call_id
+
+    def get_pending_call_id(self, tool_name: str) -> str | None:
+        """Get pending call_id for a tool (used by BridgedTool)."""
+        return self._pending_call_ids.get(tool_name)
+
+    def clear_pending_call_id(self, tool_name: str) -> None:
+        """Clear pending call_id for a tool after use."""
+        self._pending_call_ids.pop(tool_name, None)
 
     def beat(self) -> None:
         """Record a heartbeat to prove processing is active.
@@ -386,8 +398,10 @@ def create_pre_tool_use_hook(
 
         # Store tool_use_id for MCP-bridged tools so BridgedTool can include it
         # in ToolInvoked events. Cleared in post_tool_use_hook after dispatch.
+        # Strip prefix to get the original tool name that BridgedTool uses.
         if tool_name.startswith("mcp__wink__"):
-            set_current_tool_use_id(tool_use_id)
+            original_name = tool_name[len("mcp__wink__") :]
+            hook_context.set_pending_call_id(original_name, tool_use_id)
 
         return {}
 
@@ -556,7 +570,8 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         # in FeedbackContext is accurate. Run feedback providers and return.
         if data.tool_name.startswith("mcp__wink__"):
             # Clear the tool_use_id stored for BridgedTool
-            set_current_tool_use_id(None)
+            original_name = data.tool_name[len("mcp__wink__") :]
+            hook_context.clear_pending_call_id(original_name)
             feedback_response = _run_feedback_providers(data)
             return feedback_response if feedback_response else {}
 

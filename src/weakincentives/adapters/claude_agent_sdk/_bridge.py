@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -40,32 +39,15 @@ if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
     from ...runtime.session.protocols import SessionProtocol
     from ..core import ProviderAdapter
+    from ._hooks import HookContext
 
 __all__ = [
     "BridgedTool",
     "create_bridged_tools",
     "create_mcp_server",
-    "get_current_tool_use_id",
-    "set_current_tool_use_id",
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
-
-# ContextVar to store the current tool_use_id from SDK hooks.
-# Set by pre_tool_use_hook, read by BridgedTool, cleared after use.
-_CURRENT_TOOL_USE_ID: ContextVar[str | None] = ContextVar(
-    "weakincentives_current_tool_use_id", default=None
-)
-
-
-def set_current_tool_use_id(tool_use_id: str | None) -> None:
-    """Set the current tool_use_id for BridgedTool to read."""
-    _CURRENT_TOOL_USE_ID.set(tool_use_id)
-
-
-def get_current_tool_use_id() -> str | None:
-    """Get the current tool_use_id set by pre_tool_use_hook."""
-    return _CURRENT_TOOL_USE_ID.get()
 
 
 @dataclass(slots=True, frozen=True)
@@ -116,6 +98,7 @@ class BridgedTool:
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
         visibility_signal: VisibilityExpansionSignal | None = None,
+        hook_context: HookContext | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -130,6 +113,7 @@ class BridgedTool:
         self._adapter_name = adapter_name
         self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
         self._heartbeat = heartbeat
+        self._hook_context = hook_context
         self._run_context = run_context
         self._visibility_signal = visibility_signal
 
@@ -341,8 +325,12 @@ class BridgedTool:
         """Dispatch a ToolInvoked event for session reducer dispatch.
 
         The session extracts the value from result.value for slice routing.
-        The call_id is retrieved from the ContextVar set by pre_tool_use_hook.
+        The call_id is retrieved from hook_context set by pre_tool_use_hook.
         """
+        call_id: str | None = None
+        if self._hook_context is not None:
+            call_id = self._hook_context.get_pending_call_id(self.name)
+
         event = ToolInvoked(
             prompt_name=self._prompt_name,
             adapter=self._adapter_name,
@@ -353,7 +341,7 @@ class BridgedTool:
             created_at=datetime.now(UTC),
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
-            call_id=get_current_tool_use_id(),
+            call_id=call_id,
             run_context=self._run_context,
         )
         self._session.dispatcher.dispatch(event)
@@ -373,6 +361,7 @@ def create_bridged_tools(
     heartbeat: Heartbeat | None = None,
     run_context: RunContext | None = None,
     visibility_signal: VisibilityExpansionSignal | None = None,
+    hook_context: HookContext | None = None,
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -390,6 +379,7 @@ def create_bridged_tools(
         run_context: Optional execution context with correlation identifiers.
         visibility_signal: Signal for propagating VisibilityExpansionRequired
             exceptions from tool handlers to the adapter.
+        hook_context: Optional hook context for accessing pending call IDs.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
@@ -432,6 +422,7 @@ def create_bridged_tools(
             heartbeat=heartbeat,
             run_context=run_context,
             visibility_signal=visibility_signal,
+            hook_context=hook_context,
         )
         bridged.append(bridged_tool)
 

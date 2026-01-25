@@ -520,6 +520,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             heartbeat=heartbeat,
             run_context=run_context,
             visibility_signal=visibility_signal,
+            hook_context=hook_context,
         )
 
         logger.debug(

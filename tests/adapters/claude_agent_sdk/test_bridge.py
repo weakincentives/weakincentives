@@ -27,6 +27,7 @@ from weakincentives.adapters.claude_agent_sdk._bridge import (
     create_bridged_tools,
     create_mcp_server,
 )
+from weakincentives.adapters.claude_agent_sdk._hooks import HookContext
 from weakincentives.adapters.claude_agent_sdk._visibility_signal import (
     VisibilityExpansionSignal,
 )
@@ -353,6 +354,57 @@ class TestBridgedTool:
         # Should use message only, not the rendered value
         assert result["content"][0]["text"] == "Query processed"
         assert "100" not in result["content"][0]["text"]
+
+    def test_dispatches_tool_invoked_with_call_id_from_hook_context(
+        self,
+        session: Session,
+        prompt: Prompt[object],
+        mock_adapter: MagicMock,
+    ) -> None:
+        """Test that BridgedTool includes call_id from hook_context in ToolInvoked."""
+        from weakincentives.runtime.events.types import ToolInvoked
+
+        # Create hook context with pending call ID
+        hook_ctx = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook_ctx.set_pending_call_id("search", "call-abc-123")
+
+        # Track dispatched events
+        dispatched_events: list[ToolInvoked] = []
+
+        def capture_event(event: object) -> None:
+            if isinstance(event, ToolInvoked):
+                dispatched_events.append(event)
+
+        session.dispatcher.subscribe(ToolInvoked, capture_event)
+
+        bridged = BridgedTool(
+            name="search",
+            description="Search for content",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=cast("PromptProtocol[object]", prompt),
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            hook_context=hook_ctx,
+        )
+
+        bridged({"query": "test"})
+
+        # Verify ToolInvoked was dispatched with call_id
+        assert len(dispatched_events) == 1
+        assert dispatched_events[0].call_id == "call-abc-123"
+        assert dispatched_events[0].name == "search"
 
 
 class TestCreateBridgedTools:

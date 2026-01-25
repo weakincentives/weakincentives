@@ -165,6 +165,29 @@ class TestHookContext:
         assert context.deadline is deadline
         assert context.budget_tracker is tracker
 
+    def test_pending_call_id_lifecycle(self, session: Session) -> None:
+        """Test set/get/clear pending call ID methods."""
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        # Initially empty
+        assert context.get_pending_call_id("search") is None
+
+        # Set and get
+        context.set_pending_call_id("search", "call-123")
+        assert context.get_pending_call_id("search") == "call-123"
+
+        # Clear
+        context.clear_pending_call_id("search")
+        assert context.get_pending_call_id("search") is None
+
+        # Clear non-existent is safe
+        context.clear_pending_call_id("nonexistent")
+
 
 class TestPreToolUseHook:
     def test_allows_tool_by_default(self, hook_context: HookContext) -> None:
