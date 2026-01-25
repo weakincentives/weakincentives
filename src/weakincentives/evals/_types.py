@@ -416,6 +416,27 @@ class EvalReport:
             treatment_results=treatment_results,
         )
 
+    def debug_bundle_refs(self) -> dict[tuple[str, str], Path]:
+        """Map (sample_id, experiment_name) to debug bundle paths.
+
+        Returns a dictionary mapping each (sample_id, experiment_name) pair
+        to its debug bundle path, for all results that have bundles enabled.
+
+        Returns:
+            Dictionary mapping (sample_id, experiment_name) to bundle Path.
+            Only includes results where bundle_path is not None.
+
+        Example:
+            >>> refs = report.debug_bundle_refs()
+            >>> for (sample_id, exp), path in refs.items():
+            ...     print(f"{sample_id} ({exp}): {path}")
+        """
+        return {
+            (r.sample_id, r.experiment_name): r.bundle_path
+            for r in self.results
+            if r.bundle_path is not None
+        }
+
 
 @dataclass(slots=True, frozen=True)
 class EvalRequest[InputT, ExpectedT]:

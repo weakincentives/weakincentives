@@ -786,3 +786,81 @@ def test_eval_report_mean_score_by_experiment_with_errors() -> None:
     scores = report.mean_score_by_experiment()
     assert scores["baseline"] == 0.0  # All errors -> 0.0
     assert scores["treatment"] == 0.8
+
+
+# =============================================================================
+# EvalReport Debug Bundle Refs Tests
+# =============================================================================
+
+
+def test_eval_report_debug_bundle_refs_empty() -> None:
+    """debug_bundle_refs returns empty dict when no bundles exist."""
+    results = (
+        EvalResult(
+            sample_id="1",
+            experiment_name="baseline",
+            score=Score(value=1.0, passed=True),
+            latency_ms=100,
+        ),
+    )
+    report = EvalReport(results=results)
+    refs = report.debug_bundle_refs()
+    assert refs == {}
+
+
+def test_eval_report_debug_bundle_refs_with_bundles() -> None:
+    """debug_bundle_refs maps (sample_id, experiment) to bundle paths."""
+    results = (
+        EvalResult(
+            sample_id="1",
+            experiment_name="baseline",
+            score=Score(value=1.0, passed=True),
+            latency_ms=100,
+            bundle_path=Path("/bundles/1_baseline.zip"),
+        ),
+        EvalResult(
+            sample_id="2",
+            experiment_name="baseline",
+            score=Score(value=0.8, passed=True),
+            latency_ms=100,
+            bundle_path=Path("/bundles/2_baseline.zip"),
+        ),
+        EvalResult(
+            sample_id="1",
+            experiment_name="treatment",
+            score=Score(value=1.0, passed=True),
+            latency_ms=100,
+            bundle_path=Path("/bundles/1_treatment.zip"),
+        ),
+    )
+    report = EvalReport(results=results)
+    refs = report.debug_bundle_refs()
+    assert len(refs) == 3
+    assert refs["1", "baseline"] == Path("/bundles/1_baseline.zip")
+    assert refs["2", "baseline"] == Path("/bundles/2_baseline.zip")
+    assert refs["1", "treatment"] == Path("/bundles/1_treatment.zip")
+
+
+def test_eval_report_debug_bundle_refs_mixed() -> None:
+    """debug_bundle_refs only includes results with bundle_path set."""
+    results = (
+        EvalResult(
+            sample_id="1",
+            experiment_name="baseline",
+            score=Score(value=1.0, passed=True),
+            latency_ms=100,
+            bundle_path=Path("/bundles/1_baseline.zip"),
+        ),
+        EvalResult(
+            sample_id="2",
+            experiment_name="baseline",
+            score=Score(value=0.8, passed=True),
+            latency_ms=100,
+            # No bundle_path
+        ),
+    )
+    report = EvalReport(results=results)
+    refs = report.debug_bundle_refs()
+    assert len(refs) == 1
+    assert refs["1", "baseline"] == Path("/bundles/1_baseline.zip")
+    assert ("2", "baseline") not in refs
