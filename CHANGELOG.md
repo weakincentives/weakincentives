@@ -4,11 +4,35 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+*Commits reviewed: 2026-01-23 (5274d9d) through 2026-01-24 (eea85a9)*
+
+### TL;DR
+
+This release introduces **debug bundle support for EvalLoop**, enabling full
+observability into evaluation runs with session state, logs, and eval-specific
+metadata. The **serialization system** undergoes a major overhaul: polymorphic
+type embedding (`__type__`) is replaced with **generic alias syntax** at parse
+time (`parse(Wrapper[Data], data)`), and **AST-based type resolution** now
+handles complex nested generics and `Literal` types. **Design-by-Contract is now
+always enabled**—contracts run in production, not just tests. A new
+**`MailboxWorker` base class** extracts common mailbox-driven processing
+infrastructure, reducing code duplication between MainLoop and EvalLoop. The
+**`Experiment` class moves to package root** to resolve circular imports. Bug
+fixes address **RedisMailbox generic type deserialization** and prevent **data
+inconsistency when bundle finalization fails**. New documentation includes a
+comprehensive **Query guide** for SQL-based bundle analysis.
+
+---
+
 ### Breaking Changes
+
+#### Design-by-Contract Always Enabled
 
 **Design-by-Contract is now always enabled by default.** DbC checks are enforced
 in all contexts (tests and production) and cannot be globally disabled. This
 ensures contracts catch bugs early in production rather than only during testing.
+The implementation now uses `ContextVar` for thread-safe and async-safe suspension
+tracking.
 
 - Removed `enable_dbc()` and `disable_dbc()` global functions
 - Removed `WEAKINCENTIVES_DBC` environment variable
@@ -21,6 +45,224 @@ ensures contracts catch bugs early in production rather than only during testing
 - Replace `with dbc_enabled(False):` with `with dbc_suspended():`
 - Replace `with dbc_enabled():` or `with dbc_enabled(True):` with nothing (DbC
   is now always active)
+
+#### Serialization API Overhaul
+
+**Polymorphic type embedding removed.** The `__type__` field approach is replaced
+with explicit type specification at parse time using generic alias syntax.
+
+**Removed parameters from `dump()`:**
+- `include_dataclass_type: bool` — no longer embeds type metadata
+- `type_key: str` — no longer customizable
+
+**Removed parameters from `parse()`:**
+- `allow_dataclass_type: bool` — types must now be specified upfront
+- `type_key: str` — no longer reads embedded type metadata
+- `cls` parameter is now mandatory (was optional)
+
+**Migration:**
+- Replace `dump(obj, include_dataclass_type=True)` with `dump(obj)` and store
+  type information separately (e.g., in a database column or message envelope)
+- Replace `parse(None, data, allow_dataclass_type=True)` with
+  `parse(KnownType, data)` where the type is determined from context
+- For generic dataclasses, use generic alias syntax: `parse(Wrapper[Data], data)`
+
+#### Bundle API Rename
+
+**`BundleWriter.write_eval()` renamed to `write_metadata(name, data)`** for
+better separation of concerns. The bundle layer is now generic, not eval-specific.
+
+**Migration:**
+- Replace `ctx.write_eval(eval_info)` with `ctx.write_metadata("eval", eval_info)`
+
+#### Experiment Class Relocated
+
+**`Experiment` moved from `evals/_experiment.py` to `experiment.py`** (package
+root) to resolve circular import issues.
+
+**Migration:**
+- Replace `from weakincentives.evals._experiment import Experiment` with
+  `from weakincentives.experiment import Experiment`
+- The public API `from weakincentives.evals import Experiment` continues to work
+
+---
+
+### New Features
+
+#### Debug Bundle Support for EvalLoop
+
+EvalLoop now supports debug bundle creation, providing full observability into
+evaluation runs.
+
+**Configuration:**
+```python
+config = EvalLoopConfig(debug_bundle_dir=Path("/tmp/eval-bundles"))
+```
+
+**Bundle contents:**
+- Session state before/after execution
+- Application logs during execution
+- Request input (sample and experiment)
+- Response output from MainLoop
+- `eval.json` metadata: `sample_id`, `experiment_name`, `score`, `latency_ms`,
+  optional `error`
+- Environment information
+
+**New fields:**
+- `EvalLoopConfig.debug_bundle_dir: Path | None` — enables bundling when set
+- `EvalResult.bundle_path: Path | None` — path to created bundle
+- `EvalResult.experiment_name: str | None` — experiment identifier
+
+#### MailboxWorker Base Class
+
+A new abstract base class `MailboxWorker[RequestT, ResponseT]` extracts common
+mailbox-driven processing infrastructure:
+
+- Message polling with configurable iterations/timeouts
+- Automatic lease extension via `LeaseExtender`
+- Graceful shutdown with timeout
+- Context manager protocol
+
+Both `MainLoop` and `EvalLoop` now extend this base class, eliminating ~500+
+lines of duplicate code.
+
+#### MainLoop Bundle API
+
+New `MainLoop.execute_with_bundle()` context manager enables bundled execution
+with custom metadata injection:
+
+```python
+with main_loop.execute_with_bundle(request, bundle_target=path) as ctx:
+    # Access ctx.response, ctx.session, ctx.latency_ms
+    ctx.write_metadata("custom", {"key": "value"})
+```
+
+#### Generic Alias Serialization
+
+Full support for generic dataclass serialization using type alias syntax:
+
+```python
+@dataclass
+class Wrapper[T]:
+    value: T
+
+# Parse with concrete type
+data = {"value": {"name": "test"}}
+result = parse(Wrapper[MyData], data)  # T resolved to MyData
+```
+
+Supports nested generics: `parse(Outer[Inner[int]], data)`
+
+#### AST-Based Type Resolution
+
+Complex generic type annotations are now resolved using AST parsing instead of
+simple string matching. This enables proper handling of:
+
+- Nested generics: `Container[Inner[T]]`
+- Union types: `str | int`
+- Literal types: `Literal["foo", 1, True, -1]`
+- Forward references with postponed evaluation (`from __future__ import annotations`)
+
+**Security improvement:** Type resolution no longer uses `eval()`. Only safe,
+well-known types from `builtins` and `typing` modules are resolved.
+
+---
+
+### Bug Fixes
+
+#### RedisMailbox Generic Type Deserialization
+
+Fixed `RedisMailbox._deserialize()` to properly handle generic type aliases like
+`MainLoopRequest[T]`. The old `hasattr(type, "__dataclass_fields__")` check
+failed for generic aliases; now uses `get_origin()` and `is_dataclass()` for
+correct detection.
+
+#### Circular Import Resolution
+
+Moved `Experiment` class to package root to break circular import chain:
+`runtime → evals → prompt → resources → runtime`. This fixes deserialization of
+`EvalRequest` and `MainLoopRequest` where nested `Experiment` objects remained
+as dicts instead of proper instances.
+
+#### Bundle Finalization Error Handling
+
+Fixed data inconsistency when bundle finalization fails after successful
+execution. The system now tracks execution state and reuses existing results
+instead of re-executing the sample, preventing inconsistent data from multiple
+executions.
+
+---
+
+### Documentation
+
+#### Query Guide
+
+New comprehensive guide (`guides/query.md`) for SQL-based debug bundle analysis:
+- `wink query` CLI usage with `--schema`, `--table`, `--export-jsonl` options
+- Complete database schema reference (core tables, optional tables, dynamic
+  slice tables)
+- Pre-built SQL views: `tool_timeline`, `native_tool_calls`, `error_summary`
+- Common query patterns for errors, tool performance, session state, token usage
+- Real-world debugging scenarios with example queries
+
+#### README Onboarding Update
+
+Refreshed onboarding guidance with a "hands-on first" approach:
+- Points new users to the starter repository for immediate experimentation
+- Repositions guides as supplementary resource for improvement
+- Acknowledges learning-by-doing preference
+
+#### Spec and Guide Updates
+
+- `specs/DBC.md` — Updated for always-on enforcement model
+- `specs/DEBUG_BUNDLE.md` — Added EvalLoop integration and `eval.json` schema
+- `specs/EVALS.md` — Added `EvalLoopConfig`, `experiment_name`, `bundle_path`
+- `specs/EXPERIMENTS.md` — Updated implementation location
+- `specs/DATACLASSES.md` — Removed `type_key`, added generic alias examples
+- `guides/debugging.md` — Added EvalLoop bundle example
+- `guides/evaluation.md` — New "Debug Bundles for Evaluations" section
+- `guides/serialization.md` — Replaced polymorphic section with generic alias
+  documentation
+
+---
+
+### Dependencies
+
+Updated to latest versions:
+- `claude-agent-sdk`: 0.1.21 → 0.1.22
+- `huggingface-hub`: 1.3.2 → 1.3.3
+- `hypothesis`: 6.150.2 → 6.150.3
+- `rich`: 14.2.0 → 14.3.0
+- `ruff`: 0.14.13 → 0.14.14 (sdist 25% smaller)
+
+---
+
+### Tests
+
+#### Comprehensive Loop Type Serialization Tests
+
+New test suite (`tests/serde/test_loop_serde.py`) with 50+ test cases covering:
+- `Score`, `Sample`, `Experiment` round-trip serialization
+- `EvalRequest`, `EvalResult` with generic types and error handling
+- `MainLoopConfig`, `MainLoopRequest`, `MainLoopResult` with complex nested types
+- `RunContext`, `Budget`, `Deadline` serialization
+- Clone operations and type coercion from JSON
+- Edge cases: unspecialized generics, missing fields, invalid data
+
+#### EvalLoop Bundle Tests
+
+8 new test cases for EvalLoop debug bundle functionality:
+- Basic bundle creation and directory structure
+- Failed evaluation and None output handling
+- Session-aware evaluator support
+- Fallback behavior and re-execution prevention
+
+#### Generic Type Resolution Tests
+
+18 new tests for AST-based type resolution:
+- Simple names, namespace handling, subscripted generics
+- Builtin generics, union types, literal types
+- Error handling and edge cases
 
 ## v0.22.0 - 2026-01-23
 
