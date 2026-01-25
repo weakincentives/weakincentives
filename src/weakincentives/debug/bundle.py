@@ -46,7 +46,7 @@ from contextlib import contextmanager
 from dataclasses import field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Self, override
+from typing import IO, TYPE_CHECKING, Any, Protocol, Self, override, runtime_checkable
 from uuid import UUID, uuid4
 
 from ..dataclasses import FrozenDataclass
@@ -162,6 +162,70 @@ class BundleValidationError(BundleError):
 
 
 @FrozenDataclass()
+class BundleRetentionPolicy:
+    """Policy for cleaning up old debug bundles in the target directory.
+
+    Retention is applied after each bundle is successfully created. If multiple
+    limits are configured, all are enforced (most restrictive wins). Bundle age
+    is determined from the ``created_at`` field in the manifest.
+
+    Attributes:
+        max_bundles: Keep at most N bundles (oldest deleted first).
+        max_age_seconds: Delete bundles older than this (in seconds).
+        max_total_bytes: Keep total size under limit (oldest deleted first).
+
+    Example::
+
+        policy = BundleRetentionPolicy(
+            max_bundles=10,           # Keep last 10 bundles
+            max_age_seconds=86400,    # Delete bundles older than 24 hours
+        )
+    """
+
+    max_bundles: int | None = None
+    max_age_seconds: int | None = None
+    max_total_bytes: int | None = None
+
+
+@runtime_checkable
+class BundleStorageHandler(Protocol):
+    """Protocol for copying bundles to external storage after creation.
+
+    The storage handler is called after retention policy is applied, so only
+    bundles that survive cleanup are passed to the handler.
+
+    Errors are logged but do not propagate (non-blocking). The local bundle
+    remains regardless of storage success.
+
+    Example::
+
+        @dataclass
+        class S3StorageHandler:
+            bucket: str
+            prefix: str = "debug-bundles/"
+
+            def store_bundle(
+                self, bundle_path: Path, manifest: BundleManifest
+            ) -> None:
+                key = f"{self.prefix}{manifest.bundle_id}.zip"
+                s3_client.upload_file(str(bundle_path), self.bucket, key)
+    """
+
+    def store_bundle(
+        self,
+        bundle_path: Path,
+        manifest: BundleManifest,
+    ) -> None:
+        """Copy/upload the bundle to external storage.
+
+        Args:
+            bundle_path: Local path to the created bundle ZIP.
+            manifest: Bundle metadata (id, timestamp, checksums, etc.).
+        """
+        ...
+
+
+@FrozenDataclass()
 class BundleConfig:
     """Configuration for bundle creation.
 
@@ -170,21 +234,27 @@ class BundleConfig:
         max_file_size: Skip files larger than this (bytes). Default 10MB.
         max_total_size: Maximum filesystem capture size (bytes). Default 50MB.
         compression: Zip compression method.
+        retention: Policy for cleaning up old bundles. None disables cleanup.
+        storage_handler: Handler for copying bundles to external storage.
     """
 
     target: Path | None = None
     max_file_size: int = 10_000_000  # 10MB
     max_total_size: int = 52_428_800  # 50MB
     compression: str = "deflate"
+    retention: BundleRetentionPolicy | None = None
+    storage_handler: BundleStorageHandler | None = None
 
     @classmethod
-    def __pre_init__(
+    def __pre_init__(  # noqa: PLR0913
         cls,
         *,
         target: Path | str | None = None,
         max_file_size: int = 10_000_000,
         max_total_size: int = 52_428_800,
         compression: str = "deflate",
+        retention: BundleRetentionPolicy | None = None,
+        storage_handler: BundleStorageHandler | None = None,
     ) -> Mapping[str, object]:
         """Normalize inputs before construction."""
         normalized_target = Path(target) if isinstance(target, str) else target
@@ -193,6 +263,8 @@ class BundleConfig:
             "max_file_size": max_file_size,
             "max_total_size": max_total_size,
             "compression": compression,
+            "retention": retention,
+            "storage_handler": storage_handler,
         }
 
     @property
@@ -833,6 +905,147 @@ class BundleWriter:
         """Set prompt metadata for manifest."""
         self._prompt_info = PromptInfo(ns=ns, key=key, adapter=adapter)
 
+    def _apply_retention_policy(self) -> None:
+        """Apply retention policy to clean up old bundles.
+
+        Called after a new bundle is successfully created. Scans the target
+        directory for existing bundles and deletes those that exceed the
+        configured limits.
+        """
+        retention = self._config.retention
+        if retention is None:
+            return
+
+        try:
+            self._enforce_retention(retention)
+        except Exception:
+            _logger.warning(
+                "Failed to apply retention policy",
+                extra={"bundle_id": str(self._bundle_id)},
+                exc_info=True,
+            )
+
+    def _enforce_retention(self, retention: BundleRetentionPolicy) -> None:
+        """Enforce retention policy on bundles in target directory."""
+        bundles = self._collect_existing_bundles()
+        to_delete: set[Path] = set()
+
+        self._apply_age_limit(retention, bundles, to_delete)
+        self._apply_count_limit(retention, bundles, to_delete)
+        self._apply_size_limit(retention, bundles, to_delete)
+        self._delete_marked_bundles(to_delete)
+
+    def _collect_existing_bundles(self) -> list[tuple[Path, datetime, int]]:
+        """Collect metadata for existing bundles in the target directory."""
+        bundles: list[tuple[Path, datetime, int]] = []
+        for bundle_path in self._target.glob("*.zip"):
+            if bundle_path == self._path:
+                continue
+            try:
+                bundle = DebugBundle.load(bundle_path)
+                created_at = datetime.fromisoformat(bundle.manifest.created_at)
+                size = bundle_path.stat().st_size
+                bundles.append((bundle_path, created_at, size))
+            except (BundleValidationError, ValueError, OSError):
+                continue
+        bundles.sort(key=lambda x: x[1])
+        return bundles
+
+    @staticmethod
+    def _apply_age_limit(
+        retention: BundleRetentionPolicy,
+        bundles: list[tuple[Path, datetime, int]],
+        to_delete: set[Path],
+    ) -> None:
+        """Mark bundles older than max_age_seconds for deletion."""
+        if retention.max_age_seconds is None:
+            return
+        now = datetime.now(UTC)
+        for bundle_path, created_at, _ in bundles:
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=UTC)
+            if (now - created_at).total_seconds() > retention.max_age_seconds:
+                to_delete.add(bundle_path)
+
+    @staticmethod
+    def _apply_count_limit(
+        retention: BundleRetentionPolicy,
+        bundles: list[tuple[Path, datetime, int]],
+        to_delete: set[Path],
+    ) -> None:
+        """Mark oldest bundles for deletion to stay under max_bundles limit."""
+        if retention.max_bundles is None:
+            return
+        total_count = len(bundles) + 1  # +1 for newly created bundle
+        excess = total_count - retention.max_bundles
+        if excess > 0:
+            for bundle_path, _, _ in bundles[:excess]:
+                to_delete.add(bundle_path)
+
+    def _apply_size_limit(
+        self,
+        retention: BundleRetentionPolicy,
+        bundles: list[tuple[Path, datetime, int]],
+        to_delete: set[Path],
+    ) -> None:
+        """Mark oldest bundles for deletion to stay under max_total_bytes limit."""
+        if retention.max_total_bytes is None:
+            return
+        current_size = self._path.stat().st_size if self._path else 0
+        for bundle_path, _, size in reversed(bundles):
+            if bundle_path in to_delete:
+                continue
+            if current_size + size > retention.max_total_bytes:
+                to_delete.add(bundle_path)
+            else:
+                current_size += size
+
+    @staticmethod
+    def _delete_marked_bundles(to_delete: set[Path]) -> None:
+        """Delete bundles marked for removal."""
+        for bundle_path in to_delete:
+            try:
+                bundle_path.unlink()
+                _logger.debug(
+                    "Deleted old bundle",
+                    extra={"bundle_path": str(bundle_path)},
+                )
+            except OSError:
+                _logger.warning(
+                    "Failed to delete old bundle",
+                    extra={"bundle_path": str(bundle_path)},
+                    exc_info=True,
+                )
+
+    def _invoke_storage_handler(self, manifest: BundleManifest) -> None:
+        """Invoke storage handler to copy bundle to external storage.
+
+        Called after retention policy is applied. Errors are logged but
+        do not propagate.
+        """
+        handler = self._config.storage_handler
+        if handler is None or self._path is None:
+            return
+
+        try:
+            handler.store_bundle(self._path, manifest)
+            _logger.debug(
+                "Bundle stored to external storage",
+                extra={
+                    "bundle_id": str(self._bundle_id),
+                    "bundle_path": str(self._path),
+                },
+            )
+        except Exception:
+            _logger.warning(
+                "Failed to store bundle to external storage",
+                extra={
+                    "bundle_id": str(self._bundle_id),
+                    "bundle_path": str(self._path),
+                },
+                exc_info=True,
+            )
+
     def _finalize(self) -> None:
         """Finalize bundle: generate README, compute manifest, create zip."""
         if self._finalized or self._temp_dir is None:
@@ -934,6 +1147,10 @@ class BundleWriter:
                 "file_count": len(self._files),
             },
         )
+
+        # Post-creation lifecycle: retention then storage
+        self._apply_retention_policy()
+        self._invoke_storage_handler(manifest)
 
 
 class DebugBundle:
@@ -1213,6 +1430,8 @@ __all__ = [
     "BundleConfig",
     "BundleError",
     "BundleManifest",
+    "BundleRetentionPolicy",
+    "BundleStorageHandler",
     "BundleValidationError",
     "BundleWriter",
     "DebugBundle",

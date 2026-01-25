@@ -279,7 +279,7 @@ After the bundle ZIP is finalized and atomically moved to the target directory:
    directory and delete bundles that exceed configured limits. Deletion order is
    oldest-first based on manifest `created_at`.
 
-2. **Storage handler invocation**: If `BundleConfig.storage_handler` is set, call
+1. **Storage handler invocation**: If `BundleConfig.storage_handler` is set, call
    `store_bundle(bundle_path, manifest)`. Errors are logged at WARNING level but
    do not fail the request or affect the local bundle.
 

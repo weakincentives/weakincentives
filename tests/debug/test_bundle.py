@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -1161,3 +1162,507 @@ class TestWriteEnvironment:
         writer.write_environment()
 
         assert "BundleWriter not entered" in caplog.text
+
+
+class TestBundleRetentionPolicy:
+    """Tests for BundleRetentionPolicy dataclass."""
+
+    def test_default_policy(self) -> None:
+        """Test default retention policy has no limits."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        policy = BundleRetentionPolicy()
+        assert policy.max_bundles is None
+        assert policy.max_age_seconds is None
+        assert policy.max_total_bytes is None
+
+    def test_policy_with_max_bundles(self) -> None:
+        """Test policy with max_bundles limit."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        policy = BundleRetentionPolicy(max_bundles=5)
+        assert policy.max_bundles == 5
+
+    def test_policy_with_all_limits(self) -> None:
+        """Test policy with all limits configured."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        policy = BundleRetentionPolicy(
+            max_bundles=10,
+            max_age_seconds=86400,
+            max_total_bytes=100_000_000,
+        )
+        assert policy.max_bundles == 10
+        assert policy.max_age_seconds == 86400
+        assert policy.max_total_bytes == 100_000_000
+
+
+class TestBundleStorageHandler:
+    """Tests for BundleStorageHandler protocol."""
+
+    def test_protocol_is_runtime_checkable(self) -> None:
+        """Test BundleStorageHandler is runtime checkable."""
+        from weakincentives.debug.bundle import BundleStorageHandler
+
+        class MyHandler:
+            def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+                pass
+
+        handler = MyHandler()
+        assert isinstance(handler, BundleStorageHandler)
+
+    def test_non_handler_is_not_instance(self) -> None:
+        """Test non-conforming class is not a BundleStorageHandler."""
+        from weakincentives.debug.bundle import BundleStorageHandler
+
+        class NotAHandler:
+            pass
+
+        not_handler = NotAHandler()
+        assert not isinstance(not_handler, BundleStorageHandler)
+
+
+class TestRetentionPolicyIntegration:
+    """Tests for retention policy integration with BundleWriter."""
+
+    def test_retention_max_bundles_deletes_oldest(self, tmp_path: Path) -> None:
+        """Test max_bundles limit deletes oldest bundles."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        retention = BundleRetentionPolicy(max_bundles=2)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        # Create 3 bundles
+        paths: list[Path] = []
+        for i in range(3):
+            with BundleWriter(tmp_path, config=config) as writer:
+                writer.write_request_input({"bundle": i})
+            assert writer.path is not None
+            paths.append(writer.path)
+
+        # After creating the 3rd bundle, only 2 should remain
+        remaining = list(tmp_path.glob("*.zip"))
+        assert len(remaining) == 2
+
+        # The newest bundle should definitely exist
+        assert paths[-1].exists()
+
+    def test_retention_max_age_deletes_old_bundles(self, tmp_path: Path) -> None:
+        """Test max_age_seconds limit deletes old bundles."""
+        from unittest.mock import patch
+
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create a bundle with old timestamp
+        with BundleWriter(tmp_path) as old_writer:
+            old_writer.write_request_input({"old": True})
+        assert old_writer.path is not None
+        old_path = old_writer.path
+
+        # Patch datetime.now to return a time far in the future for retention check
+        original_now = datetime.now
+
+        def future_now(tz: object = None) -> datetime:
+            if tz is not None:
+                return original_now(tz) + __import__("datetime").timedelta(days=2)
+            return original_now() + __import__("datetime").timedelta(days=2)
+
+        # Create a new bundle with retention policy
+        retention = BundleRetentionPolicy(max_age_seconds=86400)  # 24 hours
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        with patch("weakincentives.debug.bundle.datetime") as mock_datetime:
+            mock_datetime.now = future_now
+            mock_datetime.fromisoformat = datetime.fromisoformat
+            # Need to patch at the class level for the retention check
+            with BundleWriter(tmp_path, config=config) as new_writer:
+                new_writer.write_request_input({"new": True})
+
+        # The old bundle should be deleted
+        assert not old_path.exists()
+        assert new_writer.path is not None
+        assert new_writer.path.exists()
+
+    def test_retention_max_total_bytes_deletes_largest_oldest(
+        self, tmp_path: Path
+    ) -> None:
+        """Test max_total_bytes limit deletes bundles to stay under limit."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create first bundle
+        with BundleWriter(tmp_path) as first_writer:
+            writer_first = first_writer
+            writer_first.write_request_input({"data": "x" * 1000})
+        assert writer_first.path is not None
+        first_size = writer_first.path.stat().st_size
+
+        # Create second bundle with retention that allows only ~one bundle worth
+        retention = BundleRetentionPolicy(max_total_bytes=first_size + 100)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        with BundleWriter(tmp_path, config=config) as second_writer:
+            second_writer.write_request_input({"data": "y" * 1000})
+
+        # The first bundle should be deleted to stay under limit
+        assert not writer_first.path.exists()
+        assert second_writer.path is not None
+        assert second_writer.path.exists()
+
+    def test_retention_handles_invalid_bundles_gracefully(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test retention skips invalid bundle files."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create an invalid "bundle" file
+        invalid_file = tmp_path / "invalid_bundle.zip"
+        _ = invalid_file.write_text("not a valid zip")
+
+        retention = BundleRetentionPolicy(max_bundles=10)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        # This should not raise
+        with BundleWriter(tmp_path, config=config) as writer:
+            writer.write_request_input({"test": True})
+
+        assert writer.path is not None
+        assert writer.path.exists()
+        # Invalid file should still be there (not processed)
+        assert invalid_file.exists()
+
+    def test_retention_error_is_logged_not_raised(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test retention errors are logged but don't fail bundle creation."""
+        from unittest.mock import patch
+
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        retention = BundleRetentionPolicy(max_bundles=1)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        # Mock _enforce_retention to raise
+        def failing_enforce(self: object, policy: object) -> None:
+            raise RuntimeError("Simulated retention failure")
+
+        with patch.object(BundleWriter, "_enforce_retention", failing_enforce):
+            with BundleWriter(tmp_path, config=config) as writer:
+                writer.write_request_input({"test": True})
+
+        # Bundle should still be created
+        assert writer.path is not None
+        assert writer.path.exists()
+        assert "Failed to apply retention policy" in caplog.text
+
+    def test_retention_none_does_nothing(self, tmp_path: Path) -> None:
+        """Test that no retention policy means no cleanup."""
+        config = BundleConfig(target=tmp_path, retention=None)
+
+        # Create multiple bundles
+        paths: list[Path] = []
+        for i in range(5):
+            with BundleWriter(tmp_path, config=config) as writer:
+                writer.write_request_input({"bundle": i})
+            assert writer.path is not None
+            paths.append(writer.path)
+
+        # All bundles should still exist
+        for path in paths:
+            assert path.exists()
+
+    def test_retention_size_limit_skips_already_marked_bundles(
+        self, tmp_path: Path
+    ) -> None:
+        """Test size limit skips bundles already marked for deletion by other limits."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create multiple bundles without retention first
+        for i in range(3):
+            with BundleWriter(tmp_path) as writer:
+                writer.write_request_input({"bundle": i})
+
+        # Now create a new bundle with both max_bundles and max_total_bytes
+        # max_bundles will mark some for deletion, size limit should skip those
+        retention = BundleRetentionPolicy(
+            max_bundles=2,  # Will mark oldest for deletion
+            max_total_bytes=100_000_000,  # Large enough to not delete more
+        )
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        with BundleWriter(tmp_path, config=config) as writer:
+            writer.write_request_input({"bundle": 3})
+
+        assert writer.path is not None
+        # Should have 2 bundles remaining (max_bundles=2)
+        remaining = list(tmp_path.glob("*.zip"))
+        assert len(remaining) == 2
+
+    def test_retention_size_limit_keeps_bundles_under_limit(
+        self, tmp_path: Path
+    ) -> None:
+        """Test size limit keeps bundles that fit under the total size limit."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create a bundle first
+        with BundleWriter(tmp_path) as first_writer:
+            first_writer.write_request_input({"data": "small"})
+        assert first_writer.path is not None
+        first_size = first_writer.path.stat().st_size
+
+        # Create a second bundle with generous size limit
+        # that should keep both bundles
+        retention = BundleRetentionPolicy(
+            max_total_bytes=first_size * 10  # Plenty of room
+        )
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        with BundleWriter(tmp_path, config=config) as second_writer:
+            second_writer.write_request_input({"data": "small"})
+
+        # Both bundles should still exist
+        assert first_writer.path.exists()
+        assert second_writer.path is not None
+        assert second_writer.path.exists()
+        remaining = list(tmp_path.glob("*.zip"))
+        assert len(remaining) == 2
+
+    def test_retention_delete_failure_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test bundle deletion failure is logged but doesn't fail."""
+        from unittest.mock import patch
+
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create a bundle first
+        with BundleWriter(tmp_path) as first_writer:
+            first_writer.write_request_input({"bundle": 0})
+        assert first_writer.path is not None
+
+        # Create a new bundle with retention that will try to delete the first
+        retention = BundleRetentionPolicy(max_bundles=1)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        # Patch Path.unlink to fail
+        original_unlink = Path.unlink
+
+        def failing_unlink(self: Path, missing_ok: bool = False) -> None:
+            if str(self).endswith(".zip") and self != first_writer.path:
+                return original_unlink(self, missing_ok)
+            raise OSError("Simulated deletion failure")
+
+        with patch.object(Path, "unlink", failing_unlink):
+            with BundleWriter(tmp_path, config=config) as writer:
+                writer.write_request_input({"bundle": 1})
+
+        # Bundle should still be created
+        assert writer.path is not None
+        assert writer.path.exists()
+        assert "Failed to delete old bundle" in caplog.text
+
+    def test_retention_age_handles_timezone_naive_timestamps(
+        self, tmp_path: Path
+    ) -> None:
+        """Test age limit works with timezone-naive timestamps in manifests."""
+        from unittest.mock import MagicMock, patch
+
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create two real bundles first
+        with BundleWriter(tmp_path) as old_writer:
+            old_writer.write_request_input({"bundle": "old"})
+        assert old_writer.path is not None
+
+        with BundleWriter(tmp_path) as recent_writer:
+            recent_writer.write_request_input({"bundle": "recent"})
+        assert recent_writer.path is not None
+
+        # Create mock bundles with different timestamps
+        mock_old_bundle = MagicMock()
+        # Use naive datetime (no tzinfo) - old date
+        naive_old_timestamp = datetime(2020, 1, 1, 0, 0, 0)
+        mock_old_bundle.manifest.created_at = naive_old_timestamp.isoformat()
+
+        mock_recent_bundle = MagicMock()
+        # Use naive datetime (no tzinfo) - recent date (now)
+        naive_recent_timestamp = datetime.now().replace(tzinfo=None)
+        mock_recent_bundle.manifest.created_at = naive_recent_timestamp.isoformat()
+
+        original_load = DebugBundle.load
+
+        def mock_load(path: Path) -> DebugBundle | MagicMock:
+            if path == old_writer.path:
+                return mock_old_bundle
+            if path == recent_writer.path:
+                return mock_recent_bundle
+            return original_load(path)
+
+        # Create a new bundle with max_age retention
+        retention = BundleRetentionPolicy(max_age_seconds=86400)  # 24 hours
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        with patch.object(DebugBundle, "load", mock_load):
+            with BundleWriter(tmp_path, config=config) as writer:
+                writer.write_request_input({"bundle": "new"})
+
+        # The old bundle with naive timestamp should be deleted
+        assert not old_writer.path.exists()
+        # The recent bundle should be kept
+        assert recent_writer.path.exists()
+        assert writer.path is not None
+        assert writer.path.exists()
+
+
+class TestStorageHandlerIntegration:
+    """Tests for storage handler integration with BundleWriter."""
+
+    def test_storage_handler_is_called(self, tmp_path: Path) -> None:
+        """Test storage handler is called after bundle creation."""
+        from weakincentives.debug.bundle import BundleStorageHandler
+
+        stored_bundles: list[tuple[Path, BundleManifest]] = []
+
+        class TestHandler:
+            def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+                stored_bundles.append((bundle_path, manifest))
+
+        handler = TestHandler()
+        assert isinstance(handler, BundleStorageHandler)
+
+        config = BundleConfig(target=tmp_path, storage_handler=handler)
+
+        with BundleWriter(tmp_path, config=config) as writer:
+            writer.write_request_input({"test": True})
+
+        assert len(stored_bundles) == 1
+        assert stored_bundles[0][0] == writer.path
+        assert stored_bundles[0][1].bundle_id == str(writer.bundle_id)
+
+    def test_storage_handler_receives_manifest(self, tmp_path: Path) -> None:
+        """Test storage handler receives correct manifest data."""
+        received_manifest: BundleManifest | None = None
+
+        class TestHandler:
+            def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+                nonlocal received_manifest
+                received_manifest = manifest
+
+        config = BundleConfig(target=tmp_path, storage_handler=TestHandler())
+
+        with BundleWriter(tmp_path, config=config) as writer:
+            writer.set_prompt_info(ns="test", key="prompt", adapter="openai")
+            writer.write_request_input({"test": True})
+
+        assert received_manifest is not None
+        assert received_manifest.prompt.ns == "test"
+        assert received_manifest.prompt.key == "prompt"
+        assert received_manifest.prompt.adapter == "openai"
+
+    def test_storage_handler_error_is_logged_not_raised(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test storage handler errors are logged but don't fail bundle creation."""
+
+        class FailingHandler:
+            def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+                raise RuntimeError("Storage failed")
+
+        config = BundleConfig(target=tmp_path, storage_handler=FailingHandler())
+
+        with BundleWriter(tmp_path, config=config) as writer:
+            writer.write_request_input({"test": True})
+
+        # Bundle should still be created
+        assert writer.path is not None
+        assert writer.path.exists()
+        assert "Failed to store bundle to external storage" in caplog.text
+
+    def test_storage_handler_none_does_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that no storage handler means no storage attempt."""
+        config = BundleConfig(target=tmp_path, storage_handler=None)
+
+        with BundleWriter(tmp_path, config=config) as writer:
+            writer.write_request_input({"test": True})
+
+        assert writer.path is not None
+        assert "stored to external storage" not in caplog.text
+
+    def test_storage_handler_called_after_retention(self, tmp_path: Path) -> None:
+        """Test storage handler is called after retention policy is applied."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        call_order: list[str] = []
+        stored_paths: list[Path] = []
+
+        class OrderTrackingHandler:
+            def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+                call_order.append("storage")
+                stored_paths.append(bundle_path)
+
+        retention = BundleRetentionPolicy(max_bundles=2)
+        config = BundleConfig(
+            target=tmp_path,
+            retention=retention,
+            storage_handler=OrderTrackingHandler(),
+        )
+
+        # Create multiple bundles
+        for i in range(3):
+            with BundleWriter(tmp_path, config=config) as writer:
+                writer.write_request_input({"bundle": i})
+
+        # Storage handler should have been called 3 times
+        assert len(stored_paths) == 3
+        # And retention should have kept only 2 bundles
+        remaining = list(tmp_path.glob("*.zip"))
+        assert len(remaining) == 2
+
+
+class TestBundleConfigWithRetentionAndStorage:
+    """Tests for BundleConfig with retention and storage handler fields."""
+
+    def test_config_default_values(self) -> None:
+        """Test BundleConfig has None defaults for retention and storage."""
+        config = BundleConfig()
+        assert config.retention is None
+        assert config.storage_handler is None
+
+    def test_config_with_retention(self, tmp_path: Path) -> None:
+        """Test BundleConfig accepts retention policy."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        retention = BundleRetentionPolicy(max_bundles=5)
+        config = BundleConfig(target=tmp_path, retention=retention)
+        assert config.retention is retention
+        assert config.retention.max_bundles == 5
+
+    def test_config_with_storage_handler(self, tmp_path: Path) -> None:
+        """Test BundleConfig accepts storage handler."""
+
+        class TestHandler:
+            def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+                pass
+
+        handler = TestHandler()
+        config = BundleConfig(target=tmp_path, storage_handler=handler)
+        assert config.storage_handler is handler
+
+    def test_config_with_both_retention_and_storage(self, tmp_path: Path) -> None:
+        """Test BundleConfig accepts both retention and storage handler."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        class TestHandler:
+            def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+                pass
+
+        retention = BundleRetentionPolicy(max_bundles=10)
+        handler = TestHandler()
+        config = BundleConfig(
+            target=tmp_path,
+            retention=retention,
+            storage_handler=handler,
+        )
+        assert config.retention is retention
+        assert config.storage_handler is handler
