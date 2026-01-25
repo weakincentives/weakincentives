@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from dataclasses import field, replace
 from typing import TypeVar, overload
 
-from ..dataclasses import FrozenDataclass
+from .dataclasses import FrozenDataclass
 
 T = TypeVar("T")
 

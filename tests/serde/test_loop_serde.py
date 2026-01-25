@@ -24,8 +24,8 @@ import pytest
 from weakincentives.budget import Budget
 from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
-from weakincentives.evals._experiment import Experiment
 from weakincentives.evals._types import EvalRequest, EvalResult, Sample, Score
+from weakincentives.experiment import Experiment
 from weakincentives.runtime.main_loop_types import (
     MainLoopConfig,
     MainLoopRequest,
@@ -289,14 +289,32 @@ class TestEvalResultSerde:
 
 
 class TestEvalRequestSerde:
-    """Tests for EvalRequest serialization/deserialization.
+    """Tests for EvalRequest serialization/deserialization."""
 
-    Note: EvalRequest.experiment uses Experiment which is imported in a
-    TYPE_CHECKING block. This means the serde module cannot resolve the type
-    at runtime, and experiment is deserialized as a dict rather than an
-    Experiment instance. These tests verify dump works correctly and that
-    the experiment dict contains expected keys.
-    """
+    def test_eval_request_with_string_types(self) -> None:
+        """EvalRequest with primitive string types."""
+        sample: Sample[str, str] = Sample(id="1", input="test", expected="result")
+        experiment = Experiment(name="baseline")
+        request_id = UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+        created_at = datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC)
+
+        request: EvalRequest[str, str] = EvalRequest(
+            sample=sample,
+            experiment=experiment,
+            request_id=request_id,
+            created_at=created_at,
+        )
+
+        data = dump(request)
+        restored = parse(EvalRequest[str, str], data)
+
+        assert restored.sample.id == "1"
+        assert restored.sample.input == "test"
+        assert restored.sample.expected == "result"
+        assert isinstance(restored.experiment, Experiment)
+        assert restored.experiment.name == "baseline"
+        assert restored.request_id == request_id
+        assert restored.created_at == created_at
 
     def test_eval_request_dump_structure(self) -> None:
         """EvalRequest dump produces correct structure."""
@@ -321,36 +339,8 @@ class TestEvalRequestSerde:
         assert data["request_id"] == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         assert data["created_at"] == "2024-06-15T12:00:00+00:00"
 
-    def test_eval_request_parse_sample_and_primitives(self) -> None:
-        """EvalRequest parse handles sample and primitive fields correctly."""
-        sample: Sample[str, str] = Sample(id="1", input="test", expected="result")
-        experiment = Experiment(name="baseline")
-        request_id = UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
-        created_at = datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC)
-
-        request: EvalRequest[str, str] = EvalRequest(
-            sample=sample,
-            experiment=experiment,
-            request_id=request_id,
-            created_at=created_at,
-        )
-
-        data = dump(request)
-        restored = parse(EvalRequest[str, str], data)
-
-        # Sample and primitives are correctly parsed
-        assert restored.sample.id == "1"
-        assert restored.sample.input == "test"
-        assert restored.sample.expected == "result"
-        assert restored.request_id == request_id
-        assert restored.created_at == created_at
-
-        # experiment is a dict due to TYPE_CHECKING import limitation
-        assert isinstance(restored.experiment, dict)
-        assert restored.experiment["name"] == "baseline"
-
     def test_eval_request_with_dataclass_types(self) -> None:
-        """EvalRequest with nested dataclass types for sample."""
+        """EvalRequest with nested dataclass types."""
         sample: Sample[QuestionInput, AnswerExpected] = Sample(
             id="qa-1",
             input=QuestionInput(question="What is AI?"),
@@ -366,15 +356,12 @@ class TestEvalRequestSerde:
         data = dump(request)
         restored = parse(EvalRequest[QuestionInput, AnswerExpected], data)
 
-        # Sample with dataclass types works correctly
         assert isinstance(restored.sample.input, QuestionInput)
         assert restored.sample.input.question == "What is AI?"
         assert isinstance(restored.sample.expected, AnswerExpected)
         assert restored.sample.expected.answer == "Artificial Intelligence"
-
-        # experiment is a dict due to TYPE_CHECKING import limitation
-        assert isinstance(restored.experiment, dict)
-        assert restored.experiment["flags"] == {"debug": True}
+        assert isinstance(restored.experiment, Experiment)
+        assert restored.experiment.flags == {"debug": True}
 
     def test_eval_request_parse_from_json(self) -> None:
         """EvalRequest parses from JSON with string UUIDs and datetimes."""
@@ -388,8 +375,8 @@ class TestEvalRequestSerde:
         restored = parse(EvalRequest[str, str], data)
 
         assert restored.sample.id == "s1"
-        assert isinstance(restored.experiment, dict)
-        assert restored.experiment["name"] == "test"
+        assert isinstance(restored.experiment, Experiment)
+        assert restored.experiment.name == "test"
         assert restored.request_id == UUID("11111111-2222-3333-4444-555555555555")
         assert restored.created_at.year == 2024
 
@@ -553,13 +540,7 @@ class TestMainLoopConfigSerde:
 
 
 class TestMainLoopRequestSerde:
-    """Tests for MainLoopRequest serialization/deserialization.
-
-    Note: MainLoopRequest.experiment uses Experiment which is imported in a
-    TYPE_CHECKING block. This means the serde module cannot resolve the type
-    at runtime, and experiment is deserialized as a dict rather than an
-    Experiment instance.
-    """
+    """Tests for MainLoopRequest serialization/deserialization."""
 
     def test_main_loop_request_with_string_type(self) -> None:
         """MainLoopRequest with primitive string type."""
@@ -603,7 +584,7 @@ class TestMainLoopRequestSerde:
         assert data["budget"]["max_total_tokens"] == 10000
 
     def test_main_loop_request_with_dataclass_type(self) -> None:
-        """MainLoopRequest with nested dataclass type for request."""
+        """MainLoopRequest with nested dataclass type."""
         task = TaskRequest(task="Generate report", priority=2)
         experiment = Experiment(name="fast-mode", flags={"cache": True})
         budget = Budget(max_total_tokens=10000)
@@ -617,19 +598,14 @@ class TestMainLoopRequestSerde:
         data = dump(request)
         restored = parse(MainLoopRequest[TaskRequest], data)
 
-        # Request dataclass is correctly parsed
         assert isinstance(restored.request, TaskRequest)
         assert restored.request.task == "Generate report"
         assert restored.request.priority == 2
-
-        # Budget is correctly parsed
         assert restored.budget is not None
         assert restored.budget.max_total_tokens == 10000
-
-        # experiment is a dict due to TYPE_CHECKING import limitation
-        assert isinstance(restored.experiment, dict)
-        assert restored.experiment["name"] == "fast-mode"
-        assert restored.experiment["flags"] == {"cache": True}
+        assert isinstance(restored.experiment, Experiment)
+        assert restored.experiment.name == "fast-mode"
+        assert restored.experiment.flags == {"cache": True}
 
     def test_main_loop_request_with_run_context(self) -> None:
         """MainLoopRequest with run context."""
@@ -662,10 +638,8 @@ class TestMainLoopRequestSerde:
         assert restored.request.task == "Analyze data"
         assert restored.request.priority == 3
         assert restored.request_id == UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-
-        # experiment is a dict due to TYPE_CHECKING import limitation
-        assert isinstance(restored.experiment, dict)
-        assert restored.experiment["name"] == "experiment-1"
+        assert isinstance(restored.experiment, Experiment)
+        assert restored.experiment.name == "experiment-1"
 
         # Budget is properly parsed since it's not in TYPE_CHECKING
         assert restored.budget is not None
@@ -945,12 +919,7 @@ class TestLoopSerdeEdgeCases:
 
 
 class TestLoopSerdeIntegration:
-    """Integration tests for complete request/response workflows.
-
-    Note: experiment fields are deserialized as dicts due to TYPE_CHECKING
-    imports. These tests work around this by accessing dict keys instead of
-    attributes for experiment data.
-    """
+    """Integration tests for complete request/response workflows."""
 
     def test_eval_workflow_round_trip(self) -> None:
         """Complete EvalLoop workflow: request -> result."""
@@ -982,15 +951,13 @@ class TestLoopSerdeIntegration:
         )
 
         assert restored_request.sample.input.question == "What is machine learning?"
-
-        # experiment is a dict due to TYPE_CHECKING, access via dict keys
-        assert isinstance(restored_request.experiment, dict)
-        experiment_name = restored_request.experiment["name"]
+        assert isinstance(restored_request.experiment, Experiment)
+        assert restored_request.experiment.name == "eval-test"
 
         # Create result
         result = EvalResult(
             sample_id=restored_request.sample.id,
-            experiment_name=experiment_name,
+            experiment_name=restored_request.experiment.name,
             score=Score(value=0.95, passed=True, reason="Excellent answer"),
             latency_ms=250,
         )
@@ -1023,10 +990,8 @@ class TestLoopSerdeIntegration:
         assert restored_request.request.task == "Generate summary"
         assert restored_request.budget is not None
         assert restored_request.budget.max_total_tokens == 5000
-
-        # experiment is a dict due to TYPE_CHECKING
-        assert isinstance(restored_request.experiment, dict)
-        assert restored_request.experiment["name"] == "main-test"
+        assert isinstance(restored_request.experiment, Experiment)
+        assert restored_request.experiment.name == "main-test"
 
         # Create result
         output = TaskOutput(result="Summary: Integration test passed", success=True)

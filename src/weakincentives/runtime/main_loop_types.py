@@ -28,12 +28,12 @@ from uuid import UUID, uuid4
 from ..budget import Budget
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
+from ..experiment import Experiment
 from .lease_extender import LeaseExtenderConfig
 from .run_context import RunContext
 
 if TYPE_CHECKING:
     from ..debug.bundle import BundleConfig
-    from ..evals._experiment import Experiment
 
 
 @dataclass(frozen=True, slots=True)
