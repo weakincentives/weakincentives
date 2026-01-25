@@ -935,10 +935,25 @@ class BundleWriter:
         self._apply_size_limit(retention, bundles, to_delete)
         self._delete_marked_bundles(to_delete)
 
+    def _get_retention_search_root(self) -> Path:
+        """Get the root directory for retention policy bundle search.
+
+        Returns config.target if set (for EvalLoop's nested structure),
+        otherwise falls back to the writer's target directory.
+        """
+        if self._config.target is not None:
+            return self._config.target
+        return self._target
+
     def _collect_existing_bundles(self) -> list[tuple[Path, datetime, int]]:
-        """Collect metadata for existing bundles in the target directory."""
+        """Collect metadata for existing bundles in the target directory.
+
+        Uses recursive glob to find bundles in nested directories, supporting
+        EvalLoop's ``{target}/{request_id}/{bundle}.zip`` structure.
+        """
+        search_root = self._get_retention_search_root()
         bundles: list[tuple[Path, datetime, int]] = []
-        for bundle_path in self._target.glob("*.zip"):
+        for bundle_path in search_root.glob("**/*.zip"):
             if bundle_path == self._path:
                 continue
             try:

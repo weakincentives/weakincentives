@@ -1513,6 +1513,158 @@ class TestRetentionPolicyIntegration:
         assert writer.path.exists()
 
 
+class TestRetentionWithNestedDirectories:
+    """Tests for retention policy with nested directory structures (EvalLoop).
+
+    EvalLoop creates bundles at ``{debug_bundle_dir}/{request_id}/{bundle}.zip``.
+    The retention policy must search recursively from the config.target directory
+    to find all bundles in subdirectories.
+    """
+
+    def test_retention_finds_bundles_in_subdirectories(self, tmp_path: Path) -> None:
+        """Test retention policy finds and deletes bundles in subdirectories."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create bundles in nested directories (simulating EvalLoop structure)
+        subdir1 = tmp_path / "request-1"
+        subdir1.mkdir()
+        subdir2 = tmp_path / "request-2"
+        subdir2.mkdir()
+
+        # Create bundles in subdirectories (no retention yet)
+        paths: list[Path] = []
+        for subdir in [subdir1, subdir2]:
+            with BundleWriter(subdir) as writer:
+                writer.write_request_input({"subdir": str(subdir)})
+            assert writer.path is not None
+            paths.append(writer.path)
+
+        # Create new bundle with retention that limits to 2 total bundles
+        # Key: config.target points to the root (tmp_path) for recursive search
+        retention = BundleRetentionPolicy(max_bundles=2)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        subdir3 = tmp_path / "request-3"
+        subdir3.mkdir()
+        # Bundle written to subdir3, but retention searches from config.target (tmp_path)
+        with BundleWriter(subdir3, config=config) as writer:
+            writer.write_request_input({"subdir": str(subdir3)})
+
+        # Should have 2 bundles remaining (oldest deleted)
+        remaining = list(tmp_path.glob("**/*.zip"))
+        assert len(remaining) == 2
+        # The newest bundle should exist
+        assert writer.path is not None
+        assert writer.path.exists()
+
+    def test_retention_max_bundles_across_nested_dirs(self, tmp_path: Path) -> None:
+        """Test max_bundles counts bundles across all subdirectories."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create bundles in multiple subdirectories (no retention)
+        for i in range(4):
+            subdir = tmp_path / f"request-{i}"
+            subdir.mkdir()
+            with BundleWriter(subdir) as writer:
+                writer.write_request_input({"request": i})
+
+        # Verify 4 bundles exist
+        assert len(list(tmp_path.glob("**/*.zip"))) == 4
+
+        # Create new bundle with retention limit
+        # config.target is the root for recursive search
+        retention = BundleRetentionPolicy(max_bundles=3)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        subdir = tmp_path / "request-4"
+        subdir.mkdir()
+        with BundleWriter(subdir, config=config) as writer:
+            writer.write_request_input({"request": 4})
+
+        # Should have 3 bundles remaining
+        remaining = list(tmp_path.glob("**/*.zip"))
+        assert len(remaining) == 3
+
+    def test_retention_size_limit_across_nested_dirs(self, tmp_path: Path) -> None:
+        """Test max_total_bytes considers bundles across all subdirectories."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create bundles in subdirectories (no retention)
+        total_size = 0
+        for i in range(2):
+            subdir = tmp_path / f"request-{i}"
+            subdir.mkdir()
+            with BundleWriter(subdir) as writer:
+                writer.write_request_input({"data": "x" * 500})
+            assert writer.path is not None
+            total_size += writer.path.stat().st_size
+
+        # Create new bundle with tight size limit
+        retention = BundleRetentionPolicy(max_total_bytes=total_size)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        subdir = tmp_path / "request-2"
+        subdir.mkdir()
+        with BundleWriter(subdir, config=config) as writer:
+            writer.write_request_input({"data": "y" * 500})
+
+        # Oldest bundles should be deleted to fit under limit
+        remaining = list(tmp_path.glob("**/*.zip"))
+        # Should have fewer bundles due to size limit
+        assert len(remaining) < 3
+
+    def test_retention_skips_newly_created_bundle_in_nested_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that the newly created bundle is not considered for deletion."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create a bundle in a subdirectory (no retention)
+        subdir = tmp_path / "request-1"
+        subdir.mkdir()
+        with BundleWriter(subdir) as old_writer:
+            old_writer.write_request_input({"old": True})
+        assert old_writer.path is not None
+
+        # Create new bundle with max_bundles=1 in same target tree
+        retention = BundleRetentionPolicy(max_bundles=1)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        new_subdir = tmp_path / "request-2"
+        new_subdir.mkdir()
+        with BundleWriter(new_subdir, config=config) as new_writer:
+            new_writer.write_request_input({"new": True})
+
+        # Old bundle should be deleted, new one kept
+        assert not old_writer.path.exists()
+        assert new_writer.path is not None
+        assert new_writer.path.exists()
+
+    def test_retention_without_config_target_uses_writer_target(
+        self, tmp_path: Path
+    ) -> None:
+        """Test retention falls back to writer target if config.target is None."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create bundles in tmp_path
+        with BundleWriter(tmp_path) as first_writer:
+            first_writer.write_request_input({"first": True})
+        assert first_writer.path is not None
+
+        # Create new bundle with retention but no config.target
+        # This means retention will only search in the writer's target (tmp_path)
+        retention = BundleRetentionPolicy(max_bundles=1)
+        config = BundleConfig(retention=retention)  # No target set
+
+        with BundleWriter(tmp_path, config=config) as second_writer:
+            second_writer.write_request_input({"second": True})
+
+        # Old bundle should be deleted
+        assert not first_writer.path.exists()
+        assert second_writer.path is not None
+        assert second_writer.path.exists()
+
+
 class TestStorageHandlerIntegration:
     """Tests for storage handler integration with BundleWriter."""
 
