@@ -1,5 +1,7 @@
 # Weak Incentives (Is All You Need)
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/weakincentives/weakincentives)
+
 WINK is the agent-definition layer for building unattended/background agents.
 You define the prompt, tools, policies, and feedback that stay stable while
 runtimes change. The planning loop, sandboxing, retries, and orchestration live
