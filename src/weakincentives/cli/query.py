@@ -45,6 +45,9 @@ _MAX_COLUMN_WIDTH = 50
 # Schema version for cache invalidation - increment when schema changes
 _SCHEMA_VERSION = 4  # v4: tool_calls from ToolInvoked session slices
 
+# Maximum length for error messages before truncation
+_MAX_ERROR_MSG_LENGTH = 200
+
 
 @FrozenDataclass()
 class ColumnInfo:
@@ -167,7 +170,7 @@ def _is_tool_invoked_slice(slice_entry: object) -> bool:
         return False
     entry = cast("dict[str, Any]", slice_entry)
     slice_type: object = entry.get("slice_type", "")
-    return isinstance(slice_type, str) and "ToolInvoked" in slice_type
+    return isinstance(slice_type, str) and slice_type.endswith(":ToolInvoked")
 
 
 def _extract_items_from_slice(slice_entry: dict[str, Any]) -> list[dict[str, Any]]:
@@ -226,7 +229,9 @@ def _check_sdk_error_indicators(result_dict: dict[str, Any]) -> str | None:
     # Check stderr (Bash tool format)
     stderr: object = result_dict.get("stderr")
     if stderr and isinstance(stderr, str) and stderr.strip():
-        return stderr.strip()[:200]
+        stripped = stderr.strip()
+        limit = _MAX_ERROR_MSG_LENGTH
+        return stripped[: limit - 3] + "..." if len(stripped) > limit else stripped
 
     # Check content for error text (Claude Agent SDK format)
     content: object = result_dict.get("content")
@@ -239,7 +244,8 @@ def _check_sdk_error_indicators(result_dict: dict[str, Any]) -> str | None:
             if isinstance(text, str):
                 text_lower = text.lower()
                 if text_lower.startswith("error:") or text_lower.startswith("error -"):
-                    return text[:200]
+                    limit = _MAX_ERROR_MSG_LENGTH
+                    return text[: limit - 3] + "..." if len(text) > limit else text
 
     return None
 
