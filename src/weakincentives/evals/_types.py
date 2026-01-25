@@ -24,8 +24,8 @@ from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     from ..runtime.session import SessionProtocol, SessionViewProtocol
-    from ._experiment import Experiment
 
+from ..experiment import Experiment
 from ..serde import parse
 
 

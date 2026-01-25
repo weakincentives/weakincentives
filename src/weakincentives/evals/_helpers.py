@@ -18,8 +18,8 @@ import time
 from collections.abc import Sequence
 from typing import TypeVar
 
+from ..experiment import Experiment
 from ..runtime.mailbox import Mailbox
-from ._experiment import Experiment
 from ._types import Dataset, EvalReport, EvalRequest, EvalResult
 
 InputT = TypeVar("InputT")

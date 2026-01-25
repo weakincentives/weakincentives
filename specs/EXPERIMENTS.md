@@ -8,7 +8,7 @@ optimization runs, and controlled rollouts.
 
 **Implementation:**
 
-- `src/weakincentives/evals/_experiment.py` - Experiment class, BASELINE, CONTROL
+- `src/weakincentives/experiment.py` - Experiment class, BASELINE, CONTROL
 - `src/weakincentives/evals/_types.py` - EvalRequest, EvalResult, EvalReport, ExperimentComparison
 
 ## Core Types

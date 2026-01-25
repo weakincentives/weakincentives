@@ -71,7 +71,7 @@ from .watchdog import Heartbeat
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
     from ..debug.bundle import BundleConfig
-    from ..evals._experiment import Experiment
+    from ..experiment import Experiment
     from ..prompt import Prompt
     from .session.visibility_overrides import VisibilityOverrides
 

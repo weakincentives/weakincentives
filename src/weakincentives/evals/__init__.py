@@ -72,8 +72,8 @@ Session-aware evaluation example:
 
 from __future__ import annotations
 
+from ..experiment import BASELINE, CONTROL, Experiment
 from ._evaluators import adapt, all_of, any_of, contains, exact_match, is_session_aware
-from ._experiment import BASELINE, CONTROL, Experiment
 from ._helpers import collect_results, submit_dataset, submit_experiments
 from ._judge import (
     JUDGE_TEMPLATE,
