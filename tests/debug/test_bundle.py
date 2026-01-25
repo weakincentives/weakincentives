@@ -1426,6 +1426,43 @@ class TestRetentionPolicyIntegration:
         remaining = list(tmp_path.glob("*.zip"))
         assert len(remaining) == 2
 
+    def test_retention_size_limit_deletes_oldest_keeps_newest(
+        self, tmp_path: Path
+    ) -> None:
+        """Test size limit deletes oldest bundles, keeping newest ones."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create 3 bundles: A (oldest), B, C (newest before new)
+        bundle_paths: list[Path] = []
+        for i in range(3):
+            with BundleWriter(tmp_path) as writer:
+                writer.write_request_input({"bundle": i, "data": "x" * 100})
+            assert writer.path is not None
+            bundle_paths.append(writer.path)
+
+        # Get the size of one bundle (they should all be similar)
+        bundle_size = bundle_paths[0].stat().st_size
+
+        # Create new bundle with size limit that fits only 2 bundles
+        # (new bundle + one existing = 2 bundles worth)
+        retention = BundleRetentionPolicy(max_total_bytes=bundle_size * 2 + 100)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        with BundleWriter(tmp_path, config=config) as new_writer:
+            new_writer.write_request_input({"bundle": "new", "data": "x" * 100})
+
+        assert new_writer.path is not None
+
+        # The newest bundles should be kept: new_writer and bundle_paths[2] (C)
+        # The oldest should be deleted: bundle_paths[0] (A) and bundle_paths[1] (B)
+        assert not bundle_paths[0].exists(), "Oldest bundle A should be deleted"
+        assert not bundle_paths[1].exists(), "Second oldest bundle B should be deleted"
+        assert bundle_paths[2].exists(), "Newest existing bundle C should be kept"
+        assert new_writer.path.exists(), "New bundle should be kept"
+
+        remaining = list(tmp_path.glob("*.zip"))
+        assert len(remaining) == 2
+
     def test_retention_delete_failure_is_logged(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:

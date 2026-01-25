@@ -1006,14 +1006,22 @@ class BundleWriter:
         """Mark oldest bundles for deletion to stay under max_total_bytes limit."""
         if retention.max_total_bytes is None:
             return
-        current_size = self._path.stat().st_size if self._path else 0
-        for bundle_path, _, size in reversed(bundles):
+
+        new_bundle_size = self._path.stat().st_size if self._path else 0
+
+        # Calculate total size including new bundle and all existing bundles not yet marked
+        total_size = new_bundle_size + sum(
+            size for path, _, size in bundles if path not in to_delete
+        )
+
+        # Delete oldest bundles until under limit (bundles already sorted oldest-first)
+        for bundle_path, _, size in bundles:
             if bundle_path in to_delete:
                 continue
-            if current_size + size > retention.max_total_bytes:
-                to_delete.add(bundle_path)
-            else:
-                current_size += size
+            if total_size <= retention.max_total_bytes:
+                break
+            to_delete.add(bundle_path)
+            total_size -= size
 
     @staticmethod
     def _delete_marked_bundles(to_delete: set[Path]) -> None:
