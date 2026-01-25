@@ -20,6 +20,7 @@ from typing import Any
 
 import pytest
 
+from tests.cli.helpers import FakeLogger
 from weakincentives import cli
 from weakincentives.cli import wink
 from weakincentives.debug.bundle import BundleConfig, BundleWriter
@@ -58,20 +59,6 @@ def test_main_runs_debug_command(
 
     def fake_configure_logging(*, level: object, json_mode: object) -> None:
         calls["configure"] = {"level": level, "json_mode": json_mode}
-
-    class FakeLogger:
-        def __init__(self) -> None:
-            self.logs: list[tuple[str, dict[str, object]]] = []
-
-        def info(
-            self, message: str, *, event: str, context: object | None = None
-        ) -> None:
-            self.logs.append((message, {"event": event, "context": context}))
-
-        def error(
-            self, message: str, *, event: str, context: object | None = None
-        ) -> None:
-            self.logs.append((message, {"event": event, "context": context}))
 
     fake_logger = FakeLogger()
 

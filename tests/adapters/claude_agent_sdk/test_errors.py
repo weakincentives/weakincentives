@@ -14,39 +14,19 @@
 
 from __future__ import annotations
 
+from tests.adapters.claude_agent_sdk.error_mocks import (
+    MockCLIConnectionError,
+    MockCLIJSONDecodeError,
+    MockCLINotFoundError,
+    MockCodeError,
+    MockMaxTurnsExceededError,
+    MockProcessError,
+    MockProcessErrorMinimal,
+    MockSDKError,
+)
 from weakincentives.adapters.claude_agent_sdk._errors import normalize_sdk_error
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.adapters.throttle import ThrottleError
-
-
-class MockCLINotFoundError(Exception):
-    pass
-
-
-class MockCLIConnectionError(Exception):
-    pass
-
-
-class MockProcessError(Exception):
-    def __init__(self, message: str, exit_code: int, stderr: str) -> None:
-        super().__init__(message)
-        self.exit_code = exit_code
-        self.stderr = stderr
-
-
-class MockCLIJSONDecodeError(Exception):
-    pass
-
-
-class MockMaxTurnsExceededError(Exception):
-    pass
-
-
-MockCLINotFoundError.__name__ = "CLINotFoundError"
-MockCLIConnectionError.__name__ = "CLIConnectionError"
-MockProcessError.__name__ = "ProcessError"
-MockCLIJSONDecodeError.__name__ = "CLIJSONDecodeError"
-MockMaxTurnsExceededError.__name__ = "MaxTurnsExceededError"
 
 
 class TestNormalizeSDKError:
@@ -100,11 +80,6 @@ class TestNormalizeSDKError:
         assert result.phase == "response"
 
     def test_generic_sdk_error(self) -> None:
-        class MockSDKError(Exception):
-            pass
-
-        MockSDKError.__module__ = "claude_agent_sdk.errors"
-
         error = MockSDKError("Some SDK error")
         result = normalize_sdk_error(error, "test_prompt")
 
@@ -114,11 +89,6 @@ class TestNormalizeSDKError:
         assert result.phase == "request"
 
     def test_claude_code_module_error(self) -> None:
-        class MockCodeError(Exception):
-            pass
-
-        MockCodeError.__module__ = "claude_code.client"
-
         error = MockCodeError("Code client error")
         result = normalize_sdk_error(error, "test_prompt")
 
@@ -135,6 +105,7 @@ class TestNormalizeSDKError:
         assert result.phase == "request"
 
     def test_process_error_without_attributes(self) -> None:
+        # Inline class for edge case: ProcessError with no attributes at all
         class MinimalProcessError(Exception):
             pass
 
@@ -165,14 +136,7 @@ class TestNormalizeSDKError:
 
     def test_process_error_with_captured_stderr_no_error_stderr(self) -> None:
         """ProcessError with captured stderr but no error.stderr attribute."""
-
-        class MockProcessErrorNoStderr(Exception):
-            def __init__(self, message: str, exit_code: int) -> None:
-                super().__init__(message)
-                self.exit_code = exit_code
-
-        MockProcessErrorNoStderr.__name__ = "ProcessError"
-        error = MockProcessErrorNoStderr("Process failed", exit_code=1)
+        error = MockProcessErrorMinimal("Process failed", exit_code=1)
         result = normalize_sdk_error(
             error, "test_prompt", stderr_output="Captured stderr from process"
         )

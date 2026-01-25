@@ -13,26 +13,34 @@
 """Clock control helpers for tests.
 
 The primary test clock is :class:`weakincentives.clock.FakeClock`, which provides
-controllable monotonic and wall-clock time. This module provides fixtures and
-backward-compatible helpers.
+controllable monotonic and wall-clock time. This module provides the ``fake_clock``
+pytest fixture and backward-compatible helpers.
 
-Example::
+**Recommended**: Use the ``fake_clock`` fixture for most tests::
 
-    from weakincentives.clock import FakeClock
-
-    def test_deadline_remaining() -> None:
-        clock = FakeClock()
-        clock.set_wall(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
+    def test_deadline_remaining(fake_clock: FakeClock) -> None:
+        fake_clock.set_wall(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
 
         deadline = Deadline(
             expires_at=datetime(2024, 6, 1, 13, 0, 0, tzinfo=UTC),
-            clock=clock,
+            clock=fake_clock,
         )
 
         assert deadline.remaining() == timedelta(hours=1)
-
-        clock.advance(1800)  # 30 minutes
+        fake_clock.advance(1800)  # 30 minutes
         assert deadline.remaining() == timedelta(minutes=30)
+
+**Alternative**: Import FakeClock directly when you need multiple instances
+or for type annotations::
+
+    from tests.helpers.time import FakeClock  # Preferred import location
+
+    def test_multiple_clocks() -> None:
+        clock1 = FakeClock()
+        clock2 = FakeClock()
+        # ...
+
+The fixture is auto-registered via pytest_plugins in the main conftest.py.
 """
 
 from __future__ import annotations
