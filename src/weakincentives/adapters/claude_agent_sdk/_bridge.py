@@ -352,6 +352,7 @@ class BridgedTool:
             duration_ms=duration_ms,
             call_id=call_id,
             run_context=self._run_context,
+            tool_source="custom",
         )
         self._session.dispatcher.dispatch(event)
 

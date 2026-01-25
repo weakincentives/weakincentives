@@ -609,6 +609,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             call_id=tool_use_id,
             run_context=hook_context.run_context,
             duration_ms=duration_ms,
+            tool_source="native",
         )
         hook_context.session.dispatcher.dispatch(event)
 

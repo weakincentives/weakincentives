@@ -2509,6 +2509,7 @@ class TestToolCallsFromSession:
                             "call_id": "call_123",
                             "created_at": "2024-01-01T00:00:00Z",
                             "adapter": "claude_agent_sdk",
+                            "tool_source": "native",
                         },
                         {
                             "name": "write_file",
@@ -2520,7 +2521,8 @@ class TestToolCallsFromSession:
                             },
                             "call_id": "call_456",
                             "created_at": "2024-01-01T00:00:01Z",
-                            "adapter": "openai",
+                            "adapter": "claude_agent_sdk",
+                            "tool_source": "custom",
                         },
                     ],
                 }

@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol, cast, override
+from typing import Any, Literal, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...dataclasses import FrozenDataclass
@@ -140,6 +140,7 @@ class ToolInvoked:
     call_id: str | None = None
     run_context: RunContext | None = None
     duration_ms: float | None = None
+    tool_source: Literal["native", "custom"] | None = None
     event_id: UUID = field(default_factory=uuid4)
 
 

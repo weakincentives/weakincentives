@@ -281,16 +281,19 @@ def _extract_result_fields(
 
 def _tool_invoked_to_row(
     item: dict[str, Any],
-) -> tuple[str, str, str, str, int, str, str | None, float | None]:
+) -> tuple[str, str, str, str, int, str, str | None, float | None, str]:
     """Convert a ToolInvoked item to a tool_calls row.
 
-    Returns (timestamp, tool_name, params, result, success, error_msg, call_id, duration_ms).
+    Returns (timestamp, tool_name, params, result, success, error_msg, call_id,
+             duration_ms, tool_source).
     """
     created_at = item.get("created_at", "")
     name = item.get("name", "")
     params = item.get("params", {})
     call_id = item.get("call_id")
     duration_ms = item.get("duration_ms")
+    # Use tool_source from event, default to "custom" for backward compatibility
+    tool_source = item.get("tool_source", "custom")
 
     result_value, result_success, result_message = _extract_result_fields(
         item.get("result", {})
@@ -305,6 +308,7 @@ def _tool_invoked_to_row(
         str(result_message) if not result_success and result_message else "",
         str(call_id) if call_id else None,
         float(duration_ms) if duration_ms is not None else None,
+        str(tool_source) if tool_source else "custom",
     )
 
 
@@ -316,7 +320,7 @@ def _insert_tool_invoked_items(
     items = _extract_tool_invoked_items(session_content)
     seen_ids: set[str] = set()
 
-    for item in items:
+    for seq, item in enumerate(items):
         row = _tool_invoked_to_row(item)
         (
             timestamp,
@@ -327,6 +331,7 @@ def _insert_tool_invoked_items(
             error_msg,
             call_id,
             duration_ms,
+            tool_source,
         ) = row
 
         # Skip if no tool name
@@ -339,18 +344,12 @@ def _insert_tool_invoked_items(
                 continue
             seen_ids.add(call_id)
 
-        # Determine source from adapter field
-        # native = SDK-native tools (Bash, Read, etc.)
-        # custom = weakincentives tools bridged via MCP
-        adapter: Any = item.get("adapter", "")
-        source = "native" if adapter == "claude_agent_sdk" else "custom"
-
         _ = conn.execute(
             """
             INSERT INTO tool_calls
                 (timestamp, tool_name, params, result, success,
                  error_code, duration_ms, source, seq, tool_use_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 timestamp,
@@ -360,7 +359,8 @@ def _insert_tool_invoked_items(
                 success,
                 error_msg,
                 duration_ms,
-                source,
+                tool_source,
+                seq,
                 call_id,
             ),
         )
