@@ -43,7 +43,7 @@ class QueryError(WinkError, RuntimeError):
 _MAX_COLUMN_WIDTH = 50
 
 # Schema version for cache invalidation - increment when schema changes
-_SCHEMA_VERSION = 3  # v3: unified tool_calls table (native + custom tools)
+_SCHEMA_VERSION = 4  # v4: tool_calls from ToolInvoked session slices
 
 
 @FrozenDataclass()
@@ -161,348 +161,135 @@ def _json_to_sql_value(value: JSONValue) -> object:
     return json.dumps(value)
 
 
-@pure
-def _is_tool_event(event: str) -> bool:
-    """Check if an event string represents a completed tool call event.
-
-    Only matches completion events (not start events) since those contain
-    the full tool call data including result and duration.
-    """
-    event_lower = event.lower()
-    # Skip start events - they lack result/duration data
-    if "start" in event_lower:
+def _is_tool_invoked_slice(slice_entry: object) -> bool:
+    """Check if a slice entry is a ToolInvoked slice."""
+    if not isinstance(slice_entry, dict):
         return False
-    return "tool" in event_lower and (
-        "call" in event_lower
-        or "result" in event_lower
-        or "execut" in event_lower  # matches "execute" and "execution"
-    )
+    entry = cast("dict[str, Any]", slice_entry)
+    slice_type: object = entry.get("slice_type", "")
+    return isinstance(slice_type, str) and "ToolInvoked" in slice_type
 
 
-@FrozenDataclass()
-class _NativeToolUse:
-    """Parsed tool_use block from native tool content."""
-
-    tool_use_id: str
-    name: str
-    input_params: dict[str, Any]
-    seq: int | None  # None if sequence_number missing from log entry
-    timestamp: str
-
-
-@FrozenDataclass()
-class _NativeToolResult:
-    """Parsed tool_result block from native tool content."""
-
-    tool_use_id: str
-    content: Any
-    is_error: bool
-    seq: int | None  # None if sequence_number missing from log entry
-    timestamp: str
+def _extract_items_from_slice(slice_entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract items from a slice entry."""
+    items: Any = slice_entry.get("items", [])
+    if not isinstance(items, list):
+        return []
+    items_list = cast("list[object]", items)
+    return [
+        cast("dict[str, Any]", item) for item in items_list if isinstance(item, dict)
+    ]
 
 
-def _parse_tool_use_block(
-    data: dict[str, Any], seq: int | None, timestamp: str
-) -> _NativeToolUse | None:
-    """Parse a tool_use content block."""
-    tool_use_id = data.get("id", "")
-    name = data.get("name", "")
-    if not tool_use_id or not name:
-        return None
-    input_raw: Any = data.get("input", {})
-    input_params = (
-        cast("dict[str, Any]", input_raw) if isinstance(input_raw, dict) else {}
-    )
-    return _NativeToolUse(
-        tool_use_id=str(tool_use_id),
-        name=str(name),
-        input_params=input_params,
-        seq=seq,
-        timestamp=timestamp,
-    )
+def _extract_tool_invoked_items(session_content: str) -> list[dict[str, Any]]:
+    """Extract ToolInvoked items from session snapshot.
 
-
-def _parse_tool_result_block(
-    data: dict[str, Any], seq: int | None, timestamp: str
-) -> _NativeToolResult | None:
-    """Parse a tool_result content block."""
-    tool_use_id = data.get("tool_use_id", "")
-    if not tool_use_id:
-        return None
-    return _NativeToolResult(
-        tool_use_id=str(tool_use_id),
-        content=data.get("content", ""),
-        is_error=bool(data.get("is_error")),
-        seq=seq,
-        timestamp=timestamp,
-    )
-
-
-def _parse_native_tool_content(
-    content: str, seq: int | None, timestamp: str
-) -> _NativeToolUse | _NativeToolResult | None:
-    """Parse a native tool content block from log_aggregator.
-
-    The content is raw JSON from Claude's transcript files containing
-    tool_use or tool_result content blocks.
+    Parses the session/after.jsonl snapshot and returns all ToolInvoked
+    slice items as dicts.
     """
-    try:
-        data_raw: Any = json.loads(content)
-    except json.JSONDecodeError:
-        return None
+    result: list[dict[str, Any]] = []
 
-    if not isinstance(data_raw, dict):
-        return None
-
-    data = cast("dict[str, Any]", data_raw)
-    block_type: Any = data.get("type")
-    if block_type == "tool_use":
-        return _parse_tool_use_block(data, seq, timestamp)
-    if block_type == "tool_result":
-        return _parse_tool_result_block(data, seq, timestamp)
-    return None
-
-
-def _process_log_aggregator_entry(
-    entry: dict[str, Any],
-    tool_uses: dict[str, _NativeToolUse],
-    tool_results: dict[str, _NativeToolResult],
-) -> None:
-    """Process a single log_aggregator.log_line entry for tool blocks."""
-    if entry.get("event") != "log_aggregator.log_line":
-        return
-
-    ctx_raw = entry.get("context", {})
-    if not isinstance(ctx_raw, dict):
-        return
-    ctx = cast("dict[str, Any]", ctx_raw)
-
-    content: Any = ctx.get("content")
-    if not isinstance(content, str):
-        return
-
-    seq_val: Any = ctx.get("sequence_number")
-    seq: int | None = seq_val if isinstance(seq_val, int) else None
-    timestamp = str(entry.get("timestamp", ""))
-
-    parsed = _parse_native_tool_content(content, seq, timestamp)
-    if isinstance(parsed, _NativeToolUse):
-        tool_uses[parsed.tool_use_id] = parsed
-    elif isinstance(parsed, _NativeToolResult):
-        tool_results[parsed.tool_use_id] = parsed
-
-
-def _build_native_tool_record(
-    use: _NativeToolUse, result: _NativeToolResult | None
-) -> tuple[str, str, str, str, int, str, float, int | None, str]:
-    """Build a tool call record from matched use and result."""
-    if result is not None:
-        success = 0 if result.is_error else 1
-        result_content = result.content
-        error_code = str(result_content) if result.is_error else ""
-    else:
-        success, result_content, error_code = 1, None, ""
-
-    return (
-        use.timestamp,
-        use.name,
-        json.dumps(use.input_params),
-        json.dumps(result_content),
-        success,
-        error_code,
-        0.0,
-        use.seq,
-        use.tool_use_id,
-    )
-
-
-def _collect_native_tool_calls(
-    logs_content: str,
-) -> list[tuple[str, str, str, str, int, str, float, int | None, str]]:
-    """Collect native tool calls from log_aggregator events.
-
-    Parses log_aggregator.log_line events, extracts tool_use and tool_result
-    blocks, matches them by tool_use_id, and returns unified tool call records.
-    """
-    tool_uses: dict[str, _NativeToolUse] = {}
-    tool_results: dict[str, _NativeToolResult] = {}
-
-    for line in logs_content.strip().split("\n"):
+    for line in session_content.strip().split("\n"):
         if not line.strip():
             continue
         try:
-            entry: dict[str, Any] = json.loads(line)
-            _process_log_aggregator_entry(entry, tool_uses, tool_results)
+            data: Any = json.loads(line)
         except json.JSONDecodeError:
             continue
 
-    # Match tool_use with tool_result by tool_use_id
-    results = [
-        _build_native_tool_record(use, tool_results.get(tool_use_id))
-        for tool_use_id, use in tool_uses.items()
-    ]
-    # Sort by seq, with None values sorted last (missing sequence_number)
-    results.sort(key=lambda x: (x[7] is None, x[7] if x[7] is not None else 0))
-    return results
+        if not isinstance(data, dict):
+            continue
+
+        data_dict = cast("dict[str, Any]", data)
+        slices_raw: Any = data_dict.get("slices", [])
+        if not isinstance(slices_raw, list):
+            continue
+
+        slices = cast("list[object]", slices_raw)
+        for slice_entry in slices:
+            if _is_tool_invoked_slice(slice_entry):
+                entry = cast("dict[str, Any]", slice_entry)
+                result.extend(_extract_items_from_slice(entry))
+
+    return result
 
 
-def _extract_tool_call_from_entry(
-    entry: dict[str, Any],
-) -> tuple[str, str, str, str, int, str, float] | None:
-    """Extract tool call data from a log entry.
+def _extract_result_fields(
+    result_raw: object,
+) -> tuple[object, object, object]:
+    """Extract value, success, message from a result object."""
+    if isinstance(result_raw, dict):
+        result_dict = cast("dict[str, Any]", result_raw)
+        return (
+            result_dict.get("value", result_raw),
+            result_dict.get("success", True),
+            result_dict.get("message", ""),
+        )
+    return (result_raw, True, "")
 
-    Returns tuple of (timestamp, tool_name, params, result, success, error_code,
-    duration_ms) or None if not a tool call.
+
+def _tool_invoked_to_row(
+    item: dict[str, Any],
+) -> tuple[str, str, str, str, int, str, str | None]:
+    """Convert a ToolInvoked item to a tool_calls row.
+
+    Returns (timestamp, tool_name, params, result, success, error_msg, call_id).
     """
-    context_raw: Any = entry.get("context", {})
-    if not isinstance(context_raw, dict):
-        return None
+    created_at = item.get("created_at", "")
+    name = item.get("name", "")
+    params = item.get("params", {})
+    call_id = item.get("call_id")
 
-    ctx = cast("dict[str, Any]", context_raw)
-    tool_name: str = str(ctx.get("tool_name") or ctx.get("tool") or "")
-    if not tool_name:
-        return None
-
-    # Determine success: explicit field takes precedence, then check for error field
-    success_val: Any = ctx.get("success")
-    if success_val is not None:
-        success = 1 if success_val else 0
-    elif "error" in ctx and ctx.get("error"):
-        # Explicit error field with truthy value indicates failure
-        success = 0
-    else:
-        success = 1
-
-    error_code = ""
-    if success == 0:
-        err_code: Any = ctx.get("error_code") or ctx.get("error") or ctx.get("message")
-        error_code = str(err_code) if err_code else ""
-
-    duration: Any = ctx.get("duration_ms")
-    duration_ms: float = float(duration) if duration is not None else 0.0
-
-    # Read tool arguments: current logs use "arguments", legacy may use "params"
-    params: Any = ctx.get("arguments") or ctx.get("params") or {}
-
-    # Read tool result: current logs use "value"/"message", legacy may use "result"
-    result_val: Any = ctx.get("value")
-    if result_val is None:
-        result_val = ctx.get("result") or {}
-    result: Any = result_val
+    result_value, result_success, result_message = _extract_result_fields(
+        item.get("result", {})
+    )
 
     return (
-        str(entry.get("timestamp", "")),
-        tool_name,
-        json.dumps(params),
-        json.dumps(result),
-        success,
-        error_code,
-        duration_ms,
+        str(created_at) if created_at else "",
+        str(name) if name else "",
+        json.dumps(params) if params else "{}",
+        json.dumps(result_value),
+        1 if result_success else 0,
+        str(result_message) if not result_success and result_message else "",
+        str(call_id) if call_id else None,
     )
 
 
-def _extract_tool_use_id(entry: dict[str, Any]) -> str:
-    """Extract tool_use_id from a log entry's context.
-
-    Checks for tool_use_id first, then falls back to call_id which is
-    used by tool_executor in structured logging.
-    """
-    ctx_raw: Any = entry.get("context", {})
-    if not isinstance(ctx_raw, dict):
-        return ""
-    ctx = cast("dict[str, Any]", ctx_raw)
-    # tool_use_id is the canonical field; call_id is used by tool_executor
-    id_val: Any = ctx.get("tool_use_id") or ctx.get("call_id") or ""
-    return str(id_val) if id_val else ""
-
-
-def _insert_native_tool_calls(
+def _insert_tool_invoked_items(
     conn: sqlite3.Connection,
-    logs_content: str,
-    inserted_ids: set[str],
+    session_content: str,
 ) -> None:
-    """Insert native tool calls from log_aggregator events.
+    """Insert tool calls from ToolInvoked session slices."""
+    items = _extract_tool_invoked_items(session_content)
+    seen_ids: set[str] = set()
 
-    Native tools are collected via dict keyed by tool_use_id, guaranteeing
-    uniqueness. We add IDs to inserted_ids for cross-source deduplication
-    (so custom tools won't duplicate native ones).
-    """
-    for native_data in _collect_native_tool_calls(logs_content):
-        tool_use_id = native_data[8]
-        inserted_ids.add(tool_use_id)
+    for item in items:
+        row = _tool_invoked_to_row(item)
+        timestamp, tool_name, params, result, success, error_msg, call_id = row
+
+        # Skip if no tool name
+        if not tool_name:
+            continue
+
+        # Deduplicate by call_id if present
+        if call_id:
+            if call_id in seen_ids:
+                continue
+            seen_ids.add(call_id)
+
+        # Determine source from adapter field
+        adapter: Any = item.get("adapter", "")
+        source = "native" if adapter == "claude_agent_sdk" else "session"
+
         _ = conn.execute(
             """
             INSERT INTO tool_calls
                 (timestamp, tool_name, params, result, success,
                  error_code, duration_ms, source, seq, tool_use_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'native', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 0.0, ?, NULL, ?)
         """,
-            (*native_data[:7], native_data[7], native_data[8]),
+            (timestamp, tool_name, params, result, success, error_msg, source, call_id),
         )
-
-
-def _insert_custom_tool_calls(
-    conn: sqlite3.Connection,
-    logs_content: str,
-    inserted_ids: set[str],
-) -> None:
-    """Insert custom tool calls from tool.execution.* events."""
-    for line in logs_content.strip().split("\n"):
-        if not line.strip():
-            continue
-        try:
-            entry: dict[str, Any] = json.loads(line)
-            _process_custom_tool_entry(conn, entry, inserted_ids)
-        except json.JSONDecodeError:
-            continue
-
-
-def _generate_synthetic_id(
-    tool_data: tuple[str, str, str, str, int, str, float],
-) -> str:
-    """Generate a synthetic ID from tool call data for deduplication.
-
-    Uses timestamp + tool_name + params hash to create a deterministic ID
-    for tools that don't have an explicit tool_use_id.
-    """
-    import hashlib
-
-    timestamp, tool_name, params = tool_data[0], tool_data[1], tool_data[2]
-    content = f"{timestamp}:{tool_name}:{params}"
-    return f"synthetic:{hashlib.sha256(content.encode()).hexdigest()[:16]}"
-
-
-def _process_custom_tool_entry(
-    conn: sqlite3.Connection,
-    entry: dict[str, Any],
-    inserted_ids: set[str],
-) -> None:
-    """Process a single log entry for custom tool calls."""
-    event = entry.get("event", "")
-    if not _is_tool_event(event):
-        return
-
-    tool_data = _extract_tool_call_from_entry(entry)
-    if tool_data is None:
-        return
-
-    # Use explicit ID if present, otherwise generate synthetic ID for deduplication
-    ctx_tool_use_id = _extract_tool_use_id(entry)
-    dedup_key = ctx_tool_use_id or _generate_synthetic_id(tool_data)
-
-    if dedup_key in inserted_ids:
-        return
-    inserted_ids.add(dedup_key)
-
-    _ = conn.execute(
-        """
-        INSERT INTO tool_calls
-            (timestamp, tool_name, params, result, success,
-             error_code, duration_ms, source, seq, tool_use_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'custom', NULL, ?)
-    """,
-        (*tool_data, ctx_tool_use_id or None),
-    )
 
 
 def _create_dynamic_slice_table(
@@ -901,11 +688,11 @@ class QueryDatabase(Closeable):
                 continue
 
     def _build_tool_calls_table(self, conn: sqlite3.Connection) -> None:
-        """Build unified tool_calls table from both native and custom tools.
+        """Build tool_calls table from ToolInvoked session slices.
 
-        Native tools come from log_aggregator.log_line events (Claude Code's
-        Bash, Read, Write, etc.). Custom tools come from tool.execution.*
-        events (MCP/custom tool handlers).
+        ToolInvoked events are the authoritative source for tool execution data.
+        They are dispatched by adapters after each tool call completes and
+        captured in the session snapshot.
         """
         _ = conn.execute("""
             CREATE TABLE IF NOT EXISTS tool_calls (
@@ -923,13 +710,11 @@ class QueryDatabase(Closeable):
             )
         """)
 
-        logs_content = self._bundle.logs
-        if not logs_content:
+        session_content = self._bundle.session_after
+        if not session_content:
             return
 
-        inserted_ids: set[str] = set()
-        _insert_native_tool_calls(conn, logs_content, inserted_ids)
-        _insert_custom_tool_calls(conn, logs_content, inserted_ids)
+        _insert_tool_invoked_items(conn, session_content)
 
     def _build_errors_table(self, conn: sqlite3.Connection) -> None:
         """Build errors table aggregating errors from multiple sources."""
@@ -1242,19 +1027,12 @@ class QueryDatabase(Closeable):
             ),
             common_queries={
                 "all_tools": (
-                    "SELECT tool_name, source, success, duration_ms "
+                    "SELECT tool_name, source, success "
                     "FROM tool_calls ORDER BY timestamp"
                 ),
-                "native_tools": (
-                    "SELECT tool_name, params, success "
-                    "FROM tool_calls WHERE source = 'native' ORDER BY seq"
-                ),
-                "custom_tools": (
-                    "SELECT tool_name, params, result, duration_ms "
-                    "FROM tool_calls WHERE source = 'custom'"
-                ),
-                "tool_timeline": (
-                    "SELECT * FROM tool_timeline WHERE duration_ms > 1000"
+                "tool_timeline": "SELECT * FROM tool_timeline",
+                "failed_tools": (
+                    "SELECT tool_name, error_code FROM tool_calls WHERE success = 0"
                 ),
                 "error_context": (
                     "SELECT timestamp, message, context FROM logs WHERE level = 'ERROR'"
@@ -1287,7 +1065,7 @@ def _get_table_description(table_name: str, *, is_view: bool = False) -> str:
     descriptions = {
         "manifest": "Bundle metadata",
         "logs": "Log entries (seq column for log_aggregator events)",
-        "tool_calls": "Unified tool invocations (native + custom)",
+        "tool_calls": "Tool invocations from ToolInvoked session events",
         "errors": "Aggregated errors",
         "session_slices": "Session state items",
         "files": "Workspace files",
