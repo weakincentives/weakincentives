@@ -118,9 +118,84 @@ Configuration for bundle creation:
 | `max_file_size` | `int` | `10_000_000` | Skip files > 10MB |
 | `max_total_size` | `int` | `52_428_800` | Max filesystem capture (50MB) |
 | `compression` | `str` | `"deflate"` | Zip compression method |
+| `retention` | `BundleRetentionPolicy \| None` | `None` | Local cleanup policy |
+| `storage_handler` | `BundleStorageHandler \| None` | `None` | External storage callback |
 
 Bundles always capture full debug information: DEBUG logs, session before+after,
 and all filesystem contents within size limits.
+
+### BundleRetentionPolicy
+
+Policy for cleaning up old debug bundles in the target directory:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_bundles` | `int \| None` | `None` | Keep at most N bundles (oldest deleted first) |
+| `max_age_seconds` | `int \| None` | `None` | Delete bundles older than this |
+| `max_total_bytes` | `int \| None` | `None` | Keep total size under limit (oldest deleted first) |
+
+Retention is applied **after** each bundle is successfully created. If multiple
+limits are configured, all are enforced (most restrictive wins). Bundle age is
+determined from the `created_at` field in the manifest.
+
+```python
+from weakincentives.debug import BundleConfig, BundleRetentionPolicy
+
+config = BundleConfig(
+    target=Path("./debug/"),
+    retention=BundleRetentionPolicy(
+        max_bundles=10,           # Keep last 10 bundles
+        max_age_seconds=86400,    # Delete bundles older than 24 hours
+    ),
+)
+```
+
+### BundleStorageHandler
+
+Protocol for copying bundles to external storage after creation:
+
+```python
+@runtime_checkable
+class BundleStorageHandler(Protocol):
+    """Called after a debug bundle is successfully created."""
+
+    def store_bundle(
+        self,
+        bundle_path: Path,
+        manifest: BundleManifest,
+    ) -> None:
+        """Copy/upload the bundle to external storage.
+
+        Args:
+            bundle_path: Local path to the created bundle ZIP.
+            manifest: Bundle metadata (id, timestamp, checksums, etc.).
+
+        Errors are logged but do not propagate (non-blocking).
+        The local bundle remains regardless of storage success.
+        """
+        ...
+```
+
+The storage handler is called **after** retention policy is applied, so only
+bundles that survive cleanup are passed to the handler.
+
+Example S3 handler:
+
+```python
+@dataclass
+class S3StorageHandler:
+    bucket: str
+    prefix: str = "debug-bundles/"
+
+    def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+        key = f"{self.prefix}{manifest.bundle_id}.zip"
+        s3_client.upload_file(str(bundle_path), self.bucket, key)
+
+config = BundleConfig(
+    target=Path("./debug/"),
+    storage_handler=S3StorageHandler(bucket="my-bucket"),
+)
+```
 
 ### BundleWriter
 
@@ -187,9 +262,28 @@ AgentLoop._handle_message()
   │    ├─ write_environment()
   │    ├─ write_filesystem()
   │    ├─ write_config(), write_run_context(), write_metrics()
-  │    └─ write_error()  # if failed
+  │    ├─ write_error()  # if failed
+  │    └─ __exit__() finalizes bundle:
+  │         ├─ Generate README, compute checksums, create ZIP
+  │         ├─ Atomic rename to target directory
+  │         ├─ Apply retention policy (delete old bundles)
+  │         └─ Call storage_handler.store_bundle() (if configured)
   └─ Return AgentLoopResult(bundle_path=writer.path)
 ```
+
+### Post-Creation Lifecycle
+
+After the bundle ZIP is finalized and atomically moved to the target directory:
+
+1. **Retention enforcement**: If `BundleConfig.retention` is set, scan the target
+   directory and delete bundles that exceed configured limits. Deletion order is
+   oldest-first based on manifest `created_at`.
+
+2. **Storage handler invocation**: If `BundleConfig.storage_handler` is set, call
+   `store_bundle(bundle_path, manifest)`. Errors are logged at WARNING level but
+   do not fail the request or affect the local bundle.
+
+Both steps are non-blocking: failures are logged but do not propagate exceptions.
 
 ### Result Extension
 
@@ -307,6 +401,9 @@ from weakincentives.debug import (
     BundleManifest,
     BundleError,
     BundleValidationError,
+    # Retention and storage
+    BundleRetentionPolicy,
+    BundleStorageHandler,
     # Environment capture
     capture_environment,
     EnvironmentCapture,
@@ -326,6 +423,8 @@ from weakincentives.debug import (
 1. **Valid manifest**: Every bundle has well-formed `manifest.json`
 1. **Integrity verification**: Checksums enable artifact verification
 1. **Deterministic ordering**: JSONL files ordered by timestamp
+1. **Retention before storage**: Retention policy runs before storage handler
+1. **Non-blocking lifecycle**: Retention and storage failures never fail the request
 
 ## Security Considerations
 
