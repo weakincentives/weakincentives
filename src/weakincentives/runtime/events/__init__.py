@@ -10,7 +10,123 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""In-process event primitives for adapter telemetry."""
+"""In-process event primitives for adapter telemetry and observability.
+
+This package provides synchronous event dispatching for telemetry and
+observability events emitted by adapters during prompt evaluation and
+tool execution. Unlike the mailbox system (which provides durable
+point-to-point delivery), events are broadcast to all subscribers
+in-process with fire-and-forget semantics.
+
+When to Use Events vs Mailbox
+-----------------------------
+
+**Use Events (this package) for:**
+
+- Telemetry and observability data
+- In-process event notifications
+- Fire-and-forget broadcasts to multiple subscribers
+- Metrics collection and monitoring
+
+**Use Mailbox for:**
+
+- Durable request processing that survives restarts
+- Work distribution across multiple consumers
+- Cross-process communication
+- Tasks requiring acknowledgment and retry on failure
+
+Dispatcher Protocol
+-------------------
+
+The :class:`Dispatcher` protocol defines a minimal interface for event
+delivery with subscription management and delivery tracking::
+
+    from weakincentives.runtime.events import InProcessDispatcher
+
+    dispatcher = InProcessDispatcher()
+
+    # Subscribe to events
+    def on_tool_invoked(event: object) -> None:
+        tool_event = cast(ToolInvoked, event)
+        print(f"Tool {tool_event.name} executed")
+
+    dispatcher.subscribe(ToolInvoked, on_tool_invoked)
+
+    # Dispatch events
+    result = dispatcher.dispatch(ToolInvoked(...))
+    if not result.ok:
+        result.raise_if_errors()  # Raises ExceptionGroup
+
+    # Unsubscribe when done
+    dispatcher.unsubscribe(ToolInvoked, on_tool_invoked)
+
+Telemetry Events
+----------------
+
+The package defines three primary telemetry events emitted by adapters:
+
+**PromptRendered**
+    Emitted immediately before dispatching a rendered prompt to the
+    provider. Contains the rendered prompt text, adapter name, and
+    optional prompt descriptor for debugging.
+
+**PromptExecuted**
+    Emitted after an adapter finishes evaluating a prompt. Contains
+    the result, token usage statistics, and timing information.
+
+**ToolInvoked**
+    Emitted after an adapter executes a tool handler. Contains the
+    tool name, parameters, result, and optional rendered output.
+
+Example: Token Usage Tracking
+-----------------------------
+
+Subscribe to events to track token usage across prompts::
+
+    from weakincentives.runtime.events import InProcessDispatcher, PromptExecuted
+
+    dispatcher = InProcessDispatcher()
+    total_tokens = 0
+
+    def track_tokens(event: object) -> None:
+        global total_tokens
+        prompt_event = cast(PromptExecuted, event)
+        if prompt_event.usage is not None:
+            total_tokens += prompt_event.usage.total_tokens or 0
+
+    dispatcher.subscribe(PromptExecuted, track_tokens)
+
+Type Aliases
+------------
+
+The package provides semantic type aliases to clarify dispatcher usage:
+
+- :data:`ControlDispatcher` - Used by MainLoop for request/response orchestration
+- :data:`TelemetryDispatcher` - Used by adapters and sessions for observability
+
+Both resolve to :class:`Dispatcher` at runtime; the distinction is purely semantic.
+
+Exports
+-------
+
+**Protocols:**
+    - :class:`Dispatcher` - Minimal event dispatch protocol
+    - :data:`ControlDispatcher` - Alias for MainLoop control flow
+    - :data:`TelemetryDispatcher` - Alias for telemetry events
+
+**Implementations:**
+    - :class:`InProcessDispatcher` - Synchronous in-process delivery
+
+**Events:**
+    - :class:`PromptRendered` - Pre-dispatch prompt event
+    - :class:`PromptExecuted` - Post-evaluation completion event
+    - :class:`ToolInvoked` - Tool execution event
+
+**Results:**
+    - :class:`DispatchResult` - Delivery tracking with handler errors
+    - :class:`HandlerFailure` - Individual handler error container
+    - :class:`TokenUsage` - Token accounting from providers
+"""
 
 from __future__ import annotations
 

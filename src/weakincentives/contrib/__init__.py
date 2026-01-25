@@ -10,27 +10,127 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Contributed utilities for specific agent styles.
+"""Contributed utilities for building domain-specific agents.
 
-This package contains domain-specific tools and optimizers that extend
-the core primitives. These are useful batteries for building agents but
-are not part of the minimal core library.
+The ``contrib`` package provides optional, domain-specific extensions to the
+core weakincentives library. These components are useful "batteries included"
+tools for building agents but are not part of the minimal core. They may
+require additional dependencies (e.g., ``redis``, ``podman``, ``asteval``).
 
-Subpackages:
+Subpackages
+-----------
 
-- ``contrib.mailbox``: Redis-backed mailbox implementation
-- ``contrib.optimizers``: Workspace digest optimizer
-- ``contrib.tools``: Planning tools, VFS, Podman sandbox, asteval, workspace digest
+contrib.mailbox
+    Redis-backed message queue implementation with SQS-compatible visibility
+    timeout semantics. Supports both standalone Redis and Redis Cluster
+    deployments with durable, atomic operations via Lua scripts.
 
-Example usage::
+    Key exports:
+        - ``RedisMailbox``: Durable message queue with visibility timeouts
+        - ``RedisMailboxFactory``: Factory for creating mailboxes on shared clients
+        - ``DEFAULT_TTL_SECONDS``: Default key expiration (3 days)
+
+    Requires: ``redis`` package (``pip install weakincentives[redis]``)
+
+contrib.optimizers
+    Prompt optimization utilities that generate task-agnostic workspace summaries
+    and digests. These optimizers analyze workspaces and cache results for
+    efficient reuse across prompt evaluations.
+
+    Key exports:
+        - ``WorkspaceDigestOptimizer``: Generates workspace digests via LLM exploration
+
+contrib.tools
+    Domain-specific tool suites for LLM agents, providing filesystem operations,
+    sandboxed code execution, containerized shell access, and planning capabilities.
+
+    Tool categories:
+        - **Planning**: Session-scoped todo lists with ``PlanningToolsSection``
+        - **Virtual Filesystem**: File operations via ``VfsToolsSection``
+        - **Python Evaluation**: Sandboxed execution via ``AstevalSection``
+        - **Container Execution**: Podman-backed shell via ``PodmanSandboxSection``
+        - **Workspace Digest**: Caching layer via ``WorkspaceDigestSection``
+
+    Requires: Optional extras for specific features:
+        - ``pip install weakincentives[asteval]`` for Python evaluation
+        - ``pip install weakincentives[podman]`` for container execution
+
+Example Usage
+-------------
+
+Basic tool section setup::
 
     from weakincentives.contrib.tools import (
         PlanningToolsSection,
         VfsToolsSection,
         AstevalSection,
         PodmanSandboxSection,
+        HostMount,
+    )
+    from weakincentives.runtime.session import Session
+
+    session = Session()
+
+    # Planning tools for multi-step workflows
+    planning = PlanningToolsSection(session=session)
+
+    # Virtual filesystem with host mounts
+    vfs = VfsToolsSection(
+        session=session,
+        mounts=(HostMount(host_path="src"),),
+        allowed_host_roots=("/home/user/project",),
     )
 
+    # Sandboxed Python evaluation
+    asteval = AstevalSection(session=session)
+
+Redis mailbox for inter-agent communication::
+
+    from redis import Redis
+    from weakincentives.contrib.mailbox import RedisMailbox
+
+    client = Redis(host="localhost", port=6379)
+    requests: RedisMailbox[MyEvent, MyResult] = RedisMailbox(
+        name="requests",
+        client=client,
+    )
+
+    # Send messages with reply routing
+    requests.send(MyEvent(data="hello"), reply_to=responses)
+
+    # Receive with visibility timeout
+    for msg in requests.receive(visibility_timeout=60):
+        result = process(msg.body)
+        msg.reply(result)
+        msg.acknowledge()
+
+Workspace optimization::
+
+    from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
+    from weakincentives.optimizers.context import OptimizationContext
+
+    optimizer = WorkspaceDigestOptimizer(context)
+    result = optimizer.optimize(prompt, session=session)
+    # Digest is now cached in session for future prompt renders
+
+Architecture Notes
+------------------
+
+All contrib modules follow the core library's design patterns:
+
+- **Immutable dataclasses**: Use ``@FrozenDataclass()`` for state objects
+- **Session integration**: Tool sections bind to ``Session`` for state management
+- **Resource injection**: Filesystems and dependencies use the resource protocol
+- **Design-by-contract**: Public APIs use ``@require``/``@ensure`` decorators
+
+Lazy Loading
+------------
+
+Submodules are lazily imported to avoid circular dependencies and reduce
+startup time. Access them via attribute access or explicit import::
+
+    from weakincentives.contrib import mailbox, tools, optimizers
+    # or
     from weakincentives.contrib.mailbox import RedisMailbox
 """
 

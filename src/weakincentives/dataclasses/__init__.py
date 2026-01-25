@@ -10,7 +10,186 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Frozen dataclass helpers."""
+"""Enhanced dataclass utilities with immutability-first defaults.
+
+This package provides the :func:`FrozenDataclass` decorator, which extends
+Python's standard :func:`dataclasses.dataclass` with sensible defaults for
+building immutable, memory-efficient data structures, along with convenient
+copy-and-modify helper methods.
+
+Exported Symbols
+----------------
+FrozenDataclass
+    A decorator that creates frozen, slotted dataclasses with additional
+    helper methods for functional-style updates.
+
+Benefits Over Standard Dataclasses
+----------------------------------
+1. **Immutability by default**: Classes are frozen (``frozen=True``), preventing
+   accidental mutation and making instances safe for use as dictionary keys or
+   in sets.
+
+2. **Memory efficiency**: Slots are enabled by default (``slots=True``),
+   reducing memory overhead and improving attribute access speed.
+
+3. **Functional update methods**: Decorated classes gain ``update()``,
+   ``merge()``, and ``map()`` methods for creating modified copies without
+   mutation.
+
+4. **Input normalization hook**: The optional ``__pre_init__`` classmethod
+   allows transforming or validating inputs before the dataclass is constructed.
+
+5. **Full type checker support**: Uses ``@dataclass_transform`` for proper
+   static analysis with pyright, mypy, and other type checkers.
+
+Basic Usage
+-----------
+Create an immutable dataclass with the decorator::
+
+    from weakincentives.dataclasses import FrozenDataclass
+
+    @FrozenDataclass()
+    class Point:
+        x: float
+        y: float
+
+    p1 = Point(1.0, 2.0)
+    p2 = p1.update(x=3.0)  # Point(x=3.0, y=2.0)
+
+    # Attempting mutation raises FrozenInstanceError
+    p1.x = 5.0  # Raises dataclasses.FrozenInstanceError
+
+Copy Helper Methods
+-------------------
+All decorated classes receive three helper methods for functional updates:
+
+**update(**changes)**
+    Return a new instance with specified fields replaced::
+
+        @FrozenDataclass()
+        class User:
+            name: str
+            email: str
+            active: bool = True
+
+        user = User("Alice", "alice@example.com")
+        updated = user.update(email="alice@newdomain.com", active=False)
+
+**merge(mapping_or_obj)**
+    Merge fields from a dictionary or another object::
+
+        # From a dictionary
+        changes = {"email": "new@example.com"}
+        merged = user.merge(changes)
+
+        # From another object with matching attributes
+        class UserPatch:
+            email = "patched@example.com"
+
+        merged = user.merge(UserPatch())
+
+**map(transform)**
+    Apply a transformation function that receives current field values
+    as a dictionary and returns updates::
+
+        def uppercase_name(fields: dict[str, object]) -> dict[str, object]:
+            return {"name": str(fields["name"]).upper()}
+
+        transformed = user.map(uppercase_name)  # User with name="ALICE"
+
+Input Normalization with __pre_init__
+-------------------------------------
+Define a ``__pre_init__`` classmethod to normalize or validate inputs before
+the dataclass is constructed. The method receives all field values as keyword
+arguments and must return a mapping of field names to values::
+
+    from collections.abc import Mapping
+
+    @FrozenDataclass()
+    class NormalizedPath:
+        path: str
+
+        @classmethod
+        def __pre_init__(cls, path: str) -> Mapping[str, object]:
+            # Normalize path separators and remove trailing slashes
+            normalized = path.replace("\\\\", "/").rstrip("/")
+            return {"path": normalized}
+
+    p = NormalizedPath("some\\\\path\\\\")
+    assert p.path == "some/path"
+
+The ``__pre_init__`` hook is particularly useful for:
+
+- Coercing input types (e.g., converting strings to enums)
+- Computing derived fields that depend on other fields
+- Validating invariants before construction
+- Providing alternative constructors with different signatures
+
+Derived (Non-Init) Fields
+-------------------------
+Fields marked with ``init=False`` are considered derived fields. When using
+``__pre_init__``, you can compute and return values for these fields::
+
+    from dataclasses import field
+
+    @FrozenDataclass()
+    class Rectangle:
+        width: float
+        height: float
+        area: float = field(init=False)
+
+        @classmethod
+        def __pre_init__(
+            cls, width: float, height: float
+        ) -> Mapping[str, object]:
+            return {"width": width, "height": height, "area": width * height}
+
+    rect = Rectangle(3.0, 4.0)
+    assert rect.area == 12.0
+
+    # Updating triggers recomputation
+    rect2 = rect.update(width=5.0)
+    assert rect2.area == 20.0
+
+Note that derived fields cannot be modified directly via ``update()``; they
+are always recomputed through ``__pre_init__``.
+
+Customizing Dataclass Options
+-----------------------------
+All standard dataclass options can be overridden. The defaults are::
+
+    frozen=True      # Instances are immutable
+    slots=True       # Use __slots__ for memory efficiency
+    init=True        # Generate __init__
+    repr=True        # Generate __repr__
+    eq=True          # Generate __eq__
+    order=False      # Do not generate comparison methods
+    unsafe_hash=False
+    match_args=True  # Support pattern matching
+    kw_only=False    # Positional arguments allowed
+
+Override as needed::
+
+    @FrozenDataclass(order=True)  # Enable ordering comparisons
+    class Version:
+        major: int
+        minor: int
+        patch: int
+
+    v1 = Version(1, 0, 0)
+    v2 = Version(2, 0, 0)
+    assert v1 < v2
+
+    @FrozenDataclass(frozen=False)  # Mutable (not recommended)
+    class MutablePoint:
+        x: float
+        y: float
+
+See Also
+--------
+- :mod:`dataclasses` : Python's standard dataclass module
+- :mod:`weakincentives.serde` : Serialization utilities for dataclasses
+"""
 
 from __future__ import annotations
 

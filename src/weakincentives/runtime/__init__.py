@@ -10,7 +10,158 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Runtime primitives for :mod:`weakincentives`."""
+"""Runtime primitives for agent workflow execution and state management.
+
+This package provides the core runtime infrastructure for weakincentives,
+including session state management, event dispatching, message queuing,
+and lifecycle coordination for agent workflows.
+
+Architecture Overview
+---------------------
+
+The runtime consists of four major components:
+
+**Session (State Management)**
+    Redux-style state container with typed slices, reducers, and event-driven
+    dispatch. Sessions store dataclass payloads from prompt executions and
+    tool invocations.
+
+**Events (Telemetry)**
+    In-process event dispatching for adapter telemetry including prompt
+    rendering, tool invocation, and execution completion tracking.
+
+**Mailbox (Message Queuing)**
+    Point-to-point message delivery with SQS-compatible semantics for
+    durable request processing with at-least-once delivery.
+
+**Lifecycle (Orchestration)**
+    MainLoop orchestration for mailbox-based agent workflows with graceful
+    shutdown coordination and watchdog monitoring.
+
+Session State Pattern
+---------------------
+
+Sessions follow a Redux-inspired pattern where state is stored in typed
+slices and mutations flow through pure reducers::
+
+    from weakincentives.runtime import Session
+    from dataclasses import dataclass, replace
+
+    @dataclass(frozen=True)
+    class AgentPlan:
+        steps: tuple[str, ...]
+
+    # Create session and register reducer
+    session = Session()
+    session[AgentPlan].register(AddStep, lambda view, event, context: ...)
+
+    # Query state
+    plan = session[AgentPlan].latest()
+    all_plans = session[AgentPlan].all()
+    active = session[AgentPlan].where(lambda p: p.active)
+
+    # Dispatch events to reducers
+    session.dispatch(AddStep(step="implement feature"))
+
+MainLoop Pattern
+----------------
+
+MainLoop provides durable request processing with message queues::
+
+    from weakincentives.runtime import MainLoop, MainLoopRequest, Session
+    from weakincentives.runtime.mailbox import InMemoryMailbox
+
+    class MyLoop(MainLoop[MyRequest, MyOutput]):
+        def prepare(self, request: MyRequest) -> tuple[Prompt[MyOutput], Session]:
+            # Build prompt and session for the request
+            return prompt, Session()
+
+    requests = InMemoryMailbox[MainLoopRequest[MyRequest], MainLoopResult[MyOutput]]()
+    loop = MyLoop(adapter=adapter, requests=requests)
+    loop.run(max_iterations=100)
+
+Transaction Support
+-------------------
+
+Tool execution supports transactional semantics with automatic rollback::
+
+    from weakincentives.runtime import tool_transaction, restore_snapshot
+
+    with tool_transaction(session, resources.context) as snapshot:
+        result = execute_tool(...)
+        if not result.success:
+            restore_snapshot(session, resources.context, snapshot)
+
+Exports
+-------
+
+**Session & State:**
+    - :class:`Session` - Main state container
+    - :class:`SessionProtocol` - Protocol for session implementations
+    - :class:`Snapshot` - Immutable session state snapshot
+    - :class:`DataEvent` - Union of prompt/tool telemetry events
+    - :class:`ReducerContext` - Context passed to reducers
+    - :class:`SlicePolicy` - STATE, LOG, or TRANSIENT retention policy
+
+**Reducers:**
+    - :func:`append_all` - Ledger semantics (always append)
+    - :func:`replace_latest` - Keep only most recent value
+    - :func:`replace_latest_by` - Keep latest per derived key
+    - :func:`upsert_by` - Update or insert by derived key
+
+**Events:**
+    - :class:`Dispatcher` - Event dispatch protocol
+    - :class:`InProcessDispatcher` - Synchronous in-process dispatcher
+    - :class:`PromptExecuted` - Emitted after prompt evaluation
+    - :class:`PromptRendered` - Emitted before prompt dispatch
+    - :class:`ToolInvoked` - Emitted after tool execution
+    - :class:`TokenUsage` - Token accounting from providers
+
+**Mailbox:**
+    - :class:`Mailbox` - Message queue protocol
+    - :class:`Message` - Received message with lifecycle methods
+    - :class:`InMemoryMailbox` - Thread-safe in-memory implementation
+    - :class:`FakeMailbox` - Testing implementation with failure injection
+    - :class:`CollectingMailbox` - Stores sent messages for inspection
+    - :class:`NullMailbox` - Drops all messages silently
+
+**MainLoop:**
+    - :class:`MainLoop` - Abstract orchestrator for request processing
+    - :class:`MainLoopConfig` - Configuration for deadlines, budgets
+    - :class:`MainLoopRequest` - Wrapper for incoming requests
+    - :class:`MainLoopResult` - Response containing output and metadata
+
+**Lifecycle:**
+    - :class:`LoopGroup` - Coordinates multiple loops with shutdown
+    - :class:`ShutdownCoordinator` - Signal handler for graceful termination
+    - :class:`Runnable` - Protocol for loops supporting shutdown
+    - :class:`Watchdog` - Detects and terminates stuck workers
+
+**Transactions:**
+    - :func:`create_snapshot` - Capture session and resource state
+    - :func:`restore_snapshot` - Restore from composite snapshot
+    - :func:`tool_transaction` - Context manager for atomic tool execution
+    - :class:`CompositeSnapshot` - Combined session and resource snapshot
+    - :class:`PendingToolTracker` - Manages in-flight tool transactions
+
+**Logging:**
+    - :func:`configure_logging` - Set up structured logging
+    - :func:`get_logger` - Get a StructuredLogger instance
+    - :class:`StructuredLogger` - JSON-capable logging wrapper
+
+**Dead Letter Queue:**
+    - :class:`DeadLetter` - Unprocessable message record
+    - :class:`DLQPolicy` - Policy for routing failed messages
+    - :class:`DLQConsumer` - Consumer for dead letter messages
+
+Subpackages
+-----------
+
+- :mod:`weakincentives.runtime.events` - Event types and dispatching
+- :mod:`weakincentives.runtime.mailbox` - Message queue abstractions
+- :mod:`weakincentives.runtime.session` - Session state management
+- :mod:`weakincentives.runtime.session.slices` - Slice storage backends
+"""
 
 from __future__ import annotations
 
