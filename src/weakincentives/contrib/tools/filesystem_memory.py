@@ -30,7 +30,6 @@ Example usage::
 
 from __future__ import annotations
 
-import builtins
 import re
 import types
 from collections.abc import Mapping, Sequence
@@ -275,9 +274,9 @@ class InMemoryFilesystem:
 
     def _collect_file_entries(
         self, normalized: str, prefix: str, seen: set[str]
-    ) -> builtins.list[FileEntry]:
+    ) -> list[FileEntry]:
         """Collect file entries and implicit directories from files."""
-        entries: builtins.list[FileEntry] = []
+        entries: list[FileEntry] = []
         for file_path in self._files:
             if not is_path_under(file_path, normalized):
                 continue
@@ -304,9 +303,9 @@ class InMemoryFilesystem:
 
     def _collect_explicit_dir_entries(
         self, normalized: str, prefix: str, seen: set[str]
-    ) -> builtins.list[FileEntry]:
+    ) -> list[FileEntry]:
         """Collect explicit directory entries not already seen."""
-        entries: builtins.list[FileEntry] = []
+        entries: list[FileEntry] = []
         for dir_path in self._directories:
             if not is_path_under(dir_path, normalized) or dir_path == normalized:
                 continue

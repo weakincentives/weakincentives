@@ -16,14 +16,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TypeVar
 
 from .protocols import ResourceResolver
 from .scope import Scope
 
-T = TypeVar("T")
-
-Provider = Callable[[ResourceResolver], T]
+type Provider[T] = Callable[[ResourceResolver], T]
 """Factory function that constructs a resource given a resolver for dependencies."""
 
 
