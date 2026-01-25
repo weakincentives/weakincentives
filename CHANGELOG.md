@@ -2,9 +2,9 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.23.0 - 2026-01-25
 
-*Commits reviewed: 2026-01-23 (5274d9d) through 2026-01-24 (eea85a9)*
+*Commits reviewed: 2026-01-23 (5274d9d) through 2026-01-24 (6f62164)*
 
 ### TL;DR
 
@@ -19,8 +19,10 @@ always enabled**—contracts run in production, not just tests. A new
 infrastructure, reducing code duplication between MainLoop and EvalLoop. The
 **`Experiment` class moves to package root** to resolve circular imports. Bug
 fixes address **RedisMailbox generic type deserialization** and prevent **data
-inconsistency when bundle finalization fails**. New documentation includes a
-comprehensive **Query guide** for SQL-based bundle analysis.
+inconsistency when bundle finalization fails**. **Section subclasses now
+automatically infer `_params_type`** from generic base classes, eliminating
+manual type assignment. New documentation includes a comprehensive **Query
+guide** for SQL-based bundle analysis.
 
 ---
 
@@ -165,6 +167,25 @@ simple string matching. This enables proper handling of:
 
 **Security improvement:** Type resolution no longer uses `eval()`. Only safe,
 well-known types from `builtins` and `typing` modules are resolved.
+
+#### Automatic Section Type Inference
+
+Section subclasses now automatically infer `_params_type` from generic base
+classes. When creating `class MySection(MarkdownSection[MyParams])`, the params
+type is propagated automatically—no manual `_params_type` assignment needed.
+
+```python
+@dataclass
+class MyParams:
+    value: str
+
+# _params_type is automatically inferred - no explicit setting required
+class MySection(MarkdownSection[MyParams]):
+    pass
+```
+
+This works through `__init_subclass__` which propagates `_params_type` from
+specialized base classes created by `__class_getitem__`.
 
 ---
 
