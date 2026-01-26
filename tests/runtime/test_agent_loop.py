@@ -650,6 +650,182 @@ def test_loop_default_finalize() -> None:
 
 
 # =============================================================================
+# Postprocess Response Tests
+# =============================================================================
+
+
+class _TestLoopWithPostprocess(AgentLoop[_Request, _Output]):
+    """Test implementation that tracks postprocess_response calls."""
+
+    def __init__(
+        self,
+        *,
+        adapter: ProviderAdapter[_Output],
+        requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]]
+        | FakeMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]],
+        config: AgentLoopConfig | None = None,
+        modify_output: bool = False,
+    ) -> None:
+        super().__init__(adapter=adapter, requests=requests, config=config)
+        self._template = PromptTemplate[_Output](
+            ns="test",
+            key="test-prompt",
+            sections=[
+                MarkdownSection[_Params](
+                    title="Test",
+                    template="$content",
+                    key="test",
+                ),
+            ],
+        )
+        self.postprocess_response_called = False
+        self.postprocess_response_input: _Output | None = None
+        self._modify_output = modify_output
+
+    def prepare(
+        self,
+        request: _Request,
+        *,
+        experiment: object = None,
+    ) -> tuple[Prompt[_Output], Session]:
+        _ = experiment
+        prompt = Prompt(self._template).bind(_Params(content=request.message))
+        session = Session(tags={"loop": "test"})
+        return prompt, session
+
+    def postprocess_response(
+        self,
+        output: _Output | None,
+        prompt: Prompt[_Output],
+        session: Session,
+    ) -> _Output | None:
+        del prompt, session
+        self.postprocess_response_called = True
+        self.postprocess_response_input = output
+        if self._modify_output and output is not None:
+            return _Output(result=f"modified: {output.result}")
+        return output
+
+
+def test_loop_calls_postprocess_response() -> None:
+    """AgentLoop calls postprocess_response after successful processing."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoopWithPostprocess(adapter=adapter, requests=requests)
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        assert loop.postprocess_response_called
+        assert loop.postprocess_response_input is not None
+        assert loop.postprocess_response_input == _Output(result="success")
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_postprocess_response_can_modify_output() -> None:
+    """AgentLoop postprocess_response can modify the output."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoopWithPostprocess(
+            adapter=adapter, requests=requests, modify_output=True
+        )
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        # Output should be modified by postprocess_response
+        assert msgs[0].body.output == _Output(result="modified: success")
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_default_postprocess_response() -> None:
+    """AgentLoop default postprocess_response returns response unchanged."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        # Use _TestLoopNoFinalizeOverride which doesn't override postprocess_response
+        loop = _TestLoopNoFinalizeOverride(adapter=adapter, requests=requests)
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        # Output should be unchanged (default postprocess_response returns as-is)
+        assert msgs[0].body.output == _Output(result="success")
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_postprocess_response_called_after_visibility_expansion() -> None:
+    """AgentLoop calls postprocess_response after visibility expansion retries."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+            {("section1",): SectionVisibility.FULL},
+        ]
+        adapter = _MockAdapter(visibility_requests=visibility_requests)
+        loop = _TestLoopWithPostprocess(
+            adapter=adapter, requests=requests, modify_output=True
+        )
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Should succeed after visibility expansion
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is True
+        # postprocess_response should have been called (only once, after final success)
+        assert loop.postprocess_response_called
+        # Output should be modified
+        assert msgs[0].body.output == _Output(result="modified: success")
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+# =============================================================================
 # Resource Injection Tests
 # =============================================================================
 
