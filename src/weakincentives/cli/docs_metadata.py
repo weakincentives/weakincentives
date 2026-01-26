@@ -35,6 +35,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "LEASE_EXTENDER": "Automatic message visibility extension during processing",
     "LIFECYCLE": "LoopGroup, ShutdownCoordinator, graceful shutdown patterns",
     "LOGGING": "Logging surfaces",
+    "LOG_AGGREGATION_PROPOSAL": "Log aggregation gap analysis and fix proposal",
     "MAILBOX": "Message queue abstraction, SQS/Redis semantics, reply patterns, resolver",
     "AGENT_LOOP": "Agent loop orchestration, visibility handling, event-driven execution",
     "MODULE_BOUNDARIES": "Module organization and import boundaries",
