@@ -953,14 +953,25 @@ class BundleWriter:
         """
         search_root = self._get_retention_search_root()
         bundles: list[tuple[Path, datetime, int]] = []
+        # Resolve path once for efficient comparison
+        self_path_resolved = self._path.resolve() if self._path else None
+
         for bundle_path in search_root.glob("**/*.zip"):
             try:
-                bundle = DebugBundle.load(bundle_path)
-                # Skip the bundle we just created (compare by ID for robustness
-                # against path normalization issues like symlinks)
-                if bundle.manifest.bundle_id == str(self._bundle_id):
+                # Skip the bundle we just created - check path first for efficiency
+                # (avoids loading the just-created bundle unnecessarily)
+                if (
+                    self_path_resolved is not None
+                    and bundle_path.resolve() == self_path_resolved
+                ):
                     continue
+
+                bundle = DebugBundle.load(bundle_path)
                 created_at = datetime.fromisoformat(bundle.manifest.created_at)
+                # Normalize to UTC for consistent sorting across timezone-naive
+                # and timezone-aware timestamps
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
                 size = bundle_path.stat().st_size
                 bundles.append((bundle_path, created_at, size))
             except (BundleValidationError, ValueError, OSError):
@@ -979,8 +990,7 @@ class BundleWriter:
             return
         now = datetime.now(UTC)
         for bundle_path, created_at, _ in bundles:
-            if created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=UTC)
+            # Timestamps are already normalized to UTC in _collect_existing_bundles
             if (now - created_at).total_seconds() > retention.max_age_seconds:
                 to_delete.add(bundle_path)
 
