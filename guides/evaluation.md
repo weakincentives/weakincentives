@@ -208,7 +208,7 @@ fire-and-forget worker pattern), use `submit_dataset`:
 ```python nocheck
 from weakincentives.evals import submit_dataset, BASELINE
 
-# Submit all samples (results handled by worker's internal routing)
+# Submit all samples (results are not collected unless you provide a reply mailbox)
 count = submit_dataset(dataset, BASELINE, eval_requests)
 print(f"Submitted {count} samples")
 ```

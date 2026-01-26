@@ -153,7 +153,7 @@ Wall-clock limits via `Deadline` at `src/weakincentives/deadlines.py`:
 - Must be timezone-aware, >1s in future
 - Checked: before provider calls, before tool execution, during response finalization
 - Propagated via `RenderedPrompt.deadline` and `ToolContext.deadline`
-- Raises `DeadlineExceededError` → converted to `PromptEvaluationError` with `phase="tool"` or `phase="budget"`
+- Raises `DeadlineExceededError` → converted to `PromptEvaluationError` with `phase="request"`, `phase="response"`, or `phase="tool"`
 
 ## Budgets
 
