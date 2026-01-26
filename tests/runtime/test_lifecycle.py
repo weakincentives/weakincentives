@@ -28,11 +28,11 @@ from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime import (
+    AgentLoop,
+    AgentLoopRequest,
+    AgentLoopResult,
     InMemoryMailbox,
     LoopGroup,
-    MainLoop,
-    MainLoopRequest,
-    MainLoopResult,
     Runnable,
     Session,
     ShutdownCoordinator,
@@ -106,14 +106,14 @@ class _MockAdapter(ProviderAdapter[_Output]):
         )
 
 
-class _TestLoop(MainLoop[_Request, _Output]):
-    """Test implementation of MainLoop."""
+class _TestLoop(AgentLoop[_Request, _Output]):
+    """Test implementation of AgentLoop."""
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]],
+        requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]],
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
         self._template = PromptTemplate[_Output](
@@ -145,9 +145,9 @@ def _create_test_loop(
     delay: float = 0.0,
     error: Exception | None = None,
 ) -> _TestLoop:
-    """Create a test MainLoop with mock adapter."""
+    """Create a test AgentLoop with mock adapter."""
     adapter = _MockAdapter(delay=delay, error=error)
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="dummy-requests")
     )
     return _TestLoop(adapter=adapter, requests=requests)
@@ -464,13 +464,13 @@ def test_loop_group_with_signals(reset_coordinator: None) -> None:
 
 
 # =============================================================================
-# MainLoop Shutdown Tests
+# AgentLoop Shutdown Tests
 # =============================================================================
 
 
-def test_main_loop_shutdown_stops_loop() -> None:
-    """MainLoop.shutdown() stops the run loop."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+def test_agent_loop_shutdown_stops_loop() -> None:
+    """AgentLoop.shutdown() stops the run loop."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
 
@@ -496,9 +496,9 @@ def test_main_loop_shutdown_stops_loop() -> None:
         requests.close()
 
 
-def test_main_loop_shutdown_completes_in_flight() -> None:
-    """MainLoop.shutdown() waits for in-flight message to complete."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+def test_agent_loop_shutdown_completes_in_flight() -> None:
+    """AgentLoop.shutdown() waits for in-flight message to complete."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
 
@@ -508,7 +508,7 @@ def test_main_loop_shutdown_completes_in_flight() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         # Send a request
-        requests.send(MainLoopRequest(request=_Request(message="test")))
+        requests.send(AgentLoopRequest(request=_Request(message="test")))
 
         thread = threading.Thread(
             target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
@@ -528,9 +528,9 @@ def test_main_loop_shutdown_completes_in_flight() -> None:
         requests.close()
 
 
-def test_main_loop_shutdown_nacks_unprocessed_messages() -> None:
-    """MainLoop.shutdown() nacks unprocessed messages from batch."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+def test_agent_loop_shutdown_nacks_unprocessed_messages() -> None:
+    """AgentLoop.shutdown() nacks unprocessed messages from batch."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
 
@@ -541,7 +541,7 @@ def test_main_loop_shutdown_nacks_unprocessed_messages() -> None:
 
         # Send multiple requests
         for i in range(3):
-            requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
+            requests.send(AgentLoopRequest(request=_Request(message=f"msg-{i}")))
 
         thread = threading.Thread(
             target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": None}
@@ -561,9 +561,9 @@ def test_main_loop_shutdown_nacks_unprocessed_messages() -> None:
         requests.close()
 
 
-def test_main_loop_running_property() -> None:
-    """MainLoop.running property reflects loop state."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+def test_agent_loop_running_property() -> None:
+    """AgentLoop.running property reflects loop state."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
 
@@ -589,9 +589,9 @@ def test_main_loop_running_property() -> None:
         requests.close()
 
 
-def test_main_loop_context_manager() -> None:
-    """MainLoop supports context manager protocol."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+def test_agent_loop_context_manager() -> None:
+    """AgentLoop supports context manager protocol."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
 
@@ -613,9 +613,9 @@ def test_main_loop_context_manager() -> None:
         requests.close()
 
 
-def test_main_loop_shutdown_timeout_returns_false() -> None:
-    """MainLoop.shutdown() returns False when timeout expires."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+def test_agent_loop_shutdown_timeout_returns_false() -> None:
+    """AgentLoop.shutdown() returns False when timeout expires."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
 
@@ -624,7 +624,7 @@ def test_main_loop_shutdown_timeout_returns_false() -> None:
         adapter = _MockAdapter(delay=5.0)
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        requests.send(MainLoopRequest(request=_Request(message="slow")))
+        requests.send(AgentLoopRequest(request=_Request(message="slow")))
 
         thread = threading.Thread(
             target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
@@ -645,9 +645,9 @@ def test_main_loop_shutdown_timeout_returns_false() -> None:
         pass
 
 
-def test_main_loop_can_restart_after_shutdown() -> None:
-    """MainLoop can run again after shutdown."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+def test_agent_loop_can_restart_after_shutdown() -> None:
+    """AgentLoop can run again after shutdown."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
 
@@ -656,12 +656,12 @@ def test_main_loop_can_restart_after_shutdown() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         # First run
-        requests.send(MainLoopRequest(request=_Request(message="first")))
+        requests.send(AgentLoopRequest(request=_Request(message="first")))
         loop.run(max_iterations=1, wait_time_seconds=0)
         assert adapter.call_count == 1
 
         # Second run
-        requests.send(MainLoopRequest(request=_Request(message="second")))
+        requests.send(AgentLoopRequest(request=_Request(message="second")))
         loop.run(max_iterations=1, wait_time_seconds=0)
 
         assert adapter.call_count == 2
@@ -669,8 +669,8 @@ def test_main_loop_can_restart_after_shutdown() -> None:
         requests.close()
 
 
-def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
-    """MainLoop nacks remaining messages in batch when shutdown is triggered mid-batch."""
+def test_agent_loop_nacks_remaining_messages_on_shutdown() -> None:
+    """AgentLoop nacks remaining messages in batch when shutdown is triggered mid-batch."""
     from collections.abc import Sequence
 
     from weakincentives.runtime.mailbox import Message
@@ -678,7 +678,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
     class _ShutdownTriggeringAdapter(_MockAdapter):
         """Adapter that triggers loop shutdown after first call."""
 
-        def __init__(self, loop: MainLoop[_Request, _Output]) -> None:
+        def __init__(self, loop: AgentLoop[_Request, _Output]) -> None:
             super().__init__()
             self._loop = loop
 
@@ -708,7 +708,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             return result
 
     class _MultiMessageMailbox(
-        InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]]
+        InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]]
     ):
         """Mailbox that returns all messages in a single receive call."""
 
@@ -718,7 +718,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             max_messages: int = 10,
             visibility_timeout: int = 30,
             wait_time_seconds: int = 0,
-        ) -> Sequence[Message[MainLoopRequest[_Request], MainLoopResult[_Output]]]:
+        ) -> Sequence[Message[AgentLoopRequest[_Request], AgentLoopResult[_Output]]]:
             # Override to return up to 10 messages at once
             return super().receive(
                 max_messages=10,
@@ -742,7 +742,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
 
         # Send multiple messages
         for i in range(3):
-            requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
+            requests.send(AgentLoopRequest(request=_Request(message=f"msg-{i}")))
 
         # Run - first message will trigger shutdown, remaining should be nacked
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -753,14 +753,14 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
         requests.close()
 
 
-def test_main_loop_nacks_with_expired_receipt_handle() -> None:
-    """MainLoop handles expired receipt handle during shutdown nack."""
+def test_agent_loop_nacks_with_expired_receipt_handle() -> None:
+    """AgentLoop handles expired receipt handle during shutdown nack."""
     from weakincentives.runtime.mailbox import Message, ReceiptHandleExpiredError
 
     class _ShutdownAfterFirstAdapter(_MockAdapter):
         """Adapter that sets shutdown after first call."""
 
-        def __init__(self, loop: MainLoop[_Request, _Output]) -> None:
+        def __init__(self, loop: AgentLoop[_Request, _Output]) -> None:
             super().__init__()
             self._loop = loop
 
@@ -790,7 +790,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             return result
 
     class _ExpiredNackMailbox(
-        InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]]
+        InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]]
     ):
         """Mailbox that returns multiple messages and raises ReceiptHandleExpiredError on nack."""
 
@@ -800,7 +800,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             max_messages: int = 10,
             visibility_timeout: int = 30,
             wait_time_seconds: int = 0,
-        ) -> list[Message[MainLoopRequest[_Request], MainLoopResult[_Output]]]:
+        ) -> list[Message[AgentLoopRequest[_Request], AgentLoopResult[_Output]]]:
             msgs = super().receive(
                 max_messages=10,  # Return multiple messages
                 visibility_timeout=visibility_timeout,
@@ -813,7 +813,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
         """Message that raises ReceiptHandleExpiredError on nack."""
 
         def __init__(
-            self, inner: Message[MainLoopRequest[_Request], MainLoopResult[_Output]]
+            self, inner: Message[AgentLoopRequest[_Request], AgentLoopResult[_Output]]
         ) -> None:
             self._inner = inner
 
@@ -822,7 +822,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             return self._inner.id
 
         @property
-        def body(self) -> MainLoopRequest[_Request]:
+        def body(self) -> AgentLoopRequest[_Request]:
             return self._inner.body
 
         @property
@@ -850,7 +850,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
 
         # Send multiple messages
         for i in range(3):
-            requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
+            requests.send(AgentLoopRequest(request=_Request(message=f"msg-{i}")))
 
         # Run - should handle ReceiptHandleExpiredError gracefully during nack
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -866,9 +866,9 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
 # =============================================================================
 
 
-def test_main_loop_implements_runnable() -> None:
-    """MainLoop conforms to Runnable protocol."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+def test_agent_loop_implements_runnable() -> None:
+    """AgentLoop conforms to Runnable protocol."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
 
@@ -876,7 +876,7 @@ def test_main_loop_implements_runnable() -> None:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        # Type check - MainLoop should be usable where Runnable is expected
+        # Type check - AgentLoop should be usable where Runnable is expected
         runnable: Runnable = loop
         assert hasattr(runnable, "run")
         assert hasattr(runnable, "shutdown")
@@ -887,11 +887,11 @@ def test_main_loop_implements_runnable() -> None:
         requests.close()
 
 
-def test_main_loop_has_heartbeat_property() -> None:
-    """MainLoop exposes heartbeat property for watchdog monitoring."""
+def test_agent_loop_has_heartbeat_property() -> None:
+    """AgentLoop exposes heartbeat property for watchdog monitoring."""
     from weakincentives.runtime.watchdog import Heartbeat
 
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
 
@@ -899,7 +899,7 @@ def test_main_loop_has_heartbeat_property() -> None:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        # MainLoop should have heartbeat property
+        # AgentLoop should have heartbeat property
         assert hasattr(loop, "heartbeat")
         hb = loop.heartbeat
         assert isinstance(hb, Heartbeat)
@@ -962,9 +962,9 @@ def test_eval_loop_shutdown_stops_loop() -> None:
     )
 
     try:
-        main_loop = _create_test_loop()
+        agent_loop = _create_test_loop()
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=lambda o, e: Score(
                 value=1.0 if o.result == e else 0.0, passed=o.result == e
             ),
@@ -1011,15 +1011,15 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
         # Slow adapter to allow shutdown during batch processing
         adapter = _MockAdapter(delay=0.1)
         main_requests: InMemoryMailbox[
-            MainLoopRequest[str], MainLoopResult[_Output]
+            AgentLoopRequest[str], AgentLoopResult[_Output]
         ] = InMemoryMailbox(name="main-requests")
-        main_loop = _TestLoop(
+        agent_loop = _TestLoop(
             adapter=adapter,
             requests=main_requests,
         )
 
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=lambda o, e: Score(value=1.0, passed=True),
             requests=requests,
         )
@@ -1062,9 +1062,9 @@ def test_eval_loop_context_manager() -> None:
     )
 
     try:
-        main_loop = _create_test_loop()
+        agent_loop = _create_test_loop()
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=lambda o, e: Score(value=1.0, passed=True),
             requests=requests,
         )
@@ -1095,9 +1095,9 @@ def test_eval_loop_running_property() -> None:
     )
 
     try:
-        main_loop = _create_test_loop()
+        agent_loop = _create_test_loop()
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=lambda o, e: Score(value=1.0, passed=True),
             requests=requests,
         )
@@ -1153,9 +1153,9 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
     try:
         adapter = _MockAdapter(delay=0)
         main_requests: InMemoryMailbox[
-            MainLoopRequest[_Request], MainLoopResult[_Output]
+            AgentLoopRequest[_Request], AgentLoopResult[_Output]
         ] = InMemoryMailbox(name="main-requests")
-        main_loop = _TestLoop(adapter=adapter, requests=main_requests)
+        agent_loop = _TestLoop(adapter=adapter, requests=main_requests)
 
         # Track number of evaluations and trigger shutdown after first
         eval_count = 0
@@ -1171,7 +1171,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
             return Score(value=1.0, passed=True)
 
         eval_loop: EvalLoop[_Request, _Output, str] = EvalLoop(
-            loop=main_loop, evaluator=shutdown_after_first, requests=requests
+            loop=agent_loop, evaluator=shutdown_after_first, requests=requests
         )
         eval_loop_ref.append(eval_loop)
 

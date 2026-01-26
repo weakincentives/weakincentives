@@ -3,7 +3,7 @@
 ## Purpose
 
 `RunContext` provides immutable execution metadata for distributed tracing,
-request correlation, and debugging. Flows from `MainLoop` through adapters to
+request correlation, and debugging. Flows from `AgentLoop` through adapters to
 tool handlers and telemetry events.
 
 **Implementation:** `src/weakincentives/runtime/run_context.py`
@@ -13,7 +13,7 @@ tool handlers and telemetry events.
 | Field | Type | Description |
 |-------|------|-------------|
 | `run_id` | `UUID` | Fresh per execution (auto-generated) |
-| `request_id` | `UUID` | Stable across retries (from MainLoopRequest) |
+| `request_id` | `UUID` | Stable across retries (from AgentLoopRequest) |
 | `session_id` | `UUID \| None` | Session correlation |
 | `attempt` | `int` | Delivery count (1 = first) |
 | `worker_id` | `str` | Worker identification |
@@ -23,7 +23,7 @@ tool handlers and telemetry events.
 ## Data Flow
 
 ```
-MainLoop._handle_message()
+AgentLoop._handle_message()
   └─ _build_run_context()
   └─ bind_run_context(logger, run_context)  → log with run_id/request_id/...
   └─ _execute(run_context=...)
@@ -38,14 +38,14 @@ MainLoop._handle_message()
             └─ ToolInvoked(run_context=...)
             └─ PromptExecuted(run_context=...)
   └─ _dead_letter() → logs with run_context bound
-  └─ MainLoopResult(run_context=...)
+  └─ AgentLoopResult(run_context=...)
 ```
 
 ## Integration Points
 
-### MainLoopRequest/Result
+### AgentLoopRequest/Result
 
-Requests include optional `run_context` with trace context. MainLoop builds
+Requests include optional `run_context` with trace context. AgentLoop builds
 full context with execution-specific values.
 
 ### Logger Binding
@@ -109,6 +109,6 @@ with tracer.start_as_current_span("process_request") as span:
 
 ## Related Specifications
 
-- `specs/MAIN_LOOP.md` - Request processing
+- `specs/AGENT_LOOP.md` - Request processing
 - `specs/MAILBOX.md` - Message delivery and retries
 - `specs/LOGGING.md` - Structured logging

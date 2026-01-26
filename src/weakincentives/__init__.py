@@ -87,7 +87,7 @@ runtime
     Runtime primitives including:
 
     - ``Session``: Event-sourced state container with typed slices
-    - ``MainLoop``: Core orchestration loop for prompt evaluation
+    - ``AgentLoop``: Core orchestration loop for prompt evaluation
     - ``Mailbox``: Message queue abstraction for request/response
     - ``Dispatcher``: Event distribution and telemetry
     - ``Watchdog`` / ``Heartbeat``: Health monitoring utilities

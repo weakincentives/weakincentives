@@ -342,5 +342,5 @@ session snapshots to show what happened.
 ## Next Steps
 
 - [Tools](tools.md): Learn about transactional tool execution
-- [Orchestration](orchestration.md): Use MainLoop for request handling
+- [Orchestration](orchestration.md): Use AgentLoop for request handling
 - [Debugging](debugging.md): Inspect sessions and dump snapshots

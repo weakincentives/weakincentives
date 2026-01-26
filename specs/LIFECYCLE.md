@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Graceful shutdown coordination for `MainLoop` and `EvalLoop` instances.
+Graceful shutdown coordination for `AgentLoop` and `EvalLoop` instances.
 Core at `src/weakincentives/runtime/lifecycle.py`.
 
 ## Principles
@@ -16,7 +16,7 @@ Core at `src/weakincentives/runtime/lifecycle.py`.
 
 ### Runnable Protocol
 
-Both `MainLoop` and `EvalLoop` implement:
+Both `AgentLoop` and `EvalLoop` implement:
 
 | Method | Description |
 | --- | --- |
@@ -51,7 +51,7 @@ Coordinates multiple loops at `src/weakincentives/runtime/lifecycle.py`:
 
 Each loop runs in dedicated thread via `ThreadPoolExecutor`.
 
-## MainLoop Changes
+## AgentLoop Changes
 
 ### Lifecycle Attributes
 
@@ -85,14 +85,14 @@ loop.run()
 ### Multiple Loops
 
 ```python
-group = LoopGroup(loops=[main_loop, eval_loop])
+group = LoopGroup(loops=[agent_loop, eval_loop])
 group.run()  # Blocks until SIGTERM/SIGINT
 ```
 
 ### Context Manager
 
 ```python
-with LoopGroup(loops=[main_loop, eval_loop]) as group:
+with LoopGroup(loops=[agent_loop, eval_loop]) as group:
     thread = threading.Thread(target=group.run)
     thread.start()
 # Shutdown triggered on exit

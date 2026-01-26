@@ -13,7 +13,7 @@
 """Base class for mailbox-driven processing loops.
 
 MailboxWorker provides the common infrastructure for polling a mailbox,
-processing messages, and handling graceful shutdown. Both MainLoop and
+processing messages, and handling graceful shutdown. Both AgentLoop and
 EvalLoop extend this class.
 """
 

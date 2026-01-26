@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for MainLoop orchestration."""
+"""Tests for AgentLoop orchestration."""
 
 from __future__ import annotations
 
@@ -37,15 +37,15 @@ from weakincentives.prompt import (
     SectionVisibility,
     VisibilityExpansionRequired,
 )
+from weakincentives.runtime.agent_loop import (
+    AgentLoop,
+    AgentLoopConfig,
+    AgentLoopRequest,
+    AgentLoopResult,
+)
 from weakincentives.runtime.mailbox import (
     FakeMailbox,
     InMemoryMailbox,
-)
-from weakincentives.runtime.main_loop import (
-    MainLoop,
-    MainLoopConfig,
-    MainLoopRequest,
-    MainLoopResult,
 )
 from weakincentives.runtime.run_context import RunContext
 from weakincentives.runtime.session import Session, VisibilityOverrides
@@ -74,7 +74,7 @@ class _Params:
 
 
 class _MockAdapter(ProviderAdapter[_Output]):
-    """Mock adapter for testing MainLoop behavior."""
+    """Mock adapter for testing AgentLoop behavior."""
 
     def __init__(
         self,
@@ -155,16 +155,16 @@ class _MockAdapter(ProviderAdapter[_Output]):
             return self._response
 
 
-class _TestLoop(MainLoop[_Request, _Output]):
-    """Test implementation of MainLoop."""
+class _TestLoop(AgentLoop[_Request, _Output]):
+    """Test implementation of AgentLoop."""
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]]
-        | FakeMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]],
-        config: MainLoopConfig | None = None,
+        requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]]
+        | FakeMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]],
+        config: AgentLoopConfig | None = None,
         worker_id: str = "",
     ) -> None:
         super().__init__(
@@ -203,22 +203,22 @@ class _TestLoop(MainLoop[_Request, _Output]):
 
 
 # =============================================================================
-# MainLoopConfig Tests
+# AgentLoopConfig Tests
 # =============================================================================
 
 
 def test_config_default_values() -> None:
-    """MainLoopConfig has sensible defaults."""
-    config = MainLoopConfig()
+    """AgentLoopConfig has sensible defaults."""
+    config = AgentLoopConfig()
     assert config.deadline is None
     assert config.budget is None
 
 
 def test_config_custom_values() -> None:
-    """MainLoopConfig accepts custom values."""
+    """AgentLoopConfig accepts custom values."""
     deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
     budget = Budget(max_total_tokens=1000)
-    config = MainLoopConfig(
+    config = AgentLoopConfig(
         deadline=deadline,
         budget=budget,
     )
@@ -227,13 +227,13 @@ def test_config_custom_values() -> None:
 
 
 # =============================================================================
-# MainLoopRequest Tests
+# AgentLoopRequest Tests
 # =============================================================================
 
 
 def test_request_default_values() -> None:
-    """MainLoopRequest has sensible defaults."""
-    request = MainLoopRequest(request=_Request(message="hello"))
+    """AgentLoopRequest has sensible defaults."""
+    request = AgentLoopRequest(request=_Request(message="hello"))
     assert request.request == _Request(message="hello")
     assert request.budget is None
     assert request.deadline is None
@@ -242,10 +242,10 @@ def test_request_default_values() -> None:
 
 
 def test_request_custom_values() -> None:
-    """MainLoopRequest accepts custom values."""
+    """AgentLoopRequest accepts custom values."""
     budget = Budget(max_total_tokens=1000)
     deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
-    request = MainLoopRequest(
+    request = AgentLoopRequest(
         request=_Request(message="hello"),
         budget=budget,
         deadline=deadline,
@@ -255,16 +255,16 @@ def test_request_custom_values() -> None:
 
 
 # =============================================================================
-# MainLoopResult Tests
+# AgentLoopResult Tests
 # =============================================================================
 
 
 def test_result_success_case() -> None:
-    """MainLoopResult represents successful completion."""
+    """AgentLoopResult represents successful completion."""
     request_id = UUID("12345678-1234-5678-1234-567812345678")
     session_id = UUID("87654321-4321-8765-4321-876543218765")
     output = _Output(result="success")
-    result: MainLoopResult[_Output] = MainLoopResult(
+    result: AgentLoopResult[_Output] = AgentLoopResult(
         request_id=request_id,
         output=output,
         session_id=session_id,
@@ -278,9 +278,9 @@ def test_result_success_case() -> None:
 
 
 def test_result_error_case() -> None:
-    """MainLoopResult represents failure."""
+    """AgentLoopResult represents failure."""
     request_id = UUID("12345678-1234-5678-1234-567812345678")
-    result: MainLoopResult[_Output] = MainLoopResult(
+    result: AgentLoopResult[_Output] = AgentLoopResult(
         request_id=request_id,
         error="adapter failure",
     )
@@ -292,9 +292,9 @@ def test_result_error_case() -> None:
 
 
 def test_result_is_frozen() -> None:
-    """MainLoopResult is immutable."""
+    """AgentLoopResult is immutable."""
     request_id = UUID("12345678-1234-5678-1234-567812345678")
-    result: MainLoopResult[_Output] = MainLoopResult(
+    result: AgentLoopResult[_Output] = AgentLoopResult(
         request_id=request_id,
         output=_Output(result="success"),
     )
@@ -303,16 +303,16 @@ def test_result_is_frozen() -> None:
 
 
 # =============================================================================
-# MainLoop Tests
+# AgentLoop Tests
 # =============================================================================
 
 
 def test_loop_processes_request() -> None:
-    """MainLoop processes request from mailbox."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop processes request from mailbox."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -320,7 +320,7 @@ def test_loop_processes_request() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         # Send request with reply_to
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         # Run single iteration
@@ -340,18 +340,18 @@ def test_loop_processes_request() -> None:
 
 
 def test_loop_sends_error_on_failure() -> None:
-    """MainLoop sends error result on adapter failure."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop sends error result on adapter failure."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("adapter failure"))
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -369,18 +369,18 @@ def test_loop_sends_error_on_failure() -> None:
 
 
 def test_loop_acknowledges_request() -> None:
-    """MainLoop acknowledges processed request."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop acknowledges processed request."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -393,18 +393,18 @@ def test_loop_acknowledges_request() -> None:
 
 
 def test_loop_calls_finalize() -> None:
-    """MainLoop calls finalize after successful processing."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop calls finalize after successful processing."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -416,11 +416,11 @@ def test_loop_calls_finalize() -> None:
 
 
 def test_loop_respects_max_iterations() -> None:
-    """MainLoop respects max_iterations limit."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop respects max_iterations limit."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -429,7 +429,7 @@ def test_loop_respects_max_iterations() -> None:
 
         for i in range(5):
             requests.send(
-                MainLoopRequest(request=_Request(message=f"msg-{i}")),
+                AgentLoopRequest(request=_Request(message=f"msg-{i}")),
                 reply_to=results,
             )
 
@@ -445,11 +445,11 @@ def test_loop_respects_max_iterations() -> None:
 
 
 def test_loop_handles_visibility_expansion() -> None:
-    """MainLoop handles visibility expansion correctly."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop handles visibility expansion correctly."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -459,7 +459,7 @@ def test_loop_handles_visibility_expansion() -> None:
         adapter = _MockAdapter(visibility_requests=visibility_requests)
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -476,20 +476,20 @@ def test_loop_handles_visibility_expansion() -> None:
 
 
 def test_loop_uses_config_budget() -> None:
-    """MainLoop uses budget from config."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop uses budget from config."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         budget = Budget(max_total_tokens=1000)
-        config = MainLoopConfig(budget=budget)
+        config = AgentLoopConfig(budget=budget)
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -502,21 +502,21 @@ def test_loop_uses_config_budget() -> None:
 
 
 def test_loop_request_overrides_config() -> None:
-    """MainLoop uses request budget/deadline over config."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop uses request budget/deadline over config."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         config_budget = Budget(max_total_tokens=1000)
-        config = MainLoopConfig(budget=config_budget)
+        config = AgentLoopConfig(budget=config_budget)
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         override_budget = Budget(max_total_tokens=2000)
-        request = MainLoopRequest(
+        request = AgentLoopRequest(
             request=_Request(message="hello"),
             budget=override_budget,
         )
@@ -532,16 +532,16 @@ def test_loop_request_overrides_config() -> None:
 
 
 def test_loop_nacks_on_response_send_failure() -> None:
-    """MainLoop nacks request when response send fails."""
-    results: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(name="results")
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    """AgentLoop nacks request when response send fails."""
+    results: FakeMailbox[AgentLoopResult[_Output], None] = FakeMailbox(name="results")
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         # Make response send fail
@@ -560,9 +560,9 @@ def test_loop_nacks_on_response_send_failure() -> None:
 
 
 def test_loop_nacks_on_error_response_send_failure() -> None:
-    """MainLoop nacks request when error response send fails."""
-    results: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(name="results")
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    """AgentLoop nacks request when error response send fails."""
+    results: FakeMailbox[AgentLoopResult[_Output], None] = FakeMailbox(name="results")
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -570,7 +570,7 @@ def test_loop_nacks_on_error_response_send_failure() -> None:
         adapter = _MockAdapter(error=RuntimeError("adapter failure"))
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         # Make error response send fail too
@@ -586,16 +586,16 @@ def test_loop_nacks_on_error_response_send_failure() -> None:
         requests.close()
 
 
-class _TestLoopNoFinalizeOverride(MainLoop[_Request, _Output]):
+class _TestLoopNoFinalizeOverride(AgentLoop[_Request, _Output]):
     """Test implementation that doesn't override finalize."""
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]]
-        | FakeMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]],
-        config: MainLoopConfig | None = None,
+        requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]]
+        | FakeMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]],
+        config: AgentLoopConfig | None = None,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests, config=config)
         self._template = PromptTemplate[_Output](
@@ -623,18 +623,18 @@ class _TestLoopNoFinalizeOverride(MainLoop[_Request, _Output]):
 
 
 def test_loop_default_finalize() -> None:
-    """MainLoop default finalize does nothing."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop default finalize does nothing."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         loop = _TestLoopNoFinalizeOverride(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         # Run should succeed even without finalize override
@@ -662,18 +662,18 @@ class _CustomResource:
 
 
 def test_config_accepts_resources() -> None:
-    """MainLoopConfig accepts resources parameter."""
+    """AgentLoopConfig accepts resources parameter."""
     resource = _CustomResource(name="config-resource")
     resources: dict[type[object], object] = {_CustomResource: resource}
-    config = MainLoopConfig(resources=resources)
+    config = AgentLoopConfig(resources=resources)
     assert config.resources is resources
 
 
 def test_request_accepts_resources() -> None:
-    """MainLoopRequest accepts resources parameter."""
+    """AgentLoopRequest accepts resources parameter."""
     resource = _CustomResource(name="request-resource")
     resources: dict[type[object], object] = {_CustomResource: resource}
-    request = MainLoopRequest(
+    request = AgentLoopRequest(
         request=_Request(message="hello"),
         resources=resources,
     )
@@ -681,20 +681,20 @@ def test_request_accepts_resources() -> None:
 
 
 def test_loop_passes_resources_from_config() -> None:
-    """MainLoop binds config resources to prompt."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop binds config resources to prompt."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         resource = _CustomResource(name="config-resource")
-        config = MainLoopConfig(resources={_CustomResource: resource})
+        config = AgentLoopConfig(resources={_CustomResource: resource})
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -708,21 +708,21 @@ def test_loop_passes_resources_from_config() -> None:
 
 
 def test_loop_request_resources_overrides_config() -> None:
-    """MainLoop request resources override config resources."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop request resources override config resources."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         config_resource = _CustomResource(name="config-resource")
-        config = MainLoopConfig(resources={_CustomResource: config_resource})
+        config = AgentLoopConfig(resources={_CustomResource: config_resource})
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         override_resource = _CustomResource(name="override-resource")
-        request = MainLoopRequest(
+        request = AgentLoopRequest(
             request=_Request(message="hello"),
             resources={_CustomResource: override_resource},
         )
@@ -740,10 +740,10 @@ def test_loop_request_resources_overrides_config() -> None:
 
 def test_same_resources_used_across_visibility_retries() -> None:
     """Same resources are used across visibility expansion retries."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -755,7 +755,7 @@ def test_same_resources_used_across_visibility_retries() -> None:
         adapter = _MockAdapter(visibility_requests=visibility_requests)
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(
+        request = AgentLoopRequest(
             request=_Request(message="hello"),
             resources={_CustomResource: resource},
         )
@@ -776,17 +776,17 @@ def test_same_resources_used_across_visibility_retries() -> None:
 
 def test_no_resources_when_not_set() -> None:
     """Prompt has empty resource context when no resources configured."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -805,11 +805,11 @@ def test_no_resources_when_not_set() -> None:
 
 
 def test_visibility_overrides_accumulate_in_session() -> None:
-    """MainLoop accumulates visibility overrides in session state."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop accumulates visibility overrides in session state."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -820,7 +820,7 @@ def test_visibility_overrides_accumulate_in_session() -> None:
         adapter = _MockAdapter(visibility_requests=visibility_requests)
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -838,15 +838,15 @@ def test_visibility_overrides_accumulate_in_session() -> None:
 
 def test_same_budget_tracker_used_across_visibility_retries() -> None:
     """Same BudgetTracker is used across visibility expansion retries."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         budget = Budget(max_total_tokens=1000)
-        config = MainLoopConfig(budget=budget)
+        config = AgentLoopConfig(budget=budget)
         visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
             {("section1",): SectionVisibility.FULL},
             {("section2",): SectionVisibility.FULL},
@@ -854,7 +854,7 @@ def test_same_budget_tracker_used_across_visibility_retries() -> None:
         adapter = _MockAdapter(visibility_requests=visibility_requests)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -874,17 +874,17 @@ def test_same_budget_tracker_used_across_visibility_retries() -> None:
 
 def test_no_budget_tracker_when_no_budget() -> None:
     """No BudgetTracker is created when no budget is set."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -901,16 +901,16 @@ def test_no_budget_tracker_when_no_budget() -> None:
 
 
 def test_loop_handles_expired_receipt_handle_on_ack() -> None:
-    """MainLoop continues when receipt handle expires during processing."""
-    results: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(name="results")
-    requests: FakeMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    """AgentLoop continues when receipt handle expires during processing."""
+    results: FakeMailbox[AgentLoopResult[_Output], None] = FakeMailbox(name="results")
+    requests: FakeMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         FakeMailbox(name="requests")
     )
 
     adapter = _MockAdapter()
     loop = _TestLoop(adapter=adapter, requests=requests)
 
-    request = MainLoopRequest(request=_Request(message="hello"))
+    request = AgentLoopRequest(request=_Request(message="hello"))
     requests.send(request, reply_to=results)
 
     # Receive the message to get the handle, then expire it
@@ -922,7 +922,7 @@ def test_loop_handles_expired_receipt_handle_on_ack() -> None:
     requests.expire_handle(msg.receipt_handle)
 
     # Create a result to send
-    result: MainLoopResult[_Output] = MainLoopResult(
+    result: AgentLoopResult[_Output] = AgentLoopResult(
         request_id=request.request_id,
         output=_Output(result="success"),
     )
@@ -936,18 +936,18 @@ def test_loop_handles_expired_receipt_handle_on_ack() -> None:
 
 
 def test_loop_handles_expired_receipt_handle_on_nack() -> None:
-    """MainLoop continues when receipt handle expires during nack after send failure."""
+    """AgentLoop continues when receipt handle expires during nack after send failure."""
     from weakincentives.runtime.mailbox import MailboxConnectionError
 
-    results: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(name="results")
-    requests: FakeMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    results: FakeMailbox[AgentLoopResult[_Output], None] = FakeMailbox(name="results")
+    requests: FakeMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         FakeMailbox(name="requests")
     )
 
     adapter = _MockAdapter()
     loop = _TestLoop(adapter=adapter, requests=requests)
 
-    request = MainLoopRequest(request=_Request(message="hello"))
+    request = AgentLoopRequest(request=_Request(message="hello"))
     requests.send(request, reply_to=results)
 
     # Receive the message to get the handle
@@ -962,7 +962,7 @@ def test_loop_handles_expired_receipt_handle_on_nack() -> None:
     results.set_connection_error(MailboxConnectionError("connection lost"))
 
     # Create a result to send
-    result: MainLoopResult[_Output] = MainLoopResult(
+    result: AgentLoopResult[_Output] = AgentLoopResult(
         request_id=request.request_id,
         output=_Output(result="success"),
     )
@@ -974,13 +974,13 @@ def test_loop_handles_expired_receipt_handle_on_nack() -> None:
 
 
 def test_loop_exits_when_mailbox_closed() -> None:
-    """MainLoop.run() exits when requests mailbox is closed."""
+    """AgentLoop.run() exits when requests mailbox is closed."""
     import threading
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     adapter = _MockAdapter()
@@ -1012,11 +1012,11 @@ def test_loop_exits_when_mailbox_closed() -> None:
 
 
 def test_loop_worker_id_property() -> None:
-    """MainLoop exposes worker_id property."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop exposes worker_id property."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -1034,18 +1034,18 @@ def test_loop_worker_id_property() -> None:
 
 
 def test_loop_includes_run_context_in_result() -> None:
-    """MainLoop result includes RunContext."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop result includes RunContext."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests, worker_id="worker-1")
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1063,11 +1063,11 @@ def test_loop_includes_run_context_in_result() -> None:
 
 
 def test_loop_preserves_run_context_from_request() -> None:
-    """MainLoop preserves trace_id and span_id from request RunContext."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop preserves trace_id and span_id from request RunContext."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -1079,7 +1079,7 @@ def test_loop_preserves_run_context_from_request() -> None:
             trace_id="trace-abc-123",
             span_id="span-xyz-456",
         )
-        request = MainLoopRequest(
+        request = AgentLoopRequest(
             request=_Request(message="hello"),
             run_context=input_run_ctx,
         )
@@ -1093,7 +1093,7 @@ def test_loop_preserves_run_context_from_request() -> None:
         assert result_ctx is not None
         # run_id is generated fresh per execution
         assert result_ctx.run_id != input_run_ctx.run_id
-        # request_id comes from MainLoopRequest.request_id (for correlation)
+        # request_id comes from AgentLoopRequest.request_id (for correlation)
         assert result_ctx.request_id == request.request_id
         # trace/span IDs are preserved from input run_context
         assert result_ctx.trace_id == "trace-abc-123"
@@ -1112,17 +1112,17 @@ def test_loop_run_id_matches_during_and_after_execution() -> None:
     This verifies that the run_id is generated once and preserved (via replace())
     rather than regenerated, which would break telemetry correlation.
     """
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1151,18 +1151,18 @@ def test_loop_run_id_matches_during_and_after_execution() -> None:
 
 
 def test_loop_includes_run_context_on_error() -> None:
-    """MainLoop includes RunContext in error result."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop includes RunContext in error result."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("adapter failure"))
         loop = _TestLoop(adapter=adapter, requests=requests, worker_id="worker-err")
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1184,22 +1184,22 @@ def test_loop_includes_run_context_on_error() -> None:
 
 
 def test_loop_with_debug_bundle_enabled(tmp_path: Path) -> None:
-    """MainLoop creates debug bundle when enabled in config."""
+    """AgentLoop creates debug bundle when enabled in config."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello with bundle"))
+        request = AgentLoopRequest(request=_Request(message="hello with bundle"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1228,15 +1228,15 @@ def test_loop_with_debug_bundle_enabled(tmp_path: Path) -> None:
 
 
 def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
-    """MainLoop includes filesystem snapshot in debug bundle when provided."""
+    """AgentLoop includes filesystem snapshot in debug bundle when provided."""
     from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
     from weakincentives.filesystem import Filesystem
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -1247,13 +1247,13 @@ def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
 
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(
+        config = AgentLoopConfig(
             debug_bundle=bundle_config,
             resources={Filesystem: fs},
         )
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello with fs"))
+        request = AgentLoopRequest(request=_Request(message="hello with fs"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1279,13 +1279,13 @@ def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
 
 
 def test_loop_with_debug_bundle_no_filesystem_in_resources(tmp_path: Path) -> None:
-    """MainLoop handles debug bundle when resources exist but no Filesystem."""
+    """AgentLoop handles debug bundle when resources exist but no Filesystem."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -1295,13 +1295,13 @@ def test_loop_with_debug_bundle_no_filesystem_in_resources(tmp_path: Path) -> No
 
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(
+        config = AgentLoopConfig(
             debug_bundle=bundle_config,
             resources={DummyResource: DummyResource()},  # Resources but no Filesystem
         )
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello without fs"))
+        request = AgentLoopRequest(request=_Request(message="hello without fs"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1325,20 +1325,20 @@ def test_loop_with_debug_bundle_no_filesystem_in_resources(tmp_path: Path) -> No
 
 
 def test_loop_without_debug_bundle() -> None:
-    """MainLoop works normally without debug bundle."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    """AgentLoop works normally without debug bundle."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         # No debug_bundle in config
-        config = MainLoopConfig()
+        config = AgentLoopConfig()
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello without bundle"))
+        request = AgentLoopRequest(request=_Request(message="hello without bundle"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1357,23 +1357,23 @@ def test_loop_without_debug_bundle() -> None:
 
 
 def test_loop_with_bundle_config_no_target() -> None:
-    """MainLoop falls back to unbundled when bundle target is None."""
+    """AgentLoop falls back to unbundled when bundle target is None."""
     from weakincentives.debug.bundle import BundleConfig
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         # BundleConfig with target=None
         bundle_config = BundleConfig(target=None)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello with no target"))
+        request = AgentLoopRequest(request=_Request(message="hello with no target"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1392,24 +1392,24 @@ def test_loop_with_bundle_config_no_target() -> None:
 
 
 def test_loop_with_bundle_failure_uses_handle_failure(tmp_path: Path) -> None:
-    """MainLoop uses handle_failure when bundle creation fails."""
+    """AgentLoop uses handle_failure when bundle creation fails."""
     from unittest.mock import patch
 
     from weakincentives.debug.bundle import BundleConfig
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello bundle fail"))
+        request = AgentLoopRequest(request=_Request(message="hello bundle fail"))
         requests.send(request, reply_to=results)
 
         # Make BundleWriter raise an exception on enter
@@ -1435,23 +1435,23 @@ def test_loop_with_bundle_failure_uses_handle_failure(tmp_path: Path) -> None:
 
 
 def test_loop_with_execution_failure_but_bundle_created(tmp_path: Path) -> None:
-    """MainLoop includes bundle_path in error response when execution fails."""
+    """AgentLoop includes bundle_path in error response when execution fails."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         # Adapter that raises an error during evaluate (after bundle is entered)
         adapter = _MockAdapter(error=RuntimeError("Execution failed"))
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello execution fail"))
+        request = AgentLoopRequest(request=_Request(message="hello execution fail"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1483,22 +1483,22 @@ def test_loop_with_execution_failure_but_bundle_created(tmp_path: Path) -> None:
 
 
 def test_loop_debug_bundle_calls_session_methods(tmp_path: Path) -> None:
-    """MainLoop attempts to write session snapshots to debug bundle."""
+    """AgentLoop attempts to write session snapshots to debug bundle."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello session methods"))
+        request = AgentLoopRequest(request=_Request(message="hello session methods"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1525,22 +1525,22 @@ def test_loop_debug_bundle_calls_session_methods(tmp_path: Path) -> None:
 
 
 def test_loop_debug_bundle_includes_metrics(tmp_path: Path) -> None:
-    """MainLoop writes metrics.json to debug bundle with timing and token info."""
+    """AgentLoop writes metrics.json to debug bundle with timing and token info."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello metrics"))
+        request = AgentLoopRequest(request=_Request(message="hello metrics"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1565,23 +1565,23 @@ def test_loop_debug_bundle_includes_metrics(tmp_path: Path) -> None:
 
 
 def test_loop_debug_bundle_metrics_include_budget(tmp_path: Path) -> None:
-    """MainLoop writes budget info to metrics.json when budget tracking is enabled."""
+    """AgentLoop writes budget info to metrics.json when budget tracking is enabled."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
         budget = Budget(max_total_tokens=1000)
-        config = MainLoopConfig(debug_bundle=bundle_config, budget=budget)
+        config = AgentLoopConfig(debug_bundle=bundle_config, budget=budget)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello budget metrics"))
+        request = AgentLoopRequest(request=_Request(message="hello budget metrics"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1606,22 +1606,22 @@ def test_loop_debug_bundle_metrics_include_budget(tmp_path: Path) -> None:
 
 
 def test_loop_debug_bundle_includes_prompt_info(tmp_path: Path) -> None:
-    """MainLoop writes prompt info (ns, key, adapter) to bundle manifest."""
+    """AgentLoop writes prompt info (ns, key, adapter) to bundle manifest."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello prompt info"))
+        request = AgentLoopRequest(request=_Request(message="hello prompt info"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1647,22 +1647,22 @@ def test_loop_debug_bundle_includes_prompt_info(tmp_path: Path) -> None:
 
 
 def test_loop_debug_bundle_run_context_has_session_id(tmp_path: Path) -> None:
-    """MainLoop writes run_context.json with session_id after execution."""
+    """AgentLoop writes run_context.json with session_id after execution."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello run context"))
+        request = AgentLoopRequest(request=_Request(message="hello run context"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1687,13 +1687,13 @@ def test_loop_debug_bundle_run_context_has_session_id(tmp_path: Path) -> None:
 
 
 def test_loop_debug_bundle_includes_prompt_overrides(tmp_path: Path) -> None:
-    """MainLoop writes prompt_overrides.json when visibility overrides are set."""
+    """AgentLoop writes prompt_overrides.json when visibility overrides are set."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -1703,10 +1703,10 @@ def test_loop_debug_bundle_includes_prompt_overrides(tmp_path: Path) -> None:
         ]
         adapter = _MockAdapter(visibility_requests=visibility_requests)
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello overrides"))
+        request = AgentLoopRequest(request=_Request(message="hello overrides"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1734,24 +1734,24 @@ def test_loop_debug_bundle_includes_prompt_overrides(tmp_path: Path) -> None:
 
 
 def test_loop_debug_bundle_per_request_override(tmp_path: Path) -> None:
-    """MainLoop uses per-request debug_bundle config override."""
+    """AgentLoop uses per-request debug_bundle config override."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         # No debug_bundle in config
-        config = MainLoopConfig()
+        config = AgentLoopConfig()
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         # But include debug_bundle in request
         bundle_config = BundleConfig(target=tmp_path)
-        request = MainLoopRequest(
+        request = AgentLoopRequest(
             request=_Request(message="hello request bundle"),
             debug_bundle=bundle_config,
         )
@@ -1779,13 +1779,13 @@ def test_loop_debug_bundle_per_request_override(tmp_path: Path) -> None:
 
 
 def test_loop_handles_visibility_expansion_with_bundle(tmp_path: Path) -> None:
-    """MainLoop handles visibility expansion correctly with bundling enabled."""
+    """AgentLoop handles visibility expansion correctly with bundling enabled."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
@@ -1794,10 +1794,10 @@ def test_loop_handles_visibility_expansion_with_bundle(tmp_path: Path) -> None:
         ]
         adapter = _MockAdapter(visibility_requests=visibility_requests)
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello expansion"))
+        request = AgentLoopRequest(request=_Request(message="hello expansion"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -1822,22 +1822,22 @@ def test_loop_handles_visibility_expansion_with_bundle(tmp_path: Path) -> None:
 
 
 def test_loop_with_debug_bundle_includes_environment(tmp_path: Path) -> None:
-    """MainLoop includes environment capture in debug bundle."""
+    """AgentLoop includes environment capture in debug bundle."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
 
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter()
         bundle_config = BundleConfig(target=tmp_path)
-        config = MainLoopConfig(debug_bundle=bundle_config)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
-        request = MainLoopRequest(request=_Request(message="hello environment"))
+        request = AgentLoopRequest(request=_Request(message="hello environment"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)

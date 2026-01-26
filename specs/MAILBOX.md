@@ -172,16 +172,16 @@ def tenant_resolver(tenant_id: str, client: Redis) -> CompositeResolver:
 | Resolution | Static bindings | Dynamic lookup + factory |
 | Caching | Scope-aware | Optional |
 
-## MainLoop Integration
+## AgentLoop Integration
 
-MainLoop receives requests mailbox; response routing derives from `reply_to`.
+AgentLoop receives requests mailbox; response routing derives from `reply_to`.
 
 ### Request/Response Types
 
 | Type | Fields |
 | --- | --- |
-| `MainLoopRequest[T]` | request, budget, deadline, request_id, created_at |
-| `MainLoopResult[T]` | request_id, output, error, session_id, completed_at |
+| `AgentLoopRequest[T]` | request, budget, deadline, request_id, created_at |
+| `AgentLoopResult[T]` | request_id, output, error, session_id, completed_at |
 
 ### Execution Pattern
 
@@ -257,5 +257,5 @@ Hash tags ensure co-location in Redis Cluster.
 ## Related Specifications
 
 - `specs/DLQ.md` - Dead letter queue configuration
-- `specs/MAIN_LOOP.md` - MainLoop orchestration
+- `specs/AGENT_LOOP.md` - AgentLoop orchestration
 - `specs/RESOURCE_REGISTRY.md` - DI container

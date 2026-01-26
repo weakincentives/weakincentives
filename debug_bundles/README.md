@@ -47,4 +47,4 @@ rm debug_bundles/*.jsonl debug_bundles/*.log debug_bundles/*.zip
 ## Related
 
 See `specs/DEBUG_BUNDLE.md` for the debug bundle specification used by
-`MainLoop` for programmatic bundle creation.
+`AgentLoop` for programmatic bundle creation.

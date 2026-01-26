@@ -35,7 +35,7 @@ The runtime consists of four major components:
     durable request processing with at-least-once delivery.
 
 **Lifecycle (Orchestration)**
-    MainLoop orchestration for mailbox-based agent workflows with graceful
+    AgentLoop orchestration for mailbox-based agent workflows with graceful
     shutdown coordination and watchdog monitoring.
 
 Session State Pattern
@@ -63,20 +63,20 @@ slices and mutations flow through pure reducers::
     # Dispatch events to reducers
     session.dispatch(AddStep(step="implement feature"))
 
-MainLoop Pattern
-----------------
+AgentLoop Pattern
+-----------------
 
-MainLoop provides durable request processing with message queues::
+AgentLoop provides durable request processing with message queues::
 
-    from weakincentives.runtime import MainLoop, MainLoopRequest, Session
+    from weakincentives.runtime import AgentLoop, AgentLoopRequest, Session
     from weakincentives.runtime.mailbox import InMemoryMailbox
 
-    class MyLoop(MainLoop[MyRequest, MyOutput]):
+    class MyLoop(AgentLoop[MyRequest, MyOutput]):
         def prepare(self, request: MyRequest) -> tuple[Prompt[MyOutput], Session]:
             # Build prompt and session for the request
             return prompt, Session()
 
-    requests = InMemoryMailbox[MainLoopRequest[MyRequest], MainLoopResult[MyOutput]]()
+    requests = InMemoryMailbox[AgentLoopRequest[MyRequest], AgentLoopResult[MyOutput]]()
     loop = MyLoop(adapter=adapter, requests=requests)
     loop.run(max_iterations=100)
 
@@ -125,11 +125,11 @@ Exports
     - :class:`CollectingMailbox` - Stores sent messages for inspection
     - :class:`NullMailbox` - Drops all messages silently
 
-**MainLoop:**
-    - :class:`MainLoop` - Abstract orchestrator for request processing
-    - :class:`MainLoopConfig` - Configuration for deadlines, budgets
-    - :class:`MainLoopRequest` - Wrapper for incoming requests
-    - :class:`MainLoopResult` - Response containing output and metadata
+**AgentLoop:**
+    - :class:`AgentLoop` - Abstract orchestrator for request processing
+    - :class:`AgentLoopConfig` - Configuration for deadlines, budgets
+    - :class:`AgentLoopRequest` - Wrapper for incoming requests
+    - :class:`AgentLoopResult` - Response containing output and metadata
 
 **Lifecycle:**
     - :class:`LoopGroup` - Coordinates multiple loops with shutdown
@@ -166,16 +166,22 @@ Subpackages
 from __future__ import annotations
 
 from . import (
+    agent_loop,
+    agent_loop_types,
     dlq,
     events,
     lease_extender,
     lifecycle,
     mailbox,
-    main_loop,
-    main_loop_types,
     message_handlers,
     session,
     watchdog,
+)
+from .agent_loop import (
+    AgentLoop,
+    AgentLoopConfig,
+    AgentLoopRequest,
+    AgentLoopResult,
 )
 from .dlq import (
     DeadLetter,
@@ -216,12 +222,6 @@ from .mailbox import (
     SerializationError,
 )
 from .mailbox_worker import MailboxWorker
-from .main_loop import (
-    MainLoop,
-    MainLoopConfig,
-    MainLoopRequest,
-    MainLoopResult,
-)
 from .run_context import RunContext
 from .session import (
     DEFAULT_SNAPSHOT_POLICIES,
@@ -262,6 +262,10 @@ from .watchdog import (
 
 __all__ = [
     "DEFAULT_SNAPSHOT_POLICIES",
+    "AgentLoop",
+    "AgentLoopConfig",
+    "AgentLoopRequest",
+    "AgentLoopResult",
     "CollectingMailbox",
     "CompositeSnapshot",
     "ControlDispatcher",
@@ -285,10 +289,6 @@ __all__ = [
     "MailboxError",
     "MailboxFullError",
     "MailboxWorker",
-    "MainLoop",
-    "MainLoopConfig",
-    "MainLoopRequest",
-    "MainLoopResult",
     "Message",
     "NullMailbox",
     "PendingToolExecution",
@@ -318,6 +318,8 @@ __all__ = [
     "ToolInvoked",
     "TypedReducer",
     "Watchdog",
+    "agent_loop",
+    "agent_loop_types",
     "append_all",
     "build_reducer_context",
     "configure_logging",
@@ -329,8 +331,6 @@ __all__ = [
     "lease_extender",
     "lifecycle",
     "mailbox",
-    "main_loop",
-    "main_loop_types",
     "message_handlers",
     "replace_latest",
     "replace_latest_by",

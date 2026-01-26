@@ -1,10 +1,10 @@
-# Main Loop Specification
+# Agent Loop Specification
 
 ## Purpose
 
-`MainLoop` standardizes agent workflow: receive request, build prompt, evaluate
+`AgentLoop` standardizes agent workflow: receive request, build prompt, evaluate
 within resource context, handle visibility expansion, publish result.
-Core at `src/weakincentives/runtime/main_loop.py`.
+Core at `src/weakincentives/runtime/agent_loop.py`.
 
 ## Principles
 
@@ -16,9 +16,9 @@ Core at `src/weakincentives/runtime/main_loop.py`.
 
 ## Core Components
 
-### MainLoop
+### AgentLoop
 
-At `src/weakincentives/runtime/main_loop.py`:
+At `src/weakincentives/runtime/agent_loop.py`:
 
 | Method | Description |
 | --- | --- |
@@ -28,27 +28,27 @@ At `src/weakincentives/runtime/main_loop.py`:
 
 ### Request and Result Types
 
-`MainLoopRequest[T]`: `request`, `budget`, `deadline`, `resources`, `request_id`,
+`AgentLoopRequest[T]`: `request`, `budget`, `deadline`, `resources`, `request_id`,
 `created_at`, `run_context`, `experiment`. Request-level fields override config.
 
-`MainLoopResult[T]`: `request_id`, `output`, `error`, `session_id`, `run_context`,
+`AgentLoopResult[T]`: `request_id`, `output`, `error`, `session_id`, `run_context`,
 `completed_at`. Check `success` property for outcome.
 
 ### Configuration
 
-`MainLoopConfig`: `deadline`, `budget`, `resources`, `lease_extender`.
+`AgentLoopConfig`: `deadline`, `budget`, `resources`, `lease_extender`.
 Request-level overrides config defaults. Fresh `BudgetTracker` per execution.
 
 ## Execution Flow
 
-1. Receive `MainLoopRequest` or direct `execute()` call
+1. Receive `AgentLoopRequest` or direct `execute()` call
 1. `prepare(request)` → `(Prompt, Session)`
 1. Enter `with prompt.resources:` context
 1. Evaluate with adapter
 1. On `VisibilityExpansionRequired`: apply overrides to session, retry step 4
 1. `finalize(prompt, session)`
 1. Exit context (cleanup)
-1. Return `MainLoopResult` (with `output` on success, `error` on failure)
+1. Return `AgentLoopResult` (with `output` on success, `error` on failure)
 
 ### Resource Lifecycle
 
@@ -58,7 +58,7 @@ cleaned up on context exit. Adapters access via `prompt.resources`.
 ## Implementation Pattern
 
 ```python
-class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
+class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResult]):
     def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
         prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
         session = Session()
@@ -92,18 +92,18 @@ Use `visibility=SectionVisibility.SUMMARY` on sections with `summary` text.
 | Exception | Behavior |
 | --- | --- |
 | `VisibilityExpansionRequired` | Retry with updated overrides |
-| All others | Return `MainLoopResult` with `error` set |
+| All others | Return `AgentLoopResult` with `error` set |
 
 ## Usage
 
 ### Mailbox-Driven
 
 ```python
-requests = InMemoryMailbox[MainLoopRequest[MyRequest], MainLoopResult](name="requests")
-loop = MyMainLoop(adapter=adapter, requests=requests)
+requests = InMemoryMailbox[AgentLoopRequest[MyRequest], AgentLoopResult](name="requests")
+loop = MyAgentLoop(adapter=adapter, requests=requests)
 
 # Client sends request
-requests.send(MainLoopRequest(request=MyRequest(...)), reply_to=responses)
+requests.send(AgentLoopRequest(request=MyRequest(...)), reply_to=responses)
 
 # Start processing (blocking)
 loop.run()
@@ -127,4 +127,4 @@ response, session = loop.execute(MyRequest(...))
 - `specs/DLQ.md` - Dead letter queue configuration
 - `specs/MAILBOX.md` - Mailbox protocol
 - `specs/LIFECYCLE.md` - LoopGroup coordination
-- `specs/EVALS.md` - EvalLoop wrapping MainLoop
+- `specs/EVALS.md` - EvalLoop wrapping AgentLoop

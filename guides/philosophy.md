@@ -156,7 +156,7 @@ validates that you're overriding the version you think you're overriding.
 **WINK is:**
 
 - A Python library (`weakincentives`) for building prompts-as-agents
-- A small runtime for state (`Session`) and orchestration (`MainLoop`)
+- A small runtime for state (`Session`) and orchestration (`AgentLoop`)
 - Adapters (`OpenAI`, `LiteLLM`, `Claude Agent SDK`) that execute tools and
   parse outputs consistently
 - Contributed tool suites for background agents (planning, virtual FS,

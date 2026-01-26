@@ -13,19 +13,19 @@
 """Lifecycle management for graceful shutdown of loops.
 
 This module provides primitives for coordinating graceful shutdown across
-multiple MainLoop and EvalLoop instances running in the same process.
+multiple AgentLoop and EvalLoop instances running in the same process.
 
 Example::
 
     from weakincentives.runtime import LoopGroup, ShutdownCoordinator
 
     # Run multiple loops with coordinated shutdown
-    group = LoopGroup(loops=[main_loop, eval_loop])
+    group = LoopGroup(loops=[agent_loop, eval_loop])
     group.run()  # Blocks until SIGTERM/SIGINT
 
     # With health endpoints and watchdog
     group = LoopGroup(
-        loops=[main_loop],
+        loops=[agent_loop],
         health_port=8080,
         watchdog_threshold=720.0,
     )
@@ -39,7 +39,7 @@ Example::
 Health endpoints::
 
     # Run loops with health endpoint for Kubernetes probes
-    group = LoopGroup(loops=[main_loop], health_port=8080)
+    group = LoopGroup(loops=[agent_loop], health_port=8080)
     group.run()  # GET /health/live and /health/ready available
 """
 
@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 class Runnable(Protocol):
     """Protocol for loops that support graceful shutdown.
 
-    Both MainLoop and EvalLoop implement this protocol, enabling them to be
+    Both AgentLoop and EvalLoop implement this protocol, enabling them to be
     managed by LoopGroup and ShutdownCoordinator.
     """
 
@@ -257,13 +257,13 @@ class LoopGroup:
 
     Example::
 
-        group = LoopGroup(loops=[main_loop, eval_loop])
+        group = LoopGroup(loops=[agent_loop, eval_loop])
         group.run()  # Blocks until shutdown signal or all loops exit
 
     Example with health and watchdog::
 
         group = LoopGroup(
-            loops=[main_loop],
+            loops=[agent_loop],
             health_port=8080,
             watchdog_threshold=720.0,
         )
@@ -271,13 +271,13 @@ class LoopGroup:
 
     Example with context manager::
 
-        with LoopGroup(loops=[main_loop, eval_loop]) as group:
+        with LoopGroup(loops=[agent_loop, eval_loop]) as group:
             group.run()
         # Shutdown triggered on context exit
 
     Example with health endpoint::
 
-        group = LoopGroup(loops=[main_loop], health_port=8080)
+        group = LoopGroup(loops=[agent_loop], health_port=8080)
         group.run()  # GET /health/live and /health/ready available
     """
 

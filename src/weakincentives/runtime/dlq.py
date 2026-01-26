@@ -20,8 +20,8 @@ Example::
 
     from weakincentives.runtime import DLQPolicy, DeadLetter
 
-    # Configure MainLoop with DLQ
-    main_loop = MyMainLoop(
+    # Configure AgentLoop with DLQ
+    agent_loop = MyAgentLoop(
         adapter=adapter,
         requests=requests,
         dlq=DLQPolicy(
@@ -90,7 +90,7 @@ class DeadLetter[T]:
     """Timestamp of the first delivery attempt."""
 
     request_id: UUID | None = None
-    """Request ID if the body is a MainLoopRequest or EvalRequest."""
+    """Request ID if the body is a AgentLoopRequest or EvalRequest."""
 
     reply_to: str | None = None
     """Original reply_to mailbox name, if any."""
@@ -98,7 +98,7 @@ class DeadLetter[T]:
     trace_id: str | None = None
     """Trace ID for distributed tracing correlation.
 
-    Populated from RunContext.trace_id when available (MainLoop).
+    Populated from RunContext.trace_id when available (AgentLoop).
     May be None for contexts without distributed tracing (e.g., EvalLoop).
     """
 
@@ -175,7 +175,7 @@ class DLQConsumer[T]:
     """Runnable consumer for dead letter queues.
 
     Processes dead-lettered messages with a custom handler. Designed
-    to run alongside MainLoop workers in a LoopGroup.
+    to run alongside AgentLoop workers in a LoopGroup.
 
     Example::
 
@@ -187,7 +187,7 @@ class DLQConsumer[T]:
         )
 
         group = LoopGroup(
-            loops=[main_loop, eval_loop, dlq_consumer],
+            loops=[agent_loop, eval_loop, dlq_consumer],
             health_port=8080,
         )
         group.run()

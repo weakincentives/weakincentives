@@ -13,7 +13,7 @@
 """Debugging utilities for capturing, inspecting, and reproducing execution state.
 
 This package provides tools for creating debug bundles - self-contained zip archives
-that capture everything needed to understand, reproduce, and debug a MainLoop
+that capture everything needed to understand, reproduce, and debug an AgentLoop
 execution. Debug bundles unify session state, logs, filesystem snapshots,
 configuration, metrics, and environment information into a single portable artifact.
 
@@ -22,7 +22,7 @@ Overview
 
 The debug package offers three main capabilities:
 
-1. **Bundle Creation** - Capture execution state during MainLoop runs
+1. **Bundle Creation** - Capture execution state during AgentLoop runs
 2. **Bundle Inspection** - Load and analyze existing debug bundles
 3. **Environment Capture** - Collect reproducibility information (system, Python,
    git state, packages, etc.)
@@ -35,13 +35,13 @@ Bundle Classes
 ~~~~~~~~~~~~~~
 
 ``BundleConfig``
-    Configuration for automatic bundle creation in MainLoop. Set ``target`` to
+    Configuration for automatic bundle creation in AgentLoop. Set ``target`` to
     a directory path to enable bundling. Supports limits for file sizes and
     total capture size, plus compression options.
 
 ``BundleWriter``
     Context manager for streaming bundle creation. Use this for programmatic
-    bundle creation outside of MainLoop, or when you need fine-grained control
+    bundle creation outside of AgentLoop, or when you need fine-grained control
     over what gets captured.
 
 ``DebugBundle``
@@ -102,8 +102,8 @@ A debug bundle is a zip archive with the following structure::
         README.txt              # Human-readable navigation guide
 
         request/
-            input.json          # MainLoop request
-            output.json         # MainLoop response
+            input.json          # AgentLoop request
+            output.json         # AgentLoop response
 
         session/
             before.jsonl        # Session state before execution
@@ -122,7 +122,7 @@ A debug bundle is a zip archive with the following structure::
             command.txt         # argv, working dir, entrypoint
             container.json      # Container runtime info (if applicable)
 
-        config.json             # MainLoop and adapter configuration
+        config.json             # AgentLoop and adapter configuration
         run_context.json        # Execution context (IDs, tracing)
         metrics.json            # Token usage, timing, budget state
 
@@ -136,15 +136,15 @@ A debug bundle is a zip archive with the following structure::
 Usage Examples
 --------------
 
-MainLoop Integration
-~~~~~~~~~~~~~~~~~~~~
+AgentLoop Integration
+~~~~~~~~~~~~~~~~~~~~~
 
-Enable automatic debug bundle creation for all MainLoop executions::
+Enable automatic debug bundle creation for all AgentLoop executions::
 
     from weakincentives.debug import BundleConfig
-    from weakincentives.runtime import MainLoop, MainLoopConfig
+    from weakincentives.runtime import AgentLoop, AgentLoopConfig
 
-    config = MainLoopConfig(
+    config = AgentLoopConfig(
         debug_bundle=BundleConfig(
             target="./debug_bundles/",
             max_file_size=10_000_000,   # Skip files > 10MB

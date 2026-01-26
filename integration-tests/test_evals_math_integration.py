@@ -42,8 +42,8 @@ from weakincentives.evals import (
     collect_results,
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
-from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
+from weakincentives.runtime import AgentLoop, InMemoryMailbox, Session
+from weakincentives.runtime.agent_loop import AgentLoopRequest, AgentLoopResult
 
 pytest.importorskip("claude_agent_sdk")
 
@@ -103,12 +103,12 @@ class _InstructionParams:
 
 
 # =============================================================================
-# MainLoop Implementation
+# AgentLoop Implementation
 # =============================================================================
 
 
-class MathSolverLoop(MainLoop[MathProblem, MathAnswer]):
-    """MainLoop that solves math problems using Asteval."""
+class MathSolverLoop(AgentLoop[MathProblem, MathAnswer]):
+    """AgentLoop that solves math problems using Asteval."""
 
     _session: Session
     _template: PromptTemplate[MathAnswer]
@@ -118,7 +118,7 @@ class MathSolverLoop(MainLoop[MathProblem, MathAnswer]):
         *,
         adapter: ClaudeAgentSDKAdapter[MathAnswer],
         requests: InMemoryMailbox[
-            MainLoopRequest[MathProblem], MainLoopResult[MathAnswer]
+            AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
         ],
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
@@ -312,18 +312,18 @@ def test_math_eval_single_sample(tmp_path: Path) -> None:
         InMemoryMailbox(name="eval-requests")
     )
     dummy_requests: InMemoryMailbox[
-        MainLoopRequest[MathProblem], MainLoopResult[MathAnswer]
+        AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
     ] = InMemoryMailbox(name="dummy-requests")
 
     try:
         adapter = _make_adapter(tmp_path)
-        main_loop = MathSolverLoop(
+        agent_loop = MathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,
         )
 
         eval_loop: EvalLoop[MathProblem, MathAnswer, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_math_evaluator,
             requests=requests,
         )
@@ -362,18 +362,18 @@ def test_math_eval_full_dataset(tmp_path: Path) -> None:
         InMemoryMailbox(name="eval-requests")
     )
     dummy_requests: InMemoryMailbox[
-        MainLoopRequest[MathProblem], MainLoopResult[MathAnswer]
+        AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
     ] = InMemoryMailbox(name="dummy-requests")
 
     try:
         adapter = _make_adapter(tmp_path)
-        main_loop = MathSolverLoop(
+        agent_loop = MathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,
         )
 
         eval_loop: EvalLoop[MathProblem, MathAnswer, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_math_evaluator,
             requests=requests,
         )

@@ -26,18 +26,18 @@ from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.runtime.agent_loop import (
+    AgentLoop,
+    AgentLoopConfig,
+    AgentLoopRequest,
+    AgentLoopResult,
+)
 from weakincentives.runtime.dlq import DeadLetter, DLQConsumer, DLQPolicy
 from weakincentives.runtime.mailbox import (
     FakeMailbox,
     InMemoryMailbox,
     Mailbox,
     Message,
-)
-from weakincentives.runtime.main_loop import (
-    MainLoop,
-    MainLoopConfig,
-    MainLoopRequest,
-    MainLoopResult,
 )
 from weakincentives.runtime.run_context import RunContext
 from weakincentives.runtime.session import Session
@@ -105,16 +105,16 @@ class _MockAdapter(ProviderAdapter[_Output]):
         return self._response
 
 
-class _TestLoop(MainLoop[_Request, _Output]):
-    """Test implementation of MainLoop."""
+class _TestLoop(AgentLoop[_Request, _Output]):
+    """Test implementation of AgentLoop."""
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: Mailbox[MainLoopRequest[_Request], MainLoopResult[_Output]],
-        config: MainLoopConfig | None = None,
-        dlq: DLQPolicy[MainLoopRequest[_Request], MainLoopResult[_Output]]
+        requests: Mailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]],
+        config: AgentLoopConfig | None = None,
+        dlq: DLQPolicy[AgentLoopRequest[_Request], AgentLoopResult[_Output]]
         | None = None,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests, config=config, dlq=dlq)
@@ -146,8 +146,8 @@ class _TestLoop(MainLoop[_Request, _Output]):
 
 def test_dead_letter_creation() -> None:
     """DeadLetter captures all required metadata."""
-    body = MainLoopRequest(request=_Request(message="test"))
-    dead_letter: DeadLetter[MainLoopRequest[_Request]] = DeadLetter(
+    body = AgentLoopRequest(request=_Request(message="test"))
+    dead_letter: DeadLetter[AgentLoopRequest[_Request]] = DeadLetter(
         message_id="msg-123",
         body=body,
         source_mailbox="requests",
@@ -353,23 +353,23 @@ def test_dlq_policy_exclude_takes_precedence() -> None:
 
 
 # =============================================================================
-# MainLoop DLQ Integration Tests
+# AgentLoop DLQ Integration Tests
 # =============================================================================
 
 
-def test_mainloop_error_reply_without_dlq() -> None:
-    """MainLoop sends error reply without DLQ configured (original behavior)."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+def test_agentloop_error_reply_without_dlq() -> None:
+    """AgentLoop sends error reply without DLQ configured (original behavior)."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("failure"))
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -388,15 +388,15 @@ def test_mainloop_error_reply_without_dlq() -> None:
         results.close()
 
 
-def test_mainloop_nacks_with_dlq_before_threshold() -> None:
-    """MainLoop nacks failed messages with DLQ before threshold is reached."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+def test_agentloop_nacks_with_dlq_before_threshold() -> None:
+    """AgentLoop nacks failed messages with DLQ before threshold is reached."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
+    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
         InMemoryMailbox(name="requests-dlq")
     )
     try:
@@ -404,7 +404,7 @@ def test_mainloop_nacks_with_dlq_before_threshold() -> None:
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=5)
         loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         # Run once - should nack for retry (below threshold)
@@ -424,15 +424,15 @@ def test_mainloop_nacks_with_dlq_before_threshold() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_sends_to_dlq_after_threshold() -> None:
-    """MainLoop sends to DLQ when delivery count equals threshold."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+def test_agentloop_sends_to_dlq_after_threshold() -> None:
+    """AgentLoop sends to DLQ when delivery count equals threshold."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
+    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
         InMemoryMailbox(name="requests-dlq")
     )
     try:
@@ -441,7 +441,7 @@ def test_mainloop_sends_to_dlq_after_threshold() -> None:
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
         loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         # Run once - should dead-letter immediately (delivery_count=1 >= max=1)
@@ -475,15 +475,15 @@ def test_mainloop_sends_to_dlq_after_threshold() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_immediate_dlq_for_included_error() -> None:
-    """MainLoop immediately dead-letters included error types."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+def test_agentloop_immediate_dlq_for_included_error() -> None:
+    """AgentLoop immediately dead-letters included error types."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
+    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
         InMemoryMailbox(name="requests-dlq")
     )
     try:
@@ -495,7 +495,7 @@ def test_mainloop_immediate_dlq_for_included_error() -> None:
         )
         loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         # Run once - should immediately dead-letter
@@ -515,15 +515,15 @@ def test_mainloop_immediate_dlq_for_included_error() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_never_dlq_for_excluded_error() -> None:
-    """MainLoop never dead-letters excluded error types."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+def test_agentloop_never_dlq_for_excluded_error() -> None:
+    """AgentLoop never dead-letters excluded error types."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
+    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
         InMemoryMailbox(name="requests-dlq")
     )
     try:
@@ -535,7 +535,7 @@ def test_mainloop_never_dlq_for_excluded_error() -> None:
         )
         loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         # Run many times - should never dead-letter
@@ -551,15 +551,15 @@ def test_mainloop_never_dlq_for_excluded_error() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_dlq_preserves_request_id() -> None:
-    """MainLoop DLQ preserves request ID in dead letter."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+def test_agentloop_dlq_preserves_request_id() -> None:
+    """AgentLoop DLQ preserves request ID in dead letter."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
+    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
         InMemoryMailbox(name="requests-dlq")
     )
     try:
@@ -567,7 +567,7 @@ def test_mainloop_dlq_preserves_request_id() -> None:
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
         loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -582,15 +582,15 @@ def test_mainloop_dlq_preserves_request_id() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_dlq_preserves_reply_to() -> None:
-    """MainLoop DLQ preserves reply_to mailbox name in dead letter."""
-    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+def test_agentloop_dlq_preserves_reply_to() -> None:
+    """AgentLoop DLQ preserves reply_to mailbox name in dead letter."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="my-results-queue"
     )
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
+    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
         InMemoryMailbox(name="requests-dlq")
     )
     try:
@@ -598,7 +598,7 @@ def test_mainloop_dlq_preserves_reply_to() -> None:
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
         loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -613,12 +613,12 @@ def test_mainloop_dlq_preserves_reply_to() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_dlq_without_reply_to() -> None:
-    """MainLoop DLQ handles messages without reply_to."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+def test_agentloop_dlq_without_reply_to() -> None:
+    """AgentLoop DLQ handles messages without reply_to."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
+    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
         InMemoryMailbox(name="requests-dlq")
     )
     try:
@@ -626,7 +626,7 @@ def test_mainloop_dlq_without_reply_to() -> None:
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
         loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         # Send without reply_to
         requests.send(request)
 
@@ -645,15 +645,15 @@ def test_mainloop_dlq_without_reply_to() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_dlq_handles_reply_error() -> None:
-    """MainLoop DLQ handles errors when sending reply."""
+def test_agentloop_dlq_handles_reply_error() -> None:
+    """AgentLoop DLQ handles errors when sending reply."""
     from weakincentives.runtime.mailbox import MailboxConnectionError
 
-    results: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(name="results")
-    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+    results: FakeMailbox[AgentLoopResult[_Output], None] = FakeMailbox(name="results")
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
+    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
         InMemoryMailbox(name="requests-dlq")
     )
     try:
@@ -661,7 +661,7 @@ def test_mainloop_dlq_handles_reply_error() -> None:
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
         loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
 
-        request = MainLoopRequest(request=_Request(message="hello"))
+        request = AgentLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
         # Make reply send fail

@@ -10,20 +10,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Main loop orchestration for agent workflow execution.
+"""Agent loop orchestration for agent workflow execution.
 
-MainLoop provides a mailbox-based pattern for durable request processing with
+AgentLoop provides a mailbox-based pattern for durable request processing with
 at-least-once delivery semantics. Requests are received from a mailbox queue
 and results are sent via Message.reply().
 
 Example::
 
-    class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
+    class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResult]):
         def __init__(
             self,
             *,
             adapter: ProviderAdapter[ReviewResult],
-            requests: Mailbox[MainLoopRequest[ReviewRequest], MainLoopResult[ReviewResult]],
+            requests: Mailbox[AgentLoopRequest[ReviewRequest], AgentLoopResult[ReviewResult]],
         ) -> None:
             super().__init__(adapter=adapter, requests=requests)
             self._template = PromptTemplate[ReviewResult](...)
@@ -57,11 +57,11 @@ from uuid import UUID, uuid4
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
+from .agent_loop_types import AgentLoopConfig, AgentLoopRequest, AgentLoopResult
 from .dlq import DLQPolicy
 from .logging import StructuredLogger, bind_run_context, get_logger
 from .mailbox import Mailbox, Message
 from .mailbox_worker import MailboxWorker
-from .main_loop_types import MainLoopConfig, MainLoopRequest, MainLoopResult
 from .message_handlers import handle_failure, reply_and_ack
 from .run_context import RunContext
 from .session import Session
@@ -73,20 +73,20 @@ if TYPE_CHECKING:
     from ..debug.bundle import BundleConfig, BundleWriter
     from ..experiment import Experiment
     from ..prompt import Prompt
-    from .main_loop_types import BundleContext
+    from .agent_loop_types import BundleContext
     from .session.visibility_overrides import VisibilityOverrides
 
 _logger: StructuredLogger = get_logger(
-    __name__, context={"component": "runtime.main_loop"}
+    __name__, context={"component": "runtime.agent_loop"}
 )
 
 
-class MainLoop[UserRequestT, OutputT](
-    MailboxWorker[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
+class AgentLoop[UserRequestT, OutputT](
+    MailboxWorker[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]]
 ):
     """Abstract orchestrator for mailbox-based agent workflow execution.
 
-    MainLoop processes requests from a mailbox queue and sends responses
+    AgentLoop processes requests from a mailbox queue and sends responses
     via Message.reply(). This pattern supports durable, distributed processing
     with at-least-once delivery semantics.
 
@@ -104,7 +104,7 @@ class MainLoop[UserRequestT, OutputT](
         3. Evaluate with adapter
         4. On ``VisibilityExpansionRequired``: accumulate overrides, retry step 3
         5. Call ``finalize(prompt, session)`` for post-processing
-        6. Send ``MainLoopResult`` via msg.reply()
+        6. Send ``AgentLoopResult`` via msg.reply()
         7. Acknowledge the request message
 
     Error handling:
@@ -120,25 +120,25 @@ class MainLoop[UserRequestT, OutputT](
     """
 
     _adapter: ProviderAdapter[OutputT]
-    _config: MainLoopConfig
-    _dlq: DLQPolicy[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]] | None
+    _config: AgentLoopConfig
+    _dlq: DLQPolicy[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]] | None
     _worker_id: str
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-        config: MainLoopConfig | None = None,
+        requests: Mailbox[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
+        config: AgentLoopConfig | None = None,
         worker_id: str | None = None,
-        dlq: DLQPolicy[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
+        dlq: DLQPolicy[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]]
         | None = None,
     ) -> None:
-        """Initialize the MainLoop.
+        """Initialize the AgentLoop.
 
         Args:
             adapter: Provider adapter for prompt evaluation.
-            requests: Mailbox to receive MainLoopRequest messages from.
+            requests: Mailbox to receive AgentLoopRequest messages from.
                 Response routing derives from each message's reply_to field.
             config: Optional configuration for default deadline/budget.
             worker_id: Identifier for this worker instance. If None or empty,
@@ -149,7 +149,7 @@ class MainLoop[UserRequestT, OutputT](
                 that fail repeatedly are sent to the DLQ mailbox instead of
                 retrying indefinitely.
         """
-        effective_config = config if config is not None else MainLoopConfig()
+        effective_config = config if config is not None else AgentLoopConfig()
         super().__init__(
             requests=requests,
             lease_extender_config=effective_config.lease_extender,
@@ -238,13 +238,13 @@ class MainLoop[UserRequestT, OutputT](
             heartbeat: Optional heartbeat for lease extension. If provided, this
                 heartbeat is used for adapter evaluation instead of the loop's
                 internal heartbeat. Use this when EvalLoop needs to extend its
-                own message lease based on MainLoop work.
+                own message lease based on AgentLoop work.
             experiment: Optional experiment for A/B testing. Passed to prepare().
 
         Returns:
             Tuple of (PromptResponse, Session) from the evaluation.
         """
-        request_event = MainLoopRequest(
+        request_event = AgentLoopRequest(
             request=request,
             budget=budget,
             deadline=deadline,
@@ -300,7 +300,7 @@ class MainLoop[UserRequestT, OutputT](
             print(f"Bundle at: {ctx.bundle_path}")
         """
         from ..debug.bundle import BundleWriter
-        from .main_loop_types import BundleContext
+        from .agent_loop_types import BundleContext
 
         bundle_target.mkdir(parents=True, exist_ok=True)
         started_at = datetime.now(UTC)
@@ -309,7 +309,7 @@ class MainLoop[UserRequestT, OutputT](
         with BundleWriter(bundle_target, bundle_id=uuid4(), trigger="direct") as writer:
             # Write request input
             writer.write_request_input(
-                MainLoopRequest(
+                AgentLoopRequest(
                     request=request,
                     budget=budget,
                     deadline=deadline,
@@ -439,12 +439,12 @@ class MainLoop[UserRequestT, OutputT](
 
     def _execute(
         self,
-        request_event: MainLoopRequest[UserRequestT],
+        request_event: AgentLoopRequest[UserRequestT],
         *,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
     ) -> tuple[PromptResponse[OutputT], Session, Prompt[OutputT]]:
-        """Execute the main loop for a request event.
+        """Execute the agent loop for a request event.
 
         Handles core execution logic including visibility expansion retries.
 
@@ -545,7 +545,7 @@ class MainLoop[UserRequestT, OutputT](
 
     def _build_run_context(
         self,
-        request_event: MainLoopRequest[UserRequestT],
+        request_event: AgentLoopRequest[UserRequestT],
         delivery_count: int,
         session_id: UUID | None = None,
     ) -> RunContext:
@@ -554,7 +554,7 @@ class MainLoop[UserRequestT, OutputT](
         The run_id is always fresh for each execution attempt.
 
         Request ID always comes from request_event.request_id to ensure
-        correlation with MainLoopResult.request_id. The run_context parameter
+        correlation with AgentLoopResult.request_id. The run_context parameter
         is only used for distributed trace context (trace_id, span_id).
 
         Args:
@@ -583,7 +583,7 @@ class MainLoop[UserRequestT, OutputT](
 
     @override
     def _process_message(
-        self, msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
+        self, msg: Message[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]]
     ) -> None:
         """Process a single message from the requests mailbox.
 
@@ -602,7 +602,7 @@ class MainLoop[UserRequestT, OutputT](
         log = bind_run_context(_logger, run_context)
         log.debug(
             "Processing request from mailbox.",
-            event="main_loop.message_received",
+            event="agent_loop.message_received",
             context={
                 "message_id": msg.id,
                 "delivery_count": msg.delivery_count,
@@ -626,8 +626,8 @@ class MainLoop[UserRequestT, OutputT](
 
     def _handle_message_with_bundle(
         self,
-        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-        request_event: MainLoopRequest[UserRequestT],
+        msg: Message[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
+        request_event: AgentLoopRequest[UserRequestT],
         run_context: RunContext,
         log: StructuredLogger,
         bundle_config: BundleConfig,
@@ -702,7 +702,7 @@ class MainLoop[UserRequestT, OutputT](
             # Bundle path is set after context manager exits (in __exit__ -> _finalize)
             bundle_path = writer.path
 
-            result = MainLoopResult[OutputT](
+            result = AgentLoopResult[OutputT](
                 request_id=request_event.request_id,
                 output=response.output,
                 session_id=session.session_id,
@@ -719,14 +719,14 @@ class MainLoop[UserRequestT, OutputT](
                 # Bundle was created successfully, error was during execution
                 log.info(
                     "Execution failed but debug bundle was created",
-                    event="main_loop.execution_failed_with_bundle",
+                    event="agent_loop.execution_failed_with_bundle",
                     context={"error": str(exc), "bundle_path": str(bundle_path)},
                 )
             else:
                 # True bundle creation failure
                 log.warning(
                     "Debug bundle creation failed, falling back to unbundled execution",
-                    event="main_loop.bundle_failed",
+                    event="agent_loop.bundle_failed",
                     context={"error": str(exc)},
                 )
 
@@ -736,14 +736,14 @@ class MainLoop[UserRequestT, OutputT](
                 run_context=run_context,
                 dlq=self._dlq,
                 requests_mailbox=self._requests,
-                result_class=MainLoopResult,
+                result_class=AgentLoopResult,
                 bundle_path=bundle_path,
             )
 
     def _execute_with_bundled_settings(
         self,
         *,
-        request_event: MainLoopRequest[UserRequestT],
+        request_event: AgentLoopRequest[UserRequestT],
         prompt: Prompt[OutputT],
         session: Session,
         run_context: RunContext,
@@ -901,8 +901,8 @@ class MainLoop[UserRequestT, OutputT](
 
     def _handle_message_without_bundle(
         self,
-        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-        request_event: MainLoopRequest[UserRequestT],
+        msg: Message[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
+        request_event: AgentLoopRequest[UserRequestT],
         run_context: RunContext,
     ) -> None:
         """Process message without debug bundling."""
@@ -912,7 +912,7 @@ class MainLoop[UserRequestT, OutputT](
             # Add session_id while preserving the same run_id
             run_context = replace(run_context, session_id=session.session_id)
 
-            result = MainLoopResult[OutputT](
+            result = AgentLoopResult[OutputT](
                 request_id=request_event.request_id,
                 output=response.output,
                 session_id=session.session_id,
@@ -926,7 +926,7 @@ class MainLoop[UserRequestT, OutputT](
                 run_context=run_context,
                 dlq=self._dlq,
                 requests_mailbox=self._requests,
-                result_class=MainLoopResult,
+                result_class=AgentLoopResult,
             )
             return
 
@@ -934,8 +934,8 @@ class MainLoop[UserRequestT, OutputT](
 
     def _reply_and_ack(
         self,
-        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-        result: MainLoopResult[OutputT],
+        msg: Message[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
+        result: AgentLoopResult[OutputT],
     ) -> None:
         """Reply with result and acknowledge message.
 
@@ -947,8 +947,8 @@ class MainLoop[UserRequestT, OutputT](
 
 
 __all__ = [
-    "MainLoop",
-    "MainLoopConfig",
-    "MainLoopRequest",
-    "MainLoopResult",
+    "AgentLoop",
+    "AgentLoopConfig",
+    "AgentLoopRequest",
+    "AgentLoopResult",
 ]

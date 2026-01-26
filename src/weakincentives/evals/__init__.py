@@ -13,7 +13,7 @@
 """Evaluation framework for WINK agents.
 
 This module provides a complete evaluation framework for testing and measuring
-agent performance. Built on top of MainLoop, it adds datasets, scoring, and
+agent performance. Built on top of AgentLoop, it adds datasets, scoring, and
 aggregated reporting while leveraging the existing mailbox infrastructure for
 distributed evaluation.
 
@@ -24,7 +24,7 @@ The evaluation framework follows a message-driven architecture:
 
 1. **Samples** are loaded into a **Dataset** from JSONL files
 2. Samples are wrapped in **EvalRequest** messages and sent to a mailbox
-3. **EvalLoop** receives requests, executes through MainLoop, and scores outputs
+3. **EvalLoop** receives requests, executes through AgentLoop, and scores outputs
 4. Results are aggregated into an **EvalReport** with computed metrics
 
 This design enables both local testing and distributed evaluation across
@@ -184,7 +184,7 @@ EvalLoop orchestrates evaluation using mailbox-driven messaging:
 
 EvalLoop : class
     Mailbox-driven evaluation loop. Receives EvalRequest messages,
-    executes through MainLoop, scores with the evaluator, and sends
+    executes through AgentLoop, scores with the evaluator, and sends
     EvalResult via reply. Designed for distributed deployments.
 
     Supports both standard and session-aware evaluators. The session
@@ -254,7 +254,7 @@ Basic evaluation with exact matching::
 
     # Create evaluation loop
     eval_loop = EvalLoop(
-        loop=main_loop,
+        loop=agent_loop,
         evaluator=exact_match,
         requests=requests_mailbox,
     )

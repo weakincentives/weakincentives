@@ -46,9 +46,9 @@ from weakincentives.prompt.overrides import (
     descriptor_for_prompt,
 )
 from weakincentives.runtime import (
+    AgentLoopRequest,
+    AgentLoopResult,
     InMemoryMailbox,
-    MainLoopRequest,
-    MainLoopResult,
 )
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
 from weakincentives.runtime.session import Session
@@ -262,11 +262,11 @@ def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
     """Auto-optimization runs when first request is processed (if enabled)."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
+    responses: InMemoryMailbox[AgentLoopResult[ReviewResponse], None] = InMemoryMailbox(
         name="responses"
     )
     requests: InMemoryMailbox[
-        MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+        AgentLoopRequest[ReviewTurnParams], AgentLoopResult[ReviewResponse]
     ] = InMemoryMailbox(name="requests")
     try:
         loop = CodeReviewLoop(
@@ -279,7 +279,7 @@ def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
         assert loop.override_tag == "latest"
 
         # Send request via mailbox with reply_to
-        request_event = MainLoopRequest(
+        request_event = AgentLoopRequest(
             request=ReviewTurnParams(request="test request")
         )
         requests.send(request_event, reply_to=responses)
@@ -300,16 +300,16 @@ def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
 
 
 def test_deadline_passed_per_request(tmp_path: Path) -> None:
-    """Each request gets a deadline from MainLoopRequest."""
+    """Each request gets a deadline from AgentLoopRequest."""
     from datetime import timedelta
 
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
-    responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
+    responses: InMemoryMailbox[AgentLoopResult[ReviewResponse], None] = InMemoryMailbox(
         name="responses"
     )
     requests: InMemoryMailbox[
-        MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+        AgentLoopRequest[ReviewTurnParams], AgentLoopResult[ReviewResponse]
     ] = InMemoryMailbox(name="requests")
     try:
         loop = CodeReviewLoop(
@@ -325,7 +325,7 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
         second_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=10))
 
         requests.send(
-            MainLoopRequest(
+            AgentLoopRequest(
                 request=ReviewTurnParams(request="first"),
                 deadline=first_deadline,
             ),
@@ -334,7 +334,7 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
         loop.run(max_iterations=1, wait_time_seconds=0)
 
         requests.send(
-            MainLoopRequest(
+            AgentLoopRequest(
                 request=ReviewTurnParams(request="second"),
                 deadline=second_deadline,
             ),

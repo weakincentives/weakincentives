@@ -209,9 +209,9 @@ from weakincentives.prompt import (
 from weakincentives.runtime import (
     Session,
     InProcessDispatcher,
-    MainLoop,
-    MainLoopConfig,
-    MainLoopRequest,
+    AgentLoop,
+    AgentLoopConfig,
+    AgentLoopRequest,
     PromptExecuted,
     ToolInvoked,
     Snapshot,
@@ -1033,7 +1033,7 @@ Read before modifying related code:
 | `specs/WORKSPACE.md` | VFS, Podman, asteval |
 | `specs/DBC.md` | Design-by-contract patterns |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection |
-| `specs/MAIN_LOOP.md` | MainLoop orchestration |
+| `specs/AGENT_LOOP.md` | AgentLoop orchestration |
 | `specs/MAILBOX.md` | Message queue abstraction |
 
 ______________________________________________________________________
@@ -1135,7 +1135,7 @@ See `code_reviewer_example.py` for production patterns:
 
 - Structured output types
 - VFS/Planning tool sections
-- MainLoop implementation
+- AgentLoop implementation
 - Event subscription
 - Prompt overrides
 - Claude Agent SDK mode

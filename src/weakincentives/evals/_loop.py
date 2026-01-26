@@ -13,7 +13,7 @@
 """Mailbox-driven evaluation loop.
 
 EvalLoop orchestrates evaluation: for each sample, it executes through the
-provided MainLoop, scores the output, and aggregates results into a report.
+provided AgentLoop, scores the output, and aggregates results into a report.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from ._evaluators import is_session_aware
 from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
 
 if TYPE_CHECKING:
-    from ..runtime import MainLoop
+    from ..runtime import AgentLoop
 
 _logger = logging.getLogger(__name__)
 
@@ -51,13 +51,13 @@ class EvalLoopConfig:
     The ``lease_extender`` field controls automatic message visibility extension
     during evaluation processing. When enabled, heartbeats from tool execution
     and after each sample extend the message lease, preventing timeout during
-    long evaluation runs. EvalLoop's heartbeat is passed to MainLoop.execute()
+    long evaluation runs. EvalLoop's heartbeat is passed to AgentLoop.execute()
     so that all tool/adapter beats extend the evaluation message's lease.
 
     The ``debug_bundle_dir`` field enables debug bundle creation for each
     evaluation sample. When set, EvalLoop creates a bundle capturing:
     - Request input (sample and experiment)
-    - Response output from MainLoop
+    - Response output from AgentLoop
     - Session state after execution
     - Application logs during execution
     - Evaluation metadata (score, experiment, latency)
@@ -75,9 +75,9 @@ class EvalLoop[InputT, OutputT, ExpectedT](
 ):
     """Mailbox-driven evaluation loop.
 
-    Receives EvalRequest messages, executes through MainLoop, scores
+    Receives EvalRequest messages, executes through AgentLoop, scores
     with evaluator, and sends EvalResult via Message.reply(). Designed
-    to run alongside MainLoop workers in distributed deployments.
+    to run alongside AgentLoop workers in distributed deployments.
 
     Supports both standard and session-aware evaluators. Session-aware
     evaluators receive a SessionViewProtocol for behavioral assertions.
@@ -94,14 +94,14 @@ class EvalLoop[InputT, OutputT, ExpectedT](
 
     Example:
         >>> eval_loop = EvalLoop(
-        ...     loop=main_loop,
+        ...     loop=agent_loop,
         ...     evaluator=exact_match,
         ...     requests=requests_mailbox,
         ... )
         >>> eval_loop.run(max_iterations=1)
     """
 
-    _loop: MainLoop[InputT, OutputT]
+    _loop: AgentLoop[InputT, OutputT]
     _evaluator: Evaluator | SessionEvaluator
     _config: EvalLoopConfig
     _dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None
@@ -109,7 +109,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
     def __init__(
         self,
         *,
-        loop: MainLoop[InputT, OutputT],
+        loop: AgentLoop[InputT, OutputT],
         evaluator: Evaluator | SessionEvaluator,
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
         config: EvalLoopConfig | None = None,
@@ -118,7 +118,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         """Initialize the EvalLoop.
 
         Args:
-            loop: MainLoop instance for executing samples.
+            loop: AgentLoop instance for executing samples.
             evaluator: Scoring function. Can be either:
                 - Standard: (output, expected) -> Score
                 - Session-aware: (output, expected, session) -> Score
@@ -188,16 +188,16 @@ class EvalLoop[InputT, OutputT, ExpectedT](
     def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
         """Execute and score a single sample under an experiment.
 
-        Passes EvalLoop's heartbeat to MainLoop.execute() so that tool execution
+        Passes EvalLoop's heartbeat to AgentLoop.execute() so that tool execution
         beats extend the evaluation message's lease. Also beats after sample
         execution completes to prove progress between samples.
 
-        The experiment from the request is passed to MainLoop.execute() for
+        The experiment from the request is passed to AgentLoop.execute() for
         prompt override resolution and feature flag checking.
 
         When debug_bundle_dir is configured, creates a debug bundle capturing:
         - Request input (sample and experiment)
-        - Response output from MainLoop
+        - Response output from AgentLoop
         - Session state after execution
         - Application logs during execution
         - Evaluation metadata (score, experiment, latency)
@@ -215,7 +215,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         experiment = request.experiment
         start = time.monotonic()
 
-        # Pass our heartbeat and experiment to MainLoop
+        # Pass our heartbeat and experiment to AgentLoop
         response, session = self._loop.execute(
             sample.input,
             heartbeat=self._heartbeat,
@@ -230,9 +230,9 @@ class EvalLoop[InputT, OutputT, ExpectedT](
             return EvalResult(
                 sample_id=sample.id,
                 experiment_name=experiment.name,
-                score=Score(value=0.0, passed=False, reason="No output from MainLoop"),
+                score=Score(value=0.0, passed=False, reason="No output from AgentLoop"),
                 latency_ms=latency_ms,
-                error="No output from MainLoop",
+                error="No output from AgentLoop",
             )
 
         # Invoke evaluator with session if session-aware
@@ -254,7 +254,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
     ) -> EvalResult:
         """Execute and score a sample with debug bundling enabled.
 
-        Uses MainLoop.execute_with_bundle() to reuse the standard bundle
+        Uses AgentLoop.execute_with_bundle() to reuse the standard bundle
         creation logic, then adds eval-specific metadata before finalization.
 
         Exception handling is narrowed to avoid re-executing samples:
@@ -358,8 +358,8 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         """
         if output is None:
             return (
-                Score(value=0.0, passed=False, reason="No output from MainLoop"),
-                "No output from MainLoop",
+                Score(value=0.0, passed=False, reason="No output from AgentLoop"),
+                "No output from AgentLoop",
             )
 
         if is_session_aware(self._evaluator):

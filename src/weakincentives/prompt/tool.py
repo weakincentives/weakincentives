@@ -114,7 +114,7 @@ class ToolContext:
         context.budget_tracker
         context.resources.get(BudgetTracker)
 
-    When running within a MainLoop or EvalLoop with lease extension enabled,
+    When running within an AgentLoop or EvalLoop with lease extension enabled,
     tool handlers can call ``context.beat()`` to record a heartbeat during
     long-running operations. This helps extend the message visibility
     timeout and proves that processing is making progress.

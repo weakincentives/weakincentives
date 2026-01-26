@@ -3,18 +3,18 @@
 *Canonical spec: [specs/EVALS.md](../specs/EVALS.md)*
 
 Evaluation is built on the same composition pattern as everything else in WINK:
-**EvalLoop wraps MainLoop**. Rather than a separate evaluation framework, evals
-are just another way to drive your existing MainLoop with datasets and scoring.
+**EvalLoop wraps AgentLoop**. Rather than a separate evaluation framework, evals
+are just another way to drive your existing AgentLoop with datasets and scoring.
 
 This means a worker in production can run both your regular agent logic
-(`MainLoop`) and your evaluation suite (`EvalLoop`) side by side—same prompt
+(`AgentLoop`) and your evaluation suite (`EvalLoop`) side by side—same prompt
 templates, same tools, same adapters. Canary deployments become natural.
 
 ## The Composition Philosophy
 
 ```
 ┌─────────────┐     ┌──────────┐     ┌───────────┐     ┌────────────┐
-│   Dataset   │────▶│ EvalLoop │────▶│ MainLoop  │────▶│  Adapter   │
+│   Dataset   │────▶│ EvalLoop │────▶│ AgentLoop │────▶│  Adapter   │
 │  (samples)  │     │.execute()│     │ .execute()│     │            │
 └─────────────┘     └────┬─────┘     └───────────┘     └────────────┘
                          │
@@ -26,7 +26,7 @@ templates, same tools, same adapters. Canary deployments become natural.
 ```
 
 `EvalLoop` orchestrates evaluation: for each sample, it executes through the
-provided `MainLoop`, scores the output with an evaluator function, and
+provided `AgentLoop`, scores the output with an evaluator function, and
 aggregates results into a report.
 
 ## Core Types
@@ -149,7 +149,7 @@ evaluator = all_of(
 
 ## Running Evaluations
 
-**EvalLoop wraps your MainLoop:**
+**EvalLoop wraps your AgentLoop:**
 
 ```python nocheck
 from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, exact_match
@@ -158,9 +158,9 @@ from weakincentives.runtime import InMemoryMailbox
 # Create mailbox for evaluation requests
 eval_requests = InMemoryMailbox(name="eval-requests")
 
-# Create EvalLoop wrapping your MainLoop
+# Create EvalLoop wrapping your AgentLoop
 eval_loop = EvalLoop(
-    loop=main_loop,
+    loop=agent_loop,
     evaluator=exact_match,
     requests=eval_requests,
 )
@@ -194,7 +194,7 @@ for eval_result in report.results:
 
 ## Production Deployment Pattern
 
-Run both `MainLoop` and `EvalLoop` workers from the same process. This ensures
+Run both `AgentLoop` and `EvalLoop` workers from the same process. This ensures
 your evaluation suite runs against the exact same configuration as your
 production agent:
 
@@ -205,12 +205,12 @@ from threading import Thread
 def run_production():
     while True:
         for msg in prod_requests.receive():
-            response, _session = main_loop.execute(msg.body)
+            response, _session = agent_loop.execute(msg.body)
             prod_results.send(response)
             msg.acknowledge()
 
-# Eval worker (wraps the same MainLoop)
-eval_loop = EvalLoop(loop=main_loop, evaluator=exact_match, requests=eval_requests)
+# Eval worker (wraps the same AgentLoop)
+eval_loop = EvalLoop(loop=agent_loop, evaluator=exact_match, requests=eval_requests)
 
 # Run both in parallel
 Thread(target=run_production, daemon=True).start()
@@ -230,7 +230,7 @@ from weakincentives.evals import EvalLoop, EvalLoopConfig
 from pathlib import Path
 
 eval_loop = EvalLoop(
-    loop=main_loop,
+    loop=agent_loop,
     evaluator=exact_match,
     requests=eval_requests,
     config=EvalLoopConfig(
@@ -244,7 +244,7 @@ Each evaluation sample produces a bundle containing:
 - Session state before and after execution
 - Log records during evaluation
 - Request input (sample and experiment)
-- Response output from MainLoop
+- Response output from AgentLoop
 - Evaluation metadata (`eval.json`): score, experiment name, latency
 
 **Accessing bundle paths:**
@@ -291,6 +291,6 @@ worker processed each sample.
 
 ## Next Steps
 
-- [Lifecycle](lifecycle.md): Run MainLoop and EvalLoop together with LoopGroup
+- [Lifecycle](lifecycle.md): Run AgentLoop and EvalLoop together with LoopGroup
 - [Debugging](debugging.md): Inspect failed evaluations
 - [Testing](testing.md): Write unit tests for evaluators

@@ -1,15 +1,15 @@
-# Orchestration with MainLoop
+# Orchestration with AgentLoop
 
-*Canonical spec: [specs/MAIN_LOOP.md](../specs/MAIN_LOOP.md)*
+*Canonical spec: [specs/AGENT_LOOP.md](../specs/AGENT_LOOP.md)*
 
-`MainLoop` exists for one reason:
+`AgentLoop` exists for one reason:
 
 > Make progressive disclosure and budgets/deadlines easy to handle correctly.
 
-You could write the loop yourself. MainLoop just does it in a tested, consistent
+You could write the loop yourself. AgentLoop just does it in a tested, consistent
 way.
 
-## The Minimal MainLoop
+## The Minimal AgentLoop
 
 You implement a single method:
 
@@ -18,27 +18,27 @@ You implement a single method:
 Then call `loop.execute(request)`.
 
 ```python nocheck
-from weakincentives.runtime import MainLoop, MainLoopConfig, Session
+from weakincentives.runtime import AgentLoop, AgentLoopConfig, Session
 from weakincentives.prompt import Prompt
 
-class MyLoop(MainLoop[RequestType, OutputType]):
+class MyLoop(AgentLoop[RequestType, OutputType]):
     def prepare(self, request: RequestType) -> tuple[Prompt[OutputType], Session]:
         prompt = Prompt(self._template).bind(request)
         session = Session(tags={"loop": "my-loop"})
         return prompt, session
 ```
 
-`MainLoop` handles `VisibilityExpansionRequired` automatically. When the model
-calls `open_sections`, MainLoop applies the visibility overrides and re-evaluates
+`AgentLoop` handles `VisibilityExpansionRequired` automatically. When the model
+calls `open_sections`, AgentLoop applies the visibility overrides and re-evaluates
 the prompt. You don't have to handle this yourself.
 
-## Configuring MainLoop with Resources
+## Configuring AgentLoop with Resources
 
-You can inject custom resources at the loop level via `MainLoopConfig`:
+You can inject custom resources at the loop level via `AgentLoopConfig`:
 
 ```python nocheck
 from weakincentives.resources import Binding, ResourceRegistry
-from weakincentives.runtime import MainLoopConfig
+from weakincentives.runtime import AgentLoopConfig
 
 # Simple case: pre-constructed instances
 resources = ResourceRegistry.of(Binding.instance(HTTPClient, http_client))
@@ -49,7 +49,7 @@ resources = ResourceRegistry.of(
     Binding(HTTPClient, lambda r: HTTPClient()),
 )
 
-config = MainLoopConfig(resources=resources)
+config = AgentLoopConfig(resources=resources)
 loop = MyLoop(adapter=adapter, dispatcher=dispatcher, config=config)
 response, session = loop.execute(request)
 ```
@@ -78,13 +78,13 @@ response, session = loop.execute(request, deadline=deadline, budget=budget)
 Deadlines prevent runaway agents. Budgets prevent runaway costs. Both are
 enforced at the adapter level, so they work consistently across providers.
 
-## What MainLoop Does For You
+## What AgentLoop Does For You
 
 1. **Prepares the prompt**: Calls your `prepare()` method to get a bound prompt
    and session.
 
 1. **Handles progressive disclosure**: When the model calls `open_sections`,
-   MainLoop catches `VisibilityExpansionRequired`, applies visibility overrides
+   AgentLoop catches `VisibilityExpansionRequired`, applies visibility overrides
    to the session, and retries the evaluation.
 
 1. **Enforces deadlines**: Passes the deadline to the adapter, which will abort
@@ -98,23 +98,23 @@ enforced at the adapter level, so they work consistently across providers.
 1. **Returns results**: Returns the `PromptResponse` and the session for
    inspection.
 
-## When to Use MainLoop
+## When to Use AgentLoop
 
-Use `MainLoop` when:
+Use `AgentLoop` when:
 
 - You're building a request-response agent
 - You want progressive disclosure to "just work"
 - You need deadline and budget enforcement
 - You want consistent resource handling
 
-You might skip `MainLoop` when:
+You might skip `AgentLoop` when:
 
 - You're doing simple one-off evaluations during development
-- You need custom retry logic that doesn't fit MainLoop's pattern
+- You need custom retry logic that doesn't fit AgentLoop's pattern
 - You're building something that doesn't fit the request-response model
 
 ## Next Steps
 
-- [Evaluation](evaluation.md): Use EvalLoop to test your MainLoop
+- [Evaluation](evaluation.md): Use EvalLoop to test your AgentLoop
 - [Lifecycle](lifecycle.md): Run multiple loops with LoopGroup
 - [Progressive Disclosure](progressive-disclosure.md): Understand visibility

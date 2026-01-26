@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Serialization/deserialization tests for EvalLoop and MainLoop types."""
+"""Serialization/deserialization tests for EvalLoop and AgentLoop types."""
 
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 from weakincentives.evals._types import EvalRequest, EvalResult, Sample, Score
 from weakincentives.experiment import Experiment
-from weakincentives.runtime.main_loop_types import (
-    MainLoopConfig,
-    MainLoopRequest,
-    MainLoopResult,
+from weakincentives.runtime.agent_loop_types import (
+    AgentLoopConfig,
+    AgentLoopRequest,
+    AgentLoopResult,
 )
 from weakincentives.runtime.run_context import RunContext
 from weakincentives.serde import clone, dump, parse
@@ -60,7 +60,7 @@ class AnswerExpected:
 
 @dataclass(slots=True, frozen=True)
 class TaskRequest:
-    """User request for MainLoop."""
+    """User request for AgentLoop."""
 
     task: str
     priority: int = 1
@@ -68,7 +68,7 @@ class TaskRequest:
 
 @dataclass(slots=True, frozen=True)
 class TaskOutput:
-    """Output from MainLoop processing."""
+    """Output from AgentLoop processing."""
 
     result: str
     success: bool = True
@@ -502,19 +502,19 @@ class TestBudgetSerde:
 
 
 # =============================================================================
-# MainLoopConfig Tests
+# AgentLoopConfig Tests
 # =============================================================================
 
 
-class TestMainLoopConfigSerde:
-    """Tests for MainLoopConfig serialization/deserialization."""
+class TestAgentLoopConfigSerde:
+    """Tests for AgentLoopConfig serialization/deserialization."""
 
-    def test_main_loop_config_minimal(self) -> None:
-        """MainLoopConfig with defaults."""
-        config = MainLoopConfig()
+    def test_agent_loop_config_minimal(self) -> None:
+        """AgentLoopConfig with defaults."""
+        config = AgentLoopConfig()
 
         data = dump(config)
-        restored = parse(MainLoopConfig, data)
+        restored = parse(AgentLoopConfig, data)
 
         assert restored.deadline is None
         assert restored.budget is None
@@ -522,39 +522,39 @@ class TestMainLoopConfigSerde:
         assert restored.lease_extender is None
         assert restored.debug_bundle is None
 
-    def test_main_loop_config_with_budget(self) -> None:
-        """MainLoopConfig with budget."""
+    def test_agent_loop_config_with_budget(self) -> None:
+        """AgentLoopConfig with budget."""
         budget = Budget(max_total_tokens=5000)
-        config = MainLoopConfig(budget=budget)
+        config = AgentLoopConfig(budget=budget)
 
         data = dump(config)
-        restored = parse(MainLoopConfig, data)
+        restored = parse(AgentLoopConfig, data)
 
         assert restored.budget is not None
         assert restored.budget.max_total_tokens == 5000
 
 
 # =============================================================================
-# MainLoopRequest Tests
+# AgentLoopRequest Tests
 # =============================================================================
 
 
-class TestMainLoopRequestSerde:
-    """Tests for MainLoopRequest serialization/deserialization."""
+class TestAgentLoopRequestSerde:
+    """Tests for AgentLoopRequest serialization/deserialization."""
 
-    def test_main_loop_request_with_string_type(self) -> None:
-        """MainLoopRequest with primitive string type."""
+    def test_agent_loop_request_with_string_type(self) -> None:
+        """AgentLoopRequest with primitive string type."""
         request_id = UUID("12345678-1234-5678-1234-567812345678")
         created_at = datetime(2024, 6, 15, 14, 0, 0, tzinfo=UTC)
 
-        request: MainLoopRequest[str] = MainLoopRequest(
+        request: AgentLoopRequest[str] = AgentLoopRequest(
             request="Process this text",
             request_id=request_id,
             created_at=created_at,
         )
 
         data = dump(request)
-        restored = parse(MainLoopRequest[str], data)
+        restored = parse(AgentLoopRequest[str], data)
 
         assert restored.request == "Process this text"
         assert restored.request_id == request_id
@@ -563,13 +563,13 @@ class TestMainLoopRequestSerde:
         assert restored.deadline is None
         assert restored.experiment is None
 
-    def test_main_loop_request_dump_structure(self) -> None:
-        """MainLoopRequest dump produces correct structure."""
+    def test_agent_loop_request_dump_structure(self) -> None:
+        """AgentLoopRequest dump produces correct structure."""
         task = TaskRequest(task="Generate report", priority=2)
         experiment = Experiment(name="fast-mode", flags={"cache": True})
         budget = Budget(max_total_tokens=10000)
 
-        request: MainLoopRequest[TaskRequest] = MainLoopRequest(
+        request: AgentLoopRequest[TaskRequest] = AgentLoopRequest(
             request=task,
             budget=budget,
             experiment=experiment,
@@ -583,20 +583,20 @@ class TestMainLoopRequestSerde:
         assert data["experiment"]["flags"] == {"cache": True}
         assert data["budget"]["max_total_tokens"] == 10000
 
-    def test_main_loop_request_with_dataclass_type(self) -> None:
-        """MainLoopRequest with nested dataclass type."""
+    def test_agent_loop_request_with_dataclass_type(self) -> None:
+        """AgentLoopRequest with nested dataclass type."""
         task = TaskRequest(task="Generate report", priority=2)
         experiment = Experiment(name="fast-mode", flags={"cache": True})
         budget = Budget(max_total_tokens=10000)
 
-        request: MainLoopRequest[TaskRequest] = MainLoopRequest(
+        request: AgentLoopRequest[TaskRequest] = AgentLoopRequest(
             request=task,
             budget=budget,
             experiment=experiment,
         )
 
         data = dump(request)
-        restored = parse(MainLoopRequest[TaskRequest], data)
+        restored = parse(AgentLoopRequest[TaskRequest], data)
 
         assert isinstance(restored.request, TaskRequest)
         assert restored.request.task == "Generate report"
@@ -607,24 +607,24 @@ class TestMainLoopRequestSerde:
         assert restored.experiment.name == "fast-mode"
         assert restored.experiment.flags == {"cache": True}
 
-    def test_main_loop_request_with_run_context(self) -> None:
-        """MainLoopRequest with run context."""
+    def test_agent_loop_request_with_run_context(self) -> None:
+        """AgentLoopRequest with run context."""
         run_ctx = RunContext(worker_id="worker-5", attempt=1)
 
-        request: MainLoopRequest[str] = MainLoopRequest(
+        request: AgentLoopRequest[str] = AgentLoopRequest(
             request="test",
             run_context=run_ctx,
         )
 
         data = dump(request)
-        restored = parse(MainLoopRequest[str], data)
+        restored = parse(AgentLoopRequest[str], data)
 
         assert restored.run_context is not None
         assert restored.run_context.worker_id == "worker-5"
         assert restored.run_context.attempt == 1
 
-    def test_main_loop_request_parse_from_json(self) -> None:
-        """MainLoopRequest parses from JSON with nested types."""
+    def test_agent_loop_request_parse_from_json(self) -> None:
+        """AgentLoopRequest parses from JSON with nested types."""
         data = {
             "request": {"task": "Analyze data", "priority": "3"},
             "request_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -633,7 +633,7 @@ class TestMainLoopRequestSerde:
             "budget": {"max_total_tokens": "8000"},
         }
 
-        restored = parse(MainLoopRequest[TaskRequest], data)
+        restored = parse(AgentLoopRequest[TaskRequest], data)
 
         assert restored.request.task == "Analyze data"
         assert restored.request.priority == 3
@@ -647,20 +647,20 @@ class TestMainLoopRequestSerde:
 
 
 # =============================================================================
-# MainLoopResult Tests
+# AgentLoopResult Tests
 # =============================================================================
 
 
-class TestMainLoopResultSerde:
-    """Tests for MainLoopResult serialization/deserialization."""
+class TestAgentLoopResultSerde:
+    """Tests for AgentLoopResult serialization/deserialization."""
 
-    def test_main_loop_result_success_string(self) -> None:
-        """MainLoopResult with string output type (success)."""
+    def test_agent_loop_result_success_string(self) -> None:
+        """AgentLoopResult with string output type (success)."""
         request_id = UUID("11111111-2222-3333-4444-555555555555")
         session_id = UUID("99999999-8888-7777-6666-555555555555")
         completed_at = datetime(2024, 6, 15, 16, 0, 0, tzinfo=UTC)
 
-        result: MainLoopResult[str] = MainLoopResult(
+        result: AgentLoopResult[str] = AgentLoopResult(
             request_id=request_id,
             output="Task completed successfully",
             session_id=session_id,
@@ -668,7 +668,7 @@ class TestMainLoopResultSerde:
         )
 
         data = dump(result)
-        restored = parse(MainLoopResult[str], data)
+        restored = parse(AgentLoopResult[str], data)
 
         assert restored.request_id == request_id
         assert restored.output == "Task completed successfully"
@@ -677,20 +677,20 @@ class TestMainLoopResultSerde:
         assert restored.error is None
         assert restored.success is True
 
-    def test_main_loop_result_success_dataclass(self) -> None:
-        """MainLoopResult with dataclass output type (success)."""
+    def test_agent_loop_result_success_dataclass(self) -> None:
+        """AgentLoopResult with dataclass output type (success)."""
         request_id = UUID("22222222-3333-4444-5555-666666666666")
         output = TaskOutput(result="Report generated", success=True)
         run_ctx = RunContext(worker_id="worker-1")
 
-        result: MainLoopResult[TaskOutput] = MainLoopResult(
+        result: AgentLoopResult[TaskOutput] = AgentLoopResult(
             request_id=request_id,
             output=output,
             run_context=run_ctx,
         )
 
         data = dump(result)
-        restored = parse(MainLoopResult[TaskOutput], data)
+        restored = parse(AgentLoopResult[TaskOutput], data)
 
         assert restored.request_id == request_id
         assert isinstance(restored.output, TaskOutput)
@@ -700,40 +700,40 @@ class TestMainLoopResultSerde:
         assert restored.run_context.worker_id == "worker-1"
         assert restored.success is True
 
-    def test_main_loop_result_error(self) -> None:
-        """MainLoopResult with error."""
+    def test_agent_loop_result_error(self) -> None:
+        """AgentLoopResult with error."""
         request_id = UUID("33333333-4444-5555-6666-777777777777")
 
-        result: MainLoopResult[str] = MainLoopResult(
+        result: AgentLoopResult[str] = AgentLoopResult(
             request_id=request_id,
             error="Processing failed: timeout",
         )
 
         data = dump(result)
-        restored = parse(MainLoopResult[str], data)
+        restored = parse(AgentLoopResult[str], data)
 
         assert restored.request_id == request_id
         assert restored.output is None
         assert restored.error == "Processing failed: timeout"
         assert restored.success is False
 
-    def test_main_loop_result_with_bundle_path(self) -> None:
-        """MainLoopResult with bundle path."""
+    def test_agent_loop_result_with_bundle_path(self) -> None:
+        """AgentLoopResult with bundle path."""
         request_id = UUID("44444444-5555-6666-7777-888888888888")
 
-        result: MainLoopResult[str] = MainLoopResult(
+        result: AgentLoopResult[str] = AgentLoopResult(
             request_id=request_id,
             output="done",
             bundle_path=Path("/debug/bundle.zip"),
         )
 
         data = dump(result)
-        restored = parse(MainLoopResult[str], data)
+        restored = parse(AgentLoopResult[str], data)
 
         assert restored.bundle_path == Path("/debug/bundle.zip")
 
-    def test_main_loop_result_parse_from_json(self) -> None:
-        """MainLoopResult parses from JSON with nested types."""
+    def test_agent_loop_result_parse_from_json(self) -> None:
+        """AgentLoopResult parses from JSON with nested types."""
         data = {
             "request_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             "output": {"result": "Success", "success": "true"},
@@ -741,7 +741,7 @@ class TestMainLoopResultSerde:
             "completed_at": "2024-06-15T17:00:00+00:00",
         }
 
-        restored = parse(MainLoopResult[TaskOutput], data)
+        restored = parse(AgentLoopResult[TaskOutput], data)
 
         assert restored.request_id == UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         assert isinstance(restored.output, TaskOutput)
@@ -817,26 +817,26 @@ class TestLoopSerdeEdgeCases:
 
         assert "cannot parse TypeVar field" in str(exc.value)
 
-    def test_main_loop_request_unspecialized_generic_error(self) -> None:
-        """MainLoopRequest without type arguments raises error."""
+    def test_agent_loop_request_unspecialized_generic_error(self) -> None:
+        """AgentLoopRequest without type arguments raises error."""
         data = {
             "request": "test",
         }
 
         with pytest.raises(TypeError) as exc:
-            parse(MainLoopRequest, data)
+            parse(AgentLoopRequest, data)
 
         assert "cannot parse TypeVar field" in str(exc.value)
 
-    def test_main_loop_result_unspecialized_generic_error(self) -> None:
-        """MainLoopResult without type arguments raises error."""
+    def test_agent_loop_result_unspecialized_generic_error(self) -> None:
+        """AgentLoopResult without type arguments raises error."""
         data = {
             "request_id": "11111111-2222-3333-4444-555555555555",
             "output": "test",
         }
 
         with pytest.raises(TypeError) as exc:
-            parse(MainLoopResult, data)
+            parse(AgentLoopResult, data)
 
         assert "cannot parse TypeVar field" in str(exc.value)
 
@@ -899,7 +899,7 @@ class TestLoopSerdeEdgeCases:
 
     def test_dump_exclude_none_on_loop_types(self) -> None:
         """Dump with exclude_none removes None fields."""
-        result: MainLoopResult[str] = MainLoopResult(
+        result: AgentLoopResult[str] = AgentLoopResult(
             request_id=UUID("11111111-2222-3333-4444-555555555555"),
             output="done",
         )
@@ -969,33 +969,33 @@ class TestLoopSerdeIntegration:
         assert restored_result.sample_id == "integration-1"
         assert restored_result.score.passed is True
 
-    def test_main_loop_workflow_round_trip(self) -> None:
-        """Complete MainLoop workflow: request -> result."""
+    def test_agent_loop_workflow_round_trip(self) -> None:
+        """Complete AgentLoop workflow: request -> result."""
         # Create request
         task = TaskRequest(task="Generate summary", priority=1)
         budget = Budget(max_total_tokens=5000, max_output_tokens=1000)
         run_ctx = RunContext(worker_id="worker-integration", attempt=1)
 
-        request: MainLoopRequest[TaskRequest] = MainLoopRequest(
+        request: AgentLoopRequest[TaskRequest] = AgentLoopRequest(
             request=task,
             budget=budget,
             run_context=run_ctx,
-            experiment=Experiment(name="main-test"),
+            experiment=Experiment(name="agent-test"),
         )
 
         # Serialize and deserialize request
         request_data = dump(request)
-        restored_request = parse(MainLoopRequest[TaskRequest], request_data)
+        restored_request = parse(AgentLoopRequest[TaskRequest], request_data)
 
         assert restored_request.request.task == "Generate summary"
         assert restored_request.budget is not None
         assert restored_request.budget.max_total_tokens == 5000
         assert isinstance(restored_request.experiment, Experiment)
-        assert restored_request.experiment.name == "main-test"
+        assert restored_request.experiment.name == "agent-test"
 
         # Create result
         output = TaskOutput(result="Summary: Integration test passed", success=True)
-        result: MainLoopResult[TaskOutput] = MainLoopResult(
+        result: AgentLoopResult[TaskOutput] = AgentLoopResult(
             request_id=restored_request.request_id,
             output=output,
             session_id=UUID("88888888-7777-6666-5555-444444444444"),
@@ -1004,7 +1004,7 @@ class TestLoopSerdeIntegration:
 
         # Serialize and deserialize result
         result_data = dump(result)
-        restored_result = parse(MainLoopResult[TaskOutput], result_data)
+        restored_result = parse(AgentLoopResult[TaskOutput], result_data)
 
         assert restored_result.output is not None
         assert restored_result.output.success is True
