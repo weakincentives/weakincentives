@@ -103,9 +103,10 @@ class AgentLoop[UserRequestT, OutputT](
         2. Initialize prompt and session via ``prepare(request)``
         3. Evaluate with adapter
         4. On ``VisibilityExpansionRequired``: accumulate overrides, retry step 3
-        5. Call ``finalize(prompt, session)`` for post-processing
-        6. Send ``AgentLoopResult`` via msg.reply()
-        7. Acknowledge the request message
+        5. Call ``postprocess_response(output, prompt, session)`` to transform output
+        6. Call ``finalize(prompt, session)`` for cleanup/logging
+        7. Send ``AgentLoopResult`` via msg.reply()
+        8. Acknowledge the request message
 
     Error handling:
         - On success: reply with result, acknowledge request
@@ -214,6 +215,50 @@ class AgentLoop[UserRequestT, OutputT](
             session: The session used for evaluation.
         """
         _ = (self, prompt, session)
+
+    def postprocess_response(
+        self,
+        output: OutputT | None,
+        prompt: Prompt[OutputT],
+        session: Session,
+    ) -> OutputT | None:
+        """Postprocess the structured output before finalization.
+
+        Called after successful evaluation but before finalize(), allowing
+        transformation of the parsed output. Override to modify, validate,
+        or enrich the output before finalization occurs.
+
+        This method complements ``prepare()`` which handles request preprocessing.
+        Together they form a symmetric preprocessing/postprocessing pipeline::
+
+            prepare(request) -> (prompt, session)  # preprocessing
+            adapter.evaluate(prompt, session) -> response
+            postprocess_response(response.output, prompt, session) -> output  # postprocessing
+            finalize(prompt, session)  # cleanup
+
+        Args:
+            output: The parsed structured output from adapter evaluation (may be None).
+            prompt: The prompt that was evaluated.
+            session: The session used for evaluation.
+
+        Returns:
+            The output (possibly modified) to use in the result.
+
+        Example::
+
+            def postprocess_response(
+                self,
+                output: MyOutput | None,
+                prompt: Prompt[MyOutput],
+                session: Session,
+            ) -> MyOutput | None:
+                # Transform or enrich the output
+                if output is not None:
+                    return replace(output, processed=True, timestamp=datetime.now())
+                return output
+        """
+        _ = (self, prompt, session)
+        return output
 
     def execute(  # noqa: PLR0913
         self,
@@ -519,10 +564,11 @@ class AgentLoop[UserRequestT, OutputT](
         """Run evaluation with visibility expansion retry loop.
 
         Handles the core evaluate → catch VisibilityExpansionRequired →
-        dispatch overrides → retry cycle. Calls finalize() on success.
+        dispatch overrides → retry cycle. Calls postprocess_response()
+        then finalize() on success.
 
         Returns:
-            The prompt response from successful evaluation.
+            The prompt response from successful evaluation (with postprocessed output).
         """
         while True:
             try:
@@ -540,6 +586,11 @@ class AgentLoop[UserRequestT, OutputT](
                         SetVisibilityOverride(path=path, visibility=visibility)
                     )
             else:
+                postprocessed = self.postprocess_response(
+                    response.output, prompt, session
+                )
+                if postprocessed is not response.output:
+                    response = replace(response, output=postprocessed)
                 self.finalize(prompt, session)
                 return response
 
