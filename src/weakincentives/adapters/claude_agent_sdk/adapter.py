@@ -39,19 +39,10 @@ from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ._async_utils import run_async
 from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
-from ._hooks import (
-    HookContext,
-    create_notification_hook,
-    create_post_tool_use_hook,
-    create_pre_compact_hook,
-    create_pre_tool_use_hook,
-    create_stop_hook,
-    create_subagent_start_hook,
-    create_subagent_stop_hook,
-    create_task_completion_stop_hook,
-    create_user_prompt_submit_hook,
-)
+from ._hook_registry import HookRegistry
+from ._hooks import HookContext
 from ._log_aggregator import ClaudeLogAggregator
+from ._query_builder import SdkQueryBuilder
 from ._task_completion import TaskCompletionContext
 from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
@@ -701,7 +692,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         return stderr_handler
 
-    async def _run_sdk_query(  # noqa: C901, PLR0912, PLR0915 - complexity needed for debug logging
+    async def _run_sdk_query(
         self,
         *,
         sdk: Any,
@@ -714,8 +705,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         visibility_signal: VisibilityExpansionSignal,
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
-        # Import the SDK's types
-        from claude_agent_sdk.types import ClaudeAgentOptions, HookMatcher
+        from claude_agent_sdk.types import ClaudeAgentOptions
 
         logger.debug(
             "claude_agent_sdk.sdk_query.entry",
@@ -727,42 +717,98 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
-        # Build options dict then convert to ClaudeAgentOptions
-        options_kwargs: dict[str, Any] = {
-            "model": self._model,
-        }
+        # Build SDK options using the builder pattern
+        query_options = self._build_sdk_query_options(
+            ephemeral_home=ephemeral_home,
+            effective_cwd=effective_cwd,
+            output_format=output_format,
+            bridged_tools=bridged_tools,
+            hook_context=hook_context,
+        )
 
-        if effective_cwd:
-            options_kwargs["cwd"] = effective_cwd
+        # Log SDK options (excluding sensitive data)
+        self._log_sdk_options(query_options)
 
-        if self._client_config.permission_mode:
-            options_kwargs["permission_mode"] = self._client_config.permission_mode
+        options = ClaudeAgentOptions(**query_options.to_kwargs())
 
-        if self._client_config.max_turns:
-            options_kwargs["max_turns"] = self._client_config.max_turns
+        # Execute the query and collect messages
+        messages = await self._execute_sdk_query(
+            sdk=sdk,
+            prompt_text=prompt_text,
+            options=options,
+            hook_context=hook_context,
+        )
 
-        if self._client_config.max_budget_usd is not None:
-            options_kwargs["max_budget_usd"] = self._client_config.max_budget_usd
+        logger.debug(
+            "claude_agent_sdk.sdk_query.complete",
+            event="sdk_query.complete",
+            context={
+                "message_count": len(messages),
+                "stderr_line_count": len(self._stderr_buffer),
+                "stats_tool_count": hook_context.stats.tool_count,
+                "stats_turn_count": hook_context.stats.turn_count,
+                "stats_subagent_count": hook_context.stats.subagent_count,
+                "stats_compact_count": hook_context.stats.compact_count,
+                "stats_input_tokens": hook_context.stats.total_input_tokens,
+                "stats_output_tokens": hook_context.stats.total_output_tokens,
+                "stats_hook_errors": hook_context.stats.hook_errors,
+            },
+        )
 
-        if self._client_config.betas:
-            options_kwargs["betas"] = list(self._client_config.betas)
+        # Check for visibility expansion signal from progressive disclosure.
+        # If a tool raised VisibilityExpansionRequired, the bridge stored it
+        # in the signal. We re-raise it here so the caller can handle it.
+        stored_exc = visibility_signal.get_and_clear()
+        if stored_exc is not None:
+            logger.debug(
+                "claude_agent_sdk.sdk_query.visibility_expansion_detected",
+                event="sdk_query.visibility_expansion_detected",
+                context={
+                    "section_keys": stored_exc.section_keys,
+                    "reason": stored_exc.reason,
+                },
+            )
+            raise stored_exc
 
-        if output_format:
-            options_kwargs["output_format"] = output_format
+        return messages
 
-        if self._allowed_tools is not None:
-            options_kwargs["allowed_tools"] = list(self._allowed_tools)
+    def _build_sdk_query_options(
+        self,
+        *,
+        ephemeral_home: EphemeralHome,
+        effective_cwd: str | None,
+        output_format: dict[str, Any] | None,
+        bridged_tools: tuple[Any, ...],
+        hook_context: HookContext,
+    ) -> Any:
+        """Build SDK query options using the builder pattern.
 
-        if self._disallowed_tools:
-            options_kwargs["disallowed_tools"] = list(self._disallowed_tools)
+        Args:
+            ephemeral_home: Ephemeral home with isolation config.
+            effective_cwd: Working directory for SDK operations.
+            output_format: Structured output format specification.
+            bridged_tools: Tuple of bridged tools to register.
+            hook_context: Hook context for creating hooks.
 
-        # Apply isolation configuration from ephemeral home
-        # Set environment variables including redirected HOME
+        Returns:
+            SdkQueryOptions with all configured values.
+        """
+        builder = SdkQueryBuilder(self._model)
+
+        # Apply configurations
+        builder.with_cwd(effective_cwd)
+        builder.with_client_config(self._client_config)
+        builder.with_model_config(self._model_config)
+        builder.with_ephemeral_home(ephemeral_home)
+        builder.with_output_format(output_format)
+        builder.with_tool_constraints(
+            allowed_tools=self._allowed_tools,
+            disallowed_tools=self._disallowed_tools,
+        )
+        builder.with_stderr_handler(self._create_stderr_handler())
+
+        # Log environment configuration
         env_vars = ephemeral_home.get_env()
-        options_kwargs["env"] = env_vars
-        # Prevent loading any external settings
-        options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
-
         logger.debug(
             "claude_agent_sdk.sdk_query.env_configured",
             event="sdk_query.env_configured",
@@ -770,112 +816,91 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 "home_override": env_vars.get("HOME"),
                 "has_api_key": "ANTHROPIC_API_KEY" in env_vars,
                 "env_var_count": len(env_vars),
-                # Log non-sensitive env vars for debugging
                 "env_keys": [k for k in env_vars if "KEY" not in k.upper()],
             },
         )
 
-        # Apply model config parameters
-        # Note: The Claude Agent SDK does not expose max_tokens or temperature
-        # parameters directly. It manages token budgets internally.
-        if self._model_config.max_thinking_tokens is not None:
-            options_kwargs["max_thinking_tokens"] = (
-                self._model_config.max_thinking_tokens
-            )
-
-        # Register custom tools via MCP server if any are provided
+        # Register MCP server for bridged tools
         if bridged_tools:
-            # create_mcp_server returns an McpSdkServerConfig directly
             mcp_server_config = create_mcp_server(bridged_tools)
-            options_kwargs["mcp_servers"] = {
-                "wink": mcp_server_config,
-            }
+            builder.with_mcp_server("wink", mcp_server_config)
             logger.debug(
                 "claude_agent_sdk.sdk_query.mcp_server_configured",
                 event="sdk_query.mcp_server_configured",
                 context={"mcp_server_name": "wink"},
             )
 
-        # Always capture stderr for debug logging, but suppress display if configured
-        # This allows us to capture stderr output for error debugging even when
-        # suppress_stderr is True
-        options_kwargs["stderr"] = self._create_stderr_handler()
-
-        # Create async hook callbacks
+        # Create and register hooks using the registry
+        hook_registry = HookRegistry(hook_context)
         checker = self._client_config.task_completion_checker
-        pre_hook = create_pre_tool_use_hook(hook_context)
-        post_hook = create_post_tool_use_hook(
-            hook_context,
+        hook_set = hook_registry.create_hook_set(
             stop_on_structured_output=self._client_config.stop_on_structured_output,
             task_completion_checker=checker,
         )
-        # Use task completion stop hook if checker is configured, otherwise regular stop hook
-        if checker is not None:  # pragma: no cover - tested via hook tests
-            stop_hook_fn = create_task_completion_stop_hook(
-                hook_context,
-                checker=checker,
-            )
-        else:
-            stop_hook_fn = create_stop_hook(hook_context)
-        prompt_hook = create_user_prompt_submit_hook(hook_context)
-        subagent_start_hook = create_subagent_start_hook(hook_context)
-        subagent_stop_hook = create_subagent_stop_hook(hook_context)
-        pre_compact_hook = create_pre_compact_hook(hook_context)
-        notification_hook = create_notification_hook(hook_context)
-
-        # Build hooks dict with HookMatcher wrappers
-        # matcher=None matches all tools
-        hook_types = [
-            "PreToolUse",
-            "PostToolUse",
-            "Stop",
-            "UserPromptSubmit",
-            "SubagentStart",
-            "SubagentStop",
-            "PreCompact",
-            "Notification",
-        ]
-        options_kwargs["hooks"] = {
-            "PreToolUse": [HookMatcher(matcher=None, hooks=[pre_hook])],
-            "PostToolUse": [HookMatcher(matcher=None, hooks=[post_hook])],
-            "Stop": [HookMatcher(matcher=None, hooks=[stop_hook_fn])],
-            "UserPromptSubmit": [HookMatcher(matcher=None, hooks=[prompt_hook])],
-            "SubagentStart": [HookMatcher(matcher=None, hooks=[subagent_start_hook])],
-            "SubagentStop": [HookMatcher(matcher=None, hooks=[subagent_stop_hook])],
-            "PreCompact": [HookMatcher(matcher=None, hooks=[pre_compact_hook])],
-            "Notification": [HookMatcher(matcher=None, hooks=[notification_hook])],
-        }
+        hooks_dict = HookRegistry.to_sdk_hooks(hook_set)
+        builder.with_hooks(hooks_dict)
 
         logger.debug(
             "claude_agent_sdk.sdk_query.hooks_registered",
             event="sdk_query.hooks_registered",
-            context={"hook_types": hook_types},
+            context={"hook_types": HookRegistry.get_hook_type_names()},
         )
 
-        # Log SDK options (excluding sensitive data)
+        return builder.build()
+
+    @staticmethod
+    def _log_sdk_options(query_options: Any) -> None:
+        """Log SDK options (excluding sensitive data).
+
+        Args:
+            query_options: SdkQueryOptions to log.
+        """
         logger.debug(
             "claude_agent_sdk.sdk_query.options",
             event="sdk_query.options",
             context={
-                "model": options_kwargs.get("model"),
-                "cwd": options_kwargs.get("cwd"),
-                "permission_mode": options_kwargs.get("permission_mode"),
-                "max_turns": options_kwargs.get("max_turns"),
-                "max_budget_usd": options_kwargs.get("max_budget_usd"),
-                "max_thinking_tokens": options_kwargs.get("max_thinking_tokens"),
-                "has_output_format": "output_format" in options_kwargs,
-                "allowed_tools": options_kwargs.get("allowed_tools"),
-                "disallowed_tools": options_kwargs.get("disallowed_tools"),
-                "has_mcp_servers": "mcp_servers" in options_kwargs,
-                "betas": options_kwargs.get("betas"),
+                "model": query_options.model,
+                "cwd": query_options.cwd,
+                "permission_mode": query_options.permission_mode,
+                "max_turns": query_options.max_turns,
+                "max_budget_usd": query_options.max_budget_usd,
+                "max_thinking_tokens": query_options.max_thinking_tokens,
+                "has_output_format": query_options.output_format is not None,
+                "allowed_tools": (
+                    list(query_options.allowed_tools)
+                    if query_options.allowed_tools is not None
+                    else None
+                ),
+                "disallowed_tools": list(query_options.disallowed_tools),
+                "has_mcp_servers": bool(query_options.mcp_servers),
+                "betas": list(query_options.betas),
             },
         )
 
-        options = ClaudeAgentOptions(**options_kwargs)
+    async def _execute_sdk_query(
+        self,
+        *,
+        sdk: Any,
+        prompt_text: str,
+        options: Any,
+        hook_context: HookContext,
+    ) -> list[Any]:
+        """Execute the SDK query and collect messages.
 
-        # Use streaming mode (AsyncIterable) to enable hook support.
-        # The SDK's query() function only initializes hooks when
-        # is_streaming_mode=True, which requires an AsyncIterable prompt.
+        Uses streaming mode (AsyncIterable) to enable hook support.
+        The SDK's query() function only initializes hooks when
+        is_streaming_mode=True, which requires an AsyncIterable prompt.
+
+        Args:
+            sdk: The Claude Agent SDK instance.
+            prompt_text: The prompt text to send.
+            options: ClaudeAgentOptions for the query.
+            hook_context: Hook context for tracking stats.
+
+        Returns:
+            List of messages from the SDK query.
+        """
+
         async def stream_prompt() -> Any:
             """Yield a single user message in streaming format."""
             yield {
@@ -916,37 +941,6 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     **content,
                 },
             )
-
-        logger.debug(
-            "claude_agent_sdk.sdk_query.complete",
-            event="sdk_query.complete",
-            context={
-                "message_count": len(messages),
-                "stderr_line_count": len(self._stderr_buffer),
-                "stats_tool_count": hook_context.stats.tool_count,
-                "stats_turn_count": hook_context.stats.turn_count,
-                "stats_subagent_count": hook_context.stats.subagent_count,
-                "stats_compact_count": hook_context.stats.compact_count,
-                "stats_input_tokens": hook_context.stats.total_input_tokens,
-                "stats_output_tokens": hook_context.stats.total_output_tokens,
-                "stats_hook_errors": hook_context.stats.hook_errors,
-            },
-        )
-
-        # Check for visibility expansion signal from progressive disclosure.
-        # If a tool raised VisibilityExpansionRequired, the bridge stored it
-        # in the signal. We re-raise it here so the caller can handle it.
-        stored_exc = visibility_signal.get_and_clear()
-        if stored_exc is not None:
-            logger.debug(
-                "claude_agent_sdk.sdk_query.visibility_expansion_detected",
-                event="sdk_query.visibility_expansion_detected",
-                context={
-                    "section_keys": stored_exc.section_keys,
-                    "reason": stored_exc.reason,
-                },
-            )
-            raise stored_exc
 
         return messages
 
