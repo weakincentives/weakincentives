@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .protocols import SessionViewProtocol
 
 
-ReducerEvent = SupportsDataclass
+type ReducerEvent = SupportsDataclass
 
 
 class ReducerContextProtocol(Protocol):

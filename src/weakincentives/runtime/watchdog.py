@@ -42,11 +42,16 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any
+from typing import Any, override
 
 from ..clock import SYSTEM_CLOCK, MonotonicClock
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+def _empty_callbacks() -> list[Callable[[], None]]:
+    """Factory for empty callbacks list with proper type annotation."""
+    return []
 
 
 @dataclass(slots=True)
@@ -95,7 +100,7 @@ class Heartbeat:
     _last_beat: float = field(init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _callbacks: list[Callable[[], None]] = field(
-        default_factory=lambda: list[Callable[[], None]](), repr=False
+        default_factory=_empty_callbacks, repr=False
     )
 
     def __post_init__(self) -> None:
@@ -317,9 +322,10 @@ class HealthServer:
                 self.end_headers()
                 _ = self.wfile.write(data)
 
-            def log_message(  # pyright: ignore[reportImplicitOverride]
+            @override
+            def log_message(
                 self,
-                format: str,  # noqa: A002
+                format: str,
                 *args: object,
             ) -> None:
                 _ = (format, args)

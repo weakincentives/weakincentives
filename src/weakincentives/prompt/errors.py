@@ -20,7 +20,7 @@ from ..errors import WinkError
 if TYPE_CHECKING:
     from ._visibility import SectionVisibility
 
-SectionPath = tuple[str, ...]
+type SectionPath = tuple[str, ...]
 
 
 def _normalize_section_path(section_path: Sequence[str] | None) -> SectionPath:

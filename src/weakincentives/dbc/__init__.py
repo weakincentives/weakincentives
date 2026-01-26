@@ -33,7 +33,7 @@ R = TypeVar("R")
 S = TypeVar("S")
 T = TypeVar("T", bound=object)
 
-ContractCallable = Callable[..., ContractResult | object]
+type ContractCallable = Callable[..., ContractResult | object]
 
 # Use a ContextVar for thread-safe and async-safe suspension tracking.
 # The default is True (DbC always enabled). Only the context manager can
