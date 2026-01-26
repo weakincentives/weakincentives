@@ -954,10 +954,12 @@ class BundleWriter:
         search_root = self._get_retention_search_root()
         bundles: list[tuple[Path, datetime, int]] = []
         for bundle_path in search_root.glob("**/*.zip"):
-            if bundle_path == self._path:
-                continue
             try:
                 bundle = DebugBundle.load(bundle_path)
+                # Skip the bundle we just created (compare by ID for robustness
+                # against path normalization issues like symlinks)
+                if bundle.manifest.bundle_id == str(self._bundle_id):
+                    continue
                 created_at = datetime.fromisoformat(bundle.manifest.created_at)
                 size = bundle_path.stat().st_size
                 bundles.append((bundle_path, created_at, size))
