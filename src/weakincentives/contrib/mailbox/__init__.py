@@ -92,16 +92,14 @@ Basic request/response pattern::
 
     client = Redis(host="localhost", port=6379)
 
-    # Create typed mailboxes
-    requests: RedisMailbox[TaskRequest, TaskResult] = RedisMailbox(
+    # Create typed mailboxes - type parameters drive deserialization
+    requests = RedisMailbox[TaskRequest, TaskResult](
         name="tasks",
         client=client,
-        body_type=TaskRequest,
     )
-    responses: RedisMailbox[TaskResult, None] = RedisMailbox(
+    responses = RedisMailbox[TaskResult, None](
         name="results",
         client=client,
-        body_type=TaskResult,
     )
 
     # Producer: send request with reply routing

@@ -149,12 +149,13 @@ class InMemoryMailboxFactory[R]:
 ```python
 class RedisMailboxFactory[R]:
     client: Redis[bytes] | RedisCluster[bytes]
-    body_type: type[R] | None = None
     default_ttl: int = 259200  # 3 days
 
     def create(self, identifier: str) -> Mailbox[R, None]:
         return RedisMailbox(name=identifier, client=self.client, ...)
 ```
+
+Note: Body type for deserialization is extracted from the generic type parameter `R`.
 
 ### Dynamic Reply Queues
 

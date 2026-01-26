@@ -549,7 +549,7 @@ class TestDecodeResponsesCompatibility:
         mailbox: RedisMailbox[_TestEvent] = RedisMailbox(
             name=f"test-decode-dataclass-{uuid4().hex[:8]}",
             client=str_client,  # type: ignore[arg-type]
-            body_type=_TestEvent,
+            _body_type=_TestEvent,
             reaper_interval=0.1,
         )
 

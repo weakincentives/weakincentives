@@ -38,7 +38,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast, get_origin
+from typing import TYPE_CHECKING, Any, cast, get_args, get_origin
 from uuid import uuid4
 
 from weakincentives.formal import formal_spec
@@ -121,13 +121,13 @@ class RedisMailboxFactory[R]:
             msg.acknowledge()
     """
 
-    __slots__ = ("body_type", "client", "default_ttl")
+    __slots__ = ("_body_type", "client", "default_ttl")
 
     client: Redis[bytes] | RedisCluster[bytes]
     """Redis client to use for all created mailboxes."""
 
-    body_type: type[R] | None
-    """Optional type hint for message body deserialization."""
+    _body_type: type[R] | None
+    """Body type extracted from generic parameters for deserialization."""
 
     default_ttl: int
     """Default TTL in seconds for all Redis keys."""
@@ -136,20 +136,27 @@ class RedisMailboxFactory[R]:
         self,
         client: Redis[bytes] | RedisCluster[bytes],
         *,
-        body_type: type[R] | None = None,
         default_ttl: int = DEFAULT_TTL_SECONDS,
     ) -> None:
         """Initialize factory with shared Redis client.
 
         Args:
             client: Redis client to use for all created mailboxes.
-            body_type: Optional type hint for message body deserialization.
             default_ttl: Default TTL in seconds for Redis keys (default: 3 days).
         """
         super().__init__()
         self.client = client
-        self.body_type = body_type
+        self._body_type = self._extract_body_type()
         self.default_ttl = default_ttl
+
+    def _extract_body_type(self) -> type[R] | None:
+        """Extract body type R from generic parameters if available."""
+        orig_class = getattr(self, "__orig_class__", None)
+        if orig_class is not None:
+            args = get_args(orig_class)
+            if args:
+                return args[0]  # R is the first type parameter
+        return None
 
     def create(self, identifier: str) -> Mailbox[R, None]:
         """Create a RedisMailbox for the given identifier.
@@ -168,9 +175,9 @@ class RedisMailboxFactory[R]:
         return RedisMailbox(
             name=identifier,
             client=self.client,
-            body_type=self.body_type,
             default_ttl=self.default_ttl,
             _send_only=True,  # Send-only: no reaper thread, no nested resolution
+            _body_type=self._body_type,
         )
 
 
@@ -220,9 +227,6 @@ class RedisMailbox[T, R]:
     client: Redis[bytes] | RedisCluster[bytes]
     """Redis client instance. Can be standalone Redis or RedisCluster."""
 
-    body_type: type[T] | None = None
-    """Optional type hint for message body deserialization."""
-
     max_size: int | None = None
     """Maximum queue capacity. None for unlimited (subject to Redis maxmemory)."""
 
@@ -254,6 +258,10 @@ class RedisMailbox[T, R]:
     reaper threads and don't support reply resolution. Used by RedisMailboxFactory
     to prevent resource leaks when creating ephemeral reply mailboxes."""
 
+    _body_type: type[T] | None = field(default=None, repr=False)
+    """Body type extracted from generic parameters or passed from factory.
+    Used for deserializing message bodies back to typed Python objects."""
+
     def __post_init__(self) -> None:
         """Initialize keys, register Lua scripts, and optionally start reaper thread.
 
@@ -262,6 +270,10 @@ class RedisMailbox[T, R]:
         """
         object.__setattr__(self, "_keys", _QueueKeys.for_queue(self.name))
         self._register_scripts()
+
+        # Extract body type from generic parameters if not provided
+        if self._body_type is None:
+            object.__setattr__(self, "_body_type", self._extract_body_type())
 
         # Send-only mailboxes don't need reaper threads or reply resolution
         if self._send_only:
@@ -321,6 +333,19 @@ class RedisMailbox[T, R]:
         result = self._scripts["reap"](keys=keys, args=[self.default_ttl])
         return int(result) if result else 0
 
+    def _extract_body_type(self) -> type[T] | None:
+        """Extract body type T from generic parameters if available.
+
+        This method checks for __orig_class__ which is set when the class
+        is instantiated with type parameters, e.g., RedisMailbox[MyEvent, None](...).
+        """
+        orig_class = getattr(self, "__orig_class__", None)
+        if orig_class is not None:
+            args = get_args(orig_class)
+            if args:
+                return args[0]  # T is the first type parameter
+        return None
+
     def _serialize(self, body: T) -> str:
         """Serialize message body to JSON string."""
         try:
@@ -329,27 +354,41 @@ class RedisMailbox[T, R]:
                 return json.dumps(dump(body))
             return json.dumps(body)
         except Exception as e:
+            _LOGGER.error(
+                "Failed to serialize message body for queue '%s': %s",
+                self.name,
+                e,
+                exc_info=True,
+            )
             raise SerializationError(f"Failed to serialize message body: {e}") from e
 
     def _deserialize(self, data: bytes | str) -> T:
         """Deserialize message body from JSON bytes or string.
 
         Handles both bytes (default Redis client) and str (decode_responses=True).
+        Uses the body type extracted from generic parameters for typed deserialization.
         """
         try:
             json_str = data.decode("utf-8") if isinstance(data, bytes) else data
             json_data = json.loads(json_str)
-            if self.body_type is not None:
+            if self._body_type is not None:
                 # Use parse() for dataclass types (including generic aliases)
-                origin = get_origin(self.body_type)
-                if is_dataclass(origin if origin is not None else self.body_type):
-                    return parse(self.body_type, json_data)
+                origin = get_origin(self._body_type)
+                if is_dataclass(origin if origin is not None else self._body_type):
+                    return parse(self._body_type, json_data)
                 # For primitive types (str, int, etc.), construct directly
-                body_type: Any = self.body_type
+                body_type: Any = self._body_type
                 return body_type(json_data)
             # Without a type hint, return raw JSON data
             return cast(T, json_data)
         except Exception as e:
+            _LOGGER.error(
+                "Failed to deserialize message body for queue '%s' (body_type=%s): %s",
+                self.name,
+                self._body_type,
+                e,
+                exc_info=True,
+            )
             raise SerializationError(f"Failed to deserialize message body: {e}") from e
 
     def send(self, body: T, *, reply_to: Mailbox[R, None] | None = None) -> str:
