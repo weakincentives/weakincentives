@@ -10,17 +10,81 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Core skill types and validation for agent skill composition.
+"""Skills package for agent skill composition and validation.
 
-This module provides the data structures for representing skills following
-the Agent Skills specification (https://agentskills.io). Skills are folders
-of instructions, scripts, and resources that agents can discover and use
-to perform tasks more accurately and efficiently.
+This module provides the data structures and validation utilities for
+representing skills following the Agent Skills specification
+(https://agentskills.io). Skills are folders of instructions, scripts, and
+resources that agents can discover and use to perform tasks more accurately
+and efficiently.
 
 The SKILL.md file specification is the core format standard, originally
 developed by Anthropic and released as an open standard.
 
-Example usage::
+What are Skills?
+----------------
+
+Skills are reusable packages of domain knowledge that can be composed into
+agent environments. Each skill is either:
+
+- A **directory skill**: A folder containing a ``SKILL.md`` file plus optional
+  supporting resources like examples, templates, and scripts.
+- A **file skill**: A single markdown file with a ``.md`` extension.
+
+Skills enable declarative agent configuration without modifying prompts or
+requiring access to agent internals. They follow a standardized format that
+allows agents to discover and understand available capabilities.
+
+SKILL.md Format
+---------------
+
+Every skill requires a ``SKILL.md`` file with YAML frontmatter containing
+metadata about the skill. The format is::
+
+    ---
+    name: my-skill
+    description: A brief description of what this skill does
+    license: MIT
+    compatibility: claude-3-opus, claude-3-sonnet
+    metadata:
+      version: "1.0.0"
+      author: "Your Name"
+    allowed-tools: "Bash, Read, Write"
+    ---
+
+    # My Skill
+
+    Instructions and documentation for the skill...
+
+Frontmatter Fields:
+
+- ``name`` (required): Skill identifier, 1-64 characters, lowercase
+  alphanumeric with hyphens. Must match directory name for directory skills.
+- ``description`` (required): Brief description, 1-1024 characters.
+- ``license`` (optional): SPDX license identifier (e.g., "MIT", "Apache-2.0").
+- ``compatibility`` (optional): Comma-separated list of compatible models or
+  agents, up to 500 characters.
+- ``metadata`` (optional): Key-value pairs for custom metadata, both keys and
+  values must be strings.
+- ``allowed-tools`` (optional): Comma-separated list of tools the skill can use.
+
+Skill Name Conventions
+----------------------
+
+Skill names must follow these rules per the Agent Skills specification:
+
+- Length: 1-64 characters
+- Characters: lowercase letters (a-z), numbers (0-9), and hyphens (-)
+- Cannot start or end with a hyphen
+- Cannot contain consecutive hyphens
+
+Valid examples: ``code-review``, ``my-skill-2``, ``testing``
+Invalid examples: ``My-Skill``, ``-skill``, ``skill--v2``, ``../escape``
+
+Basic Usage
+-----------
+
+Creating and validating skill mounts::
 
     from pathlib import Path
     from weakincentives.skills import (
@@ -29,9 +93,10 @@ Example usage::
         SkillMount,
         resolve_skill_name,
         validate_skill,
+        validate_skill_name,
     )
 
-    # Create a skill configuration
+    # Create a skill configuration with multiple skills
     config = SkillConfig(
         skills=(
             SkillMount(Path("./skills/code-review")),
@@ -46,29 +111,159 @@ Example usage::
             validate_skill(mount.source.resolve())
             print(f"Skill '{name}' validated")
 
-Skill Types:
+Working with Skill Mounts
+-------------------------
 
-- :class:`Skill`: Core representation of a skill definition
-- :class:`SkillMount`: Configuration for mounting a skill
-- :class:`SkillConfig`: Collection of skills to install
+SkillMount provides flexible configuration options::
+
+    from pathlib import Path
+    from weakincentives.skills import SkillMount, SkillConfig
+
+    # Mount a directory skill (name derived from directory)
+    review_skill = SkillMount(Path("./skills/code-review"))
+
+    # Mount with a custom name override
+    custom_skill = SkillMount(
+        source=Path("./internal/review-v2"),
+        name="code-review",
+    )
+
+    # Conditionally disable a skill
+    experimental = SkillMount(
+        source=Path("./skills/experimental"),
+        enabled=False,
+    )
+
+    # Combine into a configuration
+    config = SkillConfig(
+        skills=(review_skill, custom_skill, experimental),
+        validate_on_mount=True,  # Default: validate before copying
+    )
+
+Skill Name Resolution
+---------------------
+
+The :func:`resolve_skill_name` function determines the skill name using this
+priority order::
+
+    from pathlib import Path
+    from weakincentives.skills import SkillMount, resolve_skill_name
+
+    # 1. Explicit name takes priority
+    mount = SkillMount(Path("./v2/review"), name="code-review")
+    assert resolve_skill_name(mount) == "code-review"
+
+    # 2. Directory name for directory skills
+    mount = SkillMount(Path("./skills/code-review"))
+    assert resolve_skill_name(mount) == "code-review"
+
+    # 3. File stem for file skills (strips .md extension)
+    mount = SkillMount(Path("./my-skill.md"))
+    assert resolve_skill_name(mount) == "my-skill"
+
+Skill Validation
+----------------
+
+The :func:`validate_skill` function performs comprehensive validation::
+
+    from pathlib import Path
+    from weakincentives.skills import validate_skill, SkillValidationError
+
+    try:
+        # Validates directory has SKILL.md with valid frontmatter
+        validate_skill(Path("./skills/code-review"))
+
+        # Validates file is markdown with valid frontmatter
+        validate_skill(Path("./my-skill.md"))
+    except SkillValidationError as e:
+        print(f"Validation failed: {e}")
+
+Validation checks include:
+
+- Directory skills must contain a ``SKILL.md`` file at the root
+- File skills must have a ``.md`` extension
+- File skills must not exceed :data:`MAX_SKILL_FILE_BYTES` (1 MiB)
+- SKILL.md must have valid YAML frontmatter
+- Required fields (``name``, ``description``) must be present
+- Field values must meet type and length constraints
+- For directory skills, ``name`` must match the directory name
+
+The :func:`validate_skill_name` function validates just the name format::
+
+    from weakincentives.skills import validate_skill_name, SkillMountError
+
+    validate_skill_name("code-review")  # OK
+    validate_skill_name("my-skill-2")   # OK
+
+    try:
+        validate_skill_name("../escape")  # Raises SkillMountError
+    except SkillMountError as e:
+        print(f"Invalid name: {e}")
+
+Error Handling
+--------------
+
+All skill errors inherit from :class:`SkillError`, allowing unified handling::
+
+    from weakincentives.skills import (
+        SkillError,
+        SkillValidationError,
+        SkillNotFoundError,
+        SkillMountError,
+    )
+
+    try:
+        # Perform skill operations
+        validate_skill(path)
+    except SkillValidationError:
+        # Handle invalid skill structure
+        pass
+    except SkillNotFoundError:
+        # Handle missing skill source
+        pass
+    except SkillMountError:
+        # Handle mounting failures
+        pass
+    except SkillError:
+        # Catch any other skill error
+        pass
+
+Dependencies
+------------
+
+Skill validation requires ``pyyaml`` for parsing SKILL.md frontmatter.
+Install with::
+
+    pip install 'weakincentives[skills]'
+
+Exports
+-------
+
+Core Types:
+
+- :class:`Skill`: Core representation of a skill definition with name, source,
+  and optional content.
+- :class:`SkillMount`: Configuration for mounting a skill into an agent
+  environment.
+- :class:`SkillConfig`: Collection of skill mounts with validation settings.
 
 Error Types:
 
-- :class:`SkillError`: Base class for all skill errors
-- :class:`SkillValidationError`: Invalid skill structure
-- :class:`SkillNotFoundError`: Skill source path not found
-- :class:`SkillMountError`: Mounting operation failed
+- :class:`SkillError`: Base class for all skill-related exceptions.
+- :class:`SkillValidationError`: Raised when skill structure validation fails.
+- :class:`SkillNotFoundError`: Raised when a skill source path does not exist.
+- :class:`SkillMountError`: Raised when skill mounting or name validation fails.
 
 Validation Functions:
 
-- :func:`validate_skill`: Validate skill structure
-- :func:`validate_skill_name`: Validate skill name is safe
-- :func:`resolve_skill_name`: Derive name from mount configuration
+- :func:`validate_skill`: Validate skill structure and frontmatter.
+- :func:`validate_skill_name`: Validate a skill name follows the specification.
+- :func:`resolve_skill_name`: Derive the effective skill name from a mount.
 
 Constants:
 
-- :data:`MAX_SKILL_FILE_BYTES`: Maximum size for an individual file (1 MiB)
-- :data:`MAX_SKILL_TOTAL_BYTES`: Maximum total size for a skill (10 MiB)
+- :data:`MAX_SKILL_FILE_BYTES`: Maximum size for an individual skill file (1 MiB).
+- :data:`MAX_SKILL_TOTAL_BYTES`: Maximum total size for a skill (10 MiB).
 """
 
 from __future__ import annotations
