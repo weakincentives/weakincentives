@@ -2,14 +2,14 @@
 
 ## Purpose
 
-Minimal evaluation framework built on MainLoop. MainLoop handles orchestration;
+Minimal evaluation framework built on AgentLoop. AgentLoop handles orchestration;
 this spec adds datasets and scoring.
 
 **Implementation:** `src/weakincentives/evals/`
 
 ## Guiding Principles
 
-- **EvalLoop wraps MainLoop** - Composition-based, event-driven, type-safe
+- **EvalLoop wraps AgentLoop** - Composition-based, event-driven, type-safe
 - **Evaluators are functions** - Pure `(output, expected) -> Score`
 - **Datasets are immutable** - Frozen dataclass with typed samples
 
@@ -144,7 +144,7 @@ evaluation sample containing session state, logs, and eval metadata. See
 **Implementation:** `src/weakincentives/evals/_loop.py`
 
 Mailbox-driven evaluation loop. Receives `EvalRequest`, executes through
-MainLoop, scores with evaluator, sends `EvalResult` to results mailbox.
+AgentLoop, scores with evaluator, sends `EvalResult` to results mailbox.
 
 ### Helper Functions
 
@@ -181,16 +181,16 @@ EvalLoop supports distributed evaluation using Redis/SQS mailboxes.
 
 ## Limitations
 
-- **Sequential execution**: MainLoop is synchronous
+- **Sequential execution**: AgentLoop is synchronous
 - **No caching**: Repeated samples re-execute
 - **No checkpoints**: Cannot resume interrupted runs
-- **Single loop**: One MainLoop per EvalLoop
+- **Single loop**: One AgentLoop per EvalLoop
 
 ## Related Specifications
 
 - `specs/DEBUG_BUNDLE.md` - Debug bundle format and EvalLoop integration
 - `specs/DLQ.md` - Dead letter queue for failed samples
-- `specs/MAIN_LOOP.md` - MainLoop orchestration
+- `specs/AGENT_LOOP.md` - AgentLoop orchestration
 - `specs/MAILBOX.md` - Mailbox protocol
 - `specs/LIFECYCLE.md` - LoopGroup coordination
 - `specs/HEALTH.md` - Health checks and watchdog

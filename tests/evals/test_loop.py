@@ -38,13 +38,13 @@ from weakincentives.evals import (
     submit_experiments,
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
+from weakincentives.runtime import AgentLoop, InMemoryMailbox, Session
+from weakincentives.runtime.agent_loop import AgentLoopRequest, AgentLoopResult
 from weakincentives.runtime.dlq import DeadLetter, DLQPolicy
 from weakincentives.runtime.mailbox import (
     Mailbox,
     ReceiptHandleExpiredError,
 )
-from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
 from weakincentives.runtime.session import SessionProtocol
 
 # =============================================================================
@@ -101,14 +101,14 @@ class _MockAdapter(ProviderAdapter[_Output]):
         )
 
 
-class _TestLoop(MainLoop[str, _Output]):
-    """Test MainLoop implementation."""
+class _TestLoop(AgentLoop[str, _Output]):
+    """Test AgentLoop implementation."""
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[MainLoopRequest[str], MainLoopResult[_Output]],
+        requests: InMemoryMailbox[AgentLoopRequest[str], AgentLoopResult[_Output]],
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
         self._template = PromptTemplate[_Output](
@@ -140,10 +140,10 @@ def _create_test_loop(
     result: str = "success",
     error: Exception | None = None,
 ) -> _TestLoop:
-    """Create a test MainLoop with mock adapter."""
+    """Create a test AgentLoop with mock adapter."""
     adapter = _MockAdapter(result=result, error=error)
-    # EvalLoop doesn't use MainLoop's mailboxes directly, but MainLoop requires one
-    requests: InMemoryMailbox[MainLoopRequest[str], MainLoopResult[_Output]] = (
+    # EvalLoop doesn't use AgentLoop's mailboxes directly, but AgentLoop requires one
+    requests: InMemoryMailbox[AgentLoopRequest[str], AgentLoopResult[_Output]] = (
         InMemoryMailbox(name="dummy-requests")
     )
     return _TestLoop(adapter=adapter, requests=requests)
@@ -167,9 +167,9 @@ def test_eval_loop_processes_sample() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -204,9 +204,9 @@ def test_eval_loop_handles_failure() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("test error"))
+        agent_loop = _create_test_loop(error=RuntimeError("test error"))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -236,9 +236,9 @@ def test_eval_loop_respects_max_iterations() -> None:
     )
 
     try:
-        main_loop = _create_test_loop()
+        agent_loop = _create_test_loop()
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -268,9 +268,9 @@ def test_eval_loop_failing_score() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="wrong")
+        agent_loop = _create_test_loop(result="wrong")
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -463,9 +463,9 @@ def test_end_to_end_evaluation() -> None:
         dataset = Dataset(samples=samples)
 
         # Create loop
-        main_loop = _create_test_loop(result="success")
+        agent_loop = _create_test_loop(result="success")
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -518,14 +518,14 @@ class _NoneOutputAdapter(ProviderAdapter[_Output]):
         )
 
 
-class _NoneOutputLoop(MainLoop[str, _Output]):
-    """MainLoop that returns None output."""
+class _NoneOutputLoop(AgentLoop[str, _Output]):
+    """AgentLoop that returns None output."""
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[MainLoopRequest[str], MainLoopResult[_Output]],
+        requests: InMemoryMailbox[AgentLoopRequest[str], AgentLoopResult[_Output]],
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
         self._template = PromptTemplate[_Output](
@@ -562,11 +562,11 @@ def test_eval_loop_none_output() -> None:
     try:
         adapter = _NoneOutputAdapter()
         dummy_requests: InMemoryMailbox[
-            MainLoopRequest[str], MainLoopResult[_Output]
+            AgentLoopRequest[str], AgentLoopResult[_Output]
         ] = InMemoryMailbox(name="dummy-requests")
-        main_loop = _NoneOutputLoop(adapter=adapter, requests=dummy_requests)
+        agent_loop = _NoneOutputLoop(adapter=adapter, requests=dummy_requests)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -582,8 +582,8 @@ def test_eval_loop_none_output() -> None:
         assert result.sample_id == "1"
         assert result.score.passed is False
         assert result.score.value == 0.0
-        assert result.score.reason == "No output from MainLoop"
-        assert result.error == "No output from MainLoop"
+        assert result.score.reason == "No output from AgentLoop"
+        assert result.error == "No output from AgentLoop"
         msgs[0].acknowledge()
     finally:
         requests.close()
@@ -622,9 +622,9 @@ def test_eval_loop_nacks_on_send_failure() -> None:
     try:
         # Create a successful loop - the key point is that evaluation succeeds
         # but send fails, so we should nack (not fabricate an error result)
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -656,9 +656,9 @@ def test_eval_loop_nacks_on_send_failure_after_eval_error() -> None:
 
     try:
         # Create loop that will throw an exception during evaluation
-        main_loop = _create_test_loop(error=RuntimeError("eval error"))
+        agent_loop = _create_test_loop(error=RuntimeError("eval error"))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -697,9 +697,9 @@ def test_eval_loop_handles_expired_receipt_on_send() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -780,9 +780,9 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,  # type: ignore[arg-type]
         )
@@ -811,9 +811,9 @@ def test_eval_loop_exits_when_mailbox_closed() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -849,9 +849,9 @@ def test_eval_loop_handles_no_reply_to() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -889,9 +889,9 @@ def test_eval_loop_with_session_aware_evaluator() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_session_aware_evaluator,
             requests=requests,
         )
@@ -931,9 +931,9 @@ def test_eval_loop_error_reply_without_dlq() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        agent_loop = _create_test_loop(error=RuntimeError("failure"))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -968,12 +968,12 @@ def test_eval_loop_nacks_with_dlq_before_threshold() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        agent_loop = _create_test_loop(error=RuntimeError("failure"))
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox, max_delivery_count=5
         )
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
@@ -1010,13 +1010,13 @@ def test_eval_loop_sends_to_dlq_after_threshold() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("persistent failure"))
+        agent_loop = _create_test_loop(error=RuntimeError("persistent failure"))
         # Use max_delivery_count=1 to trigger DLQ on first failure
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox, max_delivery_count=1
         )
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
@@ -1066,14 +1066,14 @@ def test_eval_loop_immediate_dlq_for_included_error() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(error=ValueError("validation error"))
+        agent_loop = _create_test_loop(error=ValueError("validation error"))
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox,
             max_delivery_count=5,
             include_errors=frozenset({ValueError}),
         )
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
@@ -1113,14 +1113,14 @@ def test_eval_loop_never_dlq_for_excluded_error() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(error=TimeoutError("transient timeout"))
+        agent_loop = _create_test_loop(error=TimeoutError("transient timeout"))
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox,
             max_delivery_count=2,
             exclude_errors=frozenset({TimeoutError}),
         )
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
@@ -1159,12 +1159,12 @@ def test_eval_loop_dlq_handles_reply_error() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        agent_loop = _create_test_loop(error=RuntimeError("failure"))
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox, max_delivery_count=1
         )
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
@@ -1196,12 +1196,12 @@ def test_eval_loop_dlq_without_reply_to() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        agent_loop = _create_test_loop(error=RuntimeError("failure"))
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox, max_delivery_count=1
         )
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
@@ -1242,10 +1242,10 @@ def test_eval_loop_creates_debug_bundle(tmp_path: Path) -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         config = EvalLoopConfig(debug_bundle_dir=tmp_path)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             config=config,
@@ -1304,10 +1304,10 @@ def test_eval_loop_bundle_contains_request_id_directory(tmp_path: Path) -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         config = EvalLoopConfig(debug_bundle_dir=tmp_path)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             config=config,
@@ -1343,10 +1343,10 @@ def test_eval_loop_bundle_captures_failed_evaluation(tmp_path: Path) -> None:
 
     try:
         # Create loop that returns "wrong" - will fail exact_match
-        main_loop = _create_test_loop(result="wrong")
+        agent_loop = _create_test_loop(result="wrong")
         config = EvalLoopConfig(debug_bundle_dir=tmp_path)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             config=config,
@@ -1390,12 +1390,12 @@ def test_eval_loop_bundle_captures_none_output(tmp_path: Path) -> None:
         # Use the NoneOutputAdapter
         adapter = _NoneOutputAdapter()
         dummy_requests: InMemoryMailbox[
-            MainLoopRequest[str], MainLoopResult[_Output]
+            AgentLoopRequest[str], AgentLoopResult[_Output]
         ] = InMemoryMailbox(name="dummy-requests")
-        main_loop = _NoneOutputLoop(adapter=adapter, requests=dummy_requests)
+        agent_loop = _NoneOutputLoop(adapter=adapter, requests=dummy_requests)
         config = EvalLoopConfig(debug_bundle_dir=tmp_path)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             config=config,
@@ -1410,15 +1410,15 @@ def test_eval_loop_bundle_captures_none_output(tmp_path: Path) -> None:
         msgs = results.receive(max_messages=1)
         result = msgs[0].body
         assert result.score.passed is False
-        assert result.error == "No output from MainLoop"
+        assert result.error == "No output from AgentLoop"
         assert result.bundle_path is not None
 
         # Verify bundle captures the error
         bundle = DebugBundle.load(result.bundle_path)
         eval_data = bundle.eval
         assert eval_data is not None
-        assert eval_data["error"] == "No output from MainLoop"
-        assert eval_data["score"]["reason"] == "No output from MainLoop"
+        assert eval_data["error"] == "No output from AgentLoop"
+        assert eval_data["score"]["reason"] == "No output from AgentLoop"
 
         msgs[0].acknowledge()
     finally:
@@ -1435,10 +1435,10 @@ def test_eval_loop_no_bundle_without_config() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         # No debug_bundle_dir configured
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
         )
@@ -1468,10 +1468,10 @@ def test_eval_loop_bundle_with_session_aware_evaluator(tmp_path: Path) -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         config = EvalLoopConfig(debug_bundle_dir=tmp_path)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_session_aware_evaluator,
             requests=requests,
             config=config,
@@ -1512,10 +1512,10 @@ def test_eval_loop_bundle_fallback_on_error(tmp_path: Path) -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         config = EvalLoopConfig(debug_bundle_dir=tmp_path)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             config=config,
@@ -1567,10 +1567,10 @@ def test_eval_loop_bundle_no_reexecution_on_finalization_error(tmp_path: Path) -
     execution_count = 0
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        agent_loop = _create_test_loop(result="correct")
         config = EvalLoopConfig(debug_bundle_dir=tmp_path)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
-            loop=main_loop,
+            loop=agent_loop,
             evaluator=_output_to_str,
             requests=requests,
             config=config,
@@ -1583,7 +1583,7 @@ def test_eval_loop_bundle_no_reexecution_on_finalization_error(tmp_path: Path) -
         requests.send(request, reply_to=results)
 
         # Mock the context manager's __exit__ to raise after execution completes
-        original_execute_with_bundle = main_loop.execute_with_bundle
+        original_execute_with_bundle = agent_loop.execute_with_bundle
 
         @contextlib.contextmanager
         def failing_bundle_context(*args: object, **kwargs: object) -> Iterator[object]:
@@ -1594,7 +1594,7 @@ def test_eval_loop_bundle_no_reexecution_on_finalization_error(tmp_path: Path) -
             # Raise during finalization (after yield returns)
             raise RuntimeError("Simulated finalization failure")
 
-        with patch.object(main_loop, "execute_with_bundle", failing_bundle_context):
+        with patch.object(agent_loop, "execute_with_bundle", failing_bundle_context):
             eval_loop.run(max_iterations=1)
 
         # Verify execution happened exactly once (no re-execution)

@@ -55,8 +55,8 @@ When summarized sections exist, WINK injects builtin tools:
 
 **open_sections** permanently expands sections and is used for sections that
 register tools. When a section has tools attached, the model needs those tools
-to become available—not just the content. `MainLoop` handles this automatically
-by setting overrides and retrying. The model asks to expand a section, MainLoop
+to become available—not just the content. `AgentLoop` handles this automatically
+by setting overrides and retrying. The model asks to expand a section, AgentLoop
 applies the expansion, and evaluation continues with the full content visible
 and the section's tools now registered.
 
@@ -66,17 +66,17 @@ summarized in subsequent turns. Use this for reference material that the model
 only needs temporarily—documentation, examples, or context that doesn't unlock
 new capabilities.
 
-## How MainLoop Handles Expansion
+## How AgentLoop Handles Expansion
 
 When the model calls `open_sections`:
 
 1. The tool handler raises `VisibilityExpansionRequired`
-1. MainLoop catches the exception
-1. MainLoop applies visibility overrides to the session
-1. MainLoop re-renders the prompt with expanded sections
+1. AgentLoop catches the exception
+1. AgentLoop applies visibility overrides to the session
+1. AgentLoop re-renders the prompt with expanded sections
 1. Evaluation continues with the new prompt
 
-You don't need to handle this yourself—MainLoop does it automatically.
+You don't need to handle this yourself—AgentLoop does it automatically.
 
 ## Visibility Overrides in Session State
 
@@ -155,4 +155,4 @@ expanding it.
   changes
 - [Workspace Tools](workspace-tools.md): See progressive disclosure in action
   with WorkspaceDigestSection
-- [Orchestration](orchestration.md): Learn how MainLoop handles expansion
+- [Orchestration](orchestration.md): Learn how AgentLoop handles expansion

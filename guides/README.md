@@ -67,7 +67,7 @@ debug issues when they arise.
 
 | Guide | What You'll Learn |
 | --- | --- |
-| [Orchestration](orchestration.md) | Use MainLoop for request handling |
+| [Orchestration](orchestration.md) | Use AgentLoop for request handling |
 | [Evaluation](evaluation.md) | Test agents with datasets and evaluators |
 | [Lifecycle](lifecycle.md) | Manage shutdown, health checks, and watchdogs |
 

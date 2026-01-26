@@ -75,10 +75,10 @@ Debug bundles capture execution state in a self-contained zip archive:
 
 ```python nocheck
 from weakincentives.debug import BundleConfig
-from weakincentives.runtime import MainLoopConfig
+from weakincentives.runtime import AgentLoopConfig
 
-# Automatic bundling per-request via MainLoop
-config = MainLoopConfig(
+# Automatic bundling per-request via AgentLoop
+config = AgentLoopConfig(
     debug_bundle=BundleConfig(
         target="./debug_bundles/",
     ),

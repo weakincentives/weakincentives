@@ -597,6 +597,6 @@ with other adapters.
 - [Code Reviewer Example](code-review-agent.md): Complete working example using
   Claude Agent SDK
 - [Workspace Tools](workspace-tools.md): VFS and Podman alternatives
-- [Orchestration](orchestration.md): MainLoop integration
+- [Orchestration](orchestration.md): AgentLoop integration
 - [specs/CLAUDE_AGENT_SDK.md](../specs/CLAUDE_AGENT_SDK.md): Complete
   configuration reference

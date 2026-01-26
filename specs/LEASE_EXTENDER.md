@@ -8,7 +8,7 @@ proof-of-work: if the worker beats, the lease extends; if stuck (no beats), the
 lease expires naturally.
 
 **Implementation:** `src/weakincentives/runtime/lease_extender.py` (LeaseExtender,
-LeaseExtenderConfig); `main_loop.py` for integration
+LeaseExtenderConfig); `agent_loop.py` for integration
 
 ## Core Types
 
@@ -34,7 +34,7 @@ with lease_extender.attach(msg, heartbeat):
 Heartbeat flows through the system:
 
 ```
-MainLoop._handle_message()
+AgentLoop._handle_message()
   └─ lease_extender.attach(msg, heartbeat)
   └─ _execute(heartbeat=heartbeat)
        └─ adapter.evaluate(heartbeat=heartbeat)
@@ -58,13 +58,13 @@ def my_handler(params, *, context: ToolContext) -> ToolResult:
 `ToolExecutor` beats automatically before/after each tool execution. Tools can
 add additional beats during long operations.
 
-## MainLoop Integration
+## AgentLoop Integration
 
 ```python
-loop = MainLoop(
+loop = AgentLoop(
     adapter=adapter,
     requests=mailbox,
-    config=MainLoopConfig(
+    config=AgentLoopConfig(
         lease_extender=LeaseExtenderConfig(interval=60, extension=300),
     ),
 )
@@ -72,7 +72,7 @@ loop = MainLoop(
 
 ## EvalLoop Integration
 
-EvalLoop uses same pattern. Passes its heartbeat to `MainLoop.execute()` so tool
+EvalLoop uses same pattern. Passes its heartbeat to `AgentLoop.execute()` so tool
 beats extend EvalLoop's message lease.
 
 ## Claude Agent SDK Native Tools
@@ -105,4 +105,4 @@ Extension is reliability optimization, not correctness requirement.
 
 - `specs/HEALTH.md` - Heartbeat class definition
 - `specs/MAILBOX.md` - Message visibility semantics
-- `specs/MAIN_LOOP.md` - MainLoop orchestration
+- `specs/AGENT_LOOP.md` - AgentLoop orchestration

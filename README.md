@@ -213,7 +213,7 @@ vfs_section = VfsToolsSection(session=session, mounts=mounts, allowed_host_roots
 ```python nocheck
 from dataclasses import dataclass
 from typing import Any
-from weakincentives.runtime import MainLoop, Session
+from weakincentives.runtime import AgentLoop, Session
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt import Prompt, PromptTemplate
@@ -230,7 +230,7 @@ class ReviewResponse:
 def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
     ...
 
-class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
+class ReviewLoop(AgentLoop[ReviewTurnParams, ReviewResponse]):
     def __init__(self, adapter: Any, dispatcher: Any) -> None:
         super().__init__(adapter=adapter, dispatcher=dispatcher)
         self._session = Session(dispatcher=dispatcher)

@@ -48,8 +48,8 @@ class Dispatcher(Protocol):
 
 # Type aliases to clarify dispatcher usage patterns.
 #
-# ControlDispatcher: Used by MainLoop for request/response orchestration
-# (MainLoopRequest, MainLoopCompleted, MainLoopFailed events).
+# ControlDispatcher: Used by AgentLoop for request/response orchestration
+# (AgentLoopRequest, AgentLoopCompleted, AgentLoopFailed events).
 #
 # TelemetryDispatcher: Used by adapters and sessions for observability
 # (PromptRendered, ToolInvoked, PromptExecuted events).
@@ -57,7 +57,7 @@ class Dispatcher(Protocol):
 # Both aliases resolve to Dispatcher at runtime; the distinction is semantic.
 
 type ControlDispatcher = Dispatcher
-"""Dispatcher used for MainLoop request/response control flow."""
+"""Dispatcher used for AgentLoop request/response control flow."""
 
 type TelemetryDispatcher = Dispatcher
 """Dispatcher used for session telemetry and adapter observability events."""

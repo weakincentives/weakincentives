@@ -53,7 +53,7 @@ def _read_example() -> str:
 This example demonstrates a complete code review agent built with WINK.
 It showcases several key features of the library:
 
-- **MainLoop integration**: Background worker processing requests from a mailbox
+- **AgentLoop integration**: Background worker processing requests from a mailbox
 - **Prompt composition**: Structured prompts with multiple sections and tools
 - **Session management**: Persistent state across multiple review requests
 - **Provider adapters**: Support for OpenAI and Claude Agent SDK

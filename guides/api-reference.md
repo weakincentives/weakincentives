@@ -43,7 +43,7 @@ Import from `weakincentives` when you want the "90% API":
 
 - `WinkError`, `ToolValidationError`
 
-For everything else (e.g., `PromptTemplate`, `RenderedPrompt`, `Section`, `SectionVisibility`, `OutputParseError`, `Session`, `InProcessDispatcher`, `MainLoop`, `MainLoopConfig`, reducer helpers), import from the relevant subpackage: `weakincentives.prompt`, `weakincentives.runtime`, etc.
+For everything else (e.g., `PromptTemplate`, `RenderedPrompt`, `Section`, `SectionVisibility`, `OutputParseError`, `Session`, `InProcessDispatcher`, `AgentLoop`, `AgentLoopConfig`, reducer helpers), import from the relevant subpackage: `weakincentives.prompt`, `weakincentives.runtime`, etc.
 
 ## weakincentives.prompt
 
@@ -86,9 +86,9 @@ session[Type].clear()                   # → ClearSlice
 session.snapshot(include_all=False)
 session.restore(snapshot, preserve_logs=True)
 
-# MainLoop
-MainLoopConfig(deadline=..., budget=..., resources=...)
-MainLoop.execute(request, deadline=..., budget=..., resources=...)
+# AgentLoop
+AgentLoopConfig(deadline=..., budget=..., resources=...)
+AgentLoop.execute(request, deadline=..., budget=..., resources=...)
 ```
 
 **Slice storage:**
@@ -259,7 +259,7 @@ wink docs --changelog   # Print changelog
 - **Prompts**: [specs/PROMPTS.md](../specs/PROMPTS.md)
 - **Tools**: [specs/TOOLS.md](../specs/TOOLS.md)
 - **Sessions**: [specs/SESSIONS.md](../specs/SESSIONS.md)
-- **MainLoop**: [specs/MAIN_LOOP.md](../specs/MAIN_LOOP.md)
+- **AgentLoop**: [specs/AGENT_LOOP.md](../specs/AGENT_LOOP.md)
 - **Evals**: [specs/EVALS.md](../specs/EVALS.md)
 - **Health & Lifecycle**: [specs/HEALTH.md](../specs/HEALTH.md)
 - **Resources**: [specs/RESOURCE_REGISTRY.md](../specs/RESOURCE_REGISTRY.md)

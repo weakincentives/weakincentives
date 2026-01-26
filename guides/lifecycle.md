@@ -4,7 +4,7 @@
 
 When running agents in production—especially in containerized environments like
 Kubernetes—you need coordinated shutdown, health monitoring, and watchdog
-protection. WINK provides lifecycle primitives that integrate with MainLoop and
+protection. WINK provides lifecycle primitives that integrate with AgentLoop and
 EvalLoop.
 
 ## LoopGroup: Running Multiple Loops
@@ -15,8 +15,8 @@ and optional health endpoints:
 ```python nocheck
 from weakincentives.runtime import LoopGroup
 
-# Run MainLoop and EvalLoop together
-group = LoopGroup(loops=[main_loop, eval_loop])
+# Run AgentLoop and EvalLoop together
+group = LoopGroup(loops=[agent_loop, eval_loop])
 group.run()  # Blocks until SIGTERM/SIGINT
 ```
 
@@ -24,7 +24,7 @@ For Kubernetes deployments, enable health endpoints and watchdog monitoring:
 
 ```python nocheck
 group = LoopGroup(
-    loops=[main_loop],
+    loops=[agent_loop],
     health_port=8080,           # Exposes /health/live and /health/ready
     watchdog_threshold=720.0,   # Terminate if worker stalls for 12 minutes
 )
@@ -57,7 +57,7 @@ arrives, all registered callbacks are invoked in registration order.
 
 ## The Runnable Protocol
 
-Both `MainLoop` and `EvalLoop` implement the `Runnable` protocol:
+Both `AgentLoop` and `EvalLoop` implement the `Runnable` protocol:
 
 ```python nocheck
 from typing import Protocol
@@ -95,7 +95,7 @@ hb.beat()  # Record a heartbeat
 print(hb.elapsed())  # Seconds since last heartbeat
 ```
 
-**When heartbeats occur in MainLoop:**
+**When heartbeats occur in AgentLoop:**
 
 1. After successfully receiving messages from the mailbox (proves the loop isn't
    stuck in `receive()`)
@@ -112,7 +112,7 @@ loop hangs indefinitely.
 
 ```python nocheck
 group = LoopGroup(
-    loops=[main_loop, eval_loop],
+    loops=[agent_loop, eval_loop],
     health_port=8080,           # Health endpoint port
     health_host="0.0.0.0",      # Bind to all interfaces
     watchdog_threshold=720.0,   # 12 minutes (calibrated for 10-min prompts)
@@ -211,6 +211,6 @@ readinessProbe:
 
 ## Next Steps
 
-- [Orchestration](orchestration.md): Learn about MainLoop
+- [Orchestration](orchestration.md): Learn about AgentLoop
 - [Evaluation](evaluation.md): Learn about EvalLoop
 - [Debugging](debugging.md): Monitor running agents

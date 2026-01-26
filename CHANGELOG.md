@@ -16,7 +16,7 @@ time (`parse(Wrapper[Data], data)`), and **AST-based type resolution** now
 handles complex nested generics and `Literal` types. **Design-by-Contract is now
 always enabled**—contracts run in production, not just tests. A new
 **`MailboxWorker` base class** extracts common mailbox-driven processing
-infrastructure, reducing code duplication between MainLoop and EvalLoop. The
+infrastructure, reducing code duplication between AgentLoop and EvalLoop. The
 **`Experiment` class moves to package root** to resolve circular imports. Bug
 fixes address **RedisMailbox generic type deserialization** and prevent **data
 inconsistency when bundle finalization fails**. **Section subclasses now
@@ -105,7 +105,7 @@ config = EvalLoopConfig(debug_bundle_dir=Path("/tmp/eval-bundles"))
 - Session state before/after execution
 - Application logs during execution
 - Request input (sample and experiment)
-- Response output from MainLoop
+- Response output from AgentLoop
 - `eval.json` metadata: `sample_id`, `experiment_name`, `score`, `latency_ms`,
   optional `error`
 - Environment information
@@ -125,16 +125,16 @@ mailbox-driven processing infrastructure:
 - Graceful shutdown with timeout
 - Context manager protocol
 
-Both `MainLoop` and `EvalLoop` now extend this base class, eliminating ~500+
+Both `AgentLoop` and `EvalLoop` now extend this base class, eliminating ~500+
 lines of duplicate code.
 
-#### MainLoop Bundle API
+#### AgentLoop Bundle API
 
-New `MainLoop.execute_with_bundle()` context manager enables bundled execution
+New `AgentLoop.execute_with_bundle()` context manager enables bundled execution
 with custom metadata injection:
 
 ```python
-with main_loop.execute_with_bundle(request, bundle_target=path) as ctx:
+with agent_loop.execute_with_bundle(request, bundle_target=path) as ctx:
     # Access ctx.response, ctx.session, ctx.latency_ms
     ctx.write_metadata("custom", {"key": "value"})
 ```
@@ -194,7 +194,7 @@ specialized base classes created by `__class_getitem__`.
 #### RedisMailbox Generic Type Deserialization
 
 Fixed `RedisMailbox._deserialize()` to properly handle generic type aliases like
-`MainLoopRequest[T]`. The old `hasattr(type, "__dataclass_fields__")` check
+`AgentLoopRequest[T]`. The old `hasattr(type, "__dataclass_fields__")` check
 failed for generic aliases; now uses `get_origin()` and `is_dataclass()` for
 correct detection.
 
@@ -202,7 +202,7 @@ correct detection.
 
 Moved `Experiment` class to package root to break circular import chain:
 `runtime → evals → prompt → resources → runtime`. This fixes deserialization of
-`EvalRequest` and `MainLoopRequest` where nested `Experiment` objects remained
+`EvalRequest` and `AgentLoopRequest` where nested `Experiment` objects remained
 as dicts instead of proper instances.
 
 #### Bundle Finalization Error Handling
@@ -265,7 +265,7 @@ Updated to latest versions:
 New test suite (`tests/serde/test_loop_serde.py`) with 50+ test cases covering:
 - `Score`, `Sample`, `Experiment` round-trip serialization
 - `EvalRequest`, `EvalResult` with generic types and error handling
-- `MainLoopConfig`, `MainLoopRequest`, `MainLoopResult` with complex nested types
+- `AgentLoopConfig`, `AgentLoopRequest`, `AgentLoopResult` with complex nested types
 - `RunContext`, `Budget`, `Deadline` serialization
 - Clone operations and type coercion from JSON
 - Edge cases: unspecialized generics, missing fields, invalid data
@@ -395,7 +395,7 @@ and filesystem changes can now be joined into a coherent timeline for debugging.
 ### Environment Capture Integration
 
 The `BundleWriter.write_environment()` method, which captures comprehensive
-reproducibility envelopes, is now automatically called by MainLoop during debug
+reproducibility envelopes, is now automatically called by AgentLoop during debug
 bundle finalization. Previously, this method existed but was never invoked.
 
 Debug bundles now automatically include:
@@ -483,15 +483,15 @@ consolidates scattered build scripts into a single extensible framework.
 ### Debug Bundle System
 
 A new debug bundle system captures comprehensive execution state for post-mortem
-analysis. Bundles are self-contained zip archives that MainLoop generates
+analysis. Bundles are self-contained zip archives that AgentLoop generates
 automatically per-request, enabling reliable debugging without manual
 instrumentation.
 
 ```python
 from weakincentives.debug import BundleConfig
-from weakincentives.runtime import MainLoopConfig
+from weakincentives.runtime import AgentLoopConfig
 
-config = MainLoopConfig(
+config = AgentLoopConfig(
     debug_bundle=BundleConfig(target="./debug_bundles/"),
 )
 # Bundles created automatically for each request
@@ -533,8 +533,8 @@ alongside bundle for fast repeated queries.
 **Additional features:**
 
 - Atomic zip creation prevents partial archives on crashes
-- Per-request override via `MainLoopRequest.debug_bundle`
-- `MainLoopResult.bundle_path` provides access to created bundle
+- Per-request override via `AgentLoopRequest.debug_bundle`
+- `AgentLoopResult.bundle_path` provides access to created bundle
 
 See `specs/DEBUG_BUNDLE.md` and `specs/WINK_QUERY.md` for specifications.
 
@@ -618,7 +618,7 @@ See `specs/VERIFICATION_TOOLBOX.md` for the complete specification.
 ### Internal
 
 - Consolidated path normalization into `weakincentives.filesystem._path`
-- Split `main_loop.py` and `session.py` into focused modules
+- Split `agent_loop.py` and `session.py` into focused modules
 - Unified AI assistant guidelines in CLAUDE.md
 - Replaced `time.sleep()` calls with controllable clock injection in tests
 - Integration tests auto-skip when API keys missing
@@ -665,7 +665,7 @@ Key features:
 
 - **Experiment**: Immutable bundle of name, overrides tag, feature flags, and
   metadata
-- **Request-level binding**: Experiments flow through `MainLoopRequest.experiment`
+- **Request-level binding**: Experiments flow through `AgentLoopRequest.experiment`
   and `EvalRequest.experiment`
 - **EvalReport extensions**: `by_experiment()`, `pass_rate_by_experiment()`,
   `compare_experiments()` for result analysis
@@ -676,11 +676,11 @@ See `specs/EXPERIMENTS.md` for the full specification.
 ### RunContext for Distributed Tracing
 
 `RunContext` provides immutable execution metadata that flows through the system
-from MainLoop to tool handlers and telemetry events, enabling distributed
+from AgentLoop to tool handlers and telemetry events, enabling distributed
 tracing, request correlation, and debugging.
 
 ```python
-from weakincentives.runtime import RunContext, MainLoopRequest
+from weakincentives.runtime import RunContext, AgentLoopRequest
 
 ctx = RunContext(
     worker_id="worker-42",
@@ -688,7 +688,7 @@ ctx = RunContext(
     span_id="xyz-789",
 )
 
-request = MainLoopRequest(request=MyRequest(...), run_context=ctx)
+request = AgentLoopRequest(request=MyRequest(...), run_context=ctx)
 ```
 
 Key features:
@@ -776,9 +776,9 @@ extension to proof-of-work: if the worker is actively processing (beating), the
 lease extends; if stuck (no beats), the lease expires naturally.
 
 ```python
-from weakincentives.runtime import MainLoopConfig, LeaseExtenderConfig
+from weakincentives.runtime import AgentLoopConfig, LeaseExtenderConfig
 
-config = MainLoopConfig(
+config = AgentLoopConfig(
     lease_extender=LeaseExtenderConfig(
         interval=60.0,   # Rate-limit to once per minute
         extension=300,   # Extend by 5 minutes on each beat
@@ -790,7 +790,7 @@ Key features:
 
 - **Heartbeat-based**: Extension piggybacks on tool execution beats
 - **Fail-safe**: Stuck workers let leases expire (correct behavior)
-- **EvalLoop support**: Both MainLoop and EvalLoop support automatic extension
+- **EvalLoop support**: Both AgentLoop and EvalLoop support automatic extension
 - **Claude Agent SDK**: Native tools trigger beats via hook system
 
 See `specs/LEASE_EXTENDER.md` for the full specification.
@@ -815,13 +815,13 @@ All exceptions inherit from `PromptEvaluationError` and include `message`,
 
 **Note:** The standalone functions `collect_all_logs`, `archive_filesystem`, and
 `dump_session` have been replaced by the unified `BundleWriter` API. Use
-`BundleConfig` with `MainLoopConfig` for automatic bundle creation per-request.
+`BundleConfig` with `AgentLoopConfig` for automatic bundle creation per-request.
 
 ```python
 from weakincentives.debug import BundleConfig
-from weakincentives.runtime import MainLoopConfig
+from weakincentives.runtime import AgentLoopConfig
 
-config = MainLoopConfig(
+config = AgentLoopConfig(
     debug_bundle=BundleConfig(
         target="./debug_bundles/",
     ),
@@ -1125,7 +1125,7 @@ a separate `ExecutionState`. Use `with prompt.resources:` to manage lifecycle an
 
 ### Lifecycle Management
 
-`LoopGroup` runs multiple `MainLoop` or `EvalLoop` instances with coordinated
+`LoopGroup` runs multiple `AgentLoop` or `EvalLoop` instances with coordinated
 shutdown, optional health endpoints (`/health/live`, `/health/ready`), and watchdog
 monitoring for Kubernetes deployments.
 
@@ -1133,7 +1133,7 @@ monitoring for Kubernetes deployments.
 from weakincentives.runtime import LoopGroup
 
 group = LoopGroup(
-    loops=[main_loop, eval_loop],
+    loops=[agent_loop, eval_loop],
     health_port=8080,
     watchdog_threshold=720.0,
 )
@@ -1295,8 +1295,8 @@ for msg in messages:
 
 ### Evaluation Framework
 
-A minimal evaluation framework built on MainLoop for testing agent behavior.
-MainLoop handles orchestration; evals add datasets and scoring.
+A minimal evaluation framework built on AgentLoop for testing agent behavior.
+AgentLoop handles orchestration; evals add datasets and scoring.
 
 ```python
 from weakincentives.evals import Dataset, EvalLoop, exact_match
@@ -1305,7 +1305,7 @@ from weakincentives.evals import Dataset, EvalLoop, exact_match
 dataset = Dataset.load(Path("qa.jsonl"), str, str)
 
 # Run evaluation
-loop = EvalLoop(main_loop=my_loop, evaluator=exact_match)
+loop = EvalLoop(agent_loop=my_loop, evaluator=exact_match)
 report = loop.execute(dataset)
 
 print(f"Accuracy: {report.accuracy:.2%}")
@@ -1330,7 +1330,7 @@ print(f"Accuracy: {report.accuracy:.2%}")
 
 ### First-Class Resource Injection
 
-Pass custom resources into `adapter.evaluate()` and `MainLoop.execute()`,
+Pass custom resources into `adapter.evaluate()` and `AgentLoop.execute()`,
 making tools cleaner, more testable, and portable.
 
 ```python
@@ -1344,8 +1344,8 @@ resources = ResourceRegistry.build({HTTPClient: http_client})
 # Pass to adapter - merged with workspace resources (e.g., filesystem)
 response = adapter.evaluate(prompt, session=session, resources=resources)
 
-# Or at the MainLoop level
-config = MainLoopConfig(resources=resources)
+# Or at the AgentLoop level
+config = AgentLoopConfig(resources=resources)
 loop = MyLoop(adapter=adapter, dispatcher=dispatcher, config=config)
 response, session = loop.execute(request)
 ```
@@ -1356,7 +1356,7 @@ response, session = loop.execute(request)
   precedence on conflicts
 - User-provided resources override workspace defaults (e.g., custom filesystem)
 - Tool handlers access resources via `context.resources.get(ResourceType)`
-- `MainLoopConfig`, `MainLoopRequest`, and `MainLoop.execute()` all accept
+- `AgentLoopConfig`, `AgentLoopRequest`, and `AgentLoop.execute()` all accept
   `resources` parameter
 - All adapters (OpenAI, LiteLLM, Claude Agent SDK) support resource injection
 
@@ -1446,7 +1446,7 @@ the complete verification framework.
 
 ### Added
 
-- **`MainLoop.execute()` direct execution.** MainLoop now supports direct
+- **`AgentLoop.execute()` direct execution.** AgentLoop now supports direct
   execution without mailbox routing, making it easier to run single evaluations
   or integrate with external orchestrators.
 
@@ -1468,7 +1468,7 @@ the complete verification framework.
 
 ### Changed
 
-- **MainLoop initialization refactored.** The two abstract methods
+- **AgentLoop initialization refactored.** The two abstract methods
   `create_session()` and `create_prompt(request)` have been replaced with a
   single `prepare(request)` method returning `(prompt, session)`. A new
   optional `finalize(prompt, session)` hook is called after successful
@@ -1852,9 +1852,9 @@ Sessions automatically register visibility reducers—no manual setup required.
   package.
 - **Optimizer relocated to `weakincentives.contrib.optimizers`**:
   `WorkspaceDigestOptimizer` moved to contrib.
-- **MainLoop return value**: `MainLoop.execute()` now returns
+- **AgentLoop return value**: `AgentLoop.execute()` now returns
   `(response, session)` instead of just `response`.
-- **MainLoop config**: `MainLoopConfig.parse_output` has been removed.
+- **AgentLoop config**: `AgentLoopConfig.parse_output` has been removed.
 - **Reducer/event payloads**: Reducers now receive the event dataclass
   directly (no `.value` wrapper). `ToolInvoked` and `PromptExecuted` no longer
   expose a `.value` field.
@@ -1881,18 +1881,18 @@ agent styles":
 
 ## v0.13.0 - 2025-12-07
 
-### MainLoop Orchestration
+### AgentLoop Orchestration
 
-- Added `MainLoop[UserRequestT, OutputT]` abstract orchestrator that
+- Added `AgentLoop[UserRequestT, OutputT]` abstract orchestrator that
   standardizes agent workflow execution: receive request, build prompt,
   evaluate, handle visibility expansion, publish result. Implementations
   define only the domain-specific factories via `create_prompt()` and
   `create_session()`.
-- Added event types for request/response routing: `MainLoopRequest[T]`,
-  `MainLoopCompleted[T]`, and `MainLoopFailed`.
-- Added `MainLoopConfig` for configuring default deadline and budget
+- Added event types for request/response routing: `AgentLoopRequest[T]`,
+  `AgentLoopCompleted[T]`, and `AgentLoopFailed`.
+- Added `AgentLoopConfig` for configuring default deadline and budget
   constraints.
-- The MainLoop automatically handles `VisibilityExpansionRequired` exceptions,
+- The AgentLoop automatically handles `VisibilityExpansionRequired` exceptions,
   accumulating visibility overrides and retrying evaluation with a shared
   `BudgetTracker` across retries.
 
@@ -2003,7 +2003,7 @@ agent styles":
 
 ### Documentation & Specs
 
-- Added `MAIN_LOOP.md` spec documenting MainLoop orchestration and visibility
+- Added `AGENT_LOOP.md` spec documenting AgentLoop orchestration and visibility
   override handling.
 - Added `HOSTED_TOOLS.md` spec for provider-executed tools (web search, code
   interpreter).
@@ -2013,7 +2013,7 @@ agent styles":
 
 ### Examples
 
-- Refactored `code_reviewer_example.py` to use the new `MainLoop` abstraction,
+- Refactored `code_reviewer_example.py` to use the new `AgentLoop` abstraction,
   demonstrating the recommended pattern for agent workflow implementation.
 - Code reviewer REPL now creates a fresh five-minute default deadline per
   request so long-running interactive sessions continue working without manual

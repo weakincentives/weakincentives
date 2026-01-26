@@ -31,7 +31,7 @@ evaluation, including all tool calls. Enforcement semantics are defined in the
 
 ## Evaluation Framework
 
-A minimal framework built on MainLoop for testing agent behavior. Includes
+A minimal framework built on AgentLoop for testing agent behavior. Includes
 `Dataset` for loading samples, `EvalLoop` for orchestration, and built-in
 evaluators like `exact_match`, `contains`, and `llm_judge`. Session evaluators
 enable behavioral assertions against tool usage and token budgets. See
@@ -72,7 +72,7 @@ lock-step with the reference adapter. See the
 
 ## LoopGroup
 
-Runs multiple `Runnable` loops (MainLoop, EvalLoop) in dedicated threads with
+Runs multiple `Runnable` loops (AgentLoop, EvalLoop) in dedicated threads with
 coordinated shutdown. Supports optional health endpoints via `HealthServer` and
 stuck worker detection via `Watchdog`. See
 [Health specification](specs/HEALTH.md).
@@ -135,7 +135,7 @@ via `Binding`, `Scope`, and `ScopedResourceContext`. Resources are resolved via
 ## Runnable
 
 Protocol for loops that support graceful shutdown. Defines `run()`, `shutdown()`,
-`running`, and `heartbeat` properties. Implemented by `MainLoop` and `EvalLoop`.
+`running`, and `heartbeat` properties. Implemented by `AgentLoop` and `EvalLoop`.
 See [Health specification](specs/HEALTH.md).
 
 ## Scope

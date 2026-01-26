@@ -41,10 +41,10 @@ custom logic.
 | `reply_to` | `str \| None` | Reply mailbox name |
 | `trace_id` | `str \| None` | Tracing correlation |
 
-## MainLoop Integration
+## AgentLoop Integration
 
 ```python
-main_loop = MainLoop(
+agent_loop = AgentLoop(
     adapter=adapter,
     requests=requests,
     dlq=DLQPolicy(mailbox=dead_letters, max_delivery_count=5),
@@ -66,7 +66,7 @@ receive() → process() → reply() → acknowledge()
 
 ## EvalLoop Integration
 
-Same pattern as MainLoop, wrapping `EvalRequest` in `DeadLetter`.
+Same pattern as AgentLoop, wrapping `EvalRequest` in `DeadLetter`.
 
 ## Usage Examples
 
@@ -133,7 +133,7 @@ def replay_handler(dead_letter, source, reply_resolver):
 
 ```python
 dlq_consumer = DLQConsumer(mailbox=dead_letters, handler=alert_handler)
-group = LoopGroup(loops=[main_loop, dlq_consumer], health_port=8080)
+group = LoopGroup(loops=[agent_loop, dlq_consumer], health_port=8080)
 ```
 
 ## Error Classification
@@ -171,5 +171,5 @@ group = LoopGroup(loops=[main_loop, dlq_consumer], health_port=8080)
 ## Related Specifications
 
 - `specs/MAILBOX.md` - Mailbox protocol
-- `specs/MAIN_LOOP.md` - MainLoop orchestration
+- `specs/AGENT_LOOP.md` - AgentLoop orchestration
 - `specs/LIFECYCLE.md` - LoopGroup coordination

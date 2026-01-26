@@ -154,5 +154,5 @@ policy = ThrottlePolicy(
 ## Next Steps
 
 - [Claude Agent SDK](claude-agent-sdk.md): Production integration guide
-- [Orchestration](orchestration.md): Use MainLoop for request handling
+- [Orchestration](orchestration.md): Use AgentLoop for request handling
 - [Evaluation](evaluation.md): Test agents with datasets

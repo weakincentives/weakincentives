@@ -61,10 +61,10 @@ Returned by `EvalReport.compare_experiments(baseline, treatment)`:
 
 ## Request Integration
 
-### MainLoopRequest
+### AgentLoopRequest
 
 ```python
-request = MainLoopRequest(
+request = AgentLoopRequest(
     request=my_request,
     experiment=Experiment(name="v2-prompts", overrides_tag="v2"),
 )
@@ -82,7 +82,7 @@ request = EvalRequest(sample=sample, experiment=experiment)
 
 Includes `experiment_name` for downstream aggregation.
 
-## MainLoop Integration
+## AgentLoop Integration
 
 `prepare()` receives experiment to configure prompt and session:
 
@@ -162,7 +162,7 @@ if comparison.relative_improvement:
 | `Experiment` | Configuration variant | Yes (prompts, flags) |
 | `RunContext` | Execution metadata | No (tracing only) |
 
-Both can be specified on `MainLoopRequest` independently.
+Both can be specified on `AgentLoopRequest` independently.
 
 ## Storage Layout
 
@@ -185,5 +185,5 @@ Experiments reference prompt overrides in:
 
 - `specs/PROMPTS.md` - Override system
 - `specs/EVALS.md` - Evaluation framework
-- `specs/MAIN_LOOP.md` - MainLoop orchestration
+- `specs/AGENT_LOOP.md` - AgentLoop orchestration
 - `specs/RUN_CONTEXT.md` - Execution metadata

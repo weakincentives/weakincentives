@@ -79,13 +79,13 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
 )
 from weakincentives.runtime import (
+    AgentLoop,
+    AgentLoopConfig,
+    AgentLoopRequest,
+    AgentLoopResult,
     DLQPolicy,
     InMemoryMailbox,
     LeaseExtenderConfig,
-    MainLoop,
-    MainLoopConfig,
-    MainLoopRequest,
-    MainLoopResult,
     Session,
     ShutdownCoordinator,
 )
@@ -180,8 +180,8 @@ class ReferenceParams:
     )
 
 
-class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
-    """MainLoop implementation for code review with optional optimization.
+class CodeReviewLoop(AgentLoop[ReviewTurnParams, ReviewResponse]):
+    """AgentLoop implementation for code review with optional optimization.
 
     This loop runs as a background worker processing requests from a mailbox.
     It maintains a persistent session across all requests and optionally
@@ -192,11 +192,11 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 
     Example::
 
-        responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
+        responses: InMemoryMailbox[AgentLoopResult[ReviewResponse], None] = InMemoryMailbox(
             name="responses"
         )
         requests: InMemoryMailbox[
-            MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+            AgentLoopRequest[ReviewTurnParams], AgentLoopResult[ReviewResponse]
         ] = InMemoryMailbox(name="requests")
         loop = CodeReviewLoop(adapter=adapter, requests=requests)
         # Run in background thread
@@ -205,7 +205,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         # Send request with reply_to mailbox instance.
         # For distributed tracing, pass run_context with trace_id/span_id.
         params = ReviewTurnParams(request="Review the latest changes")
-        requests.send(MainLoopRequest(request=params), reply_to=responses)
+        requests.send(AgentLoopRequest(request=params), reply_to=responses)
 
     Example with DLQ::
 
@@ -234,7 +234,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         *,
         adapter: ProviderAdapter[ReviewResponse],
         requests: InMemoryMailbox[
-            MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+            AgentLoopRequest[ReviewTurnParams], AgentLoopResult[ReviewResponse]
         ],
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
@@ -243,14 +243,14 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
         enable_optimization: bool = False,
         dlq: DLQPolicy[
-            MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+            AgentLoopRequest[ReviewTurnParams], AgentLoopResult[ReviewResponse]
         ]
         | None = None,
     ) -> None:
         # Configure lease extender to extend message visibility during long tool execution.
         # Extends by 5 minutes every 60 seconds of active work (heartbeats from tools).
         # Debug bundling captures logs, session state, and config for each request.
-        config = MainLoopConfig(
+        config = AgentLoopConfig(
             lease_extender=LeaseExtenderConfig(
                 interval=60.0,  # Rate-limit extensions to once per minute
                 extension=300,  # Extend by 5 minutes on each extension
@@ -359,15 +359,15 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 class CodeReviewApp:
     """Owns the REPL loop and user interaction.
 
-    Runs the MainLoop in a background thread while the main thread handles
+    Runs the AgentLoop in a background thread while the main thread handles
     user input. Requests are sent via the request mailbox and results are
     received from the response mailbox via reply routing.
     """
 
     _requests: InMemoryMailbox[
-        MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+        AgentLoopRequest[ReviewTurnParams], AgentLoopResult[ReviewResponse]
     ]
-    _responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None]
+    _responses: InMemoryMailbox[AgentLoopResult[ReviewResponse], None]
     _loop: CodeReviewLoop
     _worker_thread: threading.Thread | None
     _pending_requests: dict[UUID, str]  # request_id -> user prompt for display
@@ -410,11 +410,11 @@ class CodeReviewApp:
     def _run_worker(self) -> None:
         """Background worker that processes requests from the mailbox."""
         # Run indefinitely until mailbox is closed
-        # Debug bundles are created automatically per-request via MainLoopConfig.debug_bundle
+        # Debug bundles are created automatically per-request via AgentLoopConfig.debug_bundle
         self._loop.run(max_iterations=None, wait_time_seconds=5)
         _LOGGER.debug("Worker thread exiting")
 
-    def _render_result(self, result: MainLoopResult[ReviewResponse]) -> None:
+    def _render_result(self, result: AgentLoopResult[ReviewResponse]) -> None:
         """Render the result to console."""
         print("\n--- Agent Response ---")
         if result.success and result.output is not None:
@@ -430,7 +430,7 @@ class CodeReviewApp:
 
     def _wait_for_response(
         self, request_id: UUID
-    ) -> MainLoopResult[ReviewResponse] | None:
+    ) -> AgentLoopResult[ReviewResponse] | None:
         """Poll the response mailbox until we get a response for our request.
 
         Returns None if mailbox is closed before response received.
@@ -496,7 +496,7 @@ class CodeReviewApp:
                 # Note: For distributed tracing integration, pass run_context with
                 # trace_id and span_id from the calling context (e.g., OpenTelemetry).
                 request = ReviewTurnParams(request=user_prompt)
-                request_event = MainLoopRequest(
+                request_event = AgentLoopRequest(
                     request=request,
                     deadline=_default_deadline(),
                 )

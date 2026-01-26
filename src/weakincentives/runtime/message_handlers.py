@@ -10,9 +10,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Message handling utilities for MainLoop.
+"""Message handling utilities for AgentLoop.
 
-This module provides helper functions for handling message lifecycle in MainLoop,
+This module provides helper functions for handling message lifecycle in AgentLoop,
 including failure handling, dead-lettering, and reply/acknowledge operations.
 """
 
@@ -30,9 +30,9 @@ from .run_context import RunContext
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .agent_loop_types import AgentLoopRequest, AgentLoopResult
     from .dlq import DLQPolicy
     from .mailbox import Mailbox
-    from .main_loop_types import MainLoopRequest, MainLoopResult
 
 _logger: StructuredLogger = get_logger(
     __name__, context={"component": "runtime.message_handlers"}
@@ -40,13 +40,13 @@ _logger: StructuredLogger = get_logger(
 
 
 def handle_failure[UserRequestT, OutputT](  # noqa: PLR0913
-    msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
+    msg: Message[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
     error: Exception,
     *,
     run_context: RunContext,
-    dlq: DLQPolicy[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]] | None,
-    requests_mailbox: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-    result_class: type[MainLoopResult[OutputT]],
+    dlq: DLQPolicy[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]] | None,
+    requests_mailbox: Mailbox[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
+    result_class: type[AgentLoopResult[OutputT]],
     bundle_path: Path | None = None,
 ) -> None:
     """Handle message processing failure.
@@ -64,7 +64,7 @@ def handle_failure[UserRequestT, OutputT](  # noqa: PLR0913
         run_context: Execution context for logging.
         dlq: Optional DLQ policy configuration.
         requests_mailbox: The source mailbox for dead letter metadata.
-        result_class: The MainLoopResult class to use for error responses.
+        result_class: The AgentLoopResult class to use for error responses.
         bundle_path: Optional path to debug bundle if one was created.
     """
     if dlq is None:
@@ -100,13 +100,13 @@ def handle_failure[UserRequestT, OutputT](  # noqa: PLR0913
 
 
 def dead_letter_message[UserRequestT, OutputT](  # noqa: PLR0913
-    msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
+    msg: Message[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
     error: Exception,
     *,
     run_context: RunContext,
-    dlq: DLQPolicy[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-    requests_mailbox: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-    result_class: type[MainLoopResult[OutputT]],
+    dlq: DLQPolicy[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
+    requests_mailbox: Mailbox[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
+    result_class: type[AgentLoopResult[OutputT]],
     bundle_path: Path | None = None,
 ) -> None:
     """Send message to dead letter queue.
@@ -117,7 +117,7 @@ def dead_letter_message[UserRequestT, OutputT](  # noqa: PLR0913
         run_context: Execution context for logging and correlation.
         dlq: The DLQ policy with target mailbox.
         requests_mailbox: The source mailbox for metadata.
-        result_class: The MainLoopResult class to use for error responses.
+        result_class: The AgentLoopResult class to use for error responses.
         bundle_path: Optional path to debug bundle if one was created.
     """
     # Create run-scoped logger for tracing
@@ -152,14 +152,14 @@ def dead_letter_message[UserRequestT, OutputT](  # noqa: PLR0913
     except Exception as reply_error:  # nosec B110 - intentional: reply failure should not block dead-lettering
         log.debug(
             "Failed to send error reply during dead-lettering.",
-            event="main_loop.dead_letter_reply_failed",
+            event="agent_loop.dead_letter_reply_failed",
             context={"message_id": msg.id, "error": str(reply_error)},
         )
 
     _ = dlq.mailbox.send(dead_letter)
     log.warning(
         "Message dead-lettered.",
-        event="main_loop.message_dead_lettered",
+        event="agent_loop.message_dead_lettered",
         context={
             "message_id": msg.id,
             "delivery_count": msg.delivery_count,
@@ -173,8 +173,8 @@ def dead_letter_message[UserRequestT, OutputT](  # noqa: PLR0913
 
 
 def reply_and_ack[UserRequestT, OutputT](
-    msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-    result: MainLoopResult[OutputT],
+    msg: Message[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
+    result: AgentLoopResult[OutputT],
 ) -> None:
     """Reply with result and acknowledge message, handling expired handles gracefully.
 
@@ -191,7 +191,7 @@ def reply_and_ack[UserRequestT, OutputT](
         # No reply_to specified - log and acknowledge without reply
         log.warning(
             "No reply_to for message, acknowledging without reply.",
-            event="main_loop.no_reply_to",
+            event="agent_loop.no_reply_to",
             context={"message_id": msg.id},
         )
         with contextlib.suppress(ReceiptHandleExpiredError):

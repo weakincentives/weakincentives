@@ -72,9 +72,9 @@ Monitors heartbeats in daemon thread. Terminates via SIGKILL when threshold exce
 - Container restart is recovery path
 - Prevents resource exhaustion
 
-## MainLoop Integration
+## AgentLoop Integration
 
-MainLoop beats heartbeat at two points:
+AgentLoop beats heartbeat at two points:
 
 1. After receiving messages from mailbox
 1. After processing each message
@@ -142,28 +142,28 @@ readinessProbe:
 ### Default (Recommended)
 
 ```python
-group = LoopGroup(loops=[main_loop], health_port=8080)
+group = LoopGroup(loops=[agent_loop], health_port=8080)
 group.run()
 ```
 
 ### Watchdog Only
 
 ```python
-group = LoopGroup(loops=[main_loop])  # No health_port
+group = LoopGroup(loops=[agent_loop])  # No health_port
 group.run()
 ```
 
 ### Disable Watchdog
 
 ```python
-group = LoopGroup(loops=[main_loop], health_port=8080, watchdog_threshold=None)
+group = LoopGroup(loops=[agent_loop], health_port=8080, watchdog_threshold=None)
 ```
 
 ### Shorter Deadlines (2-Minute Evaluations)
 
 ```python
 group = LoopGroup(
-    loops=[main_loop],
+    loops=[agent_loop],
     health_port=8080,
     watchdog_threshold=180.0,  # 3 minutes
     watchdog_interval=30.0,
@@ -187,7 +187,7 @@ group = LoopGroup(
 Watchdog emits CRITICAL logs before termination:
 
 ```
-CRITICAL: Watchdog: main-loop stalled for 65.2s (threshold: 60.0s)
+CRITICAL: Watchdog: agent-loop stalled for 65.2s (threshold: 60.0s)
 CRITICAL: Watchdog: terminating process due to stalled workers
 ```
 

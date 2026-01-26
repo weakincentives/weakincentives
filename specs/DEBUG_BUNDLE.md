@@ -3,7 +3,7 @@
 ## Purpose
 
 A debug bundle is a self-contained zip archive capturing everything needed to
-understand, reproduce, and debug a MainLoop execution. Bundles unify session
+understand, reproduce, and debug an AgentLoop execution. Bundles unify session
 state, logs, filesystem snapshots, configuration, and metrics into a single
 portable artifact.
 
@@ -11,7 +11,7 @@ Core implementation at `src/weakincentives/debug/bundle.py`.
 
 ## Principles
 
-- **Zero-configuration capture**: Automatic bundling during MainLoop execution
+- **Zero-configuration capture**: Automatic bundling during AgentLoop execution
 - **Self-contained**: All context for diagnosis lives in one file
 - **Portable**: Readable with standard tools (unzip, text editor, jq)
 - **Deterministic layout**: Predictable structure enables tooling
@@ -31,8 +31,8 @@ debug_bundle/
   manifest.json           # Bundle metadata and integrity
   README.txt              # Human-readable navigation guide
   request/
-    input.json            # MainLoop request
-    output.json           # MainLoop response
+    input.json            # AgentLoop request
+    output.json           # AgentLoop response
   session/
     before.jsonl          # Session state before execution
     after.jsonl           # Session state after execution
@@ -47,7 +47,7 @@ debug_bundle/
     git.diff              # Uncommitted changes (if any)
     command.txt           # argv, working dir, entrypoint
     container.json        # Container runtime info (if applicable)
-  config.json             # MainLoop and adapter configuration
+  config.json             # AgentLoop and adapter configuration
   run_context.json        # Execution context (IDs, tracing)
   metrics.json            # Token usage, timing, budget state
   prompt_overrides.json   # Visibility overrides (if any)
@@ -63,13 +63,13 @@ debug_bundle/
 |----------|----------|-------------|
 | `manifest.json` | Yes | Version, bundle ID, file list, integrity checksums |
 | `README.txt` | Yes | Generated navigation guide |
-| `request/input.json` | Yes | Canonical MainLoop input |
-| `request/output.json` | Yes | Canonical MainLoop output |
+| `request/input.json` | Yes | Canonical AgentLoop input |
+| `request/output.json` | Yes | Canonical AgentLoop output |
 | `session/before.jsonl` | No | Pre-execution session snapshot |
 | `session/after.jsonl` | Yes | Post-execution session snapshot |
 | `logs/app.jsonl` | Yes | Structured log records with request correlation |
 | `environment/` | No | Reproducibility envelope (system, Python, packages, git) |
-| `config.json` | Yes | MainLoop, adapter, prompt configuration |
+| `config.json` | Yes | AgentLoop, adapter, prompt configuration |
 | `run_context.json` | Yes | Run/request/session IDs, tracing spans |
 | `metrics.json` | Yes | Timing phases, token consumption, budget |
 | `prompt_overrides.json` | No | Visibility overrides accumulated during execution |
@@ -155,29 +155,29 @@ print(bundle.metrics)
 print(bundle.session_after)
 ```
 
-## MainLoop Integration
+## AgentLoop Integration
 
 ### Configuration
 
-`MainLoopConfig` gains a `debug_bundle` field. When set, MainLoop automatically
+`AgentLoopConfig` gains a `debug_bundle` field. When set, AgentLoop automatically
 creates a bundle for each execution:
 
 ```python
 loop = CodeReviewLoop(
     adapter=adapter,
     requests=requests,
-    config=MainLoopConfig(
+    config=AgentLoopConfig(
         debug_bundle=BundleConfig(target=Path("./debug/")),
     ),
 )
 ```
 
-Per-request override via `MainLoopRequest.debug_bundle`.
+Per-request override via `AgentLoopRequest.debug_bundle`.
 
 ### Execution Flow
 
 ```
-MainLoop._handle_message()
+AgentLoop._handle_message()
   ├─ _build_run_context()
   ├─ BundleWriter(target, bundle_id)  # if configured
   │    ├─ write_session_before()
@@ -188,22 +188,22 @@ MainLoop._handle_message()
   │    ├─ write_filesystem()
   │    ├─ write_config(), write_run_context(), write_metrics()
   │    └─ write_error()  # if failed
-  └─ Return MainLoopResult(bundle_path=writer.path)
+  └─ Return AgentLoopResult(bundle_path=writer.path)
 ```
 
 ### Result Extension
 
-`MainLoopResult` gains `bundle_path: Path | None` for accessing the created
+`AgentLoopResult` gains `bundle_path: Path | None` for accessing the created
 bundle.
 
 ## EvalLoop Integration
 
-EvalLoop wraps MainLoop for evaluation datasets. When `EvalLoopConfig.debug_bundle_dir`
-is set, EvalLoop uses `MainLoop.execute_with_bundle()` to reuse the standard bundle
+EvalLoop wraps AgentLoop for evaluation datasets. When `EvalLoopConfig.debug_bundle_dir`
+is set, EvalLoop uses `AgentLoop.execute_with_bundle()` to reuse the standard bundle
 creation logic with eval-specific metadata:
 
 1. EvalLoop creates bundle target at `{debug_bundle_dir}/{request_id}/`
-1. MainLoop creates bundle capturing session, logs, request/response
+1. AgentLoop creates bundle capturing session, logs, request/response
 1. EvalLoop injects `eval.json` with score, experiment, latency
 1. Bundle path returned in `EvalResult.bundle_path`
 
@@ -227,7 +227,7 @@ creation logic with eval-specific metadata:
 
 ```python
 eval_loop = EvalLoop(
-    loop=main_loop,
+    loop=agent_loop,
     evaluator=exact_match,
     requests=requests_mailbox,
     config=EvalLoopConfig(
@@ -340,12 +340,12 @@ filesystem snapshots, PII in inputs. Recommendations:
 
 - **Filesystem size**: Large workspaces produce large bundles
 - **Memory**: Log capture buffers before writing
-- **Concurrency**: One bundle per MainLoop execution
+- **Concurrency**: One bundle per AgentLoop execution
 - **No automatic redaction**: Manual review required for sensitive data
 
 ## Related Specifications
 
-- `specs/MAIN_LOOP.md` - Execution flow
+- `specs/AGENT_LOOP.md` - Execution flow
 - `specs/SESSIONS.md` - Session snapshots
 - `specs/LOGGING.md` - Log record format
 - `specs/RUN_CONTEXT.md` - Execution metadata

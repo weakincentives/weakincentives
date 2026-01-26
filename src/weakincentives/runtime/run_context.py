@@ -25,13 +25,13 @@ class RunContext:
     """Immutable context capturing execution metadata for a single request run.
 
     RunContext provides correlation identifiers and execution metadata
-    that flows through the system from MainLoop to tool handlers and
+    that flows through the system from AgentLoop to tool handlers and
     telemetry events. This enables distributed tracing and debugging.
 
     Attributes:
         run_id: Unique identifier for this execution run. Generated fresh
             for each run, distinct from request_id which may be retried.
-        request_id: Correlates with MainLoopRequest.request_id. Stable
+        request_id: Correlates with AgentLoopRequest.request_id. Stable
             across retries of the same logical request.
         session_id: UUID of the session processing this request, if available.
         attempt: Delivery count from mailbox (1 = first attempt). Maps to

@@ -101,7 +101,7 @@ Type Aliases
 
 The package provides semantic type aliases to clarify dispatcher usage:
 
-- :data:`ControlDispatcher` - Used by MainLoop for request/response orchestration
+- :data:`ControlDispatcher` - Used by AgentLoop for request/response orchestration
 - :data:`TelemetryDispatcher` - Used by adapters and sessions for observability
 
 Both resolve to :class:`Dispatcher` at runtime; the distinction is purely semantic.
@@ -111,7 +111,7 @@ Exports
 
 **Protocols:**
     - :class:`Dispatcher` - Minimal event dispatch protocol
-    - :data:`ControlDispatcher` - Alias for MainLoop control flow
+    - :data:`ControlDispatcher` - Alias for AgentLoop control flow
     - :data:`TelemetryDispatcher` - Alias for telemetry events
 
 **Implementations:**

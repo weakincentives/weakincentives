@@ -10,10 +10,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Data types for MainLoop request and response handling.
+"""Data types for AgentLoop request and response handling.
 
-This module provides the data classes used by MainLoop for request/response
-handling, including MainLoopRequest, MainLoopResult, and MainLoopConfig.
+This module provides the data classes used by AgentLoop for request/response
+handling, including AgentLoopRequest, AgentLoopResult, and AgentLoopConfig.
 """
 
 from __future__ import annotations
@@ -39,15 +39,15 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class MainLoopResult[OutputT]:
-    """Response from MainLoop execution.
+class AgentLoopResult[OutputT]:
+    """Response from AgentLoop execution.
 
     Consolidates success and failure into a single type. Check ``success``
     property to determine outcome.
     """
 
     request_id: UUID
-    """Correlates with MainLoopRequest.request_id."""
+    """Correlates with AgentLoopRequest.request_id."""
 
     output: OutputT | None = None
     """Present on success. The parsed output from the prompt response."""
@@ -79,7 +79,7 @@ class BundleContext[OutputT]:
     Provides access to execution results and allows adding eval-specific
     metadata before the bundle is finalized.
 
-    This class is yielded by MainLoop.execute_with_bundle() and should not
+    This class is yielded by AgentLoop.execute_with_bundle() and should not
     be instantiated directly.
 
     Attributes:
@@ -134,8 +134,8 @@ class BundleContext[OutputT]:
 
 
 @FrozenDataclass()
-class MainLoopConfig:
-    """Configuration for MainLoop execution defaults.
+class AgentLoopConfig:
+    """Configuration for AgentLoop execution defaults.
 
     Request-level ``budget``, ``deadline``, and ``resources`` override these defaults.
 
@@ -144,7 +144,7 @@ class MainLoopConfig:
     message lease, preventing timeout during long-running requests.
 
     The ``debug_bundle`` field enables debug bundle creation for each execution.
-    When set, MainLoop automatically creates a bundle capturing request/response,
+    When set, AgentLoop automatically creates a bundle capturing request/response,
     session state, logs, and other artifacts.
     """
 
@@ -156,12 +156,12 @@ class MainLoopConfig:
 
 
 @FrozenDataclass()
-class MainLoopRequest[UserRequestT]:
-    """Request for MainLoop execution with optional constraints.
+class AgentLoopRequest[UserRequestT]:
+    """Request for AgentLoop execution with optional constraints.
 
     The ``budget``, ``deadline``, and ``resources`` fields override config defaults.
     The ``experiment`` field specifies a configuration variant for A/B testing.
-    The ``debug_bundle`` field overrides ``MainLoopConfig.debug_bundle`` for this request.
+    The ``debug_bundle`` field overrides ``AgentLoopConfig.debug_bundle`` for this request.
     """
 
     request: UserRequestT
@@ -171,16 +171,16 @@ class MainLoopRequest[UserRequestT]:
     request_id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     run_context: RunContext | None = None
-    """Optional execution context. If not provided, MainLoop creates one."""
+    """Optional execution context. If not provided, AgentLoop creates one."""
     experiment: Experiment | None = None
     """Optional experiment for A/B testing. When provided, prepare() receives it."""
     debug_bundle: BundleConfig | None = None
-    """Optional per-request debug bundle config. Overrides MainLoopConfig.debug_bundle."""
+    """Optional per-request debug bundle config. Overrides AgentLoopConfig.debug_bundle."""
 
 
 __all__ = [
+    "AgentLoopConfig",
+    "AgentLoopRequest",
+    "AgentLoopResult",
     "BundleContext",
-    "MainLoopConfig",
-    "MainLoopRequest",
-    "MainLoopResult",
 ]

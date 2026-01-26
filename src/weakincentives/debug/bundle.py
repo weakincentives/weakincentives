@@ -10,10 +10,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Debug bundle for capturing MainLoop execution state.
+"""Debug bundle for capturing AgentLoop execution state.
 
 A debug bundle is a self-contained zip archive capturing everything needed to
-understand, reproduce, and debug a MainLoop execution. Bundles unify session
+understand, reproduce, and debug a AgentLoop execution. Bundles unify session
 state, logs, filesystem snapshots, configuration, and metrics into a single
 portable artifact.
 
@@ -311,8 +311,8 @@ def _generate_readme(manifest: BundleManifest) -> str:
         "README.txt          This file",
         "",
         "request/",
-        "  input.json        MainLoop request",
-        "  output.json       MainLoop response",
+        "  input.json        AgentLoop request",
+        "  output.json       AgentLoop response",
         "",
         "session/",
         "  before.jsonl      Session state before execution",
@@ -331,7 +331,7 @@ def _generate_readme(manifest: BundleManifest) -> str:
         "  command.txt       argv, working dir, entrypoint",
         "  container.json    Container runtime info (if applicable)",
         "",
-        "config.json         MainLoop and adapter configuration",
+        "config.json         AgentLoop and adapter configuration",
         "run_context.json    Execution context (IDs, tracing)",
         "metrics.json        Token usage, timing, budget state",
         "",
@@ -516,7 +516,7 @@ class BundleWriter:
         self._checksums[rel_path] = _compute_checksum(content_bytes)
 
     def write_request_input(self, request: object) -> None:
-        """Write the MainLoop request input."""
+        """Write the AgentLoop request input."""
         try:
             content = json.dumps(_serialize_object(request), indent=2)
             self._write_artifact("request/input.json", content)
@@ -527,7 +527,7 @@ class BundleWriter:
             )
 
     def write_request_output(self, response: object) -> None:
-        """Write the MainLoop response output."""
+        """Write the AgentLoop response output."""
         try:
             content = json.dumps(_serialize_object(response), indent=2)
             self._write_artifact("request/output.json", content)
@@ -586,7 +586,7 @@ class BundleWriter:
             raise  # Re-raise to allow bundle finalization to capture error status
 
     def write_config(self, config: object) -> None:
-        """Write MainLoop and adapter configuration."""
+        """Write AgentLoop and adapter configuration."""
         try:
             content = json.dumps(_serialize_object(config), indent=2)
             self._write_artifact("config.json", content)

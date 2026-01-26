@@ -3,7 +3,7 @@
 This document describes the `code_reviewer_example.py` script that ships with
 the library. The script assembles a full-featured code review agent
 demonstrating prompt composition, progressive disclosure, workspace tools,
-planning, and the `MainLoop` pattern in one place.
+planning, and the `AgentLoop` pattern in one place.
 
 ## Rationale and Scope
 
@@ -37,13 +37,13 @@ automatically. See [Sessions](../specs/SESSIONS.md) for details.
 
 The example uses a two-layer design:
 
-- `CodeReviewLoop` extends `MainLoop[ReviewTurnParams, ReviewResponse]` for
+- `CodeReviewLoop` extends `AgentLoop[ReviewTurnParams, ReviewResponse]` for
   request handling with auto-optimization
 - `CodeReviewApp` owns the interactive REPL and delegates execution to the loop
 
 ### CodeReviewLoop
 
-Implements the `MainLoop` protocol with these responsibilities:
+Implements the `AgentLoop` protocol with these responsibilities:
 
 - **Persistent Session**: Creates a single `Session` at construction time,
   reused across all `execute()` calls
@@ -53,7 +53,7 @@ Implements the `MainLoop` protocol with these responsibilities:
 - **Prompt Binding**: Creates and binds prompts via `create_prompt()`
 
 ```python nocheck
-class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
+class CodeReviewLoop(AgentLoop[ReviewTurnParams, ReviewResponse]):
     def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]: ...
     def create_session(self) -> Session: ...
     def execute(self, request: ReviewTurnParams, *, budget=None, deadline=None) -> PromptResponse[ReviewResponse]: ...
@@ -89,12 +89,12 @@ Each turn:
 1. Calls `loop.execute()` which:
    - Auto-optimizes workspace digest if needed (first request only)
    - Applies default deadline
-   - Delegates to `MainLoop.execute()` for prompt evaluation
+   - Delegates to `AgentLoop.execute()` for prompt evaluation
 1. Renders response via `_render_response_payload`
 1. Prints plan snapshot via `render_plan_snapshot`
 
 Debug bundles are created automatically per-request in `debug_bundles/` via
-`MainLoopConfig.debug_bundle`.
+`AgentLoopConfig.debug_bundle`.
 
 ## Data Types
 
@@ -201,7 +201,7 @@ The Reference Documentation section demonstrates progressive disclosure:
 1. Section starts with `visibility=SectionVisibility.SUMMARY`
 1. Model sees only the summary text initially
 1. Model can call `open_sections` tool to expand
-1. `MainLoop` handles `VisibilityExpansionRequired` internally
+1. `AgentLoop` handles `VisibilityExpansionRequired` internally
 1. Full section content becomes visible on retry
 
 ## Auto-Optimization
@@ -327,4 +327,4 @@ The example imports several helpers from the `examples` package:
   management
 - [Prompt Overrides](prompt-overrides.md): Customize prompts without code
   changes
-- [Orchestration](orchestration.md): Scale with MainLoop
+- [Orchestration](orchestration.md): Scale with AgentLoop
