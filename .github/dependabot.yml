@@ -55,6 +55,16 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      # Group contrib/tools optional dependencies
+      contrib:
+        patterns:
+          - "pyyaml"
+          - "asteval"
+          - "podman"
+          - "redis"
+        update-types:
+          - "minor"
+          - "patch"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
