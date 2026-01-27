@@ -49,6 +49,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "TESTING": "Test harnesses, fault injection, fuzzing, coverage standards",
     "THREAD_SAFETY": "Concurrency and shared state",
     "TOOLS": "Tool runtime, policies, sequential dependencies, planning tools",
+    "TRANSCRIPT_COLLECTION": "Claude Agent SDK transcript tailing, sub-agent discovery, DEBUG logs",
     "VERIFICATION": "Redis mailbox detailed specification, invariants, property tests",
     "VERIFICATION_TOOLBOX": "Verification toolchain (check.py), checker protocol, failure reporting",
     "WINK_DEBUG": "Debug bundle viewer UI, proposed enhancements, timeline visualization",

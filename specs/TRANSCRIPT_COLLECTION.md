@@ -7,7 +7,7 @@ session and all sub-agent sessions. Replaces the generic log aggregator with a
 focused system that captures structured transcript entries as DEBUG-level logs
 in WINK.
 
-**Implementation:** `src/weakincentives/adapters/claude_agent_sdk/_transcript_collector.py`
+**Implementation:** Replaces `src/weakincentives/adapters/claude_agent_sdk/_log_aggregator.py`
 
 ## Background
 
@@ -334,7 +334,7 @@ class _TailerState:
 The tailer handles file rotation and truncation:
 
 1. **Inode change**: File was rotated (new file created)
-2. **Size decrease**: File was truncated in place (copytruncate)
+1. **Size decrease**: File was truncated in place (copytruncate)
 
 Both cases reset position to 0 and clear the partial line buffer.
 
@@ -343,8 +343,8 @@ Both cases reset position to 0 and clear the partial line buffer.
 Claude Code compacts long conversations. The collector handles this:
 
 1. **PreCompact hook**: Snapshot transcript state before compaction
-2. **Summary entries**: Log compaction summary with dropped count
-3. **Position reset**: If file size shrinks, reset tailer position
+1. **Summary entries**: Log compaction summary with dropped count
+1. **Position reset**: If file size shrinks, reset tailer position
 
 ## Usage Example
 
@@ -432,18 +432,18 @@ print(f"Transcripts discovered: {list(collector.transcript_paths)}")
 ### Behavioral Changes
 
 1. **Discovery**: Immediate via hook vs polling directory
-2. **Scope**: Transcripts only vs all log-like files
-3. **Structure**: Parsed JSONL entries vs raw text lines
-4. **Sub-agents**: Explicit directory scanning vs generic file discovery
+1. **Scope**: Transcripts only vs all log-like files
+1. **Structure**: Parsed JSONL entries vs raw text lines
+1. **Sub-agents**: Explicit directory scanning vs generic file discovery
 
 ## Invariants
 
 1. **Hook registration**: Collector hooks registered before query starts
-2. **Path derivation**: Session dir correctly derived from transcript path
-3. **Entry ordering**: Entries emitted in file order within each transcript
-4. **Sequence isolation**: Sequence numbers per-transcript, not global
-5. **No data loss**: All complete JSONL lines emitted (partial buffered)
-6. **Graceful errors**: File errors logged as WARNING, never raise
+1. **Path derivation**: Session dir correctly derived from transcript path
+1. **Entry ordering**: Entries emitted in file order within each transcript
+1. **Sequence isolation**: Sequence numbers per-transcript, not global
+1. **No data loss**: All complete JSONL lines emitted (partial buffered)
+1. **Graceful errors**: File errors logged as WARNING, never raise
 
 ## Performance Considerations
 
