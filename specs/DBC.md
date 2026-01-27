@@ -136,8 +136,7 @@ Adding new variant to union immediately surfaces as pyright error.
 | Use | Skip |
 | --- | --- |
 | Match on union types | isinstance chains (pyright handles) |
-| `SliceOp[T]` in `Session._apply_slice_op()` | After exhaustive isinstance narrowing |
-| `DataEvent` in subscription routing | |
+| `SliceOp[T]` in `apply_slice_op()` (`session_dispatch.py`) | After exhaustive isinstance narrowing |
 
 ## Testing
 

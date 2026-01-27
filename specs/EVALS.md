@@ -47,12 +47,25 @@ Immutable collection of samples with JSONL loading support.
 | `passed` | `bool` | Binary pass/fail |
 | `reason` | `str` | Explanation |
 
+### EvalRequest
+
+Request to evaluate a sample under an experiment.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sample` | `Sample[InputT, ExpectedT]` | The sample to evaluate |
+| `experiment` | `Experiment` | The experiment to evaluate under (required) |
+| `request_id` | `UUID` | Unique request identifier (auto-generated) |
+| `created_at` | `datetime` | When the request was created |
+
 ### Evaluator Types
 
 | Type | Signature |
 |------|-----------|
 | `Evaluator` | `(output, expected) -> Score` |
-| `SessionEvaluator` | `(output, expected, SessionView) -> Score` |
+| `SessionEvaluator` | `(output, expected, session) -> Score` |
+
+Session-aware evaluators receive `SessionProtocol | SessionViewProtocol` as the session parameter.
 
 ## Built-in Evaluators
 
@@ -71,9 +84,10 @@ Enable behavioral assertions on tool usage, token budgets, custom state.
 
 **Implementation:** `src/weakincentives/evals/_session_evaluators.py`
 
-### SessionView Protocol
+### Session Access
 
-Read-only session access: `session_id`, `__getitem__(slice_type) -> SliceView[T]`
+Session-aware evaluators receive `SessionProtocol | SessionViewProtocol` which provides
+read-only session access via `__getitem__(slice_type)` to query slices.
 
 ### Built-in Session Evaluators
 
@@ -88,7 +102,27 @@ Read-only session access: `session_id`, `__getitem__(slice_type) -> SliceView[T]
 
 ### Adapting Evaluators
 
-`adapt(evaluator)` converts standard evaluators to session-aware signature.
+**Implementation:** `src/weakincentives/evals/_evaluators.py`
+
+| Function | Description |
+|----------|-------------|
+| `adapt(evaluator)` | Convert standard evaluator to session-aware signature |
+| `is_session_aware(fn)` | Check if evaluator accepts session parameter |
+
+## Experiments
+
+**Implementation:** `src/weakincentives/experiment.py`
+
+Experiments enable A/B testing by bundling prompt overrides and feature flags.
+The evals module re-exports `Experiment`, `BASELINE`, and `CONTROL` for convenience.
+
+| Type | Description |
+|------|-------------|
+| `Experiment` | Named configuration variant with overrides tag and flags |
+| `BASELINE` | Sentinel experiment with no overrides (alias: latest) |
+| `CONTROL` | Explicit control group experiment (same as BASELINE) |
+
+See `specs/EXPERIMENTS.md` for full experiment specification.
 
 ## LLM-as-Judge
 
@@ -117,6 +151,19 @@ Factory: `llm_judge(adapter, criterion)` returns `Evaluator[str, str]`
 | `error` | `str \| None` | Error message |
 | `bundle_path` | `Path \| None` | Debug bundle path (if enabled) |
 
+### ExperimentComparison
+
+Statistical comparison between two experiments.
+
+| Property | Description |
+|----------|-------------|
+| `baseline_name` | Name of the baseline experiment |
+| `treatment_name` | Name of the treatment experiment |
+| `baseline_pass_rate` | Pass rate for baseline |
+| `treatment_pass_rate` | Pass rate for treatment |
+| `pass_rate_delta` | Treatment minus baseline pass rate |
+| `relative_improvement` | Percentage improvement over baseline (None if baseline is 0) |
+
 ### EvalReport
 
 | Property | Description |
@@ -127,6 +174,10 @@ Factory: `llm_judge(adapter, criterion)` returns `Evaluator[str, str]`
 | `mean_score` | Average score |
 | `mean_latency_ms` | Average latency |
 | `failed_samples()` | Non-passing samples |
+| `by_experiment()` | Group results by experiment name |
+| `pass_rate_by_experiment()` | Pass rate per experiment |
+| `mean_score_by_experiment()` | Mean score per experiment |
+| `compare_experiments(baseline, treatment)` | Compare two experiments statistically |
 
 ### EvalLoopConfig
 
@@ -152,7 +203,8 @@ AgentLoop, scores with evaluator, sends `EvalResult` to results mailbox.
 
 | Function | Description |
 |----------|-------------|
-| `submit_dataset(dataset, experiment, requests)` | Submit all samples |
+| `submit_dataset(dataset, experiment, requests)` | Submit all samples under one experiment |
+| `submit_experiments(dataset, experiments, requests)` | Submit dataset under multiple experiments for A/B testing |
 | `collect_results(results, expected_count, *, timeout_seconds)` | Collect into report |
 
 ## Distributed Deployment
@@ -190,6 +242,7 @@ EvalLoop supports distributed evaluation using Redis/SQS mailboxes.
 
 - `specs/DEBUG_BUNDLE.md` - Debug bundle format and EvalLoop integration
 - `specs/DLQ.md` - Dead letter queue for failed samples
+- `specs/EXPERIMENTS.md` - Experiment configuration for A/B testing
 - `specs/AGENT_LOOP.md` - AgentLoop orchestration
 - `specs/MAILBOX.md` - Mailbox protocol
 - `specs/LIFECYCLE.md` - LoopGroup coordination

@@ -168,8 +168,8 @@ example = TaskExample(
 
 `TaskExample` instances register as children of `TaskExamplesSection`:
 
-- Section paths: `"task-examples.security-review"`
-- Override targeting: `prompt.override("task-examples.security-review", enabled=False)`
+- Section paths: `("task-examples", "security-review")`
+- Override targeting via `PromptOverridesStore` using section path tuples
 - Per-example visibility predicates
 - Cloning preserves all properties
 

@@ -155,8 +155,9 @@ evaluator = all_of(
 from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, exact_match
 from weakincentives.runtime import InMemoryMailbox
 
-# Create mailbox for evaluation requests
+# Create mailboxes for requests and results
 eval_requests = InMemoryMailbox(name="eval-requests")
+eval_results = InMemoryMailbox(name="eval-results")
 
 # Create EvalLoop wrapping your AgentLoop
 eval_loop = EvalLoop(
@@ -168,15 +169,22 @@ eval_loop = EvalLoop(
 
 **Submit samples and collect results:**
 
-```python nocheck
-from weakincentives.evals import submit_dataset, collect_results, Experiment
+Results are routed via the `reply_to` parameter. Each message sent to the requests
+mailbox specifies where its result should be delivered:
 
-# Submit all samples to the evaluation mailbox
+```python nocheck
+from weakincentives.evals import EvalRequest, Sample, collect_results, Experiment
+
+# Submit samples with reply_to for result routing
 experiment = Experiment(name="my-eval")
-submit_dataset(dataset, experiment=experiment, requests=eval_requests)
+for sample in dataset:
+    eval_requests.send(
+        EvalRequest(sample=sample, experiment=experiment),
+        reply_to=eval_results,
+    )
 
 # Run the evaluation worker
-eval_loop.run(max_iterations=1)
+eval_loop.run(max_iterations=len(dataset))
 
 # Collect results into a report
 report = collect_results(eval_results, expected_count=len(dataset))
@@ -190,6 +198,19 @@ print(f"Mean latency: {report.mean_latency_ms:.0f}ms")
 for eval_result in report.results:
     if not eval_result.score.passed:
         print(f"Failed: {eval_result.sample_id} - {eval_result.score.reason}")
+```
+
+**Bulk submission without result collection:**
+
+If you only need to submit samples without collecting results (e.g., for a
+fire-and-forget worker pattern), use `submit_dataset`:
+
+```python nocheck
+from weakincentives.evals import submit_dataset, BASELINE
+
+# Submit all samples (results are not collected unless you provide a reply mailbox)
+count = submit_dataset(dataset, BASELINE, eval_requests)
+print(f"Submitted {count} samples")
 ```
 
 ## Production Deployment Pattern

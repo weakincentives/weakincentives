@@ -56,6 +56,7 @@ At `src/weakincentives/resources/binding.py`:
 | `provider` | Factory `Callable[[ResourceResolver], T]` |
 | `scope` | Instance lifetime (default SINGLETON) |
 | `eager` | Initialize during `start()` |
+| `provided` | Pre-constructed instance, accessible without context manager |
 
 Factory: `Binding.instance(protocol, value)` for pre-constructed instances.
 
@@ -78,7 +79,8 @@ At `src/weakincentives/resources/registry.py`:
 | `build(mapping)` | Create from pre-constructed instances |
 | `merge(other, strict)` | Compose registries |
 | `conflicts(other)` | Find overlapping bindings |
-| `create_context()` | Create resolution context |
+| `open()` | Context manager for resource lifecycle |
+| `binding_for(protocol)` | Return the binding for a protocol, or None |
 
 ### ScopedResourceContext
 

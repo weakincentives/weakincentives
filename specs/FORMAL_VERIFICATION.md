@@ -10,6 +10,7 @@ next to implementation, verified via TLC model checker.
 ## Components
 
 1. **`@formal_spec` decorator** - Embed TLA+ metadata in Python classes
+1. **`FormalSpec` dataclass** - Complete specification with TLA+ generation
 1. **Test utilities** - Extract specs and run TLC
 1. **CI integration** - `make verify-formal`
 
@@ -18,12 +19,13 @@ next to implementation, verified via TLC model checker.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `module` | `str` | TLA+ module name (required) |
-| `state_vars` | `Sequence[StateVar]` | State variables |
-| `actions` | `Sequence[Action]` | Actions/transitions |
-| `invariants` | `Sequence[Invariant]` | Safety properties |
-| `constants` | `dict[str, int \| str]` | Model constants |
+| `state_vars` | `list[StateVar]` | State variables |
+| `actions` | `list[Action]` | Actions/transitions |
+| `invariants` | `list[Invariant]` | Safety properties |
+| `constants` | `dict[str, Any]` | Model constants |
 | `constraint` | `str \| None` | State constraint |
-| `extends` | `Sequence[str]` | TLA+ modules to extend |
+| `extends` | `tuple[str, ...]` | TLA+ modules to extend |
+| `helpers` | `dict[str, str]` | Helper operator definitions (raw TLA+) |
 
 ### StateVar
 
@@ -31,17 +33,25 @@ next to implementation, verified via TLC model checker.
 |-------|-------------|
 | `name` | Variable name |
 | `type` | TLA+ type (Nat, Seq(...), Set(...)) |
-| `description` | Human-readable description |
-| `initial_value` | Override type-based default |
+| `description` | Human-readable description (optional) |
+| `initial_value` | Override type-based default (optional) |
+
+### ActionParameter
+
+| Field | Description |
+|-------|-------------|
+| `name` | Parameter name (e.g., "consumer") |
+| `domain` | TLA+ domain expression (e.g., "1..NumConsumers") |
 
 ### Action
 
 | Field | Description |
 |-------|-------------|
 | `name` | Action name |
-| `parameters` | Bounded parameters |
-| `preconditions` | Enabling conditions |
-| `updates` | State variable updates |
+| `parameters` | Tuple of `ActionParameter` with domains |
+| `preconditions` | Enabling conditions (tuple of strings) |
+| `updates` | State variable updates (dict) |
+| `description` | Human-readable description (optional) |
 
 ### Invariant
 
@@ -50,17 +60,39 @@ next to implementation, verified via TLC model checker.
 | `id` | Unique identifier (INV-1) |
 | `name` | TLA+ name |
 | `predicate` | Boolean expression |
+| `description` | Human-readable description (optional) |
+
+## FormalSpec Class
+
+The `FormalSpec` dataclass holds all specification metadata and provides TLA+
+generation methods:
+
+| Method | Description |
+|--------|-------------|
+| `to_tla()` | Generate complete TLA+ module as string |
+| `to_tla_config(...)` | Generate TLC configuration file content |
+
+The `to_tla_config()` method accepts optional parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `init` | `str \| None` | Initial state formula (for simulation) |
+| `next` | `str \| None` | Next-state formula (for simulation) |
+| `check_deadlock` | `bool` | Whether to check for deadlocks (default: False) |
+| `state_constraint` | `str \| None` | Override state constraint expression |
 
 ## Testing Utilities
+
+Located in `weakincentives.formal.testing`:
 
 | Function | Description |
 |----------|-------------|
 | `extract_spec(cls)` | Extract spec from decorated class |
 | `write_spec(spec, path)` | Write .tla and .cfg files |
-| `model_check(spec)` | Run TLC model checker |
+| `model_check(spec, *, tlc_config)` | Run TLC model checker (3-minute timeout) |
 | `extract_and_verify(cls, ...)` | All-in-one test entry point |
 
-### Model Check Result
+### ModelCheckResult
 
 | Field | Description |
 |-------|-------------|
@@ -69,6 +101,10 @@ next to implementation, verified via TLC model checker.
 | `stdout` | TLC stdout output |
 | `stderr` | TLC stderr output |
 | `returncode` | Process exit code |
+
+### ModelCheckError
+
+Exception raised when TLC is not found or model checking fails.
 
 ## State Space Optimization
 
@@ -79,8 +115,18 @@ next to implementation, verified via TLC model checker.
 ## Verification
 
 ```bash
-make verify-formal
-pytest formal-tests/ -v
+make verify-formal         # Full TLC model checking (~30s)
+make verify-formal-fast    # Fast extraction only, no model check (~1s)
+make verify-formal-persist # Full check + persist specs to specs/tla/extracted/
+make verify-all            # Full verification + property-based tests
+```
+
+Direct pytest invocation:
+
+```bash
+uv run pytest formal-tests/ -v --no-cov
+uv run pytest formal-tests/ --skip-model-check  # Extraction only
+uv run pytest formal-tests/ --persist-specs     # Save extracted specs
 ```
 
 ## Best Practices

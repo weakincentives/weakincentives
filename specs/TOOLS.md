@@ -62,13 +62,15 @@ At `src/weakincentives/prompt/tool.py` (`ToolContext` class):
 | `adapter` | Provider adapter |
 | `session` | Session for state |
 | `deadline` | Optional deadline |
-| `budget_tracker` | Optional budget tracker |
+| `heartbeat` | Optional heartbeat for lease extension |
+| `run_context` | Optional execution context with correlation IDs |
 
-| Property | Description |
+| Property/Method | Description |
 | --- | --- |
 | `resources` | Access prompt's resource context |
 | `filesystem` | Shortcut for Filesystem resource |
-| `beat()` | Heartbeat for long operations |
+| `budget_tracker` | Shortcut for BudgetTracker resource |
+| `beat()` | Record heartbeat for long operations |
 
 Tool handlers publish events via `context.session.dispatcher`.
 
@@ -203,7 +205,7 @@ template = PromptTemplate(
 
 ## Runtime Dispatch
 
-Via `ToolExecutor` at `adapters/tool_executor.py`:
+Via `ToolExecutor` at `src/weakincentives/adapters/tool_executor.py`:
 
 1. **Registry lookup** - Resolve tool name
 1. **Argument parsing** - `serde.parse(..., extra="forbid")`
@@ -288,8 +290,27 @@ At `src/weakincentives/contrib/tools/planning.py`:
 
 ### Session Integration
 
-`PlanningToolsSection` at `src/weakincentives/contrib/tools/planning.py` auto-registers
-reducers for `Plan`, `SetupPlan`, `AddStep`, `UpdateStep`.
+`PlanningToolsSection` at `src/weakincentives/contrib/tools/planning.py` installs
+the `Plan` slice into the session. The `Plan` class defines `@reducer` methods
+that handle `SetupPlan`, `AddStep`, and `UpdateStep` events.
+
+### PlanningConfig
+
+At `src/weakincentives/contrib/tools/planning.py` (`PlanningConfig` class):
+
+| Field | Description |
+| --- | --- |
+| `strategy` | `PlanningStrategy` (default: `REACT`) |
+| `accepts_overrides` | Whether section accepts parameter overrides |
+
+Example:
+
+```python
+from weakincentives.contrib.tools import PlanningConfig, PlanningToolsSection
+
+config = PlanningConfig(strategy=PlanningStrategy.PLAN_ACT_REFLECT)
+section = PlanningToolsSection(session=session, config=config)
+```
 
 ## Planning Strategies
 

@@ -5,8 +5,6 @@
 Module organization and import patterns ensuring clear separation, predictable
 dependency flow, minimal coupling, and maintainable growth.
 
-**Validation:** `wink verify layer_violations core_contrib_separation`
-
 ## Guiding Principles
 
 - **Foundation layers dependency-free**: Core types have no higher-layer dependencies
@@ -20,7 +18,7 @@ dependency flow, minimal coupling, and maintainable growth.
 ```
 ┌─────────────────────────────────────┐
 │       HIGH-LEVEL (Layer 4)          │  User-facing features
-│  contrib, evals, cli                │
+│  contrib, evals, cli, docs          │
 └─────────────────────────────────────┘
             ↓ depends on
 ┌─────────────────────────────────────┐
@@ -31,13 +29,15 @@ dependency flow, minimal coupling, and maintainable growth.
 ┌─────────────────────────────────────┐
 │       CORE (Layer 2)                │  Library primitives
 │  runtime, prompt, resources,        │
-│  filesystem, serde, skills, formal  │
+│  filesystem, serde, skills, formal, │
+│  debug, optimizers                  │
 └─────────────────────────────────────┘
             ↓ depends on
 ┌─────────────────────────────────────┐
 │       FOUNDATION (Layer 1)          │  Base types & utilities
-│  types, errors, dataclasses,        │
-│  dbc, deadlines, budget             │
+│  types, errors, dataclasses, dbc,   │
+│  deadlines, budget, clock,          │
+│  experiment                         │
 └─────────────────────────────────────┘
 ```
 
@@ -81,10 +81,8 @@ Packages MUST NOT have circular import dependencies. Use protocols or
 
 ## Validation
 
-```bash
-python scripts/validate_module_boundaries.py
-make validate-modules
-```
+Module boundary validation is enforced through code review and type checking.
+Use these violation categories during review:
 
 ### Violation Types
 
@@ -95,11 +93,11 @@ make validate-modules
 | `CIRCULAR_DEPENDENCY` | Import cycle detected |
 | `REDUNDANT_REEXPORT` | Module and items both reexported |
 
-### Known Limitations
+### Review Notes
 
-- May flag Python 3.12+ syntax as errors
-- `TYPE_CHECKING` imports flagged but acceptable
-- String-based `importlib.import_module()` not detected
+- `TYPE_CHECKING` imports are acceptable for type-only dependencies
+- String-based `importlib.import_module()` calls bypass static analysis
+- Manual review required for dynamic imports and runtime-constructed imports
 
 ## Migration Patterns
 
