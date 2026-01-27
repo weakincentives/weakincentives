@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -198,10 +197,10 @@ class TestTranscriptCollector:
         assert tailer.position > 0
         assert tailer.entry_count == initial_count + 2  # summary + new entry
 
-    def test_graceful_error_handling(
+    def test_nonexistent_path_error_handling(
         self, collector: TranscriptCollector, temp_dir: Path
     ) -> None:
-        """File errors logged, not raised."""
+        """File errors logged, not raised for nonexistent paths."""
         # Set up with non-existent path
         fake_path = temp_dir / "nonexistent" / "session.jsonl"
 
@@ -344,6 +343,7 @@ class TestTranscriptCollector:
 
     def test_invalid_json_handling(self, tmp_path: Path) -> None:
         """Test handling of invalid JSON in transcript files."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="json_error_test",
@@ -355,7 +355,9 @@ class TestTranscriptCollector:
 
             # Create transcript with invalid JSON
             transcript = tmp_path / "test.jsonl"
-            transcript.write_text('{"valid": "entry"}\ninvalid json here\n{"another": "valid"}\n')
+            transcript.write_text(
+                '{"valid": "entry"}\ninvalid json here\n{"another": "valid"}\n'
+            )
 
             async with collector.run():
                 await collector._remember_transcript_path(str(transcript))
@@ -368,6 +370,7 @@ class TestTranscriptCollector:
 
     def test_duplicate_transcript_path(self, tmp_path: Path) -> None:
         """Test that duplicate transcript paths are ignored."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="duplicate_test",
@@ -389,6 +392,7 @@ class TestTranscriptCollector:
 
     def test_duplicate_tailer_start(self, tmp_path: Path) -> None:
         """Test that starting the same tailer twice is handled."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="duplicate_tailer_test",
@@ -409,6 +413,7 @@ class TestTranscriptCollector:
 
     def test_subagent_discovery_with_missing_dir(self, tmp_path: Path) -> None:
         """Test subagent discovery when subagents directory doesn't exist."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="missing_dir_test",
@@ -428,6 +433,7 @@ class TestTranscriptCollector:
 
     def test_hook_callback_wrapper(self, tmp_path: Path) -> None:
         """Test the hook callback wrapper function."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="hook_wrapper_test",
@@ -458,6 +464,7 @@ class TestTranscriptCollector:
 
     def test_graceful_error_handling(self, tmp_path: Path) -> None:
         """Test graceful handling of file access errors."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="error_test",
@@ -483,6 +490,7 @@ class TestTranscriptCollector:
 
     def test_subagent_discovery_with_oserror(self, tmp_path: Path) -> None:
         """Test subagent discovery handles OSError gracefully."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="oserror_test",
@@ -512,6 +520,7 @@ class TestTranscriptCollector:
 
     def test_file_read_error(self, tmp_path: Path) -> None:
         """Test handling of file read errors."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="read_error_test",
@@ -527,8 +536,12 @@ class TestTranscriptCollector:
             tailer = collector._tailers["main"]
 
             # Mock the _read_bytes method to raise OSError
-            with patch.object(TranscriptCollector, "_read_bytes", side_effect=OSError("Read error")):
-                with patch("weakincentives.adapters.claude_agent_sdk._transcript_collector.logger") as mock_logger:
+            with patch.object(
+                TranscriptCollector, "_read_bytes", side_effect=OSError("Read error")
+            ):
+                with patch(
+                    "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
+                ) as mock_logger:
                     await collector._read_transcript_content(tailer)
 
                     # Should have logged warning
@@ -538,6 +551,7 @@ class TestTranscriptCollector:
 
     def test_no_session_dir(self, tmp_path: Path) -> None:
         """Test subagent discovery when session_dir is None."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="no_session_test",
@@ -557,6 +571,7 @@ class TestTranscriptCollector:
 
     def test_empty_lines_skipped(self, tmp_path: Path) -> None:
         """Test that empty lines are skipped."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="empty_lines_test",
@@ -578,6 +593,7 @@ class TestTranscriptCollector:
 
     def test_unparsed_entries(self, tmp_path: Path) -> None:
         """Test handling when parse_entries is False."""
+
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="unparsed_test",
@@ -591,14 +607,17 @@ class TestTranscriptCollector:
             transcript = tmp_path / "test.jsonl"
             transcript.write_text('{"type": "test"}\n')
 
-            with patch("weakincentives.adapters.claude_agent_sdk._transcript_collector.logger") as mock_logger:
+            with patch(
+                "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
+            ) as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
                     await asyncio.sleep(0.05)
 
                 # Should have emitted entry with "unparsed" type
                 entry_calls = [
-                    call for call in mock_logger.debug.call_args_list
+                    call
+                    for call in mock_logger.debug.call_args_list
                     if call[0][0] == "transcript.collector.entry"
                 ]
                 assert len(entry_calls) > 0
