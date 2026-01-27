@@ -59,6 +59,11 @@ Key Components
     Verification protocols for ensuring tasks are complete before allowing the
     agent to stop. Integrates with the planning tool state.
 
+**Transcript Collection** (:class:`TranscriptCollector`, :class:`TranscriptCollectorConfig`)
+    Real-time collection and logging of Claude Agent SDK transcripts from the
+    main session and all sub-agent sessions. Emits structured DEBUG-level logs
+    for observability.
+
 Authentication Modes
 --------------------
 The adapter supports multiple authentication configurations:
@@ -244,6 +249,10 @@ Task Completion:
     - :class:`TaskCompletionResult`: Result of completion check
     - :func:`create_task_completion_stop_hook`: Factory for stop hooks
 
+Transcript Collection:
+    - :class:`TranscriptCollector`: Collects and logs SDK transcripts
+    - :class:`TranscriptCollectorConfig`: Configuration for transcript collection
+
 Model Utilities:
     - :data:`DEFAULT_MODEL`: Default Anthropic API model ID
     - :data:`DEFAULT_BEDROCK_MODEL`: Default Bedrock model ID
@@ -270,6 +279,7 @@ from ._task_completion import (
     TaskCompletionContext,
     TaskCompletionResult,
 )
+from ._transcript_collector import TranscriptCollector, TranscriptCollectorConfig
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
     ClaudeAgentSDKClientConfig,
@@ -324,6 +334,8 @@ __all__ = [
     "TaskCompletionChecker",
     "TaskCompletionContext",
     "TaskCompletionResult",
+    "TranscriptCollector",
+    "TranscriptCollectorConfig",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
     "create_task_completion_stop_hook",
