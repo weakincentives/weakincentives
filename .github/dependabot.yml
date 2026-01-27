@@ -1,0 +1,93 @@
+# Dependabot configuration for automated dependency updates
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Python dependencies (pyproject.toml)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "python"
+    reviewers:
+      - "weakincentives/maintainers"
+    groups:
+      # Group all dev dependencies together
+      dev-dependencies:
+        patterns:
+          - "pytest*"
+          - "ruff"
+          - "pyright"
+          - "ty"
+          - "bandit"
+          - "deptry"
+          - "pip-audit"
+          - "mdformat"
+          - "hypothesis"
+          - "vulture"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group runtime optional dependencies
+      adapters:
+        patterns:
+          - "openai"
+          - "litellm"
+          - "claude-agent-sdk"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group web/API dependencies
+      web:
+        patterns:
+          - "fastapi"
+          - "uvicorn"
+          - "markdown-it-py*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group contrib/tools optional dependencies
+      contrib:
+        patterns:
+          - "pyyaml"
+          - "asteval"
+          - "podman"
+          - "redis"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    reviewers:
+      - "weakincentives/maintainers"
+    groups:
+      # Group all GitHub Actions updates together
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
