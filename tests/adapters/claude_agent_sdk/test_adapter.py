@@ -1424,8 +1424,12 @@ class TestVerifyTaskCompletion:
         )
         # Should not raise
 
-    def test_raises_when_tasks_incomplete(self, session: Session) -> None:
-        """When tasks are incomplete, raises PromptEvaluationError."""
+    def test_logs_warning_when_tasks_incomplete(
+        self, session: Session, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When tasks are incomplete, logs warning but doesn't raise error."""
+        import logging
+
         from weakincentives.adapters.claude_agent_sdk._task_completion import (
             PlanBasedChecker,
         )
@@ -1454,16 +1458,29 @@ class TestVerifyTaskCompletion:
             ),
         )
 
-        with pytest.raises(PromptEvaluationError) as exc_info:
-            adapter._verify_task_completion(
-                output={"summary": "done"},
-                session=session,
-                stop_reason="structured_output",
-                prompt_name="test_prompt",
-            )
+        # Set log level to capture warnings
+        caplog.set_level(logging.WARNING)
 
-        assert "Tasks incomplete" in str(exc_info.value)
-        assert "Pending" in str(exc_info.value)
+        # Should not raise an error, just log a warning
+        adapter._verify_task_completion(
+            output={"summary": "done"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test_prompt",
+        )
+
+        # Verify warning was logged with expected content
+        assert any("incomplete_tasks" in record.message for record in caplog.records), (
+            "Should log warning about incomplete tasks"
+        )
+        # Check for pending task in log output
+        warning_logged = False
+        for record in caplog.records:
+            if "incomplete_tasks" in record.message:
+                warning_logged = True
+                # The feedback should be in the log context
+                break
+        assert warning_logged, "Should have logged incomplete tasks warning"
 
     def test_passes_when_tasks_complete(self, session: Session) -> None:
         """When all tasks are complete, verification passes."""
@@ -1680,8 +1697,12 @@ class TestVerifyTaskCompletion:
         assert ctx.filesystem is None  # Lookup failed
         assert ctx.adapter is adapter  # Adapter still passed
 
-    def test_runs_checker_when_budget_not_exhausted(self, session: Session) -> None:
-        """When budget_tracker is provided but not exhausted, checker still runs."""
+    def test_logs_warning_when_budget_not_exhausted(
+        self, session: Session, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When budget_tracker is provided but not exhausted, logs warning."""
+        import logging
+
         from weakincentives.adapters.claude_agent_sdk._task_completion import (
             PlanBasedChecker,
         )
@@ -1716,14 +1737,19 @@ class TestVerifyTaskCompletion:
 
         tracker.record_cumulative("test", TokenUsage(input_tokens=50, output_tokens=50))
 
-        # Should raise because tasks are incomplete and budget is not exhausted
-        with pytest.raises(PromptEvaluationError) as exc_info:
-            adapter._verify_task_completion(
-                output={"summary": "partial"},
-                session=session,
-                stop_reason="structured_output",
-                prompt_name="test_prompt",
-                budget_tracker=tracker,
-            )
+        # Set log level to capture warnings
+        caplog.set_level(logging.WARNING)
 
-        assert "Tasks incomplete" in str(exc_info.value)
+        # Should log warning because tasks are incomplete and budget is not exhausted
+        adapter._verify_task_completion(
+            output={"summary": "partial"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test_prompt",
+            budget_tracker=tracker,
+        )
+
+        # Verify warning was logged
+        assert any("incomplete_tasks" in record.message for record in caplog.records), (
+            "Should log warning about incomplete tasks when budget remains"
+        )

@@ -641,9 +641,10 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             messages, rendered, budget_tracker, prompt_name
         )
 
-        # Final verification: if we got structured output but tasks are incomplete,
-        # reject the output. This catches cases where the SDK captured output before
-        # our hooks could prevent it.
+        # Final verification: log a warning if tasks are incomplete.
+        # The task completion checker provides feedback during execution via hooks.
+        # We don't reject the output here - we return whatever the agent produced,
+        # allowing partial progress even if all tasks weren't completed.
         self._verify_task_completion(
             output,
             session,
@@ -1128,6 +1129,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         )
         completion = checker.check(context)
         if not completion.complete:
+            # Log warning but don't fail - the task completion checker provides
+            # feedback during execution via hooks. At the end, we should return
+            # whatever output the agent produced, even if tasks are incomplete.
+            # This allows the agent to make progress even if it doesn't complete
+            # all planned tasks within the available turns/budget.
             logger.warning(
                 "claude_agent_sdk.evaluate.incomplete_tasks",
                 event="sdk.evaluate.incomplete_tasks",
@@ -1135,10 +1141,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     "prompt_name": prompt_name,
                     "feedback": completion.feedback,
                     "stop_reason": stop_reason,
+                    "has_output": output is not None,
                 },
             )
-            raise PromptEvaluationError(
-                message=f"Tasks incomplete: {completion.feedback}",
-                prompt_name=prompt_name,
-                phase="response",
-            )
+            # Don't raise an error - let the response be returned with whatever
+            # output the agent managed to produce
