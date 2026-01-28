@@ -2594,13 +2594,18 @@ select:focus-visible {
    ENVIRONMENT
    ============================================================================ */
 
+.environment-view-container {
+  grid-template-columns: 1fr;
+  display: block;
+}
+
 .environment-card {
   height: 100%;
 }
 
 .environment-sections {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
   gap: 20px;
   padding: 20px;
   max-height: calc(100vh - 300px);
