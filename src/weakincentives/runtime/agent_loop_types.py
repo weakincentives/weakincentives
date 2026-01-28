@@ -178,9 +178,85 @@ class AgentLoopRequest[UserRequestT]:
     """Optional per-request debug bundle config. Overrides AgentLoopConfig.debug_bundle."""
 
 
+# ---------------------------------------------------------------------------
+# Session State Slice Types for Request/Response Capture
+# ---------------------------------------------------------------------------
+# These types are written to the session during agent loop execution,
+# allowing inspection of request/response data in the debug UI sessions view.
+
+
+@FrozenDataclass()
+class LoopRequestState[UserRequestT]:
+    """Session state capturing the incoming request after prepare().
+
+    This slice is published to the session immediately after prepare() is called,
+    allowing inspection of the request that initiated the agent loop execution.
+    """
+
+    request: AgentLoopRequest[UserRequestT]
+    """The incoming AgentLoopRequest object."""
+
+    event_id: UUID = field(default_factory=uuid4)
+    """Unique identifier for this state entry."""
+
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """Timestamp when this state was captured."""
+
+
+@FrozenDataclass()
+class LoopRawResponse[OutputT]:
+    """Session state capturing the response before finalize() transforms it.
+
+    This slice is published to the session after adapter evaluation completes
+    but before finalize() is called, capturing the raw adapter response.
+    """
+
+    prompt_name: str
+    """Name of the prompt that was evaluated."""
+
+    text: str | None
+    """Raw text response from the model."""
+
+    output: OutputT | None
+    """Parsed structured output before finalize() transformation."""
+
+    event_id: UUID = field(default_factory=uuid4)
+    """Unique identifier for this state entry."""
+
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """Timestamp when this state was captured."""
+
+
+@FrozenDataclass()
+class LoopFinalResponse[OutputT]:
+    """Session state capturing the response after finalize() transforms it.
+
+    This slice is published to the session after finalize() completes,
+    capturing the final output that will be returned to the caller.
+    """
+
+    prompt_name: str
+    """Name of the prompt that was evaluated."""
+
+    text: str | None
+    """Raw text response from the model."""
+
+    output: OutputT | None
+    """Final output after finalize() transformation."""
+
+    event_id: UUID = field(default_factory=uuid4)
+    """Unique identifier for this state entry."""
+
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """Timestamp when this state was captured."""
+
+
 __all__ = [
     "AgentLoopConfig",
     "AgentLoopRequest",
     "AgentLoopResult",
     "BundleContext",
+    "LoopFinalResponse",
+    "LoopRawResponse",
+    "LoopRequestState",
 ]

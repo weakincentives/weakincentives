@@ -858,14 +858,6 @@ class _DebugAppHandlers:
             raise HTTPException(status_code=404, detail="No error in bundle")
         return JSONResponse(error)
 
-    def get_request_input(self) -> JSONResponse:
-        """Return the request input."""
-        return JSONResponse(self._store.bundle.request_input)
-
-    def get_request_output(self) -> JSONResponse:
-        """Return the request output."""
-        return JSONResponse(self._store.bundle.request_output)
-
     def list_files(self) -> list[str]:
         """List files in the bundle."""
         return self._store.bundle.list_files()
@@ -942,8 +934,6 @@ def build_debug_app(store: BundleStore, logger: StructuredLogger) -> FastAPI:
     _ = app.get("/api/config")(handlers.get_config)
     _ = app.get("/api/metrics")(handlers.get_metrics)
     _ = app.get("/api/error")(handlers.get_error)
-    _ = app.get("/api/request/input")(handlers.get_request_input)
-    _ = app.get("/api/request/output")(handlers.get_request_output)
     _ = app.get("/api/files")(handlers.list_files)
     _ = app.get("/api/files/{file_path:path}")(handlers.get_file)
     _ = app.post("/api/reload")(handlers.reload)

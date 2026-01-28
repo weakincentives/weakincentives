@@ -171,14 +171,6 @@ def test_api_routes_expose_bundle_data(tmp_path: Path) -> None:
     values = [item["value"] for item in detail["items"]]
     assert set(values) == {"a", "b", "c"}
 
-    request_input = client.get("/api/request/input")
-    assert request_input.status_code == 200
-    assert request_input.json() == {"task": "test"}
-
-    request_output = client.get("/api/request/output")
-    assert request_output.status_code == 200
-    assert request_output.json() == {"status": "ok"}
-
 
 def test_slice_pagination_with_query_params(tmp_path: Path) -> None:
     bundle_path = _create_test_bundle(tmp_path, ["zero", "one", "two", "three"])

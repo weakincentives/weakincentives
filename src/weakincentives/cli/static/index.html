@@ -44,7 +44,7 @@
           </div>
           <div class="shortcuts-section">
             <h3>View</h3>
-            <div class="shortcut-row"><kbd>1</kbd>-<kbd>6</kbd><span>Switch tabs</span></div>
+            <div class="shortcut-row"><kbd>1</kbd>-<kbd>5</kbd><span>Switch tabs</span></div>
             <div class="shortcut-row"><kbd>[</kbd><span>Toggle sidebar</span></div>
             <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
             <div class="shortcut-row"><kbd>Esc</kbd><span>Close dialogs</span></div>
@@ -128,19 +128,12 @@
         Logs
         <kbd>3</kbd>
       </button>
-      <button class="main-tab" data-view="task">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-        </svg>
-        Task
-        <kbd>4</kbd>
-      </button>
       <button class="main-tab" data-view="filesystem">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
         </svg>
         Filesystem
-        <kbd>5</kbd>
+        <kbd>4</kbd>
       </button>
       <button class="main-tab" data-view="environment">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -380,57 +373,6 @@
           </div>
         </div>
         <div id="logs-list" class="logs-list"></div>
-      </section>
-    </main>
-
-    <!-- ==================== TASK VIEW ==================== -->
-    <main id="task-view" class="view-container hidden">
-      <aside class="sidebar">
-        <div class="panel">
-          <div class="panel-header">
-            <h2>Task</h2>
-          </div>
-          <div class="request-nav">
-            <button class="request-nav-item active" data-request-panel="input">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13"></line>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-              </svg>
-              Input
-            </button>
-            <button class="request-nav-item" data-request-panel="output">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="9 11 12 14 22 4"></polyline>
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-              </svg>
-              Output
-            </button>
-          </div>
-        </div>
-      </aside>
-      <section class="content">
-        <div class="card request-card">
-          <div class="card-header">
-            <div>
-              <p class="label">Task</p>
-              <p id="task-panel-title">Input</p>
-            </div>
-          </div>
-          <div class="viewer-toolbar">
-            <div class="viewer-controls">
-              <label class="inline-label">
-                <span>Depth</span>
-                <input id="task-depth-input" type="number" min="1" max="10" value="2" />
-              </label>
-              <div class="button-group">
-                <button id="task-expand-all" class="ghost" type="button">Expand all</button>
-                <button id="task-collapse-all" class="ghost" type="button">Collapse all</button>
-              </div>
-            </div>
-            <button id="task-copy" class="ghost" type="button">Copy JSON</button>
-          </div>
-          <div id="task-content" class="request-json-container"></div>
-        </div>
       </section>
     </main>
 
