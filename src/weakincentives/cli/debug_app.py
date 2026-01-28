@@ -62,7 +62,7 @@ _MARKDOWN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\*\*[^\s].+?\*\*"),
 )
 _MIN_MARKDOWN_LENGTH = 16
-_markdown = MarkdownIt("commonmark", {"linkify": True})
+_markdown = MarkdownIt("commonmark", {"linkify": True, "html": False})
 
 # pyright: reportUnusedFunction=false
 
