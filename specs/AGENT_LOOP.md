@@ -23,7 +23,7 @@ At `src/weakincentives/runtime/agent_loop.py`:
 | Method | Description |
 | --- | --- |
 | `prepare(request)` | Create `(Prompt, Session)` for request |
-| `finalize(prompt, session)` | Post-processing hook |
+| `finalize(prompt, session, output)` | Post-process output; returns transformed `OutputT` |
 | `execute(request)` | Full execution returning `(PromptResponse, Session)` |
 
 ### Request and Result Types
@@ -46,7 +46,7 @@ Request-level overrides config defaults. Fresh `BudgetTracker` per execution.
 1. Enter `with prompt.resources:` context
 1. Evaluate with adapter
 1. On `VisibilityExpansionRequired`: apply overrides to session, retry step 4
-1. `finalize(prompt, session)`
+1. `finalize(prompt, session, output)` → `OutputT` (post-processing/transformation)
 1. Exit context (cleanup)
 1. Return `AgentLoopResult` (with `output` on success, `error` on failure)
 
