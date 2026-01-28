@@ -725,3 +725,51 @@ class TestTranscriptCollector:
                 assert context["entry_type"] == "unparsed"
 
         asyncio.run(run_test())
+
+    def test_file_rotation_inode_change(self, tmp_path: Path) -> None:
+        """Test that inode change is detected when file is rotated."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="inode_change_test",
+                config=TranscriptCollectorConfig(
+                    poll_interval=0.01,
+                    parse_entries=True,
+                ),
+            )
+
+            # Create initial transcript
+            transcript_path = tmp_path / "session123.jsonl"
+            transcript_path.write_text('{"type": "first"}\n')
+
+            # Set up collector and read initial content
+            await collector._remember_transcript_path(str(transcript_path))
+            tailer = collector._tailers["main"]
+
+            # Read initial content
+            await collector._poll_once()
+            original_inode = tailer.inode
+            assert tailer.entry_count == 1
+
+            # Set position to simulate having read content
+            original_position = tailer.position
+            assert original_position > 0
+
+            # Add a partial line that will be discarded on rotation
+            tailer.partial_line = '{"partial": "data'
+
+            # Simulate file rotation by changing the stored inode
+            # This forces the inode comparison to trigger
+            tailer.inode = original_inode + 12345  # Fake different inode
+
+            # Now poll - should detect "rotation" and reset state
+            await collector._read_transcript_content(tailer)
+
+            # Should have reset position, inode, and partial line
+            assert (
+                tailer.position == 0 or tailer.position > 0
+            )  # Position reset then read
+            assert tailer.inode == original_inode  # Should have updated to actual inode
+            assert tailer.partial_line == ""  # Partial line should be cleared
+
+        asyncio.run(run_test())

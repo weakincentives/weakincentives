@@ -196,10 +196,16 @@ class _TestLoop(AgentLoop[_Request, _Output]):
         self.session_created = session
         return prompt, session
 
-    def finalize(self, prompt: Prompt[_Output], session: Session) -> None:
+    def finalize(
+        self,
+        prompt: Prompt[_Output],
+        session: Session,
+        output: _Output | None,
+    ) -> _Output | None:
         del prompt
         self.finalize_called = True
         _ = session
+        return output
 
 
 # =============================================================================
@@ -410,6 +416,81 @@ def test_loop_calls_finalize() -> None:
         loop.run(max_iterations=1, wait_time_seconds=0)
 
         assert loop.finalize_called
+    finally:
+        requests.close()
+        results.close()
+
+
+class _TransformingTestLoop(AgentLoop[_Request, _Output]):
+    """Test implementation that transforms output in finalize."""
+
+    def __init__(
+        self,
+        *,
+        adapter: ProviderAdapter[_Output],
+        requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]]
+        | FakeMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]],
+        config: AgentLoopConfig | None = None,
+    ) -> None:
+        super().__init__(adapter=adapter, requests=requests, config=config)
+        self._template = PromptTemplate[_Output](
+            ns="test",
+            key="test-prompt",
+            sections=[
+                MarkdownSection[_Params](
+                    title="Test",
+                    template="$content",
+                    key="test",
+                ),
+            ],
+        )
+
+    def prepare(
+        self,
+        request: _Request,
+        *,
+        experiment: object = None,
+    ) -> tuple[Prompt[_Output], Session]:
+        _ = experiment
+        prompt = Prompt(self._template).bind(_Params(content=request.message))
+        session = Session(tags={"loop": "test"})
+        return prompt, session
+
+    def finalize(
+        self,
+        prompt: Prompt[_Output],
+        session: Session,
+        output: _Output | None,
+    ) -> _Output | None:
+        del prompt, session
+        if output is None:
+            return None
+        # Transform the output by appending "-transformed" to result
+        return _Output(result=f"{output.result}-transformed")
+
+
+def test_loop_finalize_transforms_output() -> None:
+    """AgentLoop uses transformed output from finalize."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TransformingTestLoop(adapter=adapter, requests=requests)
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        # Output should be transformed by finalize
+        assert msgs[0].body.output == _Output(result="success-transformed")
+        msgs[0].acknowledge()
     finally:
         requests.close()
         results.close()
