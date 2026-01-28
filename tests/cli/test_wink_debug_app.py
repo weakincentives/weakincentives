@@ -1238,8 +1238,6 @@ def test_logs_with_pagination(tmp_path: Path) -> None:
 
 def test_api_environment_endpoint(tmp_path: Path) -> None:
     """Test the /api/environment endpoint returns environment data."""
-    import zipfile
-
     # Create a bundle with environment data
     bundle_id = str(uuid4())
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -1357,8 +1355,6 @@ def test_api_environment_endpoint_empty(tmp_path: Path) -> None:
 
 def test_api_environment_with_git_info(tmp_path: Path) -> None:
     """Test the /api/environment endpoint with git info."""
-    import zipfile
-
     bundle_id = str(uuid4())
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     zip_name = f"{bundle_id}_{timestamp}.zip"
@@ -1423,8 +1419,6 @@ def test_api_environment_with_git_info(tmp_path: Path) -> None:
 
 def test_api_environment_with_container_info(tmp_path: Path) -> None:
     """Test the /api/environment endpoint with container info."""
-    import zipfile
-
     bundle_id = str(uuid4())
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     zip_name = f"{bundle_id}_{timestamp}.zip"
@@ -1490,8 +1484,6 @@ def test_api_environment_with_container_info(tmp_path: Path) -> None:
 
 def test_api_environment_with_non_containerized(tmp_path: Path) -> None:
     """Test /api/environment when is_containerized is False."""
-    import zipfile
-
     bundle_id = str(uuid4())
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     zip_name = f"{bundle_id}_{timestamp}.zip"

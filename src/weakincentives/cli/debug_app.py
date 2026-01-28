@@ -582,9 +582,10 @@ class BundleStore:
         python_rows = self._db.execute("SELECT * FROM env_python LIMIT 1")
         if python_rows:
             row = python_rows[0]
+            version_info = row["version_info"]
             result["python"] = {
                 "version": row["version"],
-                "version_info": row["version_info"],
+                "version_info": json.loads(version_info) if version_info else None,
                 "implementation": row["implementation"],
                 "executable": row["executable"],
                 "prefix": row["prefix"],
@@ -598,6 +599,8 @@ class BundleStore:
         git_rows = self._db.execute("SELECT * FROM env_git LIMIT 1")
         if git_rows:
             row = git_rows[0]
+            remotes = row["remotes"]
+            tags = row["tags"]
             result["git"] = {
                 "repo_root": row["repo_root"],
                 "commit_sha": row["commit_sha"],
@@ -606,8 +609,8 @@ class BundleStore:
                 "is_dirty": bool(row["is_dirty"])
                 if row["is_dirty"] is not None
                 else None,
-                "remotes": row["remotes"],
-                "tags": row["tags"],
+                "remotes": json.loads(remotes) if remotes else None,
+                "tags": json.loads(tags) if tags else None,
             }
         else:
             result["git"] = None
