@@ -57,7 +57,14 @@ from uuid import UUID, uuid4
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
-from .agent_loop_types import AgentLoopConfig, AgentLoopRequest, AgentLoopResult
+from .agent_loop_types import (
+    AgentLoopConfig,
+    AgentLoopRequest,
+    AgentLoopResult,
+    LoopFinalResponse,
+    LoopRawResponse,
+    LoopRequestState,
+)
 from .dlq import DLQPolicy
 from .logging import StructuredLogger, bind_run_context, get_logger
 from .mailbox import Mailbox, Message
@@ -319,16 +326,17 @@ class AgentLoop[UserRequestT, OutputT](
         start_mono = time.monotonic()
 
         with BundleWriter(bundle_target, bundle_id=uuid4(), trigger="direct") as writer:
-            # Write request input
-            writer.write_request_input(
-                AgentLoopRequest(
-                    request=request,
-                    budget=budget,
-                    deadline=deadline,
-                    resources=resources,
-                    experiment=experiment,
-                )
+            # Create request event for tracking
+            request_event = AgentLoopRequest(
+                request=request,
+                budget=budget,
+                deadline=deadline,
+                resources=resources,
+                experiment=experiment,
             )
+
+            # Write request input
+            writer.write_request_input(request_event)
 
             # Prepare and execute
             response, session, prompt, budget_tracker = self._execute_for_bundle(
@@ -339,6 +347,7 @@ class AgentLoop[UserRequestT, OutputT](
                 heartbeat=heartbeat,
                 experiment=experiment,
                 writer=writer,
+                request_event=request_event,
             )
 
             ended_at = datetime.now(UTC)
@@ -378,9 +387,14 @@ class AgentLoop[UserRequestT, OutputT](
         heartbeat: Heartbeat | None,
         experiment: Experiment | None,
         writer: BundleWriter,
+        request_event: AgentLoopRequest[UserRequestT],
     ) -> tuple[PromptResponse[OutputT], Session, Prompt[OutputT], BudgetTracker | None]:
         """Execute within bundle context with log capture."""
         prompt, session = self.prepare(request, experiment=experiment)
+
+        # Publish request state to session after prepare()
+        _ = session.dispatch(LoopRequestState(request=request_event))
+
         writer.write_session_before(session)
         writer.set_prompt_info(
             ns=prompt.ns, key=prompt.key, adapter=self._get_adapter_name()
@@ -474,6 +488,9 @@ class AgentLoop[UserRequestT, OutputT](
             experiment=request_event.experiment,
         )
 
+        # Publish request state to session after prepare()
+        _ = session.dispatch(LoopRequestState(request=request_event))
+
         # Resolve and apply effective settings
         prompt, budget_tracker, deadline = self._resolve_settings(
             prompt,
@@ -552,8 +569,28 @@ class AgentLoop[UserRequestT, OutputT](
                         SetVisibilityOverride(path=path, visibility=visibility)
                     )
             else:
+                # Publish raw response before finalize()
+                _ = session.dispatch(
+                    LoopRawResponse(
+                        prompt_name=response.prompt_name,
+                        text=response.text,
+                        output=response.output,
+                    )
+                )
+
                 output = self.finalize(prompt, session, response.output)
-                return replace(response, output=output)
+                final_response = replace(response, output=output)
+
+                # Publish final response after finalize()
+                _ = session.dispatch(
+                    LoopFinalResponse(
+                        prompt_name=final_response.prompt_name,
+                        text=final_response.text,
+                        output=final_response.output,
+                    )
+                )
+
+                return final_response
 
     def _build_run_context(
         self,
@@ -673,6 +710,9 @@ class AgentLoop[UserRequestT, OutputT](
                     request_event.request,
                     experiment=request_event.experiment,
                 )
+
+                # Publish request state to session after prepare()
+                _ = session.dispatch(LoopRequestState(request=request_event))
 
                 # Write session before execution
                 writer.write_session_before(session)

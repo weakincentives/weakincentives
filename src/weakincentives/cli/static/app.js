@@ -49,11 +49,6 @@ const state = {
   logsTotalCount: 0,
   logsHasMore: false,
   logsLoading: false,
-  // Task state
-  taskView: "input",
-  taskInput: null,
-  taskOutput: null,
-  taskExpandDepth: 2,
   // Filesystem state
   allFiles: [],
   filesystemFiles: [],
@@ -87,7 +82,6 @@ const elements = {
   sessionsView: document.getElementById("sessions-view"),
   transcriptView: document.getElementById("transcript-view"),
   logsView: document.getElementById("logs-view"),
-  taskView: document.getElementById("task-view"),
   filesystemView: document.getElementById("filesystem-view"),
   // Sessions (slices)
   sliceFilter: document.getElementById("slice-filter"),
@@ -132,13 +126,6 @@ const elements = {
   logsEventChips: document.getElementById("logs-event-chips"),
   logsActiveFilters: document.getElementById("logs-active-filters"),
   logsActiveFiltersGroup: document.getElementById("logs-active-filters-group"),
-  // Task
-  taskPanelTitle: document.getElementById("task-panel-title"),
-  taskContent: document.getElementById("task-content"),
-  taskDepthInput: document.getElementById("task-depth-input"),
-  taskExpandAll: document.getElementById("task-expand-all"),
-  taskCollapseAll: document.getElementById("task-collapse-all"),
-  taskCopy: document.getElementById("task-copy"),
   // Filesystem
   filesystemFilter: document.getElementById("filesystem-filter"),
   filesystemList: document.getElementById("filesystem-list"),
@@ -245,7 +232,6 @@ function switchView(viewName) {
   elements.sessionsView.classList.toggle("hidden", viewName !== "sessions");
   elements.transcriptView.classList.toggle("hidden", viewName !== "transcript");
   elements.logsView.classList.toggle("hidden", viewName !== "logs");
-  elements.taskView.classList.toggle("hidden", viewName !== "task");
   elements.filesystemView.classList.toggle("hidden", viewName !== "filesystem");
   elements.environmentView.classList.toggle("hidden", viewName !== "environment");
 
@@ -256,8 +242,6 @@ function switchView(viewName) {
   } else if (viewName === "logs" && state.filteredLogs.length === 0) {
     loadLogFacets();
     loadLogs();
-  } else if (viewName === "task" && state.taskInput === null) {
-    loadTaskData();
   } else if (viewName === "filesystem" && state.allFiles.length === 0) {
     loadFilesystem();
   } else if (viewName === "environment" && state.environmentData === null) {
@@ -323,8 +307,6 @@ function resetViewState() {
   state.filteredLogs = [];
   state.logsTotalCount = 0;
   state.logsHasMore = false;
-  state.taskInput = null;
-  state.taskOutput = null;
   state.allFiles = [];
   state.filesystemFiles = [];
   state.selectedFile = null;
@@ -1199,85 +1181,6 @@ elements.logsScrollBottom.addEventListener("click", () => {
 });
 
 // ============================================================================
-// TASK
-// ============================================================================
-
-async function loadTaskData() {
-  try {
-    const [input, output] = await Promise.all([
-      fetchJSON("/api/request/input"),
-      fetchJSON("/api/request/output"),
-    ]);
-    state.taskInput = input;
-    state.taskOutput = output;
-    renderTaskData();
-  } catch (error) {
-    elements.taskContent.innerHTML = `<p class="muted">Failed to load task data: ${error.message}</p>`;
-  }
-}
-
-function renderTaskData() {
-  const data = state.taskView === "input" ? state.taskInput : state.taskOutput;
-  elements.taskPanelTitle.textContent = state.taskView === "input" ? "Input" : "Output";
-  elements.taskContent.innerHTML = "";
-
-  if (data === null || data === undefined) {
-    elements.taskContent.innerHTML = `<p class="muted">No data available</p>`;
-    return;
-  }
-
-  const container = document.createElement("div");
-  container.className = "tree-root";
-  container.appendChild(renderTree(data, ["task"], 0, "root"));
-  elements.taskContent.appendChild(container);
-}
-
-document.querySelectorAll(".request-nav-item").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".request-nav-item").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    state.taskView = btn.dataset.requestPanel;
-    renderTaskData();
-  });
-});
-
-elements.taskCopy.addEventListener("click", async () => {
-  const data = state.taskView === "input" ? state.taskInput : state.taskOutput;
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-    showToast("Copied to clipboard", "success");
-  } catch {
-    showToast("Failed to copy", "error");
-  }
-});
-
-elements.taskDepthInput.addEventListener("change", () => {
-  const value = Number(elements.taskDepthInput.value);
-  const depth = Number.isFinite(value) ? Math.max(1, Math.min(10, value)) : 2;
-  state.taskExpandDepth = depth;
-  elements.taskDepthInput.value = String(depth);
-  state.openPaths = new Set();
-  state.closedPaths = new Set();
-  renderTaskData();
-});
-
-elements.taskExpandAll.addEventListener("click", () => {
-  const data = state.taskView === "input" ? state.taskInput : state.taskOutput;
-  if (data) {
-    setOpenForAll([data], true);
-    renderTaskData();
-  }
-});
-
-elements.taskCollapseAll.addEventListener("click", () => {
-  const data = state.taskView === "input" ? state.taskInput : state.taskOutput;
-  if (data) {
-    setOpenForAll([data], false);
-    renderTaskData();
-  }
-});
-
-// ============================================================================
 // FILESYSTEM
 // ============================================================================
 
@@ -1548,9 +1451,9 @@ document.addEventListener("keydown", (e) => {
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
   // Number keys for tabs
-  if (e.key >= "1" && e.key <= "6") {
+  if (e.key >= "1" && e.key <= "5") {
     e.preventDefault();
-    const views = ["sessions", "transcript", "logs", "task", "filesystem", "environment"];
+    const views = ["sessions", "transcript", "logs", "filesystem", "environment"];
     switchView(views[parseInt(e.key, 10) - 1]);
     return;
   }
@@ -1795,12 +1698,7 @@ function renderTree(value, path, depth, label) {
 
     toggle.addEventListener("click", () => {
       setOpen(path, !shouldOpen(path, depth));
-      // Re-render the appropriate view based on active view
-      if (state.activeView === "task") {
-        renderTaskData();
-      } else {
-        renderItems(state.currentItems);
-      }
+      renderItems(state.currentItems);
     });
 
     header.appendChild(controls);

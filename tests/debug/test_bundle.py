@@ -765,6 +765,19 @@ class TestWriteExceptionHandling:
         # session_before is None because snapshot.slices was empty
         assert bundle.session_before is None
 
+    def test_write_session_after_empty_session(self, tmp_path: Path) -> None:
+        """Test session_after skips write when session has no slices."""
+        # Empty session with no dispatched events
+        session = Session()
+
+        with BundleWriter(tmp_path) as writer:
+            writer.write_session_after(session)
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        # session_after is None because snapshot.slices was empty
+        assert bundle.session_after is None
+
     def test_capture_logs_without_temp_dir(self, tmp_path: Path) -> None:
         """Test capture_logs returns immediately when temp_dir is None."""
         writer = BundleWriter(tmp_path)
