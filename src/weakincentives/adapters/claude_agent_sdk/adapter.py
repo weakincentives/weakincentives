@@ -51,8 +51,8 @@ from ._hooks import (
     create_task_completion_stop_hook,
     create_user_prompt_submit_hook,
 )
-from ._log_aggregator import ClaudeLogAggregator
 from ._task_completion import TaskCompletionContext
+from ._transcript_collector import TranscriptCollector, TranscriptCollectorConfig
 from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import EphemeralHome, IsolationConfig
@@ -581,14 +581,17 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
-        # Create log aggregator to monitor .claude directory for log files
-        log_aggregator = ClaudeLogAggregator(
-            claude_dir=ephemeral_home.claude_dir,
+        # Create transcript collector to monitor SDK transcripts
+        transcript_config = (
+            self._client_config.transcript_collection or TranscriptCollectorConfig()
+        )
+        collector = TranscriptCollector(
             prompt_name=prompt_name,
+            config=transcript_config,
         )
 
         try:
-            async with log_aggregator.run():
+            async with collector.run():
                 messages = await self._run_sdk_query(
                     sdk=sdk,
                     prompt_text=prompt_text,
@@ -598,6 +601,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     ephemeral_home=ephemeral_home,
                     effective_cwd=effective_cwd,
                     visibility_signal=visibility_signal,
+                    collector=collector,
                 )
         except VisibilityExpansionRequired:
             # Progressive disclosure: let this propagate to the caller
@@ -637,9 +641,10 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             messages, rendered, budget_tracker, prompt_name
         )
 
-        # Final verification: if we got structured output but tasks are incomplete,
-        # reject the output. This catches cases where the SDK captured output before
-        # our hooks could prevent it.
+        # Final verification: log a warning if tasks are incomplete.
+        # The task completion checker provides feedback during execution via hooks.
+        # We don't reject the output here - we return whatever the agent produced,
+        # allowing partial progress even if all tasks weren't completed.
         self._verify_task_completion(
             output,
             session,
@@ -712,6 +717,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         ephemeral_home: EphemeralHome,
         effective_cwd: str | None = None,
         visibility_signal: VisibilityExpansionSignal,
+        collector: TranscriptCollector,
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
         # Import the SDK's types
@@ -835,14 +841,41 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             "PreCompact",
             "Notification",
         ]
+
+        # Get collector hooks
+        collector_hooks = collector.hooks_config()
+
+        # Merge hooks - both adapter hooks (for tool bridging) and collector hooks
+        # (for transcript discovery) must receive callbacks
         options_kwargs["hooks"] = {
-            "PreToolUse": [HookMatcher(matcher=None, hooks=[pre_hook])],
-            "PostToolUse": [HookMatcher(matcher=None, hooks=[post_hook])],
-            "Stop": [HookMatcher(matcher=None, hooks=[stop_hook_fn])],
-            "UserPromptSubmit": [HookMatcher(matcher=None, hooks=[prompt_hook])],
-            "SubagentStart": [HookMatcher(matcher=None, hooks=[subagent_start_hook])],
-            "SubagentStop": [HookMatcher(matcher=None, hooks=[subagent_stop_hook])],
-            "PreCompact": [HookMatcher(matcher=None, hooks=[pre_compact_hook])],
+            "PreToolUse": [
+                HookMatcher(matcher=None, hooks=[pre_hook]),
+                *collector_hooks.get("PreToolUse", []),
+            ],
+            "PostToolUse": [
+                HookMatcher(matcher=None, hooks=[post_hook]),
+                *collector_hooks.get("PostToolUse", []),
+            ],
+            "Stop": [
+                HookMatcher(matcher=None, hooks=[stop_hook_fn]),
+                *collector_hooks.get("Stop", []),
+            ],
+            "UserPromptSubmit": [
+                HookMatcher(matcher=None, hooks=[prompt_hook]),
+                *collector_hooks.get("UserPromptSubmit", []),
+            ],
+            "SubagentStart": [
+                HookMatcher(matcher=None, hooks=[subagent_start_hook]),
+                *collector_hooks.get("SubagentStart", []),
+            ],
+            "SubagentStop": [
+                HookMatcher(matcher=None, hooks=[subagent_stop_hook]),
+                *collector_hooks.get("SubagentStop", []),
+            ],
+            "PreCompact": [
+                HookMatcher(matcher=None, hooks=[pre_compact_hook]),
+                *collector_hooks.get("PreCompact", []),
+            ],
             "Notification": [HookMatcher(matcher=None, hooks=[notification_hook])],
         }
 
@@ -1096,6 +1129,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         )
         completion = checker.check(context)
         if not completion.complete:
+            # Log warning but don't fail - the task completion checker provides
+            # feedback during execution via hooks. At the end, we should return
+            # whatever output the agent produced, even if tasks are incomplete.
+            # This allows the agent to make progress even if it doesn't complete
+            # all planned tasks within the available turns/budget.
             logger.warning(
                 "claude_agent_sdk.evaluate.incomplete_tasks",
                 event="sdk.evaluate.incomplete_tasks",
@@ -1103,10 +1141,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     "prompt_name": prompt_name,
                     "feedback": completion.feedback,
                     "stop_reason": stop_reason,
+                    "has_output": output is not None,
                 },
             )
-            raise PromptEvaluationError(
-                message=f"Tasks incomplete: {completion.feedback}",
-                prompt_name=prompt_name,
-                phase="response",
-            )
+            # Don't raise an error - let the response be returned with whatever
+            # output the agent managed to produce

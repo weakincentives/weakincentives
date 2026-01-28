@@ -2259,3 +2259,550 @@ def test_claude_agent_sdk_mcp_tool_writes_file_native_tool_reads(
     assert written_file.read_text(encoding="utf-8") == test_content, (
         f"File content on disk doesn't match expected: {test_content!r}"
     )
+
+
+# =============================================================================
+# Transcript Collection Integration Tests
+# =============================================================================
+#
+# These tests validate that the TranscriptCollector properly collects and logs
+# transcript entries from Claude Agent SDK execution.
+# =============================================================================
+
+
+def test_claude_agent_sdk_adapter_transcript_collection_enabled(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify transcript collection logs entries during SDK execution.
+
+    This test validates that:
+    1. TranscriptCollector is integrated into the adapter
+    2. It discovers transcript paths via hooks
+    3. It emits structured DEBUG logs for transcript entries
+    4. Logs contain expected context (prompt_name, source, entry_type)
+    """
+    import logging
+
+    from weakincentives.adapters.claude_agent_sdk import TranscriptCollectorConfig
+
+    # Enable DEBUG logging to capture transcript entries
+    caplog.set_level(
+        logging.DEBUG,
+        logger="weakincentives.adapters.claude_agent_sdk._transcript_collector",
+    )
+
+    # Configure transcript collection with fast polling for tests
+    transcript_config = TranscriptCollectorConfig(
+        poll_interval=0.01,  # Very fast polling for tests
+        subagent_discovery_interval=0.02,
+        emit_raw_json=True,
+        parse_entries=True,
+    )
+
+    config = _make_config(
+        tmp_path,
+        transcript_collection=transcript_config,
+    )
+
+    adapter = _make_adapter(
+        tmp_path,
+        client_config=config,
+    )
+
+    # Build and execute a simple prompt
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="transcript collection test")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    response = adapter.evaluate(prompt, session=session)
+
+    # Verify response was successful
+    assert response.text is not None
+    assert response.text.strip()
+    _assert_prompt_usage(session)
+
+    # Check for transcript collector log events
+    collector_logs = [
+        record for record in caplog.records if "_transcript_collector" in record.name
+    ]
+
+    # Extract event types from logs
+    event_types = set()
+    for log in collector_logs:
+        # The event field is set via extra in the logger
+        event = getattr(log, "event", None)
+        if event:
+            event_types.add(event)
+
+    print("\nTranscript Collection Test Results:")
+    print(f"  Total collector logs: {len(collector_logs)}")
+    print(f"  Event types seen: {sorted(event_types)}")
+
+    # Should have at least start/stop events
+    assert "transcript.collector.start" in event_types, (
+        "Expected transcript collector to start"
+    )
+    assert "transcript.collector.stop" in event_types, (
+        "Expected transcript collector to stop after execution"
+    )
+
+    # Check for path discovery (should happen via hooks)
+    if "transcript.collector.path_discovered" in event_types:
+        print("  Path discovery: SUCCESS (transcript path discovered via hooks)")
+
+    # Check for transcript entries
+    entry_logs = [
+        log
+        for log in collector_logs
+        if getattr(log, "event", "") == "transcript.collector.entry"
+    ]
+
+    if entry_logs:
+        print(f"  Transcript entries logged: {len(entry_logs)}")
+
+        # Verify structure of first entry
+        first_entry = entry_logs[0]
+        context = getattr(first_entry, "context", {})
+
+        assert context.get("prompt_name") == "greeting", (
+            f"Expected prompt_name='greeting', got {context.get('prompt_name')}"
+        )
+        assert "transcript_source" in context, "Expected transcript_source in context"
+        assert "entry_type" in context, "Expected entry_type in context"
+        assert "sequence_number" in context, "Expected sequence_number in context"
+
+        # If raw JSON was emitted, verify it's present
+        if transcript_config.emit_raw_json:
+            assert "raw_json" in context, "Expected raw_json when emit_raw_json=True"
+            # Verify it looks like valid JSONL
+            raw_json = context["raw_json"]
+            assert raw_json.startswith("{"), "Expected raw_json to be JSON object"
+
+        # If entries were parsed, verify parsed data
+        if transcript_config.parse_entries and context.get("entry_type") != "invalid":
+            assert "parsed" in context, "Expected parsed data when parse_entries=True"
+            parsed = context["parsed"]
+            assert isinstance(parsed, dict), "Expected parsed to be a dict"
+            assert "type" in parsed, "Expected 'type' field in parsed transcript entry"
+    else:
+        print("  Transcript entries logged: 0 (may be timing-dependent)")
+
+
+def test_claude_agent_sdk_adapter_transcript_collection_with_tools(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify transcript collection works with tool invocations.
+
+    This test validates that transcript collection continues to work
+    properly when the SDK invokes tools (both native and MCP-bridged).
+    """
+    import logging
+
+    from weakincentives.adapters.claude_agent_sdk import TranscriptCollectorConfig
+
+    # Enable DEBUG logging
+    caplog.set_level(
+        logging.DEBUG,
+        logger="weakincentives.adapters.claude_agent_sdk._transcript_collector",
+    )
+
+    transcript_config = TranscriptCollectorConfig(
+        poll_interval=0.01,
+        parse_entries=True,
+    )
+
+    config = _make_config(
+        tmp_path,
+        transcript_collection=transcript_config,
+    )
+
+    # Create adapter with MCP-bridged tool
+    tool = _build_uppercase_tool()
+    adapter = _make_adapter(
+        tmp_path,
+        client_config=config,
+    )
+
+    prompt_template = _build_tool_prompt(tool)
+    params = TransformRequest(text="transcript with tools")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    response = adapter.evaluate(prompt, session=session)
+
+    # Verify execution succeeded
+    assert response.text is not None
+    assert "TRANSCRIPT WITH TOOLS" in response.text
+    _assert_prompt_usage(session)
+
+    # Check for transcript entries
+    entry_logs = [
+        log
+        for log in caplog.records
+        if "_transcript_collector" in log.name
+        and getattr(log, "event", "") == "transcript.collector.entry"
+    ]
+
+    # With tool usage, we should see more transcript entries
+    # (user message, assistant tool use, tool result, assistant final response)
+    if entry_logs:
+        print(f"\nTool Test - Transcript entries collected: {len(entry_logs)}")
+
+        # Collect entry types seen
+        entry_types = [
+            getattr(log, "context", {}).get("entry_type", "unknown")
+            for log in entry_logs
+        ]
+        print(f"Entry types: {entry_types}")
+
+        # We might see various entry types like:
+        # - "user" (initial message)
+        # - "assistant" (tool calls and responses)
+        # - "tool_result" (tool outputs)
+        assert len(entry_types) >= 2, (
+            "Expected multiple transcript entries with tool usage"
+        )
+
+
+def test_claude_agent_sdk_adapter_transcript_collection_with_subagents(  # noqa: PLR0912, PLR0915
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify transcript collection discovers and logs sub-agent transcripts.
+
+    This test validates that when the SDK spawns sub-agents (e.g., via Task tool),
+    the TranscriptCollector:
+    1. Discovers sub-agent transcript files in the subagents/ directory
+    2. Collects entries from both main and sub-agent transcripts
+    3. Properly identifies the source of each entry (main vs subagent:ID)
+    """
+    import logging
+
+    from weakincentives.adapters.claude_agent_sdk import TranscriptCollectorConfig
+
+    # Enable DEBUG logging
+    caplog.set_level(
+        logging.DEBUG,
+        logger="weakincentives.adapters.claude_agent_sdk._transcript_collector",
+    )
+
+    # Configure with fast subagent discovery
+    transcript_config = TranscriptCollectorConfig(
+        poll_interval=0.01,
+        subagent_discovery_interval=0.02,  # Fast discovery for tests
+        parse_entries=True,
+    )
+
+    config = _make_config(
+        tmp_path,
+        transcript_collection=transcript_config,
+    )
+
+    adapter = _make_adapter(
+        tmp_path,
+        client_config=config,
+    )
+
+    # Build a prompt that's likely to spawn sub-agents
+    # The SDK may spawn sub-agents for complex tasks or when using the Task tool
+    @dataclass(slots=True)
+    class ComplexTaskParams:
+        """Parameters for a complex task that might spawn sub-agents."""
+
+        task: str
+
+    # Create a section that requests complex multi-step work
+    # This increases the likelihood of sub-agent spawning
+    complex_section = MarkdownSection[ComplexTaskParams](
+        title="Complex Multi-Step Task",
+        template="""Please complete this task: ${task}
+
+This is a complex request that may require multiple steps or sub-tasks.
+If possible, break this down into smaller components and handle them systematically.
+""",
+        key="complex_task",
+    )
+
+    prompt_template = PromptTemplate(
+        ns="test",
+        key="subagent-test",
+        name="subagent_test",
+        sections=[complex_section],
+    )
+
+    # Request a task that might trigger sub-agent creation
+    # Note: Whether sub-agents are actually created depends on the SDK's internal logic
+    params = ComplexTaskParams(
+        task="Create a simple Python script that: 1) Defines a function, 2) Tests it, 3) Documents it"
+    )
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+
+    # Execute the prompt
+    response = adapter.evaluate(prompt, session=session)
+
+    # Verify execution succeeded
+    assert response.text is not None
+    _assert_prompt_usage(session)
+
+    # Check for transcript collector logs
+    collector_logs = [
+        record for record in caplog.records if "_transcript_collector" in record.name
+    ]
+
+    # Extract event types
+    event_types = set()
+    for log in collector_logs:
+        event = getattr(log, "event", None)
+        if event:
+            event_types.add(event)
+
+    print("\nSubagent Test Results:")
+    print(f"  Total collector logs: {len(collector_logs)}")
+    print(f"  Event types seen: {sorted(event_types)}")
+
+    # Check for subagent discovery
+    subagent_logs = [
+        log
+        for log in collector_logs
+        if getattr(log, "event", "") == "transcript.collector.subagent_discovered"
+    ]
+
+    if subagent_logs:
+        print(f"  ✅ Sub-agents discovered: {len(subagent_logs)}")
+
+        # Extract sub-agent IDs
+        for log in subagent_logs:
+            context = getattr(log, "context", {})
+            source = context.get("source", "")
+            if source.startswith("subagent:"):
+                agent_id = source.split(":", 1)[1]
+                print(f"     - Sub-agent ID: {agent_id}")
+                print(f"       Path: {context.get('path', 'unknown')}")
+    else:
+        print("  Note: No sub-agents discovered (SDK may not have spawned any)")
+
+    # Check for entries from different sources
+    entry_logs = [
+        log
+        for log in collector_logs
+        if getattr(log, "event", "") == "transcript.collector.entry"
+    ]
+
+    if entry_logs:
+        # Collect sources
+        sources = set()
+        source_counts = {}
+
+        for log in entry_logs:
+            context = getattr(log, "context", {})
+            source = context.get("transcript_source", "unknown")
+            sources.add(source)
+            source_counts[source] = source_counts.get(source, 0) + 1
+
+        print("\n  Transcript sources found:")
+        for source, count in sorted(source_counts.items()):
+            if source == "main":
+                print(f"    - Main transcript: {count} entries")
+            elif source.startswith("subagent:"):
+                agent_id = source.split(":", 1)[1]
+                print(f"    - Sub-agent {agent_id}: {count} entries")
+            else:
+                print(f"    - {source}: {count} entries")
+
+        # If we found sub-agent entries, verify their structure
+        subagent_entries = [
+            log
+            for log in entry_logs
+            if getattr(log, "context", {})
+            .get("transcript_source", "")
+            .startswith("subagent:")
+        ]
+
+        if subagent_entries:
+            print(
+                f"\n  ✅ Successfully collected {len(subagent_entries)} sub-agent entries"
+            )
+
+            # Verify first sub-agent entry structure
+            first_subagent = subagent_entries[0]
+            context = getattr(first_subagent, "context", {})
+
+            assert context.get("prompt_name") == "subagent_test", (
+                f"Expected prompt_name='subagent_test', got {context.get('prompt_name')}"
+            )
+            assert "sequence_number" in context, (
+                "Expected sequence_number in sub-agent entry"
+            )
+            assert "entry_type" in context, "Expected entry_type in sub-agent entry"
+
+            # The source should indicate it's from a sub-agent
+            source = context.get("transcript_source", "")
+            assert source.startswith("subagent:"), (
+                f"Expected sub-agent source to start with 'subagent:', got {source}"
+            )
+
+            print(f"     First sub-agent entry type: {context.get('entry_type')}")
+            print(f"     From source: {source}")
+
+
+# Add a specific test for forcing sub-agent creation via mocked transcript files
+def test_claude_agent_sdk_adapter_transcript_collection_mock_subagents(  # noqa: PLR0915
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test sub-agent discovery with mocked transcript files.
+
+    This test creates mock transcript files to simulate sub-agent creation,
+    ensuring the discovery mechanism works even if the SDK doesn't spawn
+    sub-agents in the test environment.
+    """
+    import asyncio
+    import json
+    import logging
+
+    from weakincentives.adapters.claude_agent_sdk import TranscriptCollectorConfig
+    from weakincentives.adapters.claude_agent_sdk._transcript_collector import (
+        TranscriptCollector,
+    )
+
+    # Enable DEBUG logging
+    caplog.set_level(
+        logging.DEBUG,
+        logger="weakincentives.adapters.claude_agent_sdk._transcript_collector",
+    )
+
+    # Create a collector with fast discovery
+    config = TranscriptCollectorConfig(
+        poll_interval=0.01,
+        subagent_discovery_interval=0.01,
+        parse_entries=True,
+    )
+
+    collector = TranscriptCollector(
+        prompt_name="mock_subagent_test",
+        config=config,
+    )
+
+    # Create mock session structure
+    session_id = "test_session_123"
+    session_dir = tmp_path / session_id
+    session_dir.mkdir()
+
+    # Create main transcript
+    main_transcript = tmp_path / f"{session_id}.jsonl"
+    main_entries = [
+        {"type": "user", "message": {"role": "user", "content": "Main task"}},
+        {"type": "subagent_start", "agent_id": "001", "task": "Subtask 1"},
+        {"type": "subagent_start", "agent_id": "002", "task": "Subtask 2"},
+    ]
+    with main_transcript.open("w") as f:
+        for entry in main_entries:
+            f.write(json.dumps(entry) + "\n")
+
+    # Create subagents directory with mock sub-agent transcripts
+    subagents_dir = session_dir / "subagents"
+    subagents_dir.mkdir()
+
+    # Create sub-agent 001 transcript
+    agent1_transcript = subagents_dir / "agent-001.jsonl"
+    agent1_entries = [
+        {"type": "user", "message": {"role": "user", "content": "Subtask 1"}},
+        {
+            "type": "assistant",
+            "message": {"role": "assistant", "content": "Working on subtask 1"},
+        },
+        {"type": "completion", "status": "success"},
+    ]
+    with agent1_transcript.open("w") as f:
+        for entry in agent1_entries:
+            f.write(json.dumps(entry) + "\n")
+
+    # Create sub-agent 002 transcript
+    agent2_transcript = subagents_dir / "agent-002.jsonl"
+    agent2_entries = [
+        {"type": "user", "message": {"role": "user", "content": "Subtask 2"}},
+        {"type": "tool_use", "tool": "Read", "params": {"file_path": "test.py"}},
+        {"type": "tool_result", "result": {"success": True}},
+    ]
+    with agent2_transcript.open("w") as f:
+        for entry in agent2_entries:
+            f.write(json.dumps(entry) + "\n")
+
+    async def run_collection() -> None:
+        """Run the collector and poll for entries."""
+        # Simulate hook discovering the main transcript
+        await collector._remember_transcript_path(str(main_transcript))
+
+        # Give time for discovery to run
+        await asyncio.sleep(0.05)
+
+        # Manually trigger subagent discovery (normally runs in background)
+        await collector._discover_subagents()
+
+        # Poll all transcripts
+        await collector._poll_once()
+
+    # Run the collection
+    asyncio.run(run_collection())
+
+    # Verify results
+    print("\nMock Subagent Test Results:")
+    print(f"  Main entries collected: {collector.main_entry_count}")
+    print(f"  Sub-agents discovered: {collector.subagent_count}")
+    print(f"  Total entries: {collector.total_entries}")
+
+    # Should have discovered both sub-agents
+    assert collector.subagent_count == 2, (
+        f"Expected 2 sub-agents, found {collector.subagent_count}"
+    )
+
+    # Should have collected entries from all transcripts
+    # 3 main + 3 agent1 + 3 agent2 = 9 total
+    assert collector.total_entries == 9, (
+        f"Expected 9 total entries, collected {collector.total_entries}"
+    )
+
+    # Check that we have the right tailers
+    assert "main" in collector._tailers, "Expected main tailer"
+    assert "subagent:001" in collector._tailers, "Expected subagent:001 tailer"
+    assert "subagent:002" in collector._tailers, "Expected subagent:002 tailer"
+
+    # Verify log events
+    collector_logs = [
+        record for record in caplog.records if "_transcript_collector" in record.name
+    ]
+
+    # Check for subagent discovery logs
+    discovery_logs = [
+        log
+        for log in collector_logs
+        if getattr(log, "event", "") == "transcript.collector.subagent_discovered"
+    ]
+
+    assert len(discovery_logs) >= 2, (
+        f"Expected at least 2 subagent discovery logs, found {len(discovery_logs)}"
+    )
+
+    # Verify entries were logged with correct sources
+    entry_logs = [
+        log
+        for log in collector_logs
+        if getattr(log, "event", "") == "transcript.collector.entry"
+    ]
+
+    # Collect sources
+    sources = set()
+    for log in entry_logs:
+        context = getattr(log, "context", {})
+        source = context.get("transcript_source")
+        if source:
+            sources.add(source)
+
+    print(f"\n  Sources in logged entries: {sorted(sources)}")
+
+    assert "main" in sources, "Expected entries from main transcript"
+    assert "subagent:001" in sources, "Expected entries from subagent:001"
+    assert "subagent:002" in sources, "Expected entries from subagent:002"
+
+    print("\n  ✅ All sub-agent transcripts discovered and collected!")

@@ -56,7 +56,7 @@ def _create_throttle_error(
     )
 
 
-def normalize_sdk_error(  # noqa: C901 - complexity needed for comprehensive debug logging
+def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for comprehensive error handling
     error: Exception,
     prompt_name: str,
     *,
@@ -87,6 +87,72 @@ def normalize_sdk_error(  # noqa: C901 - complexity needed for comprehensive deb
             "stderr_preview": stderr_output[:1000] if stderr_output else None,
         },
     )
+
+    # Handle ExceptionGroup from TaskGroup cleanup (Python 3.11+)
+    if error_type in {"ExceptionGroup", "BaseExceptionGroup"}:
+        # Extract information about the nested exceptions
+        sub_exceptions: list[dict[str, str]] = []
+        if hasattr(error, "exceptions"):
+            # Access exceptions attribute (available on ExceptionGroup)
+            exceptions = getattr(error, "exceptions", [])
+            sub_exceptions = [
+                {
+                    "type": type(sub_error).__name__,
+                    "message": str(sub_error),
+                }
+                for sub_error in exceptions
+            ]
+
+        logger.debug(
+            "claude_agent_sdk.error.exception_group",
+            event="error.exception_group",
+            context={
+                "prompt_name": prompt_name,
+                "sub_exception_count": len(sub_exceptions),
+                "sub_exceptions": sub_exceptions,
+                "stderr_output": stderr_output,
+            },
+        )
+
+        # Check if all sub-exceptions are CLIConnectionError during cleanup
+        all_cli_connection_errors = all(
+            exc["type"] == "CLIConnectionError"
+            and "not ready for writing" in exc["message"]
+            for exc in sub_exceptions
+        )
+
+        if all_cli_connection_errors:
+            # This is the TaskGroup cleanup race condition
+            return PromptEvaluationError(
+                message=(
+                    f"SDK cleanup error: Transport closed while processing "
+                    f"{len(sub_exceptions)} pending control requests. "
+                    f"This may occur when sub-agents are interrupted during "
+                    f"structured output validation."
+                ),
+                prompt_name=prompt_name,
+                phase="response",
+                provider_payload={
+                    "error_type": "TaskGroupCleanupError",
+                    "sub_exception_count": len(sub_exceptions),
+                    "stderr": stderr_output,
+                }
+                if stderr_output
+                else None,
+            )
+
+        # Generic ExceptionGroup handling
+        return PromptEvaluationError(
+            message=str(error),
+            prompt_name=prompt_name,
+            phase="request",
+            provider_payload={
+                "sub_exceptions": sub_exceptions,
+                "stderr": stderr_output,
+            }
+            if sub_exceptions or stderr_output
+            else None,
+        )
 
     if error_type == "CLINotFoundError":
         logger.debug(

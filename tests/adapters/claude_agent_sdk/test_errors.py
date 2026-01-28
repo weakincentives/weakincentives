@@ -208,3 +208,92 @@ class TestNormalizeSDKError:
         assert isinstance(result, PromptEvaluationError)
         assert result.provider_payload is not None
         assert result.provider_payload["stderr"] == "Unexpected stderr output"
+
+    def test_exception_group_with_cli_connection_errors(self) -> None:
+        """ExceptionGroup with CLIConnectionError during cleanup is handled."""
+        # Create mock sub-exceptions
+        sub_error1 = MockCLIConnectionError("ProcessTransport is not ready for writing")
+        sub_error2 = MockCLIConnectionError("ProcessTransport is not ready for writing")
+
+        # Create ExceptionGroup (Python 3.11+)
+        error = ExceptionGroup(
+            "unhandled errors in a TaskGroup (2 sub-exceptions)",
+            [sub_error1, sub_error2],
+        )
+
+        result = normalize_sdk_error(error, "test_prompt")
+
+        assert isinstance(result, PromptEvaluationError)
+        assert "SDK cleanup error" in result.message
+        assert "Transport closed while processing" in result.message
+        assert "2 pending control requests" in result.message
+        assert result.phase == "response"
+        assert result.prompt_name == "test_prompt"
+        # Check that provider_payload is None when no stderr_output provided
+        assert result.provider_payload is None
+
+    def test_exception_group_with_mixed_errors(self) -> None:
+        """ExceptionGroup with mixed error types is handled generically."""
+        # Create mock sub-exceptions of different types
+        sub_error1 = MockCLIConnectionError("Connection error")
+        sub_error2 = RuntimeError("Some other error")
+
+        # Create ExceptionGroup
+        error = ExceptionGroup(
+            "Multiple errors occurred",
+            [sub_error1, sub_error2],
+        )
+
+        result = normalize_sdk_error(error, "test_prompt")
+
+        assert isinstance(result, PromptEvaluationError)
+        # The error message includes the sub-exception count
+        assert result.message == "Multiple errors occurred (2 sub-exceptions)"
+        assert result.phase == "request"
+        assert result.prompt_name == "test_prompt"
+        assert result.provider_payload is not None
+        assert "sub_exceptions" in result.provider_payload
+        assert len(result.provider_payload["sub_exceptions"]) == 2
+        assert (
+            result.provider_payload["sub_exceptions"][0]["type"] == "CLIConnectionError"
+        )
+        assert result.provider_payload["sub_exceptions"][1]["type"] == "RuntimeError"
+
+    def test_exception_group_without_exceptions_attribute(self) -> None:
+        """ExceptionGroup without exceptions attribute is handled."""
+
+        # Create a mock ExceptionGroup without the exceptions attribute
+        class MockExceptionGroup(Exception):
+            pass
+
+        MockExceptionGroup.__name__ = "ExceptionGroup"
+        error = MockExceptionGroup("Some exception group")
+
+        result = normalize_sdk_error(error, "test_prompt")
+
+        assert isinstance(result, PromptEvaluationError)
+        # Empty sub_exceptions list is treated as all CLI connection errors
+        assert "SDK cleanup error" in result.message
+        assert "0 pending control requests" in result.message
+        assert result.phase == "response"
+        assert result.provider_payload is None  # No stderr_output
+
+    def test_exception_group_with_stderr_output(self) -> None:
+        """ExceptionGroup includes stderr_output in payload."""
+        sub_error = MockCLIConnectionError("ProcessTransport is not ready for writing")
+        error = ExceptionGroup(
+            "unhandled errors in a TaskGroup (1 sub-exception)",
+            [sub_error],
+        )
+
+        result = normalize_sdk_error(
+            error, "test_prompt", stderr_output="Debug output from SDK"
+        )
+
+        assert isinstance(result, PromptEvaluationError)
+        assert "SDK cleanup error" in result.message
+        assert result.phase == "response"
+        assert result.provider_payload is not None
+        assert result.provider_payload.get("stderr") == "Debug output from SDK"
+        assert result.provider_payload["error_type"] == "TaskGroupCleanupError"
+        assert result.provider_payload["sub_exception_count"] == 1

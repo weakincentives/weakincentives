@@ -135,6 +135,9 @@ class HookStats:
     subagent_count: int = 0
     """Number of subagents spawned during this execution."""
 
+    in_subagent: bool = False
+    """True when currently executing within a sub-agent context."""
+
     compact_count: int = 0
     """Number of context compaction events during this execution."""
 
@@ -609,7 +612,15 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         # This ensures completion logic (continue: false) always runs and final
         # outputs aren't ignored when a feedback trigger fires.
         if data.tool_name == "StructuredOutput":
-            if task_completion_checker is not None:
+            # Only apply task completion checker to main agent, not sub-agents
+            # Sub-agents (spawned via Task tool) should not be subject to
+            # the parent agent's task completion requirements.
+            # The in_subagent flag is set by SubagentStart hook and cleared by
+            # SubagentStop hook to track when we're executing within a sub-agent.
+            if (
+                task_completion_checker is not None
+                and not hook_context.stats.in_subagent
+            ):
                 result = _check_task_completion(data.tool_input)
                 if not result.complete:
                     # Tasks incomplete - provide feedback via additionalContext
@@ -962,6 +973,7 @@ def create_subagent_start_hook(
         _ = sdk_context
 
         hook_context.stats.subagent_count += 1
+        hook_context.stats.in_subagent = True
         payload = input_data if isinstance(input_data, dict) else {}
 
         # Extract subagent details for logging
@@ -1008,6 +1020,9 @@ def create_subagent_stop_hook(
     ) -> dict[str, Any]:
         _ = tool_use_id
         _ = sdk_context
+
+        # Clear the sub-agent flag when exiting sub-agent context
+        hook_context.stats.in_subagent = False
 
         payload = input_data if isinstance(input_data, dict) else {}
 

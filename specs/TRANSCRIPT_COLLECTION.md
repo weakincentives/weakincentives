@@ -7,7 +7,7 @@ session and all sub-agent sessions. Replaces the generic log aggregator with a
 focused system that captures structured transcript entries as DEBUG-level logs
 in WINK.
 
-**Implementation:** Replaces `src/weakincentives/adapters/claude_agent_sdk/_log_aggregator.py`
+**Implementation:** `src/weakincentives/adapters/claude_agent_sdk/_transcript_collector.py`
 
 ## Background
 
