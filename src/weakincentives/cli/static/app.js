@@ -1118,19 +1118,6 @@ function renderTranscript() {
   state.transcriptEntries.forEach((entry, index) => {
     elements.transcriptList.appendChild(createTranscriptEntryElement(entry, index));
   });
-
-  if (state.transcriptHasMore) {
-    const loadMoreContainer = document.createElement("div");
-    loadMoreContainer.className = "logs-load-more";
-    const remaining = state.transcriptTotalCount - state.transcriptEntries.length;
-    loadMoreContainer.innerHTML = `
-      <button class="ghost logs-load-more-btn" type="button">
-        Load more (${remaining} remaining)
-      </button>
-    `;
-    loadMoreContainer.querySelector("button").addEventListener("click", loadMoreTranscript);
-    elements.transcriptList.appendChild(loadMoreContainer);
-  }
 }
 
 // Transcript filter events
@@ -1564,20 +1551,6 @@ function renderLogs() {
   state.filteredLogs.forEach((log, index) => {
     elements.logsList.appendChild(createLogEntryElement(log, index));
   });
-
-  // Add "Load more" button if there are more logs
-  if (state.logsHasMore) {
-    const loadMoreContainer = document.createElement("div");
-    loadMoreContainer.className = "logs-load-more";
-    const remaining = state.logsTotalCount - state.filteredLogs.length;
-    loadMoreContainer.innerHTML = `
-      <button class="ghost logs-load-more-btn" type="button">
-        Load more (${remaining} remaining)
-      </button>
-    `;
-    loadMoreContainer.querySelector("button").addEventListener("click", loadMoreLogs);
-    elements.logsList.appendChild(loadMoreContainer);
-  }
 }
 
 // Logs filter events
