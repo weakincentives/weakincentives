@@ -198,6 +198,70 @@ def _parse_log_row(row: sqlite3.Row) -> Mapping[str, JSONValue]:
     }
 
 
+def _build_transcript_filters(
+    filters: Mapping[str, str | None],
+) -> tuple[str, list[Any]]:
+    """Build WHERE clause and params for transcript filtering.
+
+    Args:
+        filters: Dict with keys: source, entry_type, search, exclude_source, exclude_entry_type
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    _add_in_filter(
+        conditions,
+        params,
+        "transcript_source",
+        _split_csv(filters.get("source")),
+    )
+    _add_in_filter(
+        conditions,
+        params,
+        "entry_type",
+        _split_csv(filters.get("entry_type")),
+    )
+    _add_not_in_filter(
+        conditions,
+        params,
+        "transcript_source",
+        _split_csv(filters.get("exclude_source")),
+    )
+    _add_not_in_filter(
+        conditions,
+        params,
+        "entry_type",
+        _split_csv(filters.get("exclude_entry_type")),
+    )
+
+    search = filters.get("search")
+    if search:
+        conditions.append("(content LIKE ? OR raw_json LIKE ? OR parsed LIKE ?)")
+        pattern = f"%{search}%"
+        params.extend([pattern, pattern, pattern])
+
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+    return where_clause, params
+
+
+def _parse_transcript_row(row: sqlite3.Row) -> Mapping[str, JSONValue]:
+    """Parse a transcript row into a dictionary."""
+    return {
+        "rowid": row[0],
+        "timestamp": row[1],
+        "prompt_name": row[2],
+        "transcript_source": row[3],
+        "sequence_number": row[4],
+        "entry_type": row[5],
+        "role": row[6],
+        "content": row[7],
+        "tool_name": row[8],
+        "tool_use_id": row[9],
+        "raw_json": row[10],
+        "parsed": row[11],
+    }
+
+
 class BundleStore:
     """Manages the active bundle via SQLite database.
 
@@ -346,6 +410,28 @@ class BundleStore:
         where_clause, params = _build_log_filters(filters)
         return self._execute_log_query(where_clause, params, offset, limit)
 
+    def get_transcript(  # noqa: PLR0913
+        self,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+        source: str | None = None,
+        entry_type: str | None = None,
+        search: str | None = None,
+        exclude_source: str | None = None,
+        exclude_entry_type: str | None = None,
+    ) -> Mapping[str, JSONValue]:
+        """Get transcript entries with filtering."""
+        filters = {
+            "source": source,
+            "entry_type": entry_type,
+            "search": search,
+            "exclude_source": exclude_source,
+            "exclude_entry_type": exclude_entry_type,
+        }
+        where_clause, params = _build_transcript_filters(filters)
+        return self._execute_transcript_query(where_clause, params, offset, limit)
+
     def _execute_log_query(
         self,
         where_clause: str,
@@ -372,6 +458,37 @@ class BundleStore:
 
         rows = self._db.execute(query, query_params)
         entries = [_parse_log_row(row) for row in rows]
+        return {"entries": entries, "total": total}
+
+    def _execute_transcript_query(
+        self,
+        where_clause: str,
+        params: list[Any],
+        offset: int,
+        limit: int | None,
+    ) -> Mapping[str, JSONValue]:
+        count_query = f"SELECT COUNT(*) FROM transcript {where_clause}"  # nosec B608
+        count_rows = self._db.execute(count_query, list(params))
+        total = count_rows[0][0]
+
+        query = (
+            "SELECT rowid, timestamp, prompt_name, transcript_source, "
+            "sequence_number, entry_type, role, content, tool_name, tool_use_id, "
+            "raw_json, parsed "
+            f"FROM transcript {where_clause} "  # nosec B608
+            "ORDER BY rowid"
+        )
+        query_params = list(params)
+
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            query_params.extend([limit, offset])
+        elif offset > 0:
+            query += " LIMIT -1 OFFSET ?"
+            query_params.append(offset)
+
+        rows = self._db.execute(query, query_params)
+        entries = [_parse_transcript_row(row) for row in rows]
         return {"entries": entries, "total": total}
 
     def get_log_facets(self) -> Mapping[str, JSONValue]:
@@ -413,6 +530,32 @@ class BundleStore:
         ]
 
         return {"loggers": loggers, "events": events, "levels": levels}
+
+    def get_transcript_facets(self) -> Mapping[str, JSONValue]:
+        """Get unique transcript sources and entry types for filter suggestions."""
+        source_rows = self._db.execute("""
+            SELECT transcript_source, COUNT(*) as count
+            FROM transcript
+            WHERE transcript_source IS NOT NULL AND transcript_source != ''
+            GROUP BY transcript_source
+            ORDER BY count DESC
+        """)
+        sources: list[Mapping[str, JSONValue]] = [
+            {"name": row[0], "count": row[1]} for row in source_rows
+        ]
+
+        entry_type_rows = self._db.execute("""
+            SELECT entry_type, COUNT(*) as count
+            FROM transcript
+            WHERE entry_type IS NOT NULL AND entry_type != ''
+            GROUP BY entry_type
+            ORDER BY count DESC
+        """)
+        entry_types: list[Mapping[str, JSONValue]] = [
+            {"name": row[0], "count": row[1]} for row in entry_type_rows
+        ]
+
+        return {"sources": sources, "entry_types": entry_types}
 
     def list_bundles(self) -> list[Mapping[str, JSONValue]]:
         """List all bundles in the root directory."""
@@ -561,6 +704,32 @@ class _DebugAppHandlers:
         """Return unique loggers, events, and levels for filter UI."""
         return self._store.get_log_facets()
 
+    def get_transcript(  # noqa: PLR0913
+        self,
+        *,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int | None, Query(ge=0)] = None,
+        source: Annotated[str | None, Query()] = None,
+        entry_type: Annotated[str | None, Query()] = None,
+        search: Annotated[str | None, Query()] = None,
+        exclude_source: Annotated[str | None, Query()] = None,
+        exclude_entry_type: Annotated[str | None, Query()] = None,
+    ) -> Mapping[str, JSONValue]:
+        """Return transcript entries from the bundle."""
+        return self._store.get_transcript(
+            offset=offset,
+            limit=limit,
+            source=source,
+            entry_type=entry_type,
+            search=search,
+            exclude_source=exclude_source,
+            exclude_entry_type=exclude_entry_type,
+        )
+
+    def get_transcript_facets(self) -> Mapping[str, JSONValue]:
+        """Return unique transcript sources and entry types for filter UI."""
+        return self._store.get_transcript_facets()
+
     def get_config(self) -> JSONResponse:
         """Return the bundle config."""
         config = self._store.bundle.config
@@ -660,6 +829,8 @@ def build_debug_app(store: BundleStore, logger: StructuredLogger) -> FastAPI:
     _ = app.get("/api/slices/{encoded_slice_type}")(handlers.get_slice)
     _ = app.get("/api/logs")(handlers.get_logs)
     _ = app.get("/api/logs/facets")(handlers.get_log_facets)
+    _ = app.get("/api/transcript")(handlers.get_transcript)
+    _ = app.get("/api/transcript/facets")(handlers.get_transcript_facets)
     _ = app.get("/api/config")(handlers.get_config)
     _ = app.get("/api/metrics")(handlers.get_metrics)
     _ = app.get("/api/error")(handlers.get_error)

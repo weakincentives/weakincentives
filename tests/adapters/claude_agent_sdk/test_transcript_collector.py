@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import tempfile
 from pathlib import Path
@@ -622,6 +623,105 @@ class TestTranscriptCollector:
                 ]
                 assert len(entry_calls) > 0
                 context = entry_calls[0][1]["context"]
+                assert context["entry_type"] == "unparsed"
+
+        asyncio.run(run_test())
+
+    def test_hook_callback_without_transcript_path(
+        self, collector: TranscriptCollector
+    ) -> None:
+        """Hook callback returns and does not discover without transcript_path."""
+        result = asyncio.run(
+            collector.hook_callback(
+                input_data={},
+                tool_use_id=None,
+                context=None,
+            )
+        )
+        assert result == {}
+        assert collector._main_transcript_path is None
+
+    def test_poll_loop_exits_when_not_running(
+        self, collector: TranscriptCollector
+    ) -> None:
+        """Polling loop should exit immediately when _running is False."""
+        assert collector._running is False
+        asyncio.run(collector._poll_loop())
+
+    def test_context_manager_handles_missing_task_refs(
+        self, collector: TranscriptCollector
+    ) -> None:
+        """Context manager stop path handles missing task refs."""
+
+        async def run_test() -> None:
+            async with collector.run():
+                poll_task = collector._poll_task
+                discovery_task = collector._discovery_task
+                assert poll_task is not None
+                assert discovery_task is not None
+
+                # Simulate losing references to the tasks before exit.
+                collector._poll_task = None
+                collector._discovery_task = None
+
+            # Clean up tasks since collector.run() couldn't cancel them.
+            for task in (poll_task, discovery_task):
+                if task is None or task.done():
+                    continue
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(run_test())
+
+    def test_read_transcript_content_no_bytes_read(self, tmp_path: Path) -> None:
+        """Read path should handle empty reads without emitting entries."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="max_read_bytes_zero_test",
+                config=TranscriptCollectorConfig(max_read_bytes=0),
+            )
+
+            transcript_path = tmp_path / "session123.jsonl"
+            transcript_path.write_text('{"type": "user"}\n')
+            await collector._remember_transcript_path(str(transcript_path))
+            tailer = collector._tailers["main"]
+            assert tailer.position == 0
+            assert tailer.entry_count == 0
+
+            await collector._read_transcript_content(tailer)
+
+            # With max_read_bytes=0, no bytes are read and no updates occur.
+            assert tailer.position == 0
+            assert tailer.entry_count == 0
+
+        asyncio.run(run_test())
+
+    def test_emit_entry_without_raw_json(self, tmp_path: Path) -> None:
+        """Emit path omits raw_json when disabled."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="emit_raw_json_false_test",
+                config=TranscriptCollectorConfig(
+                    emit_raw_json=False, parse_entries=False
+                ),
+            )
+
+            transcript_path = tmp_path / "session123.jsonl"
+            transcript_path.write_text('{"type": "user"}\n')
+            await collector._remember_transcript_path(str(transcript_path))
+            tailer = collector._tailers["main"]
+            tailer.entry_count = 1
+
+            with patch(
+                "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
+            ) as mock_logger:
+                await collector._emit_entry(tailer, '{"type": "user"}')
+                mock_logger.debug.assert_called()
+                context = mock_logger.debug.call_args[1]["context"]
+                assert "raw_json" not in context
                 assert context["entry_type"] == "unparsed"
 
         asyncio.run(run_test())

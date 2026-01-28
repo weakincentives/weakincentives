@@ -57,11 +57,14 @@ JSON data:
   "hints": {
     "json_extraction": [
       "json_extract(context, '$.tool_name')",
+      "json_extract(params, '$.command')",
       "json_extract(context, '$.content')",
-      "json_extract(params, '$.command')"
+      "json_extract(parsed, '$.message.content')",
+      "json_extract(parsed, '$.tool_use_id')"
     ],
     "common_queries": {
-      "native_tools": "SELECT seq, json_extract(context, '$.content') ...",
+      "native_tools": "SELECT * FROM native_tool_calls ORDER BY timestamp",
+      "transcript": "SELECT transcript_source, sequence_number, entry_type, role, content FROM transcript ORDER BY rowid",
       "tool_timeline": "SELECT * FROM tool_timeline WHERE duration_ms > 1000",
       "error_context": "SELECT timestamp, message, context FROM logs WHERE level = 'ERROR'"
     }
@@ -79,6 +82,7 @@ These tables are always present:
 |-------|--------|------------------|
 | `manifest` | `manifest.json` | Bundle ID, status, timestamps |
 | `logs` | `logs/app.jsonl` | All log entries with event names and context |
+| `transcript` | derived from logs | Transcript entries from TranscriptCollector |
 | `tool_calls` | derived from logs | Tool invocations with params, results, timing |
 | `errors` | aggregated | All errors from logs, error.json, and failed tools |
 | `session_slices` | `session/after.jsonl` | Session state items |
@@ -113,7 +117,8 @@ Pre-built views for common analysis patterns:
 | View | Description |
 |------|-------------|
 | `tool_timeline` | Tool calls ordered by timestamp with extracted commands |
-| `native_tool_calls` | Claude Code native tools (Bash, Read, Write) from log aggregator |
+| `native_tool_calls` | Native tool calls from transcripts (and legacy log aggregator) |
+| `transcript_entries` | TranscriptCollector entries extracted from logs |
 | `error_summary` | Errors with truncated tracebacks |
 
 Use views directly in queries:
@@ -122,6 +127,7 @@ Use views directly in queries:
 SELECT * FROM tool_timeline WHERE duration_ms > 1000
 SELECT * FROM error_summary
 SELECT * FROM native_tool_calls LIMIT 20
+SELECT * FROM transcript_entries LIMIT 20
 ```
 
 ## Common Queries
@@ -182,21 +188,33 @@ WHERE event = 'tool.execution.complete'
 
 ### Querying Native Tool Calls
 
-When using Claude Code, native tool calls (Bash, Read, Write, etc.) are
-captured via the log aggregator. The `logs` table includes a `seq` column for
-these events, enabling range queries:
+Native tool calls (Bash, Read, Write, etc.) are captured via transcripts (and
+legacy log aggregator events in older bundles). Use the `native_tool_calls`
+view to query them consistently:
 
 ```sql
 -- Get native tool logs by sequence number
-SELECT seq, json_extract(context, '$.content') as content
-FROM logs
-WHERE event = 'log_aggregator.log_line'
-  AND seq BETWEEN 100 AND 200
-ORDER BY seq
+SELECT sequence_number, source, tool_name, content
+FROM native_tool_calls
+WHERE sequence_number BETWEEN 100 AND 200
+ORDER BY sequence_number
 ```
 
-The `seq` column is only populated for `log_aggregator.log_line` events; it's
-NULL for other log entries.
+The `logs.seq` column is populated for events that include
+`context.sequence_number` (e.g. legacy `log_aggregator.log_line`,
+`transcript.collector.entry`); it's NULL for other log entries.
+
+### Querying Transcripts
+
+When using the Claude Agent SDK adapter with transcript collection enabled,
+each transcript entry is emitted as a structured log event and normalized into
+the `transcript` table (the `transcript_entries` view is an alias):
+
+```sql
+SELECT transcript_source, sequence_number, entry_type, role, content
+FROM transcript
+ORDER BY rowid
+```
 
 ### Token Usage
 
@@ -351,6 +369,11 @@ ORDER BY total_ms DESC
 ```sql
 -- Timeline of all tool calls
 SELECT * FROM tool_timeline
+
+-- Transcript timeline
+SELECT transcript_source, sequence_number, entry_type, role, content
+FROM transcript
+ORDER BY rowid
 
 -- For Claude Code native tools
 SELECT * FROM native_tool_calls

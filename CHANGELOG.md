@@ -2,6 +2,13 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Debugging
+
+- `wink query` normalizes TranscriptCollector logs into a `transcript` table and updates `native_tool_calls` to include transcript tool uses.
+- `wink debug` surfaces a Transcript tab (filters, search, raw entry drilldowns) backed by `/api/transcript`.
+
 ## v0.23.0 - 2026-01-25
 
 *Commits reviewed: 2026-01-23 (5274d9d) through 2026-01-24 (6f62164)*
