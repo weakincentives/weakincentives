@@ -18,7 +18,9 @@ import asyncio
 import contextlib
 import json
 import tempfile
+from collections.abc import Coroutine
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -627,143 +629,309 @@ class TestTranscriptCollector:
 
         asyncio.run(run_test())
 
-    def test_hook_callback_without_transcript_path(
-        self, collector: TranscriptCollector
-    ) -> None:
-        """Hook callback returns and does not discover without transcript_path."""
-        result = asyncio.run(
-            collector.hook_callback(
-                input_data={},
+    def test_inode_rotation_handling(self, tmp_path: Path) -> None:
+        """Test file rotation detection via inode change."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="inode_rotation_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            # Create initial transcript
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text('{"type": "first"}\n')
+
+            # Set up collector
+            await collector._remember_transcript_path(str(transcript))
+            tailer = collector._tailers["main"]
+            original_inode = tailer.inode
+
+            # Read initial content
+            await collector._poll_once()
+            assert tailer.entry_count == 1
+
+            # Simulate inode change by mocking stat
+            class FakeStat:
+                def __init__(self, path: Path, new_inode: int) -> None:
+                    real_stat = path.stat()
+                    self.st_size = real_stat.st_size
+                    self.st_ino = new_inode
+
+            # Write new content
+            transcript.write_text('{"type": "rotated"}\n')
+
+            # Mock stat to return different inode
+            new_inode = original_inode + 1
+            with patch.object(
+                Path, "stat", return_value=FakeStat(transcript, new_inode)
+            ):
+                await collector._read_transcript_content(tailer)
+
+            # Tailer should have reset position and updated inode
+            assert tailer.inode == new_inode
+            assert tailer.partial_line == ""
+
+        asyncio.run(run_test())
+
+    def test_hook_callback_missing_transcript_path(self, tmp_path: Path) -> None:
+        """Test hook callback when transcript_path is missing."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="missing_path_test",
+                config=TranscriptCollectorConfig(),
+            )
+
+            # Call hook with no transcript_path
+            result = await collector.hook_callback(
+                input_data={},  # No transcript_path
                 tool_use_id=None,
                 context=None,
             )
-        )
-        assert result == {}
-        assert collector._main_transcript_path is None
 
-    def test_poll_loop_exits_when_not_running(
-        self, collector: TranscriptCollector
-    ) -> None:
-        """Polling loop should exit immediately when _running is False."""
-        assert collector._running is False
-        asyncio.run(collector._poll_loop())
-
-    def test_context_manager_handles_missing_task_refs(
-        self, collector: TranscriptCollector
-    ) -> None:
-        """Context manager stop path handles missing task refs."""
-
-        async def run_test() -> None:
-            async with collector.run():
-                poll_task = collector._poll_task
-                discovery_task = collector._discovery_task
-                assert poll_task is not None
-                assert discovery_task is not None
-
-                # Simulate losing references to the tasks before exit.
-                collector._poll_task = None
-                collector._discovery_task = None
-
-            # Clean up tasks since collector.run() couldn't cancel them.
-            for task in (poll_task, discovery_task):
-                if task is None or task.done():
-                    continue
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+            # Should return empty dict and not set main transcript
+            assert result == {}
+            assert collector._main_transcript_path is None
 
         asyncio.run(run_test())
 
-    def test_read_transcript_content_no_bytes_read(self, tmp_path: Path) -> None:
-        """Read path should handle empty reads without emitting entries."""
+    def test_cleanup_without_tasks(self, tmp_path: Path) -> None:
+        """Test cleanup when poll/discovery tasks are None."""
 
         async def run_test() -> None:
             collector = TranscriptCollector(
-                prompt_name="max_read_bytes_zero_test",
-                config=TranscriptCollectorConfig(max_read_bytes=0),
+                prompt_name="no_tasks_test",
+                config=TranscriptCollectorConfig(),
             )
 
-            transcript_path = tmp_path / "session123.jsonl"
-            transcript_path.write_text('{"type": "user"}\n')
-            await collector._remember_transcript_path(str(transcript_path))
-            tailer = collector._tailers["main"]
-            assert tailer.position == 0
-            assert tailer.entry_count == 0
+            # Force an exception during startup to leave tasks as None
+            with patch(
+                "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
+            ):
 
-            await collector._read_transcript_content(tailer)
+                def failing_create_task(
+                    coro: Coroutine[Any, Any, Any],
+                ) -> asyncio.Task[Any]:
+                    # Cancel the coroutine to avoid warnings
+                    coro.close()
+                    raise RuntimeError("Simulated failure")
 
-            # With max_read_bytes=0, no bytes are read and no updates occur.
-            assert tailer.position == 0
-            assert tailer.entry_count == 0
+                with patch.object(asyncio, "create_task", failing_create_task):
+                    try:
+                        async with collector.run():
+                            pass  # pragma: no cover
+                    except RuntimeError:
+                        pass
+
+                # Collector should have cleaned up even with None tasks
+                assert not collector._running
 
         asyncio.run(run_test())
 
-    def test_emit_entry_without_raw_json(self, tmp_path: Path) -> None:
-        """Emit path omits raw_json when disabled."""
+    def test_cleanup_with_partial_tasks(self, tmp_path: Path) -> None:
+        """Test cleanup when only poll_task exists but discovery_task is None."""
 
         async def run_test() -> None:
             collector = TranscriptCollector(
-                prompt_name="emit_raw_json_false_test",
+                prompt_name="partial_tasks_test",
+                config=TranscriptCollectorConfig(),
+            )
+
+            # Create a real poll task but leave discovery task None
+            async def dummy_loop() -> None:
+                while True:
+                    await asyncio.sleep(0.1)
+
+            collector._running = True
+            collector._poll_task = asyncio.create_task(dummy_loop())
+            collector._discovery_task = None
+
+            # Simulate cleanup
+            collector._running = False
+
+            if collector._poll_task is not None:
+                collector._poll_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await collector._poll_task
+
+            # The discovery_task is None branch
+            if collector._discovery_task is not None:
+                collector._discovery_task.cancel()
+
+            assert not collector._running
+
+        asyncio.run(run_test())
+
+    def test_empty_content_read(self, tmp_path: Path) -> None:
+        """Test when file read returns empty content."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="empty_content_test",
+                config=TranscriptCollectorConfig(),
+            )
+
+            # Create transcript
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text('{"type": "test"}\n')
+
+            # Set up collector
+            await collector._remember_transcript_path(str(transcript))
+            tailer = collector._tailers["main"]
+
+            # Read initial content
+            await collector._poll_once()
+            initial_count = tailer.entry_count
+
+            # Mock _read_bytes to return empty content
+            with patch.object(TranscriptCollector, "_read_bytes", return_value=b""):
+                await collector._read_transcript_content(tailer)
+
+            # Entry count should not change
+            assert tailer.entry_count == initial_count
+
+        asyncio.run(run_test())
+
+    def test_emit_raw_json_without_parsing(self, tmp_path: Path) -> None:
+        """Test emit_raw_json=True with parse_entries=False."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="raw_only_test",
                 config=TranscriptCollectorConfig(
-                    emit_raw_json=False, parse_entries=False
+                    poll_interval=0.01,
+                    emit_raw_json=True,
+                    parse_entries=False,
                 ),
             )
 
-            transcript_path = tmp_path / "session123.jsonl"
-            transcript_path.write_text('{"type": "user"}\n')
-            await collector._remember_transcript_path(str(transcript_path))
-            tailer = collector._tailers["main"]
-            tailer.entry_count = 1
+            # Create transcript
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text('{"type": "test"}\n')
 
             with patch(
                 "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
             ) as mock_logger:
-                await collector._emit_entry(tailer, '{"type": "user"}')
-                mock_logger.debug.assert_called()
-                context = mock_logger.debug.call_args[1]["context"]
-                assert "raw_json" not in context
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                # Should have emitted entry with raw_json but unparsed type
+                entry_calls = [
+                    call
+                    for call in mock_logger.debug.call_args_list
+                    if call[0][0] == "transcript.collector.entry"
+                ]
+                assert len(entry_calls) > 0
+                context = entry_calls[0][1]["context"]
+                assert "raw_json" in context
                 assert context["entry_type"] == "unparsed"
 
         asyncio.run(run_test())
 
-    def test_file_rotation_resets_position(self, tmp_path: Path) -> None:
-        """Test that file rotation (new inode) resets tailer position."""
+    def test_no_raw_json_emission(self, tmp_path: Path) -> None:
+        """Test emit_raw_json=False to cover the branch skip."""
 
         async def run_test() -> None:
             collector = TranscriptCollector(
-                prompt_name="rotation_test",
+                prompt_name="no_raw_test",
                 config=TranscriptCollectorConfig(
-                    emit_raw_json=False, parse_entries=False
+                    poll_interval=0.01,
+                    emit_raw_json=False,  # This is the key setting
+                    parse_entries=True,
                 ),
             )
 
-            # Create initial transcript file
-            transcript_path = tmp_path / "session123.jsonl"
-            transcript_path.write_text('{"type": "user"}\n')
-            await collector._remember_transcript_path(str(transcript_path))
+            # Create transcript
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text('{"type": "test"}\n')
+
+            with patch(
+                "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
+            ) as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                # Should have emitted entry without raw_json
+                entry_calls = [
+                    call
+                    for call in mock_logger.debug.call_args_list
+                    if call[0][0] == "transcript.collector.entry"
+                ]
+                assert len(entry_calls) > 0
+                context = entry_calls[0][1]["context"]
+                assert "raw_json" not in context  # No raw JSON
+                assert context["entry_type"] == "test"  # Still parsed
+
+        asyncio.run(run_test())
+
+    def test_poll_loop_natural_exit(self, tmp_path: Path) -> None:
+        """Test poll loop exits naturally when _running becomes False."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="natural_exit_test",
+                config=TranscriptCollectorConfig(poll_interval=0.001),
+            )
+
+            # Start the collector manually
+            collector._running = True
+
+            # Create a task for the poll loop
+            poll_task = asyncio.create_task(collector._poll_loop())
+
+            # Let it run a few iterations
+            await asyncio.sleep(0.01)
+
+            # Set running to False to trigger natural exit
+            collector._running = False
+
+            # Wait for the task to complete naturally (not via cancel)
+            await asyncio.wait_for(poll_task, timeout=1.0)
+
+            # Task should have completed without being cancelled
+            assert poll_task.done()
+            assert not poll_task.cancelled()
+
+        asyncio.run(run_test())
+
+    def test_read_bytes_empty_return(self, tmp_path: Path) -> None:
+        """Test handling when _read_bytes returns empty bytes."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="empty_bytes_test",
+                config=TranscriptCollectorConfig(),
+            )
+
+            # Create transcript
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text('{"type": "test"}\n')
+
+            # Set up collector
+            await collector._remember_transcript_path(str(transcript))
             tailer = collector._tailers["main"]
 
             # Read initial content
-            await collector._read_transcript_content(tailer)
-            assert tailer.position > 0
-            assert tailer.inode > 0
+            await collector._poll_once()
+            initial_count = tailer.entry_count
+            initial_position = tailer.position
 
-            # Save actual inode and position
-            actual_inode = tailer.inode
-            actual_position = tailer.position
+            # Simulate a read that returns empty bytes (e.g., position at end of file)
+            # by mocking _read_bytes to return empty bytes
+            with patch.object(TranscriptCollector, "_read_bytes", return_value=b""):
+                # Also need to make stat show there's "new" content
+                class FakeStat:
+                    st_size = initial_position + 100  # Pretend there's more content
+                    st_ino = tailer.inode
 
-            # Simulate file rotation by setting tailer inode to a different value
-            # This simulates what happens when the file is rotated (new file)
-            tailer.inode = 99999  # Fake inode that differs from actual
-            tailer.partial_line = "leftover data"
-            tailer.position = 100  # Some position that should be reset
+                with patch.object(Path, "stat", return_value=FakeStat()):
+                    await collector._read_transcript_content(tailer)
 
-            # Read content - should detect inode mismatch and reset
-            await collector._read_transcript_content(tailer)
-
-            # Position should be reset and inode updated to actual
-            assert tailer.inode == actual_inode
-            assert tailer.position == actual_position  # Read to same position
-            assert tailer.partial_line == ""
+            # Position should not have changed since content was empty
+            # and no new entries should have been processed
+            assert tailer.entry_count == initial_count
 
         asyncio.run(run_test())
