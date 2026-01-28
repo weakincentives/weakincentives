@@ -169,18 +169,19 @@ class SessionSnapshotter:
         Raises:
             SnapshotRestoreError: If the snapshot contains unregistered types.
         """
-        registered_slices = self._get_registered_slice_types()
-        missing = [
-            slice_type
-            for slice_type in snapshot.slices
-            if slice_type not in registered_slices
-        ]
-        if missing:
-            missing_names = ", ".join(sorted(cls.__qualname__ for cls in missing))
-            msg = f"Slice types not registered: {missing_names}"
-            raise SnapshotRestoreError(msg)
-
         with self._lock:
+            # Validate inside lock to prevent race with concurrent registration
+            registered_slices = self._get_registered_slice_types()
+            missing = [
+                slice_type
+                for slice_type in snapshot.slices
+                if slice_type not in registered_slices
+            ]
+            if missing:
+                missing_names = ", ".join(sorted(cls.__qualname__ for cls in missing))
+                msg = f"Slice types not registered: {missing_names}"
+                raise SnapshotRestoreError(msg)
+
             for slice_type in registered_slices:
                 policy = snapshot.policies.get(
                     slice_type,
