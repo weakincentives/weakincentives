@@ -61,14 +61,14 @@ class VirtualScroller {
   setupLoadMoreObserver() {
     this.loadMoreObserver = new IntersectionObserver(
       (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting && this.hasMore && !this.isLoading && this.onLoadMore) {
-            this.isLoading = true;
-            this.onLoadMore().finally(() => {
-              this.isLoading = false;
-            });
-          }
-        });
+        // Check if any entry is intersecting (avoid race condition with multiple entries)
+        const anyIntersecting = entries.some((e) => e.isIntersecting);
+        if (anyIntersecting && this.hasMore && !this.isLoading && this.onLoadMore) {
+          this.isLoading = true;
+          this.onLoadMore().finally(() => {
+            this.isLoading = false;
+          });
+        }
       },
       { root: this.container, rootMargin: "200px" }
     );
@@ -78,6 +78,8 @@ class VirtualScroller {
     this.items = items;
     this.totalCount = totalCount;
     this.hasMore = hasMore;
+    // Clear stale height measurements when data changes
+    this.itemHeights.clear();
     this.render();
   }
 
@@ -287,8 +289,14 @@ class VirtualScroller {
     this.container.removeEventListener("scroll", this.scrollHandler);
     this.resizeObserver.disconnect();
     this.loadMoreObserver.disconnect();
+
+    // Explicitly remove rendered elements from DOM to prevent memory leaks
+    this.renderedItems.forEach((element) => element.remove());
     this.renderedItems.clear();
     this.itemHeights.clear();
+
+    // Clear container content
+    this.container.innerHTML = "";
   }
 }
 
@@ -1584,7 +1592,7 @@ elements.logsLoggerFilter.addEventListener("input", () => {
 });
 
 elements.logsEventFilter.addEventListener("input", () => {
-  state.logsEventChipFilter = elements.logsEventChipFilter.value;
+  state.logsEventChipFilter = elements.logsEventFilter.value;
   renderLogFilterChips();
 });
 
