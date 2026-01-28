@@ -553,9 +553,7 @@ class AgentLoop[UserRequestT, OutputT](
                     )
             else:
                 output = self.finalize(prompt, session, response.output)
-                if output is not response.output:
-                    response = replace(response, output=output)
-                return response
+                return replace(response, output=output)
 
     def _build_run_context(
         self,
