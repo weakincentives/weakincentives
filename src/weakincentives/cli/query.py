@@ -43,7 +43,7 @@ class QueryError(WinkError, RuntimeError):
 _MAX_COLUMN_WIDTH = 50
 
 # Schema version for cache invalidation - increment when schema changes
-_SCHEMA_VERSION = 2  # v2: added seq column, views, hints
+_SCHEMA_VERSION = 4  # v4: transcript table + updated native tool view
 
 
 @FrozenDataclass()
@@ -174,6 +174,273 @@ def _is_tool_event(event: str) -> bool:
         "call" in event_lower
         or "result" in event_lower
         or "execut" in event_lower  # matches both "execute" and "execution"
+    )
+
+
+@pure
+def _safe_json_dumps(value: object) -> str:
+    """Serialize value to JSON, falling back to str on failure."""
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+@pure
+def _stringify_transcript_tool_use(mapping: Mapping[str, object]) -> str:
+    name = mapping.get("name")
+    tool_id = mapping.get("id") or mapping.get("tool_use_id")
+    input_val = mapping.get("input")
+    parts: list[str] = []
+    if name:
+        parts.append(str(name))
+    if tool_id:
+        parts.append(str(tool_id))
+    if input_val is not None:
+        parts.append(_safe_json_dumps(input_val))
+    detail = " ".join(parts).strip()
+    return f"[tool_use] {detail}".strip()
+
+
+@pure
+def _stringify_transcript_mapping(mapping: Mapping[str, object]) -> str:
+    for key in ("text", "content", "thinking", "summary"):
+        if key not in mapping:
+            continue
+        extracted = _stringify_transcript_content(mapping.get(key))
+        if extracted:
+            return extracted
+    if mapping.get("type") == "tool_use":
+        return _stringify_transcript_tool_use(mapping)
+    return _safe_json_dumps(mapping)
+
+
+@pure
+def _stringify_transcript_content(value: object) -> str:
+    """Extract a readable string from transcript content blocks."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        items = cast("list[object]", value)
+        parts = (_stringify_transcript_content(item) for item in items)
+        return "\n".join(part for part in parts if part)
+    if isinstance(value, Mapping):
+        return _stringify_transcript_mapping(cast("Mapping[str, object]", value))
+    return str(value)
+
+
+@pure
+def _extract_tool_use_from_content(content: object) -> tuple[str, str]:
+    """Extract tool name and ID from a message content block."""
+    candidates: list[Mapping[str, object]] = []
+    if isinstance(content, Mapping):
+        candidates.append(cast("Mapping[str, object]", content))
+    elif isinstance(content, list):
+        items = cast("list[object]", content)
+        candidates.extend(
+            cast("Mapping[str, object]", item)
+            for item in items
+            if isinstance(item, Mapping)
+        )
+
+    for candidate in candidates:
+        if candidate.get("type") == "tool_use":
+            name = candidate.get("name")
+            tool_id = candidate.get("id") or candidate.get("tool_use_id")
+            return (
+                str(name) if name is not None else "",
+                str(tool_id) if tool_id is not None else "",
+            )
+    return "", ""
+
+
+@pure
+def _extract_transcript_details(
+    parsed: Mapping[str, object],
+    entry_type: str,
+) -> tuple[str, str, str, str]:
+    """Extract role, content, tool_name, tool_use_id from parsed transcript."""
+    role, content, tool_name, tool_use_id = _extract_transcript_message_details(parsed)
+    if entry_type == "tool_result":
+        content, tool_name, tool_use_id = _apply_tool_result_details(
+            parsed,
+            content=content,
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+        )
+    content = _apply_transcript_content_fallbacks(parsed, entry_type, content)
+    return role, content, tool_name, tool_use_id
+
+
+@pure
+def _extract_transcript_message_details(
+    parsed: Mapping[str, object],
+) -> tuple[str, str, str, str]:
+    role = ""
+    content = ""
+    tool_name = ""
+    tool_use_id = ""
+
+    message_raw = parsed.get("message")
+    if not isinstance(message_raw, Mapping):
+        return role, content, tool_name, tool_use_id
+
+    message = cast("Mapping[str, object]", message_raw)
+    role_val = message.get("role")
+    if isinstance(role_val, str):
+        role = role_val
+    content = _stringify_transcript_content(message.get("content"))
+    tool_name, tool_use_id = _extract_tool_use_from_content(message.get("content"))
+    return role, content, tool_name, tool_use_id
+
+
+@pure
+def _apply_tool_result_details(
+    parsed: Mapping[str, object],
+    *,
+    content: str,
+    tool_name: str,
+    tool_use_id: str,
+) -> tuple[str, str, str]:
+    resolved_tool_use_id = tool_use_id
+    tool_id_val = parsed.get("tool_use_id")
+    if isinstance(tool_id_val, str):
+        resolved_tool_use_id = resolved_tool_use_id or tool_id_val
+
+    resolved_tool_name = tool_name
+    name_val = parsed.get("tool_name")
+    if isinstance(name_val, str):
+        resolved_tool_name = resolved_tool_name or name_val
+
+    resolved_content = content
+    if not resolved_content:
+        resolved_content = _stringify_transcript_content(parsed.get("content"))
+
+    return resolved_content, resolved_tool_name, resolved_tool_use_id
+
+
+@pure
+def _apply_transcript_content_fallbacks(
+    parsed: Mapping[str, object],
+    entry_type: str,
+    content: str,
+) -> str:
+    if content:
+        return content
+
+    if entry_type == "thinking":
+        content = _stringify_transcript_content(parsed.get("thinking"))
+    elif entry_type == "summary":
+        content = _stringify_transcript_content(parsed.get("summary"))
+    elif entry_type == "system":
+        content = _stringify_transcript_content(
+            parsed.get("details") or parsed.get("event")
+        )
+    else:
+        content = _stringify_transcript_content(parsed.get("content"))
+
+    if not content:
+        content = _stringify_transcript_content(parsed)
+    return content
+
+
+@pure
+def _extract_transcript_parsed_obj(
+    context: Mapping[str, object],
+    raw_json: str | None,
+) -> Mapping[str, object] | None:
+    parsed_raw = context.get("parsed")
+    if isinstance(parsed_raw, Mapping):
+        return cast("Mapping[str, object]", parsed_raw)
+    if raw_json is None:
+        return None
+    try:
+        parsed_candidate = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed_candidate, Mapping):
+        return cast("Mapping[str, object]", parsed_candidate)
+    return None
+
+
+@pure
+def _coerce_int(value: object) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+@pure
+def _coerce_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+@pure
+def _extract_transcript_details_tuple(
+    parsed: Mapping[str, object] | None,
+    entry_type: str,
+) -> tuple[str, str, str, str, str, str | None]:
+    if parsed is None:
+        return entry_type, "", "", "", "", None
+    resolved_entry_type = str(parsed.get("type") or entry_type)
+    role, content, tool_name, tool_use_id = _extract_transcript_details(
+        parsed,
+        resolved_entry_type,
+    )
+    return (
+        resolved_entry_type,
+        role,
+        content,
+        tool_name,
+        tool_use_id,
+        _safe_json_dumps(parsed),
+    )
+
+
+@pure
+def _extract_transcript_row(
+    entry: Mapping[str, object],
+) -> (
+    tuple[str, str, str, int | None, str, str, str, str, str, str | None, str | None]
+    | None
+):
+    """Extract a row for the transcript table from a log entry."""
+    if entry.get("event") != "transcript.collector.entry":
+        return None
+
+    ctx_raw = entry.get("context")
+    if not isinstance(ctx_raw, Mapping):
+        return None
+    ctx = cast("Mapping[str, object]", ctx_raw)
+
+    prompt_name = str(ctx.get("prompt_name") or "")
+    transcript_source = str(ctx.get("transcript_source") or "")
+    entry_type = str(ctx.get("entry_type") or "unknown")
+
+    sequence_number = _coerce_int(ctx.get("sequence_number"))
+    raw_json = _coerce_str(ctx.get("raw_json"))
+    parsed_obj = _extract_transcript_parsed_obj(ctx, raw_json)
+
+    resolved_entry_type, role, content, tool_name, tool_use_id, parsed_json = (
+        _extract_transcript_details_tuple(parsed_obj, entry_type)
+    )
+    if not content:
+        content = raw_json or ""
+
+    timestamp = str(entry.get("timestamp") or "")
+
+    return (
+        timestamp,
+        prompt_name,
+        transcript_source,
+        sequence_number,
+        resolved_entry_type,
+        role,
+        content,
+        tool_name,
+        tool_use_id,
+        raw_json,
+        parsed_json,
     )
 
 
@@ -512,6 +779,7 @@ class QueryDatabase(Closeable):
         # Core tables
         self._build_manifest_table(conn)
         self._build_logs_table(conn)
+        self._build_transcript_table(conn)
         self._build_tool_calls_table(conn)
         self._build_errors_table(conn)
         self._build_session_slices_table(conn)
@@ -597,35 +865,97 @@ class QueryDatabase(Closeable):
             if not line.strip():
                 continue
             try:
-                entry: dict[str, Any] = json.loads(line)
-                # Extract sequence number from log_aggregator events
-                seq: int | None = None
-                ctx_raw = entry.get("context", {})
-                if (
-                    isinstance(ctx_raw, dict)
-                    and entry.get("event") == "log_aggregator.log_line"
-                ):
-                    ctx = cast("dict[str, Any]", ctx_raw)
-                    seq_val: Any = ctx.get("sequence_number")
-                    if isinstance(seq_val, int):
-                        seq = seq_val
-                _ = conn.execute(
-                    """
-                    INSERT INTO logs (timestamp, level, logger, event, message, context, seq)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        entry.get("timestamp", ""),
-                        entry.get("level", ""),
-                        entry.get("logger", ""),
-                        entry.get("event", ""),
-                        entry.get("message", ""),
-                        json.dumps(entry.get("context", {})),
-                        seq,
-                    ),
-                )
+                entry_raw: object = json.loads(line)
             except json.JSONDecodeError:
                 continue
+
+            if not isinstance(entry_raw, dict):
+                continue
+            entry = cast("dict[str, Any]", entry_raw)
+
+            # Extract sequence number from events that include it in context
+            seq: int | None = None
+            ctx_raw = entry.get("context", {})
+            if isinstance(ctx_raw, dict):
+                ctx = cast("dict[str, Any]", ctx_raw)
+                seq_val: Any = ctx.get("sequence_number")
+                if isinstance(seq_val, int):
+                    seq = seq_val
+
+            _ = conn.execute(
+                """
+                INSERT INTO logs (timestamp, level, logger, event, message, context, seq)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    entry.get("timestamp", ""),
+                    entry.get("level", ""),
+                    entry.get("logger", ""),
+                    entry.get("event", ""),
+                    entry.get("message", ""),
+                    json.dumps(entry.get("context", {})),
+                    seq,
+                ),
+            )
+
+    def _build_transcript_table(self, conn: sqlite3.Connection) -> None:
+        """Build transcript table from TranscriptCollector structured logs."""
+        _ = conn.execute("""
+            CREATE TABLE IF NOT EXISTS transcript (
+                rowid INTEGER PRIMARY KEY,
+                timestamp TEXT,
+                prompt_name TEXT,
+                transcript_source TEXT,
+                sequence_number INTEGER,
+                entry_type TEXT,
+                role TEXT,
+                content TEXT,
+                tool_name TEXT,
+                tool_use_id TEXT,
+                raw_json TEXT,
+                parsed TEXT
+            )
+        """)
+
+        logs_content = self._bundle.logs
+        if not logs_content:
+            return
+
+        for line in logs_content.strip().split("\n"):
+            if not line.strip():
+                continue
+            try:
+                entry_raw: object = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if not isinstance(entry_raw, Mapping):
+                continue
+
+            entry = cast("Mapping[str, object]", entry_raw)
+            row = _extract_transcript_row(entry)
+            if row is None:
+                continue
+
+            _ = conn.execute(
+                """
+                INSERT INTO transcript (
+                    timestamp,
+                    prompt_name,
+                    transcript_source,
+                    sequence_number,
+                    entry_type,
+                    role,
+                    content,
+                    tool_name,
+                    tool_use_id,
+                    raw_json,
+                    parsed
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                row,
+            )
 
     def _build_tool_calls_table(self, conn: sqlite3.Connection) -> None:
         """Build tool_calls table derived from logs."""
@@ -650,26 +980,30 @@ class QueryDatabase(Closeable):
             if not line.strip():
                 continue
             try:
-                entry: dict[str, Any] = json.loads(line)
-                event = entry.get("event", "")
-                if not _is_tool_event(event):
-                    continue
-
-                tool_data = _extract_tool_call_from_entry(entry)
-                if tool_data is None:
-                    continue
-
-                _ = conn.execute(
-                    """
-                    INSERT INTO tool_calls
-                        (timestamp, tool_name, params, result, success,
-                         error_code, duration_ms)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                    tool_data,
-                )
+                entry_raw: object = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(entry_raw, dict):
+                continue
+            entry = cast("dict[str, Any]", entry_raw)
+
+            event = entry.get("event", "")
+            if not _is_tool_event(event):
+                continue
+
+            tool_data = _extract_tool_call_from_entry(entry)
+            if tool_data is None:
+                continue
+
+            _ = conn.execute(
+                """
+                INSERT INTO tool_calls
+                    (timestamp, tool_name, params, result, success,
+                     error_code, duration_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+                tool_data,
+            )
 
     def _build_errors_table(self, conn: sqlite3.Connection) -> None:
         """Build errors table aggregating errors from multiple sources."""
@@ -725,11 +1059,14 @@ class QueryDatabase(Closeable):
             if not line.strip():
                 continue
             try:
-                entry: dict[str, Any] = json.loads(line)
-                if entry.get("level") == "ERROR":
-                    _insert_error_from_log(conn, entry)
+                entry_raw: object = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(entry_raw, dict):
+                continue
+            entry = cast("dict[str, Any]", entry_raw)
+            if entry.get("level") == "ERROR":
+                _insert_error_from_log(conn, entry)
 
     def _build_session_slices_table(self, conn: sqlite3.Connection) -> None:
         """Build session_slices table and dynamic slice tables."""
@@ -921,18 +1258,143 @@ class QueryDatabase(Closeable):
             ORDER BY timestamp
         """)
 
-        # Native tool calls from log aggregator (Claude Code's Bash, Read, etc.)
+        # Native tool calls from transcripts (and legacy log_aggregator events)
         _ = conn.execute("""
             CREATE VIEW IF NOT EXISTS native_tool_calls AS
             SELECT
-                seq,
+                seq as sequence_number,
                 timestamp,
+                'log_aggregator' as source,
+                NULL as tool_name,
+                NULL as tool_use_id,
                 json_extract(context, '$.file') as source_file,
-                json_extract(context, '$.content') as raw_content
+                json_extract(context, '$.content') as content,
+                json_extract(context, '$.content') as raw_json
             FROM logs
             WHERE event = 'log_aggregator.log_line'
               AND json_extract(context, '$.content') LIKE '%"type":"tool_%'
-            ORDER BY seq
+            UNION ALL
+            SELECT
+                sequence_number,
+                timestamp,
+                transcript_source as source,
+                tool_name,
+                tool_use_id,
+                NULL as source_file,
+                content,
+                raw_json
+            FROM transcript
+            WHERE tool_name IS NOT NULL AND tool_name != ''
+        """)
+
+        # Transcript entries derived from TranscriptCollector structured logs
+        _ = conn.execute("""
+            CREATE VIEW IF NOT EXISTS transcript_entries AS
+            SELECT
+                rowid,
+                timestamp,
+                prompt_name,
+                transcript_source,
+                sequence_number,
+                entry_type,
+                role,
+                content,
+                tool_name,
+                tool_use_id,
+                raw_json,
+                parsed
+            FROM transcript
+        """)
+
+        # Transcript conversation flow view
+        _ = conn.execute("""
+            CREATE VIEW IF NOT EXISTS transcript_flow AS
+            SELECT
+                sequence_number,
+                transcript_source,
+                entry_type,
+                role,
+                CASE
+                    WHEN entry_type IN ('user', 'assistant') THEN
+                        CASE
+                            WHEN LENGTH(content) > 100 THEN SUBSTR(content, 1, 97) || '...'
+                            ELSE content
+                        END
+                    WHEN entry_type = 'thinking' THEN '[THINKING]'
+                    WHEN entry_type = 'tool_result' AND tool_name IS NOT NULL THEN
+                        '[TOOL RESULT: ' || tool_name || ']'
+                    WHEN entry_type = 'tool_result' THEN '[TOOL RESULT]'
+                    ELSE '[' || entry_type || ']'
+                END as message_preview,
+                timestamp
+            FROM transcript
+            ORDER BY transcript_source, sequence_number
+        """)
+
+        # Transcript tool usage analysis view
+        _ = conn.execute("""
+            CREATE VIEW IF NOT EXISTS transcript_tools AS
+            SELECT
+                t1.sequence_number as call_seq,
+                t2.sequence_number as result_seq,
+                t1.transcript_source,
+                t1.tool_name,
+                t1.tool_use_id,
+                t1.content as tool_params,
+                t2.content as tool_result,
+                t1.timestamp as call_time,
+                t2.timestamp as result_time
+            FROM transcript t1
+            LEFT JOIN transcript t2
+                ON t1.tool_use_id = t2.tool_use_id
+                AND t2.entry_type = 'tool_result'
+                AND t1.transcript_source = t2.transcript_source
+            WHERE t1.entry_type = 'assistant'
+                AND t1.tool_name IS NOT NULL
+                AND t1.tool_name != ''
+            ORDER BY t1.sequence_number
+        """)
+
+        # Transcript thinking blocks view
+        _ = conn.execute("""
+            CREATE VIEW IF NOT EXISTS transcript_thinking AS
+            SELECT
+                sequence_number,
+                transcript_source,
+                CASE
+                    WHEN LENGTH(content) > 200 THEN SUBSTR(content, 1, 197) || '...'
+                    ELSE content
+                END as thinking_preview,
+                LENGTH(content) as thinking_length,
+                timestamp
+            FROM transcript
+            WHERE entry_type = 'thinking'
+                AND content IS NOT NULL
+                AND content != ''
+            ORDER BY sequence_number
+        """)
+
+        # Transcript agents hierarchy and metrics view
+        _ = conn.execute("""
+            CREATE VIEW IF NOT EXISTS transcript_agents AS
+            SELECT
+                transcript_source,
+                CASE
+                    WHEN transcript_source LIKE 'subagent:%' THEN
+                        SUBSTR(transcript_source, 10)
+                    ELSE NULL
+                END as agent_id,
+                MIN(sequence_number) as first_entry,
+                MAX(sequence_number) as last_entry,
+                COUNT(*) as total_entries,
+                COUNT(CASE WHEN entry_type = 'user' THEN 1 END) as user_messages,
+                COUNT(CASE WHEN entry_type = 'assistant' THEN 1 END) as assistant_messages,
+                COUNT(CASE WHEN entry_type = 'thinking' THEN 1 END) as thinking_blocks,
+                COUNT(DISTINCT CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN tool_name END) as unique_tools,
+                COUNT(CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN 1 END) as total_tool_calls
+            FROM transcript
+            GROUP BY transcript_source
+            ORDER BY MIN(sequence_number)
         """)
 
         # Error summary with truncated traceback
@@ -988,14 +1450,32 @@ class QueryDatabase(Closeable):
         hints = SchemaHints(
             json_extraction=(
                 "json_extract(context, '$.tool_name')",
-                "json_extract(context, '$.content')",
                 "json_extract(params, '$.command')",
+                "json_extract(context, '$.content')",
+                "json_extract(parsed, '$.message.content')",
+                "json_extract(parsed, '$.tool_use_id')",
             ),
             common_queries={
-                "native_tools": (
-                    "SELECT seq, json_extract(context, '$.content') as content "
-                    "FROM logs WHERE event = 'log_aggregator.log_line' "
-                    "AND seq BETWEEN 100 AND 200 ORDER BY seq"
+                "native_tools": "SELECT * FROM native_tool_calls ORDER BY timestamp",
+                "transcript": (
+                    "SELECT transcript_source, sequence_number, entry_type, role, content "
+                    "FROM transcript ORDER BY rowid"
+                ),
+                "conversation_flow": (
+                    "SELECT * FROM transcript_flow "
+                    "WHERE transcript_source = 'main' "
+                    "ORDER BY sequence_number DESC LIMIT 50"
+                ),
+                "tool_usage_summary": (
+                    "SELECT tool_name, COUNT(*) as usage_count "
+                    "FROM transcript_tools "
+                    "GROUP BY tool_name ORDER BY usage_count DESC"
+                ),
+                "thinking_blocks": (
+                    "SELECT * FROM transcript_thinking WHERE thinking_length > 1000"
+                ),
+                "subagent_activity": (
+                    "SELECT * FROM transcript_agents WHERE transcript_source != 'main'"
                 ),
                 "tool_timeline": (
                     "SELECT * FROM tool_timeline WHERE duration_ms > 1000"
@@ -1030,7 +1510,8 @@ def _get_table_description(table_name: str, *, is_view: bool = False) -> str:
     """Get description for a table or view by name."""
     descriptions = {
         "manifest": "Bundle metadata",
-        "logs": "Log entries (seq column for log_aggregator events)",
+        "logs": "Log entries (seq extracted from context.sequence_number when present)",
+        "transcript": "Transcript entries extracted from logs",
         "tool_calls": "Tool invocations",
         "errors": "Aggregated errors",
         "session_slices": "Session state items",
@@ -1042,7 +1523,12 @@ def _get_table_description(table_name: str, *, is_view: bool = False) -> str:
         "eval": "Eval metadata",
         # Views
         "tool_timeline": "View: Tool calls ordered by timestamp",
-        "native_tool_calls": "View: Claude Code native tools from log aggregator",
+        "native_tool_calls": "View: Native tool calls from transcripts or legacy logs",
+        "transcript_entries": "View: Transcript entries (alias of transcript table)",
+        "transcript_flow": "View: Conversation flow with message previews",
+        "transcript_tools": "View: Tool usage analysis with paired calls and results",
+        "transcript_thinking": "View: Thinking blocks with preview and length",
+        "transcript_agents": "View: Agent hierarchy and activity metrics",
         "error_summary": "View: Errors with truncated traceback",
     }
     if table_name.startswith("slice_"):

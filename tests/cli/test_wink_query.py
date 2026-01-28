@@ -29,12 +29,23 @@ from weakincentives.cli.query import (
     QueryError,
     SchemaOutput,
     TableInfo,
+    _apply_tool_result_details,
+    _apply_transcript_content_fallbacks,
+    _extract_tool_use_from_content,
+    _extract_transcript_details,
+    _extract_transcript_message_details,
+    _extract_transcript_parsed_obj,
+    _extract_transcript_row,
     _flatten_json,
     _get_table_description,
     _infer_sqlite_type,
     _is_cache_valid,
     _json_to_sql_value,
     _normalize_slice_type,
+    _safe_json_dumps,
+    _stringify_transcript_content,
+    _stringify_transcript_mapping,
+    _stringify_transcript_tool_use,
     export_jsonl,
     format_as_json,
     format_as_table,
@@ -113,6 +124,7 @@ def _create_bundle_with_logs(target_dir: Path, log_file: Path) -> Path:
         # Manually trigger log capture to write to file
         with writer.capture_logs():
             logger = logging.getLogger("test.logger")
+            logger.setLevel(logging.DEBUG)
             logger.info(
                 "Test message",
                 extra={
@@ -136,6 +148,28 @@ def _create_bundle_with_logs(target_dir: Path, log_file: Path) -> Path:
                         "tool_name": "read_file",
                         "params": {"path": "/test.txt"},
                         "duration_ms": 15.5,
+                    },
+                },
+            )
+            logger.debug(
+                "Transcript entry: user",
+                extra={
+                    "event": "transcript.collector.entry",
+                    "context": {
+                        "prompt_name": "test-prompt",
+                        "transcript_source": "main",
+                        "entry_type": "user",
+                        "sequence_number": 1,
+                        "raw_json": json.dumps(
+                            {
+                                "type": "user",
+                                "message": {"role": "user", "content": "Hello"},
+                            }
+                        ),
+                        "parsed": {
+                            "type": "user",
+                            "message": {"role": "user", "content": "Hello"},
+                        },
                     },
                 },
             )
@@ -247,7 +281,11 @@ class TestGetTableDescription:
         assert _get_table_description("manifest") == "Bundle metadata"
         assert (
             _get_table_description("logs")
-            == "Log entries (seq column for log_aggregator events)"
+            == "Log entries (seq extracted from context.sequence_number when present)"
+        )
+        assert (
+            _get_table_description("transcript")
+            == "Transcript entries extracted from logs"
         )
         assert _get_table_description("errors") == "Aggregated errors"
 
@@ -343,6 +381,7 @@ class TestQueryDatabase:
             table_names = [t.name for t in schema.tables]
             assert "manifest" in table_names
             assert "logs" in table_names
+            assert "transcript" in table_names
             assert "errors" in table_names
             assert "session_slices" in table_names
             assert "config" in table_names
@@ -822,6 +861,464 @@ class TestQueryDatabaseWithLogs:
             results = db.execute_query("SELECT * FROM errors WHERE source = 'log'")
             # Should have at least one error from the ERROR level log
             assert isinstance(results, list)
+        finally:
+            db.close()
+
+
+class TestTranscriptTable:
+    """Tests for transcript table extraction."""
+
+    def test_transcript_entries_extracted(self, tmp_path: Path) -> None:
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-transcript",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        parsed_entry = {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Running tool"},
+                    {
+                        "type": "tool_use",
+                        "id": "tool-1",
+                        "name": "bash",
+                        "input": {"command": "ls"},
+                    },
+                ],
+            },
+        }
+
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "Transcript entry",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "main",
+                    "sequence_number": 7,
+                    "entry_type": "assistant",
+                    "raw_json": json.dumps(parsed_entry),
+                    "parsed": parsed_entry,
+                },
+            }
+        ]
+
+        logs_content = "\n".join(json.dumps(entry) for entry in logs)
+
+        bundle_path = tmp_path / "test.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/logs/app.jsonl", logs_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        db = open_query_database(bundle_path)
+        try:
+            rows = db.execute_query(
+                "SELECT transcript_source, entry_type, role, content, tool_name, tool_use_id "
+                "FROM transcript"
+            )
+            assert len(rows) == 1
+            row = rows[0]
+            assert row["transcript_source"] == "main"
+            assert row["entry_type"] == "assistant"
+            assert row["role"] == "assistant"
+            assert "Running tool" in row["content"]
+            assert "bash" in row["content"]
+            assert row["tool_name"] == "bash"
+            assert row["tool_use_id"] == "tool-1"
+        finally:
+            db.close()
+
+    def test_transcript_flow_view(self, tmp_path: Path) -> None:
+        """Test transcript_flow view provides conversation preview."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-flow",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "User message",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "main",
+                    "sequence_number": 1,
+                    "entry_type": "user",
+                    "parsed": {
+                        "type": "user",
+                        "message": {"role": "user", "content": "Hello, assistant!"},
+                    },
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "Assistant response",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "main",
+                    "sequence_number": 2,
+                    "entry_type": "assistant",
+                    "parsed": {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": "Hello! How can I help?",
+                        },
+                    },
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:02Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "Thinking",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "main",
+                    "sequence_number": 3,
+                    "entry_type": "thinking",
+                    "parsed": {
+                        "type": "thinking",
+                        "thinking": "The user is greeting me. I should respond politely.",
+                    },
+                },
+            },
+        ]
+
+        bundle_path = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            import json
+
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr(
+                "debug_bundle/logs/app.jsonl",
+                "\n".join(json.dumps(log) for log in logs),
+            )
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        from weakincentives.cli.query import open_query_database
+
+        db = open_query_database(bundle_path)
+        try:
+            # Query the transcript_flow view
+            rows = db.execute_query(
+                "SELECT * FROM transcript_flow ORDER BY sequence_number"
+            )
+
+            assert len(rows) == 3
+
+            # Check user message
+            assert rows[0]["sequence_number"] == 1
+            assert rows[0]["entry_type"] == "user"
+            assert rows[0]["message_preview"] == "Hello, assistant!"
+
+            # Check assistant message
+            assert rows[1]["sequence_number"] == 2
+            assert rows[1]["entry_type"] == "assistant"
+            assert rows[1]["message_preview"] == "Hello! How can I help?"
+
+            # Check thinking block
+            assert rows[2]["sequence_number"] == 3
+            assert rows[2]["entry_type"] == "thinking"
+            assert rows[2]["message_preview"] == "[THINKING]"
+        finally:
+            db.close()
+
+    def test_transcript_tools_view(self, tmp_path: Path) -> None:
+        """Test transcript_tools view pairs tool calls with results."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-tools",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        logs = [
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "Tool call",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "main",
+                    "sequence_number": 1,
+                    "entry_type": "assistant",
+                    "parsed": {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "Running bash"},
+                                {
+                                    "type": "tool_use",
+                                    "id": "tool-123",
+                                    "name": "bash",
+                                    "input": {"command": "echo hello"},
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "Tool result",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "main",
+                    "sequence_number": 2,
+                    "entry_type": "tool_result",
+                    "parsed": {
+                        "type": "tool_result",
+                        "tool_use_id": "tool-123",
+                        "content": [{"type": "text", "text": "hello"}],
+                    },
+                },
+            },
+        ]
+
+        bundle_path = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            import json
+
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr(
+                "debug_bundle/logs/app.jsonl",
+                "\n".join(json.dumps(log) for log in logs),
+            )
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        from weakincentives.cli.query import open_query_database
+
+        db = open_query_database(bundle_path)
+        try:
+            # Query the transcript_tools view
+            rows = db.execute_query("SELECT * FROM transcript_tools")
+
+            assert len(rows) == 1
+
+            # Check tool call paired with result
+            assert rows[0]["tool_name"] == "bash"
+            assert rows[0]["tool_use_id"] == "tool-123"
+            assert rows[0]["call_seq"] == 1
+            assert rows[0]["result_seq"] == 2
+            assert "Running bash" in rows[0]["tool_params"]
+            assert "hello" in rows[0]["tool_result"]
+        finally:
+            db.close()
+
+    def test_transcript_agents_view(self, tmp_path: Path) -> None:
+        """Test transcript_agents view aggregates agent metrics."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-agents",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        logs = [
+            # Main agent entries
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "User",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "main",
+                    "sequence_number": 1,
+                    "entry_type": "user",
+                    "parsed": {
+                        "type": "user",
+                        "message": {"role": "user", "content": "Hi"},
+                    },
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "Assistant",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "main",
+                    "sequence_number": 2,
+                    "entry_type": "assistant",
+                    "parsed": {
+                        "type": "assistant",
+                        "message": {"role": "assistant", "content": "Hello"},
+                    },
+                },
+            },
+            # Subagent entries
+            {
+                "timestamp": "2024-01-01T00:00:02Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "Subagent thinking",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "subagent:001",
+                    "sequence_number": 1,
+                    "entry_type": "thinking",
+                    "parsed": {"type": "thinking", "thinking": "Processing..."},
+                },
+            },
+            {
+                "timestamp": "2024-01-01T00:00:03Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "Subagent assistant",
+                "context": {
+                    "prompt_name": "test",
+                    "transcript_source": "subagent:001",
+                    "sequence_number": 2,
+                    "entry_type": "assistant",
+                    "parsed": {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "Running tool"},
+                                {
+                                    "type": "tool_use",
+                                    "id": "t1",
+                                    "name": "read",
+                                    "input": {},
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        ]
+
+        bundle_path = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            import json
+
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr(
+                "debug_bundle/logs/app.jsonl",
+                "\n".join(json.dumps(log) for log in logs),
+            )
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        from weakincentives.cli.query import open_query_database
+
+        db = open_query_database(bundle_path)
+        try:
+            # Query the transcript_agents view
+            rows = db.execute_query(
+                "SELECT * FROM transcript_agents ORDER BY transcript_source"
+            )
+
+            assert len(rows) == 2
+
+            # Check main agent metrics
+            main = rows[0]
+            assert main["transcript_source"] == "main"
+            assert main["agent_id"] is None
+            assert main["total_entries"] == 2
+            assert main["user_messages"] == 1
+            assert main["assistant_messages"] == 1
+            assert main["thinking_blocks"] == 0
+
+            # Check subagent metrics
+            subagent = rows[1]
+            assert subagent["transcript_source"] == "subagent:001"
+            assert subagent["agent_id"] == "001"
+            assert subagent["total_entries"] == 2
+            assert subagent["thinking_blocks"] == 1
+            assert subagent["assistant_messages"] == 1
+            assert subagent["unique_tools"] == 1
+            assert subagent["total_tool_calls"] == 1
         finally:
             db.close()
 
@@ -2029,8 +2526,8 @@ class TestExportJsonl:
 class TestSeqColumn:
     """Tests for seq column in logs table."""
 
-    def test_seq_extracted_from_log_aggregator(self, tmp_path: Path) -> None:
-        """Test that seq column is extracted for log_aggregator.log_line events."""
+    def test_seq_extracted_from_context_sequence_number(self, tmp_path: Path) -> None:
+        """Test that seq column is extracted from context.sequence_number."""
         import zipfile
 
         manifest = {
@@ -2051,7 +2548,7 @@ class TestSeqColumn:
             "build": {"version": "1.0.0", "commit": "abc123"},
         }
 
-        # Create logs with log_aggregator.log_line events
+        # Create logs with sequence_number context values
         logs = [
             {
                 "timestamp": "2024-01-01T00:00:00Z",
@@ -2068,6 +2565,18 @@ class TestSeqColumn:
                 "event": "log_aggregator.log_line",
                 "message": "Line 2",
                 "context": {"sequence_number": 43, "content": "more content"},
+            },
+            {
+                "timestamp": "2024-01-01T00:00:01.500Z",
+                "level": "DEBUG",
+                "logger": "collector",
+                "event": "transcript.collector.entry",
+                "message": "Transcript entry",
+                "context": {
+                    "sequence_number": 44,
+                    "entry_type": "assistant",
+                    "transcript_source": "main",
+                },
             },
             {
                 "timestamp": "2024-01-01T00:00:02Z",
@@ -2102,11 +2611,12 @@ class TestSeqColumn:
             results = db.execute_query(
                 "SELECT event, seq FROM logs WHERE seq IS NOT NULL ORDER BY seq"
             )
-            assert len(results) == 2
+            assert len(results) == 3
             assert results[0]["seq"] == 42
             assert results[1]["seq"] == 43
+            assert results[2]["seq"] == 44
 
-            # Non-log_aggregator events should have NULL seq
+            # Non sequence events should have NULL seq
             non_agg = db.execute_query(
                 "SELECT event, seq FROM logs WHERE event = 'other.event'"
             )
@@ -2180,6 +2690,28 @@ class TestQueryViews:
         finally:
             db.close()
 
+    def test_transcript_entries_view_extracts_fields(self, tmp_path: Path) -> None:
+        """Test that transcript_entries view extracts key fields from logs."""
+        bundle_path = _create_bundle_with_logs(tmp_path, tmp_path / "logs.jsonl")
+        db = open_query_database(bundle_path)
+        try:
+            results = db.execute_query(
+                """
+                SELECT prompt_name, transcript_source, sequence_number, entry_type, role, content
+                FROM transcript_entries
+                ORDER BY transcript_source, sequence_number
+            """
+            )
+            assert len(results) == 1
+            assert results[0]["prompt_name"] == "test-prompt"
+            assert results[0]["transcript_source"] == "main"
+            assert results[0]["sequence_number"] == 1
+            assert results[0]["entry_type"] == "user"
+            assert results[0]["role"] == "user"
+            assert results[0]["content"] == "Hello"
+        finally:
+            db.close()
+
     def test_views_included_in_schema(self, tmp_path: Path) -> None:
         """Test that views appear in schema output."""
         bundle_path = _create_test_bundle(tmp_path)
@@ -2189,7 +2721,223 @@ class TestQueryViews:
             table_names = [t.name for t in schema.tables]
             assert "tool_timeline" in table_names
             assert "native_tool_calls" in table_names
+            assert "transcript_entries" in table_names
             assert "error_summary" in table_names
+        finally:
+            db.close()
+
+
+class TestTranscriptHelperCoverage:
+    """Targeted unit tests for transcript helper branches in query.py."""
+
+    def test_safe_json_dumps_falls_back_to_str(self) -> None:
+        class _Unserializable:
+            def __str__(self) -> str:
+                return "unserializable"
+
+            def __eq__(self, other: object) -> bool:
+                return isinstance(other, _Unserializable)
+
+        assert _safe_json_dumps(_Unserializable()) == "unserializable"
+
+    def test_stringify_transcript_tool_use_formats_components(self) -> None:
+        full = _stringify_transcript_tool_use(
+            {"name": "read_file", "id": "toolu_123", "input": {"path": "/tmp/a.txt"}}
+        )
+        assert full == '[tool_use] read_file toolu_123 {"path": "/tmp/a.txt"}'
+
+        minimal = _stringify_transcript_tool_use({})
+        assert minimal == "[tool_use]"
+
+    def test_stringify_transcript_mapping_covers_paths(self) -> None:
+        assert _stringify_transcript_mapping({"text": "Hello"}) == "Hello"
+
+        # Empty extracted content should fall through to JSON rendering.
+        assert _stringify_transcript_mapping({"text": ""}) == '{"text": ""}'
+
+        tool_use = _stringify_transcript_mapping({"type": "tool_use", "name": "search"})
+        assert tool_use.startswith("[tool_use] search")
+
+    def test_stringify_transcript_content_handles_common_types(self) -> None:
+        assert _stringify_transcript_content(None) == ""
+        assert _stringify_transcript_content(123) == "123"
+        assert _stringify_transcript_content({"text": "A"}) == "A"
+        assert _stringify_transcript_content([{"text": "A"}, "B", None]) == "A\nB"
+
+    def test_extract_tool_use_from_content_handles_mapping_and_list(self) -> None:
+        assert _extract_tool_use_from_content(
+            {"type": "tool_use", "name": "search", "id": "toolu_1"}
+        ) == ("search", "toolu_1")
+
+        assert _extract_tool_use_from_content([{"type": "text", "text": "hi"}]) == (
+            "",
+            "",
+        )
+
+    def test_extract_transcript_message_details_handles_shapes(self) -> None:
+        assert _extract_transcript_message_details({"message": "not-a-mapping"}) == (
+            "",
+            "",
+            "",
+            "",
+        )
+
+        role, content, tool_name, tool_use_id = _extract_transcript_message_details(
+            {"message": {"role": 123, "content": [{"type": "text", "text": "Hello"}]}}
+        )
+        assert role == ""
+        assert content == "Hello"
+        assert tool_name == ""
+        assert tool_use_id == ""
+
+        role2, content2, tool_name2, tool_use_id2 = _extract_transcript_message_details(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "read_file",
+                            "tool_use_id": "toolu_2",
+                            "input": {"path": "/tmp/a.txt"},
+                        }
+                    ],
+                }
+            }
+        )
+        assert role2 == "assistant"
+        assert content2.startswith("[tool_use]")
+        assert tool_name2 == "read_file"
+        assert tool_use_id2 == "toolu_2"
+
+    def test_apply_tool_result_details_prefers_existing_and_fills_missing(self) -> None:
+        parsed = {"tool_use_id": "toolu_99", "tool_name": "search", "content": "OK"}
+        content, tool_name, tool_use_id = _apply_tool_result_details(
+            parsed,
+            content="",
+            tool_name="",
+            tool_use_id="",
+        )
+        assert content == "OK"
+        assert tool_name == "search"
+        assert tool_use_id == "toolu_99"
+
+        parsed2 = {"tool_use_id": 123, "tool_name": 456, "content": "ignored"}
+        content2, tool_name2, tool_use_id2 = _apply_tool_result_details(
+            parsed2,
+            content="already",
+            tool_name="existing",
+            tool_use_id="toolu_existing",
+        )
+        assert content2 == "already"
+        assert tool_name2 == "existing"
+        assert tool_use_id2 == "toolu_existing"
+
+    def test_extract_transcript_details_tool_result_path(self) -> None:
+        parsed = {
+            "tool_use_id": "toolu_1",
+            "tool_name": "search",
+            "content": "RESULT",
+            "message": {"role": "assistant", "content": ""},
+        }
+        role, content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_result"
+        )
+        assert role == "assistant"
+        assert content == "RESULT"
+        assert tool_name == "search"
+        assert tool_use_id == "toolu_1"
+
+    def test_apply_transcript_content_fallbacks_covers_entry_types(self) -> None:
+        assert (
+            _apply_transcript_content_fallbacks(
+                {"thinking": "Thinking"}, "thinking", ""
+            )
+            == "Thinking"
+        )
+        assert (
+            _apply_transcript_content_fallbacks({"summary": "Summary"}, "summary", "")
+            == "Summary"
+        )
+        assert (
+            _apply_transcript_content_fallbacks({"details": "Details"}, "system", "")
+            == "Details"
+        )
+        assert (
+            _apply_transcript_content_fallbacks({"event": "Event"}, "system", "")
+            == "Event"
+        )
+        assert (
+            _apply_transcript_content_fallbacks({"content": "Content"}, "assistant", "")
+            == "Content"
+        )
+        assert (
+            _apply_transcript_content_fallbacks({}, "assistant", "") == "{}"
+        )  # Fallback to stringify(parsed)
+
+        assert (
+            _apply_transcript_content_fallbacks(
+                {"content": "Ignored"}, "assistant", "ok"
+            )
+            == "ok"
+        )
+
+    def test_extract_transcript_parsed_obj_parses_raw_json(self) -> None:
+        assert _extract_transcript_parsed_obj({}, None) is None
+        assert _extract_transcript_parsed_obj({}, "{") is None
+        assert _extract_transcript_parsed_obj({}, '{"a": 1}') == {"a": 1}
+        assert _extract_transcript_parsed_obj({}, '["x"]') is None
+        assert _extract_transcript_parsed_obj({"parsed": {"k": "v"}}, None) == {
+            "k": "v"
+        }
+
+    def test_extract_transcript_row_ignores_bad_context(self) -> None:
+        assert (
+            _extract_transcript_row(
+                {"event": "transcript.collector.entry", "context": "not-a-mapping"}
+            )
+            is None
+        )
+
+    def test_open_query_database_skips_non_mapping_log_lines(
+        self, tmp_path: Path
+    ) -> None:
+        import zipfile
+
+        base_bundle = _create_bundle_with_logs(tmp_path, tmp_path / "logs.jsonl")
+
+        with zipfile.ZipFile(base_bundle, "r") as zf:
+            manifest = zf.read("debug_bundle/manifest.json")
+            session_after = zf.read("debug_bundle/session/after.jsonl")
+            request_input = zf.read("debug_bundle/request/input.json")
+            request_output = zf.read("debug_bundle/request/output.json")
+            logs = zf.read("debug_bundle/logs/app.jsonl").decode("utf-8")
+
+        # Prepend a valid JSON line that is *not* a mapping; it should be skipped.
+        new_logs = json.dumps(["not", "a", "mapping"]) + "\n" + logs
+
+        bundle_path = tmp_path / "non_mapping_logs.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", manifest)
+            zf.writestr("debug_bundle/session/after.jsonl", session_after)
+            zf.writestr("debug_bundle/request/input.json", request_input)
+            zf.writestr("debug_bundle/request/output.json", request_output)
+            zf.writestr("debug_bundle/logs/app.jsonl", new_logs)
+
+        db = open_query_database(bundle_path)
+        try:
+            results = db.execute_query(
+                """
+                SELECT transcript_source, sequence_number, entry_type, role, content
+                FROM transcript_entries
+            """
+            )
+            assert len(results) == 1
+            assert results[0]["transcript_source"] == "main"
+            assert results[0]["sequence_number"] == 1
+            assert results[0]["entry_type"] == "user"
+            assert results[0]["role"] == "user"
+            assert results[0]["content"] == "Hello"
         finally:
             db.close()
 
@@ -2201,6 +2949,7 @@ class TestGetTableDescriptionViews:
         """Test that views get appropriate descriptions."""
         assert "View:" in _get_table_description("tool_timeline", is_view=True)
         assert "View:" in _get_table_description("native_tool_calls", is_view=True)
+        assert "View:" in _get_table_description("transcript_entries", is_view=True)
         assert "View:" in _get_table_description("error_summary", is_view=True)
 
     def test_unknown_view(self) -> None:

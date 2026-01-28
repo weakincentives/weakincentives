@@ -18,6 +18,20 @@ const state = {
   expandDepth: 2,
   searchQuery: "",
   focusedItemIndex: -1,
+  // Transcript state
+  transcriptEntries: [],
+  transcriptFacets: { sources: [], entry_types: [] },
+  transcriptSearch: "",
+  transcriptSourceChipFilter: "",
+  transcriptTypeChipFilter: "",
+  transcriptIncludeSources: new Set(),
+  transcriptExcludeSources: new Set(),
+  transcriptIncludeTypes: new Set(),
+  transcriptExcludeTypes: new Set(),
+  transcriptLimit: 200,
+  transcriptTotalCount: 0,
+  transcriptHasMore: false,
+  transcriptLoading: false,
   // Logs state
   allLogs: [],
   filteredLogs: [],
@@ -68,6 +82,7 @@ const elements = {
   helpButton: document.getElementById("help-button"),
   // Views
   sessionsView: document.getElementById("sessions-view"),
+  transcriptView: document.getElementById("transcript-view"),
   logsView: document.getElementById("logs-view"),
   taskView: document.getElementById("task-view"),
   filesystemView: document.getElementById("filesystem-view"),
@@ -88,6 +103,19 @@ const elements = {
   expandAll: document.getElementById("expand-all"),
   collapseAll: document.getElementById("collapse-all"),
   copyButton: document.getElementById("copy-button"),
+  // Transcript
+  transcriptSearch: document.getElementById("transcript-search"),
+  transcriptClearFilters: document.getElementById("transcript-clear-filters"),
+  transcriptShowing: document.getElementById("transcript-showing"),
+  transcriptCopy: document.getElementById("transcript-copy"),
+  transcriptScrollBottom: document.getElementById("transcript-scroll-bottom"),
+  transcriptList: document.getElementById("transcript-list"),
+  transcriptSourceFilter: document.getElementById("transcript-source-filter"),
+  transcriptSourceChips: document.getElementById("transcript-source-chips"),
+  transcriptTypeFilter: document.getElementById("transcript-type-filter"),
+  transcriptTypeChips: document.getElementById("transcript-type-chips"),
+  transcriptActiveFilters: document.getElementById("transcript-active-filters"),
+  transcriptActiveFiltersGroup: document.getElementById("transcript-active-filters-group"),
   // Logs
   logsSearch: document.getElementById("logs-search"),
   logsClearFilters: document.getElementById("logs-clear-filters"),
@@ -206,12 +234,16 @@ function switchView(viewName) {
 
   // Update views
   elements.sessionsView.classList.toggle("hidden", viewName !== "sessions");
+  elements.transcriptView.classList.toggle("hidden", viewName !== "transcript");
   elements.logsView.classList.toggle("hidden", viewName !== "logs");
   elements.taskView.classList.toggle("hidden", viewName !== "task");
   elements.filesystemView.classList.toggle("hidden", viewName !== "filesystem");
 
   // Load data if needed
-  if (viewName === "logs" && state.filteredLogs.length === 0) {
+  if (viewName === "transcript" && state.transcriptEntries.length === 0) {
+    loadTranscriptFacets();
+    loadTranscript();
+  } else if (viewName === "logs" && state.filteredLogs.length === 0) {
     loadLogFacets();
     loadLogs();
   } else if (viewName === "task" && state.taskInput === null) {
@@ -272,6 +304,9 @@ elements.bundleSelect.addEventListener("change", (e) => {
 });
 
 function resetViewState() {
+  state.transcriptEntries = [];
+  state.transcriptTotalCount = 0;
+  state.transcriptHasMore = false;
   state.allLogs = [];
   state.filteredLogs = [];
   state.logsTotalCount = 0;
@@ -356,8 +391,8 @@ function renderSliceList() {
       const li = document.createElement("li");
       li.className = "slice-item" + (entry.slice_type === state.selectedSlice ? " active" : "");
       li.innerHTML = `
-        <div class="slice-title">${entry.display_name || entry.slice_type}</div>
-        <div class="slice-subtitle">${entry.item_display_name || entry.item_type} · ${entry.count} items</div>
+        <div class="slice-title">${escapeHtml(entry.display_name || entry.slice_type)}</div>
+        <div class="slice-subtitle">${escapeHtml(entry.item_display_name || entry.item_type)} · ${entry.count} items</div>
       `;
       li.addEventListener("click", () => selectSlice(entry.slice_type));
       target.appendChild(li);
@@ -441,6 +476,332 @@ elements.copyButton.addEventListener("click", async () => {
   }
 });
 
+// ============================================================================
+// TRANSCRIPT
+// ============================================================================
+
+function buildTranscriptQueryParams(offset = 0) {
+  const params = new URLSearchParams();
+  params.set("offset", offset);
+  params.set("limit", state.transcriptLimit);
+
+  if (state.transcriptSearch.trim()) {
+    params.set("search", state.transcriptSearch.trim());
+  }
+
+  if (state.transcriptIncludeSources.size > 0) {
+    params.set("source", Array.from(state.transcriptIncludeSources).join(","));
+  }
+  if (state.transcriptExcludeSources.size > 0) {
+    params.set("exclude_source", Array.from(state.transcriptExcludeSources).join(","));
+  }
+
+  if (state.transcriptIncludeTypes.size > 0) {
+    params.set("entry_type", Array.from(state.transcriptIncludeTypes).join(","));
+  }
+  if (state.transcriptExcludeTypes.size > 0) {
+    params.set("exclude_entry_type", Array.from(state.transcriptExcludeTypes).join(","));
+  }
+
+  return params.toString();
+}
+
+async function loadTranscriptFacets() {
+  try {
+    state.transcriptFacets = await fetchJSON("/api/transcript/facets");
+    renderTranscriptFilterChips();
+  } catch (error) {
+    console.warn("Failed to load transcript facets:", error);
+  }
+}
+
+async function loadTranscript(append = false) {
+  if (state.transcriptLoading) return;
+
+  try {
+    state.transcriptLoading = true;
+    const offset = append ? state.transcriptEntries.length : 0;
+    const query = buildTranscriptQueryParams(offset);
+    const result = await fetchJSON(`/api/transcript?${query}`);
+    const entries = result.entries || [];
+
+    state.transcriptEntries = append ? state.transcriptEntries.concat(entries) : entries;
+    state.transcriptTotalCount = result.total || state.transcriptEntries.length;
+    state.transcriptHasMore = state.transcriptEntries.length < state.transcriptTotalCount;
+
+    renderTranscript();
+    updateTranscriptStats();
+  } catch (error) {
+    elements.transcriptList.innerHTML = `<p class="muted">Failed to load transcript: ${error.message}</p>`;
+  } finally {
+    state.transcriptLoading = false;
+  }
+}
+
+async function loadMoreTranscript() {
+  await loadTranscript(true);
+}
+
+let transcriptSearchTimeout = null;
+function debouncedTranscriptSearch() {
+  clearTimeout(transcriptSearchTimeout);
+  transcriptSearchTimeout = setTimeout(() => loadTranscript(false), 300);
+}
+
+function updateTranscriptStats() {
+  let status = `Showing ${state.transcriptEntries.length}`;
+  if (state.transcriptHasMore) status += ` of ${state.transcriptTotalCount}`;
+  elements.transcriptShowing.textContent = status;
+}
+
+function renderTranscriptFilterChips() {
+  const sourceFilter = state.transcriptSourceChipFilter.toLowerCase();
+  const typeFilter = state.transcriptTypeChipFilter.toLowerCase();
+
+  elements.transcriptSourceChips.innerHTML = "";
+  (state.transcriptFacets.sources || [])
+    .filter((item) => !sourceFilter || item.name.toLowerCase().includes(sourceFilter))
+    .forEach((item) => {
+      const chip = createFilterChip(
+        item.name,
+        item.count,
+        state.transcriptIncludeSources.has(item.name),
+        state.transcriptExcludeSources.has(item.name),
+        (name, include, exclude) => toggleTranscriptSourceFilter(name, include, exclude)
+      );
+      elements.transcriptSourceChips.appendChild(chip);
+    });
+
+  elements.transcriptTypeChips.innerHTML = "";
+  (state.transcriptFacets.entry_types || [])
+    .filter((item) => !typeFilter || item.name.toLowerCase().includes(typeFilter))
+    .forEach((item) => {
+      const chip = createFilterChip(
+        item.name,
+        item.count,
+        state.transcriptIncludeTypes.has(item.name),
+        state.transcriptExcludeTypes.has(item.name),
+        (name, include, exclude) => toggleTranscriptTypeFilter(name, include, exclude)
+      );
+      elements.transcriptTypeChips.appendChild(chip);
+    });
+
+  renderTranscriptActiveFilters();
+}
+
+function toggleTranscriptSourceFilter(name, include, exclude) {
+  if (include) {
+    state.transcriptIncludeSources.add(name);
+    state.transcriptExcludeSources.delete(name);
+  } else if (exclude) {
+    state.transcriptExcludeSources.add(name);
+    state.transcriptIncludeSources.delete(name);
+  } else {
+    state.transcriptIncludeSources.delete(name);
+    state.transcriptExcludeSources.delete(name);
+  }
+  renderTranscriptFilterChips();
+  loadTranscript(false);
+}
+
+function toggleTranscriptTypeFilter(name, include, exclude) {
+  if (include) {
+    state.transcriptIncludeTypes.add(name);
+    state.transcriptExcludeTypes.delete(name);
+  } else if (exclude) {
+    state.transcriptExcludeTypes.add(name);
+    state.transcriptIncludeTypes.delete(name);
+  } else {
+    state.transcriptIncludeTypes.delete(name);
+    state.transcriptExcludeTypes.delete(name);
+  }
+  renderTranscriptFilterChips();
+  loadTranscript(false);
+}
+
+function renderTranscriptActiveFilters() {
+  const hasFilters =
+    state.transcriptIncludeSources.size > 0 ||
+    state.transcriptExcludeSources.size > 0 ||
+    state.transcriptIncludeTypes.size > 0 ||
+    state.transcriptExcludeTypes.size > 0;
+
+  elements.transcriptActiveFiltersGroup.style.display = hasFilters ? "flex" : "none";
+  if (!hasFilters) return;
+
+  elements.transcriptActiveFilters.innerHTML = "";
+
+  state.transcriptIncludeSources.forEach((name) => {
+    elements.transcriptActiveFilters.appendChild(
+      createActiveFilter("source", name, false, () => toggleTranscriptSourceFilter(name, false, false))
+    );
+  });
+
+  state.transcriptExcludeSources.forEach((name) => {
+    elements.transcriptActiveFilters.appendChild(
+      createActiveFilter("source", name, true, () => toggleTranscriptSourceFilter(name, false, false))
+    );
+  });
+
+  state.transcriptIncludeTypes.forEach((name) => {
+    elements.transcriptActiveFilters.appendChild(
+      createActiveFilter("entry_type", name, false, () => toggleTranscriptTypeFilter(name, false, false))
+    );
+  });
+
+  state.transcriptExcludeTypes.forEach((name) => {
+    elements.transcriptActiveFilters.appendChild(
+      createActiveFilter("entry_type", name, true, () => toggleTranscriptTypeFilter(name, false, false))
+    );
+  });
+}
+
+function formatTranscriptContent(entry) {
+  if (entry.content !== null && entry.content !== undefined) {
+    if (typeof entry.content === "string") return { kind: "text", value: entry.content };
+    return { kind: "json", value: JSON.stringify(entry.content, null, 2) };
+  }
+  if (entry.parsed !== null && entry.parsed !== undefined) {
+    return { kind: "json", value: JSON.stringify(entry.parsed, null, 2) };
+  }
+  if (entry.raw_json !== null && entry.raw_json !== undefined) {
+    return { kind: "json", value: JSON.stringify(entry.raw_json, null, 2) };
+  }
+  return { kind: "text", value: "" };
+}
+
+function renderTranscript() {
+  elements.transcriptList.innerHTML = "";
+
+  if (state.transcriptEntries.length === 0) {
+    elements.transcriptList.innerHTML = '<div class="logs-empty">No transcript entries match filters</div>';
+    return;
+  }
+
+  state.transcriptEntries.forEach((entry) => {
+    const entryType = entry.entry_type || "unknown";
+    const role = entry.role || "";
+    const cssClass = role ? `role-${role}` : `type-${entryType}`;
+
+    const container = document.createElement("div");
+    container.className = `transcript-entry ${cssClass}`;
+
+    const source = entry.transcript_source || "";
+    const seq = entry.sequence_number !== null && entry.sequence_number !== undefined ? String(entry.sequence_number) : "";
+    const promptName = entry.prompt_name || "";
+
+    const content = formatTranscriptContent(entry);
+
+    let html = `<div class="transcript-header">`;
+    html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
+    if (entry.timestamp) html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
+    if (source) html += `<span class="transcript-source clickable" data-source="${escapeHtml(source)}">${escapeHtml(source)}${seq ? `#${escapeHtml(seq)}` : ""}</span>`;
+    if (promptName) html += `<span class="transcript-prompt mono" title="${escapeHtml(promptName)}">${escapeHtml(promptName)}</span>`;
+    html += `</div>`;
+
+    if (content.value) {
+      if (content.kind === "json") {
+        html += `<pre class="transcript-json">${escapeHtml(content.value)}</pre>`;
+      } else {
+        html += `<div class="transcript-message">${escapeHtml(content.value)}</div>`;
+      }
+    } else {
+      html += `<div class="transcript-message muted">(no content)</div>`;
+    }
+
+    const detailsPayload = entry.parsed || entry.raw_json;
+    if (detailsPayload) {
+      html += `<details class="transcript-details"><summary>Details</summary>`;
+      html += `<pre>${escapeHtml(JSON.stringify(detailsPayload, null, 2))}</pre>`;
+      html += `</details>`;
+    }
+
+    container.innerHTML = html;
+
+    // Inline filtering
+    container.querySelectorAll(".transcript-source.clickable").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        const src = el.dataset.source;
+        if (!src) return;
+        if (e.shiftKey) toggleTranscriptSourceFilter(src, false, true);
+        else toggleTranscriptSourceFilter(src, true, false);
+      });
+    });
+
+    container.querySelectorAll(".transcript-type.clickable").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        const typ = el.dataset.type;
+        if (!typ) return;
+        if (e.shiftKey) toggleTranscriptTypeFilter(typ, false, true);
+        else toggleTranscriptTypeFilter(typ, true, false);
+      });
+    });
+
+    elements.transcriptList.appendChild(container);
+  });
+
+  if (state.transcriptHasMore) {
+    const loadMoreContainer = document.createElement("div");
+    loadMoreContainer.className = "logs-load-more";
+    const remaining = state.transcriptTotalCount - state.transcriptEntries.length;
+    loadMoreContainer.innerHTML = `
+      <button class="ghost logs-load-more-btn" type="button">
+        Load more (${remaining} remaining)
+      </button>
+    `;
+    loadMoreContainer.querySelector("button").addEventListener("click", loadMoreTranscript);
+    elements.transcriptList.appendChild(loadMoreContainer);
+  }
+}
+
+// Transcript filter events
+elements.transcriptSearch.addEventListener("input", () => {
+  state.transcriptSearch = elements.transcriptSearch.value;
+  debouncedTranscriptSearch();
+});
+
+elements.transcriptSourceFilter.addEventListener("input", () => {
+  state.transcriptSourceChipFilter = elements.transcriptSourceFilter.value;
+  renderTranscriptFilterChips();
+});
+
+elements.transcriptTypeFilter.addEventListener("input", () => {
+  state.transcriptTypeChipFilter = elements.transcriptTypeFilter.value;
+  renderTranscriptFilterChips();
+});
+
+elements.transcriptClearFilters.addEventListener("click", () => {
+  state.transcriptSearch = "";
+  state.transcriptIncludeSources.clear();
+  state.transcriptExcludeSources.clear();
+  state.transcriptIncludeTypes.clear();
+  state.transcriptExcludeTypes.clear();
+  state.transcriptSourceChipFilter = "";
+  state.transcriptTypeChipFilter = "";
+
+  elements.transcriptSearch.value = "";
+  elements.transcriptSourceFilter.value = "";
+  elements.transcriptTypeFilter.value = "";
+
+  renderTranscriptFilterChips();
+  loadTranscript(false);
+});
+
+elements.transcriptCopy.addEventListener("click", async () => {
+  const text = JSON.stringify(state.transcriptEntries, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast("Copied transcript entries", "success");
+  } catch {
+    showToast("Failed to copy", "error");
+  }
+});
+
+elements.transcriptScrollBottom.addEventListener("click", () => {
+  elements.transcriptList.scrollTop = elements.transcriptList.scrollHeight;
+});
+
+// ============================================================================
 // ============================================================================
 // LOGS
 // ============================================================================
@@ -1040,9 +1401,9 @@ document.addEventListener("keydown", (e) => {
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
   // Number keys for tabs
-  if (e.key >= "1" && e.key <= "4") {
+  if (e.key >= "1" && e.key <= "5") {
     e.preventDefault();
-    const views = ["sessions", "logs", "task", "filesystem"];
+    const views = ["sessions", "transcript", "logs", "task", "filesystem"];
     switchView(views[parseInt(e.key, 10) - 1]);
     return;
   }
@@ -1067,18 +1428,28 @@ document.addEventListener("keydown", (e) => {
 
 function focusCurrentSearch() {
   if (state.activeView === "sessions") elements.itemSearch.focus();
+  else if (state.activeView === "transcript") elements.transcriptSearch.focus();
   else if (state.activeView === "logs") elements.logsSearch.focus();
   else if (state.activeView === "filesystem") elements.filesystemFilter.focus();
 }
 
 function navigateNext() {
   if (state.activeView === "sessions") focusItem(state.focusedItemIndex + 1);
+  else if (state.activeView === "transcript") scrollTranscriptBy(1);
   else if (state.activeView === "logs") scrollLogsBy(1);
 }
 
 function navigatePrev() {
   if (state.activeView === "sessions") focusItem(state.focusedItemIndex - 1);
+  else if (state.activeView === "transcript") scrollTranscriptBy(-1);
   else if (state.activeView === "logs") scrollLogsBy(-1);
+}
+
+function scrollTranscriptBy(delta) {
+  const entries = elements.transcriptList.querySelectorAll(".transcript-entry");
+  if (entries.length === 0) return;
+  const scrollHeight = entries[0].offsetHeight;
+  elements.transcriptList.scrollBy({ top: scrollHeight * delta, behavior: "smooth" });
 }
 
 function scrollLogsBy(delta) {
@@ -1086,6 +1457,13 @@ function scrollLogsBy(delta) {
   if (entries.length === 0) return;
   const scrollHeight = entries[0].offsetHeight;
   elements.logsList.scrollBy({ top: scrollHeight * delta, behavior: "smooth" });
+}
+
+function scrollTranscriptBy(delta) {
+  const entries = elements.transcriptList.querySelectorAll(".transcript-entry");
+  if (entries.length === 0) return;
+  const scrollHeight = entries[0].offsetHeight;
+  elements.transcriptList.scrollBy({ top: scrollHeight * delta, behavior: "smooth" });
 }
 
 function focusItem(index) {

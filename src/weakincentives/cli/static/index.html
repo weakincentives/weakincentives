@@ -44,7 +44,7 @@
           </div>
           <div class="shortcuts-section">
             <h3>View</h3>
-            <div class="shortcut-row"><kbd>1</kbd>-<kbd>4</kbd><span>Switch tabs</span></div>
+            <div class="shortcut-row"><kbd>1</kbd>-<kbd>5</kbd><span>Switch tabs</span></div>
             <div class="shortcut-row"><kbd>[</kbd><span>Toggle sidebar</span></div>
             <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
             <div class="shortcut-row"><kbd>Esc</kbd><span>Close dialogs</span></div>
@@ -111,6 +111,13 @@
         Sessions
         <kbd>1</kbd>
       </button>
+      <button class="main-tab" data-view="transcript">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path>
+        </svg>
+        Transcript
+        <kbd>2</kbd>
+      </button>
       <button class="main-tab" data-view="logs">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -119,21 +126,21 @@
           <line x1="16" y1="17" x2="8" y2="17"></line>
         </svg>
         Logs
-        <kbd>2</kbd>
+        <kbd>3</kbd>
       </button>
       <button class="main-tab" data-view="task">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
         </svg>
         Task
-        <kbd>3</kbd>
+        <kbd>4</kbd>
       </button>
       <button class="main-tab" data-view="filesystem">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
         </svg>
         Filesystem
-        <kbd>4</kbd>
+        <kbd>5</kbd>
       </button>
     </nav>
 
@@ -214,6 +221,73 @@
             </div>
           </div>
         </div>
+      </section>
+    </main>
+
+    <!-- ==================== TRANSCRIPT VIEW ==================== -->
+    <main id="transcript-view" class="view-container hidden">
+      <aside class="sidebar">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Transcript</h2>
+            <button id="transcript-clear-filters" class="ghost small" type="button">Clear all</button>
+          </div>
+          <div class="logs-filters">
+            <div class="filter-group">
+              <label class="filter-label">Search</label>
+              <input
+                id="transcript-search"
+                type="search"
+                placeholder="Search transcript..."
+                autocomplete="off"
+              />
+            </div>
+            <div class="filter-group">
+              <label class="filter-label">
+                Source
+                <span class="filter-hint">(click = show only, ⇧click = hide)</span>
+              </label>
+              <input
+                id="transcript-source-filter"
+                type="search"
+                class="chip-filter-input"
+                placeholder="Filter sources..."
+                autocomplete="off"
+              />
+              <div id="transcript-source-chips" class="filter-chips"></div>
+            </div>
+            <div class="filter-group">
+              <label class="filter-label">
+                Entry type
+                <span class="filter-hint">(click = show only, ⇧click = hide)</span>
+              </label>
+              <input
+                id="transcript-type-filter"
+                type="search"
+                class="chip-filter-input"
+                placeholder="Filter types..."
+                autocomplete="off"
+              />
+              <div id="transcript-type-chips" class="filter-chips"></div>
+            </div>
+            <div class="filter-group" id="transcript-active-filters-group" style="display: none;">
+              <label class="filter-label">Active Filters</label>
+              <div id="transcript-active-filters" class="active-filters"></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+      <section class="content logs-content">
+        <div class="logs-toolbar">
+          <div class="logs-toolbar-left">
+            <span id="transcript-showing"></span>
+          </div>
+          <div class="logs-toolbar-right">
+            <button id="transcript-copy" class="ghost" type="button">Copy filtered</button>
+            <button id="transcript-scroll-bottom" class="ghost" type="button">Scroll to bottom</button>
+          </div>
+        </div>
+        <div id="transcript-list" class="transcript-list"></div>
       </section>
     </main>
 

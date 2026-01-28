@@ -21,13 +21,16 @@ state including session data, logs, task input/output, and filesystem snapshots.
 ```
 wink debug [bundle-path]
     │
-    ├── HTTP Server (localhost:8765)
+    ├── HTTP Server (localhost:8000)
     │   ├── /api/meta          - Bundle metadata
     │   ├── /api/slices/:type  - Session slice data
     │   ├── /api/logs          - Log entries (paginated)
+    │   ├── /api/logs/facets   - Logger/event/level facets for filters
+    │   ├── /api/transcript    - Transcript entries (paginated)
+    │   ├── /api/transcript/facets - Source/type facets for filters
     │   ├── /api/request/*     - Task input/output
     │   ├── /api/files         - Filesystem listing
-    │   └── /api/file/:path    - File content
+    │   └── /api/files/:path   - File content
     │
     └── Static UI
         ├── index.html
@@ -40,13 +43,14 @@ wink debug [bundle-path]
 | View | Purpose | Sidebar | Content |
 |------|---------|---------|---------|
 | **Sessions** | Inspect session state slices | Slice list with filter | Tree viewer with search, depth control |
+| **Transcript** | Browse transcript entries | Source/type filters, search | Chat-like transcript stream with details |
 | **Logs** | Browse execution logs | Level filters, search | Scrollable log entries |
 | **Task** | View request input/output | Input/Output toggle | Tree viewer with depth control |
 | **Filesystem** | Browse workspace snapshot | File list with filter | File content viewer |
 
 ### Navigation
 
-- **Tabs**: Switch views via numbered tabs (1-4 keyboard shortcuts)
+- **Tabs**: Switch views via numbered tabs (1-5 keyboard shortcuts)
 - **Bundle selector**: Dropdown to switch between bundles in directory
 - **Keyboard shortcuts**: J/K navigation, / for search, R to reload
 
@@ -56,15 +60,19 @@ A debug bundle (`.zip`) contains:
 
 ```
 {bundle_id}_{timestamp}.zip
-├── meta.json           # Bundle metadata
-├── config.json         # Runtime configuration
-├── run_context.json    # Execution context
-├── request_input.json  # Task input
-├── request_output.json # Task output (if completed)
-├── session_after.json  # Final session state
-├── logs.jsonl          # Structured log entries
-└── filesystem/         # Workspace snapshot (optional)
-    └── ...
+└── debug_bundle/
+    ├── manifest.json          # Bundle metadata and integrity
+    ├── request/
+    │   ├── input.json         # Task input
+    │   └── output.json        # Task output
+    ├── session/
+    │   └── after.jsonl        # Final session state
+    ├── logs/
+    │   └── app.jsonl          # Structured log entries (includes transcript events)
+    ├── config.json            # Runtime configuration
+    ├── run_context.json       # Execution context
+    └── filesystem/            # Workspace snapshot (optional)
+        └── ...
 ```
 
 ## Limitations

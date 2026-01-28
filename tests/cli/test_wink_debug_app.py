@@ -417,6 +417,61 @@ def test_api_logs_endpoint(tmp_path: Path) -> None:
     assert "total" in logs
 
 
+def test_api_transcript_endpoint(tmp_path: Path) -> None:
+    """Test the transcript API endpoint."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            transcript_logger = logging.getLogger("test.transcript")
+            transcript_logger.setLevel(logging.DEBUG)
+            transcript_logger.debug(
+                "Transcript entry",
+                extra={
+                    "event": "transcript.collector.entry",
+                    "context": {
+                        "prompt_name": "test",
+                        "transcript_source": "main",
+                        "entry_type": "user",
+                        "sequence_number": 1,
+                        "raw_json": json.dumps(
+                            {
+                                "type": "user",
+                                "message": {"role": "user", "content": "Hi"},
+                            }
+                        ),
+                        "parsed": {
+                            "type": "user",
+                            "message": {"role": "user", "content": "Hi"},
+                        },
+                    },
+                },
+            )
+
+    assert writer.path is not None
+    logger = debug_app.get_logger("test.transcript.api")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    transcript_response = client.get("/api/transcript")
+    assert transcript_response.status_code == 200
+    transcript = transcript_response.json()
+    assert transcript["total"] >= 1
+    assert transcript["entries"][0]["entry_type"] == "user"
+
+    facets_response = client.get("/api/transcript/facets")
+    assert facets_response.status_code == 200
+    facets = facets_response.json()
+    assert "sources" in facets
+
+
 def test_api_config_and_metrics_endpoints(tmp_path: Path) -> None:
     """Test config and metrics endpoints."""
     bundle_path = _create_test_bundle(tmp_path, ["test"])
@@ -734,6 +789,107 @@ def test_logs_facets_endpoint(tmp_path: Path) -> None:
     assert "levels" in facets
     assert len(facets["loggers"]) >= 2
     assert len(facets["events"]) >= 2
+
+
+def test_transcript_endpoints_and_filters(tmp_path: Path) -> None:
+    """Test transcript endpoints return entries and support filtering."""
+    import logging
+
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            transcript_logger = logging.getLogger("test.transcript")
+            transcript_logger.setLevel(logging.DEBUG)
+
+            transcript_logger.debug(
+                "Transcript entry: user",
+                extra={
+                    "event": "transcript.collector.entry",
+                    "context": {
+                        "prompt_name": "test-prompt",
+                        "transcript_source": "main",
+                        "entry_type": "user",
+                        "sequence_number": 1,
+                        "raw_json": json.dumps(
+                            {
+                                "type": "user",
+                                "message": {"role": "user", "content": "Hello"},
+                            }
+                        ),
+                        "parsed": {
+                            "type": "user",
+                            "message": {"role": "user", "content": "Hello"},
+                        },
+                    },
+                },
+            )
+
+            transcript_logger.debug(
+                "Transcript entry: assistant",
+                extra={
+                    "event": "transcript.collector.entry",
+                    "context": {
+                        "prompt_name": "test-prompt",
+                        "transcript_source": "main",
+                        "entry_type": "assistant",
+                        "sequence_number": 2,
+                        "raw_json": None,
+                        "parsed": {
+                            "type": "assistant",
+                            "message": {"role": "assistant", "content": "Hi"},
+                        },
+                    },
+                },
+            )
+
+    assert writer.path is not None
+    test_logger = debug_app.get_logger("test.transcript.api")
+    store = debug_app.BundleStore(writer.path, logger=test_logger)
+    app = debug_app.build_debug_app(store, logger=test_logger)
+    client = TestClient(app)
+
+    result = client.get("/api/transcript").json()
+    assert result["total"] == 2
+    assert len(result["entries"]) == 2
+    assert result["entries"][0]["transcript_source"] == "main"
+
+    facets = client.get("/api/transcript/facets").json()
+    assert any(item["name"] == "main" for item in facets["sources"])
+    assert any(item["name"] == "user" for item in facets["entry_types"])
+    assert any(item["name"] == "assistant" for item in facets["entry_types"])
+
+    # Search (server-side)
+    searched = client.get("/api/transcript", params={"search": "Hello"}).json()
+    assert searched["total"] == 1
+    assert searched["entries"][0]["entry_type"] == "user"
+
+    # Include filters
+    filtered = client.get(
+        "/api/transcript", params={"source": "main", "entry_type": "assistant"}
+    ).json()
+    assert filtered["total"] == 1
+    assert filtered["entries"][0]["entry_type"] == "assistant"
+
+    # Exclude filters
+    excluded = client.get(
+        "/api/transcript", params={"exclude_entry_type": "assistant"}
+    ).json()
+    assert excluded["total"] == 1
+    assert excluded["entries"][0]["entry_type"] == "user"
+
+    # Pagination branches
+    limited = client.get("/api/transcript", params={"limit": 1}).json()
+    assert limited["total"] == 2
+    assert len(limited["entries"]) == 1
+
+    offset_only = client.get("/api/transcript", params={"offset": 1}).json()
+    assert offset_only["total"] == 2
+    assert len(offset_only["entries"]) == 1
 
 
 def test_logs_filter_by_logger(tmp_path: Path) -> None:

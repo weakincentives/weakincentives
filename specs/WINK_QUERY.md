@@ -52,7 +52,8 @@ wink query ./bundle.zip --export-jsonl=session | jq 'select(.__type__)'
 | Table | Source | Description |
 |-------|--------|-------------|
 | `manifest` | `manifest.json` | Bundle metadata |
-| `logs` | `logs/app.jsonl` | Log entries (with `seq` column for log_aggregator events) |
+| `logs` | `logs/app.jsonl` | Log entries (with `seq` extracted from `context.sequence_number` when present) |
+| `transcript` | derived from logs | Transcript entries captured by TranscriptCollector |
 | `tool_calls` | derived from logs | Tool invocations |
 | `errors` | derived | Aggregated errors |
 | `session_slices` | `session/after.jsonl` | Session state items |
@@ -85,24 +86,51 @@ Pre-built views for common query patterns:
 | View | Description |
 |------|-------------|
 | `tool_timeline` | Tool calls ordered by timestamp with command extraction |
-| `native_tool_calls` | Claude Code native tools from log_aggregator events |
+| `native_tool_calls` | Native tool calls from transcripts (and legacy log_aggregator events) |
+| `transcript_entries` | TranscriptCollector entries extracted from logs |
 | `error_summary` | Errors with truncated traceback |
 
 ## Logs Table
 
-The `logs` table includes a `seq` column extracted from `log_aggregator.log_line`
-events. This enables range queries on native tool executions:
+The `logs` table includes a `seq` column extracted from `context.sequence_number`
+when present. This enables range queries on events that emit sequence numbers
+(e.g. legacy `log_aggregator.log_line`, and `transcript.collector.entry`).
 
 ```sql
 -- Query native tool logs by sequence range
-SELECT seq, json_extract(context, '$.content') as content
-FROM logs
-WHERE event = 'log_aggregator.log_line'
-  AND seq BETWEEN 360 AND 370
-ORDER BY seq
+SELECT sequence_number, source, tool_name, content
+FROM native_tool_calls
+WHERE sequence_number BETWEEN 360 AND 370
+ORDER BY sequence_number
 ```
 
-For non-log_aggregator events, `seq` is NULL.
+For events without a sequence number in context, `seq` is NULL.
+
+## Transcript Table
+
+The `transcript` table normalizes `transcript.collector.entry` logs into
+queryable columns:
+
+| Column | Description |
+|--------|-------------|
+| `prompt_name` | Prompt name from log context |
+| `transcript_source` | `"main"` or `"subagent:{id}"` |
+| `sequence_number` | Entry order within a transcript |
+| `entry_type` | Transcript entry type (`user`, `assistant`, etc.) |
+| `role` | Message role when present |
+| `content` | Human-readable content extracted from the entry |
+| `tool_name` | Tool name when a tool use is present |
+| `tool_use_id` | Tool use ID when present |
+| `raw_json` | Raw JSONL entry (string) |
+| `parsed` | Parsed JSON entry (string) |
+
+Example:
+
+```sql
+SELECT transcript_source, sequence_number, entry_type, role, content
+FROM transcript
+ORDER BY rowid
+```
 
 ## Schema Output
 
@@ -136,11 +164,14 @@ wink query ./bundle.zip --schema
   "hints": {
     "json_extraction": [
       "json_extract(context, '$.tool_name')",
+      "json_extract(params, '$.command')",
       "json_extract(context, '$.content')",
-      "json_extract(params, '$.command')"
+      "json_extract(parsed, '$.message.content')",
+      "json_extract(parsed, '$.tool_use_id')"
     ],
     "common_queries": {
-      "native_tools": "SELECT seq, json_extract(context, '$.content') as content FROM logs WHERE event = 'log_aggregator.log_line' AND seq BETWEEN 100 AND 200 ORDER BY seq",
+      "native_tools": "SELECT * FROM native_tool_calls ORDER BY timestamp",
+      "transcript": "SELECT transcript_source, sequence_number, entry_type, role, content FROM transcript ORDER BY rowid",
       "tool_timeline": "SELECT * FROM tool_timeline WHERE duration_ms > 1000",
       "error_context": "SELECT timestamp, message, context FROM logs WHERE level = 'ERROR'"
     }
@@ -181,17 +212,22 @@ SELECT slice_type, COUNT(*) FROM session_slices GROUP BY slice_type
 -- File search
 SELECT path FROM files WHERE content LIKE '%TODO%'
 
+-- Transcript entries (main + subagents, if available)
+SELECT transcript_source, sequence_number, entry_type, role, content
+FROM transcript
+ORDER BY rowid
+
 -- Native tools by sequence (Claude Code Bash, Read, Write, etc.)
-SELECT seq, json_extract(context, '$.content') as content
-FROM logs
-WHERE event = 'log_aggregator.log_line'
-  AND seq BETWEEN 100 AND 200
-ORDER BY seq
+SELECT sequence_number, source, tool_name, content
+FROM native_tool_calls
+WHERE sequence_number BETWEEN 100 AND 200
+ORDER BY sequence_number
 
 -- Use pre-built views
 SELECT * FROM tool_timeline WHERE duration_ms > 1000
 SELECT * FROM error_summary
 SELECT * FROM native_tool_calls LIMIT 10
+SELECT * FROM transcript_entries LIMIT 10
 ```
 
 ## Raw JSONL Export
@@ -228,6 +264,7 @@ Cache invalidated when:
 1. If stale/missing, create SQLite at `<bundle>.sqlite`:
    - `manifest.json` → `manifest`
    - `logs/app.jsonl` → `logs` (with `seq` extraction)
+   - `transcript.collector.entry` logs → `transcript`
    - `session/after.jsonl` → `session_slices` + `slice_*`
    - `config.json` → `config` (flattened)
    - `metrics.json` → `metrics`
@@ -235,7 +272,7 @@ Cache invalidated when:
    - `filesystem/` → `files`
    - Derive `tool_calls` from logs
    - Derive `errors` from logs + `error.json` + failed tools
-   - Create views: `tool_timeline`, `native_tool_calls`, `error_summary`
+   - Create views: `tool_timeline`, `native_tool_calls`, `transcript_entries`, `error_summary`
    - Optional: `prompt_overrides.json`, `eval.json`
 1. Execute query
 1. Return JSON or table
