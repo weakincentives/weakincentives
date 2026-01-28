@@ -330,7 +330,7 @@ const state = {
   transcriptExcludeSources: new Set(),
   transcriptIncludeTypes: new Set(),
   transcriptExcludeTypes: new Set(),
-  transcriptLimit: 200,
+  transcriptLimit: 50,
   transcriptTotalCount: 0,
   transcriptHasMore: false,
   transcriptLoading: false,
@@ -347,7 +347,7 @@ const state = {
   logsIncludeEvents: new Set(),
   logsExcludeEvents: new Set(),
   // Logs pagination
-  logsLimit: 200,
+  logsLimit: 50,
   logsTotalCount: 0,
   logsHasMore: false,
   logsLoading: false,
