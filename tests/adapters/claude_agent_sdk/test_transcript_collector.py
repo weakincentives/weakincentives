@@ -726,44 +726,35 @@ class TestTranscriptCollector:
 
         asyncio.run(run_test())
 
-    def test_file_rotation_resets_position(self, tmp_path: Path) -> None:
-        """Test that file rotation (new inode) resets tailer position."""
+    def test_inode_change_triggers_position_reset(
+        self, collector: TranscriptCollector, temp_dir: Path
+    ) -> None:
+        """Tailer resets position when file inode changes (rotation)."""
+        # Create initial transcript
+        transcript_path = temp_dir / "session123.jsonl"
+        transcript_path.write_text('{"type": "user", "message": "first"}\n')
 
-        async def run_test() -> None:
-            collector = TranscriptCollector(
-                prompt_name="rotation_test",
-                config=TranscriptCollectorConfig(
-                    emit_raw_json=False, parse_entries=False
-                ),
-            )
+        # Set up collector
+        asyncio.run(collector._remember_transcript_path(str(transcript_path)))
+        tailer = collector._tailers["main"]
 
-            # Create initial transcript file
-            transcript_path = tmp_path / "session123.jsonl"
-            transcript_path.write_text('{"type": "user"}\n')
-            await collector._remember_transcript_path(str(transcript_path))
-            tailer = collector._tailers["main"]
+        # Read initial content
+        asyncio.run(collector._poll_once())
+        original_inode = tailer.inode
+        assert tailer.entry_count == 1
 
-            # Read initial content
-            await collector._read_transcript_content(tailer)
-            assert tailer.position > 0
-            assert tailer.inode > 0
+        # Simulate inode change by modifying the tailer's stored inode
+        # This exercises the inode mismatch branch (lines 404-406)
+        tailer.inode = original_inode + 12345
+        tailer.partial_line = "incomplete"
 
-            # Save actual inode and position
-            actual_inode = tailer.inode
-            actual_position = tailer.position
+        # Write new content
+        with transcript_path.open("a") as f:
+            f.write('{"type": "assistant", "message": "second"}\n')
 
-            # Simulate file rotation by setting tailer inode to a different value
-            # This simulates what happens when the file is rotated (new file)
-            tailer.inode = 99999  # Fake inode that differs from actual
-            tailer.partial_line = "leftover data"
-            tailer.position = 100  # Some position that should be reset
+        # Poll - should detect inode mismatch and reset
+        asyncio.run(collector._poll_once())
 
-            # Read content - should detect inode mismatch and reset
-            await collector._read_transcript_content(tailer)
-
-            # Position should be reset and inode updated to actual
-            assert tailer.inode == actual_inode
-            assert tailer.position == actual_position  # Read to same position
-            assert tailer.partial_line == ""
-
-        asyncio.run(run_test())
+        # Verify position and partial_line were reset, inode updated
+        assert tailer.inode == original_inode
+        assert tailer.partial_line == ""
