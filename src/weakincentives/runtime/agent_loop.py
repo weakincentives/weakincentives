@@ -207,8 +207,8 @@ class AgentLoop[UserRequestT, OutputT](
         self,
         prompt: Prompt[OutputT],
         session: Session,
-        output: OutputT,
-    ) -> OutputT:
+        output: OutputT | None,
+    ) -> OutputT | None:
         """Finalize after execution completes.
 
         Called after successful evaluation. Override to perform cleanup,
@@ -218,7 +218,8 @@ class AgentLoop[UserRequestT, OutputT](
         Args:
             prompt: The prompt that was evaluated.
             session: The session used for evaluation.
-            output: The parsed output from the model response.
+            output: The parsed output from the model response, or None
+                for text-only prompts without structured output.
 
         Returns:
             The (possibly transformed) output to use in the final result.
@@ -551,10 +552,9 @@ class AgentLoop[UserRequestT, OutputT](
                         SetVisibilityOverride(path=path, visibility=visibility)
                     )
             else:
-                if response.output is not None:
-                    output = self.finalize(prompt, session, response.output)
-                    if output is not response.output:
-                        response = replace(response, output=output)
+                output = self.finalize(prompt, session, response.output)
+                if output is not response.output:
+                    response = replace(response, output=output)
                 return response
 
     def _build_run_context(

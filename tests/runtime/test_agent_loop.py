@@ -200,8 +200,8 @@ class _TestLoop(AgentLoop[_Request, _Output]):
         self,
         prompt: Prompt[_Output],
         session: Session,
-        output: _Output,
-    ) -> _Output:
+        output: _Output | None,
+    ) -> _Output | None:
         del prompt
         self.finalize_called = True
         _ = session
@@ -460,9 +460,11 @@ class _TransformingTestLoop(AgentLoop[_Request, _Output]):
         self,
         prompt: Prompt[_Output],
         session: Session,
-        output: _Output,
-    ) -> _Output:
+        output: _Output | None,
+    ) -> _Output | None:
         del prompt, session
+        if output is None:
+            return None
         # Transform the output by appending "-transformed" to result
         return _Output(result=f"{output.result}-transformed")
 
