@@ -20,12 +20,14 @@ from typing import Annotated, Literal, cast
 import pytest
 
 import weakincentives.prompt.tool as tool_module
+import weakincentives.prompt.tool_validation as tool_validation_module
 from weakincentives.prompt import (
     PromptValidationError,
     Tool,
     ToolContext,
     ToolExample,
     ToolResult,
+    TypeResolver,
 )
 from weakincentives.prompt._render_tool_examples import _render_example_value
 from weakincentives.types import SupportsDataclass, SupportsDataclassOrNone
@@ -268,18 +270,21 @@ def test_coerce_none_type_returns_none_when_union_is_all_none() -> None:
 def test_coerce_none_type_handles_union_type_with_only_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(tool_module, "get_origin", lambda _: types.UnionType)
-    monkeypatch.setattr(tool_module, "get_args", lambda _: (type(None), type(None)))
+    monkeypatch.setattr(tool_validation_module, "get_origin", lambda _: types.UnionType)
+    monkeypatch.setattr(
+        tool_validation_module, "get_args", lambda _: (type(None), type(None))
+    )
 
-    coerced = tool_module._coerce_none_type(object())
+    coerced = tool_validation_module.coerce_none_type(object())
 
     assert coerced is type(None)
 
 
 def test_tool_normalizes_none_result_annotation() -> None:
-    result_type, container = Tool._normalize_result_annotation(
+    resolver = TypeResolver()
+    result_type, container = resolver.normalize_result_annotation(
         None,
-        ExampleParams,
+        params_type=ExampleParams,
     )
 
     assert result_type is type(None)
@@ -364,9 +369,9 @@ def test_tool_wrap_handles_type_hint_resolution_errors(
         """Handler with type hint resolution issues."""
         return ToolResult.ok(ExampleResult(value=params.query), message="ok")
 
-    # Force get_type_hints to fail so _resolve_annotations returns empty dict
+    # Force get_type_hints to fail so resolve_annotations returns empty dict
     monkeypatch.setattr(
-        tool_module,
+        tool_validation_module,
         "get_type_hints",
         lambda *a, **k: (_ for _ in ()).throw(TypeError()),
     )
@@ -498,7 +503,7 @@ def test_tool_wrap_handles_empty_toolresult_args(
     def fake_get_args(annotation: object) -> tuple[object, ...]:
         return () if annotation == ToolResult[int] else typing.get_args(annotation)
 
-    monkeypatch.setattr(tool_module, "get_args", fake_get_args)
+    monkeypatch.setattr(tool_validation_module, "get_args", fake_get_args)
 
     with pytest.raises(
         PromptValidationError,

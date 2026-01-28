@@ -318,8 +318,9 @@ from .structured_output import (
     parse_structured_output,
 )
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
-from .tool import Tool, ToolContext, ToolExample, ToolHandler
+from .tool import Tool, ToolContext, ToolExample, ToolHandler, create_tool
 from .tool_result import ToolResult
+from .tool_validation import ToolValidator, TypeResolver
 
 __all__ = [
     "DeadlineFeedback",
@@ -375,9 +376,12 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "ToolSuiteSection",
+    "ToolValidator",
+    "TypeResolver",
     "VisibilityExpansionRequired",
     "WorkspaceSection",
     "collect_feedback",
+    "create_tool",
     "hash_json",
     "hash_text",
     "parse_structured_output",

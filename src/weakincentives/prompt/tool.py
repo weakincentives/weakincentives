@@ -13,13 +13,9 @@
 from __future__ import annotations
 
 import inspect
-import re
-import types
-from collections.abc import Callable, Sequence as SequenceABC
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
-    Annotated,
     Any,
     Final,
     Literal,
@@ -27,8 +23,6 @@ from typing import (
     TypeVar,
     cast,
     get_args,
-    get_origin,
-    get_type_hints,
 )
 
 from ..budget import BudgetTracker
@@ -37,22 +31,19 @@ from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
     SupportsToolResult,
-    is_dataclass_instance,
 )
 from .errors import PromptValidationError
 from .tool_result import ToolResult
-
-_NAME_MIN_LENGTH: Final = 1
-_NAME_MAX_LENGTH: Final = 64
-_DESCRIPTION_MAX_LENGTH: Final = 200
-_EXPECTED_TYPE_ARGUMENTS: Final = 2
-_HANDLER_PARAMETER_COUNT: Final = 2
-_VARIADIC_TUPLE_LENGTH: Final = 2
-_NONE_TYPE: Final = type(None)
-
-_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
-    rf"^[a-z0-9_-]{{{_NAME_MIN_LENGTH},{_NAME_MAX_LENGTH}}}$"
+from .tool_validation import (
+    ParamsType,
+    coerce_none_type,
+    get_type_resolver,
+    get_validator,
+    normalize_specialization,
 )
+
+_EXPECTED_TYPE_ARGUMENTS: Final = 2
+_NONE_TYPE: Final = type(None)
 
 
 if TYPE_CHECKING:
@@ -66,9 +57,6 @@ if TYPE_CHECKING:
         ProviderAdapterProtocol,
         RenderedPromptProtocol,
     )
-
-type ParamsType = type[SupportsDataclass] | type[None]
-type ResultType = type[SupportsDataclass] | type[None]
 
 # Contravariance for ParamsT allows a handler accepting broader param types
 # to substitute for one requiring narrower types (Liskov substitution).
@@ -176,31 +164,6 @@ class ToolContext:
             self.heartbeat.beat()
 
 
-def _normalize_specialization(item: object) -> tuple[object, object]:
-    if not isinstance(item, tuple):
-        raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
-    normalized = cast(SequenceABC[object], item)
-    if len(normalized) != _EXPECTED_TYPE_ARGUMENTS:
-        raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
-    return _coerce_none_type(normalized[0]), _coerce_none_type(normalized[1])
-
-
-def _coerce_none_type(candidate: object) -> object:
-    if candidate is None:
-        return _NONE_TYPE
-
-    origin = get_origin(candidate)
-    if origin is types.UnionType:
-        args = get_args(candidate)
-        if args and all(isinstance(arg, type) for arg in args):
-            non_none = [arg for arg in args if arg is not _NONE_TYPE]
-            if non_none:
-                return non_none[0]
-            return _NONE_TYPE
-
-    return candidate
-
-
 class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
     """Callable protocol implemented by tool handlers."""
 
@@ -211,7 +174,11 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
 
 @dataclass(slots=True)
 class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
-    """Describe a callable tool exposed by prompt sections."""
+    """Describe a callable tool exposed by prompt sections.
+
+    Tool definitions are validated on construction. Validation is delegated
+    to ``ToolValidator`` for reusability and testability.
+    """
 
     name: str
     description: str
@@ -229,11 +196,14 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     accepts_overrides: bool = True
 
     def __post_init__(self) -> None:
+        validator = get_validator()
+        resolver = get_type_resolver()
+
         params_type, raw_result_annotation = self._resolve_type_arguments()
 
-        result_type, result_container = self._normalize_result_annotation(
+        result_type, result_container = resolver.normalize_result_annotation(
             raw_result_annotation,
-            params_type,
+            params_type=params_type,
         )
 
         self.params_type = cast(type[ParamsT], params_type)
@@ -241,11 +211,18 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         self.result_container = result_container
         self._result_annotation = raw_result_annotation
 
-        self.name = self._validate_name(params_type)
-        self.description = self._validate_description(params_type)
-        self.examples = self._validate_examples(
-            params_type,
-            result_type,
+        self.name = validator.validate_name(self.name, params_type=params_type)
+        self.description = validator.validate_description(
+            self.description, params_type=params_type
+        )
+        self.examples = cast(
+            tuple[ToolExample[ParamsT, ResultT], ...],
+            validator.validate_examples(
+                self.examples,
+                params_type=params_type,
+                result_type=result_type,
+                result_container=result_container,
+            ),
         )
 
         # Handler validation removed: pyright strict mode catches signature mismatches
@@ -255,6 +232,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     def _resolve_type_arguments(
         self,
     ) -> tuple[ParamsType, ResultT]:
+        """Resolve ParamsT and ResultT from class specialization or attributes."""
         params_attr = getattr(self, "params_type", None)
         params_type: ParamsType | None = (
             cast(ParamsType, params_attr) if isinstance(params_attr, type) else None
@@ -267,9 +245,9 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                 if len(args) == _EXPECTED_TYPE_ARGUMENTS:
                     params_arg, result_arg = args
                     if isinstance(params_arg, type):
-                        params_type = cast(ParamsType, _coerce_none_type(params_arg))
+                        params_type = cast(ParamsType, coerce_none_type(params_arg))
                         raw_result_annotation = cast(
-                            ResultT, _coerce_none_type(result_arg)
+                            ResultT, coerce_none_type(result_arg)
                         )
         if params_type is None or raw_result_annotation is None:
             raise PromptValidationError(
@@ -279,242 +257,12 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
         return params_type, cast(ResultT, raw_result_annotation)
 
-    def _validate_name(self, params_type: ParamsType) -> str:
-        raw_name = self.name
-        stripped_name = raw_name.strip()
-        if raw_name != stripped_name:
-            normalized_name = stripped_name
-            raise PromptValidationError(
-                "Tool name must not contain surrounding whitespace.",
-                dataclass_type=params_type,
-                placeholder=normalized_name,
-            )
-
-        name_clean = raw_name
-        if not name_clean:
-            raise PromptValidationError(
-                "Tool name must match the OpenAI function name constraints (1-64 lowercase ASCII letters, digits, underscores, or hyphens).",
-                dataclass_type=params_type,
-                placeholder=stripped_name,
-            )
-        if len(name_clean) > _NAME_MAX_LENGTH or not _NAME_PATTERN.fullmatch(
-            name_clean
-        ):
-            raise PromptValidationError(
-                f"Tool name must match the OpenAI function name constraints (pattern: {_NAME_PATTERN.pattern}).",
-                dataclass_type=params_type,
-                placeholder=name_clean,
-            )
-
-        return name_clean
-
-    def _validate_description(self, params_type: ParamsType) -> str:
-        description_clean = self.description.strip()
-        if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
-            raise PromptValidationError(
-                "Tool description must be 1-200 ASCII characters.",
-                dataclass_type=params_type,
-                placeholder="description",
-            )
-        try:
-            _ = description_clean.encode("ascii")
-        except UnicodeEncodeError as error:
-            raise PromptValidationError(
-                "Tool description must be ASCII.",
-                dataclass_type=params_type,
-                placeholder="description",
-            ) from error
-        return description_clean
-
-    @staticmethod
-    def _validate_example_description(
-        description: str, params_type: ParamsType
-    ) -> None:
-        description_clean = description.strip()
-        if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
-            raise PromptValidationError(
-                "Tool example description must be 1-200 ASCII characters.",
-                dataclass_type=params_type,
-                placeholder="description",
-            )
-        try:
-            _ = description_clean.encode("ascii")
-        except UnicodeEncodeError as error:
-            raise PromptValidationError(
-                "Tool example description must be ASCII.",
-                dataclass_type=params_type,
-                placeholder="description",
-            ) from error
-
-    @staticmethod
-    def _validate_example_input(
-        example_input: object,
-        params_type: ParamsType,
-    ) -> None:
-        if params_type is _NONE_TYPE:
-            if example_input is not None:
-                raise PromptValidationError(
-                    "Tool example input must be None when ParamsT is None.",
-                    dataclass_type=params_type,
-                    placeholder="examples",
-                )
-            return
-        if not is_dataclass_instance(example_input):
-            raise PromptValidationError(
-                "Tool example input must be a ParamsT dataclass instance.",
-                dataclass_type=params_type,
-                placeholder="examples",
-            )
-        if type(example_input) is not params_type:
-            raise PromptValidationError(
-                "Tool example input must match the tool params type.",
-                dataclass_type=params_type,
-                placeholder="examples",
-            )
-
-    def _validate_example_output(
-        self,
-        example_output: object,
-        params_type: ParamsType,
-        result_type: ResultType,
-    ) -> None:
-        if result_type is _NONE_TYPE:
-            if example_output is not None:
-                raise PromptValidationError(
-                    "Tool example output must be None when ResultT is None.",
-                    dataclass_type=params_type,
-                    placeholder="examples",
-                )
-            return
-        if self.result_container == "array":
-            if not isinstance(example_output, SequenceABC) or isinstance(
-                example_output, (str, bytes, bytearray)
-            ):
-                raise PromptValidationError(
-                    "Tool example output must be a sequence of ResultT dataclass instances.",
-                    dataclass_type=params_type,
-                    placeholder="examples",
-                )
-
-            sequence_output = cast(SequenceABC[object], example_output)
-            for item in sequence_output:
-                if not is_dataclass_instance(item) or type(item) is not result_type:
-                    raise PromptValidationError(
-                        "Tool example output must be a sequence of ResultT dataclass instances.",
-                        dataclass_type=params_type,
-                        placeholder="examples",
-                    )
-            return
-
-        if (
-            not is_dataclass_instance(example_output)
-            or type(example_output) is not result_type
-        ):
-            raise PromptValidationError(
-                "Tool example output must be a ResultT dataclass instance.",
-                dataclass_type=params_type,
-                placeholder="examples",
-            )
-
-    def _validate_examples(
-        self,
-        params_type: ParamsType,
-        result_type: ResultType,
-    ) -> tuple[ToolExample[ParamsT, ResultT], ...]:
-        examples_value = cast(tuple[object, ...], self.examples)
-        if not examples_value:
-            return ()
-
-        normalized_examples: list[ToolExample[ParamsT, ResultT]] = []
-        for example in examples_value:
-            if not isinstance(example, ToolExample):
-                raise PromptValidationError(
-                    "Tool examples must be ToolExample instances.",
-                    dataclass_type=params_type,
-                    placeholder="examples",
-                )
-
-            typed_example = cast(ToolExample[ParamsT, ResultT], example)
-
-            self._validate_example_description(typed_example.description, params_type)
-            self._validate_example_input(typed_example.input, params_type)
-            self._validate_example_output(
-                typed_example.output, params_type, result_type
-            )
-
-            normalized_examples.append(typed_example)
-
-        return tuple(normalized_examples)
-
-    @staticmethod
-    def _validate_parameter_count(
-        parameters: list[inspect.Parameter],
-        params_type: ParamsType,
-    ) -> tuple[inspect.Parameter, inspect.Parameter]:
-        if len(parameters) != _HANDLER_PARAMETER_COUNT:
-            raise PromptValidationError(
-                "Tool handler must accept exactly one positional argument and the keyword-only 'context' parameter.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-
-        parameter = parameters[0]
-        context_parameter = parameters[1]
-        return parameter, context_parameter
-
-    @staticmethod
-    def _resolve_annotations(
-        callable_handler: Callable[..., ToolResult[ResultT]],
-    ) -> dict[str, object]:
-        try:
-            return get_type_hints(callable_handler, include_extras=True)
-        except Exception:
-            return {}
-
-    @staticmethod
-    def _normalize_result_annotation(
-        annotation: ResultT,
-        params_type: ParamsType,
-    ) -> tuple[ResultType, Literal["object", "array"]]:
-        if annotation is None:
-            return _NONE_TYPE, "object"
-        if isinstance(annotation, type):
-            return cast(ResultType, annotation), "object"
-
-        origin = get_origin(annotation)
-        if origin not in {list, tuple, SequenceABC}:
-            raise PromptValidationError(
-                "Tool ResultT must be a dataclass type or a sequence of dataclasses.",
-                dataclass_type=params_type,
-                placeholder="ResultT",
-            )
-
-        args = get_args(annotation)
-        if origin is tuple and (
-            len(args) != _VARIADIC_TUPLE_LENGTH or args[1] is not Ellipsis
-        ):
-            raise PromptValidationError(
-                "Variadic Tuple[ResultT, ...] is required for Tool sequence results.",
-                dataclass_type=params_type,
-                placeholder="ResultT",
-            )
-        # list[T] and Sequence[T] always have exactly one type arg
-        element = args[0]
-
-        if not isinstance(element, type):
-            raise PromptValidationError(
-                "Tool ResultT must be a dataclass type or a sequence of dataclasses.",
-                dataclass_type=params_type,
-                placeholder="ResultT",
-            )
-
-        return cast(ResultType, element), "array"
-
     @classmethod
     def __class_getitem__(
         cls, item: object
     ) -> type[Tool[SupportsDataclassOrNone, SupportsToolResult]]:
-        params_candidate, result_candidate = _normalize_specialization(item)
+        """Support Tool[ParamsT, ResultT] generic specialization."""
+        params_candidate, result_candidate = normalize_specialization(item)
         if not isinstance(params_candidate, type):
             raise TypeError("Tool ParamsT type argument must be a type.")
         params_type = cast(ParamsType, params_candidate)
@@ -535,102 +283,47 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         )
 
     @staticmethod
-    def _resolve_wrapped_description[
-        ParamsT_runtime: SupportsDataclassOrNone,
-        ResultT_runtime: SupportsToolResult,
-    ](
-        fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
-    ) -> str:
-        description = inspect.getdoc(fn)
-        if description is None:
-            raise PromptValidationError(
-                "Tool handler must define a docstring to use as the description.",
-                placeholder="description",
-            )
-        return description
-
-    @staticmethod
-    def _resolve_wrapped_params_type(
-        parameter: inspect.Parameter, hints: dict[str, object]
-    ) -> ParamsType:
-        annotation = hints.get(parameter.name, parameter.annotation)
-        if annotation is inspect.Parameter.empty:
-            raise PromptValidationError(
-                "Tool handler parameter must be annotated with ParamsT.",
-                placeholder="handler",
-            )
-
-        params_annotation = annotation
-        if get_origin(params_annotation) is Annotated:
-            params_annotation = get_args(params_annotation)[0]
-        if get_origin(params_annotation) is Literal:
-            literal_args = get_args(params_annotation)
-            params_annotation = literal_args[0] if literal_args else params_annotation
-
-        return cast(ParamsType, _coerce_none_type(params_annotation))
-
-    @staticmethod
-    def _resolve_wrapped_result_annotation(
-        signature: inspect.Signature,
-        hints: dict[str, object],
-        params_type: ParamsType,
-    ) -> SupportsToolResult:
-        return_annotation = hints.get("return", signature.return_annotation)
-        if return_annotation is inspect.Signature.empty:
-            raise PromptValidationError(
-                "Tool handler must annotate its return value with ToolResult[ResultT].",
-                dataclass_type=params_type,
-                placeholder="return",
-            )
-        result_annotation = return_annotation
-        if get_origin(result_annotation) is Annotated:
-            result_annotation = get_args(result_annotation)[0]
-
-        if get_origin(result_annotation) is not ToolResult:
-            raise PromptValidationError(
-                "Tool handler return annotation must be ToolResult[ResultT].",
-                dataclass_type=params_type,
-                placeholder="return",
-            )
-
-        try:
-            result_arg = next(
-                iter(cast(tuple[object, ...], get_args(result_annotation)))
-            )
-        except StopIteration as error:
-            raise PromptValidationError(
-                "Tool handler return annotation must be ToolResult[ResultT].",
-                dataclass_type=params_type,
-                placeholder="return",
-            ) from error
-
-        return cast(SupportsToolResult, _coerce_none_type(result_arg))
-
-    @staticmethod
     def wrap[
         ParamsT_runtime: SupportsDataclassOrNone,
         ResultT_runtime: SupportsToolResult,
     ](
         fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
     ) -> Tool[ParamsT_runtime, ResultT_runtime]:
-        """Create a Tool from a handler using its name and docstring."""
+        """Create a Tool from a handler using its name and docstring.
 
-        description = Tool._resolve_wrapped_description(fn)
+        The handler function must have:
+        - A docstring (used as tool description)
+        - Type annotation for the params parameter
+        - Return type annotation of ToolResult[ResultT]
+        - Exactly two parameters: (params: ParamsT, *, context: ToolContext)
+
+        Example::
+
+            def my_tool(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
+                \"\"\"Does something useful.\"\"\"
+                return ToolResult.ok(MyResult(...), message="Done")
+
+            tool = Tool.wrap(my_tool)
+        """
+        validator = get_validator()
+        resolver = get_type_resolver()
+
+        description = resolver.resolve_wrapped_description(fn)
 
         signature = inspect.signature(fn)
-        parameter = Tool._validate_parameter_count(
+        parameter = validator.validate_parameter_count(
             list(signature.parameters.values()),
-            _NONE_TYPE,
+            params_type=_NONE_TYPE,
         )[0]
 
-        hints = Tool._resolve_annotations(fn)
-        params_type: ParamsType = Tool._resolve_wrapped_params_type(parameter, hints)
+        hints = resolver.resolve_annotations(fn)
+        params_type: ParamsType = resolver.resolve_wrapped_params_type(parameter, hints)
         normalized_result = cast(
             ResultT_runtime,
-            Tool._resolve_wrapped_result_annotation(
+            resolver.resolve_wrapped_result_annotation(
                 signature,
                 hints,
-                params_type,
+                params_type=params_type,
             ),
         )
 
@@ -649,10 +342,94 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         )
 
 
+def create_tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
+    name: str,
+    handler: ToolHandler[ParamsT, ResultT],
+    *,
+    description: str | None = None,
+    examples: tuple[ToolExample[ParamsT, ResultT], ...] = (),
+    accepts_overrides: bool = True,
+) -> Tool[ParamsT, ResultT]:
+    """Create and validate a tool definition from a handler.
+
+    This factory function provides a convenient way to create tools with
+    automatic type resolution from the handler signature. If no description
+    is provided, the handler's docstring is used.
+
+    Args:
+        name: Tool name (must match OpenAI function name constraints).
+        handler: Tool handler function.
+        description: Tool description (defaults to handler docstring).
+        examples: Optional tuple of ToolExample instances.
+        accepts_overrides: Whether the tool accepts runtime overrides.
+
+    Returns:
+        Validated Tool instance.
+
+    Raises:
+        PromptValidationError: If validation fails.
+
+    Example::
+
+        def search(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
+            \"\"\"Search for items matching the query.\"\"\"
+            ...
+
+        tool = create_tool("search", search)
+        # Or with custom description:
+        tool = create_tool("search", search, description="Custom description.")
+    """
+    resolver = get_type_resolver()
+
+    # Resolve description from docstring if not provided
+    if description is None:
+        description = resolver.resolve_wrapped_description(handler)
+
+    # Resolve types from handler signature
+    signature = inspect.signature(handler)
+    validator = get_validator()
+    parameter = validator.validate_parameter_count(
+        list(signature.parameters.values()),
+        params_type=_NONE_TYPE,
+    )[0]
+
+    hints = resolver.resolve_annotations(handler)
+    params_type: ParamsType = resolver.resolve_wrapped_params_type(parameter, hints)
+    normalized_result = cast(
+        ResultT,
+        resolver.resolve_wrapped_result_annotation(
+            signature,
+            hints,
+            params_type=params_type,
+        ),
+    )
+
+    # Create specialized tool type
+    tool_type = Tool.__class_getitem__((params_type, normalized_result))
+    specialized_tool_type = cast(
+        "type[Tool[ParamsT, ResultT]]",
+        tool_type,
+    )
+
+    return specialized_tool_type(
+        name=name,
+        description=description,
+        handler=handler,
+        examples=examples,
+        accepts_overrides=accepts_overrides,
+    )
+
+
+# Re-export for backward compatibility
+_coerce_none_type = coerce_none_type
+_normalize_specialization = normalize_specialization
+
+
 __all__ = [
     "Tool",
     "ToolContext",
     "ToolExample",
     "ToolHandler",
     "ToolResult",
+    "create_tool",
 ]
