@@ -349,7 +349,7 @@ class TranscriptCollector:
 
     async def _discovery_loop(self) -> None:
         """Background loop for subagent discovery."""
-        while self._running:
+        while self._running:  # pragma: no branch
             await self._discover_subagents()
             await asyncio.sleep(self.config.subagent_discovery_interval)
 

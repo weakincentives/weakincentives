@@ -150,6 +150,7 @@ combine-as-imports = true
 "examples/**" = ["C901", "CPY001", "ANN201", "ANN204"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
+"src/weakincentives/prompt/tool_validation.py" = ["PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
 "src/weakincentives/adapters/core.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/adapters/openai.py" = ["PLR0913"]

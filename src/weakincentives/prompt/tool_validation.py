@@ -40,7 +40,6 @@ from typing import (
 
 from ..types.dataclass import (
     SupportsDataclass,
-    SupportsDataclassOrNone,
     SupportsToolResult,
     is_dataclass_instance,
 )
@@ -127,9 +126,7 @@ class ToolValidator:
         validated_desc = validator.validate_description("Does something.", params_type=MyParams)
     """
 
-    def validate_name(  # noqa: PLR6301
-        self, name: str, *, params_type: ParamsType
-    ) -> str:
+    def validate_name(self, name: str, *, params_type: ParamsType) -> str:
         """Validate and normalize a tool name.
 
         Args:
@@ -175,9 +172,7 @@ class ToolValidator:
 
         return name_clean
 
-    def validate_description(  # noqa: PLR6301
-        self, description: str, *, params_type: ParamsType
-    ) -> str:
+    def validate_description(self, description: str, *, params_type: ParamsType) -> str:
         """Validate and normalize a tool description.
 
         Args:
@@ -207,7 +202,7 @@ class ToolValidator:
             ) from error
         return description_clean
 
-    def validate_example_description(  # noqa: PLR6301
+    def validate_example_description(
         self, description: str, *, params_type: ParamsType
     ) -> None:
         """Validate an example description.
@@ -235,7 +230,7 @@ class ToolValidator:
                 placeholder="description",
             ) from error
 
-    def validate_example_input(  # noqa: PLR6301
+    def validate_example_input(
         self,
         example_input: object,
         *,
@@ -272,7 +267,7 @@ class ToolValidator:
                 placeholder="examples",
             )
 
-    def validate_example_output(  # noqa: PLR6301
+    def validate_example_output(
         self,
         example_output: object,
         *,
@@ -329,10 +324,7 @@ class ToolValidator:
                 placeholder="examples",
             )
 
-    def validate_examples[
-        ParamsT: SupportsDataclassOrNone,
-        ResultT: SupportsToolResult,
-    ](
+    def validate_examples(
         self,
         examples: tuple[object, ...],
         *,
@@ -393,7 +385,7 @@ class ToolValidator:
 
         return tuple(normalized_examples)
 
-    def validate_parameter_count(  # noqa: PLR6301
+    def validate_parameter_count(
         self,
         parameters: list[inspect.Parameter],
         *,
@@ -430,7 +422,7 @@ class ToolValidator:
 class TypeResolver:
     """Resolves type annotations from handler signatures and Tool specializations."""
 
-    def resolve_annotations(  # noqa: PLR6301
+    def resolve_annotations(
         self,
         callable_handler: Callable[..., object],
     ) -> dict[str, object]:
@@ -447,7 +439,7 @@ class TypeResolver:
         except Exception:
             return {}
 
-    def normalize_result_annotation(  # noqa: PLR6301
+    def normalize_result_annotation(
         self,
         annotation: SupportsToolResult,
         *,
@@ -499,12 +491,9 @@ class TypeResolver:
 
         return cast(ResultType, element), "array"
 
-    def resolve_wrapped_description[  # noqa: PLR6301
-        ParamsT: SupportsDataclassOrNone,
-        ResultT: SupportsToolResult,
-    ](
+    def resolve_wrapped_description(
         self,
-        fn: Callable[..., ToolResult[ResultT]],
+        fn: Callable[..., object],
     ) -> str:
         """Extract description from handler docstring.
 
@@ -525,7 +514,7 @@ class TypeResolver:
             )
         return description
 
-    def resolve_wrapped_params_type(  # noqa: PLR6301
+    def resolve_wrapped_params_type(
         self, parameter: inspect.Parameter, hints: dict[str, object]
     ) -> ParamsType:
         """Resolve parameter type from handler annotation.
@@ -556,7 +545,7 @@ class TypeResolver:
 
         return cast(ParamsType, coerce_none_type(params_annotation))
 
-    def resolve_wrapped_result_annotation(  # noqa: PLR6301
+    def resolve_wrapped_result_annotation(
         self,
         signature: inspect.Signature,
         hints: dict[str, object],
