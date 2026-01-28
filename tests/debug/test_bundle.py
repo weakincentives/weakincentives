@@ -1342,7 +1342,7 @@ class TestRetentionPolicyIntegration:
         config = BundleConfig(target=tmp_path, retention=retention)
 
         # Mock _enforce_retention to raise
-        def failing_enforce(self: object, policy: object) -> None:
+        def failing_enforce(self: object, policy: object, exclude_path: object) -> None:
             raise RuntimeError("Simulated retention failure")
 
         with patch.object(BundleWriter, "_enforce_retention", failing_enforce):

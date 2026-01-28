@@ -905,19 +905,23 @@ class BundleWriter:
         """Set prompt metadata for manifest."""
         self._prompt_info = PromptInfo(ns=ns, key=key, adapter=adapter)
 
-    def _apply_retention_policy(self) -> None:
+    def _apply_retention_policy(self, exclude_path: Path) -> None:
         """Apply retention policy to clean up old bundles.
 
         Called after a new bundle is successfully created. Scans the target
         directory for existing bundles and deletes those that exceed the
         configured limits.
+
+        Args:
+            exclude_path: Path to the just-created bundle to exclude from
+                retention processing (prevents self-deletion).
         """
         retention = self._config.retention
         if retention is None:
             return
 
         try:
-            self._enforce_retention(retention)
+            self._enforce_retention(retention, exclude_path)
         except Exception:
             _logger.warning(
                 "Failed to apply retention policy",
@@ -925,9 +929,11 @@ class BundleWriter:
                 exc_info=True,
             )
 
-    def _enforce_retention(self, retention: BundleRetentionPolicy) -> None:
+    def _enforce_retention(
+        self, retention: BundleRetentionPolicy, exclude_path: Path
+    ) -> None:
         """Enforce retention policy on bundles in target directory."""
-        bundles = self._collect_existing_bundles()
+        bundles = self._collect_existing_bundles(exclude_path)
         to_delete: set[Path] = set()
 
         self._apply_age_limit(retention, bundles, to_delete)
@@ -945,25 +951,28 @@ class BundleWriter:
             return self._config.target
         return self._target
 
-    def _collect_existing_bundles(self) -> list[tuple[Path, datetime, int]]:
+    def _collect_existing_bundles(
+        self, exclude_path: Path
+    ) -> list[tuple[Path, datetime, int]]:
         """Collect metadata for existing bundles in the target directory.
 
         Uses recursive glob to find bundles in nested directories, supporting
         EvalLoop's ``{target}/{request_id}/{bundle}.zip`` structure.
+
+        Args:
+            exclude_path: Path to the just-created bundle to exclude from
+                collection (prevents self-deletion).
         """
         search_root = self._get_retention_search_root()
         bundles: list[tuple[Path, datetime, int]] = []
-        # Resolve path once for efficient comparison
-        self_path_resolved = self._path.resolve() if self._path else None
+        # Resolve exclude path once for efficient comparison
+        exclude_path_resolved = exclude_path.resolve()
 
         for bundle_path in search_root.glob("**/*.zip"):
             try:
                 # Skip the bundle we just created - check path first for efficiency
                 # (avoids loading the just-created bundle unnecessarily)
-                if (
-                    self_path_resolved is not None
-                    and bundle_path.resolve() == self_path_resolved
-                ):
+                if bundle_path.resolve() == exclude_path_resolved:
                     continue
 
                 bundle = DebugBundle.load(bundle_path)
@@ -1184,7 +1193,7 @@ class BundleWriter:
         )
 
         # Post-creation lifecycle: retention then storage
-        self._apply_retention_policy()
+        self._apply_retention_policy(exclude_path=zip_path)
         self._invoke_storage_handler(manifest)
 
 
