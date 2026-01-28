@@ -557,6 +557,109 @@ class BundleStore:
 
         return {"sources": sources, "entry_types": entry_types}
 
+    def get_environment(self) -> Mapping[str, JSONValue]:
+        """Get environment data (system, python, git, container, env_vars)."""
+        result: dict[str, JSONValue] = {}
+
+        # Get system info
+        system_rows = self._db.execute("SELECT * FROM env_system LIMIT 1")
+        if system_rows:
+            row = system_rows[0]
+            result["system"] = {
+                "os_name": row["os_name"],
+                "os_release": row["os_release"],
+                "kernel_version": row["kernel_version"],
+                "architecture": row["architecture"],
+                "processor": row["processor"],
+                "cpu_count": row["cpu_count"],
+                "memory_total_bytes": row["memory_total_bytes"],
+                "hostname": row["hostname"],
+            }
+        else:
+            result["system"] = None
+
+        # Get python info
+        python_rows = self._db.execute("SELECT * FROM env_python LIMIT 1")
+        if python_rows:
+            row = python_rows[0]
+            version_info = row["version_info"]
+            result["python"] = {
+                "version": row["version"],
+                "version_info": json.loads(version_info) if version_info else None,
+                "implementation": row["implementation"],
+                "executable": row["executable"],
+                "prefix": row["prefix"],
+                "base_prefix": row["base_prefix"],
+                "is_virtualenv": bool(row["is_virtualenv"]),
+            }
+        else:
+            result["python"] = None
+
+        # Get git info
+        git_rows = self._db.execute("SELECT * FROM env_git LIMIT 1")
+        if git_rows:
+            row = git_rows[0]
+            remotes = row["remotes"]
+            tags = row["tags"]
+            result["git"] = {
+                "repo_root": row["repo_root"],
+                "commit_sha": row["commit_sha"],
+                "commit_short": row["commit_short"],
+                "branch": row["branch"],
+                "is_dirty": bool(row["is_dirty"])
+                if row["is_dirty"] is not None
+                else None,
+                "remotes": json.loads(remotes) if remotes else None,
+                "tags": json.loads(tags) if tags else None,
+            }
+        else:
+            result["git"] = None
+
+        # Get container info
+        container_rows = self._db.execute("SELECT * FROM env_container LIMIT 1")
+        if container_rows:
+            row = container_rows[0]
+            is_containerized = row["is_containerized"]
+            if is_containerized is not None and is_containerized:
+                result["container"] = {
+                    "runtime": row["runtime"],
+                    "container_id": row["container_id"],
+                    "image": row["image"],
+                    "image_digest": row["image_digest"],
+                    "cgroup_path": row["cgroup_path"],
+                    "is_containerized": bool(is_containerized),
+                }
+            else:
+                result["container"] = None
+        else:
+            result["container"] = None
+
+        # Get env vars
+        env_var_rows = self._db.execute(
+            "SELECT name, value FROM env_vars ORDER BY name"
+        )
+        result["env_vars"] = {row["name"]: row["value"] for row in env_var_rows}
+
+        # Get packages from environment table
+        pkg_rows = self._db.execute(
+            "SELECT value FROM environment WHERE key = 'packages' LIMIT 1"
+        )
+        result["packages"] = pkg_rows[0]["value"] if pkg_rows else None
+
+        # Get command from environment table
+        cmd_rows = self._db.execute(
+            "SELECT value FROM environment WHERE key = 'command' LIMIT 1"
+        )
+        result["command"] = cmd_rows[0]["value"] if cmd_rows else None
+
+        # Get git_diff from environment table
+        diff_rows = self._db.execute(
+            "SELECT value FROM environment WHERE key = 'git_diff' LIMIT 1"
+        )
+        result["git_diff"] = diff_rows[0]["value"] if diff_rows else None
+
+        return result
+
     def list_bundles(self) -> list[Mapping[str, JSONValue]]:
         """List all bundles in the root directory."""
         bundles: list[tuple[float, Path]] = []
@@ -730,6 +833,10 @@ class _DebugAppHandlers:
         """Return unique transcript sources and entry types for filter UI."""
         return self._store.get_transcript_facets()
 
+    def get_environment(self) -> Mapping[str, JSONValue]:
+        """Return environment data (system, python, git, container, env_vars)."""
+        return self._store.get_environment()
+
     def get_config(self) -> JSONResponse:
         """Return the bundle config."""
         config = self._store.bundle.config
@@ -831,6 +938,7 @@ def build_debug_app(store: BundleStore, logger: StructuredLogger) -> FastAPI:
     _ = app.get("/api/logs/facets")(handlers.get_log_facets)
     _ = app.get("/api/transcript")(handlers.get_transcript)
     _ = app.get("/api/transcript/facets")(handlers.get_transcript_facets)
+    _ = app.get("/api/environment")(handlers.get_environment)
     _ = app.get("/api/config")(handlers.get_config)
     _ = app.get("/api/metrics")(handlers.get_metrics)
     _ = app.get("/api/error")(handlers.get_error)

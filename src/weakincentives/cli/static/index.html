@@ -44,7 +44,7 @@
           </div>
           <div class="shortcuts-section">
             <h3>View</h3>
-            <div class="shortcut-row"><kbd>1</kbd>-<kbd>5</kbd><span>Switch tabs</span></div>
+            <div class="shortcut-row"><kbd>1</kbd>-<kbd>6</kbd><span>Switch tabs</span></div>
             <div class="shortcut-row"><kbd>[</kbd><span>Toggle sidebar</span></div>
             <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
             <div class="shortcut-row"><kbd>Esc</kbd><span>Close dialogs</span></div>
@@ -141,6 +141,14 @@
         </svg>
         Filesystem
         <kbd>5</kbd>
+      </button>
+      <button class="main-tab" data-view="environment">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M12 1v6m0 6v6m5.2-14.2l-4.2 4.2m0 6l4.2 4.2M23 12h-6m-6 0H1m20.2 5.2l-4.2-4.2m0-6l4.2-4.2"></path>
+        </svg>
+        Environment
+        <kbd>6</kbd>
       </button>
     </nav>
 
@@ -472,6 +480,30 @@
           </div>
         </div>
       </section>
+    </main>
+
+    <!-- ==================== ENVIRONMENT VIEW ==================== -->
+    <main id="environment-view" class="view-container environment-view-container hidden">
+      <div class="card environment-card">
+        <div id="environment-empty-state" class="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 1v6m0 6v6m5.2-14.2l-4.2 4.2m0 6l4.2 4.2M23 12h-6m-6 0H1m20.2 5.2l-4.2-4.2m0-6l4.2-4.2"></path>
+          </svg>
+          <h3>No environment data</h3>
+          <p class="muted">This bundle does not include environment information</p>
+        </div>
+        <div id="environment-content" class="hidden">
+          <div class="card-header">
+            <div>
+              <p class="label">Environment</p>
+              <p>System, Python, Git & Container Information</p>
+            </div>
+            <button id="environment-copy" class="ghost" type="button">Copy JSON</button>
+          </div>
+          <div id="environment-data" class="environment-sections"></div>
+        </div>
+      </div>
     </main>
 
     <script src="/static/app.js"></script>

@@ -61,6 +61,9 @@ const state = {
   fileContent: null,
   filesystemFilter: "",
   hasFilesystemSnapshot: false,
+  // Environment state
+  environmentData: null,
+  hasEnvironmentData: false,
   // Shortcuts overlay
   shortcutsOpen: false,
 };
@@ -145,6 +148,12 @@ const elements = {
   filesystemCurrentPath: document.getElementById("filesystem-current-path"),
   filesystemViewer: document.getElementById("filesystem-viewer"),
   filesystemCopy: document.getElementById("filesystem-copy"),
+  // Environment
+  environmentView: document.getElementById("environment-view"),
+  environmentEmptyState: document.getElementById("environment-empty-state"),
+  environmentContent: document.getElementById("environment-content"),
+  environmentData: document.getElementById("environment-data"),
+  environmentCopy: document.getElementById("environment-copy"),
   // Overlays
   loadingOverlay: document.getElementById("loading-overlay"),
   toastContainer: document.getElementById("toast-container"),
@@ -238,6 +247,7 @@ function switchView(viewName) {
   elements.logsView.classList.toggle("hidden", viewName !== "logs");
   elements.taskView.classList.toggle("hidden", viewName !== "task");
   elements.filesystemView.classList.toggle("hidden", viewName !== "filesystem");
+  elements.environmentView.classList.toggle("hidden", viewName !== "environment");
 
   // Load data if needed
   if (viewName === "transcript" && state.transcriptEntries.length === 0) {
@@ -250,6 +260,8 @@ function switchView(viewName) {
     loadTaskData();
   } else if (viewName === "filesystem" && state.allFiles.length === 0) {
     loadFilesystem();
+  } else if (viewName === "environment" && state.environmentData === null) {
+    loadEnvironment();
   }
 }
 
@@ -1364,6 +1376,141 @@ elements.filesystemCopy.addEventListener("click", async () => {
 });
 
 // ============================================================================
+// ENVIRONMENT
+// ============================================================================
+
+async function loadEnvironment() {
+  try {
+    const data = await fetchJSON("/api/environment");
+    state.environmentData = data;
+    state.hasEnvironmentData = data.system !== null || data.python !== null || data.git !== null || data.container !== null;
+    renderEnvironment();
+  } catch (error) {
+    elements.environmentData.innerHTML = `<p class="muted">Failed to load environment data: ${error.message}</p>`;
+  }
+}
+
+function renderEnvironment() {
+  if (!state.hasEnvironmentData) {
+    elements.environmentEmptyState.classList.remove("hidden");
+    elements.environmentContent.classList.add("hidden");
+    return;
+  }
+
+  elements.environmentEmptyState.classList.add("hidden");
+  elements.environmentContent.classList.remove("hidden");
+
+  const data = state.environmentData;
+  let html = "";
+
+  // System section
+  if (data.system) {
+    html += '<div class="environment-section">';
+    html += '<h3 class="section-title">System</h3>';
+    html += '<dl class="key-value-list">';
+    html += `<dt>OS</dt><dd>${escapeHtml(data.system.os_name)} ${escapeHtml(data.system.os_release)}</dd>`;
+    html += `<dt>Kernel</dt><dd class="mono">${escapeHtml(data.system.kernel_version)}</dd>`;
+    html += `<dt>Architecture</dt><dd>${escapeHtml(data.system.architecture)}</dd>`;
+    html += `<dt>Processor</dt><dd>${escapeHtml(data.system.processor)}</dd>`;
+    html += `<dt>CPU Count</dt><dd>${data.system.cpu_count}</dd>`;
+    html += `<dt>Memory</dt><dd>${formatBytes(data.system.memory_total_bytes)}</dd>`;
+    html += `<dt>Hostname</dt><dd class="mono">${escapeHtml(data.system.hostname)}</dd>`;
+    html += '</dl></div>';
+  }
+
+  // Python section
+  if (data.python) {
+    html += '<div class="environment-section">';
+    html += '<h3 class="section-title">Python</h3>';
+    html += '<dl class="key-value-list">';
+    html += `<dt>Version</dt><dd class="mono">${escapeHtml(data.python.version)}</dd>`;
+    if (data.python.version_info) {
+      html += `<dt>Version Info</dt><dd class="mono">${JSON.stringify(data.python.version_info)}</dd>`;
+    }
+    html += `<dt>Implementation</dt><dd>${escapeHtml(data.python.implementation)}</dd>`;
+    html += `<dt>Executable</dt><dd class="mono">${escapeHtml(data.python.executable)}</dd>`;
+    html += `<dt>Prefix</dt><dd class="mono">${escapeHtml(data.python.prefix)}</dd>`;
+    html += `<dt>Base Prefix</dt><dd class="mono">${escapeHtml(data.python.base_prefix)}</dd>`;
+    html += `<dt>Virtualenv</dt><dd>${data.python.is_virtualenv ? "Yes" : "No"}</dd>`;
+    html += '</dl></div>';
+  }
+
+  // Git section
+  if (data.git) {
+    html += '<div class="environment-section">';
+    html += '<h3 class="section-title">Git Repository</h3>';
+    html += '<dl class="key-value-list">';
+    html += `<dt>Repo Root</dt><dd class="mono">${escapeHtml(data.git.repo_root)}</dd>`;
+    html += `<dt>Branch</dt><dd class="mono">${escapeHtml(data.git.branch)}</dd>`;
+    html += `<dt>Commit</dt><dd class="mono">${escapeHtml(data.git.commit_short)}</dd>`;
+    html += `<dt>Full SHA</dt><dd class="mono small">${escapeHtml(data.git.commit_sha)}</dd>`;
+    html += `<dt>Dirty</dt><dd>${data.git.is_dirty ? "Yes" : "No"}</dd>`;
+    if (data.git.remotes && Object.keys(data.git.remotes).length > 0) {
+      html += '<dt>Remotes</dt><dd><div class="nested-list">';
+      Object.entries(data.git.remotes).forEach(([name, url]) => {
+        html += `<div><span class="mono">${escapeHtml(name)}:</span> ${escapeHtml(url)}</div>`;
+      });
+      html += '</div></dd>';
+    }
+    if (data.git.tags && data.git.tags.length > 0) {
+      html += `<dt>Tags</dt><dd class="mono">${data.git.tags.map(t => escapeHtml(t)).join(", ")}</dd>`;
+    }
+    html += '</dl></div>';
+  }
+
+  // Container section
+  if (data.container) {
+    html += '<div class="environment-section">';
+    html += '<h3 class="section-title">Container</h3>';
+    html += '<dl class="key-value-list">';
+    html += `<dt>Runtime</dt><dd>${escapeHtml(data.container.runtime)}</dd>`;
+    html += `<dt>Container ID</dt><dd class="mono">${escapeHtml(data.container.container_id)}</dd>`;
+    html += `<dt>Image</dt><dd class="mono">${escapeHtml(data.container.image)}</dd>`;
+    if (data.container.image_digest) {
+      html += `<dt>Image Digest</dt><dd class="mono small">${escapeHtml(data.container.image_digest)}</dd>`;
+    }
+    if (data.container.cgroup_path) {
+      html += `<dt>Cgroup Path</dt><dd class="mono">${escapeHtml(data.container.cgroup_path)}</dd>`;
+    }
+    html += '</dl></div>';
+  }
+
+  // Environment Variables section
+  if (data.env_vars && Object.keys(data.env_vars).length > 0) {
+    html += '<div class="environment-section">';
+    html += '<h3 class="section-title">Environment Variables</h3>';
+    html += '<dl class="key-value-list">';
+    Object.entries(data.env_vars).forEach(([key, value]) => {
+      html += `<dt class="mono">${escapeHtml(key)}</dt><dd class="mono small">${escapeHtml(value)}</dd>`;
+    });
+    html += '</dl></div>';
+  }
+
+  elements.environmentData.innerHTML = html;
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
+}
+
+elements.environmentCopy.addEventListener("click", async () => {
+  if (!state.environmentData) {
+    showToast("No environment data to copy", "error");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(state.environmentData, null, 2));
+    showToast("Copied environment data to clipboard", "success");
+  } catch {
+    showToast("Failed to copy", "error");
+  }
+});
+
+// ============================================================================
 // SHORTCUTS OVERLAY
 // ============================================================================
 
@@ -1401,9 +1548,9 @@ document.addEventListener("keydown", (e) => {
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
   // Number keys for tabs
-  if (e.key >= "1" && e.key <= "5") {
+  if (e.key >= "1" && e.key <= "6") {
     e.preventDefault();
-    const views = ["sessions", "transcript", "logs", "task", "filesystem"];
+    const views = ["sessions", "transcript", "logs", "task", "filesystem", "environment"];
     switchView(views[parseInt(e.key, 10) - 1]);
     return;
   }

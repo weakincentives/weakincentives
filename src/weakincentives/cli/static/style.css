@@ -2589,3 +2589,92 @@ select:focus-visible {
     padding: 10px;
   }
 }
+
+/* ============================================================================
+   ENVIRONMENT
+   ============================================================================ */
+
+.environment-view-container {
+  grid-template-columns: 1fr;
+  display: block;
+}
+
+.environment-card {
+  height: 100%;
+}
+
+.environment-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+  gap: 20px;
+  padding: 20px;
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+}
+
+.environment-section {
+  padding: 20px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  min-width: 0; /* Allow content to shrink */
+}
+
+.environment-section .section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-main);
+  margin: 0 0 16px 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.key-value-list {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 10px 20px;
+  align-items: baseline;
+}
+
+.key-value-list dt {
+  font-weight: 600;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-align: right;
+  padding-right: 10px;
+}
+
+.key-value-list dd {
+  color: var(--color-text-main);
+  font-size: 13px;
+  margin: 0;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.key-value-list dd.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.key-value-list dd.small {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.nested-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nested-list div {
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 1200px) {
+  .environment-sections {
+    grid-template-columns: 1fr;
+  }
+}
