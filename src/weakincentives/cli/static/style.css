@@ -2589,3 +2589,68 @@ select:focus-visible {
     padding: 10px;
   }
 }
+
+/* ============================================================================
+   ENVIRONMENT
+   ============================================================================ */
+
+.environment-sections {
+  display: grid;
+  gap: 20px;
+  padding: 20px;
+}
+
+.environment-section {
+  padding: 16px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.environment-section .section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-main);
+  margin: 0 0 12px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.key-value-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  align-items: baseline;
+}
+
+.key-value-list dt {
+  font-weight: 600;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.key-value-list dd {
+  color: var(--color-text-main);
+  font-size: 13px;
+  margin: 0;
+  word-break: break-word;
+}
+
+.key-value-list dd.mono {
+  font-family: var(--font-mono);
+}
+
+.key-value-list dd.small {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.nested-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nested-list div {
+  font-size: 12px;
+}
