@@ -1,4 +1,298 @@
 // ============================================================================
+// VIRTUAL SCROLLER
+// ============================================================================
+
+/**
+ * VirtualScroller - Implements windowed rendering with garbage collection
+ * Only renders items visible in viewport plus a buffer zone.
+ * Items scrolling out of the buffer are removed from DOM to save memory.
+ */
+class VirtualScroller {
+  constructor(options) {
+    this.container = options.container;
+    this.estimatedItemHeight = options.estimatedItemHeight || 100;
+    this.bufferSize = options.bufferSize || 10; // Items to keep above/below viewport
+    this.renderItem = options.renderItem;
+    this.onLoadMore = options.onLoadMore || null;
+    this.loadMoreThreshold = options.loadMoreThreshold || 3; // Items from bottom to trigger load
+
+    this.items = [];
+    this.totalCount = 0;
+    this.hasMore = false;
+    this.isLoading = false;
+
+    // Track rendered items
+    this.renderedItems = new Map(); // index -> DOM element
+    this.itemHeights = new Map(); // index -> measured height
+
+    // Spacer elements
+    this.topSpacer = document.createElement("div");
+    this.topSpacer.className = "virtual-spacer virtual-spacer-top";
+    this.bottomSpacer = document.createElement("div");
+    this.bottomSpacer.className = "virtual-spacer virtual-spacer-bottom";
+    this.loadMoreSentinel = document.createElement("div");
+    this.loadMoreSentinel.className = "virtual-load-sentinel";
+
+    // Intersection observer for infinite scroll
+    this.loadMoreObserver = null;
+    this.setupLoadMoreObserver();
+
+    // Scroll handler with debounce
+    this.scrollHandler = this.debounce(() => this.updateVisibleRange(), 16);
+    this.container.addEventListener("scroll", this.scrollHandler);
+
+    // Resize observer for container size changes
+    this.resizeObserver = new ResizeObserver(() => this.updateVisibleRange());
+    this.resizeObserver.observe(this.container);
+
+    // Initial state
+    this.visibleStart = 0;
+    this.visibleEnd = 0;
+  }
+
+  debounce(fn, delay) {
+    let timeout;
+    return (...args) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => fn(...args), delay);
+    };
+  }
+
+  setupLoadMoreObserver() {
+    this.loadMoreObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && this.hasMore && !this.isLoading && this.onLoadMore) {
+            this.isLoading = true;
+            this.onLoadMore().finally(() => {
+              this.isLoading = false;
+            });
+          }
+        });
+      },
+      { root: this.container, rootMargin: "200px" }
+    );
+  }
+
+  setData(items, totalCount, hasMore) {
+    this.items = items;
+    this.totalCount = totalCount;
+    this.hasMore = hasMore;
+    this.render();
+  }
+
+  appendData(newItems, totalCount, hasMore) {
+    this.items = this.items.concat(newItems);
+    this.totalCount = totalCount;
+    this.hasMore = hasMore;
+    this.updateVisibleRange();
+    this.updateSpacers();
+  }
+
+  reset() {
+    this.items = [];
+    this.totalCount = 0;
+    this.hasMore = false;
+    this.renderedItems.clear();
+    this.itemHeights.clear();
+    this.container.innerHTML = "";
+    this.visibleStart = 0;
+    this.visibleEnd = 0;
+  }
+
+  getItemHeight(index) {
+    return this.itemHeights.get(index) || this.estimatedItemHeight;
+  }
+
+  getTotalHeight() {
+    let total = 0;
+    for (let i = 0; i < this.items.length; i++) {
+      total += this.getItemHeight(i);
+    }
+    return total;
+  }
+
+  getOffsetForIndex(index) {
+    let offset = 0;
+    for (let i = 0; i < index && i < this.items.length; i++) {
+      offset += this.getItemHeight(i);
+    }
+    return offset;
+  }
+
+  getIndexAtOffset(offset) {
+    let current = 0;
+    for (let i = 0; i < this.items.length; i++) {
+      const height = this.getItemHeight(i);
+      if (current + height > offset) {
+        return i;
+      }
+      current += height;
+    }
+    return Math.max(0, this.items.length - 1);
+  }
+
+  calculateVisibleRange() {
+    const scrollTop = this.container.scrollTop;
+    const viewportHeight = this.container.clientHeight;
+
+    const startIndex = Math.max(0, this.getIndexAtOffset(scrollTop) - this.bufferSize);
+    const endIndex = Math.min(
+      this.items.length,
+      this.getIndexAtOffset(scrollTop + viewportHeight) + this.bufferSize + 1
+    );
+
+    return { startIndex, endIndex };
+  }
+
+  updateSpacers() {
+    const topHeight = this.getOffsetForIndex(this.visibleStart);
+    const bottomHeight = this.getTotalHeight() - this.getOffsetForIndex(this.visibleEnd);
+
+    this.topSpacer.style.height = `${topHeight}px`;
+    this.bottomSpacer.style.height = `${Math.max(0, bottomHeight)}px`;
+  }
+
+  measureRenderedItems() {
+    this.renderedItems.forEach((element, index) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.height > 0) {
+        this.itemHeights.set(index, rect.height);
+      }
+    });
+  }
+
+  updateVisibleRange() {
+    if (this.items.length === 0) return;
+
+    // Measure current items before updating
+    this.measureRenderedItems();
+
+    const { startIndex, endIndex } = this.calculateVisibleRange();
+
+    // Only update if range changed
+    if (startIndex === this.visibleStart && endIndex === this.visibleEnd) {
+      return;
+    }
+
+    // Garbage collection: remove items outside new range
+    this.renderedItems.forEach((element, index) => {
+      if (index < startIndex || index >= endIndex) {
+        element.remove();
+        this.renderedItems.delete(index);
+      }
+    });
+
+    // Add new items in range
+    for (let i = startIndex; i < endIndex; i++) {
+      if (!this.renderedItems.has(i) && i < this.items.length) {
+        const element = this.renderItem(this.items[i], i);
+        element.dataset.virtualIndex = i;
+        this.renderedItems.set(i, element);
+      }
+    }
+
+    // Update visible range
+    this.visibleStart = startIndex;
+    this.visibleEnd = endIndex;
+
+    // Reorder elements in DOM
+    this.reorderElements();
+
+    // Update spacers
+    this.updateSpacers();
+  }
+
+  reorderElements() {
+    // Get sorted indices
+    const indices = Array.from(this.renderedItems.keys()).sort((a, b) => a - b);
+
+    // Remove sentinel observer temporarily
+    this.loadMoreObserver.unobserve(this.loadMoreSentinel);
+
+    // Clear and rebuild container content
+    const fragment = document.createDocumentFragment();
+    fragment.appendChild(this.topSpacer);
+
+    indices.forEach((index) => {
+      fragment.appendChild(this.renderedItems.get(index));
+    });
+
+    fragment.appendChild(this.bottomSpacer);
+    fragment.appendChild(this.loadMoreSentinel);
+
+    this.container.innerHTML = "";
+    this.container.appendChild(fragment);
+
+    // Re-observe sentinel
+    if (this.hasMore) {
+      this.loadMoreObserver.observe(this.loadMoreSentinel);
+    }
+  }
+
+  render() {
+    this.container.innerHTML = "";
+    this.renderedItems.clear();
+
+    if (this.items.length === 0) {
+      return;
+    }
+
+    // Calculate initial visible range
+    const { startIndex, endIndex } = this.calculateVisibleRange();
+    this.visibleStart = startIndex;
+    this.visibleEnd = endIndex;
+
+    // Build DOM
+    const fragment = document.createDocumentFragment();
+    fragment.appendChild(this.topSpacer);
+
+    for (let i = startIndex; i < endIndex && i < this.items.length; i++) {
+      const element = this.renderItem(this.items[i], i);
+      element.dataset.virtualIndex = i;
+      this.renderedItems.set(i, element);
+      fragment.appendChild(element);
+    }
+
+    fragment.appendChild(this.bottomSpacer);
+    fragment.appendChild(this.loadMoreSentinel);
+
+    this.container.appendChild(fragment);
+
+    // Update spacers
+    this.updateSpacers();
+
+    // Observe sentinel for infinite scroll
+    if (this.hasMore) {
+      this.loadMoreObserver.observe(this.loadMoreSentinel);
+    }
+
+    // Measure items after render
+    requestAnimationFrame(() => {
+      this.measureRenderedItems();
+      this.updateSpacers();
+    });
+  }
+
+  scrollToBottom() {
+    this.container.scrollTop = this.container.scrollHeight;
+  }
+
+  scrollToIndex(index) {
+    const offset = this.getOffsetForIndex(index);
+    this.container.scrollTop = offset;
+  }
+
+  destroy() {
+    this.container.removeEventListener("scroll", this.scrollHandler);
+    this.resizeObserver.disconnect();
+    this.loadMoreObserver.disconnect();
+    this.renderedItems.clear();
+    this.itemHeights.clear();
+  }
+}
+
+// ============================================================================
 // STATE
 // ============================================================================
 
@@ -61,6 +355,9 @@ const state = {
   hasEnvironmentData: false,
   // Shortcuts overlay
   shortcutsOpen: false,
+  // Virtual scrollers (initialized after DOM ready)
+  logsScroller: null,
+  transcriptScroller: null,
 };
 
 const MARKDOWN_KEY = "__markdown__";
@@ -312,6 +609,14 @@ function resetViewState() {
   state.selectedFile = null;
   state.fileContent = null;
   state.hasFilesystemSnapshot = false;
+
+  // Reset virtual scrollers if initialized
+  if (state.transcriptScroller) {
+    state.transcriptScroller.reset();
+  }
+  if (state.logsScroller) {
+    state.logsScroller.reset();
+  }
 }
 
 async function reloadBundle() {
@@ -519,11 +824,25 @@ async function loadTranscript(append = false) {
     const result = await fetchJSON(`/api/transcript?${query}`);
     const entries = result.entries || [];
 
-    state.transcriptEntries = append ? state.transcriptEntries.concat(entries) : entries;
+    if (append) {
+      state.transcriptEntries = state.transcriptEntries.concat(entries);
+    } else {
+      state.transcriptEntries = entries;
+    }
     state.transcriptTotalCount = result.total || state.transcriptEntries.length;
     state.transcriptHasMore = state.transcriptEntries.length < state.transcriptTotalCount;
 
-    renderTranscript();
+    // Use virtual scroller if available
+    if (state.transcriptScroller) {
+      if (append) {
+        state.transcriptScroller.appendData(entries, state.transcriptTotalCount, state.transcriptHasMore);
+      } else {
+        state.transcriptScroller.setData(state.transcriptEntries, state.transcriptTotalCount, state.transcriptHasMore);
+      }
+      renderTranscriptEmptyState();
+    } else {
+      renderTranscript();
+    }
     updateTranscriptStats();
   } catch (error) {
     elements.transcriptList.innerHTML = `<p class="muted">Failed to load transcript: ${error.message}</p>`;
@@ -533,7 +852,7 @@ async function loadTranscript(append = false) {
 }
 
 async function loadMoreTranscript() {
-  await loadTranscript(true);
+  return loadTranscript(true);
 }
 
 let transcriptSearchTimeout = null;
@@ -664,7 +983,123 @@ function formatTranscriptContent(entry) {
   return { kind: "text", value: "" };
 }
 
+/**
+ * Creates a single transcript entry DOM element.
+ * Used by both virtual scroller and fallback rendering.
+ */
+function createTranscriptEntryElement(entry, index) {
+  const entryType = entry.entry_type || "unknown";
+  const role = entry.role || "";
+  const cssClass = role ? `role-${role}` : `type-${entryType}`;
+
+  const container = document.createElement("div");
+  container.className = `transcript-entry ${cssClass}`;
+
+  const source = entry.transcript_source || "";
+  const seq = entry.sequence_number !== null && entry.sequence_number !== undefined ? String(entry.sequence_number) : "";
+  const promptName = entry.prompt_name || "";
+
+  const content = formatTranscriptContent(entry);
+
+  let html = `<div class="transcript-header">`;
+  html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
+  if (entry.timestamp) html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
+  if (source) html += `<span class="transcript-source clickable" data-source="${escapeHtml(source)}">${escapeHtml(source)}${seq ? `#${escapeHtml(seq)}` : ""}</span>`;
+  if (promptName) html += `<span class="transcript-prompt mono" title="${escapeHtml(promptName)}">${escapeHtml(promptName)}</span>`;
+  html += `</div>`;
+
+  if (content.value) {
+    if (content.kind === "json") {
+      html += `<pre class="transcript-json">${escapeHtml(content.value)}</pre>`;
+    } else {
+      html += `<div class="transcript-message">${escapeHtml(content.value)}</div>`;
+    }
+  } else {
+    html += `<div class="transcript-message muted">(no content)</div>`;
+  }
+
+  const detailsPayload = entry.parsed || entry.raw_json;
+  if (detailsPayload) {
+    html += `<details class="transcript-details"><summary>Details</summary>`;
+    html += `<pre>${escapeHtml(JSON.stringify(detailsPayload, null, 2))}</pre>`;
+    html += `</details>`;
+  }
+
+  container.innerHTML = html;
+
+  // Inline filtering
+  container.querySelectorAll(".transcript-source.clickable").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const src = el.dataset.source;
+      if (!src) return;
+      if (e.shiftKey) toggleTranscriptSourceFilter(src, false, true);
+      else toggleTranscriptSourceFilter(src, true, false);
+    });
+  });
+
+  container.querySelectorAll(".transcript-type.clickable").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const typ = el.dataset.type;
+      if (!typ) return;
+      if (e.shiftKey) toggleTranscriptTypeFilter(typ, false, true);
+      else toggleTranscriptTypeFilter(typ, true, false);
+    });
+  });
+
+  return container;
+}
+
+/**
+ * Renders empty state for transcript when using virtual scroller.
+ */
+function renderTranscriptEmptyState() {
+  if (state.transcriptEntries.length === 0) {
+    // Show empty state inside the virtual scroller container
+    if (state.transcriptScroller) {
+      state.transcriptScroller.reset();
+    }
+    elements.transcriptList.innerHTML = '<div class="logs-empty">No transcript entries match filters</div>';
+  }
+}
+
+/**
+ * Initializes the transcript virtual scroller.
+ * Called once after DOM is ready.
+ */
+function initTranscriptVirtualScroller() {
+  if (state.transcriptScroller) {
+    state.transcriptScroller.destroy();
+  }
+
+  state.transcriptScroller = new VirtualScroller({
+    container: elements.transcriptList,
+    estimatedItemHeight: 120, // Transcript entries are typically taller
+    bufferSize: 15,
+    renderItem: createTranscriptEntryElement,
+    onLoadMore: loadMoreTranscript,
+  });
+}
+
+/**
+ * Fallback render function for transcript (without virtual scrolling).
+ * Used when virtual scroller is not initialized.
+ */
 function renderTranscript() {
+  // If virtual scroller is available, use it instead
+  if (state.transcriptScroller) {
+    if (state.transcriptEntries.length === 0) {
+      renderTranscriptEmptyState();
+    } else {
+      state.transcriptScroller.setData(
+        state.transcriptEntries,
+        state.transcriptTotalCount,
+        state.transcriptHasMore
+      );
+    }
+    return;
+  }
+
+  // Fallback: render all items (original behavior)
   elements.transcriptList.innerHTML = "";
 
   if (state.transcriptEntries.length === 0) {
@@ -672,66 +1107,8 @@ function renderTranscript() {
     return;
   }
 
-  state.transcriptEntries.forEach((entry) => {
-    const entryType = entry.entry_type || "unknown";
-    const role = entry.role || "";
-    const cssClass = role ? `role-${role}` : `type-${entryType}`;
-
-    const container = document.createElement("div");
-    container.className = `transcript-entry ${cssClass}`;
-
-    const source = entry.transcript_source || "";
-    const seq = entry.sequence_number !== null && entry.sequence_number !== undefined ? String(entry.sequence_number) : "";
-    const promptName = entry.prompt_name || "";
-
-    const content = formatTranscriptContent(entry);
-
-    let html = `<div class="transcript-header">`;
-    html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
-    if (entry.timestamp) html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
-    if (source) html += `<span class="transcript-source clickable" data-source="${escapeHtml(source)}">${escapeHtml(source)}${seq ? `#${escapeHtml(seq)}` : ""}</span>`;
-    if (promptName) html += `<span class="transcript-prompt mono" title="${escapeHtml(promptName)}">${escapeHtml(promptName)}</span>`;
-    html += `</div>`;
-
-    if (content.value) {
-      if (content.kind === "json") {
-        html += `<pre class="transcript-json">${escapeHtml(content.value)}</pre>`;
-      } else {
-        html += `<div class="transcript-message">${escapeHtml(content.value)}</div>`;
-      }
-    } else {
-      html += `<div class="transcript-message muted">(no content)</div>`;
-    }
-
-    const detailsPayload = entry.parsed || entry.raw_json;
-    if (detailsPayload) {
-      html += `<details class="transcript-details"><summary>Details</summary>`;
-      html += `<pre>${escapeHtml(JSON.stringify(detailsPayload, null, 2))}</pre>`;
-      html += `</details>`;
-    }
-
-    container.innerHTML = html;
-
-    // Inline filtering
-    container.querySelectorAll(".transcript-source.clickable").forEach((el) => {
-      el.addEventListener("click", (e) => {
-        const src = el.dataset.source;
-        if (!src) return;
-        if (e.shiftKey) toggleTranscriptSourceFilter(src, false, true);
-        else toggleTranscriptSourceFilter(src, true, false);
-      });
-    });
-
-    container.querySelectorAll(".transcript-type.clickable").forEach((el) => {
-      el.addEventListener("click", (e) => {
-        const typ = el.dataset.type;
-        if (!typ) return;
-        if (e.shiftKey) toggleTranscriptTypeFilter(typ, false, true);
-        else toggleTranscriptTypeFilter(typ, true, false);
-      });
-    });
-
-    elements.transcriptList.appendChild(container);
+  state.transcriptEntries.forEach((entry, index) => {
+    elements.transcriptList.appendChild(createTranscriptEntryElement(entry, index));
   });
 
   if (state.transcriptHasMore) {
@@ -792,7 +1169,11 @@ elements.transcriptCopy.addEventListener("click", async () => {
 });
 
 elements.transcriptScrollBottom.addEventListener("click", () => {
-  elements.transcriptList.scrollTop = elements.transcriptList.scrollHeight;
+  if (state.transcriptScroller) {
+    state.transcriptScroller.scrollToBottom();
+  } else {
+    elements.transcriptList.scrollTop = elements.transcriptList.scrollHeight;
+  }
 });
 
 // ============================================================================
@@ -853,11 +1234,25 @@ async function loadLogs(append = false) {
     const result = await fetchJSON(`/api/logs?${query}`);
     const entries = result.entries || [];
 
-    state.filteredLogs = append ? state.filteredLogs.concat(entries) : entries;
+    if (append) {
+      state.filteredLogs = state.filteredLogs.concat(entries);
+    } else {
+      state.filteredLogs = entries;
+    }
     state.logsTotalCount = result.total || state.filteredLogs.length;
     state.logsHasMore = state.filteredLogs.length < state.logsTotalCount;
 
-    renderLogs();
+    // Use virtual scroller if available
+    if (state.logsScroller) {
+      if (append) {
+        state.logsScroller.appendData(entries, state.logsTotalCount, state.logsHasMore);
+      } else {
+        state.logsScroller.setData(state.filteredLogs, state.logsTotalCount, state.logsHasMore);
+      }
+      renderLogsEmptyState();
+    } else {
+      renderLogs();
+    }
     updateLogsStats();
   } catch (error) {
     elements.logsList.innerHTML = `<p class="muted">Failed to load logs: ${error.message}</p>`;
@@ -867,7 +1262,7 @@ async function loadLogs(append = false) {
 }
 
 async function loadMoreLogs() {
-  await loadLogs(true);
+  return loadLogs(true);
 }
 
 // Debounced search to avoid too many API calls
@@ -1036,7 +1431,121 @@ function createActiveFilter(type, name, isExclude, onRemove) {
   return filter;
 }
 
+/**
+ * Creates a single log entry DOM element.
+ * Used by both virtual scroller and fallback rendering.
+ */
+function createLogEntryElement(log, index) {
+  const level = (log.level || "INFO").toLowerCase();
+  const entry = document.createElement("div");
+  entry.className = `log-entry log-${level}`;
+  entry.dataset.index = index;
+
+  let html = `<div class="log-header">`;
+  html += `<span class="log-level">${(log.level || "INFO").toUpperCase()}</span>`;
+  if (log.timestamp) {
+    html += `<span class="log-timestamp">${log.timestamp}</span>`;
+  }
+  if (log.logger) {
+    const loggerShort = log.logger.split(".").slice(-2).join(".");
+    html += `<span class="log-logger clickable" data-logger="${escapeHtml(log.logger)}" title="${escapeHtml(log.logger)}">${escapeHtml(loggerShort)}</span>`;
+  }
+  if (log.event) {
+    html += `<span class="log-event-name clickable" data-event="${escapeHtml(log.event)}">${escapeHtml(log.event)}</span>`;
+  }
+  html += `</div>`;
+
+  if (log.message) {
+    html += `<div class="log-message">${escapeHtml(log.message)}</div>`;
+  }
+
+  if (log.context && Object.keys(log.context).length > 0) {
+    html += `<pre class="log-context">${escapeHtml(JSON.stringify(log.context, null, 2))}</pre>`;
+  }
+
+  if (log.exc_info) {
+    html += `<pre class="log-exception">${escapeHtml(log.exc_info)}</pre>`;
+  }
+
+  entry.innerHTML = html;
+
+  // Add click handlers for inline filtering
+  entry.querySelectorAll(".log-logger.clickable").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const logger = el.dataset.logger;
+      if (e.shiftKey) {
+        toggleLoggerFilter(logger, false, true);
+      } else {
+        toggleLoggerFilter(logger, true, false);
+      }
+    });
+  });
+
+  entry.querySelectorAll(".log-event-name.clickable").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const event = el.dataset.event;
+      if (e.shiftKey) {
+        toggleEventFilter(event, false, true);
+      } else {
+        toggleEventFilter(event, true, false);
+      }
+    });
+  });
+
+  return entry;
+}
+
+/**
+ * Renders empty state for logs when using virtual scroller.
+ */
+function renderLogsEmptyState() {
+  if (state.filteredLogs.length === 0) {
+    // Show empty state inside the virtual scroller container
+    if (state.logsScroller) {
+      state.logsScroller.reset();
+    }
+    elements.logsList.innerHTML = '<div class="logs-empty">No log entries match filters</div>';
+  }
+}
+
+/**
+ * Initializes the logs virtual scroller.
+ * Called once after DOM is ready.
+ */
+function initLogsVirtualScroller() {
+  if (state.logsScroller) {
+    state.logsScroller.destroy();
+  }
+
+  state.logsScroller = new VirtualScroller({
+    container: elements.logsList,
+    estimatedItemHeight: 80, // Log entries are typically shorter
+    bufferSize: 20,
+    renderItem: createLogEntryElement,
+    onLoadMore: loadMoreLogs,
+  });
+}
+
+/**
+ * Fallback render function for logs (without virtual scrolling).
+ * Used when virtual scroller is not initialized.
+ */
 function renderLogs() {
+  // If virtual scroller is available, use it instead
+  if (state.logsScroller) {
+    if (state.filteredLogs.length === 0) {
+      renderLogsEmptyState();
+    } else {
+      state.logsScroller.setData(
+        state.filteredLogs,
+        state.logsTotalCount,
+        state.logsHasMore
+      );
+    }
+    return;
+  }
+
+  // Fallback: render all items (original behavior)
   elements.logsList.innerHTML = "";
 
   if (state.filteredLogs.length === 0) {
@@ -1045,63 +1554,7 @@ function renderLogs() {
   }
 
   state.filteredLogs.forEach((log, index) => {
-    const level = (log.level || "INFO").toLowerCase();
-    const entry = document.createElement("div");
-    entry.className = `log-entry log-${level}`;
-    entry.dataset.index = index;
-
-    let html = `<div class="log-header">`;
-    html += `<span class="log-level">${(log.level || "INFO").toUpperCase()}</span>`;
-    if (log.timestamp) {
-      html += `<span class="log-timestamp">${log.timestamp}</span>`;
-    }
-    if (log.logger) {
-      const loggerShort = log.logger.split(".").slice(-2).join(".");
-      html += `<span class="log-logger clickable" data-logger="${escapeHtml(log.logger)}" title="${escapeHtml(log.logger)}">${escapeHtml(loggerShort)}</span>`;
-    }
-    if (log.event) {
-      html += `<span class="log-event-name clickable" data-event="${escapeHtml(log.event)}">${escapeHtml(log.event)}</span>`;
-    }
-    html += `</div>`;
-
-    if (log.message) {
-      html += `<div class="log-message">${escapeHtml(log.message)}</div>`;
-    }
-
-    if (log.context && Object.keys(log.context).length > 0) {
-      html += `<pre class="log-context">${escapeHtml(JSON.stringify(log.context, null, 2))}</pre>`;
-    }
-
-    if (log.exc_info) {
-      html += `<pre class="log-exception">${escapeHtml(log.exc_info)}</pre>`;
-    }
-
-    entry.innerHTML = html;
-
-    // Add click handlers for inline filtering
-    entry.querySelectorAll(".log-logger.clickable").forEach((el) => {
-      el.addEventListener("click", (e) => {
-        const logger = el.dataset.logger;
-        if (e.shiftKey) {
-          toggleLoggerFilter(logger, false, true);
-        } else {
-          toggleLoggerFilter(logger, true, false);
-        }
-      });
-    });
-
-    entry.querySelectorAll(".log-event-name.clickable").forEach((el) => {
-      el.addEventListener("click", (e) => {
-        const event = el.dataset.event;
-        if (e.shiftKey) {
-          toggleEventFilter(event, false, true);
-        } else {
-          toggleEventFilter(event, true, false);
-        }
-      });
-    });
-
-    elements.logsList.appendChild(entry);
+    elements.logsList.appendChild(createLogEntryElement(log, index));
   });
 
   // Add "Load more" button if there are more logs
@@ -1177,7 +1630,11 @@ elements.logsCopy.addEventListener("click", async () => {
 });
 
 elements.logsScrollBottom.addEventListener("click", () => {
-  elements.logsList.scrollTop = elements.logsList.scrollHeight;
+  if (state.logsScroller) {
+    state.logsScroller.scrollToBottom();
+  } else {
+    elements.logsList.scrollTop = elements.logsList.scrollHeight;
+  }
 });
 
 // ============================================================================
@@ -1785,6 +2242,10 @@ async function refreshMeta() {
 document.addEventListener("DOMContentLoaded", async () => {
   setLoading(true);
   try {
+    // Initialize virtual scrollers for logs and transcript
+    initLogsVirtualScroller();
+    initTranscriptVirtualScroller();
+
     await refreshMeta();
     await refreshBundles();
   } catch (error) {

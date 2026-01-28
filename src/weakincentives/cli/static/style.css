@@ -2678,3 +2678,70 @@ select:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================================
+   VIRTUAL SCROLL
+   ============================================================================ */
+
+/**
+ * Virtual scroller spacer elements.
+ * These maintain the correct scroll position by taking up space
+ * for items that are not currently rendered.
+ */
+.virtual-spacer {
+  flex-shrink: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
+.virtual-spacer-top {
+  /* Height set dynamically by JS */
+}
+
+.virtual-spacer-bottom {
+  /* Height set dynamically by JS */
+}
+
+/**
+ * Sentinel element for intersection observer.
+ * When this becomes visible, more items are loaded.
+ */
+.virtual-load-sentinel {
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+}
+
+/**
+ * Loading indicator shown while fetching more items.
+ */
+.virtual-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.virtual-loading::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  margin-right: 8px;
+  animation: spin 0.8s linear infinite;
+}
+
+/**
+ * Ensure proper scrolling behavior for virtual scroll containers.
+ */
+.logs-list,
+.transcript-list {
+  /* Ensure smooth scrolling */
+  scroll-behavior: auto;
+  /* Prevent content shifts during virtual scroll updates */
+  overflow-anchor: none;
+}
