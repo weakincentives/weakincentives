@@ -1701,6 +1701,45 @@ class TestRetentionWithNestedDirectories:
         assert second_writer.path is not None
         assert second_writer.path.exists()
 
+    def test_retention_skips_symlinks(self, tmp_path: Path) -> None:
+        """Test retention policy skips symlinks to prevent loops."""
+        from weakincentives.debug.bundle import BundleRetentionPolicy
+
+        # Create initial bundles
+        paths: list[Path] = []
+        for i in range(3):
+            with BundleWriter(tmp_path) as writer:
+                writer.write_request_input({"bundle": i})
+            assert writer.path is not None
+            paths.append(writer.path)
+
+        # Create a symlink to one of the bundles
+        symlink_path = tmp_path / "symlink_bundle.zip"
+        symlink_path.symlink_to(paths[0])
+
+        # Also create a symlink in a subdirectory
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        nested_symlink = subdir / "nested_symlink.zip"
+        nested_symlink.symlink_to(paths[1])
+
+        # Now create new bundle with retention that limits to 2
+        # Symlinks should be skipped, so only real bundles count
+        retention = BundleRetentionPolicy(max_bundles=2)
+        config = BundleConfig(target=tmp_path, retention=retention)
+
+        with BundleWriter(tmp_path, config=config) as new_writer:
+            new_writer.write_request_input({"new": True})
+
+        # Oldest bundle should be deleted (paths[0])
+        assert not paths[0].exists()
+        # Symlinks should still exist (not deleted, just skipped)
+        assert symlink_path.is_symlink()
+        assert nested_symlink.is_symlink()
+        # New bundle and one old bundle should remain
+        assert new_writer.path is not None
+        assert new_writer.path.exists()
+
 
 class TestStorageHandlerIntegration:
     """Tests for storage handler integration with BundleWriter."""

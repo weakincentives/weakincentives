@@ -956,8 +956,9 @@ class BundleWriter:
     ) -> list[tuple[Path, datetime, int]]:
         """Collect metadata for existing bundles in the target directory.
 
-        Uses recursive glob to find bundles in nested directories, supporting
-        EvalLoop's ``{target}/{request_id}/{bundle}.zip`` structure.
+        Searches up to 2 levels deep to support EvalLoop's nested structure
+        (``{target}/{request_id}/{bundle}.zip``) while avoiding unbounded
+        recursive traversal for performance and security.
 
         Args:
             exclude_path: Path to the just-created bundle to exclude from
@@ -968,23 +969,30 @@ class BundleWriter:
         # Resolve exclude path once for efficient comparison
         exclude_path_resolved = exclude_path.resolve()
 
-        for bundle_path in search_root.glob("**/*.zip"):
-            try:
-                # Skip the bundle we just created - check path first for efficiency
-                # (avoids loading the just-created bundle unnecessarily)
-                if bundle_path.resolve() == exclude_path_resolved:
+        # Use explicit patterns instead of ** to limit depth (max 2 levels)
+        # This avoids unbounded traversal and symlink loop risks
+        for pattern in ("*.zip", "*/*.zip"):
+            for bundle_path in search_root.glob(pattern):
+                # Skip symlinks to avoid loops and ensure we only process
+                # real bundle files
+                if bundle_path.is_symlink():
                     continue
+                try:
+                    # Skip the bundle we just created - compare resolved paths
+                    # for efficiency (avoids loading the just-created bundle)
+                    if bundle_path.resolve() == exclude_path_resolved:
+                        continue
 
-                bundle = DebugBundle.load(bundle_path)
-                created_at = datetime.fromisoformat(bundle.manifest.created_at)
-                # Normalize to UTC for consistent sorting across timezone-naive
-                # and timezone-aware timestamps
-                if created_at.tzinfo is None:
-                    created_at = created_at.replace(tzinfo=UTC)
-                size = bundle_path.stat().st_size
-                bundles.append((bundle_path, created_at, size))
-            except (BundleValidationError, ValueError, OSError):
-                continue
+                    bundle = DebugBundle.load(bundle_path)
+                    created_at = datetime.fromisoformat(bundle.manifest.created_at)
+                    # Normalize to UTC for consistent sorting across timezone-naive
+                    # and timezone-aware timestamps
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=UTC)
+                    size = bundle_path.stat().st_size
+                    bundles.append((bundle_path, created_at, size))
+                except (BundleValidationError, ValueError, OSError):
+                    continue
         bundles.sort(key=lambda x: x[1])
         return bundles
 
