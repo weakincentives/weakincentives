@@ -290,6 +290,7 @@ Public API
 - ``TYPE_REF_KEY``: The polymorphic discriminator field name (``"__type__"``)
 """
 
+from ._scope import HiddenInStructuredOutput, SerdeScope
 from ._utils import TYPE_REF_KEY, resolve_type_identifier, type_identifier
 from .dump import clone, dump
 from .parse import parse
@@ -297,6 +298,8 @@ from .schema import schema
 
 __all__ = [
     "TYPE_REF_KEY",
+    "HiddenInStructuredOutput",
+    "SerdeScope",
     "clone",
     "dump",
     "parse",

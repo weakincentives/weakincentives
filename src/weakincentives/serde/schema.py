@@ -32,6 +32,7 @@ from typing import Literal, cast, get_args, get_origin, get_type_hints
 from uuid import UUID
 
 from ..types import JSONValue
+from ._scope import SerdeScope, is_hidden_in_scope
 from ._utils import _UNION_TYPE, _AnyType, _merge_annotated_meta, _ordered_values
 
 NULL_TYPE = type(None)
@@ -362,8 +363,21 @@ def schema(
     *,
     alias_generator: Callable[[str], str] | None = None,
     extra: Literal["ignore", "forbid", "allow"] = IGNORE_EXTRA,
+    scope: SerdeScope = SerdeScope.DEFAULT,
 ) -> dict[str, JSONValue]:
-    """Produce a minimal JSON Schema description for a dataclass."""
+    """Produce a minimal JSON Schema description for a dataclass.
+
+    Args:
+        cls: The dataclass type to generate schema for.
+        alias_generator: Optional function to transform field names to aliases.
+        extra: How to handle extra fields: "ignore", "forbid", or "allow".
+        scope: The serialization scope. Fields marked with
+            ``HiddenInStructuredOutput`` are excluded when
+            ``scope=SerdeScope.STRUCTURED_OUTPUT``.
+
+    Returns:
+        A JSON Schema dictionary describing the dataclass structure.
+    """
     if not dataclasses.is_dataclass(cls):
         raise TypeError("schema() requires a dataclass type")
     if extra not in EXTRA_MODES:
@@ -376,8 +390,10 @@ def schema(
     for field in dataclasses.fields(cls):
         if not field.init:
             continue
-        property_name = _resolve_field_property_name(field, alias_generator)
         field_type = type_hints.get(field.name, field.type)
+        if is_hidden_in_scope(field_type, scope):
+            continue
+        property_name = _resolve_field_property_name(field, alias_generator)
         properties[property_name] = _schema_for_type(
             field_type, dict(field.metadata), alias_generator
         )
