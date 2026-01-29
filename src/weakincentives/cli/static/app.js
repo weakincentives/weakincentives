@@ -1593,19 +1593,10 @@ function createActiveFilter(type, name, isExclude, onRemove) {
 function createLogEntryElement(log, index) {
   const level = (log.level || "INFO").toLowerCase();
   const entry = document.createElement("div");
-  entry.className = `log-entry log-${level} compact`;
+  entry.className = `log-entry log-${level}`;
   entry.dataset.index = index;
-  entry.dataset.logIndex = index;
 
   let html = `<div class="log-header">`;
-  // Zoom button
-  html += `<button class="zoom-button" type="button" data-log-zoom-index="${index}" title="Expand entry" aria-label="Expand entry">`;
-  html += `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">`;
-  html += `<polyline points="15 3 21 3 21 9"></polyline>`;
-  html += `<polyline points="9 21 3 21 3 15"></polyline>`;
-  html += '<line x1="21" y1="3" x2="14" y2="10"></line>';
-  html += '<line x1="3" y1="21" x2="10" y2="14"></line>';
-  html += "</svg></button>";
   html += `<span class="log-level">${(log.level || "INFO").toUpperCase()}</span>`;
   if (log.timestamp) {
     html += `<span class="log-timestamp">${log.timestamp}</span>`;
@@ -2070,22 +2061,6 @@ function openTranscriptZoom(index) {
 }
 
 /**
- * Opens the zoom modal for a log entry.
- */
-function openLogZoom(index) {
-  const log = state.filteredLogs[index];
-  if (!log) {
-    return;
-  }
-  state.zoomOpen = true;
-  state.zoomType = "log";
-  state.zoomIndex = index;
-  state.zoomEntry = log;
-  renderZoomModal();
-  elements.zoomModal.classList.remove("hidden");
-}
-
-/**
  * Closes the zoom modal.
  */
 function closeZoomModal() {
@@ -2103,11 +2078,7 @@ function zoomPrev() {
   if (!state.zoomOpen || state.zoomIndex <= 0) {
     return;
   }
-  if (state.zoomType === "transcript") {
-    openTranscriptZoom(state.zoomIndex - 1);
-  } else if (state.zoomType === "log") {
-    openLogZoom(state.zoomIndex - 1);
-  }
+  openTranscriptZoom(state.zoomIndex - 1);
 }
 
 /**
@@ -2117,18 +2088,11 @@ function zoomNext() {
   if (!state.zoomOpen) {
     return;
   }
-  const maxIndex =
-    state.zoomType === "transcript"
-      ? state.transcriptEntries.length - 1
-      : state.filteredLogs.length - 1;
+  const maxIndex = state.transcriptEntries.length - 1;
   if (state.zoomIndex >= maxIndex) {
     return;
   }
-  if (state.zoomType === "transcript") {
-    openTranscriptZoom(state.zoomIndex + 1);
-  } else if (state.zoomType === "log") {
-    openLogZoom(state.zoomIndex + 1);
-  }
+  openTranscriptZoom(state.zoomIndex + 1);
 }
 
 /**
@@ -2139,11 +2103,7 @@ function renderZoomModal() {
     return;
   }
 
-  if (state.zoomType === "transcript") {
-    renderTranscriptZoom();
-  } else if (state.zoomType === "log") {
-    renderLogZoom();
-  }
+  renderTranscriptZoom();
 
   // Update navigation button states
   updateZoomNavigation();
@@ -2197,105 +2157,153 @@ function renderTranscriptZoom() {
 
   elements.zoomContent.innerHTML = contentHtml;
 
-  // Details panel
-  let detailsHtml = "";
+  // Details panel - render pretty-printed JSON tree
   const detailsPayload = entry.parsed || entry.raw_json;
+  elements.zoomDetails.innerHTML = "";
 
   if (entry.tool_name) {
-    detailsHtml += `<div class="zoom-section">`;
-    detailsHtml += `<div class="zoom-section-label">Tool</div>`;
-    detailsHtml += `<div class="zoom-text-content">${escapeHtml(entry.tool_name)}</div>`;
-    detailsHtml += "</div>";
+    const toolSection = document.createElement("div");
+    toolSection.className = "zoom-section";
+    toolSection.innerHTML = `<div class="zoom-section-label">Tool</div><div class="zoom-text-content">${escapeHtml(entry.tool_name)}</div>`;
+    elements.zoomDetails.appendChild(toolSection);
   }
 
   if (entry.tool_use_id) {
-    detailsHtml += `<div class="zoom-section">`;
-    detailsHtml += `<div class="zoom-section-label">Tool Use ID</div>`;
-    detailsHtml += `<div class="zoom-text-content">${escapeHtml(entry.tool_use_id)}</div>`;
-    detailsHtml += "</div>";
+    const toolIdSection = document.createElement("div");
+    toolIdSection.className = "zoom-section";
+    toolIdSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content">${escapeHtml(entry.tool_use_id)}</div>`;
+    elements.zoomDetails.appendChild(toolIdSection);
   }
 
   if (detailsPayload) {
-    detailsHtml += `<div class="zoom-section">`;
-    detailsHtml += `<div class="zoom-section-label">Raw JSON</div>`;
-    detailsHtml += `<pre class="zoom-json-content">${escapeHtml(JSON.stringify(detailsPayload, null, 2))}</pre>`;
-    detailsHtml += "</div>";
+    const jsonSection = document.createElement("div");
+    jsonSection.className = "zoom-section";
+    const label = document.createElement("div");
+    label.className = "zoom-section-label";
+    label.textContent = "Raw JSON";
+    jsonSection.appendChild(label);
+
+    // Render pretty-printed JSON tree
+    const jsonContainer = document.createElement("div");
+    jsonContainer.className = "zoom-json-tree";
+    jsonContainer.appendChild(renderZoomJsonTree(detailsPayload, "", 0));
+    jsonSection.appendChild(jsonContainer);
+
+    elements.zoomDetails.appendChild(jsonSection);
   }
 
-  if (!detailsHtml) {
-    detailsHtml = `<div class="zoom-empty">(no additional details)</div>`;
+  if (elements.zoomDetails.children.length === 0) {
+    elements.zoomDetails.innerHTML = `<div class="zoom-empty">(no additional details)</div>`;
   }
-
-  elements.zoomDetails.innerHTML = detailsHtml;
 }
 
 /**
- * Renders a log entry in the zoom modal.
+ * Renders a collapsible JSON tree for the zoom modal details panel.
  */
-function renderLogZoom() {
-  const log = state.zoomEntry;
-  const level = (log.level || "INFO").toLowerCase();
-  const typeClass = `zoom-type-${level}`;
+function renderZoomJsonTree(value, key, depth) {
+  const node = document.createElement("div");
+  node.className = "zoom-json-node";
 
-  // Header
-  elements.zoomModalType.textContent = (log.level || "INFO").toUpperCase();
-  elements.zoomModalType.className = `zoom-type-badge ${typeClass}`;
-  elements.zoomModalTimestamp.textContent = log.timestamp || "";
-  elements.zoomModalSource.textContent = log.logger || "";
-  elements.zoomModalSource.style.display = log.logger ? "" : "none";
-
-  // Content panel
-  let contentHtml = "";
-
-  if (log.event) {
-    contentHtml += `<div class="zoom-section">`;
-    contentHtml += `<div class="zoom-section-label">Event</div>`;
-    contentHtml += `<div class="zoom-text-content">${escapeHtml(log.event)}</div>`;
-    contentHtml += "</div>";
+  if (value === null) {
+    node.innerHTML = key
+      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-null">null</span>`
+      : '<span class="zoom-json-null">null</span>';
+    return node;
   }
 
-  if (log.message) {
-    contentHtml += `<div class="zoom-section">`;
-    contentHtml += `<div class="zoom-section-label">Message</div>`;
-    contentHtml += `<div class="zoom-text-content">${escapeHtml(log.message)}</div>`;
-    contentHtml += "</div>";
+  if (typeof value === "boolean") {
+    node.innerHTML = key
+      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-bool">${value}</span>`
+      : `<span class="zoom-json-bool">${value}</span>`;
+    return node;
   }
 
-  if (log.exc_info) {
-    contentHtml += `<div class="zoom-section">`;
-    contentHtml += `<div class="zoom-section-label">Exception</div>`;
-    contentHtml += `<pre class="zoom-exception">${escapeHtml(log.exc_info)}</pre>`;
-    contentHtml += "</div>";
+  if (typeof value === "number") {
+    node.innerHTML = key
+      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-number">${value}</span>`
+      : `<span class="zoom-json-number">${value}</span>`;
+    return node;
   }
 
-  if (!contentHtml) {
-    contentHtml = `<div class="zoom-empty">(no message)</div>`;
+  if (typeof value === "string") {
+    const displayValue = value.length > 500 ? `${value.slice(0, 500)}...` : value;
+    const escaped = escapeHtml(displayValue);
+    const formatted = escaped.replace(/\n/g, "<br>");
+    node.innerHTML = key
+      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-string">"${formatted}"</span>`
+      : `<span class="zoom-json-string">"${formatted}"</span>`;
+    return node;
   }
 
-  elements.zoomContent.innerHTML = contentHtml;
+  if (Array.isArray(value)) {
+    const isExpanded = depth < 2;
+    const header = document.createElement("div");
+    header.className = "zoom-json-header";
+    header.innerHTML = `<span class="zoom-json-toggle">${isExpanded ? "▼" : "▶"}</span>${key ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: ` : ""}<span class="zoom-json-bracket">[</span><span class="zoom-json-count">${value.length} items</span><span class="zoom-json-bracket zoom-json-close-bracket" style="display: ${isExpanded ? "none" : "inline"}">]</span>`;
+    node.appendChild(header);
 
-  // Details panel
-  let detailsHtml = "";
+    const children = document.createElement("div");
+    children.className = "zoom-json-children";
+    children.style.display = isExpanded ? "block" : "none";
 
-  if (log.logger) {
-    detailsHtml += `<div class="zoom-section">`;
-    detailsHtml += `<div class="zoom-section-label">Logger</div>`;
-    detailsHtml += `<div class="zoom-text-content">${escapeHtml(log.logger)}</div>`;
-    detailsHtml += "</div>";
+    for (let i = 0; i < value.length; i++) {
+      children.appendChild(renderZoomJsonTree(value[i], String(i), depth + 1));
+    }
+
+    const closeBracket = document.createElement("div");
+    closeBracket.className = "zoom-json-close";
+    closeBracket.innerHTML = '<span class="zoom-json-bracket">]</span>';
+    closeBracket.style.display = isExpanded ? "block" : "none";
+    children.appendChild(closeBracket);
+
+    node.appendChild(children);
+
+    header.addEventListener("click", () => {
+      const isOpen = children.style.display !== "none";
+      children.style.display = isOpen ? "none" : "block";
+      header.querySelector(".zoom-json-toggle").textContent = isOpen ? "▶" : "▼";
+      header.querySelector(".zoom-json-close-bracket").style.display = isOpen ? "inline" : "none";
+    });
+
+    return node;
   }
 
-  if (log.context && Object.keys(log.context).length > 0) {
-    detailsHtml += `<div class="zoom-section">`;
-    detailsHtml += `<div class="zoom-section-label">Context</div>`;
-    detailsHtml += `<pre class="zoom-json-content">${escapeHtml(JSON.stringify(log.context, null, 2))}</pre>`;
-    detailsHtml += "</div>";
+  if (typeof value === "object") {
+    const keys = Object.keys(value);
+    const isExpanded = depth < 2;
+    const header = document.createElement("div");
+    header.className = "zoom-json-header";
+    header.innerHTML = `<span class="zoom-json-toggle">${isExpanded ? "▼" : "▶"}</span>${key ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: ` : ""}<span class="zoom-json-bracket">{</span><span class="zoom-json-count">${keys.length} keys</span><span class="zoom-json-bracket zoom-json-close-bracket" style="display: ${isExpanded ? "none" : "inline"}">}</span>`;
+    node.appendChild(header);
+
+    const children = document.createElement("div");
+    children.className = "zoom-json-children";
+    children.style.display = isExpanded ? "block" : "none";
+
+    for (const k of keys) {
+      children.appendChild(renderZoomJsonTree(value[k], k, depth + 1));
+    }
+
+    const closeBracket = document.createElement("div");
+    closeBracket.className = "zoom-json-close";
+    closeBracket.innerHTML = '<span class="zoom-json-bracket">}</span>';
+    closeBracket.style.display = isExpanded ? "block" : "none";
+    children.appendChild(closeBracket);
+
+    node.appendChild(children);
+
+    header.addEventListener("click", () => {
+      const isOpen = children.style.display !== "none";
+      children.style.display = isOpen ? "none" : "block";
+      header.querySelector(".zoom-json-toggle").textContent = isOpen ? "▶" : "▼";
+      header.querySelector(".zoom-json-close-bracket").style.display = isOpen ? "inline" : "none";
+    });
+
+    return node;
   }
 
-  if (!detailsHtml) {
-    detailsHtml = `<div class="zoom-empty">(no additional details)</div>`;
-  }
-
-  elements.zoomDetails.innerHTML = detailsHtml;
+  node.textContent = String(value);
+  return node;
 }
 
 /**
@@ -2306,10 +2314,7 @@ function updateZoomNavigation() {
     return;
   }
 
-  const maxIndex =
-    state.zoomType === "transcript"
-      ? state.transcriptEntries.length - 1
-      : state.filteredLogs.length - 1;
+  const maxIndex = state.transcriptEntries.length - 1;
 
   elements.zoomPrev.disabled = state.zoomIndex <= 0;
   elements.zoomNext.disabled = state.zoomIndex >= maxIndex;
@@ -2346,17 +2351,6 @@ elements.transcriptList.addEventListener("click", (e) => {
     e.stopPropagation();
     const index = Number.parseInt(zoomBtn.dataset.zoomIndex, 10);
     openTranscriptZoom(index);
-  }
-});
-
-// Event delegation for zoom buttons in logs list
-elements.logsList.addEventListener("click", (e) => {
-  const zoomBtn = e.target.closest(".zoom-button[data-log-zoom-index]");
-  if (zoomBtn) {
-    e.preventDefault();
-    e.stopPropagation();
-    const index = Number.parseInt(zoomBtn.dataset.logZoomIndex, 10);
-    openLogZoom(index);
   }
 });
 

@@ -1843,28 +1843,6 @@ select:focus-visible {
   display: none;
 }
 
-.log-entry.compact .log-message {
-  max-height: 40px;
-  overflow: hidden;
-  position: relative;
-}
-
-.log-entry.compact .log-message::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 20px;
-  background: linear-gradient(transparent, var(--color-bg-subtle));
-  pointer-events: none;
-}
-
-.log-entry.compact .log-context,
-.log-entry.compact .log-exception {
-  display: none;
-}
-
 /* Zoom button in list entries */
 .zoom-button {
   display: inline-flex;
@@ -1890,6 +1868,83 @@ select:focus-visible {
 .zoom-button svg {
   width: 14px;
   height: 14px;
+}
+
+/* Pretty-printed JSON tree in zoom modal */
+.zoom-json-tree {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.zoom-json-node {
+  padding-left: 0;
+}
+
+.zoom-json-children {
+  padding-left: 20px;
+  border-left: 1px solid var(--color-border);
+  margin-left: 8px;
+}
+
+.zoom-json-header {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.zoom-json-header:hover {
+  background: var(--color-surface);
+}
+
+.zoom-json-toggle {
+  display: inline-block;
+  width: 16px;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.zoom-json-key {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.zoom-json-string {
+  color: var(--color-success);
+  word-break: break-word;
+}
+
+.zoom-json-number {
+  color: var(--color-warning);
+}
+
+.zoom-json-bool {
+  color: var(--color-error);
+}
+
+.zoom-json-null {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.zoom-json-bracket {
+  color: var(--color-text-faint);
+}
+
+.zoom-json-count {
+  color: var(--color-text-faint);
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.zoom-json-close {
+  color: var(--color-text-faint);
 }
 
 /* --- Bundle Info Panel --- */
