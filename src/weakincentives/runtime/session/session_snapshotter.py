@@ -49,6 +49,9 @@ class SessionSnapshotter:
     snapshots of session state and restoring sessions from those snapshots.
     It works with SliceStore and ReducerRegistry to gather and apply state.
 
+    Thread Safety: This class uses Session's lock for all operations.
+    SliceStore and ReducerRegistry are accessed atomically under this lock.
+
     Example::
 
         snapshotter = SessionSnapshotter(
@@ -92,7 +95,10 @@ class SessionSnapshotter:
         self._lock = lock
 
     def _get_registered_slice_types(self) -> set[SessionSliceType]:
-        """Get all registered slice types from store and registry."""
+        """Get all registered slice types from store and registry.
+
+        Must be called while holding self._lock.
+        """
         types = self._store.all_slice_types()
         types.update(self._registry.all_target_slice_types())
         return types

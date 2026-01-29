@@ -14,13 +14,16 @@
 
 ReducerRegistry manages the mapping from event types to reducers,
 supporting multiple reducers per event type with different target slices.
+
+Note: ReducerRegistry is NOT thread-safe on its own. Thread safety is
+provided by Session's lock. All access must be made while holding
+Session's lock.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from threading import RLock
 from typing import Any
 
 from ...types.dataclass import SupportsDataclass
@@ -42,17 +45,20 @@ class ReducerRegistration:
 
 
 class ReducerRegistry:
-    """Thread-safe registry for event-to-reducer mappings.
+    """Registry for event-to-reducer mappings.
 
     ReducerRegistry tracks which reducers should be invoked for each event
     type, along with their target slice types. Multiple reducers can be
     registered for the same event type, targeting different slices.
 
+    Note: This class is NOT thread-safe. Callers must hold Session's lock
+    before calling any methods.
+
     Example::
 
         registry = ReducerRegistry()
 
-        # Register reducers for an event type
+        # Register reducers for an event type (caller holds lock)
         registry.register(AddStep, step_reducer, target_slice=AgentPlan)
 
         # Get all reducers for an event type
@@ -61,13 +67,12 @@ class ReducerRegistry:
 
     """
 
-    __slots__ = ("_lock", "_reducers")
+    __slots__ = ("_reducers",)
 
     def __init__(self) -> None:
         """Initialize an empty reducer registry."""
         super().__init__()
         self._reducers: dict[SessionSliceType, list[ReducerRegistration]] = {}
-        self._lock = RLock()
 
     def register[S: SupportsDataclass](
         self,
@@ -76,25 +81,24 @@ class ReducerRegistry:
         *,
         target_slice: type[S],
     ) -> None:
-        """Register a reducer for an event type.
+        """Register a reducer for an event type. Caller must hold lock.
 
         Args:
             event_type: The event type that triggers this reducer.
             reducer: The reducer function to invoke.
             target_slice: The slice type that the reducer operates on.
         """
-        with self._lock:
-            registration = ReducerRegistration(
-                reducer=reducer,
-                slice_type=target_slice,
-            )
-            bucket = self._reducers.setdefault(event_type, [])
-            bucket.append(registration)
+        registration = ReducerRegistration(
+            reducer=reducer,
+            slice_type=target_slice,
+        )
+        bucket = self._reducers.setdefault(event_type, [])
+        bucket.append(registration)
 
     def get_registrations(
         self, event_type: SessionSliceType
     ) -> tuple[ReducerRegistration, ...]:
-        """Get all reducer registrations for an event type.
+        """Get all reducer registrations for an event type. Caller must hold lock.
 
         Args:
             event_type: The event type to look up.
@@ -102,11 +106,10 @@ class ReducerRegistry:
         Returns:
             Tuple of ReducerRegistration objects, empty if none registered.
         """
-        with self._lock:
-            return tuple(self._reducers.get(event_type, ()))
+        return tuple(self._reducers.get(event_type, ()))
 
     def has_registrations(self, event_type: SessionSliceType) -> bool:
-        """Check if any reducers are registered for an event type.
+        """Check if any reducers are registered for an event type. Caller must hold lock.
 
         Args:
             event_type: The event type to check.
@@ -114,61 +117,51 @@ class ReducerRegistry:
         Returns:
             True if at least one reducer is registered.
         """
-        with self._lock:
-            return event_type in self._reducers and len(self._reducers[event_type]) > 0
+        return event_type in self._reducers and len(self._reducers[event_type]) > 0
 
     def all_event_types(self) -> set[SessionSliceType]:
-        """Return all event types with registered reducers.
+        """Return all event types with registered reducers. Caller must hold lock.
 
         Returns:
             Set of event types that have at least one reducer.
         """
-        with self._lock:
-            return set(self._reducers)
+        return set(self._reducers)
 
     def all_target_slice_types(self) -> set[SessionSliceType]:
-        """Return all target slice types from all registrations.
+        """Return all target slice types from all registrations. Caller must hold lock.
 
         Returns:
             Set of slice types that are targets of registered reducers.
         """
-        with self._lock:
-            types: set[SessionSliceType] = set()
-            for registrations in self._reducers.values():
-                for registration in registrations:
-                    types.add(registration.slice_type)
-            return types
+        types: set[SessionSliceType] = set()
+        for registrations in self._reducers.values():
+            for registration in registrations:
+                types.add(registration.slice_type)
+        return types
 
     def iter_registrations(
         self,
     ) -> Iterator[tuple[SessionSliceType, tuple[ReducerRegistration, ...]]]:
-        """Iterate over all event types and their registrations.
-
-        Thread-safe snapshot iteration.
+        """Iterate over all event types and their registrations. Caller must hold lock.
 
         Yields:
             Tuples of (event_type, registrations).
         """
-        with self._lock:
-            items = [
-                (event_type, tuple(registrations))
-                for event_type, registrations in self._reducers.items()
-            ]
-        yield from items
+        for event_type, registrations in self._reducers.items():
+            yield event_type, tuple(registrations)
 
     def snapshot(
         self,
     ) -> list[tuple[SessionSliceType, tuple[ReducerRegistration, ...]]]:
-        """Create a snapshot of all registrations for cloning.
+        """Create a snapshot of all registrations for cloning. Caller must hold lock.
 
         Returns:
             List of (event_type, registrations) tuples.
         """
-        with self._lock:
-            return [
-                (event_type, tuple(registrations))
-                for event_type, registrations in self._reducers.items()
-            ]
+        return [
+            (event_type, tuple(registrations))
+            for event_type, registrations in self._reducers.items()
+        ]
 
     def copy_from(
         self,
@@ -176,24 +169,23 @@ class ReducerRegistry:
         *,
         skip_existing: bool = True,
     ) -> None:
-        """Copy registrations from a snapshot.
+        """Copy registrations from a snapshot. Caller must hold lock.
 
         Args:
             snapshot: List of (event_type, registrations) tuples.
             skip_existing: If True, skip event types already registered.
         """
-        with self._lock:
-            for event_type, registrations in snapshot:
-                if skip_existing and event_type in self._reducers:
-                    continue
-                for registration in registrations:
-                    bucket = self._reducers.setdefault(event_type, [])
-                    bucket.append(
-                        ReducerRegistration(
-                            reducer=registration.reducer,
-                            slice_type=registration.slice_type,
-                        )
+        for event_type, registrations in snapshot:
+            if skip_existing and event_type in self._reducers:
+                continue
+            for registration in registrations:
+                bucket = self._reducers.setdefault(event_type, [])
+                bucket.append(
+                    ReducerRegistration(
+                        reducer=registration.reducer,
+                        slice_type=registration.slice_type,
                     )
+                )
 
 
 __all__ = ["ReducerRegistration", "ReducerRegistry"]

@@ -538,16 +538,18 @@ class Session(SessionProtocol):
             include_all: If True, snapshot all slices regardless of policy.
         """
         del tag
-        parent_id = self._parent.session_id if self._parent is not None else None
         with self._lock:
+            # Capture all state under lock to prevent concurrent modifications
+            parent_id = self._parent.session_id if self._parent is not None else None
             children_ids = tuple(child.session_id for child in self._children)
-        return self._snapshotter.create_snapshot(
-            parent_id=parent_id,
-            children_ids=children_ids,
-            tags=self.tags,
-            policies=policies,
-            include_all=include_all,
-        )
+            tags_snapshot = self.tags
+            return self._snapshotter.create_snapshot(
+                parent_id=parent_id,
+                children_ids=children_ids,
+                tags=tags_snapshot,
+                policies=policies,
+                include_all=include_all,
+            )
 
     # ──────────────────────────────────────────────────────────────────────
     # Clone Support (uses session_cloning module)
@@ -763,15 +765,17 @@ class Session(SessionProtocol):
         register_visibility_reducers(self)
 
     # ──────────────────────────────────────────────────────────────────────
-    # Backward Compatibility Attributes
+    # Backward Compatibility Attributes (Internal Use Only)
     # ──────────────────────────────────────────────────────────────────────
 
     @property
     def _slices(self) -> dict[SessionSliceType, Slice[Any]]:
         """Access internal slices dict for backward compatibility.
 
-        This property provides access to the internal slice storage for
-        modules like session_cloning that need direct access during cloning.
+        WARNING: Caller MUST hold Session's lock (via locked() context manager).
+        Returns a direct mutable reference - not a defensive copy.
+
+        This property is for internal use by session_cloning module only.
         """
         return self._store._slices  # pyright: ignore[reportPrivateUsage]
 
@@ -779,22 +783,29 @@ class Session(SessionProtocol):
     def _slice_policies(self) -> dict[SessionSliceType, SlicePolicy]:
         """Access internal policies dict for backward compatibility.
 
-        This property provides access to the internal policy storage for
-        modules like session_cloning that need direct access during cloning.
+        WARNING: Caller MUST hold Session's lock (via locked() context manager).
+        Returns a direct mutable reference - not a defensive copy.
+
+        This property is for internal use by session_cloning module only.
         """
         return self._store._slice_policies  # pyright: ignore[reportPrivateUsage]
 
     @_slice_policies.setter
     def _slice_policies(self, value: dict[SessionSliceType, SlicePolicy]) -> None:
-        """Set internal policies dict for backward compatibility."""
+        """Set internal policies dict for backward compatibility.
+
+        WARNING: Caller MUST hold Session's lock (via locked() context manager).
+        """
         self._store._slice_policies = value  # pyright: ignore[reportPrivateUsage]
 
     @property
     def _reducers(self) -> dict[SessionSliceType, list[ReducerRegistration]]:
         """Access internal reducers dict for backward compatibility.
 
-        This property provides access to the internal reducer storage for
-        modules like session_cloning that need direct access during cloning.
+        WARNING: Caller MUST hold Session's lock (via locked() context manager).
+        Returns a direct mutable reference - not a defensive copy.
+
+        This property is for internal use by session_cloning module only.
         """
         return self._registry._reducers  # pyright: ignore[reportPrivateUsage]
 
