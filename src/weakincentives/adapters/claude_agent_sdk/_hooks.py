@@ -657,7 +657,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                         "tool_count": hook_context.stats.tool_count,
                     },
                 )
-                return {"continue": False}
+                return {"continue_": False}
             if stop_on_structured_output:
                 # No checker - stop immediately
                 logger.debug(
@@ -669,7 +669,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                         "tool_count": hook_context.stats.tool_count,
                     },
                 )
-                return {"continue": False}
+                return {"continue_": False}
 
         # Run feedback providers AFTER ToolInvoked dispatch so tool_call_count
         # includes this tool. Return feedback response if triggered.

@@ -387,7 +387,7 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-structured", context))
 
-        assert result == {"continue": False}
+        assert result == {"continue_": False}
 
     def test_does_not_stop_on_structured_output_when_disabled(
         self, session: Session
@@ -537,7 +537,7 @@ class TestPostToolUseHook:
         result = asyncio.run(hook(input_data, "call-structured", context))
 
         # Should stop - all tasks complete
-        assert result == {"continue": False}
+        assert result == {"continue_": False}
 
     def test_stops_when_structured_output_without_plan(self, session: Session) -> None:
         """PostToolUse stops after StructuredOutput when no plan exists."""
@@ -561,7 +561,7 @@ class TestPostToolUseHook:
         result = asyncio.run(hook(input_data, "call-structured", context))
 
         # Should stop - no plan means nothing to enforce
-        assert result == {"continue": False}
+        assert result == {"continue_": False}
 
     def test_returns_feedback_when_provider_triggers(self, session: Session) -> None:
         """PostToolUse returns additionalContext when feedback provider triggers."""
