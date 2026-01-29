@@ -19,6 +19,7 @@ the `wink query` command.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import sqlite3
@@ -866,8 +867,34 @@ class _DebugAppHandlers:
         """Get content of a specific file in the bundle."""
         from ..debug.bundle import BundleValidationError
 
+        # Image extension to MIME type mapping
+        image_extensions: dict[str, str] = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+            ".ico": "image/x-icon",
+            ".bmp": "image/bmp",
+        }
+
         try:
             content = self._store.bundle.read_file(file_path)
+
+            # Check for image by extension
+            lower_path = file_path.lower()
+            for ext, mime_type in image_extensions.items():
+                if lower_path.endswith(ext):
+                    encoded = base64.b64encode(content).decode("ascii")
+                    return JSONResponse(
+                        {
+                            "content": encoded,
+                            "type": "image",
+                            "mime_type": mime_type,
+                        }
+                    )
+
             # Try to parse as JSON
             try:
                 parsed = json.loads(content.decode("utf-8"))

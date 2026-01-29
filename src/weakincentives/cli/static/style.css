@@ -2511,6 +2511,26 @@ select:focus-visible {
   border: 1px solid rgba(79, 70, 229, 0.2);
 }
 
+/* --- Filesystem Image Display --- */
+
+.image-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 16px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-sm);
+  min-height: 200px;
+}
+
+.filesystem-image {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+
 /* --- Main Navigation Tabs --- */
 
 .main-tabs {

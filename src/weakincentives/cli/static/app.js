@@ -1886,7 +1886,11 @@ async function selectFilesystemFile(fullPath, displayPath) {
     elements.filesystemContent.classList.remove("hidden");
     elements.filesystemCurrentPath.textContent = displayPath;
 
-    if (result.type === "binary") {
+    if (result.type === "image") {
+      const dataUrl = `data:${result.mime_type};base64,${result.content}`;
+      elements.filesystemViewer.innerHTML = `<div class="image-container"><img src="${dataUrl}" alt="${escapeHtml(displayPath)}" class="filesystem-image" /></div>`;
+      state.fileContent = null;
+    } else if (result.type === "binary") {
       elements.filesystemViewer.innerHTML = '<p class="muted">Binary file cannot be displayed</p>';
       state.fileContent = null;
     } else {
