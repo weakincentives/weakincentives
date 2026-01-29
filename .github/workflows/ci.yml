@@ -30,7 +30,7 @@ jobs:
       formal: ${{ steps.detect.outputs.formal }}
       mailbox: ${{ steps.detect.outputs.mailbox }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         if: github.event_name != 'push'
 
       - uses: dorny/paths-filter@v3
@@ -128,7 +128,7 @@ jobs:
   static-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -151,7 +151,7 @@ jobs:
     needs: detect-changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -208,7 +208,7 @@ jobs:
     if: needs.detect-changes.outputs.run_all != 'true' && needs.detect-changes.outputs.docs_only == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -233,7 +233,7 @@ jobs:
       needs.detect-changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Set up Java (for TLC)
         uses: actions/setup-java@v4
@@ -291,7 +291,7 @@ jobs:
         ports:
           - 6379:6379
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
