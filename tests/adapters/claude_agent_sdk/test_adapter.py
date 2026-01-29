@@ -1323,7 +1323,7 @@ class TestMessageContentExtraction:
 
         # Create a mock completion checker
         class TestChecker(TaskCompletionChecker):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.check_count = 0
 
             def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
@@ -1346,25 +1346,27 @@ class TestMessageContentExtraction:
 
         # Set up mock client that supports multi-turn
         class MockClient:
-            def __init__(self, options=None, transport=None):
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
                 self.options = options
                 self.query_count = 0
-                self.feedback_received = []
+                self.feedback_received: list[str] = []
                 MockSDKQuery.captured_options.append(options)
 
-            async def connect(self, prompt=None):
+            async def connect(self, prompt: object | None = None) -> None:
                 if prompt:
                     async for _ in prompt:
                         pass
 
-            async def disconnect(self):
+            async def disconnect(self) -> None:
                 pass
 
-            async def query(self, prompt, session_id):
+            async def query(self, prompt: str, session_id: str) -> None:
                 self.query_count += 1
                 self.feedback_received.append(prompt)
 
-            async def receive_messages(self):
+            async def receive_messages(self) -> AsyncGenerator[object, None]:
                 # First round - return incomplete response
                 if self.query_count == 0:
                     yield MockResultMessage(
