@@ -396,6 +396,11 @@ const state = {
   hasEnvironmentData: false,
   // Shortcuts overlay
   shortcutsOpen: false,
+  // Zoom modal state
+  zoomOpen: false,
+  zoomType: null, // 'transcript' or 'log'
+  zoomIndex: -1,
+  zoomEntry: null,
   // Virtual scrollers (initialized after DOM ready)
   logsScroller: null,
   transcriptScroller: null,
@@ -484,6 +489,17 @@ const elements = {
   toastContainer: document.getElementById("toast-container"),
   shortcutsOverlay: document.getElementById("shortcuts-overlay"),
   shortcutsClose: document.getElementById("shortcuts-close"),
+  // Zoom modal
+  zoomModal: document.getElementById("zoom-modal"),
+  zoomModalType: document.getElementById("zoom-modal-type"),
+  zoomModalTimestamp: document.getElementById("zoom-modal-timestamp"),
+  zoomModalSource: document.getElementById("zoom-modal-source"),
+  zoomContent: document.getElementById("zoom-content"),
+  zoomDetails: document.getElementById("zoom-details"),
+  zoomClose: document.getElementById("zoom-close"),
+  zoomCopy: document.getElementById("zoom-copy"),
+  zoomPrev: document.getElementById("zoom-prev"),
+  zoomNext: document.getElementById("zoom-next"),
 };
 
 // ============================================================================
@@ -1082,13 +1098,14 @@ function formatTranscriptContent(entry) {
  * Creates a single transcript entry DOM element.
  * Used by both virtual scroller and fallback rendering.
  */
-function createTranscriptEntryElement(entry, _index) {
+function createTranscriptEntryElement(entry, index) {
   const entryType = entry.entry_type || "unknown";
   const role = entry.role || "";
   const cssClass = role ? `role-${role}` : `type-${entryType}`;
 
   const container = document.createElement("div");
-  container.className = `transcript-entry ${cssClass}`;
+  container.className = `transcript-entry ${cssClass} compact`;
+  container.dataset.entryIndex = index;
 
   const source = entry.transcript_source || "";
   const seq =
@@ -1100,6 +1117,14 @@ function createTranscriptEntryElement(entry, _index) {
   const content = formatTranscriptContent(entry);
 
   let html = `<div class="transcript-header">`;
+  // Zoom button
+  html += `<button class="zoom-button" type="button" data-zoom-index="${index}" title="Expand entry" aria-label="Expand entry">`;
+  html += `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">`;
+  html += `<polyline points="15 3 21 3 21 9"></polyline>`;
+  html += `<polyline points="9 21 3 21 3 15"></polyline>`;
+  html += '<line x1="21" y1="3" x2="14" y2="10"></line>';
+  html += '<line x1="3" y1="21" x2="10" y2="14"></line>';
+  html += "</svg></button>";
   html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
   if (entry.timestamp) {
     html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
@@ -1568,10 +1593,19 @@ function createActiveFilter(type, name, isExclude, onRemove) {
 function createLogEntryElement(log, index) {
   const level = (log.level || "INFO").toLowerCase();
   const entry = document.createElement("div");
-  entry.className = `log-entry log-${level}`;
+  entry.className = `log-entry log-${level} compact`;
   entry.dataset.index = index;
+  entry.dataset.logIndex = index;
 
   let html = `<div class="log-header">`;
+  // Zoom button
+  html += `<button class="zoom-button" type="button" data-log-zoom-index="${index}" title="Expand entry" aria-label="Expand entry">`;
+  html += `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">`;
+  html += `<polyline points="15 3 21 3 21 9"></polyline>`;
+  html += `<polyline points="9 21 3 21 3 15"></polyline>`;
+  html += '<line x1="21" y1="3" x2="14" y2="10"></line>';
+  html += '<line x1="3" y1="21" x2="10" y2="14"></line>';
+  html += "</svg></button>";
   html += `<span class="log-level">${(log.level || "INFO").toUpperCase()}</span>`;
   if (log.timestamp) {
     html += `<span class="log-timestamp">${log.timestamp}</span>`;
@@ -2016,16 +2050,348 @@ elements.shortcutsOverlay
 elements.helpButton.addEventListener("click", openShortcuts);
 
 // ============================================================================
+// ZOOM MODAL
+// ============================================================================
+
+/**
+ * Opens the zoom modal for a transcript entry.
+ */
+function openTranscriptZoom(index) {
+  const entry = state.transcriptEntries[index];
+  if (!entry) {
+    return;
+  }
+  state.zoomOpen = true;
+  state.zoomType = "transcript";
+  state.zoomIndex = index;
+  state.zoomEntry = entry;
+  renderZoomModal();
+  elements.zoomModal.classList.remove("hidden");
+}
+
+/**
+ * Opens the zoom modal for a log entry.
+ */
+function openLogZoom(index) {
+  const log = state.filteredLogs[index];
+  if (!log) {
+    return;
+  }
+  state.zoomOpen = true;
+  state.zoomType = "log";
+  state.zoomIndex = index;
+  state.zoomEntry = log;
+  renderZoomModal();
+  elements.zoomModal.classList.remove("hidden");
+}
+
+/**
+ * Closes the zoom modal.
+ */
+function closeZoomModal() {
+  state.zoomOpen = false;
+  state.zoomType = null;
+  state.zoomIndex = -1;
+  state.zoomEntry = null;
+  elements.zoomModal.classList.add("hidden");
+}
+
+/**
+ * Navigates to the previous entry in the zoom modal.
+ */
+function zoomPrev() {
+  if (!state.zoomOpen || state.zoomIndex <= 0) {
+    return;
+  }
+  if (state.zoomType === "transcript") {
+    openTranscriptZoom(state.zoomIndex - 1);
+  } else if (state.zoomType === "log") {
+    openLogZoom(state.zoomIndex - 1);
+  }
+}
+
+/**
+ * Navigates to the next entry in the zoom modal.
+ */
+function zoomNext() {
+  if (!state.zoomOpen) {
+    return;
+  }
+  const maxIndex =
+    state.zoomType === "transcript"
+      ? state.transcriptEntries.length - 1
+      : state.filteredLogs.length - 1;
+  if (state.zoomIndex >= maxIndex) {
+    return;
+  }
+  if (state.zoomType === "transcript") {
+    openTranscriptZoom(state.zoomIndex + 1);
+  } else if (state.zoomType === "log") {
+    openLogZoom(state.zoomIndex + 1);
+  }
+}
+
+/**
+ * Renders the zoom modal content based on current state.
+ */
+function renderZoomModal() {
+  if (!state.zoomEntry) {
+    return;
+  }
+
+  if (state.zoomType === "transcript") {
+    renderTranscriptZoom();
+  } else if (state.zoomType === "log") {
+    renderLogZoom();
+  }
+
+  // Update navigation button states
+  updateZoomNavigation();
+}
+
+/**
+ * Renders a transcript entry in the zoom modal.
+ */
+function renderTranscriptZoom() {
+  const entry = state.zoomEntry;
+  const entryType = entry.entry_type || "unknown";
+  const role = entry.role || "";
+  const typeClass = role ? `zoom-type-${role}` : `zoom-type-${entryType}`;
+
+  // Header
+  elements.zoomModalType.textContent = entryType.toUpperCase();
+  elements.zoomModalType.className = `zoom-type-badge ${typeClass}`;
+  elements.zoomModalTimestamp.textContent = entry.timestamp || "";
+
+  const source = entry.transcript_source || "";
+  const seq =
+    entry.sequence_number !== null && entry.sequence_number !== undefined
+      ? `#${entry.sequence_number}`
+      : "";
+  elements.zoomModalSource.textContent = source ? `${source}${seq}` : "";
+  elements.zoomModalSource.style.display = source ? "" : "none";
+
+  // Content panel
+  const content = formatTranscriptContent(entry);
+  let contentHtml = "";
+
+  if (entry.prompt_name) {
+    contentHtml += `<div class="zoom-section">`;
+    contentHtml += `<div class="zoom-section-label">Prompt</div>`;
+    contentHtml += `<div class="zoom-text-content">${escapeHtml(entry.prompt_name)}</div>`;
+    contentHtml += "</div>";
+  }
+
+  if (content.value) {
+    contentHtml += `<div class="zoom-section">`;
+    contentHtml += `<div class="zoom-section-label">${role || entryType} Content</div>`;
+    if (content.kind === "json") {
+      contentHtml += `<pre class="zoom-json-content">${escapeHtml(content.value)}</pre>`;
+    } else {
+      contentHtml += `<div class="zoom-text-content">${escapeHtml(content.value)}</div>`;
+    }
+    contentHtml += "</div>";
+  } else {
+    contentHtml += `<div class="zoom-empty">(no content)</div>`;
+  }
+
+  elements.zoomContent.innerHTML = contentHtml;
+
+  // Details panel
+  let detailsHtml = "";
+  const detailsPayload = entry.parsed || entry.raw_json;
+
+  if (entry.tool_name) {
+    detailsHtml += `<div class="zoom-section">`;
+    detailsHtml += `<div class="zoom-section-label">Tool</div>`;
+    detailsHtml += `<div class="zoom-text-content">${escapeHtml(entry.tool_name)}</div>`;
+    detailsHtml += "</div>";
+  }
+
+  if (entry.tool_use_id) {
+    detailsHtml += `<div class="zoom-section">`;
+    detailsHtml += `<div class="zoom-section-label">Tool Use ID</div>`;
+    detailsHtml += `<div class="zoom-text-content">${escapeHtml(entry.tool_use_id)}</div>`;
+    detailsHtml += "</div>";
+  }
+
+  if (detailsPayload) {
+    detailsHtml += `<div class="zoom-section">`;
+    detailsHtml += `<div class="zoom-section-label">Raw JSON</div>`;
+    detailsHtml += `<pre class="zoom-json-content">${escapeHtml(JSON.stringify(detailsPayload, null, 2))}</pre>`;
+    detailsHtml += "</div>";
+  }
+
+  if (!detailsHtml) {
+    detailsHtml = `<div class="zoom-empty">(no additional details)</div>`;
+  }
+
+  elements.zoomDetails.innerHTML = detailsHtml;
+}
+
+/**
+ * Renders a log entry in the zoom modal.
+ */
+function renderLogZoom() {
+  const log = state.zoomEntry;
+  const level = (log.level || "INFO").toLowerCase();
+  const typeClass = `zoom-type-${level}`;
+
+  // Header
+  elements.zoomModalType.textContent = (log.level || "INFO").toUpperCase();
+  elements.zoomModalType.className = `zoom-type-badge ${typeClass}`;
+  elements.zoomModalTimestamp.textContent = log.timestamp || "";
+  elements.zoomModalSource.textContent = log.logger || "";
+  elements.zoomModalSource.style.display = log.logger ? "" : "none";
+
+  // Content panel
+  let contentHtml = "";
+
+  if (log.event) {
+    contentHtml += `<div class="zoom-section">`;
+    contentHtml += `<div class="zoom-section-label">Event</div>`;
+    contentHtml += `<div class="zoom-text-content">${escapeHtml(log.event)}</div>`;
+    contentHtml += "</div>";
+  }
+
+  if (log.message) {
+    contentHtml += `<div class="zoom-section">`;
+    contentHtml += `<div class="zoom-section-label">Message</div>`;
+    contentHtml += `<div class="zoom-text-content">${escapeHtml(log.message)}</div>`;
+    contentHtml += "</div>";
+  }
+
+  if (log.exc_info) {
+    contentHtml += `<div class="zoom-section">`;
+    contentHtml += `<div class="zoom-section-label">Exception</div>`;
+    contentHtml += `<pre class="zoom-exception">${escapeHtml(log.exc_info)}</pre>`;
+    contentHtml += "</div>";
+  }
+
+  if (!contentHtml) {
+    contentHtml = `<div class="zoom-empty">(no message)</div>`;
+  }
+
+  elements.zoomContent.innerHTML = contentHtml;
+
+  // Details panel
+  let detailsHtml = "";
+
+  if (log.logger) {
+    detailsHtml += `<div class="zoom-section">`;
+    detailsHtml += `<div class="zoom-section-label">Logger</div>`;
+    detailsHtml += `<div class="zoom-text-content">${escapeHtml(log.logger)}</div>`;
+    detailsHtml += "</div>";
+  }
+
+  if (log.context && Object.keys(log.context).length > 0) {
+    detailsHtml += `<div class="zoom-section">`;
+    detailsHtml += `<div class="zoom-section-label">Context</div>`;
+    detailsHtml += `<pre class="zoom-json-content">${escapeHtml(JSON.stringify(log.context, null, 2))}</pre>`;
+    detailsHtml += "</div>";
+  }
+
+  if (!detailsHtml) {
+    detailsHtml = `<div class="zoom-empty">(no additional details)</div>`;
+  }
+
+  elements.zoomDetails.innerHTML = detailsHtml;
+}
+
+/**
+ * Updates the state of prev/next navigation buttons.
+ */
+function updateZoomNavigation() {
+  if (!state.zoomOpen) {
+    return;
+  }
+
+  const maxIndex =
+    state.zoomType === "transcript"
+      ? state.transcriptEntries.length - 1
+      : state.filteredLogs.length - 1;
+
+  elements.zoomPrev.disabled = state.zoomIndex <= 0;
+  elements.zoomNext.disabled = state.zoomIndex >= maxIndex;
+}
+
+/**
+ * Copies the current zoom entry as JSON to clipboard.
+ */
+async function copyZoomEntry() {
+  if (!state.zoomEntry) {
+    showToast("No entry to copy", "error");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(state.zoomEntry, null, 2));
+    showToast("Copied entry to clipboard", "success");
+  } catch {
+    showToast("Failed to copy", "error");
+  }
+}
+
+// Zoom modal event listeners
+elements.zoomClose.addEventListener("click", closeZoomModal);
+elements.zoomModal.querySelector(".zoom-modal-backdrop").addEventListener("click", closeZoomModal);
+elements.zoomCopy.addEventListener("click", copyZoomEntry);
+elements.zoomPrev.addEventListener("click", zoomPrev);
+elements.zoomNext.addEventListener("click", zoomNext);
+
+// Event delegation for zoom buttons in transcript list
+elements.transcriptList.addEventListener("click", (e) => {
+  const zoomBtn = e.target.closest(".zoom-button[data-zoom-index]");
+  if (zoomBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const index = Number.parseInt(zoomBtn.dataset.zoomIndex, 10);
+    openTranscriptZoom(index);
+  }
+});
+
+// Event delegation for zoom buttons in logs list
+elements.logsList.addEventListener("click", (e) => {
+  const zoomBtn = e.target.closest(".zoom-button[data-log-zoom-index]");
+  if (zoomBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const index = Number.parseInt(zoomBtn.dataset.logZoomIndex, 10);
+    openLogZoom(index);
+  }
+});
+
+// ============================================================================
 // KEYBOARD SHORTCUTS
 // ============================================================================
 
 document.addEventListener("keydown", (e) => {
   // Escape - close dialogs
   if (e.key === "Escape") {
+    if (state.zoomOpen) {
+      e.preventDefault();
+      closeZoomModal();
+      return;
+    }
     if (state.shortcutsOpen) {
       e.preventDefault();
       closeShortcuts();
     }
+    return;
+  }
+
+  // Handle zoom modal navigation
+  if (state.zoomOpen) {
+    if (e.key === "j" || e.key === "J" || e.key === "ArrowDown") {
+      e.preventDefault();
+      zoomNext();
+      return;
+    }
+    if (e.key === "k" || e.key === "K" || e.key === "ArrowUp") {
+      e.preventDefault();
+      zoomPrev();
+      return;
+    }
+    // Other keys are blocked while zoom modal is open
     return;
   }
 
