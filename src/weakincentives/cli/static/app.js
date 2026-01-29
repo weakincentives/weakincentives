@@ -2110,12 +2110,56 @@ function renderZoomModal() {
 }
 
 /**
+ * Extracts tool_use_id from an entry's nested message.content structure.
+ * For tool_use entries: looks for content[*].id where type === "tool_use"
+ * For tool_result entries: looks for content[*].tool_use_id where type === "tool_result"
+ */
+function extractToolUseId(entry) {
+  // First try top-level tool_use_id if it exists
+  if (entry.tool_use_id) {
+    return entry.tool_use_id;
+  }
+
+  // Try to get from parsed or raw_json
+  let parsed = entry.parsed;
+  if (!parsed && entry.raw_json) {
+    try {
+      parsed = JSON.parse(entry.raw_json);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!parsed) {
+    return null;
+  }
+
+  // Look in message.content array
+  const content = parsed.message?.content;
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  for (const item of content) {
+    if (item.type === "tool_use" && item.id) {
+      return item.id;
+    }
+    if (item.type === "tool_result" && item.tool_use_id) {
+      return item.tool_use_id;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Finds the index of a linked transcript entry by tool_use_id.
  * For tool_use entries, finds the corresponding tool_result.
  * For tool_result entries, finds the corresponding tool_use.
  */
 function findLinkedToolEntry(currentEntry) {
-  if (!currentEntry.tool_use_id) {
+  const currentToolId = extractToolUseId(currentEntry);
+  if (!currentToolId) {
     return null;
   }
 
@@ -2124,8 +2168,11 @@ function findLinkedToolEntry(currentEntry) {
 
   for (let i = 0; i < state.transcriptEntries.length; i++) {
     const entry = state.transcriptEntries[i];
-    if (entry.tool_use_id === currentEntry.tool_use_id && entry.entry_type === targetType) {
-      return { index: i, entry };
+    if (entry.entry_type === targetType) {
+      const entryToolId = extractToolUseId(entry);
+      if (entryToolId === currentToolId) {
+        return { index: i, entry };
+      }
     }
   }
   return null;
