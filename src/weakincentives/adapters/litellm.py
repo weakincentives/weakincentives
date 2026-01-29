@@ -40,6 +40,7 @@ from .core import (
     ProviderAdapter,
     SessionProtocol,
 )
+from .exceptions import LiteLLMError
 from .inner_loop import InnerLoopConfig, InnerLoopInputs, run_inner_loop
 from .throttle import ThrottleError, ThrottleKind, throttle_details
 from .utilities import (
@@ -143,6 +144,24 @@ def _error_payload(error: object) -> dict[str, Any] | None:
         response_mapping = cast(Mapping[object, Any], response)
         return {str(key): value for key, value in response_mapping.items()}
     return None
+
+
+def _create_litellm_error(
+    message: str,
+    prompt_name: str,
+    provider_payload: dict[str, Any] | None,
+    error: Exception,
+) -> LiteLLMError:
+    """Create a LiteLLMError from an exception."""
+    error_code = getattr(error, "code", None)
+    return LiteLLMError(
+        message,
+        prompt_name=prompt_name,
+        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        error_code=str(error_code) if error_code is not None else None,
+        original_provider=None,
+        provider_payload=provider_payload,
+    )
 
 
 def _normalize_litellm_throttle(
@@ -433,6 +452,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 ),
                 provider_payload=_error_payload,
                 request_error_message="LiteLLM request failed.",
+                error_factory=_create_litellm_error,
             )
 
         def _select_choice(response: object) -> ProviderChoice:
@@ -481,6 +501,7 @@ __all__ = [
     "LiteLLMAdapter",
     "LiteLLMClientConfig",
     "LiteLLMCompletion",
+    "LiteLLMError",
     "LiteLLMModelConfig",
     "create_litellm_completion",
 ]

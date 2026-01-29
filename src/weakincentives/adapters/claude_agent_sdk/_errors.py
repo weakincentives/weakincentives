@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ..core import PromptEvaluationError
+from ..exceptions import ClaudeAgentSDKError
 
 if TYPE_CHECKING:
     from ..throttle import ThrottleError, ThrottleKind
@@ -71,7 +72,7 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
             This is particularly useful for debugging process failures.
 
     Returns:
-        A normalized PromptEvaluationError or subclass.
+        A normalized ClaudeAgentSDKError or subclass.
     """
     error_type = type(error).__name__
     error_module = type(error).__module__
@@ -160,13 +161,14 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
             event="error.cli_not_found",
             context={"prompt_name": prompt_name},
         )
-        return PromptEvaluationError(
+        return ClaudeAgentSDKError(
             message=(
                 "Claude Code CLI not found. Install: "
                 "npm install -g @anthropic-ai/claude-code"
             ),
             prompt_name=prompt_name,
             phase="request",
+            error_type=error_type,
         )
 
     if error_type == "CLIConnectionError":
@@ -210,10 +212,11 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
             },
         )
 
-        return PromptEvaluationError(
+        return ClaudeAgentSDKError(
             message=f"Claude Code process failed: {error}",
             prompt_name=prompt_name,
             phase="request",
+            error_type=error_type,
             provider_payload=provider_payload if provider_payload else None,
         )
 
@@ -229,10 +232,11 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
         provider_payload_json: dict[str, Any] = {}
         if stderr_output:
             provider_payload_json["stderr"] = stderr_output
-        return PromptEvaluationError(
+        return ClaudeAgentSDKError(
             message=f"Failed to parse SDK response: {error}",
             prompt_name=prompt_name,
             phase="response",
+            error_type=error_type,
             provider_payload=provider_payload_json if provider_payload_json else None,
         )
 
@@ -242,10 +246,11 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
             event="error.max_turns_exceeded",
             context={"prompt_name": prompt_name},
         )
-        return PromptEvaluationError(
+        return ClaudeAgentSDKError(
             message=f"SDK exceeded maximum turns: {error}",
             prompt_name=prompt_name,
             phase="response",
+            error_type=error_type,
         )
 
     # Handle unknown SDK errors or general errors
@@ -268,9 +273,10 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
     if stderr_output:
         unknown_payload["stderr"] = stderr_output
 
-    return PromptEvaluationError(
+    return ClaudeAgentSDKError(
         message=message,
         prompt_name=prompt_name,
         phase="request",
+        error_type=error_type if is_sdk_error else None,
         provider_payload=unknown_payload if unknown_payload else None,
     )

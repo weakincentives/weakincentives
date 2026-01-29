@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from weakincentives.adapters.claude_agent_sdk._errors import normalize_sdk_error
 from weakincentives.adapters.core import PromptEvaluationError
+from weakincentives.adapters.exceptions import ClaudeAgentSDKError
 from weakincentives.adapters.throttle import ThrottleError
 
 
@@ -54,11 +55,13 @@ class TestNormalizeSDKError:
         error = MockCLINotFoundError("CLI not found")
         result = normalize_sdk_error(error, "test_prompt")
 
+        assert isinstance(result, ClaudeAgentSDKError)
         assert isinstance(result, PromptEvaluationError)
         assert "Claude Code CLI not found" in result.message
         assert "npm install" in result.message
         assert result.prompt_name == "test_prompt"
         assert result.phase == "request"
+        assert result.error_type == "CLINotFoundError"
 
     def test_cli_connection_error(self) -> None:
         error = MockCLIConnectionError("Connection timed out")
@@ -73,10 +76,12 @@ class TestNormalizeSDKError:
         error = MockProcessError("Process failed", exit_code=1, stderr="Error output")
         result = normalize_sdk_error(error, "test_prompt")
 
+        assert isinstance(result, ClaudeAgentSDKError)
         assert isinstance(result, PromptEvaluationError)
         assert "Claude Code process failed" in result.message
         assert result.prompt_name == "test_prompt"
         assert result.phase == "request"
+        assert result.error_type == "ProcessError"
         assert result.provider_payload is not None
         assert result.provider_payload["exit_code"] == 1
         assert result.provider_payload["stderr"] == "Error output"
@@ -85,19 +90,23 @@ class TestNormalizeSDKError:
         error = MockCLIJSONDecodeError("Invalid JSON")
         result = normalize_sdk_error(error, "test_prompt")
 
+        assert isinstance(result, ClaudeAgentSDKError)
         assert isinstance(result, PromptEvaluationError)
         assert "Failed to parse SDK response" in result.message
         assert result.prompt_name == "test_prompt"
         assert result.phase == "response"
+        assert result.error_type == "CLIJSONDecodeError"
 
     def test_max_turns_exceeded_error(self) -> None:
         error = MockMaxTurnsExceededError("Exceeded 10 turns")
         result = normalize_sdk_error(error, "test_prompt")
 
+        assert isinstance(result, ClaudeAgentSDKError)
         assert isinstance(result, PromptEvaluationError)
         assert "exceeded maximum turns" in result.message
         assert result.prompt_name == "test_prompt"
         assert result.phase == "response"
+        assert result.error_type == "MaxTurnsExceededError"
 
     def test_generic_sdk_error(self) -> None:
         class MockSDKError(Exception):
@@ -108,10 +117,12 @@ class TestNormalizeSDKError:
         error = MockSDKError("Some SDK error")
         result = normalize_sdk_error(error, "test_prompt")
 
+        assert isinstance(result, ClaudeAgentSDKError)
         assert isinstance(result, PromptEvaluationError)
         assert "Claude Agent SDK error" in result.message
         assert result.prompt_name == "test_prompt"
         assert result.phase == "request"
+        assert result.error_type == "MockSDKError"
 
     def test_claude_code_module_error(self) -> None:
         class MockCodeError(Exception):
@@ -122,17 +133,21 @@ class TestNormalizeSDKError:
         error = MockCodeError("Code client error")
         result = normalize_sdk_error(error, "test_prompt")
 
+        assert isinstance(result, ClaudeAgentSDKError)
         assert isinstance(result, PromptEvaluationError)
         assert "Claude Agent SDK error" in result.message
+        assert result.error_type == "MockCodeError"
 
     def test_unknown_error(self) -> None:
         error = RuntimeError("Something went wrong")
         result = normalize_sdk_error(error, "test_prompt")
 
+        assert isinstance(result, ClaudeAgentSDKError)
         assert isinstance(result, PromptEvaluationError)
         assert result.message == "Something went wrong"
         assert result.prompt_name == "test_prompt"
         assert result.phase == "request"
+        assert result.error_type is None
 
     def test_process_error_without_attributes(self) -> None:
         class MinimalProcessError(Exception):
@@ -142,8 +157,10 @@ class TestNormalizeSDKError:
         error = MinimalProcessError("Minimal error")
         result = normalize_sdk_error(error, "test_prompt")
 
+        assert isinstance(result, ClaudeAgentSDKError)
         assert isinstance(result, PromptEvaluationError)
         assert "Claude Code process failed" in result.message
+        assert result.error_type == "ProcessError"
         assert result.provider_payload is None
 
     def test_process_error_with_captured_stderr(self) -> None:

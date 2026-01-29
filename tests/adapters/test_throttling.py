@@ -444,3 +444,28 @@ def test_openai_additional_throttle_paths() -> None:
     assert (
         litellm._normalize_litellm_throttle(neutral_error, prompt_name="prompt") is None
     )
+
+
+def test_litellm_create_error_factory() -> None:
+    error_with_code = _ThrottleLikeError("failed", code="invalid_model")
+    result = litellm._create_litellm_error(
+        message="LiteLLM request failed",
+        prompt_name="test_prompt",
+        provider_payload={"status": 400},
+        error=error_with_code,
+    )
+
+    assert result.message == "LiteLLM request failed"
+    assert result.prompt_name == "test_prompt"
+    assert result.error_code == "invalid_model"
+    assert result.provider_payload == {"status": 400}
+
+    error_without_code = Exception("generic error")
+    result_no_code = litellm._create_litellm_error(
+        message="Request failed",
+        prompt_name="test",
+        provider_payload=None,
+        error=error_without_code,
+    )
+
+    assert result_no_code.error_code is None
