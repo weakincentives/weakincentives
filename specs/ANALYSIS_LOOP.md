@@ -43,7 +43,7 @@ under study, it can perform deep investigation that would be impractical manuall
 
 - **Research-objective-driven**: Every analysis session targets a specific question
 - **Bundle-native**: Debug bundles are first-class inputs, not afterthoughts
-- **Two operational modes**: Works with EvalLoop (dataset-driven) or MainLoop (retrospective)
+- **Two operational modes**: Works with EvalLoop (dataset-driven) or AgentLoop (retrospective)
 - **Actionable output**: Produces findings, hypotheses, and concrete recommendations
 - **Compositional**: Built on AgentLoop; reuses mailbox, lifecycle, and resource patterns
 
@@ -78,7 +78,7 @@ AnalysisLoop operates in two complementary modes:
 | Mode | Input | Use Case |
 |------|-------|----------|
 | **EvalLoop Integration** | Dataset + EvalLoop mailbox | Systematic analysis with expected outputs |
-| **MainLoop Integration** | Debug bundles directly | Retrospective trajectory analysis |
+| **AgentLoop Integration** | Debug bundles directly | Retrospective trajectory analysis |
 
 #### EvalLoop Integration Mode
 
@@ -97,12 +97,12 @@ This mode answers questions like:
 - "What patterns distinguish passing from failing samples?"
 - "Which tool sequences correlate with success?"
 
-#### MainLoop Integration Mode
+#### AgentLoop Integration Mode
 
 When there is no clear expected output or the goal is understanding trajectory
 quality, AnalysisLoop performs retrospective analysis:
 
-1. Receive debug bundles from MainLoop executions
+1. Receive debug bundles from AgentLoop executions
 1. Analyze whether the trajectory was sound given the objective
 1. Identify decision points where the agent could have done better
 1. Surface patterns across multiple retrospectives
@@ -133,7 +133,7 @@ This mode answers questions like:
 │  └────────────────────────────────────────────────────────────────────┘ │
 │                                                                          │
 │  ┌─────────────────────┐       ┌──────────────────────────────────────┐ │
-│  │   EvalLoop Mode     │       │   MainLoop Mode                       │ │
+│  │   EvalLoop Mode     │       │   AgentLoop Mode                      │ │
 │  │                     │       │                                       │ │
 │  │  Dataset            │       │  Debug Bundles                        │ │
 │  │    ↓                │       │    ↓                                  │ │
@@ -186,7 +186,7 @@ class AnalysisRequest:
     """What question to answer."""
 
     bundles: tuple[Path, ...] | None = None
-    """Direct bundle paths (MainLoop mode)."""
+    """Direct bundle paths (AgentLoop mode)."""
 
     dataset: Dataset[Any, Any] | None = None
     """Dataset to evaluate (EvalLoop mode)."""
@@ -428,6 +428,85 @@ def hypothesis_test(
     """
 ```
 
+## Analysis Agent Environment
+
+### wink query Integration
+
+The analysis agent makes heavy use of `wink query` for structured bundle
+exploration. This CLI tool is installed in the analysis agent's sandbox and
+provides SQL-based access to bundle contents:
+
+```bash
+# Query tool invocations across bundles
+wink query ./bundles/ "SELECT tool_name, COUNT(*) as calls FROM tool_invocations GROUP BY tool_name"
+
+# Find error patterns
+wink query ./bundles/ "SELECT * FROM logs WHERE level = 'ERROR' ORDER BY timestamp"
+
+# Compare token usage across experiments
+wink query ./bundles/ "SELECT experiment_name, AVG(total_tokens) FROM metrics GROUP BY experiment_name"
+
+# Identify failing samples
+wink query ./bundles/ "SELECT sample_id, score, reason FROM eval WHERE passed = false"
+```
+
+The `bundle_query` tool wraps `wink query` for programmatic access within the
+analysis agent, providing the same SQL interface with structured result handling.
+
+See `specs/WINK_QUERY.md` for full query capabilities and schema documentation.
+
+### Collocated Tool Access
+
+Because AnalysisLoop runs as a specialized AgentLoop, the analysis agent has
+access to the same tool environment as any other agent in the system:
+
+| Tool Category | Examples | Purpose in Analysis |
+|---------------|----------|---------------------|
+| **Bundle tools** | `bundle_query`, `bundle_compare` | Direct bundle inspection |
+| **Filesystem tools** | `read_file`, `list_directory` | Examine bundle contents on disk |
+| **Shell tools** | `bash`, `wink query` | Run CLI queries and scripts |
+| **Search tools** | `grep`, `glob` | Find patterns across extracted data |
+
+This enables sophisticated analysis workflows that combine structured queries
+with ad-hoc exploration.
+
+### Original Prompt Tool Access
+
+For deep behavioral analysis, the analysis agent can optionally access the
+complete tool set from the original prompt being analyzed:
+
+```python
+@dataclass(frozen=True)
+class AnalysisLoopConfig:
+    # ... other fields ...
+
+    mount_original_tools: bool = False
+    """If True, mount tools from the analyzed prompt for replay/inspection."""
+
+    original_prompt_template: PromptTemplate | None = None
+    """The prompt template whose tools should be mounted."""
+```
+
+When enabled, this allows the analysis agent to:
+
+- **Replay tool calls**: Re-execute tool invocations from the bundle to verify behavior
+- **Inspect tool schemas**: Understand what capabilities were available
+- **Test hypotheses**: Try alternative tool sequences to validate findings
+
+This is particularly useful for understanding whether failures stem from tool
+limitations, incorrect tool selection, or flawed tool usage patterns.
+
+### Sandboxed Execution
+
+The analysis agent runs in an isolated environment with:
+
+- Read-only access to bundle directories
+- Write access to a scratch workspace for intermediate results
+- Network access for LLM API calls (analysis agent's own inference)
+- No access to production systems or sensitive credentials
+
+This ensures analysis cannot inadvertently affect the systems being studied.
+
 ## EvalLoop Integration
 
 ### Micro-batch Dispatch
@@ -513,11 +592,11 @@ class SampleAnalysis:
     """Unexpected behaviors observed."""
 ```
 
-## MainLoop Integration
+## AgentLoop Integration
 
 ### Retrospective Analysis
 
-For MainLoop integration, bundles come directly without expected outputs:
+For AgentLoop integration, bundles come directly without expected outputs:
 
 ```python
 async def _execute_retrospective_mode(
@@ -679,10 +758,10 @@ group = LoopGroup(loops=[eval_loop, analysis_loop])
 group.run()
 ```
 
-### MainLoop Mode
+### AgentLoop Mode
 
 ```python
-# Collect bundles from MainLoop executions
+# Collect bundles from AgentLoop executions
 bundle_paths = list(Path("./debug/").glob("*.zip"))
 
 # Submit retrospective analysis
