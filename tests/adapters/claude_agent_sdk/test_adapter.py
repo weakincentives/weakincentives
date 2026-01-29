@@ -72,8 +72,12 @@ class MockClaudeAgentOptions:
     max_thinking_tokens: int | None
     mcp_servers: dict[str, object] | None
     hooks: dict[str, list[object]] | None
+    can_use_tool: object | None  # Added for ClaudeSDKClient compatibility
 
     def __init__(self, **kwargs: object) -> None:
+        # Set defaults for required attributes
+        self.can_use_tool = None
+        # Set any provided attributes
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -143,6 +147,50 @@ class MockSDKQuery:
             raise cls._error
 
         for result in cls._results:
+            yield result
+
+
+class MockClaudeSDKClient:
+    """Mock for ClaudeSDKClient."""
+
+    def __init__(
+        self,
+        options: MockClaudeAgentOptions | None = None,
+        transport: object | None = None,
+    ) -> None:
+        """Initialize mock client."""
+        self.options = options or MockClaudeAgentOptions()
+        self._connected = False
+        MockSDKQuery.captured_options.append(self.options)
+
+    async def connect(
+        self, prompt: str | AsyncIterable[dict[str, Any]] | None = None
+    ) -> None:
+        """Mock connect method."""
+        self._connected = True
+        # Handle AsyncIterable prompts (streaming mode)
+        if prompt is not None and not isinstance(prompt, str):
+            # Consume the async generator to get prompt content
+            prompt_content = ""
+            async for msg in prompt:
+                if isinstance(msg, dict) and "message" in msg:
+                    message = msg["message"]
+                    if isinstance(message, dict) and "content" in message:
+                        prompt_content = message["content"]
+            MockSDKQuery.captured_prompts.append(prompt_content)
+        elif isinstance(prompt, str):
+            MockSDKQuery.captured_prompts.append(prompt)
+
+    async def disconnect(self) -> None:
+        """Mock disconnect method."""
+        self._connected = False
+
+    async def receive_messages(self) -> AsyncGenerator[object, None]:
+        """Mock receive_messages that yields configured results."""
+        if MockSDKQuery._error is not None:
+            raise MockSDKQuery._error
+
+        for result in MockSDKQuery._results:
             yield result
 
 
@@ -256,6 +304,10 @@ def sdk_patches() -> Generator[None, None, None]:
         patch(
             "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
             return_value=_create_sdk_mock(),
+        ),
+        patch(
+            "claude_agent_sdk.ClaudeSDKClient",
+            MockClaudeSDKClient,
         ),
         patch(
             "claude_agent_sdk.types.ClaudeAgentOptions",
