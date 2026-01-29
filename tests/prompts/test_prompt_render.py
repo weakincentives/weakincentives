@@ -380,27 +380,34 @@ def test_rendered_prompt_str_returns_text() -> None:
     assert str(rendered) == "Rendered output"
 
 
-def test_prompt_bind_mutates_and_replaces_params() -> None:
-    prompt = PromptTemplate(
+def test_prompt_bind_returns_new_instance_and_replaces_params() -> None:
+    template = PromptTemplate(
         ns="tests/prompts",
-        key="bind-mutation",
+        key="bind-immutable",
         sections=[
             MarkdownSection[IntroParams](title="Intro", template="", key="intro")
         ],
     )
-    bound = Prompt(prompt)
+    original = Prompt(template)
 
-    assert bound.bind() is bound  # no-op, identity
-    assert bound.params == ()
+    # No-op bind returns self (optimization)
+    assert original.bind() is original
+    assert original.params == ()
 
     first = IntroParams(title="v1")
     second = IntroParams(title="v2")
 
-    assert bound.bind(first) is bound
-    assert bound.params == (first,)
+    # bind() returns a new instance, not self
+    bound_first = original.bind(first)
+    assert bound_first is not original  # new instance
+    assert bound_first.params == (first,)
+    assert original.params == ()  # original unchanged
 
-    assert bound.bind(second) is bound
-    assert bound.params == (second,)
+    # Rebinding with same type replaces the param
+    bound_second = bound_first.bind(second)
+    assert bound_second is not bound_first  # new instance
+    assert bound_second.params == (second,)
+    assert bound_first.params == (first,)  # previous unchanged
 
 
 def test_format_specialization_argument_variants() -> None:
