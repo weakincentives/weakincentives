@@ -24,7 +24,7 @@ from uuid import uuid4
 from ..budget import BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
-from ..errors import DeadlineExceededError, ToolValidationError
+from ..errors import ToolValidationError
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.feedback import collect_feedback
 from ..prompt.policy import PolicyDecision, ToolPolicy
@@ -46,6 +46,7 @@ from ..types.dataclass import (
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
+from ._exception_handlers import DEFAULT_EXCEPTION_CHAIN, ExceptionContext
 from ._provider_protocols import ProviderToolCall
 from .core import (
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -55,7 +56,6 @@ from .core import (
 from .utilities import (
     ToolArgumentsParser,
     ToolChoice,
-    deadline_provider_payload,
     raise_tool_deadline_error,
     token_usage_from_payload,
 )
@@ -319,80 +319,6 @@ def _log_tool_completion(
     )
 
 
-def _handle_tool_validation_error(
-    *,
-    log: StructuredLogger,
-    error: Exception,
-) -> ToolResult[SupportsToolResult]:
-    log.warning(
-        "Tool validation failed.",
-        event="tool_validation_failed",
-        context={"reason": str(error)},
-    )
-    return ToolResult(
-        message=f"Tool validation failed: {error}",
-        value=None,
-        success=False,
-    )
-
-
-def _handle_tool_deadline_error(
-    *,
-    error: DeadlineExceededError,
-    prompt_name: str,
-    tool_name: str,
-    deadline: Deadline | None,
-) -> PromptEvaluationError:
-    return PromptEvaluationError(
-        str(error) or f"Tool '{tool_name}' exceeded the deadline.",
-        prompt_name=prompt_name,
-        phase=PROMPT_EVALUATION_PHASE_TOOL,
-        provider_payload=deadline_provider_payload(deadline),
-    )
-
-
-def _handle_type_error(
-    *,
-    log: StructuredLogger,
-    tool_name: str,
-    error: TypeError,
-) -> ToolResult[SupportsToolResult]:
-    """Handle TypeError during tool execution.
-
-    TypeErrors may indicate handler signature mismatches (which pyright catches
-    at development time) or other type-related issues within the handler logic.
-    """
-    log.error(
-        "Tool raised TypeError.",
-        event="tool_type_error",
-        context={"error": str(error)},
-    )
-    return ToolResult(
-        message=f"Tool '{tool_name}' raised TypeError: {error}",
-        value=None,
-        success=False,
-    )
-
-
-def _handle_unexpected_tool_error(
-    *,
-    log: StructuredLogger,
-    tool_name: str,
-    provider_payload: dict[str, Any] | None,
-    error: Exception,
-) -> ToolResult[SupportsToolResult]:
-    log.exception(
-        "Tool handler raised an unexpected exception.",
-        event="tool_handler_exception",
-        context={"provider_payload": provider_payload},
-    )
-    return ToolResult(
-        message=f"Tool '{tool_name}' execution failed: {error}",
-        value=None,
-        success=False,
-    )
-
-
 def _restore_snapshot_if_needed(
     context: ToolExecutionContext,
     snapshot: CompositeSnapshot,
@@ -418,33 +344,27 @@ def _handle_tool_exception(  # noqa: PLR0913
     tool_params: SupportsDataclass | None,
     arguments_mapping: Mapping[str, Any],
 ) -> ToolResult[SupportsToolResult]:
-    """Handle exceptions during tool execution, restoring snapshot as needed."""
-    if isinstance(error, ToolValidationError):
-        # Validation errors happen before tool invocation, no restore needed
-        return _handle_tool_validation_error(log=log, error=error)
-    if isinstance(error, DeadlineExceededError):
-        # Context manager handles restore for re-raised exceptions
-        raise _handle_tool_deadline_error(
-            error=error,
-            prompt_name=context.prompt_name,
-            tool_name=tool_name,
-            deadline=context.deadline,
-        ) from error
-    # Restore snapshot for all other exceptions since we're catching and returning
-    _restore_snapshot_if_needed(context, snapshot, log, reason="exception")
-    # TypeError may indicate signature mismatch or other type issues
-    if isinstance(error, TypeError):
-        return _handle_type_error(
-            log=log,
-            tool_name=tool_name,
-            error=error,
-        )
-    return _handle_unexpected_tool_error(
-        log=log,
-        tool_name=tool_name,
-        provider_payload=context.provider_payload,
+    """Handle exceptions during tool execution using the exception handler chain.
+
+    Delegates to DEFAULT_EXCEPTION_CHAIN which processes the exception through
+    a chain of handlers, each specialized for a specific exception type.
+    """
+    exception_ctx = ExceptionContext(
         error=error,
+        tool_name=tool_name,
+        prompt_name=context.prompt_name,
+        deadline=context.deadline,
+        provider_payload=context.provider_payload or {},
+        log=log,
+        snapshot=snapshot,
+        tool_params=tool_params,
+        arguments_mapping=arguments_mapping,
     )
+
+    def restore_fn(reason: str) -> None:
+        _restore_snapshot_if_needed(context, snapshot, log, reason=reason)
+
+    return DEFAULT_EXCEPTION_CHAIN.handle(exception_ctx, restore_fn=restore_fn)
 
 
 def _build_policy_denied_result(
