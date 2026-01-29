@@ -14,6 +14,7 @@ class VirtualScroller {
     this.bufferSize = options.bufferSize || 10; // Items to keep above/below viewport
     this.renderItem = options.renderItem;
     this.onLoadMore = options.onLoadMore || null;
+    this.onLoadError = options.onLoadError || null; // Callback for load errors
     this.loadMoreThreshold = options.loadMoreThreshold || 3; // Items from bottom to trigger load
 
     this.items = [];
@@ -65,9 +66,17 @@ class VirtualScroller {
         const anyIntersecting = entries.some((e) => e.isIntersecting);
         if (anyIntersecting && this.hasMore && !this.isLoading && this.onLoadMore) {
           this.isLoading = true;
-          this.onLoadMore().finally(() => {
-            this.isLoading = false;
-          });
+          this.onLoadMore()
+            .catch((error) => {
+              if (this.onLoadError) {
+                this.onLoadError(error);
+              } else {
+                console.error("Failed to load more items:", error);
+              }
+            })
+            .finally(() => {
+              this.isLoading = false;
+            });
         }
       },
       { root: this.container, rootMargin: "200px" }
@@ -261,19 +270,17 @@ class VirtualScroller {
 
     this.container.appendChild(fragment);
 
-    // Update spacers
+    // Measure items synchronously to avoid scroll jumps
+    // (accessing offsetHeight forces a synchronous layout)
+    this.measureRenderedItems();
+
+    // Update spacers with accurate measurements
     this.updateSpacers();
 
     // Observe sentinel for infinite scroll
     if (this.hasMore) {
       this.loadMoreObserver.observe(this.loadMoreSentinel);
     }
-
-    // Measure items after render
-    requestAnimationFrame(() => {
-      this.measureRenderedItems();
-      this.updateSpacers();
-    });
   }
 
   scrollToBottom() {
@@ -334,6 +341,7 @@ const state = {
   transcriptTotalCount: 0,
   transcriptHasMore: false,
   transcriptLoading: false,
+  transcriptRequestId: 0, // Tracks current request to ignore stale responses
   // Logs state
   allLogs: [],
   filteredLogs: [],
@@ -351,6 +359,12 @@ const state = {
   logsTotalCount: 0,
   logsHasMore: false,
   logsLoading: false,
+  logsRequestId: 0, // Tracks current request to ignore stale responses
+  // Task state
+  taskView: "input",
+  taskInput: null,
+  taskOutput: null,
+  taskExpandDepth: 2,
   // Filesystem state
   allFiles: [],
   filesystemFiles: [],
@@ -540,6 +554,13 @@ function switchView(viewName) {
   elements.filesystemView.classList.toggle("hidden", viewName !== "filesystem");
   elements.environmentView.classList.toggle("hidden", viewName !== "environment");
 
+  // Initialize virtual scrollers if needed (may have been destroyed by resetViewState)
+  if (viewName === "transcript" && !state.transcriptScroller) {
+    initTranscriptVirtualScroller();
+  } else if (viewName === "logs" && !state.logsScroller) {
+    initLogsVirtualScroller();
+  }
+
   // Load data if needed
   if (viewName === "transcript" && state.transcriptEntries.length === 0) {
     loadTranscriptFacets();
@@ -618,12 +639,14 @@ function resetViewState() {
   state.fileContent = null;
   state.hasFilesystemSnapshot = false;
 
-  // Reset virtual scrollers if initialized
+  // Destroy virtual scrollers to release resources (they'll be re-initialized on view switch)
   if (state.transcriptScroller) {
-    state.transcriptScroller.reset();
+    state.transcriptScroller.destroy();
+    state.transcriptScroller = null;
   }
   if (state.logsScroller) {
-    state.logsScroller.reset();
+    state.logsScroller.destroy();
+    state.logsScroller = null;
   }
 }
 
@@ -823,13 +846,25 @@ async function loadTranscriptFacets() {
 }
 
 async function loadTranscript(append = false) {
-  if (state.transcriptLoading) return;
+  if (state.transcriptLoading && !append) {
+    // For non-append requests, cancel the concept of previous request
+    state.transcriptRequestId++;
+  }
+
+  // Track this request
+  const requestId = ++state.transcriptRequestId;
 
   try {
     state.transcriptLoading = true;
     const offset = append ? state.transcriptEntries.length : 0;
     const query = buildTranscriptQueryParams(offset);
     const result = await fetchJSON(`/api/transcript?${query}`);
+
+    // Ignore stale responses (filters changed while loading)
+    if (requestId !== state.transcriptRequestId) {
+      return;
+    }
+
     const entries = result.entries || [];
 
     if (append) {
@@ -853,9 +888,15 @@ async function loadTranscript(append = false) {
     }
     updateTranscriptStats();
   } catch (error) {
-    elements.transcriptList.innerHTML = `<p class="muted">Failed to load transcript: ${error.message}</p>`;
+    // Only show error if this is still the current request
+    if (requestId === state.transcriptRequestId) {
+      elements.transcriptList.innerHTML = `<p class="muted">Failed to load transcript: ${error.message}</p>`;
+    }
   } finally {
-    state.transcriptLoading = false;
+    // Only clear loading state if this is still the current request
+    if (requestId === state.transcriptRequestId) {
+      state.transcriptLoading = false;
+    }
   }
 }
 
@@ -1035,25 +1076,7 @@ function createTranscriptEntryElement(entry, index) {
 
   container.innerHTML = html;
 
-  // Inline filtering
-  container.querySelectorAll(".transcript-source.clickable").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      const src = el.dataset.source;
-      if (!src) return;
-      if (e.shiftKey) toggleTranscriptSourceFilter(src, false, true);
-      else toggleTranscriptSourceFilter(src, true, false);
-    });
-  });
-
-  container.querySelectorAll(".transcript-type.clickable").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      const typ = el.dataset.type;
-      if (!typ) return;
-      if (e.shiftKey) toggleTranscriptTypeFilter(typ, false, true);
-      else toggleTranscriptTypeFilter(typ, true, false);
-    });
-  });
-
+  // Event listeners handled via delegation on container (see setupTranscriptEventDelegation)
   return container;
 }
 
@@ -1085,6 +1108,7 @@ function initTranscriptVirtualScroller() {
     bufferSize: 15,
     renderItem: createTranscriptEntryElement,
     onLoadMore: loadMoreTranscript,
+    onLoadError: (error) => showToast(`Failed to load more transcript entries: ${error.message}`, "error"),
   });
 }
 
@@ -1119,6 +1143,28 @@ function renderTranscript() {
     elements.transcriptList.appendChild(createTranscriptEntryElement(entry, index));
   });
 }
+
+// Transcript event delegation - handles clicks on dynamically created elements
+elements.transcriptList.addEventListener("click", (e) => {
+  const sourceEl = e.target.closest(".transcript-source.clickable");
+  if (sourceEl) {
+    const src = sourceEl.dataset.source;
+    if (src) {
+      if (e.shiftKey) toggleTranscriptSourceFilter(src, false, true);
+      else toggleTranscriptSourceFilter(src, true, false);
+    }
+    return;
+  }
+
+  const typeEl = e.target.closest(".transcript-type.clickable");
+  if (typeEl) {
+    const typ = typeEl.dataset.type;
+    if (typ) {
+      if (e.shiftKey) toggleTranscriptTypeFilter(typ, false, true);
+      else toggleTranscriptTypeFilter(typ, true, false);
+    }
+  }
+});
 
 // Transcript filter events
 elements.transcriptSearch.addEventListener("input", () => {
@@ -1220,13 +1266,25 @@ async function loadLogFacets() {
 }
 
 async function loadLogs(append = false) {
-  if (state.logsLoading) return;
+  if (state.logsLoading && !append) {
+    // For non-append requests, cancel the concept of previous request
+    state.logsRequestId++;
+  }
+
+  // Track this request
+  const requestId = ++state.logsRequestId;
 
   try {
     state.logsLoading = true;
     const offset = append ? state.filteredLogs.length : 0;
     const query = buildLogsQueryParams(offset);
     const result = await fetchJSON(`/api/logs?${query}`);
+
+    // Ignore stale responses (filters changed while loading)
+    if (requestId !== state.logsRequestId) {
+      return;
+    }
+
     const entries = result.entries || [];
 
     if (append) {
@@ -1250,9 +1308,15 @@ async function loadLogs(append = false) {
     }
     updateLogsStats();
   } catch (error) {
-    elements.logsList.innerHTML = `<p class="muted">Failed to load logs: ${error.message}</p>`;
+    // Only show error if this is still the current request
+    if (requestId === state.logsRequestId) {
+      elements.logsList.innerHTML = `<p class="muted">Failed to load logs: ${error.message}</p>`;
+    }
   } finally {
-    state.logsLoading = false;
+    // Only clear loading state if this is still the current request
+    if (requestId === state.logsRequestId) {
+      state.logsLoading = false;
+    }
   }
 }
 
@@ -1464,29 +1528,7 @@ function createLogEntryElement(log, index) {
 
   entry.innerHTML = html;
 
-  // Add click handlers for inline filtering
-  entry.querySelectorAll(".log-logger.clickable").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      const logger = el.dataset.logger;
-      if (e.shiftKey) {
-        toggleLoggerFilter(logger, false, true);
-      } else {
-        toggleLoggerFilter(logger, true, false);
-      }
-    });
-  });
-
-  entry.querySelectorAll(".log-event-name.clickable").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      const event = el.dataset.event;
-      if (e.shiftKey) {
-        toggleEventFilter(event, false, true);
-      } else {
-        toggleEventFilter(event, true, false);
-      }
-    });
-  });
-
+  // Event listeners handled via delegation on container (see logs event delegation below)
   return entry;
 }
 
@@ -1518,6 +1560,7 @@ function initLogsVirtualScroller() {
     bufferSize: 20,
     renderItem: createLogEntryElement,
     onLoadMore: loadMoreLogs,
+    onLoadError: (error) => showToast(`Failed to load more logs: ${error.message}`, "error"),
   });
 }
 
@@ -1552,6 +1595,28 @@ function renderLogs() {
     elements.logsList.appendChild(createLogEntryElement(log, index));
   });
 }
+
+// Logs event delegation - handles clicks on dynamically created elements
+elements.logsList.addEventListener("click", (e) => {
+  const loggerEl = e.target.closest(".log-logger.clickable");
+  if (loggerEl) {
+    const logger = loggerEl.dataset.logger;
+    if (logger) {
+      if (e.shiftKey) toggleLoggerFilter(logger, false, true);
+      else toggleLoggerFilter(logger, true, false);
+    }
+    return;
+  }
+
+  const eventEl = e.target.closest(".log-event-name.clickable");
+  if (eventEl) {
+    const event = eventEl.dataset.event;
+    if (event) {
+      if (e.shiftKey) toggleEventFilter(event, false, true);
+      else toggleEventFilter(event, true, false);
+    }
+  }
+});
 
 // Logs filter events
 elements.logsSearch.addEventListener("input", () => {
