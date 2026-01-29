@@ -174,7 +174,9 @@ class VirtualScroller {
   }
 
   updateVisibleRange() {
-    if (this.items.length === 0) return;
+    if (this.items.length === 0) {
+      return;
+    }
 
     // Measure current items before updating
     this.measureRenderedItems();
@@ -602,7 +604,9 @@ async function refreshBundles() {
     const option = document.createElement("option");
     option.value = entry.path;
     option.textContent = entry.name;
-    if (entry.selected) option.selected = true;
+    if (entry.selected) {
+      option.selected = true;
+    }
     elements.bundleSelect.appendChild(option);
   });
 }
@@ -624,7 +628,9 @@ async function switchBundle(path) {
 }
 
 elements.bundleSelect.addEventListener("change", (e) => {
-  if (e.target.value) switchBundle(e.target.value);
+  if (e.target.value) {
+    switchBundle(e.target.value);
+  }
 });
 
 function resetViewState() {
@@ -674,7 +680,9 @@ elements.reloadButton.addEventListener("click", reloadBundle);
 // ============================================================================
 
 async function isEventSlice(entry) {
-  if (!entry.count) return false;
+  if (!entry.count) {
+    return false;
+  }
   try {
     const encoded = encodeURIComponent(entry.slice_type);
     const detail = await fetchJSON(`/api/slices/${encoded}?limit=1`);
@@ -721,7 +729,7 @@ function renderSliceList() {
     }
     filtered.forEach((entry) => {
       const li = document.createElement("li");
-      li.className = "slice-item" + (entry.slice_type === state.selectedSlice ? " active" : "");
+      li.className = `slice-item${entry.slice_type === state.selectedSlice ? " active" : ""}`;
       li.innerHTML = `
         <div class="slice-title">${escapeHtml(entry.display_name || entry.slice_type)}</div>
         <div class="slice-subtitle">${escapeHtml(entry.item_display_name || entry.item_type)} · ${entry.count} items</div>
@@ -799,7 +807,11 @@ elements.collapseAll.addEventListener("click", () => {
 });
 
 elements.copyButton.addEventListener("click", async () => {
-  const text = JSON.stringify(getFilteredItems().map((e) => e.item), null, 2);
+  const text = JSON.stringify(
+    getFilteredItems().map((e) => e.item),
+    null,
+    2
+  );
   try {
     await navigator.clipboard.writeText(text);
     showToast("Copied to clipboard", "success");
@@ -875,9 +887,17 @@ async function loadTranscript(append = false) {
     // Use virtual scroller if available
     if (state.transcriptScroller) {
       if (append) {
-        state.transcriptScroller.appendData(entries, state.transcriptTotalCount, state.transcriptHasMore);
+        state.transcriptScroller.appendData(
+          entries,
+          state.transcriptTotalCount,
+          state.transcriptHasMore
+        );
       } else {
-        state.transcriptScroller.setData(state.transcriptEntries, state.transcriptTotalCount, state.transcriptHasMore);
+        state.transcriptScroller.setData(
+          state.transcriptEntries,
+          state.transcriptTotalCount,
+          state.transcriptHasMore
+        );
       }
       renderTranscriptEmptyState();
     } else {
@@ -897,7 +917,7 @@ async function loadTranscript(append = false) {
   }
 }
 
-async function loadMoreTranscript() {
+function loadMoreTranscript() {
   return loadTranscript(true);
 }
 
@@ -909,7 +929,9 @@ function debouncedTranscriptSearch() {
 
 function updateTranscriptStats() {
   let status = `Showing ${state.transcriptEntries.length}`;
-  if (state.transcriptHasMore) status += ` of ${state.transcriptTotalCount}`;
+  if (state.transcriptHasMore) {
+    status += ` of ${state.transcriptTotalCount}`;
+  }
   elements.transcriptShowing.textContent = status;
 }
 
@@ -986,38 +1008,50 @@ function renderTranscriptActiveFilters() {
     state.transcriptExcludeTypes.size > 0;
 
   elements.transcriptActiveFiltersGroup.style.display = hasFilters ? "flex" : "none";
-  if (!hasFilters) return;
+  if (!hasFilters) {
+    return;
+  }
 
   elements.transcriptActiveFilters.innerHTML = "";
 
   state.transcriptIncludeSources.forEach((name) => {
     elements.transcriptActiveFilters.appendChild(
-      createActiveFilter("source", name, false, () => toggleTranscriptSourceFilter(name, false, false))
+      createActiveFilter("source", name, false, () =>
+        toggleTranscriptSourceFilter(name, false, false)
+      )
     );
   });
 
   state.transcriptExcludeSources.forEach((name) => {
     elements.transcriptActiveFilters.appendChild(
-      createActiveFilter("source", name, true, () => toggleTranscriptSourceFilter(name, false, false))
+      createActiveFilter("source", name, true, () =>
+        toggleTranscriptSourceFilter(name, false, false)
+      )
     );
   });
 
   state.transcriptIncludeTypes.forEach((name) => {
     elements.transcriptActiveFilters.appendChild(
-      createActiveFilter("entry_type", name, false, () => toggleTranscriptTypeFilter(name, false, false))
+      createActiveFilter("entry_type", name, false, () =>
+        toggleTranscriptTypeFilter(name, false, false)
+      )
     );
   });
 
   state.transcriptExcludeTypes.forEach((name) => {
     elements.transcriptActiveFilters.appendChild(
-      createActiveFilter("entry_type", name, true, () => toggleTranscriptTypeFilter(name, false, false))
+      createActiveFilter("entry_type", name, true, () =>
+        toggleTranscriptTypeFilter(name, false, false)
+      )
     );
   });
 }
 
 function formatTranscriptContent(entry) {
   if (entry.content !== null && entry.content !== undefined) {
-    if (typeof entry.content === "string") return { kind: "text", value: entry.content };
+    if (typeof entry.content === "string") {
+      return { kind: "text", value: entry.content };
+    }
     return { kind: "json", value: JSON.stringify(entry.content, null, 2) };
   }
   if (entry.parsed !== null && entry.parsed !== undefined) {
@@ -1033,7 +1067,7 @@ function formatTranscriptContent(entry) {
  * Creates a single transcript entry DOM element.
  * Used by both virtual scroller and fallback rendering.
  */
-function createTranscriptEntryElement(entry, index) {
+function createTranscriptEntryElement(entry, _index) {
   const entryType = entry.entry_type || "unknown";
   const role = entry.role || "";
   const cssClass = role ? `role-${role}` : `type-${entryType}`;
@@ -1042,17 +1076,26 @@ function createTranscriptEntryElement(entry, index) {
   container.className = `transcript-entry ${cssClass}`;
 
   const source = entry.transcript_source || "";
-  const seq = entry.sequence_number !== null && entry.sequence_number !== undefined ? String(entry.sequence_number) : "";
+  const seq =
+    entry.sequence_number !== null && entry.sequence_number !== undefined
+      ? String(entry.sequence_number)
+      : "";
   const promptName = entry.prompt_name || "";
 
   const content = formatTranscriptContent(entry);
 
   let html = `<div class="transcript-header">`;
   html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
-  if (entry.timestamp) html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
-  if (source) html += `<span class="transcript-source clickable" data-source="${escapeHtml(source)}">${escapeHtml(source)}${seq ? `#${escapeHtml(seq)}` : ""}</span>`;
-  if (promptName) html += `<span class="transcript-prompt mono" title="${escapeHtml(promptName)}">${escapeHtml(promptName)}</span>`;
-  html += `</div>`;
+  if (entry.timestamp) {
+    html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
+  }
+  if (source) {
+    html += `<span class="transcript-source clickable" data-source="${escapeHtml(source)}">${escapeHtml(source)}${seq ? `#${escapeHtml(seq)}` : ""}</span>`;
+  }
+  if (promptName) {
+    html += `<span class="transcript-prompt mono" title="${escapeHtml(promptName)}">${escapeHtml(promptName)}</span>`;
+  }
+  html += "</div>";
 
   if (content.value) {
     if (content.kind === "json") {
@@ -1068,7 +1111,7 @@ function createTranscriptEntryElement(entry, index) {
   if (detailsPayload) {
     html += `<details class="transcript-details"><summary>Details</summary>`;
     html += `<pre>${escapeHtml(JSON.stringify(detailsPayload, null, 2))}</pre>`;
-    html += `</details>`;
+    html += "</details>";
   }
 
   container.innerHTML = html;
@@ -1086,7 +1129,8 @@ function renderTranscriptEmptyState() {
     if (state.transcriptScroller) {
       state.transcriptScroller.reset();
     }
-    elements.transcriptList.innerHTML = '<div class="logs-empty">No transcript entries match filters</div>';
+    elements.transcriptList.innerHTML =
+      '<div class="logs-empty">No transcript entries match filters</div>';
   }
 }
 
@@ -1105,7 +1149,8 @@ function initTranscriptVirtualScroller() {
     bufferSize: 15,
     renderItem: createTranscriptEntryElement,
     onLoadMore: loadMoreTranscript,
-    onLoadError: (error) => showToast(`Failed to load more transcript entries: ${error.message}`, "error"),
+    onLoadError: (error) =>
+      showToast(`Failed to load more transcript entries: ${error.message}`, "error"),
   });
 }
 
@@ -1132,7 +1177,8 @@ function renderTranscript() {
   elements.transcriptList.innerHTML = "";
 
   if (state.transcriptEntries.length === 0) {
-    elements.transcriptList.innerHTML = '<div class="logs-empty">No transcript entries match filters</div>';
+    elements.transcriptList.innerHTML =
+      '<div class="logs-empty">No transcript entries match filters</div>';
     return;
   }
 
@@ -1147,8 +1193,11 @@ elements.transcriptList.addEventListener("click", (e) => {
   if (sourceEl) {
     const src = sourceEl.dataset.source;
     if (src) {
-      if (e.shiftKey) toggleTranscriptSourceFilter(src, false, true);
-      else toggleTranscriptSourceFilter(src, true, false);
+      if (e.shiftKey) {
+        toggleTranscriptSourceFilter(src, false, true);
+      } else {
+        toggleTranscriptSourceFilter(src, true, false);
+      }
     }
     return;
   }
@@ -1157,8 +1206,11 @@ elements.transcriptList.addEventListener("click", (e) => {
   if (typeEl) {
     const typ = typeEl.dataset.type;
     if (typ) {
-      if (e.shiftKey) toggleTranscriptTypeFilter(typ, false, true);
-      else toggleTranscriptTypeFilter(typ, true, false);
+      if (e.shiftKey) {
+        toggleTranscriptTypeFilter(typ, false, true);
+      } else {
+        toggleTranscriptTypeFilter(typ, true, false);
+      }
     }
   }
 });
@@ -1312,7 +1364,7 @@ async function loadLogs(append = false) {
   }
 }
 
-async function loadMoreLogs() {
+function loadMoreLogs() {
   return loadLogs(true);
 }
 
@@ -1325,7 +1377,9 @@ function debouncedLogsSearch() {
 
 function updateLogsStats() {
   let status = `Showing ${state.filteredLogs.length}`;
-  if (state.logsHasMore) status += ` of ${state.logsTotalCount}`;
+  if (state.logsHasMore) {
+    status += ` of ${state.logsTotalCount}`;
+  }
   elements.logsShowing.textContent = status;
 }
 
@@ -1373,13 +1427,21 @@ function renderLogFilterChips() {
 function createFilterChip(name, count, isIncluded, isExcluded, onToggle) {
   const chip = document.createElement("span");
   chip.className = "filter-chip";
-  if (isIncluded) chip.classList.add("included");
-  if (isExcluded) chip.classList.add("excluded");
+  if (isIncluded) {
+    chip.classList.add("included");
+  }
+  if (isExcluded) {
+    chip.classList.add("excluded");
+  }
 
   const displayName = name.split(".").pop() || name;
   let prefix = "";
-  if (isIncluded) prefix = "+ ";
-  if (isExcluded) prefix = "− ";
+  if (isIncluded) {
+    prefix = "+ ";
+  }
+  if (isExcluded) {
+    prefix = "− ";
+  }
   chip.innerHTML = `${prefix}${escapeHtml(displayName)} <span class="chip-count">${count}</span>`;
   chip.title = `${name}\nClick: show only | Shift+click: hide`;
 
@@ -1436,7 +1498,9 @@ function renderActiveFilters() {
 
   elements.logsActiveFiltersGroup.style.display = hasFilters ? "flex" : "none";
 
-  if (!hasFilters) return;
+  if (!hasFilters) {
+    return;
+  }
 
   elements.logsActiveFilters.innerHTML = "";
 
@@ -1504,7 +1568,7 @@ function createLogEntryElement(log, index) {
   if (log.event) {
     html += `<span class="log-event-name clickable" data-event="${escapeHtml(log.event)}">${escapeHtml(log.event)}</span>`;
   }
-  html += `</div>`;
+  html += "</div>";
 
   if (log.message) {
     html += `<div class="log-message">${escapeHtml(log.message)}</div>`;
@@ -1566,11 +1630,7 @@ function renderLogs() {
     if (state.filteredLogs.length === 0) {
       renderLogsEmptyState();
     } else {
-      state.logsScroller.setData(
-        state.filteredLogs,
-        state.logsTotalCount,
-        state.logsHasMore
-      );
+      state.logsScroller.setData(state.filteredLogs, state.logsTotalCount, state.logsHasMore);
     }
     return;
   }
@@ -1594,8 +1654,11 @@ elements.logsList.addEventListener("click", (e) => {
   if (loggerEl) {
     const logger = loggerEl.dataset.logger;
     if (logger) {
-      if (e.shiftKey) toggleLoggerFilter(logger, false, true);
-      else toggleLoggerFilter(logger, true, false);
+      if (e.shiftKey) {
+        toggleLoggerFilter(logger, false, true);
+      } else {
+        toggleLoggerFilter(logger, true, false);
+      }
     }
     return;
   }
@@ -1604,8 +1667,11 @@ elements.logsList.addEventListener("click", (e) => {
   if (eventEl) {
     const event = eventEl.dataset.event;
     if (event) {
-      if (e.shiftKey) toggleEventFilter(event, false, true);
-      else toggleEventFilter(event, true, false);
+      if (e.shiftKey) {
+        toggleEventFilter(event, false, true);
+      } else {
+        toggleEventFilter(event, true, false);
+      }
     }
   }
 });
@@ -1651,7 +1717,9 @@ elements.logsClearFilters.addEventListener("click", () => {
   elements.logsSearch.value = "";
   elements.logsLoggerFilter.value = "";
   elements.logsEventFilter.value = "";
-  document.querySelectorAll(".level-checkbox input").forEach((cb) => (cb.checked = true));
+  document.querySelectorAll(".level-checkbox input").forEach((cb) => {
+    cb.checked = true;
+  });
 
   renderLogFilterChips();
   loadLogs(false);
@@ -1723,7 +1791,7 @@ function renderFilesystemList() {
   filtered.forEach((displayPath) => {
     const item = document.createElement("div");
     const fullPath = FILESYSTEM_PREFIX + displayPath;
-    item.className = "file-item" + (fullPath === state.selectedFile ? " active" : "");
+    item.className = `file-item${fullPath === state.selectedFile ? " active" : ""}`;
     item.textContent = displayPath;
     item.addEventListener("click", () => selectFilesystemFile(fullPath, displayPath));
     elements.filesystemList.appendChild(item);
@@ -1751,7 +1819,8 @@ async function selectFilesystemFile(fullPath, displayPath) {
       elements.filesystemViewer.innerHTML = '<p class="muted">Binary file cannot be displayed</p>';
       state.fileContent = null;
     } else {
-      const content = result.type === "json" ? JSON.stringify(result.content, null, 2) : result.content;
+      const content =
+        result.type === "json" ? JSON.stringify(result.content, null, 2) : result.content;
       state.fileContent = content;
       elements.filesystemViewer.innerHTML = `<pre class="file-content">${escapeHtml(content)}</pre>`;
     }
@@ -1781,7 +1850,8 @@ async function loadEnvironment() {
   try {
     const data = await fetchJSON("/api/environment");
     state.environmentData = data;
-    state.hasEnvironmentData = data.system !== null || data.python !== null || data.git !== null || data.container !== null;
+    state.hasEnvironmentData =
+      data.system !== null || data.python !== null || data.git !== null || data.container !== null;
     renderEnvironment();
   } catch (error) {
     elements.environmentData.innerHTML = `<p class="muted">Failed to load environment data: ${error.message}</p>`;
@@ -1813,7 +1883,7 @@ function renderEnvironment() {
     html += `<dt>CPU Count</dt><dd>${data.system.cpu_count}</dd>`;
     html += `<dt>Memory</dt><dd>${formatBytes(data.system.memory_total_bytes)}</dd>`;
     html += `<dt>Hostname</dt><dd class="mono">${escapeHtml(data.system.hostname)}</dd>`;
-    html += '</dl></div>';
+    html += "</dl></div>";
   }
 
   // Python section
@@ -1830,7 +1900,7 @@ function renderEnvironment() {
     html += `<dt>Prefix</dt><dd class="mono">${escapeHtml(data.python.prefix)}</dd>`;
     html += `<dt>Base Prefix</dt><dd class="mono">${escapeHtml(data.python.base_prefix)}</dd>`;
     html += `<dt>Virtualenv</dt><dd>${data.python.is_virtualenv ? "Yes" : "No"}</dd>`;
-    html += '</dl></div>';
+    html += "</dl></div>";
   }
 
   // Git section
@@ -1848,12 +1918,12 @@ function renderEnvironment() {
       Object.entries(data.git.remotes).forEach(([name, url]) => {
         html += `<div><span class="mono">${escapeHtml(name)}:</span> ${escapeHtml(url)}</div>`;
       });
-      html += '</div></dd>';
+      html += "</div></dd>";
     }
     if (data.git.tags && data.git.tags.length > 0) {
-      html += `<dt>Tags</dt><dd class="mono">${data.git.tags.map(t => escapeHtml(t)).join(", ")}</dd>`;
+      html += `<dt>Tags</dt><dd class="mono">${data.git.tags.map((t) => escapeHtml(t)).join(", ")}</dd>`;
     }
-    html += '</dl></div>';
+    html += "</dl></div>";
   }
 
   // Container section
@@ -1870,7 +1940,7 @@ function renderEnvironment() {
     if (data.container.cgroup_path) {
       html += `<dt>Cgroup Path</dt><dd class="mono">${escapeHtml(data.container.cgroup_path)}</dd>`;
     }
-    html += '</dl></div>';
+    html += "</dl></div>";
   }
 
   // Environment Variables section
@@ -1881,18 +1951,20 @@ function renderEnvironment() {
     Object.entries(data.env_vars).forEach(([key, value]) => {
       html += `<dt class="mono">${escapeHtml(key)}</dt><dd class="mono small">${escapeHtml(value)}</dd>`;
     });
-    html += '</dl></div>';
+    html += "</dl></div>";
   }
 
   elements.environmentData.innerHTML = html;
 }
 
 function formatBytes(bytes) {
-  if (bytes === 0) return "0 B";
+  if (bytes === 0) {
+    return "0 B";
+  }
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
+  return `${Math.round((bytes / k ** i) * 100) / 100} ${sizes[i]}`;
 }
 
 elements.environmentCopy.addEventListener("click", async () => {
@@ -1923,7 +1995,9 @@ function closeShortcuts() {
 }
 
 elements.shortcutsClose.addEventListener("click", closeShortcuts);
-elements.shortcutsOverlay.querySelector(".shortcuts-backdrop").addEventListener("click", closeShortcuts);
+elements.shortcutsOverlay
+  .querySelector(".shortcuts-backdrop")
+  .addEventListener("click", closeShortcuts);
 elements.helpButton.addEventListener("click", openShortcuts);
 
 // ============================================================================
@@ -1941,28 +2015,60 @@ document.addEventListener("keydown", (e) => {
   }
 
   // Don't process if dialog open or typing in input
-  if (state.shortcutsOpen) return;
+  if (state.shortcutsOpen) {
+    return;
+  }
   const tag = e.target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    return;
+  }
 
   // Number keys for tabs
   if (e.key >= "1" && e.key <= "5") {
     e.preventDefault();
     const views = ["sessions", "transcript", "logs", "filesystem", "environment"];
-    switchView(views[parseInt(e.key, 10) - 1]);
+    switchView(views[Number.parseInt(e.key, 10) - 1]);
     return;
   }
 
   // Global shortcuts
-  if (e.key === "r" || e.key === "R") { e.preventDefault(); reloadBundle(); return; }
-  if (e.key === "d" || e.key === "D") { e.preventDefault(); toggleTheme(); return; }
-  if (e.key === "[") { e.preventDefault(); toggleSidebar(); return; }
-  if (e.key === "?" || (e.shiftKey && e.key === "/")) { e.preventDefault(); openShortcuts(); return; }
-  if (e.key === "/") { e.preventDefault(); focusCurrentSearch(); return; }
+  if (e.key === "r" || e.key === "R") {
+    e.preventDefault();
+    reloadBundle();
+    return;
+  }
+  if (e.key === "d" || e.key === "D") {
+    e.preventDefault();
+    toggleTheme();
+    return;
+  }
+  if (e.key === "[") {
+    e.preventDefault();
+    toggleSidebar();
+    return;
+  }
+  if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+    e.preventDefault();
+    openShortcuts();
+    return;
+  }
+  if (e.key === "/") {
+    e.preventDefault();
+    focusCurrentSearch();
+    return;
+  }
 
   // J/K navigation
-  if (e.key === "j" || e.key === "J") { e.preventDefault(); navigateNext(); return; }
-  if (e.key === "k" || e.key === "K") { e.preventDefault(); navigatePrev(); return; }
+  if (e.key === "j" || e.key === "J") {
+    e.preventDefault();
+    navigateNext();
+    return;
+  }
+  if (e.key === "k" || e.key === "K") {
+    e.preventDefault();
+    navigatePrev();
+    return;
+  }
 
   // Arrow keys for bundles
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
@@ -1972,64 +2078,64 @@ document.addEventListener("keydown", (e) => {
 });
 
 function focusCurrentSearch() {
-  if (state.activeView === "sessions") elements.itemSearch.focus();
-  else if (state.activeView === "transcript") elements.transcriptSearch.focus();
-  else if (state.activeView === "logs") elements.logsSearch.focus();
-  else if (state.activeView === "filesystem") elements.filesystemFilter.focus();
+  if (state.activeView === "sessions") {
+    elements.itemSearch.focus();
+  } else if (state.activeView === "transcript") {
+    elements.transcriptSearch.focus();
+  } else if (state.activeView === "logs") {
+    elements.logsSearch.focus();
+  } else if (state.activeView === "filesystem") {
+    elements.filesystemFilter.focus();
+  }
 }
 
 function navigateNext() {
-  if (state.activeView === "sessions") focusItem(state.focusedItemIndex + 1);
-  else if (state.activeView === "transcript") scrollTranscriptBy(1);
-  else if (state.activeView === "logs") scrollLogsBy(1);
+  if (state.activeView === "sessions") {
+    focusItem(state.focusedItemIndex + 1);
+  } else if (state.activeView === "transcript") {
+    scrollTranscriptBy(1);
+  } else if (state.activeView === "logs") {
+    scrollLogsBy(1);
+  }
 }
 
 function navigatePrev() {
-  if (state.activeView === "sessions") focusItem(state.focusedItemIndex - 1);
-  else if (state.activeView === "transcript") scrollTranscriptBy(-1);
-  else if (state.activeView === "logs") scrollLogsBy(-1);
+  if (state.activeView === "sessions") {
+    focusItem(state.focusedItemIndex - 1);
+  } else if (state.activeView === "transcript") {
+    scrollTranscriptBy(-1);
+  } else if (state.activeView === "logs") {
+    scrollLogsBy(-1);
+  }
 }
 
 function scrollTranscriptBy(delta) {
   const entries = elements.transcriptList.querySelectorAll(".transcript-entry");
-  if (entries.length === 0) return;
+  if (entries.length === 0) {
+    return;
+  }
   const scrollHeight = entries[0].offsetHeight;
   elements.transcriptList.scrollBy({ top: scrollHeight * delta, behavior: "smooth" });
 }
 
 function scrollLogsBy(delta) {
   const entries = elements.logsList.querySelectorAll(".log-entry");
-  if (entries.length === 0) return;
+  if (entries.length === 0) {
+    return;
+  }
   const scrollHeight = entries[0].offsetHeight;
   elements.logsList.scrollBy({ top: scrollHeight * delta, behavior: "smooth" });
 }
 
-function scrollTranscriptBy(delta) {
-  const entries = elements.transcriptList.querySelectorAll(".transcript-entry");
-  if (entries.length === 0) return;
-  const scrollHeight = entries[0].offsetHeight;
-  elements.transcriptList.scrollBy({ top: scrollHeight * delta, behavior: "smooth" });
-}
-
 function focusItem(index) {
   const items = elements.jsonViewer.querySelectorAll(".item-card");
-  if (items.length === 0) return;
+  if (items.length === 0) {
+    return;
+  }
   const newIndex = Math.max(0, Math.min(index, items.length - 1));
   state.focusedItemIndex = newIndex;
   items.forEach((item, i) => item.classList.toggle("focused", i === newIndex));
   items[newIndex].scrollIntoView({ behavior: "smooth", block: "center" });
-}
-
-function selectNextSlice() {
-  const all = [...state.sliceBuckets.state, ...state.sliceBuckets.event];
-  const idx = all.findIndex((s) => s.slice_type === state.selectedSlice);
-  if (idx < all.length - 1) selectSlice(all[idx + 1].slice_type);
-}
-
-function selectPrevSlice() {
-  const all = [...state.sliceBuckets.state, ...state.sliceBuckets.event];
-  const idx = all.findIndex((s) => s.slice_type === state.selectedSlice);
-  if (idx > 0) selectSlice(all[idx - 1].slice_type);
 }
 
 function navigateBundle(delta) {
@@ -2050,15 +2156,30 @@ const isPrimitive = (v) => v === null || (typeof v !== "object" && !Array.isArra
 const isSimpleArray = (v) => Array.isArray(v) && v.every(isPrimitive);
 
 function getMarkdownPayload(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value) || !Object.prototype.hasOwnProperty.call(value, MARKDOWN_KEY)) return null;
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !Object.prototype.hasOwnProperty.call(value, MARKDOWN_KEY)
+  ) {
+    return null;
+  }
   const payload = value[MARKDOWN_KEY];
-  return payload && typeof payload.text === "string" && typeof payload.html === "string" ? payload : null;
+  return payload && typeof payload.text === "string" && typeof payload.html === "string"
+    ? payload
+    : null;
 }
 
 function valueType(value) {
-  if (getMarkdownPayload(value)) return "markdown";
-  if (Array.isArray(value)) return "array";
-  if (value === null) return "null";
+  if (getMarkdownPayload(value)) {
+    return "markdown";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (value === null) {
+    return "null";
+  }
   return typeof value;
 }
 
@@ -2068,31 +2189,53 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-function pathKey(path) { return path.join("."); }
-function getMarkdownView(path) { return state.markdownViews.get(pathKey(path)) || "html"; }
-function setMarkdownView(path, view) { state.markdownViews.set(pathKey(path), view); }
+function pathKey(path) {
+  return path.join(".");
+}
+function getMarkdownView(path) {
+  return state.markdownViews.get(pathKey(path)) || "html";
+}
+function setMarkdownView(path, view) {
+  state.markdownViews.set(pathKey(path), view);
+}
 
 function shouldOpen(path, depth) {
   const key = pathKey(path);
-  if (state.closedPaths.has(key)) return false;
-  if (state.openPaths.has(key)) return true;
+  if (state.closedPaths.has(key)) {
+    return false;
+  }
+  if (state.openPaths.has(key)) {
+    return true;
+  }
   return depth < state.expandDepth;
 }
 
 function setOpen(path, open) {
   const key = pathKey(path);
-  if (open) { state.openPaths.add(key); state.closedPaths.delete(key); }
-  else { state.openPaths.delete(key); state.closedPaths.add(key); }
+  if (open) {
+    state.openPaths.add(key);
+    state.closedPaths.delete(key);
+  } else {
+    state.openPaths.delete(key);
+    state.closedPaths.add(key);
+  }
 }
 
 function applyDepth(items, depth) {
   state.openPaths = new Set();
   state.closedPaths = new Set();
   const walk = (value, path, d) => {
-    if (!(Array.isArray(value) || isObject(value))) return;
-    if (d < depth) setOpen(path, true);
-    if (Array.isArray(value)) value.forEach((c, i) => walk(c, path.concat(String(i)), d + 1));
-    else Object.entries(value).forEach(([k, v]) => walk(v, path.concat(k), d + 1));
+    if (!(Array.isArray(value) || isObject(value))) {
+      return;
+    }
+    if (d < depth) {
+      setOpen(path, true);
+    }
+    if (Array.isArray(value)) {
+      value.forEach((c, i) => walk(c, path.concat(String(i)), d + 1));
+    } else {
+      Object.entries(value).forEach(([k, v]) => walk(v, path.concat(k), d + 1));
+    }
   };
   items.forEach((item, i) => walk(item, [`item-${i}`], 0));
 }
@@ -2101,17 +2244,24 @@ function setOpenForAll(items, open) {
   state.openPaths = new Set();
   state.closedPaths = new Set();
   const update = (value, path) => {
-    if (!(Array.isArray(value) || isObject(value))) return;
+    if (!(Array.isArray(value) || isObject(value))) {
+      return;
+    }
     setOpen(path, open);
-    if (Array.isArray(value)) value.forEach((c, i) => update(c, path.concat(String(i))));
-    else Object.entries(value).forEach(([k, v]) => update(v, path.concat(k)));
+    if (Array.isArray(value)) {
+      value.forEach((c, i) => update(c, path.concat(String(i))));
+    } else {
+      Object.entries(value).forEach(([k, v]) => update(v, path.concat(k)));
+    }
   };
   items.forEach((item, i) => update(item, [`item-${i}`]));
 }
 
 function getFilteredItems() {
   const query = state.searchQuery.toLowerCase().trim();
-  if (!query) return state.currentItems.map((item, index) => ({ item, index }));
+  if (!query) {
+    return state.currentItems.map((item, index) => ({ item, index }));
+  }
   return state.currentItems
     .map((item, index) => ({ item, index, text: JSON.stringify(item).toLowerCase() }))
     .filter((e) => e.text.includes(query))
@@ -2135,7 +2285,12 @@ function renderTree(value, path, depth, label) {
 
   const badge = document.createElement("span");
   badge.className = "pill pill-quiet";
-  badge.textContent = type === "array" ? `array (${value.length})` : type === "object" && value !== null ? `object (${Object.keys(value).length})` : type;
+  badge.textContent =
+    type === "array"
+      ? `array (${value.length})`
+      : type === "object" && value !== null
+        ? `object (${Object.keys(value).length})`
+        : type;
   header.appendChild(badge);
 
   const body = document.createElement("div");
@@ -2164,8 +2319,20 @@ function renderTree(value, path, depth, label) {
       `;
       const buttons = wrapper.querySelectorAll(".markdown-toggle button");
       const sections = wrapper.querySelectorAll(".markdown-section");
-      buttons[0].addEventListener("click", () => { setMarkdownView(path, "html"); buttons[0].classList.add("active"); buttons[1].classList.remove("active"); sections[0].style.display = "flex"; sections[1].style.display = "none"; });
-      buttons[1].addEventListener("click", () => { setMarkdownView(path, "raw"); buttons[1].classList.add("active"); buttons[0].classList.remove("active"); sections[1].style.display = "flex"; sections[0].style.display = "none"; });
+      buttons[0].addEventListener("click", () => {
+        setMarkdownView(path, "html");
+        buttons[0].classList.add("active");
+        buttons[1].classList.remove("active");
+        sections[0].style.display = "flex";
+        sections[1].style.display = "none";
+      });
+      buttons[1].addEventListener("click", () => {
+        setMarkdownView(path, "raw");
+        buttons[1].classList.add("active");
+        buttons[0].classList.remove("active");
+        sections[1].style.display = "flex";
+        sections[0].style.display = "none";
+      });
     } else {
       const leaf = document.createElement("div");
       leaf.className = "tree-leaf";
@@ -2204,9 +2371,7 @@ function renderTree(value, path, depth, label) {
 
   if (!hasChildren) {
     childrenContainer.innerHTML = '<span class="muted">(empty)</span>';
-  } else if (!shouldOpen(path, depth)) {
-    childrenContainer.style.display = "none";
-  } else {
+  } else if (shouldOpen(path, depth)) {
     if (Array.isArray(value)) {
       if (isSimpleArray(value)) {
         childrenContainer.classList.add("compact-array");
@@ -2218,7 +2383,9 @@ function renderTree(value, path, depth, label) {
         });
       } else {
         value.forEach((child, i) => {
-          childrenContainer.appendChild(renderTree(child, path.concat(String(i)), depth + 1, `[${i}]`));
+          childrenContainer.appendChild(
+            renderTree(child, path.concat(String(i)), depth + 1, `[${i}]`)
+          );
         });
       }
     } else {
@@ -2226,6 +2393,8 @@ function renderTree(value, path, depth, label) {
         childrenContainer.appendChild(renderTree(child, path.concat(key), depth + 1, key));
       });
     }
+  } else {
+    childrenContainer.style.display = "none";
   }
 
   body.appendChild(childrenContainer);
@@ -2272,8 +2441,11 @@ async function refreshMeta() {
     await selectSlice(meta.slices[0].slice_type);
   } else if (state.selectedSlice) {
     const exists = meta.slices.some((e) => e.slice_type === state.selectedSlice);
-    if (exists) await selectSlice(state.selectedSlice);
-    else if (meta.slices.length > 0) await selectSlice(meta.slices[0].slice_type);
+    if (exists) {
+      await selectSlice(state.selectedSlice);
+    } else if (meta.slices.length > 0) {
+      await selectSlice(meta.slices[0].slice_type);
+    }
   }
 }
 

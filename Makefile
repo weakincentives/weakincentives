@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix
 
 # =============================================================================
 # Code Formatting
@@ -19,6 +19,20 @@ lint:
 # Run ruff linter with fixes
 lint-fix:
 	@uv run ruff check --fix -q .
+
+# =============================================================================
+# Frontend Linting (Biome)
+# =============================================================================
+
+# Run Biome linter and formatter check on frontend static files
+biome:
+	@if [ ! -d node_modules ]; then npm install --silent; fi
+	@npx biome check src/weakincentives/cli/static/
+
+# Run Biome with auto-fix
+biome-fix:
+	@if [ ! -d node_modules ]; then npm install --silent; fi
+	@npx biome check --write src/weakincentives/cli/static/
 
 # =============================================================================
 # Security & Dependency Checks
@@ -215,7 +229,7 @@ demo-claude-agent:
 # =============================================================================
 
 # Run all checks (format, lint, typecheck, security, dependencies, architecture, docs, tests)
-check: format-check lint typecheck bandit deptry pip-audit markdown-check test
+check: format-check lint typecheck bandit deptry pip-audit markdown-check biome test
 	@uv run --all-extras python check.py -q architecture docs
 
 # Synchronize documentation files into package
