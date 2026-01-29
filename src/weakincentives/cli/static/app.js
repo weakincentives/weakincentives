@@ -1887,7 +1887,18 @@ async function selectFilesystemFile(fullPath, displayPath) {
     elements.filesystemCurrentPath.textContent = displayPath;
 
     if (result.type === "image") {
-      const dataUrl = `data:${result.mime_type};base64,${result.content}`;
+      // Whitelist of allowed MIME types to prevent XSS via crafted MIME strings
+      const allowedMimeTypes = new Set([
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/svg+xml",
+        "image/x-icon",
+        "image/bmp",
+      ]);
+      const mimeType = allowedMimeTypes.has(result.mime_type) ? result.mime_type : "image/png";
+      const dataUrl = `data:${mimeType};base64,${result.content}`;
       elements.filesystemViewer.innerHTML = `<div class="image-container"><img src="${dataUrl}" alt="${escapeHtml(displayPath)}" class="filesystem-image" /></div>`;
       state.fileContent = null;
     } else if (result.type === "binary") {
