@@ -221,23 +221,25 @@ class VirtualScroller {
     // Remove sentinel observer temporarily
     this.loadMoreObserver.unobserve(this.loadMoreSentinel);
 
-    // Clear and rebuild container content
-    const fragment = document.createDocumentFragment();
-    fragment.appendChild(this.topSpacer);
+    try {
+      // Clear and rebuild container content
+      const fragment = document.createDocumentFragment();
+      fragment.appendChild(this.topSpacer);
 
-    indices.forEach((index) => {
-      fragment.appendChild(this.renderedItems.get(index));
-    });
+      indices.forEach((index) => {
+        fragment.appendChild(this.renderedItems.get(index));
+      });
 
-    fragment.appendChild(this.bottomSpacer);
-    fragment.appendChild(this.loadMoreSentinel);
+      fragment.appendChild(this.bottomSpacer);
+      fragment.appendChild(this.loadMoreSentinel);
 
-    this.container.innerHTML = "";
-    this.container.appendChild(fragment);
-
-    // Re-observe sentinel
-    if (this.hasMore) {
-      this.loadMoreObserver.observe(this.loadMoreSentinel);
+      // Use replaceChildren for atomic replacement (avoids memory leak)
+      this.container.replaceChildren(fragment);
+    } finally {
+      // Re-observe sentinel (always reconnect, even on error)
+      if (this.hasMore) {
+        this.loadMoreObserver.observe(this.loadMoreSentinel);
+      }
     }
   }
 
@@ -846,12 +848,7 @@ async function loadTranscriptFacets() {
 }
 
 async function loadTranscript(append = false) {
-  if (state.transcriptLoading && !append) {
-    // For non-append requests, cancel the concept of previous request
-    state.transcriptRequestId++;
-  }
-
-  // Track this request
+  // Track this request (incrementing invalidates any in-flight requests)
   const requestId = ++state.transcriptRequestId;
 
   try {
@@ -1266,12 +1263,7 @@ async function loadLogFacets() {
 }
 
 async function loadLogs(append = false) {
-  if (state.logsLoading && !append) {
-    // For non-append requests, cancel the concept of previous request
-    state.logsRequestId++;
-  }
-
-  // Track this request
+  // Track this request (incrementing invalidates any in-flight requests)
   const requestId = ++state.logsRequestId;
 
   try {
