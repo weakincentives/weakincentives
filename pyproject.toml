@@ -103,7 +103,7 @@ dev = [
     "pip-audit>=2.9.0",
     "ruff>=0.14.5",
     "pyright>=1.1.407",
-    "ty==0.0.1a35",
+    "ty==0.0.13",
     "mdformat>=1.0.0",
     "hypothesis>=6.100.0",
     "vulture>=2.14",
