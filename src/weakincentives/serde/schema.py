@@ -358,18 +358,6 @@ def _resolve_field_property_name(
     return alias or field.name
 
 
-def _validate_hidden_field_has_default(
-    field: dataclasses.Field[object], cls: type[object]
-) -> None:
-    """Raise TypeError if a hidden field lacks a default value."""
-    if field.default is MISSING and field.default_factory is MISSING:
-        msg = (
-            f"Hidden field '{field.name}' in {cls.__name__} must have a default "
-            f"value or default_factory (STRUCTURED_OUTPUT scope)"
-        )
-        raise TypeError(msg)
-
-
 def schema(
     cls: type[object],
     *,
@@ -404,7 +392,6 @@ def schema(
             continue
         field_type = type_hints.get(field.name, field.type)
         if is_hidden_in_scope(field_type, scope):
-            _validate_hidden_field_has_default(field, cls)
             continue
         property_name = _resolve_field_property_name(field, alias_generator)
         properties[property_name] = _schema_for_type(
