@@ -19,6 +19,7 @@ from typing import Final, Literal, cast
 
 from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
+from ..serde._scope import SerdeScope
 from ..serde.parse import parse as parse_dataclass
 from ..types import JSONValue, ParseableDataclassT
 from ._structured_output_config import StructuredOutputConfig
@@ -153,6 +154,10 @@ def parse_dataclass_payload(
     payload: JSONValue,
     config: PayloadParsingConfig,
 ) -> ParseableDataclassT | list[ParseableDataclassT]:
+    """Parse a JSON payload into dataclass instance(s) for structured output.
+
+    Uses STRUCTURED_OUTPUT scope to skip fields marked with HiddenInStructuredOutput.
+    """
     if config.container not in {"object", "array"}:
         raise TypeError("Unknown output container declared.")
 
@@ -164,7 +169,12 @@ def parse_dataclass_payload(
         if not isinstance(payload, Mapping):
             raise TypeError(config.object_error)
         mapping_payload = cast(Mapping[str, JSONValue], payload)
-        return parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode)
+        return parse_dataclass(
+            dataclass_type,
+            mapping_payload,
+            extra=extra_mode,
+            scope=SerdeScope.STRUCTURED_OUTPUT,
+        )
 
     sequence_payload = _unwrap_array_payload(payload, config)
     parsed_items: list[ParseableDataclassT] = []
@@ -173,6 +183,11 @@ def parse_dataclass_payload(
             raise TypeError(config.array_item_error.format(index=index))
         mapping_item = cast(Mapping[str, JSONValue], item)
         parsed_items.append(
-            parse_dataclass(dataclass_type, mapping_item, extra=extra_mode)
+            parse_dataclass(
+                dataclass_type,
+                mapping_item,
+                extra=extra_mode,
+                scope=SerdeScope.STRUCTURED_OUTPUT,
+            )
         )
     return parsed_items

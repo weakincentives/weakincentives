@@ -293,6 +293,7 @@ class Result:
 | `clone()` | Included (uses DEFAULT) |
 
 **Key:** `dump()` always serializes hidden fields. This ensures:
+
 - Logging captures complete state
 - Storage/persistence includes all data
 - API responses can include computed fields

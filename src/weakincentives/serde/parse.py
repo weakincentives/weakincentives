@@ -44,6 +44,7 @@ from typing import (
 from uuid import UUID
 
 from ..types import JSONValue
+from ._scope import SerdeScope, is_hidden_in_scope
 from ._utils import (
     _UNION_TYPE,
     _AnyType,
@@ -854,9 +855,22 @@ def _collect_field_kwargs(
     kwargs: dict[str, object] = {}
     used_keys: set[str] = set()
 
+    # Determine scope for hidden field checks
+    scope = (
+        cast(SerdeScope, config.scope)
+        if config.scope is not None
+        else SerdeScope.DEFAULT
+    )
+
     for field in dataclasses.fields(cls):
         if not field.init:
             continue
+        field_type = type_hints.get(field.name, field.type)
+
+        # Skip hidden fields in the current scope - they use defaults
+        if is_hidden_in_scope(field_type, scope):
+            continue
+
         field_meta = dict(field.metadata)
         field_alias = _resolve_field_alias(field, aliases, alias_generator, field_meta)
 
@@ -867,7 +881,6 @@ def _collect_field_kwargs(
             continue
         used_keys.add(key)
         raw_value = mapping_data[key]
-        field_type = type_hints.get(field.name, field.type)
         kwargs[field.name] = _coerce_field_value(
             field, raw_value, field_meta, field_type, config
         )
@@ -985,6 +998,7 @@ def parse[T](
     case_insensitive: bool = False,
     alias_generator: Callable[[str], str] | None = None,
     aliases: Mapping[str, str] | None = None,
+    scope: SerdeScope = SerdeScope.DEFAULT,
 ) -> T:
     """Parse a mapping into a dataclass instance.
 
@@ -992,6 +1006,21 @@ def parse[T](
         parse(MyGenericClass[str], data)
 
     The type arguments are used to resolve TypeVar fields during parsing.
+
+    Args:
+        cls: The dataclass type to parse into.
+        data: A mapping (dict) containing the field values.
+        extra: How to handle extra fields: "ignore", "forbid", or "allow".
+        coerce: Whether to coerce values to match declared types.
+        case_insensitive: Whether to match field names case-insensitively.
+        alias_generator: Optional function to transform field names to aliases.
+        aliases: Optional mapping of field names to aliases.
+        scope: The serialization scope. Fields marked with
+            ``HiddenInStructuredOutput`` are skipped (use defaults) when
+            ``scope=SerdeScope.STRUCTURED_OUTPUT``.
+
+    Returns:
+        An instance of the dataclass with parsed values.
     """
     if not isinstance(data, Mapping):
         raise TypeError("parse() requires a mapping input")
@@ -1016,6 +1045,7 @@ def parse[T](
         alias_generator=alias_generator,
         aliases=aliases,
         typevar_map=typevar_map,
+        scope=scope,
     )
 
     return _parse_dataclass(target_cls, mapping_data, config=config)

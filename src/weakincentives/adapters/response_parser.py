@@ -28,6 +28,7 @@ from ..prompt.structured_output import (
     parse_structured_output,
 )
 from ..serde import schema
+from ..serde._scope import SerdeScope
 from ..types import JSONValue
 from ._provider_protocols import ProviderMessage
 from .core import PROMPT_EVALUATION_PHASE_RESPONSE, PromptEvaluationError
@@ -36,7 +37,10 @@ from .core import PROMPT_EVALUATION_PHASE_RESPONSE, PromptEvaluationError
 def build_json_schema_response_format(
     rendered: RenderedPrompt[Any], prompt_name: str
 ) -> dict[str, JSONValue] | None:
-    """Construct a JSON schema response format for structured outputs."""
+    """Construct a JSON schema response format for structured outputs.
+
+    Uses STRUCTURED_OUTPUT scope to exclude fields marked with HiddenInStructuredOutput.
+    """
 
     output_type = rendered.output_type
     container = rendered.container
@@ -46,7 +50,9 @@ def build_json_schema_response_format(
         return None
 
     extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
-    base_schema = schema(output_type, extra=extra_mode)
+    base_schema = schema(
+        output_type, extra=extra_mode, scope=SerdeScope.STRUCTURED_OUTPUT
+    )
     _ = base_schema.pop("title", None)
 
     if container == "array":

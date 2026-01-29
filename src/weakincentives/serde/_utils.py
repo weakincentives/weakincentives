@@ -25,6 +25,9 @@ from typing import Any as _AnyType, Final, Literal, cast, get_args
 from ..dataclasses import FrozenDataclass
 from ..types import JSONValue
 
+# Import SerdeScope lazily to avoid circular imports
+# The actual import happens in _ParseConfig usage
+
 MISSING_SENTINEL: Final[object] = object()
 _UNION_TYPE = type(int | str)
 TYPE_REF_KEY: Final[str] = "__type__"
@@ -97,6 +100,8 @@ class _ParseConfig:
         default_factory=lambda: dict[object, type]()
     )
     """Mapping from TypeVar objects to their concrete types for generic alias support."""
+    scope: object = None  # SerdeScope | None, using object to avoid circular import
+    """Serialization scope for field visibility. Use SerdeScope enum values."""
 
 
 def _merge_annotated_meta(
