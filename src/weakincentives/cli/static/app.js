@@ -2226,8 +2226,31 @@ function renderZoomJsonTree(value, key, depth) {
   }
 
   if (typeof value === "string") {
-    const displayValue = value.length > 500 ? `${value.slice(0, 500)}...` : value;
-    const escaped = escapeHtml(displayValue);
+    // Try to parse as JSON - handle double-serialized JSON
+    if (
+      value.length > 1 &&
+      ((value.startsWith("{") && value.endsWith("}")) ||
+        (value.startsWith("[") && value.endsWith("]")))
+    ) {
+      try {
+        const parsed = JSON.parse(value);
+        // Successfully parsed - render as object/array with a "parsed" indicator
+        const wrapper = document.createElement("div");
+        wrapper.className = "zoom-json-node";
+        if (key) {
+          const keyLabel = document.createElement("span");
+          keyLabel.innerHTML = `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-parsed-hint">(parsed JSON string)</span>`;
+          wrapper.appendChild(keyLabel);
+        }
+        wrapper.appendChild(renderZoomJsonTree(parsed, "", depth));
+        return wrapper;
+      } catch {
+        // Not valid JSON, render as string
+      }
+    }
+
+    // Regular string - no truncation, show full content
+    const escaped = escapeHtml(value);
     const formatted = escaped.replace(/\n/g, "<br>");
     node.innerHTML = key
       ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-string">"${formatted}"</span>`
