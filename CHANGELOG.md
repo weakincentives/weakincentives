@@ -4,10 +4,327 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-### Debugging
+*Commits reviewed: 2026-01-25 (e5a00a4) through 2026-01-29 (7c76f23)*
 
-- `wink query` normalizes TranscriptCollector logs into a `transcript` table and updates `native_tool_calls` to include transcript tool uses.
-- `wink debug` surfaces a Transcript tab (filters, search, raw entry drilldowns) backed by `/api/transcript`.
+### TL;DR
+
+This release introduces **TranscriptCollector**, a hook-driven system replacing the
+old log aggregator for real-time Claude Agent SDK transcript collection. The
+**debug UI receives major upgrades**: virtual scrolling for large lists, a zoom
+modal for detailed entry inspection, environment data tables, and the transcript
+tab with filtering/search. **AgentLoop** (renamed from MainLoop) gains a
+**transforming `finalize()` hook** that can modify outputs post-execution, and
+**scoped field visibility** lets you hide dataclass fields from LLM structured
+outputs while keeping them for post-processing. **Bundle lifecycle management**
+adds retention policies (max count/age/size) and external storage handler support.
+Frontend code now enforces **Biome linting**. The codebase modernizes to **PEP 695
+type syntax** and gains **comprehensive docstrings** across all public modules.
+
+---
+
+### Breaking Changes
+
+#### MainLoop Renamed to AgentLoop
+
+The `MainLoop` class and all related types have been renamed to `AgentLoop` for
+clarity. This affects all imports and type annotations.
+
+**Migration:**
+```python
+# Old ❌
+from weakincentives.runtime import MainLoop, MainLoopConfig, MainLoopRequest, MainLoopResult
+
+# New ✅
+from weakincentives.runtime import AgentLoop, AgentLoopConfig, AgentLoopRequest, AgentLoopResult
+```
+
+All related files renamed: `main_loop.py` → `agent_loop.py`,
+`main_loop_types.py` → `agent_loop_types.py`. Spec file renamed:
+`MAIN_LOOP.md` → `AGENT_LOOP.md`.
+
+#### AgentLoop.finalize() Signature Change
+
+The `finalize()` method now receives the parsed output and returns a (possibly
+transformed) output. Subclasses overriding this method must update their signature.
+
+**Old signature:**
+```python
+def finalize(self, prompt: Prompt[OutputT], session: Session) -> None:
+```
+
+**New signature:**
+```python
+def finalize(
+    self,
+    prompt: Prompt[OutputT],
+    session: Session,
+    output: OutputT | None,
+) -> OutputT | None:
+```
+
+**Migration:** Add the `output` parameter to your override and return it (or a
+transformed version).
+
+#### Debug UI Task View Removed
+
+The dedicated Task view tab and its API endpoints (`/api/request/input`,
+`/api/request/output`) have been removed. Request and response data is now
+captured in session state and viewable through the Sessions tab instead.
+
+- Keyboard shortcuts reduced from 6 tabs to 5 tabs
+- Filesystem view moved from key `5` to key `4`
+
+---
+
+### New Features
+
+#### TranscriptCollector System
+
+Replaces `ClaudeLogAggregator` with a hook-driven transcript collection system
+that provides real-time collection from Claude Agent SDK sessions.
+
+**Key capabilities:**
+- Uses SDK hooks (`SubagentStart`, `SubagentStop`) for immediate transcript path
+  discovery instead of directory polling
+- Automatic sub-agent transcript discovery and tailing
+- Emits structured DEBUG logs with full context (`prompt_name`, `source`,
+  `entry_type`, `raw_json`)
+- File rotation detection via inode tracking
+- Configurable poll intervals and max read bytes
+
+**Configuration:**
+```python
+config = ClaudeAgentSDKClientConfig(
+    transcript_collection=TranscriptCollectorConfig(
+        poll_interval=0.25,
+        subagent_discovery_interval=1.0,
+        emit_raw_json=True,
+    )
+)
+```
+
+#### Transcript Analysis Views
+
+New `wink query` database schema (v5) with normalized transcript data:
+
+**New `transcript` table** with columns: `timestamp`, `prompt_name`,
+`transcript_source`, `sequence_number`, `entry_type`, `role`, `content`,
+`tool_name`, `tool_use_id`, `raw_json`, `parsed`
+
+**Four pre-built SQL views:**
+- `transcript_flow` — Conversation flow with truncated previews
+- `transcript_tools` — Tool calls paired with their results
+- `transcript_thinking` — Thinking block analysis with length metrics
+- `transcript_agents` — Subagent metrics and hierarchy
+
+**New `/api/transcript` endpoint** with filtering by source, entry type, and
+full-text search.
+
+**New Transcript tab** in `wink debug` with:
+- Filter chips for sources (main vs. subagents) and entry types
+- Full-text search on message content
+- Drilldown into raw JSON
+
+#### Environment Data Tables
+
+New Environment tab in `wink debug` displaying captured runtime context:
+
+**Six new database tables:**
+- `env_system` — OS, kernel, architecture, CPU, memory, hostname
+- `env_python` — Version, implementation, executable, virtualenv status
+- `env_git` — Commit SHA, branch, dirty status, remotes, tags
+- `env_container` — Runtime type, container ID, image, containerized flag
+- `env_vars` — Filtered environment variables
+- `environment` — Flat key-value table with prefixed naming
+
+**New `/api/environment` endpoint** returning structured JSON.
+
+#### Virtual Scrolling
+
+Efficient windowed rendering for logs and transcript lists in `wink debug`:
+
+- Renders only visible items plus configurable buffer (default 10 items)
+- IntersectionObserver-based infinite scroll
+- ResizeObserver for responsive layout updates
+- Automatic garbage collection of off-screen DOM elements
+- Falls back gracefully to traditional rendering when needed
+
+#### Zoom Modal for Entry Inspection
+
+Click any transcript entry to open a full-screen modal with:
+
+- Two-panel layout: formatted content (left) and metadata/JSON tree (right)
+- Tool call + result pairs displayed side-by-side
+- Collapsible/expandable JSON tree with syntax highlighting
+- Keyboard navigation: `J`/`K` or arrows for prev/next, `Escape` to close
+- Copy JSON button for exporting entry data
+
+Transcript list entries now display in compact mode (60px max-height with
+fade-out) with automatic tool call + result pairing.
+
+#### Bundle Retention Policy
+
+Automatic cleanup of old debug bundles based on configurable limits:
+
+```python
+config = BundleConfig(
+    target=Path("./debug/"),
+    retention=BundleRetentionPolicy(
+        max_bundles=10,           # Keep at most N bundles
+        max_age_seconds=86400,    # Delete bundles older than 24 hours
+        max_total_bytes=500_000_000,  # Keep under 500MB total
+    ),
+)
+```
+
+All limits are optional; when multiple are set, the most restrictive wins.
+Retention errors are logged as warnings but never fail the request.
+
+#### External Storage Handler
+
+Protocol for uploading bundles to external storage after creation:
+
+```python
+class S3StorageHandler:
+    bucket: str
+    prefix: str = "debug-bundles/"
+
+    def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+        key = f"{self.prefix}{manifest.bundle_id}.zip"
+        s3_client.upload_file(str(bundle_path), self.bucket, key)
+
+config = BundleConfig(
+    target=Path("./debug/"),
+    storage_handler=S3StorageHandler(bucket="my-bucket"),
+)
+```
+
+Retention is applied before storage handler invocation, so only surviving
+bundles are uploaded.
+
+#### Scoped Field Visibility
+
+Hide dataclass fields from LLM structured outputs while keeping them available
+for post-processing:
+
+```python
+from weakincentives.serde import HiddenInStructuredOutput
+
+@dataclass
+class AnalysisResult:
+    summary: str           # LLM generates this
+    confidence: float      # LLM generates this
+
+    # Hidden from LLM — populated in finalize()
+    processing_time_ms: Annotated[int, HiddenInStructuredOutput()] = 0
+    model_version: Annotated[str, HiddenInStructuredOutput()] = ""
+```
+
+- `schema(..., scope=SerdeScope.STRUCTURED_OUTPUT)` excludes hidden fields
+- `parse(..., scope=SerdeScope.STRUCTURED_OUTPUT)` skips hidden fields, uses defaults
+- `dump()` always serializes all fields (unchanged)
+
+The response parser and structured output modules automatically use the
+`STRUCTURED_OUTPUT` scope.
+
+---
+
+### Improvements
+
+#### Output Transformation in finalize()
+
+`AgentLoop.finalize()` can now transform the model output before returning:
+
+```python
+class MyLoop(AgentLoop[Input, Output]):
+    def finalize(self, prompt, session, output):
+        if output is not None:
+            return replace(output, timestamp=datetime.now(UTC))
+        return output
+```
+
+#### Session State for Request/Response
+
+Request and response data is now captured in session state via three new event
+types: `LoopRequestState`, `LoopRawResponse`, `LoopFinalResponse`. This enables
+viewing the data through the Sessions tab and standard session inspection APIs.
+
+---
+
+### Internal Changes
+
+#### PEP 695 Type Syntax
+
+Type aliases modernized to Python 3.12+ `type` statement syntax:
+
+```python
+# Old
+ContractCallable = Callable[..., bool | tuple[bool, str]]
+
+# New
+type ContractCallable = Callable[..., bool | tuple[bool, str]]
+```
+
+Affected modules: `dbc`, `prompt/_visibility.py`, `prompt/errors.py`,
+`runtime/session/_types.py`, `resources/binding.py`. Also removed unnecessary
+`builtins` module usage in `filesystem_memory.py`.
+
+#### Frontend Linting with Biome
+
+Added Biome configuration for JavaScript linting/formatting:
+
+- New `package.json`, `biome.json` configuration files
+- `make biome` and `make biome-fix` targets
+- `make check` now includes Biome validation
+
+Rules enforce complexity limits (max cognitive complexity 25), correctness
+(unused variables as errors), performance warnings, and security checks
+(forbids dangerously setting innerHTML).
+
+#### Dependency Updates
+
+- `mcp` 1.25.0 → 1.26.0 (minor)
+- `coverage`, `huggingface-hub`, `hypothesis`, `litellm`, `multidict`,
+  `python-multipart`, `rich` patch updates
+- Removed `grpcio` as transitive dependency
+- `actions/checkout` v5 → v6 in CI workflows
+
+#### Dependabot Configuration
+
+Added `.github/dependabot.yml` for automated dependency updates:
+
+- Python packages: weekly on Mondays, grouped by category (dev, adapters, web,
+  contrib), minor/patch only
+- GitHub Actions: weekly, minor/patch only
+- Both assigned to `weakincentives/maintainers` team
+
+---
+
+### Documentation
+
+#### Comprehensive Module Docstrings
+
+All 26 public `__init__.py` modules now include NumPy/SciPy-style docstrings
+(+5,000 lines) with:
+
+- Module overview and use cases
+- Organized class/function descriptions by category
+- Practical runnable examples
+- Cross-references to related modules
+
+#### Specification Updates
+
+- **TRANSCRIPT_COLLECTION.md** — New spec for TranscriptCollector architecture
+- **AGENT_LOOP.md** — Updated for finalize() signature change
+- **DATACLASSES.md** — New section on scoped field visibility
+- **DEBUG_BUNDLE.md** — Bundle naming and retention policy documentation
+- **CLAUDE_AGENT_SDK.md** — Default model changed from Opus 4.5 to Sonnet 4.5
+- Various API clarifications across EVALS.md, MAILBOX.md, SESSIONS.md,
+  TOOLS.md, RESOURCE_REGISTRY.md, VERIFICATION.md
+
+#### README
+
+Added DeepWiki badge linking to external documentation.
 
 ## v0.23.0 - 2026-01-25
 
