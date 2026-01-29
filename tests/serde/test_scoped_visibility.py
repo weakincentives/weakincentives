@@ -200,6 +200,27 @@ def test_schema_no_hidden_same_in_both_scopes() -> None:
     assert schema_default == schema_structured
 
 
+def test_schema_hidden_field_without_default_raises_error() -> None:
+    """Hidden field without default raises TypeError in STRUCTURED_OUTPUT scope."""
+
+    @dataclass
+    class InvalidHidden:
+        visible: str
+        hidden_no_default: Annotated[int, HiddenInStructuredOutput()]  # No default!
+
+    # DEFAULT scope doesn't validate - field is included in schema
+    schema_default = schema(InvalidHidden, scope=SerdeScope.DEFAULT)
+    properties = cast(dict[str, object], schema_default["properties"])
+    assert "hidden_no_default" in properties
+
+    # STRUCTURED_OUTPUT scope validates and raises clear error
+    with pytest.raises(TypeError) as exc:
+        schema(InvalidHidden, scope=SerdeScope.STRUCTURED_OUTPUT)
+    assert "Hidden field 'hidden_no_default'" in str(exc.value)
+    assert "must have a default" in str(exc.value)
+    assert "STRUCTURED_OUTPUT" in str(exc.value)
+
+
 # =============================================================================
 # parse() with scope Tests
 # =============================================================================
