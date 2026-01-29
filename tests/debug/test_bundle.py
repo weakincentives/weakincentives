@@ -1585,11 +1585,26 @@ class TestRetentionPolicyIntegration:
         # Replace the bundle file (creates new inode)
         original_content = paths[0].read_bytes()
         paths[0].unlink()
-        paths[0].write_bytes(original_content)
 
-        # Verify inode changed
+        # Create intermediate files to occupy the freed inode slot
+        # (some filesystems like tmpfs reuse inodes immediately)
+        intermediates: list[Path] = []
+        for j in range(10):
+            intermediate = tmp_path / f"_inode_occupier_{j}.tmp"
+            intermediate.write_bytes(b"x")
+            intermediates.append(intermediate)
+
+        # Now recreate the original file - should get a new inode
+        paths[0].write_bytes(original_content)
         new_inode = paths[0].stat().st_ino
-        assert new_inode != original_inode
+
+        # Clean up intermediate files
+        for intermediate in intermediates:
+            intermediate.unlink()
+
+        # Skip if filesystem still reuses inodes (cannot test TOCTOU in this env)
+        if new_inode == original_inode:
+            pytest.skip("Filesystem reuses inodes immediately; cannot test TOCTOU")
 
         # Call _delete_marked_bundles with stale identity
         BundleWriter._delete_marked_bundles({paths[0]}, stale_identity)
@@ -1597,6 +1612,28 @@ class TestRetentionPolicyIntegration:
         # File should NOT be deleted due to inode mismatch
         assert paths[0].exists()
         assert "Bundle file changed since collection" in caplog.text
+
+    def test_retention_deletes_bundles_without_identity_tracking(
+        self, tmp_path: Path
+    ) -> None:
+        """Test deletion proceeds when file_identity has no entry for bundle.
+
+        This covers the branch where expected_identity is None (no TOCTOU
+        verification possible, proceed with deletion).
+        """
+        # Create a bundle
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"bundle": 0})
+        assert writer.path is not None
+        bundle_path = writer.path
+        assert bundle_path.exists()
+
+        # Call _delete_marked_bundles with empty identity dict (no tracking)
+        empty_identity: dict[Path, tuple[int, int]] = {}
+        BundleWriter._delete_marked_bundles({bundle_path}, empty_identity)
+
+        # File should be deleted (no identity to verify against)
+        assert not bundle_path.exists()
 
 
 class TestRetentionWithNestedDirectories:
