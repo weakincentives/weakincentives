@@ -2398,12 +2398,12 @@ document.addEventListener("keydown", (e) => {
 
   // Handle zoom modal navigation
   if (state.zoomOpen) {
-    if (e.key === "j" || e.key === "J" || e.key === "ArrowDown") {
+    if (e.key === "j" || e.key === "J" || e.key === "ArrowDown" || e.key === "ArrowRight") {
       e.preventDefault();
       zoomNext();
       return;
     }
-    if (e.key === "k" || e.key === "K" || e.key === "ArrowUp") {
+    if (e.key === "k" || e.key === "K" || e.key === "ArrowUp" || e.key === "ArrowLeft") {
       e.preventDefault();
       zoomPrev();
       return;
