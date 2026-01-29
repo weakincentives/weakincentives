@@ -93,14 +93,23 @@ class VirtualScroller {
   }
 
   appendData(newItems, totalCount, hasMore) {
+    const wasObserving = this.hasMore;
     this.items = this.items.concat(newItems);
     this.totalCount = totalCount;
     this.hasMore = hasMore;
     this.updateVisibleRange();
     this.updateSpacers();
+
+    // If hasMore changed from false to true, re-observe the sentinel
+    if (!wasObserving && this.hasMore) {
+      this.loadMoreObserver.observe(this.loadMoreSentinel);
+    }
   }
 
   reset() {
+    // Unobserve sentinel before removing it from DOM to prevent memory leak
+    this.loadMoreObserver.unobserve(this.loadMoreSentinel);
+
     this.items = [];
     this.totalCount = 0;
     this.hasMore = false;
@@ -246,6 +255,9 @@ class VirtualScroller {
   }
 
   render() {
+    // Unobserve sentinel before clearing (it may have been observed from previous render)
+    this.loadMoreObserver.unobserve(this.loadMoreSentinel);
+
     this.container.innerHTML = "";
     this.renderedItems.clear();
 
