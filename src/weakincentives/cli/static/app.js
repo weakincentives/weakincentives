@@ -2110,6 +2110,28 @@ function renderZoomModal() {
 }
 
 /**
+ * Finds the index of a linked transcript entry by tool_use_id.
+ * For tool_use entries, finds the corresponding tool_result.
+ * For tool_result entries, finds the corresponding tool_use.
+ */
+function findLinkedToolEntry(currentEntry) {
+  if (!currentEntry.tool_use_id) {
+    return null;
+  }
+
+  const currentType = currentEntry.entry_type;
+  const targetType = currentType === "tool_use" ? "tool_result" : "tool_use";
+
+  for (let i = 0; i < state.transcriptEntries.length; i++) {
+    const entry = state.transcriptEntries[i];
+    if (entry.tool_use_id === currentEntry.tool_use_id && entry.entry_type === targetType) {
+      return { index: i, entry };
+    }
+  }
+  return null;
+}
+
+/**
  * Renders a transcript entry in the zoom modal.
  */
 function renderTranscriptZoom() {
@@ -2173,6 +2195,42 @@ function renderTranscriptZoom() {
     toolIdSection.className = "zoom-section";
     toolIdSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content">${escapeHtml(entry.tool_use_id)}</div>`;
     elements.zoomDetails.appendChild(toolIdSection);
+
+    // Find and show linked tool entry (call <-> result)
+    const linked = findLinkedToolEntry(entry);
+    if (linked) {
+      const linkSection = document.createElement("div");
+      linkSection.className = "zoom-section zoom-linked-section";
+      const isToolUse = entryType === "tool_use";
+      const linkLabel = isToolUse ? "Tool Result" : "Tool Call";
+      const linkIcon = isToolUse ? "↓" : "↑";
+
+      linkSection.innerHTML = `<div class="zoom-section-label">${linkLabel}</div>`;
+
+      const linkButton = document.createElement("button");
+      linkButton.className = "zoom-linked-button";
+      linkButton.type = "button";
+      linkButton.innerHTML = `<span class="zoom-linked-icon">${linkIcon}</span> Jump to ${linkLabel}`;
+      linkButton.addEventListener("click", () => {
+        openTranscriptZoom(linked.index);
+      });
+      linkSection.appendChild(linkButton);
+
+      // Show a preview of the linked entry content
+      const linkedContent = formatTranscriptContent(linked.entry);
+      if (linkedContent.value) {
+        const preview = document.createElement("div");
+        preview.className = "zoom-linked-preview";
+        const previewText =
+          linkedContent.value.length > 200
+            ? `${linkedContent.value.slice(0, 200)}...`
+            : linkedContent.value;
+        preview.textContent = previewText;
+        linkSection.appendChild(preview);
+      }
+
+      elements.zoomDetails.appendChild(linkSection);
+    }
   }
 
   if (detailsPayload) {
