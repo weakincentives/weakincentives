@@ -938,38 +938,183 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         )
 
         messages: list[Any] = []
+        # Only use max rounds as fallback if no deadline or budget configured
+        has_constraints = (
+            hook_context.deadline is not None or hook_context.budget_tracker is not None
+        )
+        max_continuation_rounds = (
+            None if has_constraints else 100
+        )  # Generous fallback limit
+        continuation_round = 0
+
+        if has_constraints:
+            logger.debug(
+                "claude_agent_sdk.sdk_query.using_constraints",
+                event="sdk_query.using_constraints",
+                context={
+                    "has_deadline": hook_context.deadline is not None,
+                    "has_budget": hook_context.budget_tracker is not None,
+                    "prompt_name": hook_context.prompt_name,
+                },
+            )
+        else:
+            logger.debug(
+                "claude_agent_sdk.sdk_query.using_fallback_limit",
+                event="sdk_query.using_fallback_limit",
+                context={
+                    "max_rounds": max_continuation_rounds,
+                    "prompt_name": hook_context.prompt_name,
+                },
+            )
+
         try:
-            # Receive messages from the client
-            async for message in client.receive_messages():
-                messages.append(message)
+            while (
+                max_continuation_rounds is None
+                or continuation_round < max_continuation_rounds
+            ):
+                # Check deadline before each round
+                if (
+                    hook_context.deadline
+                    and hook_context.deadline.remaining().total_seconds() <= 0
+                ):
+                    logger.info(
+                        "claude_agent_sdk.sdk_query.deadline_exceeded",
+                        event="sdk_query.deadline_exceeded",
+                        context={
+                            "continuation_round": continuation_round,
+                            "prompt_name": hook_context.prompt_name,
+                        },
+                    )
+                    break
 
-                # Extract message content for logging
-                content = _extract_message_content(message)
+                # Check token budget before each round
+                if hook_context.budget_tracker:
+                    try:
+                        hook_context.budget_tracker.check()
+                    except Exception as budget_error:
+                        # Budget exceeded - this is expected behavior, not a warning
+                        logger.info(
+                            "claude_agent_sdk.sdk_query.token_budget_exceeded",
+                            event="sdk_query.token_budget_exceeded",
+                            context={
+                                "continuation_round": continuation_round,
+                                "total_input_tokens": hook_context.stats.total_input_tokens,
+                                "total_output_tokens": hook_context.stats.total_output_tokens,
+                                "error": str(budget_error),
+                            },
+                        )
+                        break
 
-                # Update cumulative token stats in hook context
-                if content.get("input_tokens"):
-                    hook_context.stats.total_input_tokens += content["input_tokens"]
-                if content.get("output_tokens"):
-                    hook_context.stats.total_output_tokens += content["output_tokens"]
+                # Receive messages from the client
+                round_messages: list[Any] = []
+                async for message in client.receive_messages():
+                    messages.append(message)
+                    round_messages.append(message)
 
-                # Log each message at DEBUG level for troubleshooting
-                logger.debug(
-                    "claude_agent_sdk.sdk_query.message_received",
-                    event="sdk_query.message_received",
-                    context={
-                        "message_type": type(message).__name__,
-                        "message_index": len(messages) - 1,
-                        "cumulative_input_tokens": hook_context.stats.total_input_tokens,
-                        "cumulative_output_tokens": hook_context.stats.total_output_tokens,
-                        **content,
-                    },
-                )
+                    # Extract message content for logging
+                    content = _extract_message_content(message)
+
+                    # Update cumulative token stats in hook context
+                    if content.get("input_tokens"):
+                        hook_context.stats.total_input_tokens += content["input_tokens"]
+                    if content.get("output_tokens"):
+                        hook_context.stats.total_output_tokens += content[
+                            "output_tokens"
+                        ]
+
+                    # Update budget tracker if available with cumulative totals
+                    if hook_context.budget_tracker:
+                        from ...runtime.events import TokenUsage
+
+                        hook_context.budget_tracker.record_cumulative(
+                            hook_context.prompt_name,
+                            TokenUsage(
+                                input_tokens=hook_context.stats.total_input_tokens,
+                                output_tokens=hook_context.stats.total_output_tokens,
+                            ),
+                        )
+
+                    # Log each message at DEBUG level for troubleshooting
+                    logger.debug(
+                        "claude_agent_sdk.sdk_query.message_received",
+                        event="sdk_query.message_received",
+                        context={
+                            "message_type": type(message).__name__,
+                            "message_index": len(messages) - 1,
+                            "continuation_round": continuation_round,
+                            "cumulative_input_tokens": hook_context.stats.total_input_tokens,
+                            "cumulative_output_tokens": hook_context.stats.total_output_tokens,
+                            **content,
+                        },
+                    )
+
+                # After first round, check if we should continue based on task completion
+                if continuation_round == 0 and checker is not None:
+                    # Import task completion types
+                    from ._task_completion import TaskCompletionContext
+
+                    # Extract the last message for completion checking
+                    last_message = round_messages[-1] if round_messages else None
+                    tentative_output = None
+
+                    # Try to extract structured output from the last message
+                    if last_message:
+                        tentative_output = getattr(
+                            last_message, "structured_output", None
+                        )
+                        if tentative_output is None:
+                            tentative_output = getattr(last_message, "result", None)
+
+                    # Check task completion
+                    completion_context = TaskCompletionContext(
+                        session=hook_context.session,
+                        tentative_output=tentative_output,
+                        stop_reason="message_stream_complete",
+                        filesystem=None,  # Could be enhanced to get filesystem from resources
+                    )
+
+                    result = checker.check(completion_context)
+
+                    if not result.complete and result.feedback:
+                        logger.info(
+                            "claude_agent_sdk.sdk_query.continuation_required",
+                            event="sdk_query.continuation_required",
+                            context={
+                                "feedback": result.feedback[:200],
+                                "continuation_round": continuation_round + 1,
+                            },
+                        )
+
+                        # Send feedback to continue the conversation
+                        continuation_round += 1
+                        await client.query(
+                            prompt=result.feedback,
+                            session_id=hook_context.prompt_name,
+                        )
+                        # Continue the loop to receive more messages
+                        continue
+
+                    # Task is complete or no feedback, exit loop
+                    if result.complete:
+                        logger.debug(
+                            "claude_agent_sdk.sdk_query.task_complete",
+                            event="sdk_query.task_complete",
+                            context={"feedback": result.feedback},
+                        )
+                    break
+
+                # No checker or not first round, exit after receiving messages
+                break
+
         finally:
             # Always disconnect the client to clean up resources
             logger.debug(
                 "claude_agent_sdk.sdk_query.disconnecting",
                 event="sdk_query.disconnecting",
-                context={"prompt_name": hook_context.prompt_name},
+                context={
+                    "prompt_name": hook_context.prompt_name,
+                    "continuation_rounds": continuation_round,
+                },
             )
             await client.disconnect()
 
