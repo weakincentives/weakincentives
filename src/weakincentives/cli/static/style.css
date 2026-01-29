@@ -1590,7 +1590,7 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 0;
 }
 
 .zoom-modal.hidden {
@@ -1613,14 +1613,12 @@ select:focus-visible {
 
 .zoom-modal-container {
   position: relative;
-  width: 100%;
-  max-width: 1400px;
-  height: 90vh;
-  max-height: 90vh;
+  width: 100vw;
+  height: 100vh;
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xl);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
   overflow: hidden;
   animation: paletteEnter 0.15s ease;
   display: flex;
@@ -1780,6 +1778,22 @@ select:focus-visible {
   color: var(--color-text-main);
 }
 
+/* Scrollable container for long text content */
+.zoom-text-scroll {
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+}
+
+.zoom-text-scroll .zoom-text-content {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
 .zoom-panel-body .zoom-json-content {
   background: var(--color-bg-subtle);
   border: 1px solid var(--color-border);
@@ -1843,6 +1857,41 @@ select:focus-visible {
   display: none;
 }
 
+/* Combined tool call + result styles */
+.transcript-entry.combined {
+  border-left-color: var(--color-warning);
+}
+
+.transcript-result-divider {
+  margin: 8px 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: var(--color-bg-main);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Tool result content should use monospace font */
+.transcript-result-divider ~ .transcript-message,
+.transcript-result-divider ~ .transcript-json {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.transcript-tool-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-warning);
+  background: var(--color-bg-main);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
 /* Zoom button in list entries */
 .zoom-button {
   display: inline-flex;
@@ -1879,7 +1928,8 @@ select:focus-visible {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 12px;
-  overflow-x: auto;
+  max-height: 400px;
+  overflow: auto;
 }
 
 .zoom-json-node {
@@ -1974,6 +2024,13 @@ select:focus-visible {
 .zoom-combined-result {
   background: var(--color-success-subtle);
   color: var(--color-success);
+}
+
+/* Tool result content should use monospace font */
+.zoom-combined-result + .zoom-section .zoom-text-content,
+.zoom-combined-result + .zoom-section pre {
+  font-family: var(--font-mono);
+  font-size: 13px;
 }
 
 .zoom-combined-badge {

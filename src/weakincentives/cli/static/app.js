@@ -347,7 +347,8 @@ const state = {
   searchQuery: "",
   focusedItemIndex: -1,
   // Transcript state
-  transcriptEntries: [],
+  transcriptRawEntries: [], // Raw entries from API
+  transcriptEntries: [], // Preprocessed entries (tool calls combined with results)
   transcriptFacets: { sources: [], entry_types: [] },
   transcriptSearch: "",
   transcriptSourceChipFilter: "",
@@ -665,6 +666,7 @@ elements.bundleSelect.addEventListener("change", (e) => {
 });
 
 function resetViewState() {
+  state.transcriptRawEntries = [];
   state.transcriptEntries = [];
   state.transcriptTotalCount = 0;
   state.transcriptHasMore = false;
@@ -907,29 +909,29 @@ async function loadTranscript(append = false) {
 
     const entries = result.entries || [];
 
+    // Preprocess to combine tool calls with their results
+    let processed;
     if (append) {
-      state.transcriptEntries = state.transcriptEntries.concat(entries);
+      // When appending, reprocess everything to handle cross-boundary pairs
+      const rawEntries = [...state.transcriptRawEntries, ...entries];
+      state.transcriptRawEntries = rawEntries;
+      processed = preprocessTranscriptEntries(rawEntries);
     } else {
-      state.transcriptEntries = entries;
+      state.transcriptRawEntries = entries;
+      processed = preprocessTranscriptEntries(entries);
     }
-    state.transcriptTotalCount = result.total || state.transcriptEntries.length;
-    state.transcriptHasMore = state.transcriptEntries.length < state.transcriptTotalCount;
+
+    state.transcriptEntries = processed;
+    state.transcriptTotalCount = result.total || state.transcriptRawEntries.length;
+    state.transcriptHasMore = state.transcriptRawEntries.length < state.transcriptTotalCount;
 
     // Use virtual scroller if available
     if (state.transcriptScroller) {
-      if (append) {
-        state.transcriptScroller.appendData(
-          entries,
-          state.transcriptTotalCount,
-          state.transcriptHasMore
-        );
-      } else {
-        state.transcriptScroller.setData(
-          state.transcriptEntries,
-          state.transcriptTotalCount,
-          state.transcriptHasMore
-        );
-      }
+      state.transcriptScroller.setData(
+        state.transcriptEntries,
+        state.transcriptTotalCount,
+        state.transcriptHasMore
+      );
       renderTranscriptEmptyState();
     } else {
       renderTranscript();
@@ -1099,12 +1101,15 @@ function formatTranscriptContent(entry) {
  * Used by both virtual scroller and fallback rendering.
  */
 function createTranscriptEntryElement(entry, index) {
+  const isComposite = entry.isComposite === true;
+  const toolResult = entry.toolResult;
+
   const entryType = entry.entry_type || "unknown";
   const role = entry.role || "";
   const cssClass = role ? `role-${role}` : `type-${entryType}`;
 
   const container = document.createElement("div");
-  container.className = `transcript-entry ${cssClass} compact`;
+  container.className = `transcript-entry ${cssClass} compact${isComposite ? " combined" : ""}`;
   container.dataset.entryIndex = index;
 
   const source = entry.transcript_source || "";
@@ -1125,7 +1130,17 @@ function createTranscriptEntryElement(entry, index) {
   html += '<line x1="21" y1="3" x2="14" y2="10"></line>';
   html += '<line x1="3" y1="21" x2="10" y2="14"></line>';
   html += "</svg></button>";
-  html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
+
+  // Show combined label for tool call + result
+  if (isComposite) {
+    html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">tool call + result</span>`;
+    if (entry.tool_name) {
+      html += `<span class="transcript-tool-name">${escapeHtml(entry.tool_name)}</span>`;
+    }
+  } else {
+    html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
+  }
+
   if (entry.timestamp) {
     html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
   }
@@ -1137,6 +1152,7 @@ function createTranscriptEntryElement(entry, index) {
   }
   html += "</div>";
 
+  // Render tool call content
   if (content.value) {
     if (content.kind === "json") {
       html += `<pre class="transcript-json">${escapeHtml(content.value)}</pre>`;
@@ -1145,6 +1161,21 @@ function createTranscriptEntryElement(entry, index) {
     }
   } else {
     html += `<div class="transcript-message muted">(no content)</div>`;
+  }
+
+  // Render tool result content if this is a composite entry
+  if (isComposite && toolResult) {
+    const resultContent = formatTranscriptContent(toolResult);
+    html += `<div class="transcript-result-divider">↓ result</div>`;
+    if (resultContent.value) {
+      if (resultContent.kind === "json") {
+        html += `<pre class="transcript-json">${escapeHtml(resultContent.value)}</pre>`;
+      } else {
+        html += `<div class="transcript-message">${escapeHtml(resultContent.value)}</div>`;
+      }
+    } else {
+      html += `<div class="transcript-message muted">(no result)</div>`;
+    }
   }
 
   const detailsPayload = entry.parsed || entry.raw_json;
@@ -2110,19 +2141,68 @@ function renderZoomModal() {
 }
 
 /**
+ * Checks if an entry is a tool call (assistant message with tool_name).
+ */
+function isToolCall(entry) {
+  return entry.entry_type === "assistant" && entry.tool_name && entry.tool_name !== "";
+}
+
+/**
+ * Checks if an entry is a tool result (user message containing tool_result).
+ */
+function isToolResult(entry) {
+  if (entry.entry_type !== "user") {
+    return false;
+  }
+
+  // Parse the entry to check for tool_result in message.content
+  let parsed = entry.parsed;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return false;
+    }
+  } else if (!parsed && entry.raw_json) {
+    try {
+      parsed = JSON.parse(entry.raw_json);
+    } catch {
+      return false;
+    }
+  }
+
+  if (!parsed) {
+    return false;
+  }
+
+  const content = parsed.message?.content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+
+  return content.some((item) => item.type === "tool_result");
+}
+
+/**
  * Extracts tool_use_id from an entry's nested message.content structure.
- * For tool_use entries: looks for content[*].id where type === "tool_use"
- * For tool_result entries: looks for content[*].tool_use_id where type === "tool_result"
+ * For tool calls: uses top-level tool_use_id or looks for content[*].id where type === "tool_use"
+ * For tool results: looks for content[*].tool_use_id where type === "tool_result"
  */
 function extractToolUseId(entry) {
-  // First try top-level tool_use_id if it exists
+  // First try top-level tool_use_id if it exists (tool calls have this)
   if (entry.tool_use_id) {
     return entry.tool_use_id;
   }
 
   // Try to get from parsed or raw_json
   let parsed = entry.parsed;
-  if (!parsed && entry.raw_json) {
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return null;
+    }
+  } else if (!parsed && entry.raw_json) {
     try {
       parsed = JSON.parse(entry.raw_json);
     } catch {
@@ -2153,29 +2233,55 @@ function extractToolUseId(entry) {
 }
 
 /**
- * Finds the index of a linked transcript entry by tool_use_id.
- * For tool_use entries, finds the corresponding tool_result.
- * For tool_result entries, finds the corresponding tool_use.
+ * Preprocesses transcript entries to combine tool calls with their results.
+ * Returns a new array where tool call + result pairs are merged into composite entries.
+ * Each composite entry has an `isComposite` flag and `toolResult` property.
  */
-function findLinkedToolEntry(currentEntry) {
-  const currentToolId = extractToolUseId(currentEntry);
-  if (!currentToolId) {
-    return null;
-  }
+function preprocessTranscriptEntries(entries) {
+  const processed = [];
+  const usedIndices = new Set();
 
-  const currentType = currentEntry.entry_type;
-  const targetType = currentType === "tool_use" ? "tool_result" : "tool_use";
+  for (let i = 0; i < entries.length; i++) {
+    if (usedIndices.has(i)) {
+      continue;
+    }
 
-  for (let i = 0; i < state.transcriptEntries.length; i++) {
-    const entry = state.transcriptEntries[i];
-    if (entry.entry_type === targetType) {
-      const entryToolId = extractToolUseId(entry);
-      if (entryToolId === currentToolId) {
-        return { index: i, entry };
+    const entry = entries[i];
+
+    // Check if this is a tool call
+    if (isToolCall(entry)) {
+      const toolId = extractToolUseId(entry);
+
+      // Look for matching result in next few entries (usually immediately after)
+      let resultEntry = null;
+      for (let j = i + 1; j < Math.min(i + 10, entries.length); j++) {
+        if (usedIndices.has(j)) {
+          continue;
+        }
+        const candidate = entries[j];
+        if (isToolResult(candidate) && extractToolUseId(candidate) === toolId) {
+          resultEntry = candidate;
+          usedIndices.add(j);
+          break;
+        }
       }
+
+      // Create composite entry if result found
+      if (resultEntry) {
+        processed.push({
+          ...entry,
+          isComposite: true,
+          toolResult: resultEntry,
+        });
+      } else {
+        processed.push(entry);
+      }
+    } else {
+      processed.push(entry);
     }
   }
-  return null;
+
+  return processed;
 }
 
 /**
@@ -2186,13 +2292,10 @@ function renderTranscriptZoom() {
   const entryType = entry.entry_type || "unknown";
   const role = entry.role || "";
 
-  // Check if this is a tool-related entry that can be combined
-  const isToolEntry = entryType === "tool_use" || entryType === "tool_result";
-  const linked = isToolEntry ? findLinkedToolEntry(entry) : null;
-
-  if (isToolEntry && linked) {
+  // Check if this is a composite entry (tool call + result)
+  if (entry.isComposite && entry.toolResult) {
     // Render combined tool call + result view
-    renderCombinedToolView(entry, linked.entry);
+    renderCombinedToolView(entry, entry.toolResult);
   } else {
     // Render regular entry view
     renderRegularEntryView(entry, entryType, role);
@@ -2200,14 +2303,11 @@ function renderTranscriptZoom() {
 }
 
 /**
- * Renders a combined view of tool_use and tool_result entries.
+ * Renders a combined view of tool call and tool result entries.
+ * @param {Object} toolCall - The tool call entry
+ * @param {Object} toolResult - The tool result entry
  */
-function renderCombinedToolView(currentEntry, linkedEntry) {
-  // Determine which is the call and which is the result
-  const isCurrentCall = currentEntry.entry_type === "tool_use";
-  const toolCall = isCurrentCall ? currentEntry : linkedEntry;
-  const toolResult = isCurrentCall ? linkedEntry : currentEntry;
-
+function renderCombinedToolView(toolCall, toolResult) {
   // Header - show as combined tool execution
   const toolName = toolCall.tool_name || "unknown";
   elements.zoomModalType.textContent = `TOOL: ${toolName}`;
@@ -2246,7 +2346,10 @@ function renderCombinedToolView(currentEntry, linkedEntry) {
       }
       callSection.appendChild(jsonContainer);
     } else {
-      callSection.innerHTML = `<div class="zoom-text-content">${escapeHtml(callContent.value)}</div>`;
+      const scrollContainer = document.createElement("div");
+      scrollContainer.className = "zoom-text-scroll";
+      scrollContainer.innerHTML = `<div class="zoom-text-content">${escapeHtml(callContent.value)}</div>`;
+      callSection.appendChild(scrollContainer);
     }
     elements.zoomContent.appendChild(callSection);
   }
@@ -2291,7 +2394,10 @@ function renderCombinedToolView(currentEntry, linkedEntry) {
       }
       resultSection.appendChild(jsonContainer);
     } else {
-      resultSection.innerHTML = `<div class="zoom-text-content">${escapeHtml(resultContent.value)}</div>`;
+      const scrollContainer = document.createElement("div");
+      scrollContainer.className = "zoom-text-scroll";
+      scrollContainer.innerHTML = `<div class="zoom-text-content">${escapeHtml(resultContent.value)}</div>`;
+      resultSection.appendChild(scrollContainer);
     }
     elements.zoomDetails.appendChild(resultSection);
   }
