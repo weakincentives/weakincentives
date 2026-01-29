@@ -347,7 +347,8 @@ const state = {
   searchQuery: "",
   focusedItemIndex: -1,
   // Transcript state
-  transcriptEntries: [],
+  transcriptRawEntries: [], // Raw entries from API
+  transcriptEntries: [], // Preprocessed entries (tool calls combined with results)
   transcriptFacets: { sources: [], entry_types: [] },
   transcriptSearch: "",
   transcriptSourceChipFilter: "",
@@ -396,6 +397,11 @@ const state = {
   hasEnvironmentData: false,
   // Shortcuts overlay
   shortcutsOpen: false,
+  // Zoom modal state
+  zoomOpen: false,
+  zoomType: null, // 'transcript' or 'log'
+  zoomIndex: -1,
+  zoomEntry: null,
   // Virtual scrollers (initialized after DOM ready)
   logsScroller: null,
   transcriptScroller: null,
@@ -484,6 +490,17 @@ const elements = {
   toastContainer: document.getElementById("toast-container"),
   shortcutsOverlay: document.getElementById("shortcuts-overlay"),
   shortcutsClose: document.getElementById("shortcuts-close"),
+  // Zoom modal
+  zoomModal: document.getElementById("zoom-modal"),
+  zoomModalType: document.getElementById("zoom-modal-type"),
+  zoomModalTimestamp: document.getElementById("zoom-modal-timestamp"),
+  zoomModalSource: document.getElementById("zoom-modal-source"),
+  zoomContent: document.getElementById("zoom-content"),
+  zoomDetails: document.getElementById("zoom-details"),
+  zoomClose: document.getElementById("zoom-close"),
+  zoomCopy: document.getElementById("zoom-copy"),
+  zoomPrev: document.getElementById("zoom-prev"),
+  zoomNext: document.getElementById("zoom-next"),
 };
 
 // ============================================================================
@@ -649,6 +666,7 @@ elements.bundleSelect.addEventListener("change", (e) => {
 });
 
 function resetViewState() {
+  state.transcriptRawEntries = [];
   state.transcriptEntries = [];
   state.transcriptTotalCount = 0;
   state.transcriptHasMore = false;
@@ -891,29 +909,29 @@ async function loadTranscript(append = false) {
 
     const entries = result.entries || [];
 
+    // Preprocess to combine tool calls with their results
+    let processed;
     if (append) {
-      state.transcriptEntries = state.transcriptEntries.concat(entries);
+      // When appending, reprocess everything to handle cross-boundary pairs
+      const rawEntries = [...state.transcriptRawEntries, ...entries];
+      state.transcriptRawEntries = rawEntries;
+      processed = preprocessTranscriptEntries(rawEntries);
     } else {
-      state.transcriptEntries = entries;
+      state.transcriptRawEntries = entries;
+      processed = preprocessTranscriptEntries(entries);
     }
-    state.transcriptTotalCount = result.total || state.transcriptEntries.length;
-    state.transcriptHasMore = state.transcriptEntries.length < state.transcriptTotalCount;
+
+    state.transcriptEntries = processed;
+    state.transcriptTotalCount = result.total || state.transcriptRawEntries.length;
+    state.transcriptHasMore = state.transcriptRawEntries.length < state.transcriptTotalCount;
 
     // Use virtual scroller if available
     if (state.transcriptScroller) {
-      if (append) {
-        state.transcriptScroller.appendData(
-          entries,
-          state.transcriptTotalCount,
-          state.transcriptHasMore
-        );
-      } else {
-        state.transcriptScroller.setData(
-          state.transcriptEntries,
-          state.transcriptTotalCount,
-          state.transcriptHasMore
-        );
-      }
+      state.transcriptScroller.setData(
+        state.transcriptEntries,
+        state.transcriptTotalCount,
+        state.transcriptHasMore
+      );
       renderTranscriptEmptyState();
     } else {
       renderTranscript();
@@ -1082,13 +1100,17 @@ function formatTranscriptContent(entry) {
  * Creates a single transcript entry DOM element.
  * Used by both virtual scroller and fallback rendering.
  */
-function createTranscriptEntryElement(entry, _index) {
+function createTranscriptEntryElement(entry, index) {
+  const isComposite = entry.isComposite === true;
+  const toolResult = entry.toolResult;
+
   const entryType = entry.entry_type || "unknown";
   const role = entry.role || "";
   const cssClass = role ? `role-${role}` : `type-${entryType}`;
 
   const container = document.createElement("div");
-  container.className = `transcript-entry ${cssClass}`;
+  container.className = `transcript-entry ${cssClass} compact${isComposite ? " combined" : ""}`;
+  container.dataset.entryIndex = index;
 
   const source = entry.transcript_source || "";
   const seq =
@@ -1100,7 +1122,25 @@ function createTranscriptEntryElement(entry, _index) {
   const content = formatTranscriptContent(entry);
 
   let html = `<div class="transcript-header">`;
-  html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
+  // Zoom button
+  html += `<button class="zoom-button" type="button" data-zoom-index="${index}" title="Expand entry" aria-label="Expand entry">`;
+  html += `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">`;
+  html += `<polyline points="15 3 21 3 21 9"></polyline>`;
+  html += `<polyline points="9 21 3 21 3 15"></polyline>`;
+  html += '<line x1="21" y1="3" x2="14" y2="10"></line>';
+  html += '<line x1="3" y1="21" x2="10" y2="14"></line>';
+  html += "</svg></button>";
+
+  // Show combined label for tool call + result
+  if (isComposite) {
+    html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">tool call + result</span>`;
+    if (entry.tool_name) {
+      html += `<span class="transcript-tool-name">${escapeHtml(entry.tool_name)}</span>`;
+    }
+  } else {
+    html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
+  }
+
   if (entry.timestamp) {
     html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
   }
@@ -1112,6 +1152,7 @@ function createTranscriptEntryElement(entry, _index) {
   }
   html += "</div>";
 
+  // Render tool call content
   if (content.value) {
     if (content.kind === "json") {
       html += `<pre class="transcript-json">${escapeHtml(content.value)}</pre>`;
@@ -1120,6 +1161,21 @@ function createTranscriptEntryElement(entry, _index) {
     }
   } else {
     html += `<div class="transcript-message muted">(no content)</div>`;
+  }
+
+  // Render tool result content if this is a composite entry
+  if (isComposite && toolResult) {
+    const resultContent = formatTranscriptContent(toolResult);
+    html += `<div class="transcript-result-divider">↓ result</div>`;
+    if (resultContent.value) {
+      if (resultContent.kind === "json") {
+        html += `<pre class="transcript-json">${escapeHtml(resultContent.value)}</pre>`;
+      } else {
+        html += `<div class="transcript-message">${escapeHtml(resultContent.value)}</div>`;
+      }
+    } else {
+      html += `<div class="transcript-message muted">(no result)</div>`;
+    }
   }
 
   const detailsPayload = entry.parsed || entry.raw_json;
@@ -2016,16 +2072,610 @@ elements.shortcutsOverlay
 elements.helpButton.addEventListener("click", openShortcuts);
 
 // ============================================================================
+// ZOOM MODAL
+// ============================================================================
+
+/**
+ * Opens the zoom modal for a transcript entry.
+ */
+function openTranscriptZoom(index) {
+  const entry = state.transcriptEntries[index];
+  if (!entry) {
+    return;
+  }
+  state.zoomOpen = true;
+  state.zoomType = "transcript";
+  state.zoomIndex = index;
+  state.zoomEntry = entry;
+  renderZoomModal();
+  elements.zoomModal.classList.remove("hidden");
+}
+
+/**
+ * Closes the zoom modal.
+ */
+function closeZoomModal() {
+  state.zoomOpen = false;
+  state.zoomType = null;
+  state.zoomIndex = -1;
+  state.zoomEntry = null;
+  elements.zoomModal.classList.add("hidden");
+}
+
+/**
+ * Navigates to the previous entry in the zoom modal.
+ */
+function zoomPrev() {
+  if (!state.zoomOpen || state.zoomIndex <= 0) {
+    return;
+  }
+  openTranscriptZoom(state.zoomIndex - 1);
+}
+
+/**
+ * Navigates to the next entry in the zoom modal.
+ */
+function zoomNext() {
+  if (!state.zoomOpen) {
+    return;
+  }
+  const maxIndex = state.transcriptEntries.length - 1;
+  if (state.zoomIndex >= maxIndex) {
+    return;
+  }
+  openTranscriptZoom(state.zoomIndex + 1);
+}
+
+/**
+ * Renders the zoom modal content based on current state.
+ */
+function renderZoomModal() {
+  if (!state.zoomEntry) {
+    return;
+  }
+
+  renderTranscriptZoom();
+
+  // Update navigation button states
+  updateZoomNavigation();
+}
+
+/**
+ * Checks if an entry is a tool call (assistant message with tool_name).
+ */
+function isToolCall(entry) {
+  return entry.entry_type === "assistant" && entry.tool_name && entry.tool_name !== "";
+}
+
+/**
+ * Checks if an entry is a tool result (user message containing tool_result).
+ */
+function isToolResult(entry) {
+  if (entry.entry_type !== "user") {
+    return false;
+  }
+
+  // Parse the entry to check for tool_result in message.content
+  let parsed = entry.parsed;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return false;
+    }
+  } else if (!parsed && entry.raw_json) {
+    try {
+      parsed = JSON.parse(entry.raw_json);
+    } catch {
+      return false;
+    }
+  }
+
+  if (!parsed) {
+    return false;
+  }
+
+  const content = parsed.message?.content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+
+  return content.some((item) => item.type === "tool_result");
+}
+
+/**
+ * Extracts tool_use_id from an entry's nested message.content structure.
+ * For tool calls: uses top-level tool_use_id or looks for content[*].id where type === "tool_use"
+ * For tool results: looks for content[*].tool_use_id where type === "tool_result"
+ */
+function extractToolUseId(entry) {
+  // First try top-level tool_use_id if it exists (tool calls have this)
+  if (entry.tool_use_id) {
+    return entry.tool_use_id;
+  }
+
+  // Try to get from parsed or raw_json
+  let parsed = entry.parsed;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return null;
+    }
+  } else if (!parsed && entry.raw_json) {
+    try {
+      parsed = JSON.parse(entry.raw_json);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!parsed) {
+    return null;
+  }
+
+  // Look in message.content array
+  const content = parsed.message?.content;
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  for (const item of content) {
+    if (item.type === "tool_use" && item.id) {
+      return item.id;
+    }
+    if (item.type === "tool_result" && item.tool_use_id) {
+      return item.tool_use_id;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Preprocesses transcript entries to combine tool calls with their results.
+ * Returns a new array where tool call + result pairs are merged into composite entries.
+ * Each composite entry has an `isComposite` flag and `toolResult` property.
+ */
+function preprocessTranscriptEntries(entries) {
+  const processed = [];
+  const usedIndices = new Set();
+
+  for (let i = 0; i < entries.length; i++) {
+    if (usedIndices.has(i)) {
+      continue;
+    }
+
+    const entry = entries[i];
+
+    // Check if this is a tool call
+    if (isToolCall(entry)) {
+      const toolId = extractToolUseId(entry);
+
+      // Look for matching result in next few entries (usually immediately after)
+      let resultEntry = null;
+      for (let j = i + 1; j < Math.min(i + 10, entries.length); j++) {
+        if (usedIndices.has(j)) {
+          continue;
+        }
+        const candidate = entries[j];
+        if (isToolResult(candidate) && extractToolUseId(candidate) === toolId) {
+          resultEntry = candidate;
+          usedIndices.add(j);
+          break;
+        }
+      }
+
+      // Create composite entry if result found
+      if (resultEntry) {
+        processed.push({
+          ...entry,
+          isComposite: true,
+          toolResult: resultEntry,
+        });
+      } else {
+        processed.push(entry);
+      }
+    } else {
+      processed.push(entry);
+    }
+  }
+
+  return processed;
+}
+
+/**
+ * Helper: Renders content (text or JSON) in a scrollable container.
+ */
+function renderContentSection(content, parentElement) {
+  const section = document.createElement("div");
+  section.className = "zoom-section";
+
+  if (content.kind === "json") {
+    const jsonContainer = document.createElement("div");
+    jsonContainer.className = "zoom-json-tree";
+    try {
+      const parsed = JSON.parse(content.value);
+      jsonContainer.appendChild(renderZoomJsonTree(parsed, "", 0));
+    } catch {
+      jsonContainer.innerHTML = `<pre>${escapeHtml(content.value)}</pre>`;
+    }
+    section.appendChild(jsonContainer);
+  } else {
+    const scrollContainer = document.createElement("div");
+    scrollContainer.className = "zoom-text-scroll";
+    scrollContainer.innerHTML = `<div class="zoom-text-content">${escapeHtml(content.value)}</div>`;
+    section.appendChild(scrollContainer);
+  }
+
+  parentElement.appendChild(section);
+}
+
+/**
+ * Helper: Renders raw JSON tree with label.
+ */
+function renderRawJsonSection(payload, label, parentElement) {
+  if (!payload) {
+    return;
+  }
+
+  const section = document.createElement("div");
+  section.className = "zoom-section";
+  const labelDiv = document.createElement("div");
+  labelDiv.className = "zoom-section-label";
+  labelDiv.textContent = label;
+  section.appendChild(labelDiv);
+
+  const jsonContainer = document.createElement("div");
+  jsonContainer.className = "zoom-json-tree";
+  jsonContainer.appendChild(renderZoomJsonTree(payload, "", 0));
+  section.appendChild(jsonContainer);
+
+  parentElement.appendChild(section);
+}
+
+/**
+ * Renders a transcript entry in the zoom modal.
+ */
+function renderTranscriptZoom() {
+  const entry = state.zoomEntry;
+
+  if (entry.isComposite) {
+    renderCompositeEntryZoom(entry);
+  } else {
+    renderRegularEntryZoom(entry);
+  }
+}
+
+/**
+ * Renders a composite tool call + result entry in zoom view.
+ */
+function renderCompositeEntryZoom(entry) {
+  const toolName = entry.tool_name || "unknown";
+
+  // Header
+  elements.zoomModalType.textContent = `TOOL: ${toolName}`;
+  elements.zoomModalType.className = "zoom-type-badge zoom-type-tool_use";
+  elements.zoomModalTimestamp.textContent = entry.timestamp || "";
+
+  const source = entry.transcript_source || "";
+  const seq =
+    entry.sequence_number !== null && entry.sequence_number !== undefined
+      ? `#${entry.sequence_number}`
+      : "";
+  elements.zoomModalSource.textContent = source ? `${source}${seq}` : "";
+  elements.zoomModalSource.style.display = source ? "" : "none";
+
+  // Left panel: Tool Call
+  elements.zoomContent.innerHTML = "";
+  const callHeader = document.createElement("div");
+  callHeader.className = "zoom-combined-header zoom-combined-call";
+  callHeader.innerHTML = '<span class="zoom-combined-badge">CALL</span> Tool Input';
+  elements.zoomContent.appendChild(callHeader);
+
+  const callContent = formatTranscriptContent(entry);
+  if (callContent.value) {
+    renderContentSection(callContent, elements.zoomContent);
+  }
+  renderRawJsonSection(entry.parsed || entry.raw_json, "Call Raw JSON", elements.zoomContent);
+
+  // Right panel: Tool Result
+  elements.zoomDetails.innerHTML = "";
+  const resultHeader = document.createElement("div");
+  resultHeader.className = "zoom-combined-header zoom-combined-result";
+  resultHeader.innerHTML = '<span class="zoom-combined-badge">RESULT</span> Tool Output';
+  elements.zoomDetails.appendChild(resultHeader);
+
+  if (entry.toolResult) {
+    const resultContent = formatTranscriptContent(entry.toolResult);
+    if (resultContent.value) {
+      renderContentSection(resultContent, elements.zoomDetails);
+    }
+    renderRawJsonSection(
+      entry.toolResult.parsed || entry.toolResult.raw_json,
+      "Result Raw JSON",
+      elements.zoomDetails
+    );
+  }
+
+  // Tool metadata
+  if (entry.tool_use_id) {
+    const metaSection = document.createElement("div");
+    metaSection.className = "zoom-section zoom-tool-meta";
+    metaSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content mono">${escapeHtml(entry.tool_use_id)}</div>`;
+    elements.zoomDetails.appendChild(metaSection);
+  }
+}
+
+/**
+ * Renders a regular (non-composite) entry in zoom view.
+ */
+function renderRegularEntryZoom(entry) {
+  const entryType = entry.entry_type || "unknown";
+
+  // Header
+  elements.zoomModalType.textContent = entryType.toUpperCase();
+  elements.zoomModalType.className = `zoom-type-badge zoom-type-${entryType}`;
+  elements.zoomModalTimestamp.textContent = entry.timestamp || "";
+
+  const source = entry.transcript_source || "";
+  const seq =
+    entry.sequence_number !== null && entry.sequence_number !== undefined
+      ? `#${entry.sequence_number}`
+      : "";
+  elements.zoomModalSource.textContent = source ? `${source}${seq}` : "";
+  elements.zoomModalSource.style.display = source ? "" : "none";
+
+  // Content panel
+  elements.zoomContent.innerHTML = "";
+  const content = formatTranscriptContent(entry);
+  if (content.value) {
+    renderContentSection(content, elements.zoomContent);
+  }
+
+  // Details panel
+  elements.zoomDetails.innerHTML = "";
+
+  if (entry.tool_name) {
+    const toolSection = document.createElement("div");
+    toolSection.className = "zoom-section";
+    toolSection.innerHTML = `<div class="zoom-section-label">Tool</div><div class="zoom-text-content">${escapeHtml(entry.tool_name)}</div>`;
+    elements.zoomDetails.appendChild(toolSection);
+  }
+
+  if (entry.tool_use_id) {
+    const toolIdSection = document.createElement("div");
+    toolIdSection.className = "zoom-section";
+    toolIdSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content">${escapeHtml(entry.tool_use_id)}</div>`;
+    elements.zoomDetails.appendChild(toolIdSection);
+  }
+
+  if (entry.prompt_name) {
+    const promptSection = document.createElement("div");
+    promptSection.className = "zoom-section";
+    promptSection.innerHTML = `<div class="zoom-section-label">Prompt</div><div class="zoom-text-content">${escapeHtml(entry.prompt_name)}</div>`;
+    elements.zoomDetails.appendChild(promptSection);
+  }
+
+  renderRawJsonSection(entry.parsed || entry.raw_json, "Raw JSON", elements.zoomDetails);
+
+  if (elements.zoomDetails.children.length === 0) {
+    elements.zoomDetails.innerHTML = `<div class="zoom-empty">(no additional details)</div>`;
+  }
+}
+
+/**
+ * Renders a collapsible JSON tree for the zoom modal details panel.
+ */
+function renderZoomJsonTree(value, key, depth) {
+  const node = document.createElement("div");
+  node.className = "zoom-json-node";
+
+  if (value === null) {
+    node.innerHTML = key
+      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-null">null</span>`
+      : '<span class="zoom-json-null">null</span>';
+    return node;
+  }
+
+  if (typeof value === "boolean") {
+    node.innerHTML = key
+      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-bool">${value}</span>`
+      : `<span class="zoom-json-bool">${value}</span>`;
+    return node;
+  }
+
+  if (typeof value === "number") {
+    node.innerHTML = key
+      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-number">${value}</span>`
+      : `<span class="zoom-json-number">${value}</span>`;
+    return node;
+  }
+
+  if (typeof value === "string") {
+    // Try to parse as JSON - handle double-serialized JSON
+    if (
+      value.length > 1 &&
+      ((value.startsWith("{") && value.endsWith("}")) ||
+        (value.startsWith("[") && value.endsWith("]")))
+    ) {
+      try {
+        const parsed = JSON.parse(value);
+        // Successfully parsed - render as object/array with a "parsed" indicator
+        const wrapper = document.createElement("div");
+        wrapper.className = "zoom-json-node";
+        if (key) {
+          const keyLabel = document.createElement("span");
+          keyLabel.innerHTML = `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-parsed-hint">(parsed JSON string)</span>`;
+          wrapper.appendChild(keyLabel);
+        }
+        wrapper.appendChild(renderZoomJsonTree(parsed, "", depth));
+        return wrapper;
+      } catch {
+        // Not valid JSON, render as string
+      }
+    }
+
+    // Regular string - no truncation, show full content
+    const escaped = escapeHtml(value);
+    const formatted = escaped.replace(/\n/g, "<br>");
+    node.innerHTML = key
+      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-string">"${formatted}"</span>`
+      : `<span class="zoom-json-string">"${formatted}"</span>`;
+    return node;
+  }
+
+  if (Array.isArray(value)) {
+    const isExpanded = depth < 2;
+    const header = document.createElement("div");
+    header.className = "zoom-json-header";
+    header.innerHTML = `<span class="zoom-json-toggle">${isExpanded ? "▼" : "▶"}</span>${key ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: ` : ""}<span class="zoom-json-bracket">[</span><span class="zoom-json-count">${value.length} items</span><span class="zoom-json-bracket zoom-json-close-bracket" style="display: ${isExpanded ? "none" : "inline"}">]</span>`;
+    node.appendChild(header);
+
+    const children = document.createElement("div");
+    children.className = "zoom-json-children";
+    children.style.display = isExpanded ? "block" : "none";
+
+    for (let i = 0; i < value.length; i++) {
+      children.appendChild(renderZoomJsonTree(value[i], String(i), depth + 1));
+    }
+
+    const closeBracket = document.createElement("div");
+    closeBracket.className = "zoom-json-close";
+    closeBracket.innerHTML = '<span class="zoom-json-bracket">]</span>';
+    closeBracket.style.display = isExpanded ? "block" : "none";
+    children.appendChild(closeBracket);
+
+    node.appendChild(children);
+
+    header.addEventListener("click", () => {
+      const isOpen = children.style.display !== "none";
+      children.style.display = isOpen ? "none" : "block";
+      header.querySelector(".zoom-json-toggle").textContent = isOpen ? "▶" : "▼";
+      header.querySelector(".zoom-json-close-bracket").style.display = isOpen ? "inline" : "none";
+    });
+
+    return node;
+  }
+
+  if (typeof value === "object") {
+    const keys = Object.keys(value);
+    const isExpanded = depth < 2;
+    const header = document.createElement("div");
+    header.className = "zoom-json-header";
+    header.innerHTML = `<span class="zoom-json-toggle">${isExpanded ? "▼" : "▶"}</span>${key ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: ` : ""}<span class="zoom-json-bracket">{</span><span class="zoom-json-count">${keys.length} keys</span><span class="zoom-json-bracket zoom-json-close-bracket" style="display: ${isExpanded ? "none" : "inline"}">}</span>`;
+    node.appendChild(header);
+
+    const children = document.createElement("div");
+    children.className = "zoom-json-children";
+    children.style.display = isExpanded ? "block" : "none";
+
+    for (const k of keys) {
+      children.appendChild(renderZoomJsonTree(value[k], k, depth + 1));
+    }
+
+    const closeBracket = document.createElement("div");
+    closeBracket.className = "zoom-json-close";
+    closeBracket.innerHTML = '<span class="zoom-json-bracket">}</span>';
+    closeBracket.style.display = isExpanded ? "block" : "none";
+    children.appendChild(closeBracket);
+
+    node.appendChild(children);
+
+    header.addEventListener("click", () => {
+      const isOpen = children.style.display !== "none";
+      children.style.display = isOpen ? "none" : "block";
+      header.querySelector(".zoom-json-toggle").textContent = isOpen ? "▶" : "▼";
+      header.querySelector(".zoom-json-close-bracket").style.display = isOpen ? "inline" : "none";
+    });
+
+    return node;
+  }
+
+  node.textContent = String(value);
+  return node;
+}
+
+/**
+ * Updates the state of prev/next navigation buttons.
+ */
+function updateZoomNavigation() {
+  if (!state.zoomOpen) {
+    return;
+  }
+
+  const maxIndex = state.transcriptEntries.length - 1;
+
+  elements.zoomPrev.disabled = state.zoomIndex <= 0;
+  elements.zoomNext.disabled = state.zoomIndex >= maxIndex;
+}
+
+/**
+ * Copies the current zoom entry as JSON to clipboard.
+ */
+async function copyZoomEntry() {
+  if (!state.zoomEntry) {
+    showToast("No entry to copy", "error");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(state.zoomEntry, null, 2));
+    showToast("Copied entry to clipboard", "success");
+  } catch {
+    showToast("Failed to copy", "error");
+  }
+}
+
+// Zoom modal event listeners
+elements.zoomClose.addEventListener("click", closeZoomModal);
+elements.zoomModal.querySelector(".zoom-modal-backdrop").addEventListener("click", closeZoomModal);
+elements.zoomCopy.addEventListener("click", copyZoomEntry);
+elements.zoomPrev.addEventListener("click", zoomPrev);
+elements.zoomNext.addEventListener("click", zoomNext);
+
+// Event delegation for zoom buttons in transcript list
+elements.transcriptList.addEventListener("click", (e) => {
+  const zoomBtn = e.target.closest(".zoom-button[data-zoom-index]");
+  if (zoomBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const index = Number.parseInt(zoomBtn.dataset.zoomIndex, 10);
+    openTranscriptZoom(index);
+  }
+});
+
+// ============================================================================
 // KEYBOARD SHORTCUTS
 // ============================================================================
 
 document.addEventListener("keydown", (e) => {
   // Escape - close dialogs
   if (e.key === "Escape") {
+    if (state.zoomOpen) {
+      e.preventDefault();
+      closeZoomModal();
+      return;
+    }
     if (state.shortcutsOpen) {
       e.preventDefault();
       closeShortcuts();
     }
+    return;
+  }
+
+  // Handle zoom modal navigation
+  if (state.zoomOpen) {
+    if (e.key === "j" || e.key === "J" || e.key === "ArrowDown" || e.key === "ArrowRight") {
+      e.preventDefault();
+      zoomNext();
+      return;
+    }
+    if (e.key === "k" || e.key === "K" || e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      zoomPrev();
+      return;
+    }
+    // Other keys are blocked while zoom modal is open
     return;
   }
 
