@@ -10,7 +10,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tool execution and transaction management for provider adapters."""
+"""Tool execution and transaction management for provider adapters.
+
+This module provides the tool execution pipeline with four main components:
+
+- **_ToolValidator**: Parameter validation and parsing
+- **_ToolDispatcher**: Event dispatch to session
+- **_ToolResultParser**: Tool resolution and argument parsing
+- **ToolExecutor**: Orchestrates the above phases
+"""
 
 from __future__ import annotations
 
@@ -31,7 +39,7 @@ from ..prompt.policy import PolicyDecision, ToolPolicy
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
-from ..runtime.events import HandlerFailure, ToolInvoked
+from ..runtime.events import DispatchResult, HandlerFailure, ToolInvoked
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.run_context import RunContext
 from ..runtime.transactions import (
@@ -140,6 +148,253 @@ class ToolExecutionContext:
             self.heartbeat.beat()
 
 
+# =============================================================================
+# _ToolValidator: Parameter validation and parsing
+# =============================================================================
+
+
+class _ToolValidator:
+    """Handles parameter validation and parsing for tool calls.
+
+    Encapsulates the logic for:
+    - Parsing tool parameters from raw arguments
+    - Creating rejected parameter records on validation failure
+    - Logging validation errors
+    """
+
+    __slots__ = ()
+
+    @staticmethod
+    def parse_params(
+        *,
+        tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+        arguments_mapping: Mapping[str, Any],
+    ) -> SupportsDataclass | None:
+        """Parse and validate tool parameters from raw arguments.
+
+        Raises:
+            ToolValidationError: If validation fails.
+        """
+        if tool.params_type is type(None):
+            if arguments_mapping:
+                raise ToolValidationError("Tool does not accept any arguments.")
+            return None
+        try:
+            return parse(tool.params_type, arguments_mapping, extra="forbid")
+        except (TypeError, ValueError) as error:
+            raise ToolValidationError(str(error)) from error
+
+    @staticmethod
+    def rejected_params(
+        *,
+        arguments_mapping: Mapping[str, Any],
+        error: Exception,
+    ) -> RejectedToolParams:
+        """Create a rejected params record for validation failures."""
+        return RejectedToolParams(
+            raw_arguments=dict(arguments_mapping),
+            error=str(error),
+        )
+
+    @staticmethod
+    def handle_validation_error(
+        *,
+        log: StructuredLogger,
+        error: Exception,
+    ) -> ToolResult[SupportsToolResult]:
+        """Log validation failure and return an error result."""
+        log.warning(
+            "Tool validation failed.",
+            event="tool_validation_failed",
+            context={"reason": str(error)},
+        )
+        return ToolResult(
+            message=f"Tool validation failed: {error}",
+            value=None,
+            success=False,
+        )
+
+
+# =============================================================================
+# _ToolResultParser: Tool resolution and argument parsing
+# =============================================================================
+
+
+class _ToolResultParser:
+    """Handles tool resolution and argument parsing from provider calls.
+
+    Encapsulates the logic for:
+    - Resolving tool and handler from registry
+    - Parsing raw arguments from provider
+    - Building bound loggers for tool execution
+    """
+
+    __slots__ = ()
+
+    @staticmethod
+    def resolve_tool_and_handler(
+        *,
+        tool_call: ProviderToolCall,
+        tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        prompt_name: str,
+        provider_payload: dict[str, Any] | None,
+    ) -> tuple[
+        Tool[SupportsDataclassOrNone, SupportsToolResult],
+        ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
+    ]:
+        """Resolve tool and handler from registry.
+
+        Raises:
+            PromptEvaluationError: If tool not found or has no handler.
+        """
+        function = tool_call.function
+        tool_name = function.name
+        tool = tool_registry.get(tool_name)
+        if tool is None:
+            raise PromptEvaluationError(
+                f"Unknown tool '{tool_name}' requested by provider.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_TOOL,
+                provider_payload=provider_payload,
+            )
+        handler = tool.handler
+        if handler is None:
+            raise PromptEvaluationError(
+                f"Tool '{tool_name}' does not have a registered handler.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_TOOL,
+                provider_payload=provider_payload,
+            )
+        return tool, handler
+
+    @staticmethod
+    def parse_arguments(
+        *,
+        tool_call: ProviderToolCall,
+        prompt_name: str,
+        provider_payload: dict[str, Any] | None,
+        parse_arguments: ToolArgumentsParser,
+    ) -> dict[str, Any]:
+        """Parse raw arguments from provider tool call."""
+        return parse_arguments(
+            tool_call.function.arguments,
+            prompt_name=prompt_name,
+            provider_payload=provider_payload,
+        )
+
+    @staticmethod
+    def build_logger(
+        *,
+        context: ToolExecutionContext,
+        tool_name: str,
+        tool_call: ProviderToolCall,
+    ) -> tuple[str | None, StructuredLogger]:
+        """Build a bound logger for tool execution."""
+        call_id = tool_call.id
+        bound_log = (context.logger_override or logger).bind(
+            adapter=context.adapter_name,
+            prompt=context.prompt_name,
+            tool=tool_name,
+            call_id=call_id,
+        )
+        return call_id, bound_log
+
+
+# =============================================================================
+# _ToolDispatcher: Event dispatch to session
+# =============================================================================
+
+
+class _ToolDispatcher:
+    """Handles event dispatch to session for tool invocations.
+
+    Encapsulates the logic for:
+    - Sending ToolInvoked events to session dispatcher
+    - Handling dispatch failures and triggering rollbacks
+    - Logging dispatch outcomes
+    """
+
+    __slots__ = ()
+
+    @staticmethod
+    def dispatch_invocation(
+        *,
+        context: ToolExecutionContext,
+        outcome: ToolExecutionOutcome,
+    ) -> ToolInvoked:
+        """Send a tool invocation event to the session dispatcher."""
+        session_id = getattr(context.session, "session_id", None)
+        rendered_output = outcome.result.render()
+        usage = token_usage_from_payload(context.provider_payload)
+
+        invocation = ToolInvoked(
+            prompt_name=context.prompt_name,
+            adapter=context.adapter_name,
+            name=outcome.tool.name,
+            params=outcome.params,
+            result=cast(ToolResult[object], outcome.result),
+            session_id=session_id,
+            created_at=datetime.now(UTC),
+            usage=usage,
+            rendered_output=rendered_output,
+            call_id=outcome.call_id,
+            run_context=context.run_context,
+            event_id=uuid4(),
+        )
+        dispatch_result = context.session.dispatcher.dispatch(invocation)
+        if not dispatch_result.ok:
+            _ToolDispatcher._handle_dispatch_failure(
+                context=context,
+                outcome=outcome,
+                dispatch_result=dispatch_result,
+            )
+        else:
+            outcome.log.debug(
+                "Tool event dispatched.",
+                event="tool_event_dispatched",
+                context={"handler_count": dispatch_result.handled_count},
+            )
+        return invocation
+
+    @staticmethod
+    def _handle_dispatch_failure(
+        *,
+        context: ToolExecutionContext,
+        outcome: ToolExecutionOutcome,
+        dispatch_result: DispatchResult,
+    ) -> None:
+        """Handle dispatch failure by restoring state and logging."""
+        # Restore to pre-tool state if tool succeeded (not already restored)
+        if outcome.result.success:
+            _restore_snapshot_if_needed(
+                context, outcome.snapshot, outcome.log, reason="dispatch_failure"
+            )
+        outcome.log.warning(
+            "State rollback triggered after dispatch failure.",
+            event="state_rollback_due_to_dispatch_failure",
+        )
+        failure_handlers = [
+            getattr(failure.handler, "__qualname__", repr(failure.handler))
+            for failure in dispatch_result.errors
+        ]
+        outcome.log.error(
+            "Tool event dispatch failed.",
+            event="tool_event_dispatch_failed",
+            context={
+                "failure_count": len(dispatch_result.errors),
+                "failed_handlers": failure_handlers,
+            },
+        )
+        outcome.result.message = context.format_dispatch_failures(
+            dispatch_result.errors
+        )
+
+
+# =============================================================================
+# Standalone helper functions (used by orchestration)
+# =============================================================================
+
+
 def _resolve_tool_and_handler(
     *,
     tool_call: ProviderToolCall,
@@ -150,26 +405,13 @@ def _resolve_tool_and_handler(
     Tool[SupportsDataclassOrNone, SupportsToolResult],
     ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
 ]:
-    function = tool_call.function
-    tool_name = function.name
-    tool = tool_registry.get(tool_name)
-    if tool is None:
-        raise PromptEvaluationError(
-            f"Unknown tool '{tool_name}' requested by provider.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_TOOL,
-            provider_payload=provider_payload,
-        )
-    handler = tool.handler
-    if handler is None:
-        raise PromptEvaluationError(
-            f"Tool '{tool_name}' does not have a registered handler.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_TOOL,
-            provider_payload=provider_payload,
-        )
-
-    return tool, handler
+    """Delegate to _ToolResultParser for backward compatibility."""
+    return _ToolResultParser.resolve_tool_and_handler(
+        tool_call=tool_call,
+        tool_registry=tool_registry,
+        prompt_name=prompt_name,
+        provider_payload=provider_payload,
+    )
 
 
 def _parse_tool_call_arguments(
@@ -179,10 +421,12 @@ def _parse_tool_call_arguments(
     provider_payload: dict[str, Any] | None,
     parse_arguments: ToolArgumentsParser,
 ) -> dict[str, Any]:
-    return parse_arguments(
-        tool_call.function.arguments,
+    """Delegate to _ToolResultParser for backward compatibility."""
+    return _ToolResultParser.parse_arguments(
+        tool_call=tool_call,
         prompt_name=prompt_name,
         provider_payload=provider_payload,
+        parse_arguments=parse_arguments,
     )
 
 
@@ -192,14 +436,12 @@ def _build_tool_logger(
     tool_name: str,
     tool_call: ProviderToolCall,
 ) -> tuple[str | None, StructuredLogger]:
-    call_id = tool_call.id
-    bound_log = (context.logger_override or logger).bind(
-        adapter=context.adapter_name,
-        prompt=context.prompt_name,
-        tool=tool_name,
-        call_id=call_id,
+    """Delegate to _ToolResultParser for backward compatibility."""
+    return _ToolResultParser.build_logger(
+        context=context,
+        tool_name=tool_name,
+        tool_call=tool_call,
     )
-    return call_id, bound_log
 
 
 def parse_tool_params(
@@ -207,14 +449,11 @@ def parse_tool_params(
     tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
     arguments_mapping: Mapping[str, Any],
 ) -> SupportsDataclass | None:
-    if tool.params_type is type(None):
-        if arguments_mapping:
-            raise ToolValidationError("Tool does not accept any arguments.")
-        return None
-    try:
-        return parse(tool.params_type, arguments_mapping, extra="forbid")
-    except (TypeError, ValueError) as error:
-        raise ToolValidationError(str(error)) from error
+    """Delegate to _ToolValidator for backward compatibility."""
+    return _ToolValidator.parse_params(
+        tool=tool,
+        arguments_mapping=arguments_mapping,
+    )
 
 
 def _rejected_params(
@@ -222,9 +461,10 @@ def _rejected_params(
     arguments_mapping: Mapping[str, Any],
     error: Exception,
 ) -> RejectedToolParams:
-    return RejectedToolParams(
-        raw_arguments=dict(arguments_mapping),
-        error=str(error),
+    """Delegate to _ToolValidator for backward compatibility."""
+    return _ToolValidator.rejected_params(
+        arguments_mapping=arguments_mapping,
+        error=error,
     )
 
 
@@ -324,16 +564,8 @@ def _handle_tool_validation_error(
     log: StructuredLogger,
     error: Exception,
 ) -> ToolResult[SupportsToolResult]:
-    log.warning(
-        "Tool validation failed.",
-        event="tool_validation_failed",
-        context={"reason": str(error)},
-    )
-    return ToolResult(
-        message=f"Tool validation failed: {error}",
-        value=None,
-        success=False,
-    )
+    """Delegate to _ToolValidator for backward compatibility."""
+    return _ToolValidator.handle_validation_error(log=log, error=error)
 
 
 def _handle_tool_deadline_error(
@@ -639,58 +871,8 @@ def dispatch_tool_invocation(
     context: ToolExecutionContext,
     outcome: ToolExecutionOutcome,
 ) -> ToolInvoked:
-    """Send a tool invocation event to the session dispatcher."""
-    session_id = getattr(context.session, "session_id", None)
-    rendered_output = outcome.result.render()
-    usage = token_usage_from_payload(context.provider_payload)
-
-    invocation = ToolInvoked(
-        prompt_name=context.prompt_name,
-        adapter=context.adapter_name,
-        name=outcome.tool.name,
-        params=outcome.params,
-        result=cast(ToolResult[object], outcome.result),
-        session_id=session_id,
-        created_at=datetime.now(UTC),
-        usage=usage,
-        rendered_output=rendered_output,
-        call_id=outcome.call_id,
-        run_context=context.run_context,
-        event_id=uuid4(),
-    )
-    dispatch_result = context.session.dispatcher.dispatch(invocation)
-    if not dispatch_result.ok:
-        # Restore to pre-tool state if tool succeeded (not already restored)
-        if outcome.result.success:
-            _restore_snapshot_if_needed(
-                context, outcome.snapshot, outcome.log, reason="dispatch_failure"
-            )
-        outcome.log.warning(
-            "State rollback triggered after dispatch failure.",
-            event="state_rollback_due_to_dispatch_failure",
-        )
-        failure_handlers = [
-            getattr(failure.handler, "__qualname__", repr(failure.handler))
-            for failure in dispatch_result.errors
-        ]
-        outcome.log.error(
-            "Tool event dispatch failed.",
-            event="tool_event_dispatch_failed",
-            context={
-                "failure_count": len(dispatch_result.errors),
-                "failed_handlers": failure_handlers,
-            },
-        )
-        outcome.result.message = context.format_dispatch_failures(
-            dispatch_result.errors
-        )
-    else:
-        outcome.log.debug(
-            "Tool event dispatched.",
-            event="tool_event_dispatched",
-            context={"handler_count": dispatch_result.handled_count},
-        )
-    return invocation
+    """Delegate to _ToolDispatcher for backward compatibility."""
+    return _ToolDispatcher.dispatch_invocation(context=context, outcome=outcome)
 
 
 def _append_feedback_to_result(
