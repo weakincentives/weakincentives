@@ -72,6 +72,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "orchestration": "Use AgentLoop for request handling",
     "evaluation": "Test agents with datasets and evaluators",
     "lifecycle": "Manage shutdown, health checks, and watchdogs",
+    "tracing": "Request correlation and distributed tracing integration",
     "resources": "Dependency injection, scopes, and lifecycle management",
     "progressive-disclosure": "Control context size with summaries",
     "prompt-overrides": "Iterate on prompts without code changes",
