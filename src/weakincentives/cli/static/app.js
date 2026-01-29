@@ -2138,6 +2138,146 @@ function renderTranscriptZoom() {
   const entry = state.zoomEntry;
   const entryType = entry.entry_type || "unknown";
   const role = entry.role || "";
+
+  // Check if this is a tool-related entry that can be combined
+  const isToolEntry = entryType === "tool_use" || entryType === "tool_result";
+  const linked = isToolEntry ? findLinkedToolEntry(entry) : null;
+
+  if (isToolEntry && linked) {
+    // Render combined tool call + result view
+    renderCombinedToolView(entry, linked.entry);
+  } else {
+    // Render regular entry view
+    renderRegularEntryView(entry, entryType, role);
+  }
+}
+
+/**
+ * Renders a combined view of tool_use and tool_result entries.
+ */
+function renderCombinedToolView(currentEntry, linkedEntry) {
+  // Determine which is the call and which is the result
+  const isCurrentCall = currentEntry.entry_type === "tool_use";
+  const toolCall = isCurrentCall ? currentEntry : linkedEntry;
+  const toolResult = isCurrentCall ? linkedEntry : currentEntry;
+
+  // Header - show as combined tool execution
+  const toolName = toolCall.tool_name || "unknown";
+  elements.zoomModalType.textContent = `TOOL: ${toolName}`;
+  elements.zoomModalType.className = "zoom-type-badge zoom-type-tool_use";
+  elements.zoomModalTimestamp.textContent = toolCall.timestamp || "";
+
+  const source = toolCall.transcript_source || "";
+  const seq =
+    toolCall.sequence_number !== null && toolCall.sequence_number !== undefined
+      ? `#${toolCall.sequence_number}`
+      : "";
+  elements.zoomModalSource.textContent = source ? `${source}${seq}` : "";
+  elements.zoomModalSource.style.display = source ? "" : "none";
+
+  // Content panel - Tool Call (input)
+  elements.zoomContent.innerHTML = "";
+
+  const callHeader = document.createElement("div");
+  callHeader.className = "zoom-combined-header zoom-combined-call";
+  callHeader.innerHTML = '<span class="zoom-combined-badge">CALL</span> Tool Input';
+  elements.zoomContent.appendChild(callHeader);
+
+  // Tool call content
+  const callContent = formatTranscriptContent(toolCall);
+  if (callContent.value) {
+    const callSection = document.createElement("div");
+    callSection.className = "zoom-section";
+    if (callContent.kind === "json") {
+      const jsonContainer = document.createElement("div");
+      jsonContainer.className = "zoom-json-tree";
+      try {
+        const parsed = JSON.parse(callContent.value);
+        jsonContainer.appendChild(renderZoomJsonTree(parsed, "", 0));
+      } catch {
+        jsonContainer.innerHTML = `<pre>${escapeHtml(callContent.value)}</pre>`;
+      }
+      callSection.appendChild(jsonContainer);
+    } else {
+      callSection.innerHTML = `<div class="zoom-text-content">${escapeHtml(callContent.value)}</div>`;
+    }
+    elements.zoomContent.appendChild(callSection);
+  }
+
+  // Show raw call JSON tree
+  const callPayload = toolCall.parsed || toolCall.raw_json;
+  if (callPayload) {
+    const jsonSection = document.createElement("div");
+    jsonSection.className = "zoom-section";
+    const label = document.createElement("div");
+    label.className = "zoom-section-label";
+    label.textContent = "Call Raw JSON";
+    jsonSection.appendChild(label);
+    const jsonContainer = document.createElement("div");
+    jsonContainer.className = "zoom-json-tree";
+    jsonContainer.appendChild(renderZoomJsonTree(callPayload, "", 0));
+    jsonSection.appendChild(jsonContainer);
+    elements.zoomContent.appendChild(jsonSection);
+  }
+
+  // Details panel - Tool Result (output)
+  elements.zoomDetails.innerHTML = "";
+
+  const resultHeader = document.createElement("div");
+  resultHeader.className = "zoom-combined-header zoom-combined-result";
+  resultHeader.innerHTML = '<span class="zoom-combined-badge">RESULT</span> Tool Output';
+  elements.zoomDetails.appendChild(resultHeader);
+
+  // Tool result content
+  const resultContent = formatTranscriptContent(toolResult);
+  if (resultContent.value) {
+    const resultSection = document.createElement("div");
+    resultSection.className = "zoom-section";
+    if (resultContent.kind === "json") {
+      const jsonContainer = document.createElement("div");
+      jsonContainer.className = "zoom-json-tree";
+      try {
+        const parsed = JSON.parse(resultContent.value);
+        jsonContainer.appendChild(renderZoomJsonTree(parsed, "", 0));
+      } catch {
+        jsonContainer.innerHTML = `<pre>${escapeHtml(resultContent.value)}</pre>`;
+      }
+      resultSection.appendChild(jsonContainer);
+    } else {
+      resultSection.innerHTML = `<div class="zoom-text-content">${escapeHtml(resultContent.value)}</div>`;
+    }
+    elements.zoomDetails.appendChild(resultSection);
+  }
+
+  // Show raw result JSON tree
+  const resultPayload = toolResult.parsed || toolResult.raw_json;
+  if (resultPayload) {
+    const jsonSection = document.createElement("div");
+    jsonSection.className = "zoom-section";
+    const label = document.createElement("div");
+    label.className = "zoom-section-label";
+    label.textContent = "Result Raw JSON";
+    jsonSection.appendChild(label);
+    const jsonContainer = document.createElement("div");
+    jsonContainer.className = "zoom-json-tree";
+    jsonContainer.appendChild(renderZoomJsonTree(resultPayload, "", 0));
+    jsonSection.appendChild(jsonContainer);
+    elements.zoomDetails.appendChild(jsonSection);
+  }
+
+  // Add tool metadata at the bottom of details
+  if (toolCall.tool_use_id) {
+    const metaSection = document.createElement("div");
+    metaSection.className = "zoom-section zoom-tool-meta";
+    metaSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content mono">${escapeHtml(toolCall.tool_use_id)}</div>`;
+    elements.zoomDetails.appendChild(metaSection);
+  }
+}
+
+/**
+ * Renders a regular (non-tool) entry view.
+ */
+function renderRegularEntryView(entry, entryType, role) {
   const typeClass = role ? `zoom-type-${role}` : `zoom-type-${entryType}`;
 
   // Header
@@ -2195,42 +2335,6 @@ function renderTranscriptZoom() {
     toolIdSection.className = "zoom-section";
     toolIdSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content">${escapeHtml(entry.tool_use_id)}</div>`;
     elements.zoomDetails.appendChild(toolIdSection);
-
-    // Find and show linked tool entry (call <-> result)
-    const linked = findLinkedToolEntry(entry);
-    if (linked) {
-      const linkSection = document.createElement("div");
-      linkSection.className = "zoom-section zoom-linked-section";
-      const isToolUse = entryType === "tool_use";
-      const linkLabel = isToolUse ? "Tool Result" : "Tool Call";
-      const linkIcon = isToolUse ? "↓" : "↑";
-
-      linkSection.innerHTML = `<div class="zoom-section-label">${linkLabel}</div>`;
-
-      const linkButton = document.createElement("button");
-      linkButton.className = "zoom-linked-button";
-      linkButton.type = "button";
-      linkButton.innerHTML = `<span class="zoom-linked-icon">${linkIcon}</span> Jump to ${linkLabel}`;
-      linkButton.addEventListener("click", () => {
-        openTranscriptZoom(linked.index);
-      });
-      linkSection.appendChild(linkButton);
-
-      // Show a preview of the linked entry content
-      const linkedContent = formatTranscriptContent(linked.entry);
-      if (linkedContent.value) {
-        const preview = document.createElement("div");
-        preview.className = "zoom-linked-preview";
-        const previewText =
-          linkedContent.value.length > 200
-            ? `${linkedContent.value.slice(0, 200)}...`
-            : linkedContent.value;
-        preview.textContent = previewText;
-        linkSection.appendChild(preview);
-      }
-
-      elements.zoomDetails.appendChild(linkSection);
-    }
   }
 
   if (detailsPayload) {

@@ -1954,50 +1954,50 @@ select:focus-visible {
   margin-left: 4px;
 }
 
-/* Linked tool entry section */
-.zoom-linked-section {
-  background: var(--color-primary-subtle);
-  border-radius: var(--radius-sm);
-  padding: 12px;
-  margin-top: 8px;
-}
-
-.zoom-linked-button {
-  display: inline-flex;
+/* Combined tool call + result view */
+.zoom-combined-header {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  background: var(--color-primary);
-  color: white;
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.zoom-linked-button:hover {
-  background: var(--color-primary-hover);
-}
-
-.zoom-linked-icon {
-  font-size: 14px;
-}
-
-.zoom-linked-preview {
-  margin-top: 10px;
+  gap: 10px;
   padding: 10px 12px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--color-text-muted);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 100px;
-  overflow-y: auto;
+  margin: -16px -16px 16px -16px;
+  font-weight: 600;
+  font-size: 13px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.zoom-combined-call {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+.zoom-combined-result {
+  background: var(--color-success-subtle);
+  color: var(--color-success);
+}
+
+.zoom-combined-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: currentColor;
+  color: white;
+}
+
+.zoom-combined-call .zoom-combined-badge {
+  background: var(--color-primary);
+}
+
+.zoom-combined-result .zoom-combined-badge {
+  background: var(--color-success);
+}
+
+.zoom-tool-meta {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
 }
 
 /* --- Bundle Info Panel --- */
