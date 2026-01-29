@@ -1,0 +1,14 @@
+{
+  "name": "weakincentives",
+  "private": true,
+  "description": "Frontend tooling for weakincentives debug UI",
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4"
+  },
+  "scripts": {
+    "lint": "biome check src/weakincentives/cli/static/",
+    "lint:fix": "biome check --write src/weakincentives/cli/static/",
+    "format": "biome format --write src/weakincentives/cli/static/",
+    "format:check": "biome format src/weakincentives/cli/static/"
+  }
+}

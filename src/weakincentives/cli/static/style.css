@@ -23,7 +23,8 @@
   --color-error: #ef4444;
 
   /* Typography */
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
   --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 
   /* Spacing & Radius */
@@ -1186,11 +1187,21 @@ kbd {
   animation: itemEnter 0.25s ease backwards;
 }
 
-.item-card:nth-child(1) { animation-delay: 0ms; }
-.item-card:nth-child(2) { animation-delay: 30ms; }
-.item-card:nth-child(3) { animation-delay: 60ms; }
-.item-card:nth-child(4) { animation-delay: 90ms; }
-.item-card:nth-child(5) { animation-delay: 120ms; }
+.item-card:nth-child(1) {
+  animation-delay: 0ms;
+}
+.item-card:nth-child(2) {
+  animation-delay: 30ms;
+}
+.item-card:nth-child(3) {
+  animation-delay: 60ms;
+}
+.item-card:nth-child(4) {
+  animation-delay: 90ms;
+}
+.item-card:nth-child(5) {
+  animation-delay: 120ms;
+}
 
 @keyframes itemEnter {
   from {
@@ -1229,20 +1240,46 @@ select:focus-visible {
   color: var(--color-text-faint);
 }
 
-.type-icon.type-string { color: #059669; }
-.type-icon.type-number { color: #0284c7; }
-.type-icon.type-boolean { color: #dc2626; }
-.type-icon.type-null { color: #64748b; }
-.type-icon.type-array { color: #7c3aed; }
-.type-icon.type-object { color: #ea580c; }
-.type-icon.type-markdown { color: #0d9488; }
+.type-icon.type-string {
+  color: #059669;
+}
+.type-icon.type-number {
+  color: #0284c7;
+}
+.type-icon.type-boolean {
+  color: #dc2626;
+}
+.type-icon.type-null {
+  color: #64748b;
+}
+.type-icon.type-array {
+  color: #7c3aed;
+}
+.type-icon.type-object {
+  color: #ea580c;
+}
+.type-icon.type-markdown {
+  color: #0d9488;
+}
 
-[data-theme="dark"] .type-icon.type-string { color: #34d399; }
-[data-theme="dark"] .type-icon.type-number { color: #38bdf8; }
-[data-theme="dark"] .type-icon.type-boolean { color: #f87171; }
-[data-theme="dark"] .type-icon.type-array { color: #a78bfa; }
-[data-theme="dark"] .type-icon.type-object { color: #fb923c; }
-[data-theme="dark"] .type-icon.type-markdown { color: #2dd4bf; }
+[data-theme="dark"] .type-icon.type-string {
+  color: #34d399;
+}
+[data-theme="dark"] .type-icon.type-number {
+  color: #38bdf8;
+}
+[data-theme="dark"] .type-icon.type-boolean {
+  color: #f87171;
+}
+[data-theme="dark"] .type-icon.type-array {
+  color: #a78bfa;
+}
+[data-theme="dark"] .type-icon.type-object {
+  color: #fb923c;
+}
+[data-theme="dark"] .type-icon.type-markdown {
+  color: #2dd4bf;
+}
 
 /* --- Scrollbar styling for dark mode --- */
 
@@ -2241,14 +2278,14 @@ select:focus-visible {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.2);
+  background: rgba(255, 255, 255, 0.2);
   cursor: pointer;
   font-size: 10px;
   line-height: 1;
 }
 
 .active-filter .remove-filter:hover {
-  background: rgba(255,255,255,0.4);
+  background: rgba(255, 255, 255, 0.4);
 }
 
 .panel-header {
@@ -2677,4 +2714,71 @@ select:focus-visible {
   .environment-sections {
     grid-template-columns: 1fr;
   }
+}
+
+/* ============================================================================
+   VIRTUAL SCROLL
+   ============================================================================ */
+
+/**
+ * Virtual scroller spacer elements.
+ * These maintain the correct scroll position by taking up space
+ * for items that are not currently rendered.
+ */
+.virtual-spacer {
+  flex-shrink: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
+.virtual-spacer-top {
+  /* Height set dynamically by JS */
+}
+
+.virtual-spacer-bottom {
+  /* Height set dynamically by JS */
+}
+
+/**
+ * Sentinel element for intersection observer.
+ * When this becomes visible, more items are loaded.
+ */
+.virtual-load-sentinel {
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+}
+
+/**
+ * Loading indicator shown while fetching more items.
+ */
+.virtual-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.virtual-loading::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  margin-right: 8px;
+  animation: spin 0.8s linear infinite;
+}
+
+/**
+ * Ensure proper scrolling behavior for virtual scroll containers.
+ */
+.logs-list,
+.transcript-list {
+  /* Ensure smooth scrolling */
+  scroll-behavior: auto;
+  /* Prevent content shifts during virtual scroll updates */
+  overflow-anchor: none;
 }
