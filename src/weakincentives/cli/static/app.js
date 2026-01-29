@@ -49,13 +49,13 @@ class VirtualScroller {
     // Initial state
     this.visibleStart = 0;
     this.visibleEnd = 0;
+    this.scrollTimeout = null; // Track debounce timeout for cleanup
   }
 
   debounce(fn, delay) {
-    let timeout;
     return (...args) => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => fn(...args), delay);
+      clearTimeout(this.scrollTimeout);
+      this.scrollTimeout = setTimeout(() => fn(...args), delay);
     };
   }
 
@@ -297,6 +297,9 @@ class VirtualScroller {
   }
 
   destroy() {
+    // Clear pending debounced scroll handler to prevent post-destroy execution
+    clearTimeout(this.scrollTimeout);
+
     this.container.removeEventListener("scroll", this.scrollHandler);
     this.resizeObserver.disconnect();
     this.loadMoreObserver.disconnect();
