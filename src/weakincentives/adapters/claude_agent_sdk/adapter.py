@@ -1048,8 +1048,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                         },
                     )
 
-                # After first round, check if we should continue based on task completion
-                if continuation_round == 0 and checker is not None:
+                # Check if we should continue based on task completion
+                if checker is not None and round_messages:
                     # Import task completion types
                     from ._task_completion import TaskCompletionContext
 
@@ -1094,16 +1094,15 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                         # Continue the loop to receive more messages
                         continue
 
-                    # Task is complete or no feedback, exit loop
+                    # Task is complete or no feedback, log and exit
                     if result.complete:
                         logger.debug(
                             "claude_agent_sdk.sdk_query.task_complete",
                             event="sdk_query.task_complete",
                             context={"feedback": result.feedback},
                         )
-                    break
 
-                # No checker or not first round, exit after receiving messages
+                # Exit loop if no checker, no messages, or completion check passed
                 break
 
         finally:
