@@ -2285,157 +2285,137 @@ function preprocessTranscriptEntries(entries) {
 }
 
 /**
+ * Helper: Renders content (text or JSON) in a scrollable container.
+ */
+function renderContentSection(content, parentElement) {
+  const section = document.createElement("div");
+  section.className = "zoom-section";
+
+  if (content.kind === "json") {
+    const jsonContainer = document.createElement("div");
+    jsonContainer.className = "zoom-json-tree";
+    try {
+      const parsed = JSON.parse(content.value);
+      jsonContainer.appendChild(renderZoomJsonTree(parsed, "", 0));
+    } catch {
+      jsonContainer.innerHTML = `<pre>${escapeHtml(content.value)}</pre>`;
+    }
+    section.appendChild(jsonContainer);
+  } else {
+    const scrollContainer = document.createElement("div");
+    scrollContainer.className = "zoom-text-scroll";
+    scrollContainer.innerHTML = `<div class="zoom-text-content">${escapeHtml(content.value)}</div>`;
+    section.appendChild(scrollContainer);
+  }
+
+  parentElement.appendChild(section);
+}
+
+/**
+ * Helper: Renders raw JSON tree with label.
+ */
+function renderRawJsonSection(payload, label, parentElement) {
+  if (!payload) {
+    return;
+  }
+
+  const section = document.createElement("div");
+  section.className = "zoom-section";
+  const labelDiv = document.createElement("div");
+  labelDiv.className = "zoom-section-label";
+  labelDiv.textContent = label;
+  section.appendChild(labelDiv);
+
+  const jsonContainer = document.createElement("div");
+  jsonContainer.className = "zoom-json-tree";
+  jsonContainer.appendChild(renderZoomJsonTree(payload, "", 0));
+  section.appendChild(jsonContainer);
+
+  parentElement.appendChild(section);
+}
+
+/**
  * Renders a transcript entry in the zoom modal.
  */
 function renderTranscriptZoom() {
   const entry = state.zoomEntry;
-  const entryType = entry.entry_type || "unknown";
-  const role = entry.role || "";
 
-  // Check if this is a composite entry (tool call + result)
-  if (entry.isComposite && entry.toolResult) {
-    // Render combined tool call + result view
-    renderCombinedToolView(entry, entry.toolResult);
+  if (entry.isComposite) {
+    renderCompositeEntryZoom(entry);
   } else {
-    // Render regular entry view
-    renderRegularEntryView(entry, entryType, role);
+    renderRegularEntryZoom(entry);
   }
 }
 
 /**
- * Renders a combined view of tool call and tool result entries.
- * @param {Object} toolCall - The tool call entry
- * @param {Object} toolResult - The tool result entry
+ * Renders a composite tool call + result entry in zoom view.
  */
-function renderCombinedToolView(toolCall, toolResult) {
-  // Header - show as combined tool execution
-  const toolName = toolCall.tool_name || "unknown";
+function renderCompositeEntryZoom(entry) {
+  const toolName = entry.tool_name || "unknown";
+
+  // Header
   elements.zoomModalType.textContent = `TOOL: ${toolName}`;
   elements.zoomModalType.className = "zoom-type-badge zoom-type-tool_use";
-  elements.zoomModalTimestamp.textContent = toolCall.timestamp || "";
+  elements.zoomModalTimestamp.textContent = entry.timestamp || "";
 
-  const source = toolCall.transcript_source || "";
+  const source = entry.transcript_source || "";
   const seq =
-    toolCall.sequence_number !== null && toolCall.sequence_number !== undefined
-      ? `#${toolCall.sequence_number}`
+    entry.sequence_number !== null && entry.sequence_number !== undefined
+      ? `#${entry.sequence_number}`
       : "";
   elements.zoomModalSource.textContent = source ? `${source}${seq}` : "";
   elements.zoomModalSource.style.display = source ? "" : "none";
 
-  // Content panel - Tool Call (input)
+  // Left panel: Tool Call
   elements.zoomContent.innerHTML = "";
-
   const callHeader = document.createElement("div");
   callHeader.className = "zoom-combined-header zoom-combined-call";
   callHeader.innerHTML = '<span class="zoom-combined-badge">CALL</span> Tool Input';
   elements.zoomContent.appendChild(callHeader);
 
-  // Tool call content
-  const callContent = formatTranscriptContent(toolCall);
+  const callContent = formatTranscriptContent(entry);
   if (callContent.value) {
-    const callSection = document.createElement("div");
-    callSection.className = "zoom-section";
-    if (callContent.kind === "json") {
-      const jsonContainer = document.createElement("div");
-      jsonContainer.className = "zoom-json-tree";
-      try {
-        const parsed = JSON.parse(callContent.value);
-        jsonContainer.appendChild(renderZoomJsonTree(parsed, "", 0));
-      } catch {
-        jsonContainer.innerHTML = `<pre>${escapeHtml(callContent.value)}</pre>`;
-      }
-      callSection.appendChild(jsonContainer);
-    } else {
-      const scrollContainer = document.createElement("div");
-      scrollContainer.className = "zoom-text-scroll";
-      scrollContainer.innerHTML = `<div class="zoom-text-content">${escapeHtml(callContent.value)}</div>`;
-      callSection.appendChild(scrollContainer);
-    }
-    elements.zoomContent.appendChild(callSection);
+    renderContentSection(callContent, elements.zoomContent);
   }
+  renderRawJsonSection(entry.parsed || entry.raw_json, "Call Raw JSON", elements.zoomContent);
 
-  // Show raw call JSON tree
-  const callPayload = toolCall.parsed || toolCall.raw_json;
-  if (callPayload) {
-    const jsonSection = document.createElement("div");
-    jsonSection.className = "zoom-section";
-    const label = document.createElement("div");
-    label.className = "zoom-section-label";
-    label.textContent = "Call Raw JSON";
-    jsonSection.appendChild(label);
-    const jsonContainer = document.createElement("div");
-    jsonContainer.className = "zoom-json-tree";
-    jsonContainer.appendChild(renderZoomJsonTree(callPayload, "", 0));
-    jsonSection.appendChild(jsonContainer);
-    elements.zoomContent.appendChild(jsonSection);
-  }
-
-  // Details panel - Tool Result (output)
+  // Right panel: Tool Result
   elements.zoomDetails.innerHTML = "";
-
   const resultHeader = document.createElement("div");
   resultHeader.className = "zoom-combined-header zoom-combined-result";
   resultHeader.innerHTML = '<span class="zoom-combined-badge">RESULT</span> Tool Output';
   elements.zoomDetails.appendChild(resultHeader);
 
-  // Tool result content
-  const resultContent = formatTranscriptContent(toolResult);
-  if (resultContent.value) {
-    const resultSection = document.createElement("div");
-    resultSection.className = "zoom-section";
-    if (resultContent.kind === "json") {
-      const jsonContainer = document.createElement("div");
-      jsonContainer.className = "zoom-json-tree";
-      try {
-        const parsed = JSON.parse(resultContent.value);
-        jsonContainer.appendChild(renderZoomJsonTree(parsed, "", 0));
-      } catch {
-        jsonContainer.innerHTML = `<pre>${escapeHtml(resultContent.value)}</pre>`;
-      }
-      resultSection.appendChild(jsonContainer);
-    } else {
-      const scrollContainer = document.createElement("div");
-      scrollContainer.className = "zoom-text-scroll";
-      scrollContainer.innerHTML = `<div class="zoom-text-content">${escapeHtml(resultContent.value)}</div>`;
-      resultSection.appendChild(scrollContainer);
+  if (entry.toolResult) {
+    const resultContent = formatTranscriptContent(entry.toolResult);
+    if (resultContent.value) {
+      renderContentSection(resultContent, elements.zoomDetails);
     }
-    elements.zoomDetails.appendChild(resultSection);
+    renderRawJsonSection(
+      entry.toolResult.parsed || entry.toolResult.raw_json,
+      "Result Raw JSON",
+      elements.zoomDetails
+    );
   }
 
-  // Show raw result JSON tree
-  const resultPayload = toolResult.parsed || toolResult.raw_json;
-  if (resultPayload) {
-    const jsonSection = document.createElement("div");
-    jsonSection.className = "zoom-section";
-    const label = document.createElement("div");
-    label.className = "zoom-section-label";
-    label.textContent = "Result Raw JSON";
-    jsonSection.appendChild(label);
-    const jsonContainer = document.createElement("div");
-    jsonContainer.className = "zoom-json-tree";
-    jsonContainer.appendChild(renderZoomJsonTree(resultPayload, "", 0));
-    jsonSection.appendChild(jsonContainer);
-    elements.zoomDetails.appendChild(jsonSection);
-  }
-
-  // Add tool metadata at the bottom of details
-  if (toolCall.tool_use_id) {
+  // Tool metadata
+  if (entry.tool_use_id) {
     const metaSection = document.createElement("div");
     metaSection.className = "zoom-section zoom-tool-meta";
-    metaSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content mono">${escapeHtml(toolCall.tool_use_id)}</div>`;
+    metaSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content mono">${escapeHtml(entry.tool_use_id)}</div>`;
     elements.zoomDetails.appendChild(metaSection);
   }
 }
 
 /**
- * Renders a regular (non-tool) entry view.
+ * Renders a regular (non-composite) entry in zoom view.
  */
-function renderRegularEntryView(entry, entryType, role) {
-  const typeClass = role ? `zoom-type-${role}` : `zoom-type-${entryType}`;
+function renderRegularEntryZoom(entry) {
+  const entryType = entry.entry_type || "unknown";
 
   // Header
   elements.zoomModalType.textContent = entryType.toUpperCase();
-  elements.zoomModalType.className = `zoom-type-badge ${typeClass}`;
+  elements.zoomModalType.className = `zoom-type-badge zoom-type-${entryType}`;
   elements.zoomModalTimestamp.textContent = entry.timestamp || "";
 
   const source = entry.transcript_source || "";
@@ -2447,33 +2427,13 @@ function renderRegularEntryView(entry, entryType, role) {
   elements.zoomModalSource.style.display = source ? "" : "none";
 
   // Content panel
+  elements.zoomContent.innerHTML = "";
   const content = formatTranscriptContent(entry);
-  let contentHtml = "";
-
-  if (entry.prompt_name) {
-    contentHtml += `<div class="zoom-section">`;
-    contentHtml += `<div class="zoom-section-label">Prompt</div>`;
-    contentHtml += `<div class="zoom-text-content">${escapeHtml(entry.prompt_name)}</div>`;
-    contentHtml += "</div>";
-  }
-
   if (content.value) {
-    contentHtml += `<div class="zoom-section">`;
-    contentHtml += `<div class="zoom-section-label">${role || entryType} Content</div>`;
-    if (content.kind === "json") {
-      contentHtml += `<pre class="zoom-json-content">${escapeHtml(content.value)}</pre>`;
-    } else {
-      contentHtml += `<div class="zoom-text-content">${escapeHtml(content.value)}</div>`;
-    }
-    contentHtml += "</div>";
-  } else {
-    contentHtml += `<div class="zoom-empty">(no content)</div>`;
+    renderContentSection(content, elements.zoomContent);
   }
 
-  elements.zoomContent.innerHTML = contentHtml;
-
-  // Details panel - render pretty-printed JSON tree
-  const detailsPayload = entry.parsed || entry.raw_json;
+  // Details panel
   elements.zoomDetails.innerHTML = "";
 
   if (entry.tool_name) {
@@ -2490,22 +2450,14 @@ function renderRegularEntryView(entry, entryType, role) {
     elements.zoomDetails.appendChild(toolIdSection);
   }
 
-  if (detailsPayload) {
-    const jsonSection = document.createElement("div");
-    jsonSection.className = "zoom-section";
-    const label = document.createElement("div");
-    label.className = "zoom-section-label";
-    label.textContent = "Raw JSON";
-    jsonSection.appendChild(label);
-
-    // Render pretty-printed JSON tree
-    const jsonContainer = document.createElement("div");
-    jsonContainer.className = "zoom-json-tree";
-    jsonContainer.appendChild(renderZoomJsonTree(detailsPayload, "", 0));
-    jsonSection.appendChild(jsonContainer);
-
-    elements.zoomDetails.appendChild(jsonSection);
+  if (entry.prompt_name) {
+    const promptSection = document.createElement("div");
+    promptSection.className = "zoom-section";
+    promptSection.innerHTML = `<div class="zoom-section-label">Prompt</div><div class="zoom-text-content">${escapeHtml(entry.prompt_name)}</div>`;
+    elements.zoomDetails.appendChild(promptSection);
   }
+
+  renderRawJsonSection(entry.parsed || entry.raw_json, "Raw JSON", elements.zoomDetails);
 
   if (elements.zoomDetails.children.length === 0) {
     elements.zoomDetails.innerHTML = `<div class="zoom-empty">(no additional details)</div>`;
