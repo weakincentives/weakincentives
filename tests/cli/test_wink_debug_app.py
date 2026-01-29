@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
@@ -1092,6 +1093,157 @@ def test_file_endpoint_binary_file(tmp_path: Path) -> None:
     content = file_response.json()
     assert content["type"] == "binary"
     assert content["content"] is None
+
+
+def test_file_endpoint_image_file(tmp_path: Path) -> None:
+    """Test reading an image file returns base64 content."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    # Create a minimal PNG file (1x1 transparent pixel)
+    png_data = bytes(
+        [
+            0x89,
+            0x50,
+            0x4E,
+            0x47,
+            0x0D,
+            0x0A,
+            0x1A,
+            0x0A,  # PNG signature
+            0x00,
+            0x00,
+            0x00,
+            0x0D,
+            0x49,
+            0x48,
+            0x44,
+            0x52,  # IHDR chunk
+            0x00,
+            0x00,
+            0x00,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x01,  # 1x1
+            0x08,
+            0x06,
+            0x00,
+            0x00,
+            0x00,
+            0x1F,
+            0x15,
+            0xC4,
+            0x89,
+            0x00,
+            0x00,
+            0x00,
+            0x0A,
+            0x49,
+            0x44,
+            0x41,  # IDAT chunk
+            0x54,
+            0x78,
+            0x9C,
+            0x63,
+            0x00,
+            0x01,
+            0x00,
+            0x00,
+            0x05,
+            0x00,
+            0x01,
+            0x0D,
+            0x0A,
+            0x2D,
+            0xB4,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x49,
+            0x45,
+            0x4E,
+            0x44,
+            0xAE,  # IEND chunk
+            0x42,
+            0x60,
+            0x82,
+        ]
+    )
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/filesystem/image.png", png_data)
+
+    logger = debug_app.get_logger("test.file.image")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    file_response = client.get("/api/files/filesystem/image.png")
+    assert file_response.status_code == 200
+    content = file_response.json()
+    assert content["type"] == "image"
+    assert content["mime_type"] == "image/png"
+    assert content["content"] == base64.b64encode(png_data).decode("ascii")
+
+
+def test_file_endpoint_image_extensions(tmp_path: Path) -> None:
+    """Test image detection for various file extensions."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    # Test data (just arbitrary bytes, not real images)
+    test_data = b"test image data"
+
+    extensions = [
+        (".png", "image/png"),
+        (".jpg", "image/jpeg"),
+        (".jpeg", "image/jpeg"),
+        (".gif", "image/gif"),
+        (".webp", "image/webp"),
+        (".svg", "image/svg+xml"),
+        (".ico", "image/x-icon"),
+        (".bmp", "image/bmp"),
+    ]
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        for ext, _ in extensions:
+            zf.writestr(f"debug_bundle/filesystem/test{ext}", test_data)
+
+    logger = debug_app.get_logger("test.file.image.ext")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    for ext, expected_mime in extensions:
+        file_response = client.get(f"/api/files/filesystem/test{ext}")
+        assert file_response.status_code == 200, f"Failed for extension {ext}"
+        content = file_response.json()
+        assert content["type"] == "image", f"Expected image type for {ext}"
+        assert content["mime_type"] == expected_mime, f"Wrong MIME for {ext}"
+        assert content["content"] == base64.b64encode(test_data).decode("ascii")
+
+
+def test_file_endpoint_image_case_insensitive(tmp_path: Path) -> None:
+    """Test image detection is case-insensitive for extensions."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    test_data = b"test image"
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/filesystem/upper.PNG", test_data)
+        zf.writestr("debug_bundle/filesystem/mixed.JpG", test_data)
+
+    logger = debug_app.get_logger("test.file.image.case")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    for filename in ["upper.PNG", "mixed.JpG"]:
+        file_response = client.get(f"/api/files/filesystem/{filename}")
+        assert file_response.status_code == 200
+        content = file_response.json()
+        assert content["type"] == "image"
 
 
 def test_bundle_store_close(tmp_path: Path) -> None:

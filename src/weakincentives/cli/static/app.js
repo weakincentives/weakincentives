@@ -1886,7 +1886,22 @@ async function selectFilesystemFile(fullPath, displayPath) {
     elements.filesystemContent.classList.remove("hidden");
     elements.filesystemCurrentPath.textContent = displayPath;
 
-    if (result.type === "binary") {
+    if (result.type === "image") {
+      // Whitelist of allowed MIME types to prevent XSS via crafted MIME strings
+      const allowedMimeTypes = new Set([
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/svg+xml",
+        "image/x-icon",
+        "image/bmp",
+      ]);
+      const mimeType = allowedMimeTypes.has(result.mime_type) ? result.mime_type : "image/png";
+      const dataUrl = `data:${mimeType};base64,${result.content}`;
+      elements.filesystemViewer.innerHTML = `<div class="image-container"><img src="${dataUrl}" alt="${escapeHtml(displayPath)}" class="filesystem-image" /></div>`;
+      state.fileContent = null;
+    } else if (result.type === "binary") {
       elements.filesystemViewer.innerHTML = '<p class="muted">Binary file cannot be displayed</p>';
       state.fileContent = null;
     } else {
