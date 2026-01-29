@@ -933,13 +933,13 @@ class BundleWriter:
         self, retention: BundleRetentionPolicy, exclude_path: Path
     ) -> None:
         """Enforce retention policy on bundles in target directory."""
-        bundles = self._collect_existing_bundles(exclude_path)
+        bundles, file_identity = self._collect_existing_bundles(exclude_path)
         to_delete: set[Path] = set()
 
         self._apply_age_limit(retention, bundles, to_delete)
         self._apply_count_limit(retention, bundles, to_delete)
         self._apply_size_limit(retention, bundles, to_delete)
-        self._delete_marked_bundles(to_delete)
+        self._delete_marked_bundles(to_delete, file_identity)
 
     def _get_retention_search_root(self) -> Path:
         """Get the root directory for retention policy bundle search.
@@ -953,7 +953,7 @@ class BundleWriter:
 
     def _collect_existing_bundles(
         self, exclude_path: Path
-    ) -> list[tuple[Path, datetime, int]]:
+    ) -> tuple[list[tuple[Path, datetime, int]], dict[Path, tuple[int, int]]]:
         """Collect metadata for existing bundles in the target directory.
 
         Searches up to 2 levels deep to support EvalLoop's nested structure
@@ -963,9 +963,18 @@ class BundleWriter:
         Args:
             exclude_path: Path to the just-created bundle to exclude from
                 collection (prevents self-deletion).
+
+        Returns:
+            A tuple of (bundles, file_identity) where:
+            - bundles: List of (path, created_at, size) sorted oldest-first
+            - file_identity: Dict mapping path to (inode, device) for TOCTOU
+              protection during deletion
         """
         search_root = self._get_retention_search_root()
         bundles: list[tuple[Path, datetime, int]] = []
+        # Track file identity (inode, device) to prevent TOCTOU race conditions
+        # during deletion - verifies file hasn't been replaced between check and use
+        file_identity: dict[Path, tuple[int, int]] = {}
         # Resolve exclude path once for efficient comparison
         exclude_path_resolved = exclude_path.resolve()
 
@@ -989,12 +998,15 @@ class BundleWriter:
                     # and timezone-aware timestamps
                     if created_at.tzinfo is None:
                         created_at = created_at.replace(tzinfo=UTC)
-                    size = bundle_path.stat().st_size
+                    stat_info = bundle_path.stat()
+                    size = stat_info.st_size
+                    # Store inode and device for TOCTOU protection
+                    file_identity[bundle_path] = (stat_info.st_ino, stat_info.st_dev)
                     bundles.append((bundle_path, created_at, size))
                 except (BundleValidationError, ValueError, OSError):
                     continue
         bundles.sort(key=lambda x: x[1])
-        return bundles
+        return bundles, file_identity
 
     @staticmethod
     def _apply_age_limit(
@@ -1053,10 +1065,39 @@ class BundleWriter:
             total_size -= size
 
     @staticmethod
-    def _delete_marked_bundles(to_delete: set[Path]) -> None:
-        """Delete bundles marked for removal."""
+    def _delete_marked_bundles(
+        to_delete: set[Path], file_identity: dict[Path, tuple[int, int]]
+    ) -> None:
+        """Delete bundles marked for removal with TOCTOU protection.
+
+        Verifies file identity (inode/device) before deletion to prevent
+        race conditions where a file could be replaced between collection
+        and deletion.
+
+        Args:
+            to_delete: Set of bundle paths to delete.
+            file_identity: Mapping of path to (inode, device) captured during
+                collection for verification.
+        """
         for bundle_path in to_delete:
             try:
+                # Verify file identity before deletion (TOCTOU protection)
+                # This prevents deleting a file that was replaced/moved since collection
+                expected_identity = file_identity.get(bundle_path)
+                if expected_identity is not None:
+                    current_stat = bundle_path.stat()
+                    current_identity = (current_stat.st_ino, current_stat.st_dev)
+                    if current_identity != expected_identity:
+                        _logger.warning(
+                            "Bundle file changed since collection, skipping deletion",
+                            extra={
+                                "bundle_path": str(bundle_path),
+                                "expected_inode": expected_identity[0],
+                                "current_inode": current_identity[0],
+                            },
+                        )
+                        continue
+
                 bundle_path.unlink()
                 _logger.debug(
                     "Deleted old bundle",

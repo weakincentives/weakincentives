@@ -1549,6 +1549,42 @@ class TestRetentionPolicyIntegration:
         assert writer.path is not None
         assert writer.path.exists()
 
+    def test_retention_skips_deletion_if_file_changed(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test TOCTOU protection: skip deletion if file identity changed."""
+        # Create initial bundles
+        paths: list[Path] = []
+        for i in range(3):
+            with BundleWriter(tmp_path) as writer:
+                writer.write_request_input({"bundle": i})
+            assert writer.path is not None
+            paths.append(writer.path)
+
+        # Capture the original inode of the oldest bundle
+        original_inode = paths[0].stat().st_ino
+
+        # Create stale file_identity with the original inode
+        stale_identity: dict[Path, tuple[int, int]] = {
+            paths[0]: (original_inode, paths[0].stat().st_dev)
+        }
+
+        # Replace the bundle file (creates new inode)
+        original_content = paths[0].read_bytes()
+        paths[0].unlink()
+        paths[0].write_bytes(original_content)
+
+        # Verify inode changed
+        new_inode = paths[0].stat().st_ino
+        assert new_inode != original_inode
+
+        # Call _delete_marked_bundles with stale identity
+        BundleWriter._delete_marked_bundles({paths[0]}, stale_identity)
+
+        # File should NOT be deleted due to inode mismatch
+        assert paths[0].exists()
+        assert "Bundle file changed since collection" in caplog.text
+
 
 class TestRetentionWithNestedDirectories:
     """Tests for retention policy with nested directory structures (EvalLoop).
