@@ -1959,3 +1959,336 @@ class TestVerifyTaskCompletion:
         assert any("incomplete_tasks" in record.message for record in caplog.records), (
             "Should log warning about incomplete tasks when budget remains"
         )
+
+
+class TestMultiturnEdgeCases:
+    """Tests for edge cases in multi-turn continuation loop."""
+
+    def test_deadline_exceeded_during_continuation(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that continuation stops when deadline expires mid-loop."""
+        from datetime import timedelta
+        from unittest.mock import MagicMock
+
+        from weakincentives.adapters.claude_agent_sdk import (
+            ClaudeAgentSDKClientConfig,
+            TaskCompletionChecker,
+            TaskCompletionContext,
+            TaskCompletionResult,
+        )
+        from weakincentives.deadlines import Deadline
+
+        # Create a mock deadline that returns positive for first few checks,
+        # then negative to trigger the in-loop deadline check.
+        # Calls: 1) logging, 2) pre-loop check, 3) first loop check (pass),
+        #        4) second loop check (should fail)
+        check_count = 0
+
+        def mock_remaining() -> timedelta:
+            nonlocal check_count
+            check_count += 1
+            if check_count <= 3:
+                return timedelta(seconds=10)  # First 3 checks pass
+            return timedelta(seconds=-1)  # 4th+ check: deadline exceeded
+
+        mock_deadline = MagicMock(spec=Deadline)
+        mock_deadline.remaining.side_effect = mock_remaining
+
+        # Task completion checker that forces continuation
+        class ForceContinuationChecker(TaskCompletionChecker):
+            def __init__(self) -> None:
+                self.check_count = 0
+
+            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+                self.check_count += 1
+                # Always return incomplete to force continuation
+                return TaskCompletionResult.incomplete("Please continue.")
+
+        checker = ForceContinuationChecker()
+
+        # Mock client that yields messages and handles continuation
+        class MockClientDeadlineTest:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                self.receive_count = 0
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                if prompt and not isinstance(prompt, str):
+                    async for _ in prompt:
+                        pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def query(self, prompt: str, session_id: str) -> None:
+                pass  # Handle continuation query
+
+            async def receive_messages(self) -> AsyncGenerator[object, None]:
+                self.receive_count += 1
+                yield MockResultMessage(
+                    result=f"Response {self.receive_count}",
+                    usage={"input_tokens": 10, "output_tokens": 5},
+                )
+
+        _setup_mock_query([])
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=checker,
+            ),
+        )
+
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClientDeadlineTest):
+                response = adapter.evaluate(
+                    simple_prompt, session=session, deadline=mock_deadline
+                )
+
+        # Should return the last response received before deadline
+        assert response.text is not None
+        # Deadline was checked multiple times including inside the loop
+        assert check_count >= 4
+
+    def test_budget_check_raises_exception_during_continuation(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that continuation stops when budget check raises an exception."""
+
+        from weakincentives.adapters.claude_agent_sdk import (
+            ClaudeAgentSDKClientConfig,
+            TaskCompletionChecker,
+            TaskCompletionContext,
+            TaskCompletionResult,
+        )
+        from weakincentives.budget import Budget, BudgetExceededError, BudgetTracker
+
+        # Create a budget tracker that raises on second check
+        budget = Budget(max_total_tokens=1000)
+        budget_tracker = BudgetTracker(budget)
+
+        check_count = 0
+        original_check = budget_tracker.check
+
+        def mock_check() -> None:
+            nonlocal check_count
+            check_count += 1
+            if check_count > 1:
+                raise BudgetExceededError("Budget exceeded during continuation")
+            original_check()
+
+        budget_tracker.check = mock_check  # type: ignore[method-assign]
+
+        # Task completion checker that forces continuation
+        class ForceContinuationChecker(TaskCompletionChecker):
+            def __init__(self) -> None:
+                self.check_count = 0
+
+            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+                self.check_count += 1
+                return TaskCompletionResult.incomplete("Please continue.")
+
+        checker = ForceContinuationChecker()
+
+        # Mock client that yields messages
+        class MockClientBudgetTest:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                self.receive_count = 0
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                if prompt and not isinstance(prompt, str):
+                    async for _ in prompt:
+                        pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def query(self, prompt: str, session_id: str) -> None:
+                pass  # Handle continuation query
+
+            async def receive_messages(self) -> AsyncGenerator[object, None]:
+                self.receive_count += 1
+                yield MockResultMessage(
+                    result=f"Response {self.receive_count}",
+                    usage={"input_tokens": 100, "output_tokens": 50},
+                )
+
+        _setup_mock_query([])
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=checker,
+            ),
+        )
+
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClientBudgetTest):
+                response = adapter.evaluate(
+                    simple_prompt, session=session, budget_tracker=budget_tracker
+                )
+
+        # Should return response from first round before budget check failed
+        assert response.text == "Response 1"
+        # Budget check was called at least twice (first pass, second raise)
+        assert check_count >= 2
+
+    def test_empty_message_stream_breaks_continuation(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that continuation stops when receive_messages returns no messages."""
+
+        # Mock client that returns empty message stream
+        class MockClientEmptyStream:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                if prompt and not isinstance(prompt, str):
+                    async for _ in prompt:
+                        pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def receive_messages(self) -> AsyncGenerator[object, None]:
+                # Return empty stream - no messages
+                return
+                yield  # pragma: no cover - makes this an async generator
+
+        _setup_mock_query([])
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClientEmptyStream):
+                response = adapter.evaluate(simple_prompt, session=session)
+
+        # Should return with no text (empty stream)
+        assert response.text is None
+
+    def test_structured_output_used_for_completion_check(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that structured_output is used for task completion checking."""
+
+        from weakincentives.adapters.claude_agent_sdk import (
+            ClaudeAgentSDKClientConfig,
+            TaskCompletionChecker,
+            TaskCompletionContext,
+            TaskCompletionResult,
+        )
+
+        # Track what tentative_output was passed to the checker
+        captured_outputs: list[object] = []
+
+        class OutputCapturingChecker(TaskCompletionChecker):
+            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+                captured_outputs.append(context.tentative_output)
+                return TaskCompletionResult.ok("Complete")
+
+        checker = OutputCapturingChecker()
+
+        # Mock client that returns a message with structured_output
+        class MockClientStructuredOutput:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                if prompt and not isinstance(prompt, str):
+                    async for _ in prompt:
+                        pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def receive_messages(self) -> AsyncGenerator[object, None]:
+                # Return message with structured_output set
+                yield MockResultMessage(
+                    result="Text result",
+                    structured_output={"key": "structured_value"},
+                    usage={"input_tokens": 10, "output_tokens": 5},
+                )
+
+        _setup_mock_query([])
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=checker,
+            ),
+        )
+
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClientStructuredOutput):
+                response = adapter.evaluate(simple_prompt, session=session)
+
+        # Verify structured_output was passed to the checker (not result)
+        assert len(captured_outputs) == 1
+        assert captured_outputs[0] == {"key": "structured_value"}
+        assert response.text == "Text result"
+
+    def test_incomplete_without_feedback_exits_loop(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that incomplete result without feedback exits the loop."""
+
+        from weakincentives.adapters.claude_agent_sdk import (
+            ClaudeAgentSDKClientConfig,
+            TaskCompletionChecker,
+            TaskCompletionContext,
+            TaskCompletionResult,
+        )
+
+        # Checker that returns incomplete without feedback
+        class NoFeedbackChecker(TaskCompletionChecker):
+            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+                # Return incomplete but without feedback - should exit loop
+                return TaskCompletionResult(complete=False, feedback=None)
+
+        checker = NoFeedbackChecker()
+
+        # Mock client that yields messages
+        class MockClientNoFeedback:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                self.receive_count = 0
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                if prompt and not isinstance(prompt, str):
+                    async for _ in prompt:
+                        pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def receive_messages(self) -> AsyncGenerator[object, None]:
+                self.receive_count += 1
+                yield MockResultMessage(
+                    result=f"Response {self.receive_count}",
+                    usage={"input_tokens": 10, "output_tokens": 5},
+                )
+
+        _setup_mock_query([])
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=checker,
+            ),
+        )
+
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClientNoFeedback):
+                response = adapter.evaluate(simple_prompt, session=session)
+
+        # Should exit after first round due to no feedback
+        assert response.text == "Response 1"
