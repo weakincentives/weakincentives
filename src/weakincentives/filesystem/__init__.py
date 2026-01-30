@@ -111,10 +111,10 @@ READ_ENTIRE_FILE
     Pass as ``limit`` to ``read()`` to read entire file without truncation (-1).
 
 MAX_WRITE_LENGTH
-    Maximum text content length for ``write()`` (48,000 characters).
+    Maximum text content length for ``write()`` (32MB).
 
 MAX_WRITE_BYTES
-    Maximum binary content size for ``write_bytes()`` (48,000 bytes).
+    Maximum binary content size for ``write_bytes()`` (32MB).
 
 MAX_GREP_MATCHES
     Maximum matches returned by ``grep()`` (1,000).

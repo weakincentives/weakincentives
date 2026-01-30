@@ -32,8 +32,8 @@ from ._path import (
 )
 
 DEFAULT_READ_LIMIT: Final[int] = 2_000
-MAX_WRITE_LENGTH: Final[int] = 48_000
-MAX_WRITE_BYTES: Final[int] = 48_000
+MAX_WRITE_LENGTH: Final[int] = 33_554_432  # 32MB
+MAX_WRITE_BYTES: Final[int] = 33_554_432  # 32MB
 MAX_GREP_MATCHES: Final[int] = 1_000
 
 #: Pass as `limit` to `Filesystem.read()` to read the entire file without truncation.

@@ -690,11 +690,14 @@ def test_read_file_missing_path(
 
 def test_write_file_content_length_limit(
     session_and_dispatcher: tuple[Session, InProcessDispatcher],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Temporarily set a smaller limit for testing
+    monkeypatch.setattr(vfs_types_module, "_MAX_WRITE_LENGTH", 100)
     session, _dispatcher = session_and_dispatcher
     section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
-    params = WriteFileParams(file_path="docs/big.txt", content="x" * 48_001)
+    params = WriteFileParams(file_path="docs/big.txt", content="x" * 101)
     with pytest.raises(ToolValidationError, match="Content exceeds"):
         invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
@@ -835,7 +838,12 @@ def test_edit_file_single_occurrence_replace(
 
 def test_edit_file_replacement_length_guard(
     session_and_dispatcher: tuple[Session, InProcessDispatcher],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import weakincentives.contrib.tools.vfs as vfs_module
+
+    # Temporarily set a smaller limit for testing
+    monkeypatch.setattr(vfs_module, "_MAX_WRITE_LENGTH", 100)
     session, _dispatcher = session_and_dispatcher
     section = _make_section(session=session)
     _write(session, section, path=("src", "file.py"), content="flag = 1")
@@ -843,10 +851,10 @@ def test_edit_file_replacement_length_guard(
     params = EditFileParams(
         file_path="src/file.py",
         old_string="flag",
-        new_string="x" * 48_001,
+        new_string="x" * 101,
         replace_all=True,
     )
-    with pytest.raises(ToolValidationError, match="48,000 characters or fewer"):
+    with pytest.raises(ToolValidationError, match="32MB or fewer"):
         invoke_tool(edit_tool, params, session=session, filesystem=section.filesystem)
 
 
