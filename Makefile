@@ -87,7 +87,7 @@ typecheck:
 # =============================================================================
 
 # Run tests with coverage (100% minimum) and 10s per-test timeout
-test:
+test: bun-test
 	@uv run --all-extras python check.py -q test
 
 # Run integration tests (tests skip automatically when API keys are not set)
