@@ -238,30 +238,33 @@ export function calculateVisibleRange({
   bufferSize,
   getItemHeight,
 }) {
-  // Find start index
+  // Find start index (first item visible in viewport)
   let current = 0;
-  let startIndex = 0;
+  let firstVisibleIndex = 0;
   for (let i = 0; i < itemCount; i++) {
     const height = getItemHeight(i);
     if (current + height > scrollTop) {
-      startIndex = i;
+      firstVisibleIndex = i;
       break;
     }
     current += height;
-    startIndex = i;
+    firstVisibleIndex = i;
   }
-  startIndex = Math.max(0, startIndex - bufferSize);
 
-  // Find end index
-  current = 0;
+  // Find end index by continuing from where we left off
+  // current = cumulative height up to (but not including) firstVisibleIndex
+  const viewportBottom = scrollTop + viewportHeight;
   let endIndex = itemCount;
-  for (let i = 0; i < itemCount; i++) {
+  for (let i = firstVisibleIndex; i < itemCount; i++) {
     current += getItemHeight(i);
-    if (current > scrollTop + viewportHeight) {
+    if (current > viewportBottom) {
       endIndex = i + 1;
       break;
     }
   }
+
+  // Apply buffer and clamp to valid range
+  const startIndex = Math.max(0, firstVisibleIndex - bufferSize);
   endIndex = Math.min(itemCount, endIndex + bufferSize);
 
   return { startIndex, endIndex };
