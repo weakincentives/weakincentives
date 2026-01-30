@@ -856,7 +856,9 @@ class _InMemoryByteWriter:
             return
         self._closed = True
 
-        # Commit the written content to the filesystem
-        content = self._writer.get_content()
-        self.filesystem.commit_streaming_write(self.path, content, self.mode)
-        self._writer.close()
+        try:
+            # Commit the written content to the filesystem
+            content = self._writer.get_content()
+            self.filesystem.commit_streaming_write(self.path, content, self.mode)
+        finally:
+            self._writer.close()

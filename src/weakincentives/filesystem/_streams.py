@@ -896,9 +896,11 @@ class DefaultTextReader:
     def close(self) -> None:
         """Close the reader."""
         if not self._closed:
-            self._text_wrapper.close()
-            self._byte_reader.close()
             self._closed = True
+            try:
+                self._text_wrapper.close()
+            finally:
+                self._byte_reader.close()
 
 
 class _ByteReaderWrapper(io.RawIOBase):
