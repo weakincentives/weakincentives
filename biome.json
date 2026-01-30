@@ -9,9 +9,9 @@
       "recommended": true,
       "complexity": {
         "noExcessiveCognitiveComplexity": {
-          "level": "warn",
+          "level": "error",
           "options": {
-            "maxAllowedComplexity": 25
+            "maxAllowedComplexity": 8
           }
         },
         "noForEach": "off",

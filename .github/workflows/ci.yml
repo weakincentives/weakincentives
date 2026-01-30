@@ -145,6 +145,14 @@ jobs:
         run: make ty
       - name: Run pyright
         run: make pyright
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Run Biome (JS/CSS lint)
+        run: make biome
+      - name: Run JavaScript tests
+        run: make bun-test
 
   # Test job - always runs core tests, then targeted or full suite based on changes
   test:
