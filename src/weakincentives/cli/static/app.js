@@ -587,40 +587,54 @@ async function fetchJSON(url, options) {
 // VIEW SWITCHING
 // ============================================================================
 
-function switchView(viewName) {
-  state.activeView = viewName;
+const VIEW_ELEMENTS = {
+  sessions: "sessionsView",
+  transcript: "transcriptView",
+  logs: "logsView",
+  filesystem: "filesystemView",
+  environment: "environmentView",
+};
 
-  // Update tabs
+function updateViewVisibility(viewName) {
   document.querySelectorAll(".main-tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.view === viewName);
   });
+  for (const [name, elementKey] of Object.entries(VIEW_ELEMENTS)) {
+    elements[elementKey].classList.toggle("hidden", viewName !== name);
+  }
+}
 
-  // Update views
-  elements.sessionsView.classList.toggle("hidden", viewName !== "sessions");
-  elements.transcriptView.classList.toggle("hidden", viewName !== "transcript");
-  elements.logsView.classList.toggle("hidden", viewName !== "logs");
-  elements.filesystemView.classList.toggle("hidden", viewName !== "filesystem");
-  elements.environmentView.classList.toggle("hidden", viewName !== "environment");
-
-  // Initialize virtual scrollers if needed (may have been destroyed by resetViewState)
+function initScrollerIfNeeded(viewName) {
   if (viewName === "transcript" && !state.transcriptScroller) {
     initTranscriptVirtualScroller();
-  } else if (viewName === "logs" && !state.logsScroller) {
+  }
+  if (viewName === "logs" && !state.logsScroller) {
     initLogsVirtualScroller();
   }
+}
 
-  // Load data if needed
+function loadViewDataIfNeeded(viewName) {
   if (viewName === "transcript" && state.transcriptEntries.length === 0) {
     loadTranscriptFacets();
     loadTranscript();
-  } else if (viewName === "logs" && state.filteredLogs.length === 0) {
+  }
+  if (viewName === "logs" && state.filteredLogs.length === 0) {
     loadLogFacets();
     loadLogs();
-  } else if (viewName === "filesystem" && state.allFiles.length === 0) {
+  }
+  if (viewName === "filesystem" && state.allFiles.length === 0) {
     loadFilesystem();
-  } else if (viewName === "environment" && state.environmentData === null) {
+  }
+  if (viewName === "environment" && state.environmentData === null) {
     loadEnvironment();
   }
+}
+
+function switchView(viewName) {
+  state.activeView = viewName;
+  updateViewVisibility(viewName);
+  initScrollerIfNeeded(viewName);
+  loadViewDataIfNeeded(viewName);
 }
 
 document.querySelectorAll(".main-tab").forEach((tab) => {
@@ -904,59 +918,57 @@ async function loadTranscriptFacets() {
   }
 }
 
-async function loadTranscript(append = false) {
-  // Track this request (incrementing invalidates any in-flight requests)
-  const requestId = ++state.transcriptRequestId;
+function processTranscriptEntries(entries, append) {
+  if (append) {
+    const rawEntries = [...state.transcriptRawEntries, ...entries];
+    state.transcriptRawEntries = rawEntries;
+    return preprocessTranscriptEntries(rawEntries);
+  }
+  state.transcriptRawEntries = entries;
+  return preprocessTranscriptEntries(entries);
+}
 
+function updateTranscriptDisplay() {
+  if (state.transcriptScroller) {
+    state.transcriptScroller.setData(
+      state.transcriptEntries,
+      state.transcriptTotalCount,
+      state.transcriptHasMore
+    );
+    renderTranscriptEmptyState();
+  } else {
+    renderTranscript();
+  }
+  updateTranscriptStats();
+}
+
+function showTranscriptError(message) {
+  elements.transcriptList.innerHTML = `<p class="muted">Failed to load transcript: ${message}</p>`;
+}
+
+function applyTranscriptResult(result, append) {
+  state.transcriptEntries = processTranscriptEntries(result.entries || [], append);
+  state.transcriptTotalCount = result.total || state.transcriptRawEntries.length;
+  state.transcriptHasMore = state.transcriptRawEntries.length < state.transcriptTotalCount;
+  updateTranscriptDisplay();
+}
+
+async function loadTranscript(append = false) {
+  const requestId = ++state.transcriptRequestId;
+  const isCurrentRequest = () => requestId === state.transcriptRequestId;
   try {
     state.transcriptLoading = true;
     const offset = append ? state.transcriptEntries.length : 0;
-    const query = buildTranscriptQueryParams(offset);
-    const result = await fetchJSON(`/api/transcript?${query}`);
-
-    // Ignore stale responses (filters changed while loading)
-    if (requestId !== state.transcriptRequestId) {
-      return;
+    const result = await fetchJSON(`/api/transcript?${buildTranscriptQueryParams(offset)}`);
+    if (isCurrentRequest()) {
+      applyTranscriptResult(result, append);
     }
-
-    const entries = result.entries || [];
-
-    // Preprocess to combine tool calls with their results
-    let processed;
-    if (append) {
-      // When appending, reprocess everything to handle cross-boundary pairs
-      const rawEntries = [...state.transcriptRawEntries, ...entries];
-      state.transcriptRawEntries = rawEntries;
-      processed = preprocessTranscriptEntries(rawEntries);
-    } else {
-      state.transcriptRawEntries = entries;
-      processed = preprocessTranscriptEntries(entries);
-    }
-
-    state.transcriptEntries = processed;
-    state.transcriptTotalCount = result.total || state.transcriptRawEntries.length;
-    state.transcriptHasMore = state.transcriptRawEntries.length < state.transcriptTotalCount;
-
-    // Use virtual scroller if available
-    if (state.transcriptScroller) {
-      state.transcriptScroller.setData(
-        state.transcriptEntries,
-        state.transcriptTotalCount,
-        state.transcriptHasMore
-      );
-      renderTranscriptEmptyState();
-    } else {
-      renderTranscript();
-    }
-    updateTranscriptStats();
   } catch (error) {
-    // Only show error if this is still the current request
-    if (requestId === state.transcriptRequestId) {
-      elements.transcriptList.innerHTML = `<p class="muted">Failed to load transcript: ${error.message}</p>`;
+    if (isCurrentRequest()) {
+      showTranscriptError(error.message);
     }
   } finally {
-    // Only clear loading state if this is still the current request
-    if (requestId === state.transcriptRequestId) {
+    if (isCurrentRequest()) {
       state.transcriptLoading = false;
     }
   }
@@ -1108,98 +1120,84 @@ function formatTranscriptContent(entry) {
   return { kind: "text", value: "" };
 }
 
+const ZOOM_BUTTON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`;
+
+function createTranscriptTypeHtml(entry, entryType) {
+  if (entry.isComposite) {
+    let html = `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">tool call + result</span>`;
+    if (entry.tool_name) {
+      html += `<span class="transcript-tool-name">${escapeHtml(entry.tool_name)}</span>`;
+    }
+    return html;
+  }
+  return `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
+}
+
+function createTranscriptMetadataHtml(entry) {
+  let html = "";
+  if (entry.timestamp) {
+    html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
+  }
+  const source = entry.transcript_source || "";
+  if (source) {
+    const seq =
+      entry.sequence_number != null ? `#${escapeHtml(String(entry.sequence_number))}` : "";
+    html += `<span class="transcript-source clickable" data-source="${escapeHtml(source)}">${escapeHtml(source)}${seq}</span>`;
+  }
+  if (entry.prompt_name) {
+    html += `<span class="transcript-prompt mono" title="${escapeHtml(entry.prompt_name)}">${escapeHtml(entry.prompt_name)}</span>`;
+  }
+  return html;
+}
+
+function createContentHtml(content, emptyMessage = "(no content)") {
+  if (!content.value) {
+    return `<div class="transcript-message muted">${emptyMessage}</div>`;
+  }
+  if (content.kind === "json") {
+    return `<pre class="transcript-json">${escapeHtml(content.value)}</pre>`;
+  }
+  return `<div class="transcript-message">${escapeHtml(content.value)}</div>`;
+}
+
+function createToolResultHtml(toolResult) {
+  if (!toolResult) {
+    return "";
+  }
+  const resultContent = formatTranscriptContent(toolResult);
+  return `<div class="transcript-result-divider">↓ result</div>${createContentHtml(resultContent, "(no result)")}`;
+}
+
+function createDetailsHtml(entry) {
+  const payload = entry.parsed || entry.raw_json;
+  if (!payload) {
+    return "";
+  }
+  return `<details class="transcript-details"><summary>Details</summary><pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre></details>`;
+}
+
 /**
  * Creates a single transcript entry DOM element.
  * Used by both virtual scroller and fallback rendering.
  */
 function createTranscriptEntryElement(entry, index) {
-  const isComposite = entry.isComposite === true;
-  const toolResult = entry.toolResult;
-
   const entryType = entry.entry_type || "unknown";
   const role = entry.role || "";
   const cssClass = role ? `role-${role}` : `type-${entryType}`;
 
   const container = document.createElement("div");
-  container.className = `transcript-entry ${cssClass} compact${isComposite ? " combined" : ""}`;
+  container.className = `transcript-entry ${cssClass} compact${entry.isComposite ? " combined" : ""}`;
   container.dataset.entryIndex = index;
 
-  const source = entry.transcript_source || "";
-  const seq =
-    entry.sequence_number !== null && entry.sequence_number !== undefined
-      ? String(entry.sequence_number)
-      : "";
-  const promptName = entry.prompt_name || "";
+  const headerHtml = `<div class="transcript-header"><button class="zoom-button" type="button" data-zoom-index="${index}" title="Expand entry" aria-label="Expand entry">${ZOOM_BUTTON_SVG}</button>${createTranscriptTypeHtml(entry, entryType)}${createTranscriptMetadataHtml(entry)}</div>`;
 
   const content = formatTranscriptContent(entry);
+  container.innerHTML =
+    headerHtml +
+    createContentHtml(content) +
+    (entry.isComposite ? createToolResultHtml(entry.toolResult) : "") +
+    createDetailsHtml(entry);
 
-  let html = `<div class="transcript-header">`;
-  // Zoom button
-  html += `<button class="zoom-button" type="button" data-zoom-index="${index}" title="Expand entry" aria-label="Expand entry">`;
-  html += `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">`;
-  html += `<polyline points="15 3 21 3 21 9"></polyline>`;
-  html += `<polyline points="9 21 3 21 3 15"></polyline>`;
-  html += '<line x1="21" y1="3" x2="14" y2="10"></line>';
-  html += '<line x1="3" y1="21" x2="10" y2="14"></line>';
-  html += "</svg></button>";
-
-  // Show combined label for tool call + result
-  if (isComposite) {
-    html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">tool call + result</span>`;
-    if (entry.tool_name) {
-      html += `<span class="transcript-tool-name">${escapeHtml(entry.tool_name)}</span>`;
-    }
-  } else {
-    html += `<span class="transcript-type clickable" data-type="${escapeHtml(entryType)}">${escapeHtml(entryType)}</span>`;
-  }
-
-  if (entry.timestamp) {
-    html += `<span class="transcript-timestamp">${escapeHtml(entry.timestamp)}</span>`;
-  }
-  if (source) {
-    html += `<span class="transcript-source clickable" data-source="${escapeHtml(source)}">${escapeHtml(source)}${seq ? `#${escapeHtml(seq)}` : ""}</span>`;
-  }
-  if (promptName) {
-    html += `<span class="transcript-prompt mono" title="${escapeHtml(promptName)}">${escapeHtml(promptName)}</span>`;
-  }
-  html += "</div>";
-
-  // Render tool call content
-  if (content.value) {
-    if (content.kind === "json") {
-      html += `<pre class="transcript-json">${escapeHtml(content.value)}</pre>`;
-    } else {
-      html += `<div class="transcript-message">${escapeHtml(content.value)}</div>`;
-    }
-  } else {
-    html += `<div class="transcript-message muted">(no content)</div>`;
-  }
-
-  // Render tool result content if this is a composite entry
-  if (isComposite && toolResult) {
-    const resultContent = formatTranscriptContent(toolResult);
-    html += `<div class="transcript-result-divider">↓ result</div>`;
-    if (resultContent.value) {
-      if (resultContent.kind === "json") {
-        html += `<pre class="transcript-json">${escapeHtml(resultContent.value)}</pre>`;
-      } else {
-        html += `<div class="transcript-message">${escapeHtml(resultContent.value)}</div>`;
-      }
-    } else {
-      html += `<div class="transcript-message muted">(no result)</div>`;
-    }
-  }
-
-  const detailsPayload = entry.parsed || entry.raw_json;
-  if (detailsPayload) {
-    html += `<details class="transcript-details"><summary>Details</summary>`;
-    html += `<pre>${escapeHtml(JSON.stringify(detailsPayload, null, 2))}</pre>`;
-    html += "</details>";
-  }
-
-  container.innerHTML = html;
-
-  // Event listeners handled via delegation on container (see setupTranscriptEventDelegation)
   return container;
 }
 
@@ -1270,31 +1268,32 @@ function renderTranscript() {
   });
 }
 
+function handleTranscriptSourceClick(e, sourceEl) {
+  const src = sourceEl.dataset.source;
+  if (!src) {
+    return;
+  }
+  toggleTranscriptSourceFilter(src, !e.shiftKey, e.shiftKey);
+}
+
+function handleTranscriptTypeClick(e, typeEl) {
+  const typ = typeEl.dataset.type;
+  if (!typ) {
+    return;
+  }
+  toggleTranscriptTypeFilter(typ, !e.shiftKey, e.shiftKey);
+}
+
 // Transcript event delegation - handles clicks on dynamically created elements
 elements.transcriptList.addEventListener("click", (e) => {
   const sourceEl = e.target.closest(".transcript-source.clickable");
   if (sourceEl) {
-    const src = sourceEl.dataset.source;
-    if (src) {
-      if (e.shiftKey) {
-        toggleTranscriptSourceFilter(src, false, true);
-      } else {
-        toggleTranscriptSourceFilter(src, true, false);
-      }
-    }
+    handleTranscriptSourceClick(e, sourceEl);
     return;
   }
-
   const typeEl = e.target.closest(".transcript-type.clickable");
   if (typeEl) {
-    const typ = typeEl.dataset.type;
-    if (typ) {
-      if (e.shiftKey) {
-        toggleTranscriptTypeFilter(typ, false, true);
-      } else {
-        toggleTranscriptTypeFilter(typ, true, false);
-      }
-    }
+    handleTranscriptTypeClick(e, typeEl);
   }
 });
 
@@ -1397,51 +1396,56 @@ async function loadLogFacets() {
   }
 }
 
-async function loadLogs(append = false) {
-  // Track this request (incrementing invalidates any in-flight requests)
-  const requestId = ++state.logsRequestId;
+function updateLogsData(entries, append) {
+  if (append) {
+    state.filteredLogs = state.filteredLogs.concat(entries);
+  } else {
+    state.filteredLogs = entries;
+  }
+}
 
+function updateLogsDisplay(entries, append) {
+  if (state.logsScroller) {
+    if (append) {
+      state.logsScroller.appendData(entries, state.logsTotalCount, state.logsHasMore);
+    } else {
+      state.logsScroller.setData(state.filteredLogs, state.logsTotalCount, state.logsHasMore);
+    }
+    renderLogsEmptyState();
+  } else {
+    renderLogs();
+  }
+  updateLogsStats();
+}
+
+function showLogsError(message) {
+  elements.logsList.innerHTML = `<p class="muted">Failed to load logs: ${message}</p>`;
+}
+
+function applyLogsResult(result, append) {
+  const entries = result.entries || [];
+  updateLogsData(entries, append);
+  state.logsTotalCount = result.total || state.filteredLogs.length;
+  state.logsHasMore = state.filteredLogs.length < state.logsTotalCount;
+  updateLogsDisplay(entries, append);
+}
+
+async function loadLogs(append = false) {
+  const requestId = ++state.logsRequestId;
+  const isCurrentRequest = () => requestId === state.logsRequestId;
   try {
     state.logsLoading = true;
     const offset = append ? state.filteredLogs.length : 0;
-    const query = buildLogsQueryParams(offset);
-    const result = await fetchJSON(`/api/logs?${query}`);
-
-    // Ignore stale responses (filters changed while loading)
-    if (requestId !== state.logsRequestId) {
-      return;
+    const result = await fetchJSON(`/api/logs?${buildLogsQueryParams(offset)}`);
+    if (isCurrentRequest()) {
+      applyLogsResult(result, append);
     }
-
-    const entries = result.entries || [];
-
-    if (append) {
-      state.filteredLogs = state.filteredLogs.concat(entries);
-    } else {
-      state.filteredLogs = entries;
-    }
-    state.logsTotalCount = result.total || state.filteredLogs.length;
-    state.logsHasMore = state.filteredLogs.length < state.logsTotalCount;
-
-    // Use virtual scroller if available
-    if (state.logsScroller) {
-      if (append) {
-        state.logsScroller.appendData(entries, state.logsTotalCount, state.logsHasMore);
-      } else {
-        state.logsScroller.setData(state.filteredLogs, state.logsTotalCount, state.logsHasMore);
-      }
-      renderLogsEmptyState();
-    } else {
-      renderLogs();
-    }
-    updateLogsStats();
   } catch (error) {
-    // Only show error if this is still the current request
-    if (requestId === state.logsRequestId) {
-      elements.logsList.innerHTML = `<p class="muted">Failed to load logs: ${error.message}</p>`;
+    if (isCurrentRequest()) {
+      showLogsError(error.message);
     }
   } finally {
-    // Only clear loading state if this is still the current request
-    if (requestId === state.logsRequestId) {
+    if (isCurrentRequest()) {
       state.logsLoading = false;
     }
   }
@@ -1629,18 +1633,8 @@ function createActiveFilter(type, name, isExclude, onRemove) {
   return filter;
 }
 
-/**
- * Creates a single log entry DOM element.
- * Used by both virtual scroller and fallback rendering.
- */
-function createLogEntryElement(log, index) {
-  const level = (log.level || "INFO").toLowerCase();
-  const entry = document.createElement("div");
-  entry.className = `log-entry log-${level}`;
-  entry.dataset.index = index;
-
-  let html = `<div class="log-header">`;
-  html += `<span class="log-level">${(log.level || "INFO").toUpperCase()}</span>`;
+function createLogHeaderHtml(log) {
+  let html = `<span class="log-level">${(log.level || "INFO").toUpperCase()}</span>`;
   if (log.timestamp) {
     html += `<span class="log-timestamp">${log.timestamp}</span>`;
   }
@@ -1651,23 +1645,32 @@ function createLogEntryElement(log, index) {
   if (log.event) {
     html += `<span class="log-event-name clickable" data-event="${escapeHtml(log.event)}">${escapeHtml(log.event)}</span>`;
   }
-  html += "</div>";
+  return `<div class="log-header">${html}</div>`;
+}
 
+function createLogBodyHtml(log) {
+  let html = "";
   if (log.message) {
     html += `<div class="log-message">${escapeHtml(log.message)}</div>`;
   }
-
   if (log.context && Object.keys(log.context).length > 0) {
     html += `<pre class="log-context">${escapeHtml(JSON.stringify(log.context, null, 2))}</pre>`;
   }
-
   if (log.exc_info) {
     html += `<pre class="log-exception">${escapeHtml(log.exc_info)}</pre>`;
   }
+  return html;
+}
 
-  entry.innerHTML = html;
-
-  // Event listeners handled via delegation on container (see logs event delegation below)
+/**
+ * Creates a single log entry DOM element.
+ * Used by both virtual scroller and fallback rendering.
+ */
+function createLogEntryElement(log, index) {
+  const entry = document.createElement("div");
+  entry.className = `log-entry log-${(log.level || "INFO").toLowerCase()}`;
+  entry.dataset.index = index;
+  entry.innerHTML = createLogHeaderHtml(log) + createLogBodyHtml(log);
   return entry;
 }
 
@@ -1731,31 +1734,30 @@ function renderLogs() {
   });
 }
 
+function handleLoggerClick(e, loggerEl) {
+  const logger = loggerEl.dataset.logger;
+  if (logger) {
+    toggleLoggerFilter(logger, !e.shiftKey, e.shiftKey);
+  }
+}
+
+function handleEventClick(e, eventEl) {
+  const event = eventEl.dataset.event;
+  if (event) {
+    toggleEventFilter(event, !e.shiftKey, e.shiftKey);
+  }
+}
+
 // Logs event delegation - handles clicks on dynamically created elements
 elements.logsList.addEventListener("click", (e) => {
   const loggerEl = e.target.closest(".log-logger.clickable");
   if (loggerEl) {
-    const logger = loggerEl.dataset.logger;
-    if (logger) {
-      if (e.shiftKey) {
-        toggleLoggerFilter(logger, false, true);
-      } else {
-        toggleLoggerFilter(logger, true, false);
-      }
-    }
+    handleLoggerClick(e, loggerEl);
     return;
   }
-
   const eventEl = e.target.closest(".log-event-name.clickable");
   if (eventEl) {
-    const event = eventEl.dataset.event;
-    if (event) {
-      if (e.shiftKey) {
-        toggleEventFilter(event, false, true);
-      } else {
-        toggleEventFilter(event, true, false);
-      }
-    }
+    handleEventClick(e, eventEl);
   }
 });
 
@@ -1914,6 +1916,7 @@ async function selectFilesystemFile(fullPath, displayPath) {
       elements.filesystemViewer.innerHTML = `<div class="image-container"><img src="${dataUrl}" alt="${escapeHtml(displayPath)}" class="filesystem-image" /></div>`;
       state.fileContent = null;
     } else if (result.type === "binary") {
+      // biome-ignore lint/nursery/noSecrets: HTML string, not a secret
       elements.filesystemViewer.innerHTML = '<p class="muted">Binary file cannot be displayed</p>';
       state.fileContent = null;
     } else {
@@ -1956,103 +1959,114 @@ async function loadEnvironment() {
   }
 }
 
+function renderEnvSection(title, content) {
+  return `<div class="environment-section"><h3 class="section-title">${title}</h3><dl class="key-value-list">${content}</dl></div>`;
+}
+
+function renderSystemSection(sys) {
+  if (!sys) {
+    return "";
+  }
+  return renderEnvSection(
+    "System",
+    `<dt>OS</dt><dd>${escapeHtml(sys.os_name)} ${escapeHtml(sys.os_release)}</dd>` +
+      `<dt>Kernel</dt><dd class="mono">${escapeHtml(sys.kernel_version)}</dd>` +
+      `<dt>Architecture</dt><dd>${escapeHtml(sys.architecture)}</dd>` +
+      `<dt>Processor</dt><dd>${escapeHtml(sys.processor)}</dd>` +
+      `<dt>CPU Count</dt><dd>${sys.cpu_count}</dd>` +
+      `<dt>Memory</dt><dd>${formatBytes(sys.memory_total_bytes)}</dd>` +
+      `<dt>Hostname</dt><dd class="mono">${escapeHtml(sys.hostname)}</dd>`
+  );
+}
+
+function renderPythonSection(py) {
+  if (!py) {
+    return "";
+  }
+  let content = `<dt>Version</dt><dd class="mono">${escapeHtml(py.version)}</dd>`;
+  if (py.version_info) {
+    content += `<dt>Version Info</dt><dd class="mono">${JSON.stringify(py.version_info)}</dd>`;
+  }
+  content +=
+    `<dt>Implementation</dt><dd>${escapeHtml(py.implementation)}</dd>` +
+    `<dt>Executable</dt><dd class="mono">${escapeHtml(py.executable)}</dd>` +
+    `<dt>Prefix</dt><dd class="mono">${escapeHtml(py.prefix)}</dd>` +
+    `<dt>Base Prefix</dt><dd class="mono">${escapeHtml(py.base_prefix)}</dd>` +
+    `<dt>Virtualenv</dt><dd>${py.is_virtualenv ? "Yes" : "No"}</dd>`;
+  return renderEnvSection("Python", content);
+}
+
+function renderGitSection(git) {
+  if (!git) {
+    return "";
+  }
+  let content =
+    `<dt>Repo Root</dt><dd class="mono">${escapeHtml(git.repo_root)}</dd>` +
+    `<dt>Branch</dt><dd class="mono">${escapeHtml(git.branch)}</dd>` +
+    `<dt>Commit</dt><dd class="mono">${escapeHtml(git.commit_short)}</dd>` +
+    `<dt>Full SHA</dt><dd class="mono small">${escapeHtml(git.commit_sha)}</dd>` +
+    `<dt>Dirty</dt><dd>${git.is_dirty ? "Yes" : "No"}</dd>`;
+  if (git.remotes && Object.keys(git.remotes).length > 0) {
+    const remoteItems = Object.entries(git.remotes)
+      .map(
+        ([name, url]) =>
+          `<div><span class="mono">${escapeHtml(name)}:</span> ${escapeHtml(url)}</div>`
+      )
+      .join("");
+    content += `<dt>Remotes</dt><dd><div class="nested-list">${remoteItems}</div></dd>`;
+  }
+  if (git.tags && git.tags.length > 0) {
+    content += `<dt>Tags</dt><dd class="mono">${git.tags.map((t) => escapeHtml(t)).join(", ")}</dd>`;
+  }
+  return renderEnvSection("Git Repository", content);
+}
+
+function renderContainerSection(container) {
+  if (!container) {
+    return "";
+  }
+  let content =
+    `<dt>Runtime</dt><dd>${escapeHtml(container.runtime)}</dd>` +
+    `<dt>Container ID</dt><dd class="mono">${escapeHtml(container.container_id)}</dd>` +
+    `<dt>Image</dt><dd class="mono">${escapeHtml(container.image)}</dd>`;
+  if (container.image_digest) {
+    content += `<dt>Image Digest</dt><dd class="mono small">${escapeHtml(container.image_digest)}</dd>`;
+  }
+  if (container.cgroup_path) {
+    content += `<dt>Cgroup Path</dt><dd class="mono">${escapeHtml(container.cgroup_path)}</dd>`;
+  }
+  return renderEnvSection("Container", content);
+}
+
+function renderEnvVarsSection(envVars) {
+  if (!envVars || Object.keys(envVars).length === 0) {
+    return "";
+  }
+  const content = Object.entries(envVars)
+    .map(
+      ([key, value]) =>
+        `<dt class="mono">${escapeHtml(key)}</dt><dd class="mono small">${escapeHtml(value)}</dd>`
+    )
+    .join("");
+  return renderEnvSection("Environment Variables", content);
+}
+
 function renderEnvironment() {
   if (!state.hasEnvironmentData) {
     elements.environmentEmptyState.classList.remove("hidden");
     elements.environmentContent.classList.add("hidden");
     return;
   }
-
   elements.environmentEmptyState.classList.add("hidden");
   elements.environmentContent.classList.remove("hidden");
 
   const data = state.environmentData;
-  let html = "";
-
-  // System section
-  if (data.system) {
-    html += '<div class="environment-section">';
-    html += '<h3 class="section-title">System</h3>';
-    html += '<dl class="key-value-list">';
-    html += `<dt>OS</dt><dd>${escapeHtml(data.system.os_name)} ${escapeHtml(data.system.os_release)}</dd>`;
-    html += `<dt>Kernel</dt><dd class="mono">${escapeHtml(data.system.kernel_version)}</dd>`;
-    html += `<dt>Architecture</dt><dd>${escapeHtml(data.system.architecture)}</dd>`;
-    html += `<dt>Processor</dt><dd>${escapeHtml(data.system.processor)}</dd>`;
-    html += `<dt>CPU Count</dt><dd>${data.system.cpu_count}</dd>`;
-    html += `<dt>Memory</dt><dd>${formatBytes(data.system.memory_total_bytes)}</dd>`;
-    html += `<dt>Hostname</dt><dd class="mono">${escapeHtml(data.system.hostname)}</dd>`;
-    html += "</dl></div>";
-  }
-
-  // Python section
-  if (data.python) {
-    html += '<div class="environment-section">';
-    html += '<h3 class="section-title">Python</h3>';
-    html += '<dl class="key-value-list">';
-    html += `<dt>Version</dt><dd class="mono">${escapeHtml(data.python.version)}</dd>`;
-    if (data.python.version_info) {
-      html += `<dt>Version Info</dt><dd class="mono">${JSON.stringify(data.python.version_info)}</dd>`;
-    }
-    html += `<dt>Implementation</dt><dd>${escapeHtml(data.python.implementation)}</dd>`;
-    html += `<dt>Executable</dt><dd class="mono">${escapeHtml(data.python.executable)}</dd>`;
-    html += `<dt>Prefix</dt><dd class="mono">${escapeHtml(data.python.prefix)}</dd>`;
-    html += `<dt>Base Prefix</dt><dd class="mono">${escapeHtml(data.python.base_prefix)}</dd>`;
-    html += `<dt>Virtualenv</dt><dd>${data.python.is_virtualenv ? "Yes" : "No"}</dd>`;
-    html += "</dl></div>";
-  }
-
-  // Git section
-  if (data.git) {
-    html += '<div class="environment-section">';
-    html += '<h3 class="section-title">Git Repository</h3>';
-    html += '<dl class="key-value-list">';
-    html += `<dt>Repo Root</dt><dd class="mono">${escapeHtml(data.git.repo_root)}</dd>`;
-    html += `<dt>Branch</dt><dd class="mono">${escapeHtml(data.git.branch)}</dd>`;
-    html += `<dt>Commit</dt><dd class="mono">${escapeHtml(data.git.commit_short)}</dd>`;
-    html += `<dt>Full SHA</dt><dd class="mono small">${escapeHtml(data.git.commit_sha)}</dd>`;
-    html += `<dt>Dirty</dt><dd>${data.git.is_dirty ? "Yes" : "No"}</dd>`;
-    if (data.git.remotes && Object.keys(data.git.remotes).length > 0) {
-      html += '<dt>Remotes</dt><dd><div class="nested-list">';
-      Object.entries(data.git.remotes).forEach(([name, url]) => {
-        html += `<div><span class="mono">${escapeHtml(name)}:</span> ${escapeHtml(url)}</div>`;
-      });
-      html += "</div></dd>";
-    }
-    if (data.git.tags && data.git.tags.length > 0) {
-      html += `<dt>Tags</dt><dd class="mono">${data.git.tags.map((t) => escapeHtml(t)).join(", ")}</dd>`;
-    }
-    html += "</dl></div>";
-  }
-
-  // Container section
-  if (data.container) {
-    html += '<div class="environment-section">';
-    html += '<h3 class="section-title">Container</h3>';
-    html += '<dl class="key-value-list">';
-    html += `<dt>Runtime</dt><dd>${escapeHtml(data.container.runtime)}</dd>`;
-    html += `<dt>Container ID</dt><dd class="mono">${escapeHtml(data.container.container_id)}</dd>`;
-    html += `<dt>Image</dt><dd class="mono">${escapeHtml(data.container.image)}</dd>`;
-    if (data.container.image_digest) {
-      html += `<dt>Image Digest</dt><dd class="mono small">${escapeHtml(data.container.image_digest)}</dd>`;
-    }
-    if (data.container.cgroup_path) {
-      html += `<dt>Cgroup Path</dt><dd class="mono">${escapeHtml(data.container.cgroup_path)}</dd>`;
-    }
-    html += "</dl></div>";
-  }
-
-  // Environment Variables section
-  if (data.env_vars && Object.keys(data.env_vars).length > 0) {
-    html += '<div class="environment-section">';
-    html += '<h3 class="section-title">Environment Variables</h3>';
-    html += '<dl class="key-value-list">';
-    Object.entries(data.env_vars).forEach(([key, value]) => {
-      html += `<dt class="mono">${escapeHtml(key)}</dt><dd class="mono small">${escapeHtml(value)}</dd>`;
-    });
-    html += "</dl></div>";
-  }
-
-  elements.environmentData.innerHTML = html;
+  elements.environmentData.innerHTML =
+    renderSystemSection(data.system) +
+    renderPythonSection(data.python) +
+    renderGitSection(data.git) +
+    renderContainerSection(data.container) +
+    renderEnvVarsSection(data.env_vars);
 }
 
 elements.environmentCopy.addEventListener("click", async () => {
@@ -2165,78 +2179,53 @@ function isToolCall(entry) {
 }
 
 /**
+ * Parse entry's data from parsed or raw_json fields.
+ */
+function parseEntryData(entry) {
+  const parsed = entry.parsed;
+  if (typeof parsed === "string") {
+    try {
+      return JSON.parse(parsed);
+    } catch {
+      return null;
+    }
+  }
+  if (parsed) {
+    return parsed;
+  }
+  if (entry.raw_json) {
+    try {
+      return JSON.parse(entry.raw_json);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Get message content array from parsed entry data.
+ */
+function getMessageContent(parsed) {
+  const content = parsed?.message?.content;
+  return Array.isArray(content) ? content : null;
+}
+
+/**
  * Checks if an entry is a tool result (user message containing tool_result).
  */
 function isToolResult(entry) {
   if (entry.entry_type !== "user") {
     return false;
   }
-
-  // Parse the entry to check for tool_result in message.content
-  let parsed = entry.parsed;
-  if (typeof parsed === "string") {
-    try {
-      parsed = JSON.parse(parsed);
-    } catch {
-      return false;
-    }
-  } else if (!parsed && entry.raw_json) {
-    try {
-      parsed = JSON.parse(entry.raw_json);
-    } catch {
-      return false;
-    }
-  }
-
-  if (!parsed) {
-    return false;
-  }
-
-  const content = parsed.message?.content;
-  if (!Array.isArray(content)) {
-    return false;
-  }
-
-  return content.some((item) => item.type === "tool_result");
+  const content = getMessageContent(parseEntryData(entry));
+  return content ? content.some((item) => item.type === "tool_result") : false;
 }
 
 /**
- * Extracts tool_use_id from an entry's nested message.content structure.
- * For tool calls: uses top-level tool_use_id or looks for content[*].id where type === "tool_use"
- * For tool results: looks for content[*].tool_use_id where type === "tool_result"
+ * Finds tool ID in a content array (tool_use.id or tool_result.tool_use_id).
  */
-function extractToolUseId(entry) {
-  // First try top-level tool_use_id if it exists (tool calls have this)
-  if (entry.tool_use_id) {
-    return entry.tool_use_id;
-  }
-
-  // Try to get from parsed or raw_json
-  let parsed = entry.parsed;
-  if (typeof parsed === "string") {
-    try {
-      parsed = JSON.parse(parsed);
-    } catch {
-      return null;
-    }
-  } else if (!parsed && entry.raw_json) {
-    try {
-      parsed = JSON.parse(entry.raw_json);
-    } catch {
-      return null;
-    }
-  }
-
-  if (!parsed) {
-    return null;
-  }
-
-  // Look in message.content array
-  const content = parsed.message?.content;
-  if (!Array.isArray(content)) {
-    return null;
-  }
-
+function findToolIdInContent(content) {
   for (const item of content) {
     if (item.type === "tool_use" && item.id) {
       return item.id;
@@ -2245,56 +2234,61 @@ function extractToolUseId(entry) {
       return item.tool_use_id;
     }
   }
-
   return null;
 }
 
 /**
+ * Extracts tool_use_id from an entry's nested message.content structure.
+ */
+function extractToolUseId(entry) {
+  if (entry.tool_use_id) {
+    return entry.tool_use_id;
+  }
+  const content = getMessageContent(parseEntryData(entry));
+  return content ? findToolIdInContent(content) : null;
+}
+
+/**
+ * Find matching tool result for a tool call entry.
+ */
+function findMatchingToolResult(entries, startIndex, toolId, usedIndices) {
+  const searchLimit = Math.min(startIndex + 10, entries.length);
+  for (let j = startIndex + 1; j < searchLimit; j++) {
+    if (usedIndices.has(j)) {
+      continue;
+    }
+    const candidate = entries[j];
+    if (isToolResult(candidate) && extractToolUseId(candidate) === toolId) {
+      usedIndices.add(j);
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/**
+ * Process a single entry, potentially combining it with a tool result.
+ */
+function processEntry(entry, entries, index, usedIndices) {
+  if (!isToolCall(entry)) {
+    return entry;
+  }
+  const resultEntry = findMatchingToolResult(entries, index, extractToolUseId(entry), usedIndices);
+  if (resultEntry) {
+    return { ...entry, isComposite: true, toolResult: resultEntry };
+  }
+  return entry;
+}
+
+/**
  * Preprocesses transcript entries to combine tool calls with their results.
- * Returns a new array where tool call + result pairs are merged into composite entries.
- * Each composite entry has an `isComposite` flag and `toolResult` property.
  */
 function preprocessTranscriptEntries(entries) {
   const processed = [];
   const usedIndices = new Set();
-
   for (let i = 0; i < entries.length; i++) {
-    if (usedIndices.has(i)) {
-      continue;
-    }
-
-    const entry = entries[i];
-
-    // Check if this is a tool call
-    if (isToolCall(entry)) {
-      const toolId = extractToolUseId(entry);
-
-      // Look for matching result in next few entries (usually immediately after)
-      let resultEntry = null;
-      for (let j = i + 1; j < Math.min(i + 10, entries.length); j++) {
-        if (usedIndices.has(j)) {
-          continue;
-        }
-        const candidate = entries[j];
-        if (isToolResult(candidate) && extractToolUseId(candidate) === toolId) {
-          resultEntry = candidate;
-          usedIndices.add(j);
-          break;
-        }
-      }
-
-      // Create composite entry if result found
-      if (resultEntry) {
-        processed.push({
-          ...entry,
-          isComposite: true,
-          toolResult: resultEntry,
-        });
-      } else {
-        processed.push(entry);
-      }
-    } else {
-      processed.push(entry);
+    if (!usedIndices.has(i)) {
+      processed.push(processEntry(entries[i], entries, i, usedIndices));
     }
   }
 
@@ -2364,45 +2358,50 @@ function renderTranscriptZoom() {
   }
 }
 
+function setZoomHeader(typeText, typeClass, entry) {
+  elements.zoomModalType.textContent = typeText;
+  elements.zoomModalType.className = `zoom-type-badge ${typeClass}`;
+  elements.zoomModalTimestamp.textContent = entry.timestamp || "";
+  const source = entry.transcript_source || "";
+  const seq = entry.sequence_number != null ? `#${entry.sequence_number}` : "";
+  elements.zoomModalSource.textContent = source ? `${source}${seq}` : "";
+  elements.zoomModalSource.style.display = source ? "" : "none";
+}
+
+function createZoomSection(label, content) {
+  const section = document.createElement("div");
+  section.className = "zoom-section";
+  section.innerHTML = `<div class="zoom-section-label">${label}</div><div class="zoom-text-content">${content}</div>`;
+  return section;
+}
+
+function createCombinedHeader(badgeText, labelText, cssClass) {
+  const header = document.createElement("div");
+  header.className = `zoom-combined-header ${cssClass}`;
+  header.innerHTML = `<span class="zoom-combined-badge">${badgeText}</span> ${labelText}`;
+  return header;
+}
+
 /**
  * Renders a composite tool call + result entry in zoom view.
  */
 function renderCompositeEntryZoom(entry) {
-  const toolName = entry.tool_name || "unknown";
+  setZoomHeader(`TOOL: ${entry.tool_name || "unknown"}`, "zoom-type-tool_use", entry);
 
-  // Header
-  elements.zoomModalType.textContent = `TOOL: ${toolName}`;
-  elements.zoomModalType.className = "zoom-type-badge zoom-type-tool_use";
-  elements.zoomModalTimestamp.textContent = entry.timestamp || "";
-
-  const source = entry.transcript_source || "";
-  const seq =
-    entry.sequence_number !== null && entry.sequence_number !== undefined
-      ? `#${entry.sequence_number}`
-      : "";
-  elements.zoomModalSource.textContent = source ? `${source}${seq}` : "";
-  elements.zoomModalSource.style.display = source ? "" : "none";
-
-  // Left panel: Tool Call
   elements.zoomContent.innerHTML = "";
-  const callHeader = document.createElement("div");
-  callHeader.className = "zoom-combined-header zoom-combined-call";
-  callHeader.innerHTML = '<span class="zoom-combined-badge">CALL</span> Tool Input';
-  elements.zoomContent.appendChild(callHeader);
-
+  elements.zoomContent.appendChild(
+    createCombinedHeader("CALL", "Tool Input", "zoom-combined-call")
+  );
   const callContent = formatTranscriptContent(entry);
   if (callContent.value) {
     renderContentSection(callContent, elements.zoomContent);
   }
   renderRawJsonSection(entry.parsed || entry.raw_json, "Call Raw JSON", elements.zoomContent);
 
-  // Right panel: Tool Result
   elements.zoomDetails.innerHTML = "";
-  const resultHeader = document.createElement("div");
-  resultHeader.className = "zoom-combined-header zoom-combined-result";
-  resultHeader.innerHTML = '<span class="zoom-combined-badge">RESULT</span> Tool Output';
-  elements.zoomDetails.appendChild(resultHeader);
-
+  elements.zoomDetails.appendChild(
+    createCombinedHeader("RESULT", "Tool Output", "zoom-combined-result")
+  );
   if (entry.toolResult) {
     const resultContent = formatTranscriptContent(entry.toolResult);
     if (resultContent.value) {
@@ -2414,12 +2413,12 @@ function renderCompositeEntryZoom(entry) {
       elements.zoomDetails
     );
   }
-
-  // Tool metadata
   if (entry.tool_use_id) {
-    const metaSection = document.createElement("div");
-    metaSection.className = "zoom-section zoom-tool-meta";
-    metaSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content mono">${escapeHtml(entry.tool_use_id)}</div>`;
+    const metaSection = createZoomSection(
+      "Tool Use ID",
+      `<span class="mono">${escapeHtml(entry.tool_use_id)}</span>`
+    );
+    metaSection.classList.add("zoom-tool-meta");
     elements.zoomDetails.appendChild(metaSection);
   }
 }
@@ -2429,56 +2428,166 @@ function renderCompositeEntryZoom(entry) {
  */
 function renderRegularEntryZoom(entry) {
   const entryType = entry.entry_type || "unknown";
+  setZoomHeader(entryType.toUpperCase(), `zoom-type-${entryType}`, entry);
 
-  // Header
-  elements.zoomModalType.textContent = entryType.toUpperCase();
-  elements.zoomModalType.className = `zoom-type-badge zoom-type-${entryType}`;
-  elements.zoomModalTimestamp.textContent = entry.timestamp || "";
-
-  const source = entry.transcript_source || "";
-  const seq =
-    entry.sequence_number !== null && entry.sequence_number !== undefined
-      ? `#${entry.sequence_number}`
-      : "";
-  elements.zoomModalSource.textContent = source ? `${source}${seq}` : "";
-  elements.zoomModalSource.style.display = source ? "" : "none";
-
-  // Content panel
   elements.zoomContent.innerHTML = "";
   const content = formatTranscriptContent(entry);
   if (content.value) {
     renderContentSection(content, elements.zoomContent);
   }
 
-  // Details panel
   elements.zoomDetails.innerHTML = "";
-
   if (entry.tool_name) {
-    const toolSection = document.createElement("div");
-    toolSection.className = "zoom-section";
-    toolSection.innerHTML = `<div class="zoom-section-label">Tool</div><div class="zoom-text-content">${escapeHtml(entry.tool_name)}</div>`;
-    elements.zoomDetails.appendChild(toolSection);
+    elements.zoomDetails.appendChild(createZoomSection("Tool", escapeHtml(entry.tool_name)));
   }
-
   if (entry.tool_use_id) {
-    const toolIdSection = document.createElement("div");
-    toolIdSection.className = "zoom-section";
-    toolIdSection.innerHTML = `<div class="zoom-section-label">Tool Use ID</div><div class="zoom-text-content">${escapeHtml(entry.tool_use_id)}</div>`;
-    elements.zoomDetails.appendChild(toolIdSection);
+    elements.zoomDetails.appendChild(
+      createZoomSection("Tool Use ID", escapeHtml(entry.tool_use_id))
+    );
   }
-
   if (entry.prompt_name) {
-    const promptSection = document.createElement("div");
-    promptSection.className = "zoom-section";
-    promptSection.innerHTML = `<div class="zoom-section-label">Prompt</div><div class="zoom-text-content">${escapeHtml(entry.prompt_name)}</div>`;
-    elements.zoomDetails.appendChild(promptSection);
+    elements.zoomDetails.appendChild(createZoomSection("Prompt", escapeHtml(entry.prompt_name)));
   }
-
   renderRawJsonSection(entry.parsed || entry.raw_json, "Raw JSON", elements.zoomDetails);
-
   if (elements.zoomDetails.children.length === 0) {
     elements.zoomDetails.innerHTML = `<div class="zoom-empty">(no additional details)</div>`;
   }
+}
+
+/**
+ * Creates the key prefix HTML for JSON tree nodes.
+ */
+function zoomJsonKeyHtml(key) {
+  return key ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: ` : "";
+}
+
+/**
+ * Renders a primitive JSON value (null, boolean, number).
+ */
+function renderZoomJsonPrimitive(node, key, value, cssClass) {
+  const valueHtml = value === null ? "null" : String(value);
+  node.innerHTML = `${zoomJsonKeyHtml(key)}<span class="${cssClass}">${valueHtml}</span>`;
+}
+
+/**
+ * Attempts to parse a string as JSON and render it if successful.
+ * Returns the wrapper node if parsed, null otherwise.
+ */
+function tryRenderParsedJsonString(value, key, depth) {
+  if (value.length <= 1) {
+    return null;
+  }
+  const looksLikeJson =
+    (value.startsWith("{") && value.endsWith("}")) ||
+    (value.startsWith("[") && value.endsWith("]"));
+  if (!looksLikeJson) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    const wrapper = document.createElement("div");
+    wrapper.className = "zoom-json-node";
+    if (key) {
+      const keyLabel = document.createElement("span");
+      keyLabel.innerHTML = `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-parsed-hint">(parsed JSON string)</span>`;
+      wrapper.appendChild(keyLabel);
+    }
+    wrapper.appendChild(renderZoomJsonTree(parsed, "", depth));
+    return wrapper;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Renders a string value in the JSON tree.
+ */
+function renderZoomJsonString(node, key, value, depth) {
+  const parsedNode = tryRenderParsedJsonString(value, key, depth);
+  if (parsedNode) {
+    return parsedNode;
+  }
+  const escaped = escapeHtml(value);
+  const formatted = escaped.replace(/\n/g, "<br>");
+  node.innerHTML = `${zoomJsonKeyHtml(key)}<span class="zoom-json-string">"${formatted}"</span>`;
+  return node;
+}
+
+/**
+ * Attaches toggle click handler for collapsible JSON tree nodes.
+ */
+function attachZoomJsonToggle(header, children) {
+  header.addEventListener("click", () => {
+    const isOpen = children.style.display !== "none";
+    children.style.display = isOpen ? "none" : "block";
+    header.querySelector(".zoom-json-toggle").textContent = isOpen ? "▶" : "▼";
+    header.querySelector(".zoom-json-close-bracket").style.display = isOpen ? "inline" : "none";
+  });
+}
+
+/**
+ * Creates the header element for collapsible JSON tree nodes.
+ */
+function createZoomJsonHeader(key, openBracket, count, countLabel, isExpanded) {
+  const header = document.createElement("div");
+  header.className = "zoom-json-header";
+  const toggle = isExpanded ? "▼" : "▶";
+  const closeBracket = openBracket === "[" ? "]" : "}";
+  header.innerHTML = `<span class="zoom-json-toggle">${toggle}</span>${zoomJsonKeyHtml(key)}<span class="zoom-json-bracket">${openBracket}</span><span class="zoom-json-count">${count} ${countLabel}</span><span class="zoom-json-bracket zoom-json-close-bracket" style="display: ${isExpanded ? "none" : "inline"}">${closeBracket}</span>`;
+  return header;
+}
+
+/**
+ * Creates children container and close bracket for collapsible nodes.
+ */
+function createZoomJsonChildren(closeBracket, isExpanded) {
+  const children = document.createElement("div");
+  children.className = "zoom-json-children";
+  children.style.display = isExpanded ? "block" : "none";
+
+  const closeBracketEl = document.createElement("div");
+  closeBracketEl.className = "zoom-json-close";
+  closeBracketEl.innerHTML = `<span class="zoom-json-bracket">${closeBracket}</span>`;
+  closeBracketEl.style.display = isExpanded ? "block" : "none";
+
+  return { children, closeBracketEl };
+}
+
+/**
+ * Renders an array value in the JSON tree.
+ */
+function renderZoomJsonArray(node, key, value, depth) {
+  const isExpanded = depth < 2;
+  const header = createZoomJsonHeader(key, "[", value.length, "items", isExpanded);
+  node.appendChild(header);
+
+  const { children, closeBracketEl } = createZoomJsonChildren("]", isExpanded);
+  for (let i = 0; i < value.length; i++) {
+    children.appendChild(renderZoomJsonTree(value[i], String(i), depth + 1));
+  }
+  children.appendChild(closeBracketEl);
+  node.appendChild(children);
+  attachZoomJsonToggle(header, children);
+  return node;
+}
+
+/**
+ * Renders an object value in the JSON tree.
+ */
+function renderZoomJsonObject(node, key, value, depth) {
+  const keys = Object.keys(value);
+  const isExpanded = depth < 2;
+  const header = createZoomJsonHeader(key, "{", keys.length, "keys", isExpanded);
+  node.appendChild(header);
+
+  const { children, closeBracketEl } = createZoomJsonChildren("}", isExpanded);
+  for (const k of keys) {
+    children.appendChild(renderZoomJsonTree(value[k], k, depth + 1));
+  }
+  children.appendChild(closeBracketEl);
+  node.appendChild(children);
+  attachZoomJsonToggle(header, children);
+  return node;
 }
 
 /**
@@ -2489,124 +2598,25 @@ function renderZoomJsonTree(value, key, depth) {
   node.className = "zoom-json-node";
 
   if (value === null) {
-    node.innerHTML = key
-      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-null">null</span>`
-      : '<span class="zoom-json-null">null</span>';
+    renderZoomJsonPrimitive(node, key, null, "zoom-json-null");
     return node;
   }
-
   if (typeof value === "boolean") {
-    node.innerHTML = key
-      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-bool">${value}</span>`
-      : `<span class="zoom-json-bool">${value}</span>`;
+    renderZoomJsonPrimitive(node, key, value, "zoom-json-bool");
     return node;
   }
-
   if (typeof value === "number") {
-    node.innerHTML = key
-      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-number">${value}</span>`
-      : `<span class="zoom-json-number">${value}</span>`;
+    renderZoomJsonPrimitive(node, key, value, "zoom-json-number");
     return node;
   }
-
   if (typeof value === "string") {
-    // Try to parse as JSON - handle double-serialized JSON
-    if (
-      value.length > 1 &&
-      ((value.startsWith("{") && value.endsWith("}")) ||
-        (value.startsWith("[") && value.endsWith("]")))
-    ) {
-      try {
-        const parsed = JSON.parse(value);
-        // Successfully parsed - render as object/array with a "parsed" indicator
-        const wrapper = document.createElement("div");
-        wrapper.className = "zoom-json-node";
-        if (key) {
-          const keyLabel = document.createElement("span");
-          keyLabel.innerHTML = `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-parsed-hint">(parsed JSON string)</span>`;
-          wrapper.appendChild(keyLabel);
-        }
-        wrapper.appendChild(renderZoomJsonTree(parsed, "", depth));
-        return wrapper;
-      } catch {
-        // Not valid JSON, render as string
-      }
-    }
-
-    // Regular string - no truncation, show full content
-    const escaped = escapeHtml(value);
-    const formatted = escaped.replace(/\n/g, "<br>");
-    node.innerHTML = key
-      ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: <span class="zoom-json-string">"${formatted}"</span>`
-      : `<span class="zoom-json-string">"${formatted}"</span>`;
-    return node;
+    return renderZoomJsonString(node, key, value, depth);
   }
-
   if (Array.isArray(value)) {
-    const isExpanded = depth < 2;
-    const header = document.createElement("div");
-    header.className = "zoom-json-header";
-    header.innerHTML = `<span class="zoom-json-toggle">${isExpanded ? "▼" : "▶"}</span>${key ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: ` : ""}<span class="zoom-json-bracket">[</span><span class="zoom-json-count">${value.length} items</span><span class="zoom-json-bracket zoom-json-close-bracket" style="display: ${isExpanded ? "none" : "inline"}">]</span>`;
-    node.appendChild(header);
-
-    const children = document.createElement("div");
-    children.className = "zoom-json-children";
-    children.style.display = isExpanded ? "block" : "none";
-
-    for (let i = 0; i < value.length; i++) {
-      children.appendChild(renderZoomJsonTree(value[i], String(i), depth + 1));
-    }
-
-    const closeBracket = document.createElement("div");
-    closeBracket.className = "zoom-json-close";
-    closeBracket.innerHTML = '<span class="zoom-json-bracket">]</span>';
-    closeBracket.style.display = isExpanded ? "block" : "none";
-    children.appendChild(closeBracket);
-
-    node.appendChild(children);
-
-    header.addEventListener("click", () => {
-      const isOpen = children.style.display !== "none";
-      children.style.display = isOpen ? "none" : "block";
-      header.querySelector(".zoom-json-toggle").textContent = isOpen ? "▶" : "▼";
-      header.querySelector(".zoom-json-close-bracket").style.display = isOpen ? "inline" : "none";
-    });
-
-    return node;
+    return renderZoomJsonArray(node, key, value, depth);
   }
-
   if (typeof value === "object") {
-    const keys = Object.keys(value);
-    const isExpanded = depth < 2;
-    const header = document.createElement("div");
-    header.className = "zoom-json-header";
-    header.innerHTML = `<span class="zoom-json-toggle">${isExpanded ? "▼" : "▶"}</span>${key ? `<span class="zoom-json-key">${escapeHtml(key)}</span>: ` : ""}<span class="zoom-json-bracket">{</span><span class="zoom-json-count">${keys.length} keys</span><span class="zoom-json-bracket zoom-json-close-bracket" style="display: ${isExpanded ? "none" : "inline"}">}</span>`;
-    node.appendChild(header);
-
-    const children = document.createElement("div");
-    children.className = "zoom-json-children";
-    children.style.display = isExpanded ? "block" : "none";
-
-    for (const k of keys) {
-      children.appendChild(renderZoomJsonTree(value[k], k, depth + 1));
-    }
-
-    const closeBracket = document.createElement("div");
-    closeBracket.className = "zoom-json-close";
-    closeBracket.innerHTML = '<span class="zoom-json-bracket">}</span>';
-    closeBracket.style.display = isExpanded ? "block" : "none";
-    children.appendChild(closeBracket);
-
-    node.appendChild(children);
-
-    header.addEventListener("click", () => {
-      const isOpen = children.style.display !== "none";
-      children.style.display = isOpen ? "none" : "block";
-      header.querySelector(".zoom-json-toggle").textContent = isOpen ? "▶" : "▼";
-      header.querySelector(".zoom-json-close-bracket").style.display = isOpen ? "inline" : "none";
-    });
-
-    return node;
+    return renderZoomJsonObject(node, key, value, depth);
   }
 
   node.textContent = String(value);
@@ -2665,98 +2675,140 @@ elements.transcriptList.addEventListener("click", (e) => {
 // KEYBOARD SHORTCUTS
 // ============================================================================
 
-document.addEventListener("keydown", (e) => {
-  // Escape - close dialogs
-  if (e.key === "Escape") {
-    if (state.zoomOpen) {
-      e.preventDefault();
-      closeZoomModal();
-      return;
-    }
-    if (state.shortcutsOpen) {
-      e.preventDefault();
-      closeShortcuts();
-    }
-    return;
-  }
-
-  // Handle zoom modal navigation
+/**
+ * Handles escape key to close modals/dialogs.
+ * Returns true if the event was handled.
+ */
+function handleEscapeKey(e) {
   if (state.zoomOpen) {
-    if (e.key === "j" || e.key === "J" || e.key === "ArrowDown" || e.key === "ArrowRight") {
-      e.preventDefault();
-      zoomNext();
-      return;
-    }
-    if (e.key === "k" || e.key === "K" || e.key === "ArrowUp" || e.key === "ArrowLeft") {
-      e.preventDefault();
-      zoomPrev();
-      return;
-    }
-    // Other keys are blocked while zoom modal is open
-    return;
+    e.preventDefault();
+    closeZoomModal();
+    return true;
   }
-
-  // Don't process if dialog open or typing in input
   if (state.shortcutsOpen) {
-    return;
+    e.preventDefault();
+    closeShortcuts();
+    return true;
   }
-  const tag = e.target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
-    return;
+  return false;
+}
+
+/**
+ * Handles navigation keys when zoom modal is open.
+ * Returns true if the event was handled.
+ */
+function handleZoomModalKeys(e) {
+  const nextKeys = ["j", "J", "ArrowDown", "ArrowRight"];
+  const prevKeys = ["k", "K", "ArrowUp", "ArrowLeft"];
+  if (nextKeys.includes(e.key)) {
+    e.preventDefault();
+    zoomNext();
+    return true;
+  }
+  if (prevKeys.includes(e.key)) {
+    e.preventDefault();
+    zoomPrev();
+    return true;
+  }
+  return true; // Block other keys while zoom modal is open
+}
+
+/**
+ * Checks if target is an input element that should block shortcuts.
+ */
+function isInputElement(target) {
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
+/**
+ * Single key shortcuts mapping.
+ */
+const KEYBOARD_SHORTCUTS = {
+  r: reloadBundle,
+  R: reloadBundle,
+  d: toggleTheme,
+  D: toggleTheme,
+  "[": toggleSidebar,
+  "/": focusCurrentSearch,
+  j: navigateNext,
+  J: navigateNext,
+  k: navigatePrev,
+  K: navigatePrev,
+};
+
+/**
+ * Tab view names indexed by number key.
+ */
+const TAB_VIEWS = ["sessions", "transcript", "logs", "filesystem", "environment"];
+
+/**
+ * Handles number key shortcuts for tab switching.
+ */
+function handleTabShortcut(e, key) {
+  if (key >= "1" && key <= "5") {
+    e.preventDefault();
+    switchView(TAB_VIEWS[Number.parseInt(key, 10) - 1]);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Handles arrow key shortcuts for bundle navigation.
+ */
+function handleArrowShortcut(e, key) {
+  if (key === "ArrowLeft" || key === "ArrowRight") {
+    e.preventDefault();
+    navigateBundle(key === "ArrowRight" ? 1 : -1);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Handles global keyboard shortcuts.
+ * Returns true if the event was handled.
+ */
+function handleGlobalShortcuts(e) {
+  const key = e.key;
+
+  if (handleTabShortcut(e, key)) {
+    return true;
   }
 
-  // Number keys for tabs
-  if (e.key >= "1" && e.key <= "5") {
+  if (KEYBOARD_SHORTCUTS[key]) {
     e.preventDefault();
-    const views = ["sessions", "transcript", "logs", "filesystem", "environment"];
-    switchView(views[Number.parseInt(e.key, 10) - 1]);
-    return;
+    KEYBOARD_SHORTCUTS[key]();
+    return true;
   }
 
-  // Global shortcuts
-  if (e.key === "r" || e.key === "R") {
-    e.preventDefault();
-    reloadBundle();
-    return;
-  }
-  if (e.key === "d" || e.key === "D") {
-    e.preventDefault();
-    toggleTheme();
-    return;
-  }
-  if (e.key === "[") {
-    e.preventDefault();
-    toggleSidebar();
-    return;
-  }
-  if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+  // Help shortcut
+  if (key === "?" || (e.shiftKey && key === "/")) {
     e.preventDefault();
     openShortcuts();
-    return;
+    return true;
   }
-  if (e.key === "/") {
-    e.preventDefault();
-    focusCurrentSearch();
+
+  return handleArrowShortcut(e, key);
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    handleEscapeKey(e);
     return;
   }
 
-  // J/K navigation
-  if (e.key === "j" || e.key === "J") {
-    e.preventDefault();
-    navigateNext();
-    return;
-  }
-  if (e.key === "k" || e.key === "K") {
-    e.preventDefault();
-    navigatePrev();
+  if (state.zoomOpen) {
+    handleZoomModalKeys(e);
     return;
   }
 
-  // Arrow keys for bundles
-  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-    e.preventDefault();
-    navigateBundle(e.key === "ArrowRight" ? 1 : -1);
+  if (state.shortcutsOpen || isInputElement(e.target)) {
+    return;
   }
+
+  handleGlobalShortcuts(e);
 });
 
 function focusCurrentSearch() {
@@ -2909,6 +2961,146 @@ function getFilteredItems() {
     .map(({ item, index }) => ({ item, index }));
 }
 
+/**
+ * Creates the type badge text for tree nodes.
+ */
+function getTreeTypeBadge(value, type) {
+  if (type === "array") {
+    return `array (${value.length})`;
+  }
+  if (type === "object" && value !== null) {
+    return `object (${Object.keys(value).length})`;
+  }
+  return type;
+}
+
+/**
+ * Renders a markdown leaf node with toggle between rendered and raw views.
+ */
+function renderMarkdownLeaf(wrapper, markdown, path) {
+  const view = getMarkdownView(path);
+  wrapper.classList.add("markdown-leaf");
+  wrapper.innerHTML = `
+    <div class="markdown-toggle">
+      <button type="button" class="${view === "html" ? "active" : ""}">Rendered</button>
+      <button type="button" class="${view === "raw" ? "active" : ""}">Raw</button>
+    </div>
+    <div class="markdown-section" style="display:${view === "html" ? "flex" : "none"}">
+      <div class="markdown-rendered">${markdown.html}</div>
+    </div>
+    <div class="markdown-section" style="display:${view === "raw" ? "flex" : "none"}">
+      <pre class="markdown-raw">${escapeHtml(markdown.text)}</pre>
+    </div>
+  `;
+  attachMarkdownToggleHandlers(wrapper, path);
+}
+
+/**
+ * Attaches click handlers for markdown view toggle buttons.
+ */
+function attachMarkdownToggleHandlers(wrapper, path) {
+  const buttons = wrapper.querySelectorAll(".markdown-toggle button");
+  const sections = wrapper.querySelectorAll(".markdown-section");
+  buttons[0].addEventListener("click", () => {
+    setMarkdownView(path, "html");
+    buttons[0].classList.add("active");
+    buttons[1].classList.remove("active");
+    sections[0].style.display = "flex";
+    sections[1].style.display = "none";
+  });
+  buttons[1].addEventListener("click", () => {
+    setMarkdownView(path, "raw");
+    buttons[1].classList.add("active");
+    buttons[0].classList.remove("active");
+    sections[1].style.display = "flex";
+    sections[0].style.display = "none";
+  });
+}
+
+/**
+ * Renders a non-expandable leaf node (markdown or simple value).
+ */
+function renderTreeLeaf(node, header, body, value, markdown, path) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "leaf-wrapper";
+
+  if (markdown) {
+    renderMarkdownLeaf(wrapper, markdown, path);
+  } else {
+    const leaf = document.createElement("div");
+    leaf.className = "tree-leaf";
+    leaf.textContent = String(value);
+    wrapper.appendChild(leaf);
+  }
+  body.appendChild(wrapper);
+  node.appendChild(header);
+  node.appendChild(body);
+  return node;
+}
+
+/**
+ * Creates the expand/collapse controls for tree nodes.
+ */
+function createTreeControls(path, depth) {
+  const controls = document.createElement("div");
+  controls.className = "tree-controls";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "tree-toggle";
+  toggle.textContent = shouldOpen(path, depth) ? "Collapse" : "Expand";
+  controls.appendChild(toggle);
+
+  toggle.addEventListener("click", () => {
+    setOpen(path, !shouldOpen(path, depth));
+    renderItems(state.currentItems);
+  });
+
+  return controls;
+}
+
+/**
+ * Renders simple array as compact chips.
+ */
+function renderSimpleArrayChips(container, value) {
+  container.classList.add("compact-array");
+  value.forEach((child) => {
+    const chip = document.createElement("span");
+    chip.className = "array-chip";
+    chip.textContent = String(child);
+    container.appendChild(chip);
+  });
+}
+
+/**
+ * Populates tree children container based on value type and expansion state.
+ */
+function populateTreeChildren(container, value, path, depth) {
+  const childCount = Array.isArray(value) ? value.length : Object.keys(value).length;
+  if (childCount === 0) {
+    // biome-ignore lint/nursery/noSecrets: HTML string, not a secret
+    container.innerHTML = '<span class="muted">(empty)</span>';
+    return;
+  }
+  if (!shouldOpen(path, depth)) {
+    container.style.display = "none";
+    return;
+  }
+  if (Array.isArray(value)) {
+    if (isSimpleArray(value)) {
+      renderSimpleArrayChips(container, value);
+    } else {
+      value.forEach((child, i) => {
+        container.appendChild(renderTree(child, path.concat(String(i)), depth + 1, `[${i}]`));
+      });
+    }
+  } else {
+    Object.entries(value).forEach(([key, child]) => {
+      container.appendChild(renderTree(child, path.concat(key), depth + 1, key));
+    });
+  }
+}
+
 function renderTree(value, path, depth, label) {
   const node = document.createElement("div");
   node.className = "tree-node";
@@ -2926,12 +3118,7 @@ function renderTree(value, path, depth, label) {
 
   const badge = document.createElement("span");
   badge.className = "pill pill-quiet";
-  badge.textContent =
-    type === "array"
-      ? `array (${value.length})`
-      : type === "object" && value !== null
-        ? `object (${Object.keys(value).length})`
-        : type;
+  badge.textContent = getTreeTypeBadge(value, type);
   header.appendChild(badge);
 
   const body = document.createElement("div");
@@ -2940,103 +3127,17 @@ function renderTree(value, path, depth, label) {
   const expandable = !markdown && (Array.isArray(value) || isObject(value));
 
   if (!expandable) {
-    const wrapper = document.createElement("div");
-    wrapper.className = "leaf-wrapper";
-
-    if (markdown) {
-      const view = getMarkdownView(path);
-      wrapper.classList.add("markdown-leaf");
-      wrapper.innerHTML = `
-        <div class="markdown-toggle">
-          <button type="button" class="${view === "html" ? "active" : ""}">Rendered</button>
-          <button type="button" class="${view === "raw" ? "active" : ""}">Raw</button>
-        </div>
-        <div class="markdown-section" style="display:${view === "html" ? "flex" : "none"}">
-          <div class="markdown-rendered">${markdown.html}</div>
-        </div>
-        <div class="markdown-section" style="display:${view === "raw" ? "flex" : "none"}">
-          <pre class="markdown-raw">${escapeHtml(markdown.text)}</pre>
-        </div>
-      `;
-      const buttons = wrapper.querySelectorAll(".markdown-toggle button");
-      const sections = wrapper.querySelectorAll(".markdown-section");
-      buttons[0].addEventListener("click", () => {
-        setMarkdownView(path, "html");
-        buttons[0].classList.add("active");
-        buttons[1].classList.remove("active");
-        sections[0].style.display = "flex";
-        sections[1].style.display = "none";
-      });
-      buttons[1].addEventListener("click", () => {
-        setMarkdownView(path, "raw");
-        buttons[1].classList.add("active");
-        buttons[0].classList.remove("active");
-        sections[1].style.display = "flex";
-        sections[0].style.display = "none";
-      });
-    } else {
-      const leaf = document.createElement("div");
-      leaf.className = "tree-leaf";
-      leaf.textContent = String(value);
-      wrapper.appendChild(leaf);
-    }
-    body.appendChild(wrapper);
-    node.appendChild(header);
-    node.appendChild(body);
-    return node;
+    return renderTreeLeaf(node, header, body, value, markdown, path);
   }
 
   const childCount = Array.isArray(value) ? value.length : Object.keys(value).length;
-  const hasChildren = childCount > 0;
-
-  if (hasChildren) {
-    const controls = document.createElement("div");
-    controls.className = "tree-controls";
-
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "tree-toggle";
-    toggle.textContent = shouldOpen(path, depth) ? "Collapse" : "Expand";
-    controls.appendChild(toggle);
-
-    toggle.addEventListener("click", () => {
-      setOpen(path, !shouldOpen(path, depth));
-      renderItems(state.currentItems);
-    });
-
-    header.appendChild(controls);
+  if (childCount > 0) {
+    header.appendChild(createTreeControls(path, depth));
   }
 
   const childrenContainer = document.createElement("div");
   childrenContainer.className = "tree-children";
-
-  if (!hasChildren) {
-    childrenContainer.innerHTML = '<span class="muted">(empty)</span>';
-  } else if (shouldOpen(path, depth)) {
-    if (Array.isArray(value)) {
-      if (isSimpleArray(value)) {
-        childrenContainer.classList.add("compact-array");
-        value.forEach((child) => {
-          const chip = document.createElement("span");
-          chip.className = "array-chip";
-          chip.textContent = String(child);
-          childrenContainer.appendChild(chip);
-        });
-      } else {
-        value.forEach((child, i) => {
-          childrenContainer.appendChild(
-            renderTree(child, path.concat(String(i)), depth + 1, `[${i}]`)
-          );
-        });
-      }
-    } else {
-      Object.entries(value).forEach(([key, child]) => {
-        childrenContainer.appendChild(renderTree(child, path.concat(key), depth + 1, key));
-      });
-    }
-  } else {
-    childrenContainer.style.display = "none";
-  }
+  populateTreeChildren(childrenContainer, value, path, depth);
 
   body.appendChild(childrenContainer);
   node.appendChild(header);
