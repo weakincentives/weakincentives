@@ -72,8 +72,12 @@ class MockClaudeAgentOptions:
     max_thinking_tokens: int | None
     mcp_servers: dict[str, object] | None
     hooks: dict[str, list[object]] | None
+    can_use_tool: object | None  # Added for ClaudeSDKClient compatibility
 
     def __init__(self, **kwargs: object) -> None:
+        # Set defaults for required attributes
+        self.can_use_tool = None
+        # Set any provided attributes
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -143,6 +147,50 @@ class MockSDKQuery:
             raise cls._error
 
         for result in cls._results:
+            yield result
+
+
+class MockClaudeSDKClient:
+    """Mock for ClaudeSDKClient."""
+
+    def __init__(
+        self,
+        options: MockClaudeAgentOptions | None = None,
+        transport: object | None = None,
+    ) -> None:
+        """Initialize mock client."""
+        self.options = options or MockClaudeAgentOptions()
+        self._connected = False
+        MockSDKQuery.captured_options.append(self.options)
+
+    async def connect(
+        self, prompt: str | AsyncIterable[dict[str, Any]] | None = None
+    ) -> None:
+        """Mock connect method."""
+        self._connected = True
+        # Handle AsyncIterable prompts (streaming mode)
+        if prompt is not None and not isinstance(prompt, str):
+            # Consume the async generator to get prompt content
+            prompt_content = ""
+            async for msg in prompt:
+                if isinstance(msg, dict) and "message" in msg:
+                    message = msg["message"]
+                    if isinstance(message, dict) and "content" in message:
+                        prompt_content = message["content"]
+            MockSDKQuery.captured_prompts.append(prompt_content)
+        elif isinstance(prompt, str):
+            MockSDKQuery.captured_prompts.append(prompt)
+
+    async def disconnect(self) -> None:
+        """Mock disconnect method."""
+        self._connected = False
+
+    async def receive_messages(self) -> AsyncGenerator[object, None]:
+        """Mock receive_messages that yields configured results."""
+        if MockSDKQuery._error is not None:
+            raise MockSDKQuery._error
+
+        for result in MockSDKQuery._results:
             yield result
 
 
@@ -256,6 +304,10 @@ def sdk_patches() -> Generator[None, None, None]:
         patch(
             "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
             return_value=_create_sdk_mock(),
+        ),
+        patch(
+            "claude_agent_sdk.ClaudeSDKClient",
+            MockClaudeSDKClient,
         ),
         patch(
             "claude_agent_sdk.types.ClaudeAgentOptions",
@@ -1250,12 +1302,166 @@ class TestMessageContentExtraction:
 
         content = [
             {"type": "text", "text": "Hello"},
-            "not a dict",
-            None,
+            "not a dict",  # Should be skipped
+            123,  # Should be skipped
+            {"type": "text", "text": "World"},
         ]
         result = _extract_list_content(content)
-        assert len(result) == 1
-        assert result[0]["text"] == "Hello"
+        assert len(result) == 2
+        assert result[0] == {"type": "text", "text": "Hello"}
+        assert result[1] == {"type": "text", "text": "World"}
+
+    def test_multiturn_with_task_completion_checker(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test multi-turn conversations with task completion checking."""
+        from weakincentives.adapters.claude_agent_sdk import (
+            TaskCompletionChecker,
+            TaskCompletionContext,
+            TaskCompletionResult,
+        )
+
+        # Create a mock completion checker
+        class TestChecker(TaskCompletionChecker):
+            def __init__(self) -> None:
+                self.check_count = 0
+
+            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+                self.check_count += 1
+                if self.check_count == 1:
+                    return TaskCompletionResult.incomplete(
+                        "Please continue working on the task."
+                    )
+                return TaskCompletionResult.ok("Task complete.")
+
+        checker = TestChecker()
+
+        # Create adapter with task completion checker
+        from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKClientConfig
+
+        client_config = ClaudeAgentSDKClientConfig(
+            task_completion_checker=checker,
+        )
+        adapter = ClaudeAgentSDKAdapter(client_config=client_config)
+
+        # Set up mock client that supports multi-turn
+        class MockClient:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                self.query_count = 0
+                self.receive_count = 0  # Track receive_messages calls
+                self.feedback_received: list[str] = []
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                if prompt:
+                    async for _ in prompt:
+                        pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def query(self, prompt: str, session_id: str) -> None:
+                self.query_count += 1
+                self.feedback_received.append(prompt)
+
+            async def receive_messages(self) -> AsyncGenerator[object, None]:
+                # Track which call this is
+                current_receive = self.receive_count
+                self.receive_count += 1
+
+                # First call - return incomplete response
+                if current_receive == 0:
+                    yield MockResultMessage(
+                        result="Partial work",
+                        usage={"input_tokens": 10, "output_tokens": 5},
+                    )
+                elif current_receive == 1:
+                    # Second call (after feedback) - return complete response
+                    yield MockResultMessage(
+                        result="Complete work",
+                        usage={"input_tokens": 5, "output_tokens": 3},
+                    )
+
+        # Use sdk_patches first, then override ClaudeSDKClient
+        _setup_mock_query([])  # Clear any previous mock results
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClient):
+                response = adapter.evaluate(simple_prompt, session=session)
+
+        # Verify that the checker was called twice (once incomplete, once complete)
+        assert checker.check_count == 2
+        assert response.output is None  # No structured output
+
+    def test_multiturn_deadline_exceeded(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that evaluation raises error when deadline already expired."""
+        from datetime import UTC, datetime, timedelta
+
+        from weakincentives.adapters.core import PromptEvaluationError
+        from weakincentives.deadlines import Deadline
+
+        # Create a deadline that will expire soon (must be at least 1 second)
+        near_expiry_deadline = Deadline(datetime.now(UTC) + timedelta(seconds=1.1))
+
+        # Mock the SDK to return messages
+        _setup_mock_query(
+            [
+                MockResultMessage(
+                    result="Test", usage={"input_tokens": 10, "output_tokens": 5}
+                ),
+            ]
+        )
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            # Add a small delay to ensure deadline expires
+            import time
+
+            time.sleep(1.2)  # Sleep for 1.2 seconds to ensure deadline expires
+
+            # Should raise error due to expired deadline
+            with pytest.raises(PromptEvaluationError, match="Deadline expired"):
+                adapter.evaluate(
+                    simple_prompt, session=session, deadline=near_expiry_deadline
+                )
+
+    def test_multiturn_budget_exceeded(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that multi-turn stops when budget is exceeded."""
+        from weakincentives.budget import Budget, BudgetTracker
+
+        # Create a budget with very low token limit
+        budget = Budget(max_output_tokens=1)
+        budget_tracker = BudgetTracker(budget)
+
+        # Pre-fill the budget to nearly exhausted
+        from weakincentives.runtime.events import TokenUsage
+
+        budget_tracker.record_cumulative("test", TokenUsage(output_tokens=0))
+
+        # Mock the SDK to return messages with token usage
+        _setup_mock_query(
+            [
+                MockResultMessage(
+                    result="Test", usage={"input_tokens": 10, "output_tokens": 5}
+                ),
+            ]
+        )
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            # Should stop due to budget exceeded
+            response = adapter.evaluate(
+                simple_prompt, session=session, budget_tracker=budget_tracker
+            )
+            assert response.output is None
 
     def test_extract_inner_message_content_string(self) -> None:
         """String content is extracted fully."""
