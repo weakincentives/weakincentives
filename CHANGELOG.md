@@ -4,21 +4,25 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-*Commits reviewed: 2026-01-25 (e5a00a4) through 2026-01-29 (7c76f23)*
+*Commits reviewed: 2026-01-25 (e5a00a4) through 2026-01-29 (01ab9c5)*
 
 ### TL;DR
 
-This release introduces **TranscriptCollector**, a hook-driven system replacing the
-old log aggregator for real-time Claude Agent SDK transcript collection. The
-**debug UI receives major upgrades**: virtual scrolling for large lists, a zoom
-modal for detailed entry inspection, environment data tables, and the transcript
-tab with filtering/search. **AgentLoop** (renamed from MainLoop) gains a
-**transforming `finalize()` hook** that can modify outputs post-execution, and
-**scoped field visibility** lets you hide dataclass fields from LLM structured
-outputs while keeping them for post-processing. **Bundle lifecycle management**
-adds retention policies (max count/age/size) and external storage handler support.
-Frontend code now enforces **Biome linting**. The codebase modernizes to **PEP 695
-type syntax** and gains **comprehensive docstrings** across all public modules.
+This release introduces **TranscriptCollector**, a hook-driven system replacing
+the old log aggregator for real-time Claude Agent SDK transcript collection with
+automatic sub-agent discovery. The **debug UI receives major upgrades**: a new
+**Transcript tab** with filtering/search, an **Environment tab** displaying system
+and runtime context, **virtual scrolling** for large lists, a **zoom modal** for
+detailed entry inspection with keyboard navigation, and **image file support** in
+the file viewer. **AgentLoop** (renamed from MainLoop) gains a **transforming
+`finalize()` hook** that can modify outputs post-execution. **Scoped field
+visibility** lets you hide dataclass fields from LLM structured outputs while
+keeping them for post-processing. **Bundle lifecycle management** adds retention
+policies (max count/age/size) and external storage handler support for cloud
+uploads. The **Task view is removed**—request/response data now lives in session
+state. Frontend code now enforces **Biome linting**. The codebase modernizes to
+**PEP 695 type syntax** and gains **comprehensive docstrings** across all 26
+public modules.
 
 ---
 
@@ -227,6 +231,16 @@ class AnalysisResult:
 The response parser and structured output modules automatically use the
 `STRUCTURED_OUTPUT` scope.
 
+#### Image File Support in Debug Viewer
+
+The filesystem tab in `wink debug` now displays image files inline instead of
+showing "binary file cannot be displayed":
+
+- Supports PNG, JPG, JPEG, GIF, WebP, SVG, ICO, and BMP formats
+- Case-insensitive extension matching
+- Responsive sizing (max 70% viewport height)
+- Base64 encoding with MIME type whitelisting for security
+
 ---
 
 ### Improvements
@@ -284,10 +298,19 @@ Rules enforce complexity limits (max cognitive complexity 25), correctness
 #### Dependency Updates
 
 - `mcp` 1.25.0 → 1.26.0 (minor)
+- `openai` 2.15.0 → 2.16.0 (minor)
+- `claude-agent-sdk` 0.1.22 → 0.1.25 (patch)
+- `cryptography` 46.0.3 → 46.0.4 (security patch)
 - `coverage`, `huggingface-hub`, `hypothesis`, `litellm`, `multidict`,
   `python-multipart`, `rich` patch updates
 - Removed `grpcio` as transitive dependency
 - `actions/checkout` v5 → v6 in CI workflows
+
+#### Test Infrastructure
+
+- Improved TOCTOU test reliability for bundle retention on filesystems with
+  aggressive inode reuse (e.g., tmpfs)
+- Added missing test case for bundle deletion without identity tracking
 
 #### Dependabot Configuration
 
