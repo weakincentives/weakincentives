@@ -1066,13 +1066,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     from ._task_completion import TaskCompletionContext
 
                     # Extract the last message for completion checking
-                    last_message = round_messages[-1]  # We know round_messages is non-empty
+                    last_message = round_messages[
+                        -1
+                    ]  # We know round_messages is non-empty
                     tentative_output = None
 
                     # Try to extract structured output from the last message
-                    tentative_output = getattr(
-                        last_message, "structured_output", None
-                    )
+                    tentative_output = getattr(last_message, "structured_output", None)
                     if tentative_output is None:
                         tentative_output = getattr(last_message, "result", None)
 

@@ -1351,6 +1351,7 @@ class TestMessageContentExtraction:
             ) -> None:
                 self.options = options
                 self.query_count = 0
+                self.receive_count = 0  # Track receive_messages calls
                 self.feedback_received: list[str] = []
                 MockSDKQuery.captured_options.append(options)
 
@@ -1367,39 +1368,44 @@ class TestMessageContentExtraction:
                 self.feedback_received.append(prompt)
 
             async def receive_messages(self) -> AsyncGenerator[object, None]:
-                # First round - return incomplete response
-                if self.query_count == 0:
+                # Track which call this is
+                current_receive = self.receive_count
+                self.receive_count += 1
+
+                # First call - return incomplete response
+                if current_receive == 0:
                     yield MockResultMessage(
                         result="Partial work",
                         usage={"input_tokens": 10, "output_tokens": 5},
                     )
-                else:
-                    # Second round - return complete response
+                elif current_receive == 1:
+                    # Second call (after feedback) - return complete response
                     yield MockResultMessage(
                         result="Complete work",
                         usage={"input_tokens": 5, "output_tokens": 3},
                     )
 
-        # Patch ClaudeSDKClient to return our mock
-        with patch("claude_agent_sdk.ClaudeSDKClient", MockClient):
-            _setup_mock_query([])  # Clear any previous mock results
-            with sdk_patches():
+        # Use sdk_patches first, then override ClaudeSDKClient
+        _setup_mock_query([])  # Clear any previous mock results
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClient):
                 response = adapter.evaluate(simple_prompt, session=session)
 
-                # Verify that the checker was called
-                assert checker.check_count == 1
-                assert response.output is None  # No structured output
+        # Verify that the checker was called twice (once incomplete, once complete)
+        assert checker.check_count == 2
+        assert response.output is None  # No structured output
 
     def test_multiturn_deadline_exceeded(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        """Test that multi-turn stops when deadline is exceeded."""
+        """Test that evaluation raises error when deadline already expired."""
         from datetime import UTC, datetime, timedelta
 
+        from weakincentives.adapters.core import PromptEvaluationError
         from weakincentives.deadlines import Deadline
 
-        # Create a deadline that will expire very soon
-        near_expiry_deadline = Deadline(datetime.now(UTC) + timedelta(microseconds=1))
+        # Create a deadline that will expire soon (must be at least 1 second)
+        near_expiry_deadline = Deadline(datetime.now(UTC) + timedelta(seconds=1.1))
 
         # Mock the SDK to return messages
         _setup_mock_query(
@@ -1416,13 +1422,13 @@ class TestMessageContentExtraction:
             # Add a small delay to ensure deadline expires
             import time
 
-            time.sleep(0.001)  # Sleep for 1ms to ensure deadline expires
+            time.sleep(1.2)  # Sleep for 1.2 seconds to ensure deadline expires
 
-            # Should complete without continuation due to expired deadline
-            response = adapter.evaluate(
-                simple_prompt, session=session, deadline=near_expiry_deadline
-            )
-            assert response.output is None
+            # Should raise error due to expired deadline
+            with pytest.raises(PromptEvaluationError, match="Deadline expired"):
+                adapter.evaluate(
+                    simple_prompt, session=session, deadline=near_expiry_deadline
+                )
 
     def test_multiturn_budget_exceeded(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
