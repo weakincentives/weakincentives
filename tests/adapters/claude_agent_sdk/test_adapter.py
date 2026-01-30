@@ -721,6 +721,25 @@ class TestSDKConfigOptions:
             "computer-use",
         ]
 
+    def test_transcript_collection_disabled_with_none(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that setting transcript_collection=None disables collection."""
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(transcript_collection=None),
+        )
+
+        with sdk_patches():
+            response = adapter.evaluate(simple_prompt, session=session)
+
+        # Should complete successfully without transcript collector
+        assert response.text == "Done"
+        assert len(MockSDKQuery.captured_options) == 1
+
     def test_passes_max_thinking_tokens_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:

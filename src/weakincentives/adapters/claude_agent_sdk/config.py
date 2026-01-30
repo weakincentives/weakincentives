@@ -18,10 +18,10 @@ from typing import TYPE_CHECKING, Literal
 
 from ...dataclasses import FrozenDataclass
 from ..config import LLMConfig
+from ._transcript_collector import TranscriptCollectorConfig
 
 if TYPE_CHECKING:
     from ._task_completion import TaskCompletionChecker
-    from ._transcript_collector import TranscriptCollectorConfig
     from .isolation import IsolationConfig
 
 __all__ = [
@@ -67,10 +67,10 @@ class ClaudeAgentSDKClientConfig:
             ~/.claude configuration. See :class:`IsolationConfig` for details.
         betas: Beta features to enable. Passed to the SDK as a list of
             beta feature identifiers. None means no beta features.
-        transcript_collection: Configuration for transcript collection. When
-            provided, collects and logs transcript entries from the main session
-            and all sub-agent sessions. See :class:`TranscriptCollectorConfig`
-            for details.
+        transcript_collection: Configuration for transcript collection. By
+            default, collects and logs transcript entries from the main session
+            and all sub-agent sessions. Set to None to disable transcript
+            collection. See :class:`TranscriptCollectorConfig` for details.
     """
 
     permission_mode: PermissionMode = "bypassPermissions"
@@ -82,7 +82,9 @@ class ClaudeAgentSDKClientConfig:
     task_completion_checker: TaskCompletionChecker | None = None
     isolation: IsolationConfig | None = None
     betas: tuple[str, ...] | None = None
-    transcript_collection: TranscriptCollectorConfig | None = None
+    transcript_collection: TranscriptCollectorConfig | None = (
+        TranscriptCollectorConfig()
+    )
 
 
 @FrozenDataclass()

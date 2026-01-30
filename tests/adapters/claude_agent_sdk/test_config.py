@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 
+from weakincentives.adapters.claude_agent_sdk import TranscriptCollectorConfig
 from weakincentives.adapters.claude_agent_sdk.config import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
@@ -37,6 +38,23 @@ class TestClaudeAgentSDKClientConfig:
         assert config.stop_on_structured_output is True
         assert config.isolation is None
         assert config.betas is None
+        # Transcript collection is enabled by default
+        assert config.transcript_collection is not None
+        assert isinstance(config.transcript_collection, TranscriptCollectorConfig)
+
+    def test_transcript_collection_disabled_with_none(self) -> None:
+        config = ClaudeAgentSDKClientConfig(transcript_collection=None)
+        assert config.transcript_collection is None
+
+    def test_transcript_collection_custom_config(self) -> None:
+        custom_config = TranscriptCollectorConfig(
+            poll_interval=0.5,
+            emit_raw_json=False,
+        )
+        config = ClaudeAgentSDKClientConfig(transcript_collection=custom_config)
+        assert config.transcript_collection is custom_config
+        assert config.transcript_collection.poll_interval == 0.5
+        assert config.transcript_collection.emit_raw_json is False
 
     def test_with_all_values(self) -> None:
         isolation = IsolationConfig(network_policy=NetworkPolicy.no_network())
