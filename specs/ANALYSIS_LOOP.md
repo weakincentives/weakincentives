@@ -5,9 +5,8 @@
 The best way to debug a complex agent is with another agent.
 
 `AnalysisLoop` is a specialized AgentLoop that analyzes debug bundles and
-produces human-readable analysis bundles with actionable insights. It runs
-continuously in the background, sampling executions from EvalLoop or AgentLoop
-within configurable budget constraints.
+produces human-readable analysis bundles with actionable insights. It receives
+requests on its own mailbox and runs independently of the loops it analyzes.
 
 **Implementation:** `src/weakincentives/analysis/`
 
@@ -28,6 +27,7 @@ contents and produces markdown reports that developers can act on immediately.
 
 ## Principles
 
+- **Loosely coupled**: Receives requests via mailbox; no direct loop dependencies
 - **Always-on**: Runs continuously with sampling; not just on-demand
 - **Budget-aware**: Operates within token/cost constraints via sampling rate
 - **Self-contained output**: Analysis bundles include source debug bundles
@@ -35,40 +35,237 @@ contents and produces markdown reports that developers can act on immediately.
 - **Single tool dependency**: Only `wink query`; no other tools required
 - **Prebuilt with hooks**: Works out of the box; customize via prompt overrides
 
-## Auto-Connect API
+## Architecture
 
-AnalysisLoop provides a simple API to attach to existing loops for continuous
-background analysis:
+AnalysisLoop stays decoupled from AgentLoop and EvalLoop through a notification
+and forwarding pattern:
+
+```
+┌─────────────┐     ┌─────────────┐
+│  AgentLoop  │     │  EvalLoop   │
+└──────┬──────┘     └──────┬──────┘
+       │                   │
+       │ CompletionNotification
+       ▼                   ▼
+┌──────────────────────────────────┐
+│      Notifications Mailbox       │
+└────────────────┬─────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────┐
+│       AnalysisForwarder          │
+│  - sampling logic                │
+│  - budget tracking               │
+│  - request construction          │
+└────────────────┬─────────────────┘
+                 │ AnalysisRequest
+                 ▼
+┌──────────────────────────────────┐
+│   AnalysisLoop Requests Mailbox  │
+└────────────────┬─────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────┐
+│          AnalysisLoop            │
+│  - load bundles                  │
+│  - run wink query                │
+│  - generate report               │
+│  - write analysis bundle         │
+└──────────────────────────────────┘
+```
+
+### Completion Notifications
+
+AgentLoop and EvalLoop emit notifications when work completes:
 
 ```python
-from weakincentives.analysis import AnalysisLoop
+@dataclass(frozen=True)
+class CompletionNotification:
+    """Emitted when a loop completes an execution."""
 
-# Attach to EvalLoop - analyzes eval results with expected outputs
-analysis = AnalysisLoop.connect_to_eval_loop(
-    eval_loop=eval_loop,
+    source: Literal["agent_loop", "eval_loop"]
+    """Which loop type emitted this notification."""
+
+    bundle_path: Path
+    """Path to the debug bundle."""
+
+    request_id: UUID
+    """Original request identifier."""
+
+    success: bool
+    """Whether the execution succeeded."""
+
+    # EvalLoop-specific (None for AgentLoop)
+    passed: bool | None = None
+    """Whether the eval passed (EvalLoop only)."""
+
+    score: float | None = None
+    """Eval score if applicable."""
+
+    completed_at: datetime = field(default_factory=lambda: now(UTC))
+```
+
+Loops emit to a shared notifications mailbox without knowing who consumes:
+
+```python
+# In AgentLoop, after execution completes
+self._notifications.send(CompletionNotification(
+    source="agent_loop",
+    bundle_path=bundle.path,
+    request_id=request.request_id,
+    success=result.error is None,
+))
+
+# In EvalLoop, after evaluation completes
+self._notifications.send(CompletionNotification(
+    source="eval_loop",
+    bundle_path=bundle.path,
+    request_id=request.request_id,
+    success=result.error is None,
+    passed=result.passed,
+    score=result.score,
+))
+```
+
+### AnalysisForwarder
+
+A lightweight consumer that handles sampling and forwards to AnalysisLoop:
+
+```python
+@dataclass(frozen=True)
+class AnalysisForwarderConfig:
+    """Configuration for the analysis forwarder."""
+
+    objective: str
+    """Research question for analysis."""
+
+    sample_rate: float = 0.1
+    """Fraction of notifications to forward (0.0-1.0)."""
+
+    always_forward_failures: bool = True
+    """Forward failed executions regardless of sample rate."""
+
+    budget: AnalysisBudget = field(default_factory=AnalysisBudget)
+    """Token and bundle limits."""
+
+    seed: int | None = None
+    """Random seed for reproducible sampling."""
+```
+
+```python
+class AnalysisForwarder:
+    """Consumes notifications and forwards sampled requests to AnalysisLoop."""
+
+    def __init__(
+        self,
+        notifications: Mailbox[CompletionNotification, None],
+        analysis_requests: Mailbox[AnalysisRequest, AnalysisBundle],
+        config: AnalysisForwarderConfig,
+    ):
+        self._notifications = notifications
+        self._analysis_requests = analysis_requests
+        self._config = config
+        self._rng = Random(config.seed)
+        self._budget_tracker = BudgetTracker(config.budget)
+
+    def run(self) -> None:
+        """Process notifications and forward sampled requests."""
+        for msg in self._notifications.receive():
+            notification = msg.body
+
+            if self._should_forward(notification):
+                request = AnalysisRequest(
+                    objective=self._config.objective,
+                    bundles=(notification.bundle_path,),
+                    source=notification.source,
+                    eval_context=EvalContext(
+                        passed=notification.passed,
+                        score=notification.score,
+                    ) if notification.source == "eval_loop" else None,
+                )
+                self._analysis_requests.send(request)
+                self._budget_tracker.record_forwarded()
+
+            msg.acknowledge()
+
+    def _should_forward(self, notification: CompletionNotification) -> bool:
+        """Determine if this notification should trigger analysis."""
+        if self._budget_tracker.exhausted:
+            return False
+
+        if self._config.always_forward_failures and not notification.success:
+            return True
+
+        return self._rng.random() < self._config.sample_rate
+```
+
+### AnalysisLoop
+
+Receives requests on its own mailbox, independent of notification source:
+
+```python
+class AnalysisLoop(AgentLoop[AnalysisRequest, AnalysisBundle]):
+    """Specialized loop for debug bundle analysis."""
+
+    def __init__(
+        self,
+        adapter: Adapter,
+        requests: Mailbox[AnalysisRequest, AnalysisBundle],
+        config: AnalysisLoopConfig | None = None,
+    ):
+        ...
+```
+
+## Auto-Connect API
+
+Helper functions wire up the notification pattern:
+
+```python
+from weakincentives.analysis import connect_analysis
+
+# Returns (forwarder, analysis_loop) tuple
+# Creates mailboxes and wiring automatically
+forwarder, analysis = connect_analysis(
+    notifications=notifications_mailbox,  # Shared notifications mailbox
     objective="Identify patterns in failing samples",
-    sample_rate=0.1,  # Analyze 10% of executions
-    budget=Budget(max_tokens=100_000),
+    sample_rate=0.1,
+    budget=AnalysisBudget(max_tokens=100_000),
 )
 
-# Attach to AgentLoop - retrospective trajectory analysis
-analysis = AnalysisLoop.connect_to_agent_loop(
-    agent_loop=agent_loop,
-    objective="Assess trajectory soundness",
-    sample_rate=0.05,  # Analyze 5% of executions
-    budget=Budget(max_tokens=50_000),
-)
-
-# Both return the same AnalysisLoop instance configured appropriately
-# Run as part of a LoopGroup for lifecycle management
-group = LoopGroup(loops=[eval_loop, analysis])
+# Run all components together
+group = LoopGroup(loops=[agent_loop, eval_loop, forwarder, analysis])
 group.run()
+```
+
+For convenience, loops can be configured to emit to a notifications mailbox:
+
+```python
+# Create shared notifications mailbox
+notifications = InMemoryMailbox[CompletionNotification, None](name="notifications")
+
+# Configure loops to emit notifications
+agent_loop = AgentLoop(
+    ...,
+    notifications=notifications,  # Emits CompletionNotification on completion
+)
+
+eval_loop = EvalLoop(
+    ...,
+    notifications=notifications,  # Emits CompletionNotification on completion
+)
+
+# Wire up analysis
+forwarder, analysis = connect_analysis(
+    notifications=notifications,
+    objective="Monitor agent behavior",
+    sample_rate=0.1,
+)
 ```
 
 ### Sampling
 
-The `sample_rate` parameter controls what fraction of executions trigger
-analysis. This enables continuous background operation within budget:
+The `sample_rate` parameter controls what fraction of notifications trigger
+analysis:
 
 | Sample Rate | Behavior |
 |-------------|----------|
@@ -81,29 +278,44 @@ configured to always trigger analysis regardless of sample rate.
 
 ### Budget Constraints
 
-Analysis operates within the specified budget:
+The forwarder tracks budget and stops forwarding when exhausted:
 
 ```python
 @dataclass(frozen=True)
 class AnalysisBudget:
-    max_tokens: int = 100_000
-    """Maximum tokens per analysis session."""
-
-    max_bundles: int = 10
-    """Maximum bundles to analyze per session."""
+    max_requests: int = 100
+    """Maximum analysis requests per interval."""
 
     reset_interval: timedelta = timedelta(hours=1)
     """Budget resets after this interval."""
 ```
 
-When budget is exhausted, analysis pauses until the reset interval elapses.
+## Analysis Request and Response
 
-## Analysis Bundle
+### AnalysisRequest
 
-The output of AnalysisLoop is an **analysis bundle**: a self-contained archive
-designed for human consumption.
+```python
+@dataclass(frozen=True)
+class AnalysisRequest:
+    """Request to analyze debug bundles."""
 
-### Structure
+    objective: str
+    """Research question to investigate."""
+
+    bundles: tuple[Path, ...]
+    """Debug bundle paths to analyze."""
+
+    source: Literal["agent_loop", "eval_loop", "manual"] = "manual"
+    """Where this request originated."""
+
+    eval_context: EvalContext | None = None
+    """Eval-specific context (pass/fail, score) if from EvalLoop."""
+```
+
+### AnalysisBundle (Response)
+
+The output is an **analysis bundle**: a self-contained archive for human
+consumption.
 
 ```
 analysis-2024-01-15T10-30-00.zip
@@ -169,13 +381,11 @@ The main `report.md` follows a consistent structure:
 
 ### Self-Containment
 
-Analysis bundles include the source debug bundles that were analyzed. This
-ensures the analysis is reproducible and allows drill-down without requiring
-access to the original bundle storage.
+Analysis bundles include the source debug bundles that were analyzed:
 
 ```python
 @dataclass(frozen=True)
-class AnalysisBundleConfig:
+class AnalysisLoopConfig:
     include_source_bundles: bool = True
     """Embed analyzed debug bundles in the output."""
 
@@ -229,7 +439,7 @@ analysis styles.
 Override sections to change analysis behavior:
 
 ```python
-from weakincentives.analysis import AnalysisLoop, AnalysisPromptOverrides
+from weakincentives.analysis import AnalysisPromptOverrides
 
 # Security-focused analysis
 security_overrides = AnalysisPromptOverrides(
@@ -245,8 +455,8 @@ security_overrides = AnalysisPromptOverrides(
     """,
 )
 
-analysis = AnalysisLoop.connect_to_eval_loop(
-    eval_loop=eval_loop,
+forwarder, analysis = connect_analysis(
+    notifications=notifications,
     objective="Security audit of agent behavior",
     overrides=security_overrides,
 )
@@ -269,17 +479,6 @@ analysis = AnalysisLoop.connect_to_eval_loop(
 class AnalysisLoopConfig:
     """Configuration for AnalysisLoop."""
 
-    # Sampling
-    sample_rate: float = 0.1
-    """Fraction of executions to analyze (0.0-1.0)."""
-
-    always_analyze_failures: bool = True
-    """Analyze failed executions regardless of sample rate."""
-
-    # Budget
-    budget: AnalysisBudget = field(default_factory=AnalysisBudget)
-    """Token and bundle limits."""
-
     # Output
     output_dir: Path = Path("./analysis-bundles/")
     """Where to write analysis bundles."""
@@ -287,77 +486,38 @@ class AnalysisLoopConfig:
     include_source_bundles: bool = True
     """Embed debug bundles in analysis output."""
 
+    max_source_bundle_size: int = 50_000_000
+    """Skip embedding bundles larger than this."""
+
     # Agent
     overrides: AnalysisPromptOverrides | None = None
     """Prompt section overrides."""
 ```
-
-## Operational Modes
-
-### EvalLoop Integration
-
-When connected to EvalLoop, analysis has access to expected outputs and can
-focus on pass/fail patterns:
-
-```
-EvalLoop                    AnalysisLoop
-    │                            │
-    ├─── eval complete ─────────►│ (sampled)
-    │    + debug bundle          │
-    │                            ├── load bundle
-    │                            ├── run wink query
-    │                            ├── generate report
-    │                            └── write analysis bundle
-```
-
-Questions this mode answers:
-
-- "Why do samples fail?"
-- "What distinguishes passing from failing samples?"
-- "Which tool sequences correlate with success?"
-
-### AgentLoop Integration
-
-When connected to AgentLoop (production), there are no expected outputs.
-Analysis focuses on trajectory soundness:
-
-```
-AgentLoop                   AnalysisLoop
-    │                            │
-    ├─── execution complete ────►│ (sampled)
-    │    + debug bundle          │
-    │                            ├── load bundle
-    │                            ├── assess trajectory
-    │                            ├── generate report
-    │                            └── write analysis bundle
-```
-
-Questions this mode answers:
-
-- "Did the agent take a reasonable path?"
-- "Where did the agent get stuck?"
-- "What information was missing?"
 
 ## Usage
 
 ### Continuous Background Analysis
 
 ```python
-from weakincentives.analysis import AnalysisLoop
-from weakincentives.runtime import AgentLoop, LoopGroup
+from weakincentives.analysis import connect_analysis
+from weakincentives.runtime import AgentLoop, LoopGroup, InMemoryMailbox
 
-# Create your agent loop
-agent_loop = AgentLoop(...)
+# Create shared notifications mailbox
+notifications = InMemoryMailbox(name="notifications")
 
-# Attach analysis with 10% sampling
-analysis = AnalysisLoop.connect_to_agent_loop(
-    agent_loop=agent_loop,
+# Create loops that emit notifications
+agent_loop = AgentLoop(..., notifications=notifications)
+eval_loop = EvalLoop(..., notifications=notifications)
+
+# Wire up analysis
+forwarder, analysis = connect_analysis(
+    notifications=notifications,
     objective="Monitor for degraded performance patterns",
     sample_rate=0.1,
 )
 
-# Run together
-group = LoopGroup(loops=[agent_loop, analysis])
+# Run all together
+group = LoopGroup(loops=[agent_loop, eval_loop, forwarder, analysis])
 group.run()
 
 # Analysis bundles appear in ./analysis-bundles/
@@ -366,14 +526,20 @@ group.run()
 ### On-Demand Analysis
 
 ```python
-from weakincentives.analysis import AnalysisLoop
+from weakincentives.analysis import AnalysisLoop, AnalysisRequest
 
-# Analyze specific bundles
-bundle = AnalysisLoop.analyze(
-    bundles=[Path("./debug/bundle-001.zip")],
+# Create analysis loop with its own mailbox
+requests = InMemoryMailbox(name="analysis-requests")
+analysis = AnalysisLoop(adapter=adapter, requests=requests)
+
+# Submit request directly
+requests.send(AnalysisRequest(
     objective="Deep dive on this specific failure",
-)
+    bundles=(Path("./debug/bundle-001.zip"),),
+))
 
+# Run and get result
+bundle = analysis.run_once()
 print(f"Report: {bundle.report_path}")
 ```
 
@@ -396,52 +562,6 @@ for debug_bundle in bundle.source_bundles:
     print(f"Source: {debug_bundle.path}")
 ```
 
-## Implementation
-
-AnalysisLoop is a specialized AgentLoop with:
-
-- A prebuilt prompt template focused on bundle analysis
-- `wink query` as the single registered tool
-- Markdown file output instead of structured responses
-- Analysis bundle packaging on completion
-
-```python
-class AnalysisLoop(AgentLoop[AnalysisTrigger, AnalysisBundle]):
-    """Specialized loop for debug bundle analysis."""
-
-    @classmethod
-    def connect_to_eval_loop(
-        cls,
-        eval_loop: EvalLoop,
-        objective: str,
-        sample_rate: float = 0.1,
-        **config_kwargs,
-    ) -> AnalysisLoop:
-        """Create an AnalysisLoop connected to an EvalLoop."""
-        ...
-
-    @classmethod
-    def connect_to_agent_loop(
-        cls,
-        agent_loop: AgentLoop,
-        objective: str,
-        sample_rate: float = 0.1,
-        **config_kwargs,
-    ) -> AnalysisLoop:
-        """Create an AnalysisLoop connected to an AgentLoop."""
-        ...
-
-    @classmethod
-    def analyze(
-        cls,
-        bundles: Sequence[Path],
-        objective: str,
-        **config_kwargs,
-    ) -> AnalysisBundle:
-        """One-shot analysis of specific bundles."""
-        ...
-```
-
 ## Limitations
 
 - **Single objective**: Each AnalysisLoop instance targets one research question
@@ -454,5 +574,6 @@ class AnalysisLoop(AgentLoop[AnalysisTrigger, AnalysisBundle]):
 - `specs/AGENT_LOOP.md` - Base loop abstraction
 - `specs/EVALS.md` - EvalLoop and evaluation framework
 - `specs/DEBUG_BUNDLE.md` - Debug bundle format
+- `specs/MAILBOX.md` - Message passing protocol
 - `specs/WINK_QUERY.md` - SQL queries against bundles
 - `specs/LIFECYCLE.md` - Loop coordination
