@@ -1,0 +1,14 @@
+# Bun configuration - https://bun.sh/docs/runtime/bunfig
+
+[test]
+# Require 100% line and function coverage
+coverage = true
+coverageThreshold = { lines = 1.0, functions = 1.0 }
+coverageReporter = "text"
+
+# Only cover lib.js (the testable pure functions)
+# app.js has DOM-dependent code that can't be unit tested without jsdom
+coveragePathIgnorePatterns = [
+  "tests/**",
+  "src/weakincentives/cli/static/app.js"
+]
