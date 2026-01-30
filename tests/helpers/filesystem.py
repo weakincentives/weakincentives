@@ -284,10 +284,17 @@ class FilesystemValidationSuite:
         with pytest.raises(ValueError, match=r"[Cc]annot write to root"):
             fs.write(".", "content")
 
-    def test_write_content_too_long_fails(self, fs: Filesystem) -> None:
+    def test_write_content_too_long_fails(
+        self, fs: Filesystem, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """write() should fail if content exceeds max length."""
+        # Patch both implementations since we don't know which one is being tested
+        monkeypatch.setattr(
+            "weakincentives.contrib.tools.filesystem_memory.MAX_WRITE_LENGTH", 100
+        )
+        monkeypatch.setattr("weakincentives.filesystem._host.MAX_WRITE_LENGTH", 100)
         with pytest.raises(ValueError, match=r"[Cc]ontent exceeds maximum"):
-            fs.write("file.txt", "x" * 100000)
+            fs.write("file.txt", "x" * 101)
 
     def test_write_validates_path_depth(self, fs: Filesystem) -> None:
         """write() should validate path depth."""
@@ -351,10 +358,17 @@ class FilesystemValidationSuite:
         result = fs.read_bytes("binary.bin")
         assert result.content == binary_data
 
-    def test_write_bytes_content_too_long_fails(self, fs: Filesystem) -> None:
+    def test_write_bytes_content_too_long_fails(
+        self, fs: Filesystem, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """write_bytes() should fail if content exceeds max size."""
+        # Patch both implementations since we don't know which one is being tested
+        monkeypatch.setattr(
+            "weakincentives.contrib.tools.filesystem_memory.MAX_WRITE_BYTES", 100
+        )
+        monkeypatch.setattr("weakincentives.filesystem._host.MAX_WRITE_BYTES", 100)
         with pytest.raises(ValueError, match=r"[Cc]ontent exceeds maximum"):
-            fs.write_bytes("file.bin", b"x" * 100000)
+            fs.write_bytes("file.bin", b"x" * 101)
 
     def test_write_bytes_to_root_fails(self, fs: Filesystem) -> None:
         """write_bytes() to root directory should fail."""

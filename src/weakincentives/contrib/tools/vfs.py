@@ -277,7 +277,7 @@ class FilesystemToolHandlers:
             raise ToolValidationError("old_string must not be empty.")
         if len(old) > _MAX_WRITE_LENGTH or len(new) > _MAX_WRITE_LENGTH:
             raise ToolValidationError(
-                "Replacement strings must be 48,000 characters or fewer."
+                "Replacement strings must be 32MB or fewer."
             )
 
         occurrences = file_content.count(old)

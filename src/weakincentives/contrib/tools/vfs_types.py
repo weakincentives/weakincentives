@@ -39,7 +39,7 @@ from ...filesystem._path import (
 
 _ASCII: Final[str] = "ascii"
 _DEFAULT_ENCODING: Final[Literal["utf-8"]] = "utf-8"
-_MAX_WRITE_LENGTH: Final[int] = 48_000
+_MAX_WRITE_LENGTH: Final[int] = 33_554_432  # 32MB
 _MAX_READ_LIMIT: Final[int] = 2_000
 
 FileEncoding = Literal["utf-8"]
@@ -397,7 +397,7 @@ class WriteFileParams:
     content: str = field(
         metadata={
             "description": (
-                "UTF-8 text that will be written to the file. Content is limited to 48,000 characters."
+                "UTF-8 text that will be written to the file. Content is limited to 32MB."
             )
         }
     )
@@ -638,7 +638,7 @@ def normalize_content(content: str) -> str:
     """Normalize and validate content for writing."""
     if len(content) > _MAX_WRITE_LENGTH:
         raise ToolValidationError(
-            "Content exceeds maximum length of 48,000 characters."
+            "Content exceeds maximum length of 32MB."
         )
     return content
 
