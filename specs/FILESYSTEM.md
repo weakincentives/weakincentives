@@ -432,12 +432,14 @@ Test fixtures and utilities for filesystem testing.
 ### From Buffered to Streaming
 
 Old (loads entire file):
+
 ```python
 result = filesystem.read_bytes(path)
 process(result.content)
 ```
 
 New (fixed memory):
+
 ```python
 with filesystem.open_read(path) as reader:
     for chunk in reader:
@@ -447,6 +449,7 @@ with filesystem.open_read(path) as reader:
 ### From Eager Text to Lazy Decode
 
 Old (decodes all at once):
+
 ```python
 result = filesystem.read(path)
 for line in result.content.splitlines():
@@ -454,6 +457,7 @@ for line in result.content.splitlines():
 ```
 
 New (decodes lazily per line):
+
 ```python
 with filesystem.open_text(path) as reader:
     for line in reader.lines(strip=True):
