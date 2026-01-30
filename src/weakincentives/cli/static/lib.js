@@ -238,21 +238,35 @@ export function calculateVisibleRange({
   bufferSize,
   getItemHeight,
 }) {
+  if (itemCount === 0) {
+    return { startIndex: 0, endIndex: 0 };
+  }
+
   // Find start index (first item visible in viewport)
+  // Invariant: current = sum of heights of items 0 to (firstVisibleIndex - 1)
   let current = 0;
   let firstVisibleIndex = 0;
+  let foundVisible = false;
+
   for (let i = 0; i < itemCount; i++) {
     const height = getItemHeight(i);
     if (current + height > scrollTop) {
       firstVisibleIndex = i;
+      foundVisible = true;
       break;
     }
     current += height;
-    firstVisibleIndex = i;
+  }
+
+  // Edge case: scrolled past all content
+  // Loop completed without breaking, so current = total height of all items
+  // Adjust to maintain invariant: current should exclude firstVisibleIndex's height
+  if (!foundVisible) {
+    firstVisibleIndex = itemCount - 1;
+    current -= getItemHeight(firstVisibleIndex);
   }
 
   // Find end index by continuing from where we left off
-  // current = cumulative height up to (but not including) firstVisibleIndex
   const viewportBottom = scrollTop + viewportHeight;
   let endIndex = itemCount;
   for (let i = firstVisibleIndex; i < itemCount; i++) {

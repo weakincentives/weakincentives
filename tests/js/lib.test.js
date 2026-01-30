@@ -539,6 +539,23 @@ describe("calculateVisibleRange", () => {
     expect(result.startIndex).toBe(0);
     expect(result.endIndex).toBe(0);
   });
+
+  test("handles scrolled past all content", () => {
+    // Total height = 5 * 100 = 500px
+    // scrollTop = 600 (past all content)
+    const result = calculateVisibleRange({
+      scrollTop: 600,
+      viewportHeight: 200,
+      itemCount: 5,
+      bufferSize: 1,
+      getItemHeight: fixedHeight,
+    });
+    // When scrolled past content, show last items with buffer
+    // firstVisibleIndex = 4 (last item), startIndex = max(0, 4-1) = 3
+    // endIndex should be 5 (all items), plus buffer clamped to 5
+    expect(result.startIndex).toBe(3);
+    expect(result.endIndex).toBe(5);
+  });
 });
 
 // ============================================================================
