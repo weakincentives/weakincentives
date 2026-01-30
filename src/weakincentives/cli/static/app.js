@@ -1,4 +1,18 @@
 // ============================================================================
+// IMPORTS
+// ============================================================================
+
+import {
+  escapeHtml,
+  formatBytes,
+  getMarkdownPayload,
+  isObject,
+  isSimpleArray,
+  pathKey,
+  valueType,
+} from "./lib.js";
+
+// ============================================================================
 // VIRTUAL SCROLLER
 // ============================================================================
 
@@ -406,8 +420,6 @@ const state = {
   logsScroller: null,
   transcriptScroller: null,
 };
-
-const MARKDOWN_KEY = "__markdown__";
 
 // ============================================================================
 // ELEMENTS
@@ -2043,16 +2055,6 @@ function renderEnvironment() {
   elements.environmentData.innerHTML = html;
 }
 
-function formatBytes(bytes) {
-  if (bytes === 0) {
-    return "0 B";
-  }
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${Math.round((bytes / k ** i) * 100) / 100} ${sizes[i]}`;
-}
-
 elements.environmentCopy.addEventListener("click", async () => {
   if (!state.environmentData) {
     showToast("No environment data to copy", "error");
@@ -2831,47 +2833,6 @@ function navigateBundle(delta) {
 // JSON TREE RENDERING
 // ============================================================================
 
-const isObject = (v) => typeof v === "object" && v !== null;
-const isPrimitive = (v) => v === null || (typeof v !== "object" && !Array.isArray(v));
-const isSimpleArray = (v) => Array.isArray(v) && v.every(isPrimitive);
-
-function getMarkdownPayload(value) {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    !Object.prototype.hasOwnProperty.call(value, MARKDOWN_KEY)
-  ) {
-    return null;
-  }
-  const payload = value[MARKDOWN_KEY];
-  return payload && typeof payload.text === "string" && typeof payload.html === "string"
-    ? payload
-    : null;
-}
-
-function valueType(value) {
-  if (getMarkdownPayload(value)) {
-    return "markdown";
-  }
-  if (Array.isArray(value)) {
-    return "array";
-  }
-  if (value === null) {
-    return "null";
-  }
-  return typeof value;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function pathKey(path) {
-  return path.join(".");
-}
 function getMarkdownView(path) {
   return state.markdownViews.get(pathKey(path)) || "html";
 }

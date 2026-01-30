@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix
+.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix
 
 # =============================================================================
 # Code Formatting
@@ -105,6 +105,14 @@ redis-standalone-tests:
 # Run Redis cluster tests only
 redis-cluster-tests:
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv -m redis_cluster integration-tests
+
+# Run JavaScript tests with Bun
+bun-test:
+	@if command -v bun >/dev/null 2>&1; then \
+		bun test tests/js/; \
+	else \
+		echo "Bun not installed, skipping JS tests. Install with: curl -fsSL https://bun.sh/install | bash"; \
+	fi
 
 # =============================================================================
 # Setup
@@ -229,7 +237,7 @@ demo-claude-agent:
 # =============================================================================
 
 # Run all checks (format, lint, typecheck, security, dependencies, architecture, docs, tests)
-check: format-check lint typecheck bandit deptry pip-audit markdown-check biome test
+check: format-check lint typecheck bandit deptry pip-audit markdown-check biome bun-test test
 	@uv run --all-extras python check.py -q architecture docs
 
 # Synchronize documentation files into package
