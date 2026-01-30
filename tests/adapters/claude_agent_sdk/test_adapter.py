@@ -1311,7 +1311,7 @@ class TestMessageContentExtraction:
         assert result[0] == {"type": "text", "text": "Hello"}
         assert result[1] == {"type": "text", "text": "World"}
 
-    def __test_multiturn_with_task_completion_checker(
+    def test_multiturn_with_task_completion_checker(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Test multi-turn conversations with task completion checking."""
@@ -1390,7 +1390,7 @@ class TestMessageContentExtraction:
                 assert checker.check_count == 1
                 assert response.output is None  # No structured output
 
-    def __test_multiturn_deadline_exceeded(
+    def test_multiturn_deadline_exceeded(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Test that multi-turn stops when deadline is exceeded."""
@@ -1424,7 +1424,7 @@ class TestMessageContentExtraction:
             )
             assert response.output is None
 
-    def __test_multiturn_budget_exceeded(
+    def test_multiturn_budget_exceeded(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Test that multi-turn stops when budget is exceeded."""

@@ -1048,22 +1048,33 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                         },
                     )
 
+                # Handle empty message stream (e.g., after continuation)
+                if not round_messages:
+                    logger.warning(
+                        "claude_agent_sdk.sdk_query.empty_message_stream",
+                        event="sdk_query.empty_message_stream",
+                        context={
+                            "continuation_round": continuation_round,
+                            "prompt_name": hook_context.prompt_name,
+                        },
+                    )
+                    break  # Exit if no messages received
+
                 # Check if we should continue based on task completion
                 if checker is not None and round_messages:
                     # Import task completion types
                     from ._task_completion import TaskCompletionContext
 
                     # Extract the last message for completion checking
-                    last_message = round_messages[-1] if round_messages else None
+                    last_message = round_messages[-1]  # We know round_messages is non-empty
                     tentative_output = None
 
                     # Try to extract structured output from the last message
-                    if last_message:
-                        tentative_output = getattr(
-                            last_message, "structured_output", None
-                        )
-                        if tentative_output is None:
-                            tentative_output = getattr(last_message, "result", None)
+                    tentative_output = getattr(
+                        last_message, "structured_output", None
+                    )
+                    if tentative_output is None:
+                        tentative_output = getattr(last_message, "result", None)
 
                     # Check task completion
                     completion_context = TaskCompletionContext(
