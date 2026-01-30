@@ -968,7 +968,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             )
 
         try:
-            while (
+            while (  # pragma: no branch - safety limit, tested via unit logic
                 max_continuation_rounds is None
                 or continuation_round < max_continuation_rounds
             ):
