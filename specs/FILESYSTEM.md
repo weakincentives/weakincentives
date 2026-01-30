@@ -45,7 +45,6 @@ The filesystem is structured in three layers:
 | `ByteReader` | Context manager yielding byte chunks via iteration |
 | `ByteWriter` | Context manager accepting byte chunks via `write()` |
 | `TextReader` | Wrapper over `ByteReader` with lazy UTF-8 decoding |
-| `TextWriter` | Wrapper over `ByteWriter` with UTF-8 encoding |
 
 ### ByteReader Protocol
 
@@ -67,6 +66,11 @@ class ByteReader(Protocol):
     @property
     def position(self) -> int:
         """Current read position in bytes."""
+        ...
+
+    @property
+    def closed(self) -> bool:
+        """True if the reader has been closed."""
         ...
 
     def read(self, size: int = -1) -> bytes:
@@ -96,6 +100,10 @@ class ByteReader(Protocol):
 
     def __enter__(self) -> ByteReader: ...
     def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+
+    def close(self) -> None:
+        """Close the reader and release resources."""
+        ...
 ```
 
 ### ByteWriter Protocol
@@ -115,6 +123,11 @@ class ByteWriter(Protocol):
         """Total bytes written so far."""
         ...
 
+    @property
+    def closed(self) -> bool:
+        """True if the writer has been closed."""
+        ...
+
     def write(self, data: bytes) -> int:
         """Write bytes, returns number of bytes written."""
         ...
@@ -125,6 +138,10 @@ class ByteWriter(Protocol):
 
     def __enter__(self) -> ByteWriter: ...
     def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+
+    def close(self) -> None:
+        """Close the writer and flush any buffered data."""
+        ...
 ```
 
 ### TextReader Protocol
@@ -149,6 +166,11 @@ class TextReader(Protocol):
         """Current 0-indexed line number."""
         ...
 
+    @property
+    def closed(self) -> bool:
+        """True if the reader has been closed."""
+        ...
+
     def readline(self) -> str:
         """Read next line including newline. Empty string at EOF."""
         ...
@@ -167,6 +189,10 @@ class TextReader(Protocol):
 
     def __enter__(self) -> TextReader: ...
     def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+
+    def close(self) -> None:
+        """Close the reader and release resources."""
+        ...
 ```
 
 ### Result Types
