@@ -1232,8 +1232,8 @@ def test_eval_loop_dlq_without_reply_to() -> None:
 
 
 def test_eval_loop_creates_debug_bundle(tmp_path: Path) -> None:
-    """EvalLoop creates debug bundle when debug_bundle_dir is configured."""
-    from weakincentives.debug.bundle import DebugBundle
+    """EvalLoop creates debug bundle when debug_bundle is configured."""
+    from weakincentives.debug.bundle import BundleConfig, DebugBundle
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1243,7 +1243,7 @@ def test_eval_loop_creates_debug_bundle(tmp_path: Path) -> None:
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        config = EvalLoopConfig(debug_bundle_dir=tmp_path)
+        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -1296,6 +1296,7 @@ def test_eval_loop_creates_debug_bundle(tmp_path: Path) -> None:
 
 def test_eval_loop_bundle_contains_request_id_directory(tmp_path: Path) -> None:
     """EvalLoop creates bundle in request-specific directory."""
+    from weakincentives.debug.bundle import BundleConfig
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1305,7 +1306,7 @@ def test_eval_loop_bundle_contains_request_id_directory(tmp_path: Path) -> None:
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        config = EvalLoopConfig(debug_bundle_dir=tmp_path)
+        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -1333,7 +1334,7 @@ def test_eval_loop_bundle_contains_request_id_directory(tmp_path: Path) -> None:
 
 def test_eval_loop_bundle_captures_failed_evaluation(tmp_path: Path) -> None:
     """EvalLoop bundle captures evaluation failures."""
-    from weakincentives.debug.bundle import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig, DebugBundle
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1344,7 +1345,7 @@ def test_eval_loop_bundle_captures_failed_evaluation(tmp_path: Path) -> None:
     try:
         # Create loop that returns "wrong" - will fail exact_match
         agent_loop = _create_test_loop(result="wrong")
-        config = EvalLoopConfig(debug_bundle_dir=tmp_path)
+        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -1378,7 +1379,7 @@ def test_eval_loop_bundle_captures_failed_evaluation(tmp_path: Path) -> None:
 
 def test_eval_loop_bundle_captures_none_output(tmp_path: Path) -> None:
     """EvalLoop bundle captures None output scenario."""
-    from weakincentives.debug.bundle import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig, DebugBundle
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1393,7 +1394,7 @@ def test_eval_loop_bundle_captures_none_output(tmp_path: Path) -> None:
             AgentLoopRequest[str], AgentLoopResult[_Output]
         ] = InMemoryMailbox(name="dummy-requests")
         agent_loop = _NoneOutputLoop(adapter=adapter, requests=dummy_requests)
-        config = EvalLoopConfig(debug_bundle_dir=tmp_path)
+        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -1428,7 +1429,7 @@ def test_eval_loop_bundle_captures_none_output(tmp_path: Path) -> None:
 
 
 def test_eval_loop_no_bundle_without_config() -> None:
-    """EvalLoop does not create bundle when debug_bundle_dir is not set."""
+    """EvalLoop does not create bundle when debug_bundle is not set."""
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
         name="eval-requests"
@@ -1436,7 +1437,7 @@ def test_eval_loop_no_bundle_without_config() -> None:
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        # No debug_bundle_dir configured
+        # No debug_bundle configured
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -1459,7 +1460,7 @@ def test_eval_loop_no_bundle_without_config() -> None:
 
 def test_eval_loop_bundle_with_session_aware_evaluator(tmp_path: Path) -> None:
     """EvalLoop bundle works with session-aware evaluators."""
-    from weakincentives.debug.bundle import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig, DebugBundle
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1469,7 +1470,7 @@ def test_eval_loop_bundle_with_session_aware_evaluator(tmp_path: Path) -> None:
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        config = EvalLoopConfig(debug_bundle_dir=tmp_path)
+        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_session_aware_evaluator,
@@ -1504,6 +1505,7 @@ def test_eval_loop_bundle_fallback_on_error(tmp_path: Path) -> None:
     """EvalLoop falls back to non-bundled path when bundle creation fails."""
     from unittest.mock import patch
 
+    from weakincentives.debug.bundle import BundleConfig
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1513,7 +1515,7 @@ def test_eval_loop_bundle_fallback_on_error(tmp_path: Path) -> None:
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        config = EvalLoopConfig(debug_bundle_dir=tmp_path)
+        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -1557,6 +1559,7 @@ def test_eval_loop_bundle_no_reexecution_on_finalization_error(tmp_path: Path) -
     from collections.abc import Iterator
     from unittest.mock import patch
 
+    from weakincentives.debug.bundle import BundleConfig
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1568,7 +1571,7 @@ def test_eval_loop_bundle_no_reexecution_on_finalization_error(tmp_path: Path) -
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        config = EvalLoopConfig(debug_bundle_dir=tmp_path)
+        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -1606,6 +1609,118 @@ def test_eval_loop_bundle_no_reexecution_on_finalization_error(tmp_path: Path) -
         assert result.sample_id == "sample-finalize-fail"
         assert result.score.passed is True
         assert result.error is None  # Evaluation succeeded
+
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_eval_loop_bundle_invokes_storage_handler(tmp_path: Path) -> None:
+    """EvalLoop invokes storage_handler when bundle is finalized."""
+    from weakincentives.debug.bundle import BundleConfig, BundleManifest
+    from weakincentives.evals import EvalLoopConfig
+
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+
+    # Track storage handler invocations
+    stored_bundles: list[tuple[Path, BundleManifest]] = []
+
+    class TestStorageHandler:
+        """Test storage handler that records invocations."""
+
+        def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+            stored_bundles.append((bundle_path, manifest))
+
+    try:
+        agent_loop = _create_test_loop(result="correct")
+        storage_handler = TestStorageHandler()
+        config = EvalLoopConfig(
+            debug_bundle=BundleConfig(target=tmp_path, storage_handler=storage_handler)
+        )
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=agent_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            config=config,
+        )
+
+        sample = Sample(id="sample-upload", input="test input", expected="correct")
+        request = EvalRequest(sample=sample, experiment=BASELINE)
+        requests.send(request, reply_to=results)
+
+        eval_loop.run(max_iterations=1)
+
+        # Check result
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        result = msgs[0].body
+        assert result.sample_id == "sample-upload"
+        assert result.score.passed is True
+        assert result.bundle_path is not None
+
+        # Verify storage handler was invoked
+        assert len(stored_bundles) == 1
+        stored_path, stored_manifest = stored_bundles[0]
+        assert stored_path == result.bundle_path
+        assert stored_manifest.bundle_id is not None
+        assert stored_manifest.request.status == "success"
+
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_eval_loop_bundle_storage_handler_error_does_not_fail_eval(
+    tmp_path: Path,
+) -> None:
+    """EvalLoop evaluation succeeds even if storage handler fails."""
+    from weakincentives.debug.bundle import BundleConfig, BundleManifest
+    from weakincentives.evals import EvalLoopConfig
+
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+
+    class FailingStorageHandler:
+        """Storage handler that always fails."""
+
+        def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
+            raise RuntimeError("Simulated upload failure")
+
+    try:
+        agent_loop = _create_test_loop(result="correct")
+        config = EvalLoopConfig(
+            debug_bundle=BundleConfig(
+                target=tmp_path, storage_handler=FailingStorageHandler()
+            )
+        )
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=agent_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            config=config,
+        )
+
+        sample = Sample(id="sample-fail-upload", input="test input", expected="correct")
+        request = EvalRequest(sample=sample, experiment=BASELINE)
+        requests.send(request, reply_to=results)
+
+        eval_loop.run(max_iterations=1)
+
+        # Evaluation should still succeed
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        result = msgs[0].body
+        assert result.sample_id == "sample-fail-upload"
+        assert result.score.passed is True
+        assert result.error is None  # No eval error despite storage failure
+        assert result.bundle_path is not None  # Bundle was still created locally
 
         msgs[0].acknowledge()
     finally:

@@ -22,10 +22,10 @@ import contextlib
 import logging
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 from ..dataclasses import FrozenDataclass
+from ..debug.bundle import BundleConfig
 from ..runtime.dlq import DeadLetter, DLQPolicy
 from ..runtime.lease_extender import LeaseExtenderConfig
 from ..runtime.mailbox import (
@@ -54,8 +54,8 @@ class EvalLoopConfig:
     long evaluation runs. EvalLoop's heartbeat is passed to AgentLoop.execute()
     so that all tool/adapter beats extend the evaluation message's lease.
 
-    The ``debug_bundle_dir`` field enables debug bundle creation for each
-    evaluation sample. When set, EvalLoop creates a bundle capturing:
+    The ``debug_bundle`` field enables debug bundle creation for each evaluation
+    sample. When set, EvalLoop creates a bundle capturing:
     - Request input (sample and experiment)
     - Response output from AgentLoop
     - Session state after execution
@@ -63,11 +63,14 @@ class EvalLoopConfig:
     - Evaluation metadata (score, experiment, latency)
     - Environment information
 
-    Bundles are written to ``{debug_bundle_dir}/{request_id}/{sample_id}_{timestamp}.zip``.
+    The bundle config's ``target`` directory is used as the base, with bundles
+    written to ``{target}/{request_id}/{bundle_id}_{timestamp}.zip``. The config
+    also supports ``storage_handler`` for uploading bundles to external storage
+    (e.g., S3), ``retention`` policy for automatic cleanup, and other settings.
     """
 
     lease_extender: LeaseExtenderConfig | None = None
-    debug_bundle_dir: Path | None = None
+    debug_bundle: BundleConfig | None = None
 
 
 class EvalLoop[InputT, OutputT, ExpectedT](
@@ -195,15 +198,19 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         The experiment from the request is passed to AgentLoop.execute() for
         prompt override resolution and feature flag checking.
 
-        When debug_bundle_dir is configured, creates a debug bundle capturing:
+        When debug_bundle is configured with a target, creates a debug bundle
+        capturing:
         - Request input (sample and experiment)
         - Response output from AgentLoop
         - Session state after execution
         - Application logs during execution
         - Evaluation metadata (score, experiment, latency)
         - Environment information
+
+        The bundle config also supports storage_handler for uploading to external
+        storage (e.g., S3) after bundle creation.
         """
-        if self._config.debug_bundle_dir is not None:
+        if self._config.debug_bundle is not None and self._config.debug_bundle.enabled:
             return self._evaluate_sample_with_bundle(request)
         return self._evaluate_sample_without_bundle(request)
 
@@ -257,17 +264,21 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         Uses AgentLoop.execute_with_bundle() to reuse the standard bundle
         creation logic, then adds eval-specific metadata before finalization.
 
+        The bundle config's storage_handler (if set) is invoked automatically
+        after bundle finalization to upload bundles to external storage.
+
         Exception handling is narrowed to avoid re-executing samples:
         - If bundle setup/execution fails before ctx is created, fall back to
           non-bundled execution
         - If execution succeeds but scoring or bundle writing fails, use the
           results from the successful execution (never re-execute)
         """
-        if self._config.debug_bundle_dir is None:  # pragma: no cover - defensive
+        bundle_config = self._config.debug_bundle
+        if bundle_config is None or bundle_config.target is None:  # pragma: no cover
             return self._evaluate_sample_without_bundle(request)
 
-        # Create per-request directory: {debug_bundle_dir}/{request_id}/
-        bundle_target = self._config.debug_bundle_dir / str(request.request_id)
+        # Create per-request directory: {target}/{request_id}/
+        bundle_target = bundle_config.target / str(request.request_id)
 
         # Track execution state to avoid re-running on post-execution failures
         ctx = None
@@ -278,6 +289,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
             with self._loop.execute_with_bundle(
                 request.sample.input,
                 bundle_target=bundle_target,
+                bundle_config=bundle_config,
                 heartbeat=self._heartbeat,
                 experiment=request.experiment,
             ) as ctx:

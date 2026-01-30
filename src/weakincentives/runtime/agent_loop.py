@@ -279,6 +279,7 @@ class AgentLoop[UserRequestT, OutputT](
         request: UserRequestT,
         *,
         bundle_target: Path,
+        bundle_config: BundleConfig | None = None,
         budget: Budget | None = None,
         deadline: Deadline | None = None,
         resources: Mapping[type[object], object] | None = None,
@@ -297,6 +298,10 @@ class AgentLoop[UserRequestT, OutputT](
             request: The user request to process.
             bundle_target: Directory for bundle creation. The bundle zip file will
                 be created in this directory with a generated filename.
+            bundle_config: Optional configuration for bundle creation. When provided,
+                settings like storage_handler (for uploading to external storage),
+                retention policy, max_file_size, and compression are used. If not
+                provided, default BundleConfig settings are used.
             budget: Optional budget override (takes precedence over config).
             deadline: Optional deadline override (takes precedence over config).
             resources: Optional resources override.
@@ -317,6 +322,15 @@ class AgentLoop[UserRequestT, OutputT](
                 })
             # Bundle is now finalized
             print(f"Bundle at: {ctx.bundle_path}")
+
+            # With storage handler for external upload:
+            config = BundleConfig(
+                target=bundle_dir,
+                storage_handler=S3StorageHandler(bucket="my-bucket"),
+            )
+            with loop.execute_with_bundle(request, bundle_target=bundle_dir,
+                                          bundle_config=config) as ctx:
+                ...  # Bundle will be uploaded to S3 after finalization
         """
         from ..debug.bundle import BundleWriter
         from .agent_loop_types import BundleContext
@@ -325,7 +339,9 @@ class AgentLoop[UserRequestT, OutputT](
         started_at = datetime.now(UTC)
         start_mono = time.monotonic()
 
-        with BundleWriter(bundle_target, bundle_id=uuid4(), trigger="direct") as writer:
+        with BundleWriter(
+            bundle_target, bundle_id=uuid4(), config=bundle_config, trigger="direct"
+        ) as writer:
             # Create request event for tracking
             request_event = AgentLoopRequest(
                 request=request,
