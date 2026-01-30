@@ -4,7 +4,7 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-*Commits reviewed: 2026-01-25 (e5a00a4) through 2026-01-29 (01ab9c5)*
+*Commits reviewed: 2026-01-25 (e5a00a4) through 2026-01-29 (a1c5996)*
 
 ### TL;DR
 
@@ -257,6 +257,13 @@ class MyLoop(AgentLoop[Input, Output]):
         return output
 ```
 
+#### Increased File Write Size Limit
+
+The maximum file write size limit has been increased from 48KB to 32MB across
+all filesystem operations and VFS tools. This enables agents to write larger
+files such as database dumps, generated images, or bundled outputs without
+hitting size constraints.
+
 #### Session State for Request/Response
 
 Request and response data is now captured in session state via three new event
@@ -266,6 +273,14 @@ viewing the data through the Sessions tab and standard session inspection APIs.
 ---
 
 ### Internal Changes
+
+#### Claude Agent SDK Adapter Refactored to Use ClaudeSDKClient
+
+The Claude Agent SDK adapter now uses `ClaudeSDKClient` directly instead of the
+high-level `sdk.query()` interface. This provides direct control over session
+lifecycle management with explicit `connect()`/`disconnect()` semantics, better
+error handling and resource cleanup, and lays the foundation for future
+enhancements like session reuse and multi-turn conversations.
 
 #### PEP 695 Type Syntax
 
