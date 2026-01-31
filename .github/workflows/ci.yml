@@ -168,6 +168,10 @@ jobs:
         run: uv python install 3.14
       - name: Install dependencies
         run: uv sync --all-extras
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       # Always run core tests (fast, high-value smoke tests)
       - name: Run core tests
