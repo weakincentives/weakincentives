@@ -45,10 +45,13 @@ from explicit host mounts at section construction.
 
 | Limit | Value |
 |-------|-------|
-| Content per write | 48,000 characters |
+| Convenience read/write | 32MB |
 | Path depth | 16 segments |
 | Segment length | 80 characters |
-| Encoding | UTF-8 text only |
+| Default encoding | UTF-8 |
+
+**Note:** Streaming operations (`open_read`, `open_write`) have no inherent size
+limits. See `FILESYSTEM.md` for streaming API details.
 
 ### Host Mounts
 
@@ -204,7 +207,6 @@ All workspace sections support `clone(session=..., dispatcher=...)`:
 ## Limitations
 
 - **Ephemeral state**: All workspace data dies with session
-- **Text-only VFS**: Binary content rejected
 - **No network**: Podman containers have no network access
 - **Cooperative timeout**: ASTEval interrupts cooperatively only
 - **Synchronized clocks**: Timestamps require UTC synchronization
