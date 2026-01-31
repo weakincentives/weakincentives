@@ -15,9 +15,13 @@
 """Session state container synchronized with the event dispatcher.
 
 Session is a thin facade coordinating specialized subsystems:
-- SliceStore: Thread-safe slice storage with policy-based factories
+- SliceStore: Slice storage with policy-based factories
 - ReducerRegistry: Event-to-reducer routing
 - SessionSnapshotter: Snapshot/restore functionality
+
+Thread safety is provided by Session's lock. Subsystems are not
+thread-safe on their own and must only be accessed while holding
+the lock.
 """
 
 from __future__ import annotations
@@ -263,7 +267,10 @@ class Session(SessionProtocol):
     def _get_or_create_slice[T: SupportsDataclass](
         self, slice_type: type[T]
     ) -> Slice[T]:
-        """Get existing slice or create one using the appropriate factory."""
+        """Get existing slice or create one using the appropriate factory.
+
+        Caller must hold Session's lock.
+        """
         return self._store.get_or_create(slice_type)
 
     def _select_all[S: SupportsDataclass](self, slice_type: type[S]) -> tuple[S, ...]:

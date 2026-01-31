@@ -71,15 +71,16 @@ def copy_reducers_to_clone(
         clone: The cloned session to copy reducers to.
         reducer_snapshot: List of (data_type, registrations) tuples.
     """
-    for data_type, registrations in reducer_snapshot:
-        if data_type in clone._reducers:
-            continue
-        for registration in registrations:
-            clone._mutation_register_reducer(
-                data_type,
-                registration.reducer,
-                slice_type=registration.slice_type,
-            )
+    with clone.locked():
+        for data_type, registrations in reducer_snapshot:
+            if data_type in clone._reducers:
+                continue
+            for registration in registrations:
+                clone._mutation_register_reducer(
+                    data_type,
+                    registration.reducer,
+                    slice_type=registration.slice_type,
+                )
 
 
 def apply_state_to_clone(
