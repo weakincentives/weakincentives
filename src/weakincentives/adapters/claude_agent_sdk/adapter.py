@@ -52,7 +52,7 @@ from ._hooks import (
     create_user_prompt_submit_hook,
 )
 from ._task_completion import TaskCompletionContext
-from ._transcript_collector import TranscriptCollector, TranscriptCollectorConfig
+from ._transcript_collector import TranscriptCollector
 from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import EphemeralHome, IsolationConfig
@@ -581,17 +581,17 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
-        # Create transcript collector to monitor SDK transcripts
-        transcript_config = (
-            self._client_config.transcript_collection or TranscriptCollectorConfig()
-        )
-        collector = TranscriptCollector(
-            prompt_name=prompt_name,
-            config=transcript_config,
-        )
+        # Create transcript collector to monitor SDK transcripts (if enabled)
+        transcript_config = self._client_config.transcript_collection
+        collector: TranscriptCollector | None = None
+        if transcript_config is not None:
+            collector = TranscriptCollector(
+                prompt_name=prompt_name,
+                config=transcript_config,
+            )
 
         try:
-            async with collector.run():
+            async with collector.run() if collector else contextlib.nullcontext():
                 messages = await self._run_sdk_query(
                     sdk=sdk,
                     prompt_text=prompt_text,
@@ -717,7 +717,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         ephemeral_home: EphemeralHome,
         effective_cwd: str | None = None,
         visibility_signal: VisibilityExpansionSignal,
-        collector: TranscriptCollector,
+        collector: TranscriptCollector | None,
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
         # Import the SDK's types
@@ -843,8 +843,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             "Notification",
         ]
 
-        # Get collector hooks
-        collector_hooks = collector.hooks_config()
+        # Get collector hooks (empty if collector is disabled)
+        collector_hooks = collector.hooks_config() if collector else {}
 
         # Merge hooks - both adapter hooks (for tool bridging) and collector hooks
         # (for transcript discovery) must receive callbacks
