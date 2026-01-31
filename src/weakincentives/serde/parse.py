@@ -162,7 +162,9 @@ def _coerce_union(
                 return _apply_constraints(None, merged_meta, path)
             continue
         try:
-            coerced = _coerce_to_type(value, arg, None, path, config)
+            # Propagate untyped marker to union branch if the branch type is unbound
+            branch_meta = _build_item_meta(merged_meta, arg)
+            coerced = _coerce_to_type(value, arg, branch_meta, path, config)
         except (TypeError, ValueError) as error:
             last_error = error
             continue
