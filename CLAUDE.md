@@ -4,6 +4,65 @@ Quick-reference for AI assistants working in the `weakincentives` repository.
 
 ______________________________________________________________________
 
+## Core Philosophy
+
+**The prompt is the agent.** Prompts are hierarchical documents where sections
+bundle instructions and tools together. No separate tool registry; capabilities
+live in the prompt definition.
+
+**Event-driven state.** All mutations flow through pure reducers processing
+typed events. State is immutable and inspectable via snapshots.
+
+**Provider-agnostic.** Same agent definition works across OpenAI, LiteLLM, and
+Claude Agent SDK via adapter abstraction.
+
+______________________________________________________________________
+
+## Guiding Principles
+
+### Definition vs Harness
+
+WINK separates what you own from what the runtime provides:
+
+**Agent Definition (you own):** Prompt, Tools, Policies, Feedback
+
+**Execution Harness (runtime-owned):** Planning loop, sandboxing, retries,
+throttling, crash recovery, deadlines, budgets
+
+The harness keeps changing; your agent definition should not. WINK makes the
+definition a first-class artifact you can version, review, test, and port.
+
+### Policies Over Workflows
+
+**Prefer declarative policies over prescriptive workflows.**
+
+A workflow encodes _how_ to accomplish a goal—a predetermined sequence that
+fractures when encountering unexpected situations. A policy encodes _what_ the
+goal requires—constraints the agent must satisfy while remaining free to find
+any valid path.
+
+| Aspect | Workflow | Policy |
+|--------|----------|--------|
+| Specifies | Steps to execute | Constraints to satisfy |
+| On unexpected | Fails or branches | Agent reasons |
+| Composability | Sequential coupling | Independent conjunction |
+| Agent role | Executor | Reasoner |
+
+**Key policy characteristics:** Declarative, Composable, Fail-closed, Observable
+
+### Transactional Tools
+
+Tool calls are atomic transactions. When a tool fails:
+
+1. Session state rolls back to pre-call state
+1. Filesystem changes revert
+1. Error result returned to LLM with guidance
+
+Failed tools don't leave partial state. This enables aggressive retry and
+recovery strategies.
+
+______________________________________________________________________
+
 ## MANDATORY: Definition of Done
 
 **No work is considered complete until `make check` passes with zero errors.**
@@ -122,9 +181,25 @@ src/weakincentives/
 
 ## Documentation
 
-- **Specs**: `specs/` - design specs; see `AGENTS.md` for full index
+- **Specs**: `specs/` - design specs (PROMPTS, SESSIONS, TOOLS, ADAPTERS, etc.)
 - **Guides**: `guides/` - how-to material; see `guides/README.md`
-- **Key files**: `README.md`, `AGENTS.md`, `llms.md`, `CHANGELOG.md`
+- **Key files**: `README.md`, `llms.md` (API reference), `CHANGELOG.md`
+- **CLI docs**: `wink docs --reference` (API), `--specs` (design), `--guide`
+
+### Key Specs
+
+Read before modifying related code:
+
+| Spec | Topic |
+|------|-------|
+| `PROMPTS.md` | Prompt system, sections, composition |
+| `SESSIONS.md` | Session lifecycle, events, budgets |
+| `TOOLS.md` | Tool registration, policies |
+| `ADAPTERS.md` | Provider adapters, throttling |
+| `CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
+| `AGENT_LOOP.md` | AgentLoop orchestration |
+| `POLICIES_OVER_WORKFLOWS.md` | Design philosophy |
+| `MODULE_BOUNDARIES.md` | Layer architecture |
 
 ## Stability
 
