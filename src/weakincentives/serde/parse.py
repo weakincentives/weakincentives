@@ -49,6 +49,8 @@ from ._utils import (
     _UNION_TYPE,
     _AnyType,
     _apply_constraints,
+    _build_item_meta,
+    _is_typevar,
     _merge_annotated_meta,
     _ParseConfig,
     _set_extras,
@@ -237,6 +239,15 @@ def _coerce_primitive(
     if coercer is None:
         return _NOT_HANDLED
 
+    # Reject untyped marker on primitive types - it only makes sense for unbound types
+    if merged_meta.get("untyped", False) is True:
+        type_name = getattr(base_type, "__name__", str(base_type))
+        msg = (
+            f"{path}: 'untyped' marker only applies to unbound types "
+            f"(Any, object, TypeVar), not '{type_name}'"
+        )
+        raise TypeError(msg)
+
     literal_type = cast(type[object], base_type)
     if isinstance(value, literal_type):
         return _apply_constraints(value, merged_meta, path)
@@ -365,6 +376,8 @@ def _coerce_sequence_items(
     origin: type[object] | None,
     path: str,
     config: _ParseConfig,
+    *,
+    merged_meta: Mapping[str, object],
 ) -> list[object]:
     if (
         origin is tuple
@@ -380,7 +393,11 @@ def _coerce_sequence_items(
             item_type = args[0] if args[-1] is Ellipsis else args[index]
         else:
             item_type = args[0] if args else object
-        coerced_items.append(_coerce_to_type(item, item_type, None, item_path, config))
+        # Build item_meta based on whether this specific item_type is unbound
+        item_meta = _build_item_meta(merged_meta, item_type)
+        coerced_items.append(
+            _coerce_to_type(item, item_type, item_meta, item_path, config)
+        )
     return coerced_items
 
 
@@ -396,7 +413,9 @@ def _coerce_sequence(
         return _NOT_HANDLED
     items = _normalize_sequence_value(value, origin, path, config)
     args = get_args(base_type)
-    coerced_items = _coerce_sequence_items(items, args, origin, path, config)
+    coerced_items = _coerce_sequence_items(
+        items, args, origin, path, config, merged_meta=merged_meta
+    )
     if origin is set:
         value_out: object = set(coerced_items)
     elif origin is tuple:
@@ -421,12 +440,15 @@ def _coerce_mapping(
     key_type, value_type = (
         get_args(base_type) if get_args(base_type) else (object, object)
     )
+    # Build separate meta for keys and values based on whether each type is unbound
+    key_meta = _build_item_meta(merged_meta, key_type)
+    value_meta = _build_item_meta(merged_meta, value_type)
     mapping_value = cast(Mapping[JSONValue, JSONValue], value)
     result_dict: dict[object, object] = {}
     for key, item in mapping_value.items():
-        coerced_key = _coerce_to_type(key, key_type, None, f"{path} keys", config)
+        coerced_key = _coerce_to_type(key, key_type, key_meta, f"{path} keys", config)
         coerced_value = _coerce_to_type(
-            item, value_type, None, f"{path}[{coerced_key}]", config
+            item, value_type, value_meta, f"{path}[{coerced_key}]", config
         )
         result_dict[coerced_key] = coerced_value
     return _apply_constraints(result_dict, merged_meta, path)
@@ -483,13 +505,6 @@ def _coerce_bool(
     if config.coerce and isinstance(value, (int, float)):
         return _apply_constraints(bool(value), merged_meta, path)
     raise TypeError(f"{path}: expected bool")
-
-
-def _is_typevar(typ: object) -> bool:
-    """Check if a type is a TypeVar (unresolved generic parameter)."""
-    from typing import TypeVar
-
-    return isinstance(typ, TypeVar)
 
 
 def _resolve_simple_type(type_str: str) -> object | None:
@@ -730,6 +745,48 @@ def _get_field_types(cls: type[object]) -> dict[str, object]:
         return result
 
 
+def _validate_unbound_type(
+    value: object,
+    base_type: object,
+    merged_meta: Mapping[str, object],
+    path: str,
+) -> object | None:
+    """Validate unbound types (Any, object, TypeVar) and return value if allowed.
+
+    Returns the constrained value if the type is allowed via 'untyped' marker,
+    raises TypeError for rejected unbound types, or returns None if the type
+    is not an unbound type and should be handled by normal coercion.
+    """
+    is_untyped = merged_meta.get("untyped", False) is True
+
+    if base_type is _AnyType:
+        if is_untyped:
+            return _apply_constraints(value, merged_meta, path)
+        msg = (
+            f"{path}: cannot parse field with 'Any' type - use a concrete type "
+            f"annotation or mark with Annotated[Any, {{'untyped': True}}]"
+        )
+        raise TypeError(msg)
+
+    if base_type is object:
+        if is_untyped:
+            return _apply_constraints(value, merged_meta, path)
+        msg = (
+            f"{path}: cannot parse field with 'object' type - use a concrete type "
+            f"annotation or mark with Annotated[object, {{'untyped': True}}]"
+        )
+        raise TypeError(msg)
+
+    if _is_typevar(base_type):
+        msg = (
+            f"{path}: cannot parse TypeVar field - use a fully specialized "
+            f"generic type like MyClass[ConcreteType] instead of MyClass"
+        )
+        raise TypeError(msg)
+
+    return None  # Not an unbound type, continue with normal coercion
+
+
 def _coerce_to_type(
     value: object,
     typ: object,
@@ -743,17 +800,10 @@ def _coerce_to_type(
     if _is_typevar(base_type) and base_type in config.typevar_map:
         base_type = config.typevar_map[base_type]
 
-    if base_type is object or base_type is _AnyType:
-        return _apply_constraints(value, merged_meta, path)
-
-    # Check for unresolved TypeVar - this means the caller didn't provide
-    # a fully specialized generic alias
-    if _is_typevar(base_type):
-        msg = (
-            f"{path}: cannot parse TypeVar field - use a fully specialized "
-            f"generic type like MyClass[ConcreteType] instead of MyClass"
-        )
-        raise TypeError(msg)
+    # Handle unbound types (Any, object, unresolved TypeVar)
+    unbound_result = _validate_unbound_type(value, base_type, merged_meta, path)
+    if unbound_result is not None:
+        return unbound_result
 
     coercers = (
         lambda: _coerce_union(value, base_type, merged_meta, path, config),
@@ -772,7 +822,7 @@ def _coerce_to_type(
             return result
 
     try:
-        coerced = base_type(value)
+        coerced = base_type(value)  # ty: ignore[call-non-callable]
     except Exception as error:
         raise type(error)(str(error)) from error
     return _apply_constraints(coerced, merged_meta, path)
