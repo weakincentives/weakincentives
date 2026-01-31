@@ -2332,3 +2332,101 @@ def test_resolve_generic_string_type_unresolvable_subscript() -> None:
     # Unknown[str] - Unknown is not in any namespace, so base is object
     result = _resolve_generic_string_type("Unknown[str]", localns, module_ns)
     assert result is object
+
+
+def test_parse_rejects_unparameterized_dict() -> None:
+    """Parse rejects bare dict without type parameters."""
+
+    @dataclass
+    class BareDictModel:
+        data: dict  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        parse(BareDictModel, {"data": {"key": "value"}})
+    assert "cannot parse unparameterized 'dict'" in str(exc.value)
+    assert "use concrete type parameters" in str(exc.value)
+
+
+def test_parse_rejects_unparameterized_list() -> None:
+    """Parse rejects bare list without type parameters."""
+
+    @dataclass
+    class BareListModel:
+        items: list  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        parse(BareListModel, {"items": [1, 2, 3]})
+    assert "cannot parse unparameterized 'list'" in str(exc.value)
+    assert "use concrete type parameters" in str(exc.value)
+
+
+def test_parse_accepts_unparameterized_dict_with_untyped_marker() -> None:
+    """Parse accepts bare dict when marked as untyped."""
+
+    @dataclass
+    class UntypedBareDictModel:
+        data: Annotated[dict, {"untyped": True}]  # type: ignore[type-arg]
+
+    result = parse(UntypedBareDictModel, {"data": {"key": "value", "num": 123}})
+    assert result.data == {"key": "value", "num": 123}
+
+
+def test_parse_accepts_unparameterized_list_with_untyped_marker() -> None:
+    """Parse accepts bare list when marked as untyped."""
+
+    @dataclass
+    class UntypedBareListModel:
+        items: Annotated[list, {"untyped": True}]  # type: ignore[type-arg]
+
+    result = parse(UntypedBareListModel, {"items": [1, "two", 3.0]})
+    assert result.items == [1, "two", 3.0]
+
+
+def test_schema_rejects_unparameterized_dict() -> None:
+    """Schema rejects bare dict without type parameters."""
+
+    @dataclass
+    class BareDictSchema:
+        data: dict  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        schema(BareDictSchema)
+    assert "cannot generate schema for unparameterized 'dict'" in str(exc.value)
+
+
+def test_schema_rejects_unparameterized_list() -> None:
+    """Schema rejects bare list without type parameters."""
+
+    @dataclass
+    class BareListSchema:
+        items: list  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        schema(BareListSchema)
+    assert "cannot generate schema for unparameterized 'list'" in str(exc.value)
+
+
+def test_schema_accepts_unparameterized_dict_with_untyped_marker() -> None:
+    """Schema accepts bare dict when marked as untyped."""
+
+    @dataclass
+    class UntypedBareDictSchema:
+        data: Annotated[dict, {"untyped": True}]  # type: ignore[type-arg]
+
+    schema_dict = schema(UntypedBareDictSchema)
+    props = as_dict(schema_dict["properties"])
+    # Should produce permissive object schema
+    assert props["data"]["type"] == "object"
+
+
+def test_schema_accepts_unparameterized_list_with_untyped_marker() -> None:
+    """Schema accepts bare list when marked as untyped."""
+
+    @dataclass
+    class UntypedBareListSchema:
+        items: Annotated[list, {"untyped": True}]  # type: ignore[type-arg]
+
+    schema_dict = schema(UntypedBareListSchema)
+    props = as_dict(schema_dict["properties"])
+    # Should produce permissive array schema
+    assert props["items"]["type"] == "array"
