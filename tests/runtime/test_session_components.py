@@ -115,6 +115,28 @@ class TestReducerRegistry:
         assert len(regs) == 1
         assert regs[0].slice_type == SampleSlice
 
+    def test_copy_from_adds_new_while_skipping_existing(self) -> None:
+        """Verify skip_existing=True skips existing but adds new event types."""
+        source = ReducerRegistry()
+        source.register(SampleEvent, append_all, target_slice=SampleEvent)
+        source.register(SampleSlice, sample_reducer, target_slice=SampleSlice)
+        snapshot = source.snapshot()
+
+        target = ReducerRegistry()
+        # Target already has SampleEvent registered
+        target.register(SampleEvent, sample_reducer, target_slice=SampleSlice)
+        target.copy_from(snapshot, skip_existing=True)
+
+        # SampleEvent should be unchanged (skipped)
+        event_regs = target.get_registrations(SampleEvent)
+        assert len(event_regs) == 1
+        assert event_regs[0].slice_type == SampleSlice
+
+        # SampleSlice should be added (new)
+        slice_regs = target.get_registrations(SampleSlice)
+        assert len(slice_regs) == 1
+        assert slice_regs[0].slice_type == SampleSlice
+
 
 class TestSliceStore:
     """Tests for SliceStore component."""
