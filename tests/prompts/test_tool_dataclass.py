@@ -19,6 +19,7 @@ import pytest
 
 from weakincentives.prompt.errors import PromptValidationError
 from weakincentives.prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from weakincentives.prompt.tool_validation import TypeResolver
 
 
 @dataclass
@@ -257,10 +258,11 @@ def test_tool_class_getitem_rejects_unsupported_result_annotation() -> None:
 
 
 def test_tool_normalize_result_annotation_rejects_unknown_annotation() -> None:
+    resolver = TypeResolver()
     with pytest.raises(PromptValidationError) as error_info:
-        Tool._normalize_result_annotation(
+        resolver.normalize_result_annotation(
             ExampleResult | None,
-            ExampleParams,
+            params_type=ExampleParams,
         )
 
     error = error_info.value
