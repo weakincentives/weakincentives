@@ -185,7 +185,7 @@ class TestExperimentSerde:
         experiment = Experiment(
             name="v2-prompts",
             overrides_tag="v2",
-            flags={"verbose": True, "max_retries": 5},
+            flags={"verbose": "true", "max_retries": "5"},
             owner="alice@example.com",
             description="Test concise prompts",
         )
@@ -195,7 +195,7 @@ class TestExperimentSerde:
 
         assert restored.name == "v2-prompts"
         assert restored.overrides_tag == "v2"
-        assert restored.flags == {"verbose": True, "max_retries": 5}
+        assert restored.flags == {"verbose": "true", "max_retries": "5"}
         assert restored.owner == "alice@example.com"
         assert restored.description == "Test concise prompts"
 
@@ -346,7 +346,7 @@ class TestEvalRequestSerde:
             input=QuestionInput(question="What is AI?"),
             expected=AnswerExpected(answer="Artificial Intelligence"),
         )
-        experiment = Experiment(name="v2", flags={"debug": True})
+        experiment = Experiment(name="v2", flags={"debug": "true"})
 
         request: EvalRequest[QuestionInput, AnswerExpected] = EvalRequest(
             sample=sample,
@@ -361,7 +361,7 @@ class TestEvalRequestSerde:
         assert isinstance(restored.sample.expected, AnswerExpected)
         assert restored.sample.expected.answer == "Artificial Intelligence"
         assert isinstance(restored.experiment, Experiment)
-        assert restored.experiment.flags == {"debug": True}
+        assert restored.experiment.flags == {"debug": "true"}
 
     def test_eval_request_parse_from_json(self) -> None:
         """EvalRequest parses from JSON with string UUIDs and datetimes."""
@@ -565,7 +565,7 @@ class TestAgentLoopRequestSerde:
     def test_agent_loop_request_dump_structure(self) -> None:
         """AgentLoopRequest dump produces correct structure."""
         task = TaskRequest(task="Generate report", priority=2)
-        experiment = Experiment(name="fast-mode", flags={"cache": True})
+        experiment = Experiment(name="fast-mode", flags={"cache": "true"})
         budget = Budget(max_total_tokens=10000)
 
         request: AgentLoopRequest[TaskRequest] = AgentLoopRequest(
@@ -579,13 +579,13 @@ class TestAgentLoopRequestSerde:
         # Verify structure
         assert data["request"] == {"task": "Generate report", "priority": 2}
         assert data["experiment"]["name"] == "fast-mode"
-        assert data["experiment"]["flags"] == {"cache": True}
+        assert data["experiment"]["flags"] == {"cache": "true"}
         assert data["budget"]["max_total_tokens"] == 10000
 
     def test_agent_loop_request_with_dataclass_type(self) -> None:
         """AgentLoopRequest with nested dataclass type."""
         task = TaskRequest(task="Generate report", priority=2)
-        experiment = Experiment(name="fast-mode", flags={"cache": True})
+        experiment = Experiment(name="fast-mode", flags={"cache": "true"})
         budget = Budget(max_total_tokens=10000)
 
         request: AgentLoopRequest[TaskRequest] = AgentLoopRequest(
@@ -604,7 +604,7 @@ class TestAgentLoopRequestSerde:
         assert restored.budget.max_total_tokens == 10000
         assert isinstance(restored.experiment, Experiment)
         assert restored.experiment.name == "fast-mode"
-        assert restored.experiment.flags == {"cache": True}
+        assert restored.experiment.flags == {"cache": "true"}
 
     def test_agent_loop_request_with_run_context(self) -> None:
         """AgentLoopRequest with run context."""
@@ -768,11 +768,11 @@ class TestLoopTypeClone:
 
     def test_clone_experiment(self) -> None:
         """Clone Experiment with overrides."""
-        exp = Experiment(name="v1", flags={"a": 1})
+        exp = Experiment(name="v1", flags={"a": "1"})
         cloned = clone(exp, name="v2")
 
         assert cloned.name == "v2"
-        assert cloned.flags == {"a": 1}
+        assert cloned.flags == {"a": "1"}
 
     def test_clone_run_context(self) -> None:
         """Clone RunContext with overrides."""
@@ -936,7 +936,7 @@ class TestLoopSerdeIntegration:
         )
         experiment = Experiment(
             name="eval-test",
-            flags={"model": "gpt-4", "temperature": 0.7},
+            flags={"model": "gpt-4", "temperature": "0.7"},
         )
         request: EvalRequest[QuestionInput, AnswerExpected] = EvalRequest(
             sample=sample,

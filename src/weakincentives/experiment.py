@@ -16,11 +16,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import field, replace
-from typing import TypeVar, overload
 
 from .dataclasses import FrozenDataclass
-
-T = TypeVar("T")
 
 
 @FrozenDataclass()
@@ -48,21 +45,21 @@ class Experiment:
         >>> experiment = Experiment(
         ...     name="v2-concise-prompts",
         ...     overrides_tag="v2",
-        ...     flags={"verbose_logging": True, "max_retries": 5},
+        ...     flags={"verbose_logging": "true", "max_retries": "5"},
         ...     owner="alice@example.com",
         ...     description="Test shorter, more direct prompt phrasing",
         ... )
-        >>> experiment.get_flag("max_retries", 3)
-        5
+        >>> experiment.get_flag("max_retries", "3")
+        '5'
     """
 
     name: str
     overrides_tag: str = "latest"
-    flags: Mapping[str, object] = field(default_factory=lambda: {})
+    flags: Mapping[str, str] = field(default_factory=lambda: {})
     owner: str | None = None
     description: str | None = None
 
-    def with_flag(self, key: str, value: object) -> Experiment:
+    def with_flag(self, key: str, value: str) -> Experiment:
         """Return new experiment with flag added/updated.
 
         Args:
@@ -74,9 +71,9 @@ class Experiment:
 
         Example:
             >>> exp = Experiment(name="test")
-            >>> exp2 = exp.with_flag("debug", True)
+            >>> exp2 = exp.with_flag("debug", "true")
             >>> exp2.get_flag("debug")
-            True
+            'true'
         """
         return replace(self, flags={**self.flags, key: value})
 
@@ -97,13 +94,7 @@ class Experiment:
         """
         return replace(self, overrides_tag=tag)
 
-    @overload
-    def get_flag(self, key: str) -> object: ...
-
-    @overload
-    def get_flag(self, key: str, default: T) -> T | object: ...
-
-    def get_flag(self, key: str, default: T | None = None) -> T | object | None:
+    def get_flag(self, key: str, default: str | None = None) -> str | None:
         """Get flag value with optional default.
 
         Args:
@@ -114,11 +105,11 @@ class Experiment:
             The flag value if set, otherwise the default.
 
         Example:
-            >>> exp = Experiment(name="test", flags={"retries": 5})
-            >>> exp.get_flag("retries", 3)
-            5
-            >>> exp.get_flag("timeout", 30)
-            30
+            >>> exp = Experiment(name="test", flags={"retries": "5"})
+            >>> exp.get_flag("retries", "3")
+            '5'
+            >>> exp.get_flag("timeout", "30")
+            '30'
         """
         return self.flags.get(key, default)
 
@@ -132,7 +123,7 @@ class Experiment:
             True if the flag exists, False otherwise.
 
         Example:
-            >>> exp = Experiment(name="test", flags={"debug": False})
+            >>> exp = Experiment(name="test", flags={"debug": "false"})
             >>> exp.has_flag("debug")
             True
             >>> exp.has_flag("verbose")

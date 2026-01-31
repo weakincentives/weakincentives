@@ -464,13 +464,13 @@ def test_experiment_with_all_fields() -> None:
     exp = Experiment(
         name="v2-prompts",
         overrides_tag="v2",
-        flags={"verbose": True, "retries": 5},
+        flags={"verbose": "true", "retries": "5"},
         owner="alice@example.com",
         description="Test concise prompts",
     )
     assert exp.name == "v2-prompts"
     assert exp.overrides_tag == "v2"
-    assert exp.flags == {"verbose": True, "retries": 5}
+    assert exp.flags == {"verbose": "true", "retries": "5"}
     assert exp.owner == "alice@example.com"
     assert exp.description == "Test concise prompts"
 
@@ -478,9 +478,9 @@ def test_experiment_with_all_fields() -> None:
 def test_experiment_with_flag() -> None:
     """with_flag returns new experiment with flag added."""
     exp = Experiment(name="test")
-    exp2 = exp.with_flag("debug", True)
+    exp2 = exp.with_flag("debug", "true")
     assert exp.flags == {}  # Original unchanged
-    assert exp2.flags == {"debug": True}
+    assert exp2.flags == {"debug": "true"}
 
 
 def test_experiment_with_tag() -> None:
@@ -493,20 +493,20 @@ def test_experiment_with_tag() -> None:
 
 def test_experiment_get_flag_existing() -> None:
     """get_flag returns value for existing flag."""
-    exp = Experiment(name="test", flags={"retries": 5})
-    assert exp.get_flag("retries") == 5
+    exp = Experiment(name="test", flags={"retries": "5"})
+    assert exp.get_flag("retries") == "5"
 
 
 def test_experiment_get_flag_default() -> None:
     """get_flag returns default for missing flag."""
     exp = Experiment(name="test")
-    assert exp.get_flag("retries", 3) == 3
+    assert exp.get_flag("retries", "3") == "3"
     assert exp.get_flag("retries") is None
 
 
 def test_experiment_has_flag() -> None:
-    """has_flag checks flag existence including False/None values."""
-    exp = Experiment(name="test", flags={"debug": False, "count": None})
+    """has_flag checks flag existence."""
+    exp = Experiment(name="test", flags={"debug": "false", "count": "0"})
     assert exp.has_flag("debug") is True
     assert exp.has_flag("count") is True
     assert exp.has_flag("missing") is False

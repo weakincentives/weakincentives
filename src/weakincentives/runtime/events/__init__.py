@@ -133,7 +133,7 @@ from __future__ import annotations
 from dataclasses import field
 from datetime import datetime
 from threading import RLock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID, uuid4
 
 from ...dataclasses import FrozenDataclass
@@ -227,7 +227,7 @@ class PromptExecuted:
 
     prompt_name: str
     adapter: AdapterName
-    result: Any
+    result: Annotated[Any, {"untyped": True}]
     session_id: UUID | None
     created_at: datetime
     usage: TokenUsage | None = None
@@ -244,10 +244,11 @@ class PromptRendered:
     prompt_name: str | None
     adapter: AdapterName
     session_id: UUID | None
-    render_inputs: tuple[Any, ...]
+    render_inputs: Annotated[tuple[Any, ...], {"untyped": True}]
     rendered_prompt: str
     created_at: datetime
-    descriptor: PromptDescriptor | None = None
+    # Runtime alias to Any avoids import cycle; marked untyped for serde.
+    descriptor: Annotated[PromptDescriptor | None, {"untyped": True}] = None
     run_context: RunContext | None = None
     event_id: UUID = field(default_factory=uuid4)
 
