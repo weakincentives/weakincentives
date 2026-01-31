@@ -409,16 +409,33 @@ def _coerce_sequence(
     config: _ParseConfig,
 ) -> object:
     origin = cast(type[object] | None, get_origin(base_type))
-    if origin not in {list, Sequence, tuple, set}:
+    # Handle both parameterized (list[str]) and bare (list) types
+    is_bare_type = base_type is list or base_type is tuple or base_type is set
+    if origin not in {list, Sequence, tuple, set} and not is_bare_type:
         return _NOT_HANDLED
-    items = _normalize_sequence_value(value, origin, path, config)
-    args = get_args(base_type)
-    coerced_items = _coerce_sequence_items(
-        items, args, origin, path, config, merged_meta=merged_meta
+    # Use base_type as effective_origin for bare types
+    effective_origin: type[object] | None = (
+        cast(type[object], base_type) if is_bare_type else origin
     )
-    if origin is set:
+    items = _normalize_sequence_value(value, effective_origin, path, config)
+    args = get_args(base_type)
+    # Bare list/set/tuple without type parameters requires untyped marker
+    if not args:
+        is_untyped = merged_meta.get("untyped", False) is True
+        if not is_untyped:
+            origin_name = getattr(effective_origin, "__name__", "sequence")
+            msg = (
+                f"{path}: cannot parse unparameterized '{origin_name}' - "
+                f"use concrete type parameters like list[str] or mark with "
+                f"Annotated[list, {{'untyped': True}}]"
+            )
+            raise TypeError(msg)
+    coerced_items = _coerce_sequence_items(
+        items, args, effective_origin, path, config, merged_meta=merged_meta
+    )
+    if effective_origin is set:
         value_out: object = set(coerced_items)
-    elif origin is tuple:
+    elif effective_origin is tuple:
         value_out = tuple(coerced_items)
     else:
         value_out = list(coerced_items)
@@ -433,13 +450,29 @@ def _coerce_mapping(
     config: _ParseConfig,
 ) -> object:
     origin = get_origin(base_type)
-    if origin is not dict and origin is not Mapping:
+    # Handle both parameterized (dict[str, int]) and bare (dict) types
+    is_bare_type = base_type is dict
+    if origin is not dict and origin is not Mapping and not is_bare_type:
         return _NOT_HANDLED
+    # Use base_type as effective_origin for bare dict
+    effective_origin = base_type if is_bare_type else origin
     if not isinstance(value, Mapping):
         raise TypeError(f"{path}: expected mapping")
-    key_type, value_type = (
-        get_args(base_type) if get_args(base_type) else (object, object)
-    )
+    args = get_args(base_type)
+    if not args:
+        # Bare dict/Mapping without type parameters requires untyped marker
+        is_untyped = merged_meta.get("untyped", False) is True
+        if not is_untyped:
+            origin_name = getattr(effective_origin, "__name__", "dict")
+            msg = (
+                f"{path}: cannot parse unparameterized '{origin_name}' - "
+                f"use concrete type parameters like dict[str, int] or mark with "
+                f"Annotated[dict, {{'untyped': True}}]"
+            )
+            raise TypeError(msg)
+        key_type, value_type = object, object
+    else:
+        key_type, value_type = args
     # Build separate meta for keys and values based on whether each type is unbound
     key_meta = _build_item_meta(merged_meta, key_type)
     value_meta = _build_item_meta(merged_meta, value_type)

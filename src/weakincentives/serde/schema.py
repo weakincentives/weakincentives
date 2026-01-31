@@ -368,9 +368,27 @@ def _schema_for_collection(
     origin: object,
     merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue] | None:
+    # Check for builder via origin (parameterized case) or base_type (bare type case)
     builder = _COLLECTION_BUILDERS.get(origin)
+    effective_type = origin
     if builder is None:
-        return None
+        # Try base_type directly for bare collection types (list, dict, etc.)
+        builder = _COLLECTION_BUILDERS.get(base_type)
+        effective_type = base_type
+        if builder is None:
+            return None
+    # Bare collection types without type parameters require untyped marker
+    args = get_args(base_type)
+    if not args:
+        is_untyped = merged_meta.get("untyped", False) is True
+        if not is_untyped:
+            type_name = getattr(effective_type, "__name__", str(effective_type))
+            msg = (
+                f"cannot generate schema for unparameterized '{type_name}' - "
+                f"use concrete type parameters like list[str] or mark with "
+                f"Annotated[list, {{'untyped': True}}]"
+            )
+            raise TypeError(msg)
     return builder(base_type, alias_generator, merged_meta)
 
 
