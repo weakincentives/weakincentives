@@ -2430,3 +2430,65 @@ def test_schema_accepts_unparameterized_list_with_untyped_marker() -> None:
     props = as_dict(schema_dict["properties"])
     # Should produce permissive array schema
     assert props["items"]["type"] == "array"
+
+
+def test_parse_untyped_marker_propagates_to_union_branches() -> None:
+    """Untyped marker propagates to union branches containing unbound types."""
+
+    @dataclass
+    class UnionWithAnyModel:
+        # Any | None with untyped marker should work
+        value: Annotated[Any | None, {"untyped": True}]
+
+    # None value should work
+    result = parse(UnionWithAnyModel, {"value": None})
+    assert result.value is None
+
+    # Non-None value should work because untyped marker propagates to Any branch
+    result = parse(UnionWithAnyModel, {"value": "test"})
+    assert result.value == "test"
+
+    result = parse(UnionWithAnyModel, {"value": 123})
+    assert result.value == 123
+
+
+def test_parse_union_without_untyped_marker_rejects_any_branch() -> None:
+    """Union with Any branch without untyped marker should fail on non-None."""
+
+    @dataclass
+    class UnionWithAnyNoMarker:
+        value: Any | None  # type: ignore[misc]
+
+    # None value still works
+    result = parse(UnionWithAnyNoMarker, {"value": None})
+    assert result.value is None
+
+    # Non-None value should fail because Any branch lacks untyped marker
+    with pytest.raises(TypeError) as exc:
+        parse(UnionWithAnyNoMarker, {"value": "test"})
+    assert "cannot parse field with 'Any' type" in str(exc.value)
+
+
+def test_schema_untyped_marker_propagates_to_union_branches() -> None:
+    """Schema untyped marker propagates to union branches containing unbound types."""
+
+    @dataclass
+    class UnionWithAnySchema:
+        value: Annotated[Any | None, {"untyped": True}]
+
+    # Should not raise - untyped marker propagates to Any branch
+    schema_dict = schema(UnionWithAnySchema)
+    props = as_dict(schema_dict["properties"])
+    assert "value" in props
+
+
+def test_schema_union_without_untyped_marker_rejects_any_branch() -> None:
+    """Schema with Any in union without untyped marker should fail."""
+
+    @dataclass
+    class UnionWithAnyNoMarkerSchema:
+        value: Any | None  # type: ignore[misc]
+
+    with pytest.raises(TypeError) as exc:
+        schema(UnionWithAnyNoMarkerSchema)
+    assert "cannot generate schema for 'Any'" in str(exc.value)

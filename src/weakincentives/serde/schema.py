@@ -201,7 +201,9 @@ def _is_object_schema(schema_data: Mapping[str, JSONValue]) -> bool:
 
 
 def _collect_union_subschemas(
-    base_type: object, alias_generator: Callable[[str], str] | None
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    merged_meta: Mapping[str, object],
 ) -> tuple[bool, list[dict[str, JSONValue]], Mapping[str, JSONValue] | None]:
     includes_null = False
     subschemas: list[dict[str, JSONValue]] = []
@@ -210,7 +212,9 @@ def _collect_union_subschemas(
         if arg is NULL_TYPE:
             includes_null = True
             continue
-        subschema = _schema_for_type(arg, None, alias_generator)
+        # Propagate untyped marker to union branch if the branch type is unbound
+        branch_meta = _build_item_meta(merged_meta, arg)
+        subschema = _schema_for_type(arg, branch_meta, alias_generator)
         subschemas.append(subschema)
         if base_schema_ref is None and _is_object_schema(subschema):
             base_schema_ref = subschema
@@ -266,7 +270,7 @@ def _schema_for_union(
         return None
 
     includes_null, subschemas, base_schema_ref = _collect_union_subschemas(
-        base_type, alias_generator
+        base_type, alias_generator, merged_meta
     )
     schema_data = _merge_union_schema(subschemas, base_schema_ref, includes_null)
     _apply_union_metadata(schema_data, subschemas, base_schema_ref)
