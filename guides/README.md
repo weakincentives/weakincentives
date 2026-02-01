@@ -27,6 +27,9 @@ debug issues when they arise.
 1. [Skills Authoring](skills-authoring.md) - Create and mount custom skills
 1. [Orchestration](orchestration.md) - Handle requests at scale
 1. [Lifecycle](lifecycle.md) - Health checks, shutdown, watchdogs
+1. [Feedback Providers](feedback-providers.md) - Periodic guidance during execution
+1. [Task Completion](task-completion.md) - Verify work is done before stopping
+1. [Lease Extension](lease-extension.md) - Prevent message timeout during processing
 1. [Debugging](debugging.md) - Inspect and troubleshoot sessions
 1. [Query](query.md) - SQL-based debug bundle analysis
 
@@ -70,6 +73,9 @@ debug issues when they arise.
 | [Orchestration](orchestration.md) | Use AgentLoop for request handling |
 | [Evaluation](evaluation.md) | Test agents with datasets and evaluators |
 | [Lifecycle](lifecycle.md) | Manage shutdown, health checks, and watchdogs |
+| [Feedback Providers](feedback-providers.md) | Deliver periodic guidance during long tasks |
+| [Task Completion](task-completion.md) | Prevent premature termination |
+| [Lease Extension](lease-extension.md) | Extend message visibility during processing |
 
 ## Advanced Topics
 
