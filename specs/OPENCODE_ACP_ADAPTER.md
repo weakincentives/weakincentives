@@ -39,6 +39,9 @@ acp = [
 ]
 ```
 
+The adapter module uses lazy imports and raises a helpful error if the `acp` extra
+is not installed (following the pattern in `openai.py` and `claude_agent_sdk/*`).
+
 ## Architecture
 
 ```
@@ -47,7 +50,7 @@ WINK Prompt/Session
       ├─ Render WINK prompt (markdown)
       ├─ Spawn: `opencode acp`  (stdio JSON-RPC NDJSON)
       ├─ ACP handshake: initialize → session/new (or session/load)
-      ├─ Optional: session/set_mode, session/set_model
+      ├─ Optional: session/set_mode, session/set_model (best-effort)
       ├─ session/prompt (text + attachments)
       ├─ Stream in: session/update notifications
       │    ├─ agent_message_chunk (assistant output)
@@ -67,9 +70,10 @@ src/weakincentives/adapters/opencode_acp/
   adapter.py          # OpenCodeACPAdapter
   config.py           # OpenCodeACPClientConfig / OpenCodeACPAdapterConfig
   client.py           # OpenCodeACPClient (ACP Client implementation)
-  workspace.py        # OpenCodeWorkspaceSection
+  workspace.py        # OpenCodeWorkspaceSection (generic mount logic)
+  _state.py           # OpenCodeACPSessionState dataclass for session reuse
   _events.py          # Mapping ACP updates → WINK ToolInvoked
-  _mcp.py             # MCP server integration (reuses claude_agent_sdk/_bridge.py)
+  _mcp.py             # MCP server process spawning
   _async.py           # asyncio/run helpers
 ```
 
@@ -96,8 +100,10 @@ class OpenCodeACPAdapter(ProviderAdapter[OutputT]):
 
 ### Semantics
 
-- **Tools are not executed by WINK** for this adapter. OpenCode executes tools internally.
-- WINK emits `ToolInvoked` events derived from ACP tool-call updates (telemetry only).
+- **OpenCode executes tools internally** for OpenCode-native tools.
+- **WINK tools are exposed via MCP** and execute in a subprocess with WINK's
+  transactional semantics (see MCP Tool Bridging section).
+- WINK emits `ToolInvoked` events for telemetry (with deduplication rules below).
 - **Structured output**: OpenCode ACP does not expose native JSON schema response format.
   The adapter enforces structured output via **prompt augmentation** and text parsing.
 
@@ -111,16 +117,19 @@ Controls process spawn and ACP session parameters.
 |-------|------|---------|-------------|
 | `opencode_bin` | `str` | `"opencode"` | Executable to spawn |
 | `opencode_args` | `tuple[str, ...]` | `("acp",)` | Must include `acp` |
-| `cwd` | `str \| None` | `None` | Working directory for ACP session |
+| `cwd` | `str \| None` | `None` | Working directory for ACP session (must be absolute if provided; defaults to `Path.cwd().resolve()`) |
 | `env` | `Mapping[str, str] \| None` | `None` | Extra env for process |
 | `suppress_stderr` | `bool` | `True` | Capture/stash stderr for debug |
 | `startup_timeout_s` | `float` | `10.0` | Max time for initialize/session/new |
 | `permission_mode` | `Literal["auto", "deny", "prompt"]` | `"auto"` | How to respond to `session/request_permission` |
-| `allow_file_writes` | `bool` | `True` | Controls ACP fs/write capability |
+| `allow_file_reads` | `bool` | `True` | Advertise `readTextFile` capability |
+| `allow_file_writes` | `bool` | `False` | Advertise `writeTextFile` capability (conservative default) |
 | `allow_terminal` | `bool` | `False` | Advertise terminal capability |
-| `mcp_servers` | `tuple[McpServerSpec, ...]` | `()` | Extra MCP servers to register |
+| `mcp_servers` | `tuple[McpServerConfig, ...]` | `()` | Extra MCP servers to register |
 | `reuse_session` | `bool` | `False` | Whether to load/reuse an OpenCode session id |
-| `session_id_key` | `str` | `"opencode_session_id"` | Session slice key for storing session id |
+
+> **Note:** ACP requires `cwd` to be an **absolute path**. If `cwd` is `None`, the
+> adapter resolves it to `Path.cwd().resolve()` before passing to `session/new`.
 
 ### OpenCodeACPAdapterConfig
 
@@ -129,13 +138,40 @@ Controls adapter-level behavior (not OpenCode's LLM settings).
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `mode_id` | `str \| None` | `None` | ACP `session/set_mode` after session creation |
-| `model_id` | `str \| None` | `None` | ACP `session/set_model` (best-effort, unstable in ACP) |
+| `model_id` | `str \| None` | `None` | ACP `session/set_model` (best-effort; see note) |
 | `require_structured_output_text` | `bool` | `True` | For WINK structured output parsing |
 | `quiet_period_ms` | `int` | `100` | Wait after prompt returns to drain trailing updates |
 | `emit_thought_chunks` | `bool` | `False` | Whether to include thought chunks in returned text |
 
-> **Note:** OpenCode's ACP agent implements `unstable_setSessionModel`. Treat model
-> switching as best-effort and non-fatal.
+> **Note:** The ACP protocol defines an unstable `session/set_model` method. OpenCode
+> **may or may not implement it**. The adapter attempts to call it if `model_id` is
+> set, but treats any failure (including "method not found") as non-fatal.
+
+### Session Reuse Storage
+
+WINK sessions use **typed dataclass slices**, not string keys. For session reuse,
+define a dataclass in `_state.py`:
+
+```python
+from weakincentives.dataclasses import FrozenDataclass
+
+@FrozenDataclass()
+class OpenCodeACPSessionState:
+    """Stores OpenCode session ID for reuse across adapter calls."""
+    session_id: str
+```
+
+Storage and retrieval:
+
+```python
+# Store after session/new
+session.seed(OpenCodeACPSessionState(session_id=result.session_id))
+
+# Retrieve for session/load
+state = session[OpenCodeACPSessionState].latest()
+if state is not None:
+    opencode_session_id = state.session_id
+```
 
 ## Workspace Management
 
@@ -144,16 +180,19 @@ patterns (multi-tenant, safety, reproducibility), use an isolated workspace dire
 
 ### OpenCodeWorkspaceSection
 
-Reuse the mount/copy logic from `src/weakincentives/adapters/claude_agent_sdk/workspace.py`:
+Create `OpenCodeWorkspaceSection` by **extracting** the generic filesystem-mount
+machinery from `src/weakincentives/adapters/claude_agent_sdk/workspace.py`:
 
 - Accepts `HostMount` tuples, `allowed_host_roots`, and max-bytes budgets
 - Materializes a temporary directory with copied files
 - Exposes `temp_dir` path for use as `OpenCodeACPClientConfig.cwd`
 
-The existing `ClaudeAgentWorkspaceSection` can be reused directly (it's not
-Claude-specific in behavior), or wrap it with a new name to avoid confusion.
+> **Important:** Do **not** reuse `ClaudeAgentWorkspaceSection` directly—its rendered
+> template text contains Claude-specific wording ("Claude Code provides direct access…").
+> Extract the mount/copy logic into a shared helper and create `OpenCodeWorkspaceSection`
+> with neutral or OpenCode-appropriate wording.
 
-**Key types from workspace module:**
+**Key types (shared with Claude adapter):**
 
 | Type | Description |
 |------|-------------|
@@ -174,9 +213,13 @@ Implement `acp.interfaces.Client` and provide:
 |--------|-------------|
 | `session_update(...)` | Capture streamed updates; feed a `SessionAccumulator` |
 | `request_permission(...)` | Respond automatically based on `permission_mode` |
-| `read_text_file(...)` | Operate within workspace root |
+| `read_text_file(...)` | Operate within workspace root (if `allow_file_reads=True`) |
 | `write_text_file(...)` | Operate within workspace root (if `allow_file_writes=True`) |
 | `create_terminal(...)` | Stub unless `allow_terminal=True` |
+
+> **Capability alignment:** The capabilities advertised in `initialize` must match
+> what you actually implement. If you advertise `readTextFile=True`, you must
+> implement the method and enforce workspace boundary correctly.
 
 Use the ACP SDK's `spawn_agent_process()` to spawn OpenCode and connect.
 
@@ -204,39 +247,39 @@ Render the WINK prompt via the standard pipeline:
 
 If the prompt declares structured output (`rendered.output_type is not None`):
 
-**1. Append output contract** to the rendered markdown before sending.
-
-Generate JSON Schema using `serde.schema()` from `src/weakincentives/serde/schema.py`:
+**1. Generate schema** using WINK's existing logic to ensure compatibility:
 
 ```python
-from weakincentives.serde import schema
+from weakincentives.adapters.response_parser import build_json_schema_response_format
 
-json_schema = schema(
-    rendered.output_type,
-    scope=SerdeScope.STRUCTURED_OUTPUT,
-)
+# This handles:
+# - Array container wrapping (rendered.container == "array")
+# - Extra keys policy (rendered.allow_extra_keys)
+# - Proper schema generation via serde.schema()
+schema_format = build_json_schema_response_format(rendered, prompt_name)
+json_schema = schema_format["json_schema"]["schema"]
 ```
 
-Append a contract block:
+**2. Append output contract** to the rendered markdown:
 
 ````markdown
 ## Output Format (MANDATORY)
+
 Return ONLY valid JSON in a ```json``` fenced block.
 
 Schema:
 ```json
-{ ... }
+{ ... extracted schema ... }
+```
 ````
 
-````
-
-**2. Parse after completion** using WINK's structured output parser:
+**3. Parse after completion** using WINK's structured output parser:
 
 ```python
 from weakincentives.prompt.structured_output import parse_structured_output
 
 parsed = parse_structured_output(text, rendered)
-````
+```
 
 On parse failure, raise `PromptEvaluationError(phase="response")`.
 
@@ -290,17 +333,18 @@ Capture stderr if `suppress_stderr=True` for debugging/tracing.
 ### 4. Initialize + Session
 
 - Call `conn.initialize(protocol_version=1, client_capabilities=...)`
-  - fs: `readTextFile=True`, `writeTextFile=True` (if `allow_file_writes=True`)
+  - fs: `readTextFile` and `writeTextFile` per config
   - terminal: only if `allow_terminal=True`
 
 Then:
 
-- If `reuse_session=True` and WINK session contains stored OpenCode `session_id`:
+- If `reuse_session=True` and WINK session contains stored `OpenCodeACPSessionState`:
   - Attempt `conn.load_session(cwd=cwd, mcp_servers=[...], session_id=...)`
   - Fall back to `conn.new_session(...)` on failure
 - Else call `conn.new_session(cwd=cwd, mcp_servers=[...])`
 
-Persist returned `sessionId` if `reuse_session=True`.
+Store returned `sessionId` via `session.seed(OpenCodeACPSessionState(...))` if
+`reuse_session=True`.
 
 ### 5. Set Mode/Model (Best-Effort)
 
@@ -311,8 +355,8 @@ If `adapter_config.mode_id` is set:
 
 If `adapter_config.model_id` is set:
 
-- Call `conn.set_session_model(model_id=..., session_id=...)`
-- Treat failures as non-fatal (ACP marks this unstable)
+- Attempt `conn.set_session_model(model_id=..., session_id=...)`
+- Treat **any failure** as non-fatal (OpenCode may not implement this method)
 
 ### 6. Prompt
 
@@ -349,6 +393,11 @@ Mapping rules:
 |------------|-------------|
 | `"completed"` | Emit `ToolInvoked` with `ToolResult(success=True, ...)` |
 | `"failed"` | Emit `ToolInvoked` with `ToolResult(success=False, ...)` |
+
+**Deduplication rule:** If the tool name indicates it's a bridged WINK tool
+(e.g., prefix `mcp__wink__`), do **not** emit `ToolInvoked` from ACP updates—
+the `BridgedTool` execution already dispatched a richer event. Only emit
+ACP-derived telemetry for OpenCode-native tools.
 
 `ToolInvoked` fields (at `src/weakincentives/runtime/events/types.py`):
 
@@ -389,9 +438,25 @@ PromptResponse(prompt_name=..., text=result_text, output=parsed_or_none)
 MCP tool bridging is **required** for exposing WINK tools to OpenCode. OpenCode
 supports MCP servers via ACP `session/new` `mcpServers` parameter.
 
+### ACP MCP Server Model
+
+ACP's `mcpServers` configuration describes **server specs** that the **agent spawns**:
+
+```python
+McpServerStdio(
+    name="wink",
+    command="python",
+    args=["-m", "weakincentives.adapters.opencode_acp.mcp_server", ...],
+    env={...},
+)
+```
+
+The adapter cannot pass already-open file descriptors or in-process pipes to OpenCode.
+OpenCode spawns the MCP server as a subprocess and connects to it via stdio.
+
 ### Reusing Claude Agent SDK Bridge Components
 
-The adapter reuses tool bridging infrastructure from the Claude Agent SDK:
+The MCP server subprocess reuses tool bridging infrastructure from the Claude Agent SDK:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
@@ -400,63 +465,46 @@ The adapter reuses tool bridging infrastructure from the Claude Agent SDK:
 | `VisibilityExpansionSignal` | `claude_agent_sdk/_visibility_signal.py` | Thread-safe exception propagation |
 | `tool_transaction()` | `runtime/transactions.py` | Atomic snapshot/restore for tool calls |
 
-These components are **provider-agnostic**—only the MCP server registration differs.
+> **Important:** When calling `create_bridged_tools(...)`, pass `adapter_name="opencode_acp"`
+> to ensure `ToolInvoked` events are labeled correctly (the function defaults to
+> `"claude_agent_sdk"`).
 
-### In-Process MCP Server
+### MCP Server Subprocess
 
-Rather than spawning a separate MCP server process, the adapter starts an
-**in-process MCP server** that OpenCode connects to via stdio pipes. This
-approach:
+The adapter spawns a dedicated MCP server process that OpenCode connects to:
 
-- Keeps tools executing in the same process as WINK session state
-- Enables direct access to `tool_transaction()` for atomic rollback
-- Avoids IPC complexity for snapshot/restore coordination
-
-### Implementation in `_mcp.py`
-
-```python
-from weakincentives.adapters.claude_agent_sdk._bridge import (
-    BridgedTool,
-    create_bridged_tools,
-)
-from weakincentives.adapters.claude_agent_sdk._visibility_signal import (
-    VisibilityExpansionSignal,
-)
-
-def create_mcp_server_for_acp(
-    bridged_tools: tuple[BridgedTool, ...],
-    *,
-    server_name: str = "wink",
-) -> McpServerConfig:
-    """Create an in-process MCP server exposing WINK tools.
-
-    Returns configuration that can be passed to ACP session/new.
-    """
-    # Start stdio-based MCP server in a background thread
-    # Register each BridgedTool as an MCP tool
-    # Return McpServerStdio config pointing to the server's pipes
-    ...
 ```
+src/weakincentives/adapters/opencode_acp/mcp_server.py
+```
+
+This process:
+
+1. Receives tool definitions via command-line args or a rendezvous file
+1. Registers tools using the MCP protocol (stdio JSON-RPC)
+1. Executes tools using `BridgedTool` semantics
+1. Communicates `VisibilityExpansionRequired` signals back to the parent adapter
 
 ### Tool Bridging Flow
 
 ```
 1. Adapter renders prompt → rendered.tools
-2. create_bridged_tools(rendered.tools, session, ...)
-   └─ For each tool:
-      ├─ Generate JSON schema via serde.schema(tool.params_type)
-      └─ Create BridgedTool with session, deadline, budget, signal refs
-3. create_mcp_server_for_acp(bridged_tools)
-   ├─ Start in-process MCP server (stdio pipes)
-   ├─ Register tools via MCP protocol
-   └─ Return McpServerStdio config
+2. Serialize tool definitions to a rendezvous file or args
+3. Configure MCP server spec:
+   McpServerStdio(
+       name="wink",
+       command=sys.executable,
+       args=["-m", "weakincentives.adapters.opencode_acp.mcp_server",
+             "--tools-file", rendezvous_path, ...],
+   )
 4. Pass config to ACP session/new:
    conn.new_session(cwd=..., mcp_servers=[mcp_config])
-5. OpenCode calls MCP tool → BridgedTool.__call__()
-   ├─ create_snapshot(session, resource_context)
-   ├─ Execute tool handler
-   ├─ On success: dispatch ToolInvoked, return result
-   └─ On failure: restore_snapshot(), return error
+5. OpenCode spawns MCP server subprocess
+6. OpenCode calls MCP tool → mcp_server.py handles it:
+   ├─ Deserialize tool definition
+   ├─ Create BridgedTool with adapter_name="opencode_acp"
+   ├─ Execute with transactional semantics
+   └─ Return result via MCP protocol
+7. Adapter receives tool_call updates via ACP session/update
 ```
 
 ### BridgedTool Execution Semantics
@@ -479,43 +527,34 @@ The same `BridgedTool` class handles:
 
 When a bridged tool raises `VisibilityExpansionRequired`:
 
-1. `BridgedTool` catches the exception
-1. Stores it in `VisibilityExpansionSignal` (thread-safe)
-1. Returns a non-error MCP result explaining the expansion need
-1. After `conn.prompt()` completes, adapter checks signal
+1. `BridgedTool` catches the exception in the MCP server subprocess
+1. Writes signal to a shared file or returns a special marker in the result
+1. After `conn.prompt()` completes, adapter checks for the signal
 1. If signal set, re-raises `VisibilityExpansionRequired` to caller
 
-This matches the Claude Agent SDK adapter's behavior exactly.
+This matches the Claude Agent SDK adapter's behavior.
 
-### MCP Server Configuration
+### Session State Synchronization
 
-The adapter provides the MCP server to OpenCode via ACP:
+Since the MCP server runs in a **separate process**, it cannot directly access
+the WINK session state. Options for v1:
 
-```python
-# In OpenCodeACPAdapter.evaluate():
-mcp_config = create_mcp_server_for_acp(
-    bridged_tools,
-    server_name="wink",
-)
+1. **Stateless tools only**: Tools that don't require session state work out of the box
+1. **Snapshot serialization**: Serialize session snapshot to the rendezvous file;
+   MCP server restores and uses it (complex, deferred to v2)
 
-# Pass to ACP session
-await conn.new_session(
-    cwd=workspace_cwd,
-    mcp_servers=[mcp_config],  # WINK tools available to OpenCode
-)
-```
-
-OpenCode will connect to the MCP server and can call WINK tools during its
-agent loop. Tool calls appear in ACP `session/update` notifications as
-`tool_call` / `tool_call_update` events with the WINK tool names.
+For v1, recommend stateless tools or tools that use external storage (files, databases).
 
 ## Cancellation and Deadlines
 
 If `effective_deadline` expires while waiting:
 
-- Call `conn.cancel(session_id=...)` (ACP `session/cancel`)
+- Send `conn.cancel(session_id=...)` (ACP `session/cancel`)
 - Kill subprocess if it doesn't exit quickly
 - Raise `PromptEvaluationError(phase="request")` or `DeadlineExceededError`
+
+> **Note:** ACP defines `session/cancel` as a **notification** (no response expected).
+> The implementation should not wait for a reply.
 
 ## Error Handling
 
@@ -545,6 +584,7 @@ Tool telemetry mapping errors should be logged but not crash the run.
    - `PromptExecuted` emitted once
    - Tool updates produce `ToolInvoked` when terminal status observed
    - Structured output parsing works when agent returns JSON-in-fence
+   - Tool event deduplication (bridged tools not double-logged)
 
 ### Integration Tests (OpenCode Optional)
 
@@ -592,7 +632,7 @@ prompt = Prompt(template)
 
 adapter = OpenCodeACPAdapter(
     client_config=OpenCodeACPClientConfig(
-        cwd="/abs/path/to/workspace",
+        cwd="/abs/path/to/workspace",  # Must be absolute
         permission_mode="auto",
         allow_file_writes=False,  # safe default for exploration
     )
@@ -609,6 +649,7 @@ print(resp.text)
 - Accurate token usage accounting (unless OpenCode/ACP exposes it reliably)
 - Full OpenCode configuration management (providers, keys, etc.)—defer to OpenCode's own config
 - Perfect parity with Claude's sandboxing model—workspace isolation is the primary safety boundary
+- Stateful tools in MCP subprocess (deferred to v2 with session serialization)
 
 ## Related Specifications
 
