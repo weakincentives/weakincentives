@@ -20,6 +20,7 @@ import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, cast, override
+from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
 from ...deadlines import Deadline
@@ -32,10 +33,12 @@ from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
+from ...runtime.session.rendered_tools import RenderedTools, ToolSchema
 from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema
 from ...types import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
+from ..tool_spec import tool_to_spec
 from ._async_utils import run_async
 from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
@@ -398,18 +401,45 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
+        # Generate shared event correlation data
+        render_event_id = uuid4()
+        session_id = getattr(session, "session_id", None)
+        created_at = _utcnow()
+
         session.dispatcher.dispatch(
             PromptRendered(
                 prompt_ns=prompt.ns,
                 prompt_key=prompt.key,
                 prompt_name=prompt.name,
                 adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
-                session_id=getattr(session, "session_id", None),
+                session_id=session_id,
                 render_inputs=(),
                 rendered_prompt=prompt_text,
-                created_at=_utcnow(),
+                created_at=created_at,
                 descriptor=None,
                 run_context=run_context,
+                event_id=render_event_id,
+            )
+        )
+
+        # Dispatch RenderedTools with tool schemas
+        tool_schemas = tuple(
+            ToolSchema(
+                name=spec["function"]["name"],
+                description=spec["function"]["description"],
+                parameters=spec["function"]["parameters"],
+            )
+            for tool in rendered.tools
+            for spec in [tool_to_spec(tool)]
+        )
+        session.dispatcher.dispatch(
+            RenderedTools(
+                prompt_ns=prompt.ns,
+                prompt_key=prompt.key,
+                tools=tool_schemas,
+                render_event_id=render_event_id,
+                session_id=session_id,
+                created_at=created_at,
             )
         )
 
