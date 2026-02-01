@@ -59,7 +59,7 @@ The ACP approach was chosen over OpenCode's HTTP API because:
 | Workspace | `ClaudeAgentWorkspaceSection` | `OpenCodeWorkspaceSection` | Same pattern |
 | **Structured Output** | | | |
 | Native support | SDK `output_format` | None | Must use tool |
-| Tool-based fallback | N/A | `wink_emit` tool | Required for OpenCode |
+| Tool-based fallback | N/A | `structured_output` tool | Required for OpenCode |
 | Schema validation | `serde.parse()` | `serde.parse()` | Same function |
 | **Budget & Deadline** | | | |
 | Token tracking | `BudgetTracker` | `BudgetTracker` | Same class |
@@ -174,7 +174,7 @@ WINK                                    OpenCode (subprocess)
             "streaming": True,
             "tools": [
                 {
-                    "name": "wink_emit",
+                    "name": "structured_output",
                     "description": "Emit structured output",
                     "inputSchema": {"type": "object", ...}
                 }
@@ -742,7 +742,7 @@ def build_tool_schemas(
     ]
 
 
-def create_wink_emit_tool(output_type: type[T]) -> Tool[WinkEmitParams, None]:
+def create_structured_output_tool(output_type: type[T]) -> Tool[StructuredOutputParams, None]:
     """Create structured output emission tool.
 
     Claude Agent SDK has native output_format support.
@@ -755,11 +755,11 @@ def create_wink_emit_tool(output_type: type[T]) -> Tool[WinkEmitParams, None]:
     """
 
     @FrozenDataclass()
-    class WinkEmitParams:
+    class StructuredOutputParams:
         output: dict[str, Any]
 
     def handler(
-        params: WinkEmitParams,
+        params: StructuredOutputParams,
         *,
         context: ToolContext,
     ) -> ToolResult[None]:
@@ -777,7 +777,7 @@ def create_wink_emit_tool(output_type: type[T]) -> Tool[WinkEmitParams, None]:
         return ToolResult.ok(None, message="Output recorded. Task complete.")
 
     return Tool(
-        name="wink_emit",
+        name="structured_output",
         description=(
             "Emit structured output when task is complete. "
             "Call this exactly once with your final result."
@@ -1085,10 +1085,10 @@ class OpenCodeAdapter[OutputT](ProviderAdapter[OutputT]):
         # Build tool schemas (simpler than create_mcp_server)
         tools = list(rendered.tools)
 
-        # Add wink_emit tool for structured output if output type specified
+        # Add structured_output tool for structured output if output type specified
         if rendered.output_type and rendered.output_type is not type(None):
-            emit_tool = create_wink_emit_tool(rendered.output_type)
-            tools.append(emit_tool)
+            output_tool = create_structured_output_tool(rendered.output_type)
+            tools.append(output_tool)
 
         tool_schemas = build_tool_schemas(tuple(tools))
 
@@ -1315,7 +1315,7 @@ class OpenCodeAdapter[OutputT](ProviderAdapter[OutputT]):
             if isinstance(last_msg, dict):
                 result_text = last_msg.get("content") or last_msg.get("text")
 
-        # Get structured output from session (set by wink_emit tool)
+        # Get structured output from session (set by structured_output tool)
         output: OutputT | None = None
         try:
             output_slice = session[StructuredOutputState]
@@ -1403,7 +1403,7 @@ class OpenCodeWorkspaceSection(Section[None]):
 class StructuredOutputState:
     """Session slice for structured output.
 
-    Receives StructuredOutputEmitted events from wink_emit tool.
+    Receives StructuredOutputEmitted events from structured_output tool.
     """
     value: Any | None = None
 
@@ -1414,7 +1414,7 @@ class StructuredOutputState:
 
 @FrozenDataclass()
 class StructuredOutputEmitted:
-    """Event dispatched when wink_emit tool called."""
+    """Event dispatched when structured_output tool called."""
     value: Any
 ```
 
@@ -1426,17 +1426,17 @@ When using structured output, add instructions:
 STRUCTURED_OUTPUT_INSTRUCTIONS = """
 ## Output Format
 
-When you have completed the task, call the `wink_emit` tool with your result:
+When you have completed the task, call the `structured_output` tool with your result:
 
 ```json
-wink_emit({{"output": <your result matching the schema>}})
+structured_output({{"output": <your result matching the schema>}})
 ```
 
 The output must conform to this schema:
 {schema}
 
-IMPORTANT: Call wink_emit exactly once when the task is complete.
-Do not provide additional responses after calling wink_emit.
+IMPORTANT: Call structured_output exactly once when the task is complete.
+Do not provide additional responses after calling structured_output.
 """
 ```
 
@@ -1574,7 +1574,7 @@ template = PromptTemplate[CodeReviewResult](
     ),
 )
 
-# wink_emit tool added automatically when output_type specified
+# structured_output tool added automatically when output_type specified
 response = adapter.evaluate(Prompt(template), session=session)
 print(response.output)  # CodeReviewResult instance
 ```
@@ -1592,7 +1592,7 @@ print(response.output)  # CodeReviewResult instance
 ### Phase 2: Integration
 
 - [ ] `build_tool_schemas()` - tool schema generation
-- [ ] `create_wink_emit_tool()` - structured output tool
+- [ ] `create_structured_output_tool()` - structured output tool
 - [ ] `StructuredOutputState` - session slice
 - [ ] `OpenCodeIsolationConfig.build_env()` - environment building
 
