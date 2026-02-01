@@ -286,7 +286,7 @@ class TestAgentLoopRequestSerialization:
 
                 # Verify nested ModelConfig
                 assert received.request.model_config.model_name == "claude-3-opus"
-                assert received.request.model_config.temperature == 0.5
+                assert received.request.model_config.temperature == pytest.approx(0.5)
                 assert received.request.model_config.max_tokens == 8192
                 assert received.request.model_config.stop_sequences == ["END", "STOP"]
 
@@ -465,10 +465,10 @@ class TestAgentLoopResultSerialization:
                 # Verify nested list of ProcessedChunks
                 assert len(received.output.chunks) == 2
                 assert received.output.chunks[0].chunk_id == "chunk-001"
-                assert received.output.chunks[0].confidence == 0.95
+                assert received.output.chunks[0].confidence == pytest.approx(0.95)
                 assert received.output.chunks[0].source_document_id == "doc-001"
                 assert received.output.chunks[1].chunk_id == "chunk-002"
-                assert received.output.chunks[1].confidence == 0.87
+                assert received.output.chunks[1].confidence == pytest.approx(0.87)
 
                 messages[0].acknowledge()
             finally:
@@ -859,8 +859,8 @@ class TestGenericTypeExtraction:
 
                 # Verify float fields in nested ProcessedChunk
                 assert received.output is not None
-                assert received.output.chunks[0].confidence == 0.95
-                assert received.output.chunks[1].confidence == 0.87
+                assert received.output.chunks[0].confidence == pytest.approx(0.95)
+                assert received.output.chunks[1].confidence == pytest.approx(0.87)
 
                 # Verify float field in nested ModelConfig (if we had a request)
                 msgs[0].acknowledge()

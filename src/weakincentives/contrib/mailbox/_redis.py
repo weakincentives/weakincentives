@@ -342,10 +342,21 @@ class RedisMailbox[T, R]:
         This method performs lazy extraction from __orig_class__ which is only
         available after __init__ completes. The result is cached after first access.
 
+        Thread-safe via double-checked locking pattern.
+
         Returns:
             The body type T if available, None otherwise.
         """
-        if not self._body_type_resolved:
+        # Fast path: already resolved (no lock needed for read of bool)
+        if self._body_type_resolved:
+            return self._body_type
+
+        # Slow path: acquire lock and check again
+        with self._lock:
+            # Double-check after acquiring lock
+            if self._body_type_resolved:
+                return self._body_type
+
             # Attempt extraction from generic parameters (available after __init__)
             orig_class = getattr(self, "__orig_class__", None)
             if orig_class is not None:
@@ -361,6 +372,7 @@ class RedisMailbox[T, R]:
                     "Use RedisMailbox[MyType, R](...) for typed deserialization."
                 )
                 _LOGGER.warning(msg, self.name)
+
         return self._body_type
 
     def _serialize(self, body: T) -> str:
@@ -391,6 +403,10 @@ class RedisMailbox[T, R]:
             json_data = json.loads(json_str)
             body_type = self._get_body_type()
             if body_type is not None:
+                # Special case for NoneType: return None directly
+                # This handles RedisMailbox[None, R](...) where body is always null
+                if body_type is type(None):
+                    return cast(T, None)
                 # Use parse() for dataclass types (including generic aliases)
                 origin = get_origin(body_type)
                 if is_dataclass(origin if origin is not None else body_type):
