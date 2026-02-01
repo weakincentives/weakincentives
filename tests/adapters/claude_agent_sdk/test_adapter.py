@@ -499,6 +499,41 @@ class TestClaudeAgentSDKAdapterEvaluate:
         assert "properties" in tool_schema.parameters
         assert "query" in tool_schema.parameters["properties"]
 
+    def test_rendered_tools_dispatch_failure_logs_error(
+        self,
+        session: Session,
+        simple_prompt: Prompt[SimpleOutput],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that RenderedTools dispatch failures are logged."""
+        import logging
+
+        from weakincentives.runtime.session.rendered_tools import RenderedTools
+
+        # Subscribe a handler that raises an exception
+        def failing_handler(event: RenderedTools) -> None:
+            raise RuntimeError("Subscriber error")
+
+        session.dispatcher.subscribe(RenderedTools, failing_handler)
+
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter()
+        caplog.set_level(logging.ERROR)
+
+        with sdk_patches():
+            # Should not raise, but should log the error
+            response = adapter.evaluate(simple_prompt, session=session)
+
+        assert response.text == "Done"
+        # Verify error was logged
+        assert any(
+            "rendered_tools_dispatch_failed" in record.message
+            for record in caplog.records
+        )
+
     def test_returns_prompt_response(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:

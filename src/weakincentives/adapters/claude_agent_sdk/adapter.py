@@ -439,7 +439,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             )
 
         tool_schemas = tuple(_extract_tool_schema(tool) for tool in rendered.tools)
-        session.dispatcher.dispatch(
+        tools_dispatch_result = session.dispatcher.dispatch(
             RenderedTools(
                 prompt_ns=prompt.ns,
                 prompt_key=prompt.key,
@@ -449,6 +449,24 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 created_at=created_at,
             )
         )
+        if not tools_dispatch_result.ok:
+            logger.error(
+                "claude_agent_sdk.evaluate.rendered_tools_dispatch_failed",
+                event="rendered_tools_dispatch_failed",
+                context={
+                    "failure_count": len(tools_dispatch_result.errors),
+                    "tool_count": len(tool_schemas),
+                },
+            )
+        else:
+            logger.debug(
+                "claude_agent_sdk.evaluate.rendered_tools_dispatched",
+                event="rendered_tools_dispatched",
+                context={
+                    "tool_count": len(tool_schemas),
+                    "handler_count": tools_dispatch_result.handled_count,
+                },
+            )
 
         output_format = self._build_output_format(rendered)
 
