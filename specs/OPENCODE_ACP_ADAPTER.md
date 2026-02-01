@@ -73,7 +73,8 @@ src/weakincentives/adapters/opencode_acp/
   workspace.py        # OpenCodeWorkspaceSection (generic mount logic)
   _state.py           # OpenCodeACPSessionState dataclass for session reuse
   _events.py          # Mapping ACP updates → WINK ToolInvoked
-  _mcp.py             # MCP server process spawning
+  _mcp.py             # In-process HTTP MCP server (reuses claude_agent_sdk/_bridge.py)
+  _structured_output.py  # structured_output tool for finalization
   _async.py           # asyncio/run helpers
 ```
 
@@ -245,43 +246,54 @@ Render the WINK prompt via the standard pipeline:
 
 ### Structured Output
 
-If the prompt declares structured output (`rendered.output_type is not None`):
+If the prompt declares structured output (`rendered.output_type is not None`),
+the adapter uses an MCP tool-based approach rather than prompt augmentation.
 
-**1. Generate schema** using WINK's existing logic to ensure compatibility:
+**The `structured_output` tool:**
+
+The adapter registers a special MCP tool called `structured_output` that the model
+must call to finalize execution when structured output is required:
+
+```python
+@FrozenDataclass()
+class StructuredOutputParams:
+    """Parameters for the structured_output tool."""
+    data: dict[str, Any]  # The structured output payload
+
+def structured_output_handler(
+    params: StructuredOutputParams,
+    *,
+    context: ToolContext,
+) -> ToolResult[None]:
+    """Validate and store structured output."""
+    # Validate against rendered.output_type schema
+    # Store in adapter state for retrieval after completion
+    # Return success or validation error
+```
+
+**Schema generation** uses WINK's existing logic:
 
 ```python
 from weakincentives.adapters.response_parser import build_json_schema_response_format
 
-# This handles:
-# - Array container wrapping (rendered.container == "array")
-# - Extra keys policy (rendered.allow_extra_keys)
-# - Proper schema generation via serde.schema()
+# Handles array containers, extra keys policy, proper schema generation
 schema_format = build_json_schema_response_format(rendered, prompt_name)
 json_schema = schema_format["json_schema"]["schema"]
 ```
 
-**2. Append output contract** to the rendered markdown:
+**Tool description** includes the schema:
 
-````markdown
-## Output Format (MANDATORY)
-
-Return ONLY valid JSON in a ```json``` fenced block.
-
-Schema:
-```json
-{ ... extracted schema ... }
 ```
-````
-
-**3. Parse after completion** using WINK's structured output parser:
-
-```python
-from weakincentives.prompt.structured_output import parse_structured_output
-
-parsed = parse_structured_output(text, rendered)
+Call this tool to submit your final structured output.
+The data must conform to the following JSON schema:
+{json_schema}
 ```
 
-On parse failure, raise `PromptEvaluationError(phase="response")`.
+**Retrieval after completion:**
+
+After `conn.prompt()` returns, the adapter retrieves the structured output from
+the tool invocation result. If the model did not call `structured_output` or
+validation failed, raise `PromptEvaluationError(phase="response")`.
 
 ### Attachments / Resources (Optional)
 
@@ -410,12 +422,16 @@ ACP-derived telemetry for OpenCode-native tools.
 
 > **Note:** This is telemetry. WINK is not responsible for tool correctness—OpenCode owns execution.
 
-### 9. Structured Output Parse
+### 9. Structured Output Retrieval
 
-If prompt declares structured output, parse from `result_text`:
+If prompt declares structured output:
 
-- Success → `PromptResponse(output=parsed)`
-- Failure → raise `PromptEvaluationError(phase="response")` with raw text in `provider_payload`
+1. Check if the model called the `structured_output` MCP tool
+1. If called: retrieve the validated output from the tool invocation
+1. If not called or validation failed: raise `PromptEvaluationError(phase="response")`
+
+The `structured_output` tool validates the payload during execution, so retrieval
+is simply extracting the stored result.
 
 ### 10. PromptExecuted Event
 
@@ -438,25 +454,28 @@ PromptResponse(prompt_name=..., text=result_text, output=parsed_or_none)
 MCP tool bridging is **required** for exposing WINK tools to OpenCode. OpenCode
 supports MCP servers via ACP `session/new` `mcpServers` parameter.
 
-### ACP MCP Server Model
+### In-Process HTTP MCP Server
 
-ACP's `mcpServers` configuration describes **server specs** that the **agent spawns**:
+Similar to the Claude Agent SDK adapter's architecture, the OpenCode ACP adapter
+hosts the MCP server **in the same process**. This provides:
+
+- Direct access to WINK session state and resources
+- Full transactional semantics (snapshot/restore) without IPC
+- Simpler operational model (no subprocess coordination)
+
+ACP supports `McpServerSse` which connects to an HTTP server via Server-Sent Events.
+The adapter starts a local HTTP MCP server and passes the URL to OpenCode:
 
 ```python
-McpServerStdio(
+McpServerSse(
     name="wink",
-    command="python",
-    args=["-m", "weakincentives.adapters.opencode_acp.mcp_server", ...],
-    env={...},
+    url=f"http://127.0.0.1:{port}/sse",
 )
 ```
 
-The adapter cannot pass already-open file descriptors or in-process pipes to OpenCode.
-OpenCode spawns the MCP server as a subprocess and connects to it via stdio.
-
 ### Reusing Claude Agent SDK Bridge Components
 
-The MCP server subprocess reuses tool bridging infrastructure from the Claude Agent SDK:
+The adapter reuses tool bridging infrastructure from the Claude Agent SDK:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
@@ -469,42 +488,50 @@ The MCP server subprocess reuses tool bridging infrastructure from the Claude Ag
 > to ensure `ToolInvoked` events are labeled correctly (the function defaults to
 > `"claude_agent_sdk"`).
 
-### MCP Server Subprocess
+### Implementation in `_mcp.py`
 
-The adapter spawns a dedicated MCP server process that OpenCode connects to:
+```python
+from weakincentives.adapters.claude_agent_sdk._bridge import (
+    BridgedTool,
+    create_bridged_tools,
+)
 
+def create_mcp_server_for_acp(
+    bridged_tools: tuple[BridgedTool, ...],
+    structured_output_tool: BridgedTool | None,
+    *,
+    server_name: str = "wink",
+) -> tuple[McpServerSse, Callable[[], None]]:
+    """Create an in-process HTTP MCP server exposing WINK tools.
+
+    Returns:
+        Tuple of (McpServerSse config, shutdown callback).
+    """
+    # Start HTTP server on random available port
+    # Register bridged tools + structured_output tool
+    # Return config for ACP and cleanup function
+    ...
 ```
-src/weakincentives/adapters/opencode_acp/mcp_server.py
-```
-
-This process:
-
-1. Receives tool definitions via command-line args or a rendezvous file
-1. Registers tools using the MCP protocol (stdio JSON-RPC)
-1. Executes tools using `BridgedTool` semantics
-1. Communicates `VisibilityExpansionRequired` signals back to the parent adapter
 
 ### Tool Bridging Flow
 
 ```
 1. Adapter renders prompt → rendered.tools
-2. Serialize tool definitions to a rendezvous file or args
-3. Configure MCP server spec:
-   McpServerStdio(
-       name="wink",
-       command=sys.executable,
-       args=["-m", "weakincentives.adapters.opencode_acp.mcp_server",
-             "--tools-file", rendezvous_path, ...],
-   )
-4. Pass config to ACP session/new:
+2. create_bridged_tools(rendered.tools, session, adapter_name="opencode_acp", ...)
+3. Create structured_output tool if prompt has output_type
+4. create_mcp_server_for_acp(bridged_tools, structured_output_tool)
+   ├─ Start HTTP server on localhost:random_port
+   ├─ Register tools via MCP protocol
+   └─ Return McpServerSse config + shutdown callback
+5. Pass config to ACP session/new:
    conn.new_session(cwd=..., mcp_servers=[mcp_config])
-5. OpenCode spawns MCP server subprocess
-6. OpenCode calls MCP tool → mcp_server.py handles it:
-   ├─ Deserialize tool definition
-   ├─ Create BridgedTool with adapter_name="opencode_acp"
-   ├─ Execute with transactional semantics
-   └─ Return result via MCP protocol
-7. Adapter receives tool_call updates via ACP session/update
+6. OpenCode connects to HTTP MCP server
+7. OpenCode calls MCP tool → in-process BridgedTool.__call__()
+   ├─ create_snapshot(session, resource_context)
+   ├─ Execute tool handler with full session access
+   ├─ On success: dispatch ToolInvoked, return result
+   └─ On failure: restore_snapshot(), return error
+8. After completion, shutdown HTTP server
 ```
 
 ### BridgedTool Execution Semantics
@@ -527,23 +554,14 @@ The same `BridgedTool` class handles:
 
 When a bridged tool raises `VisibilityExpansionRequired`:
 
-1. `BridgedTool` catches the exception in the MCP server subprocess
-1. Writes signal to a shared file or returns a special marker in the result
-1. After `conn.prompt()` completes, adapter checks for the signal
+1. `BridgedTool` catches the exception
+1. Stores it in `VisibilityExpansionSignal` (thread-safe, in-process)
+1. Returns a non-error MCP result explaining the expansion need
+1. After `conn.prompt()` completes, adapter checks signal
 1. If signal set, re-raises `VisibilityExpansionRequired` to caller
 
-This matches the Claude Agent SDK adapter's behavior.
-
-### Session State Synchronization
-
-Since the MCP server runs in a **separate process**, it cannot directly access
-the WINK session state. Options for v1:
-
-1. **Stateless tools only**: Tools that don't require session state work out of the box
-1. **Snapshot serialization**: Serialize session snapshot to the rendezvous file;
-   MCP server restores and uses it (complex, deferred to v2)
-
-For v1, recommend stateless tools or tools that use external storage (files, databases).
+This matches the Claude Agent SDK adapter's behavior exactly since both use
+the same in-process `BridgedTool` infrastructure.
 
 ## Cancellation and Deadlines
 
@@ -649,7 +667,6 @@ print(resp.text)
 - Accurate token usage accounting (unless OpenCode/ACP exposes it reliably)
 - Full OpenCode configuration management (providers, keys, etc.)—defer to OpenCode's own config
 - Perfect parity with Claude's sandboxing model—workspace isolation is the primary safety boundary
-- Stateful tools in MCP subprocess (deferred to v2 with session serialization)
 
 ## Related Specifications
 
