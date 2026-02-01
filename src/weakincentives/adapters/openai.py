@@ -31,6 +31,7 @@ from ..runtime.run_context import RunContext
 from ..runtime.watchdog import Heartbeat
 from ..types import OPENAI_ADAPTER_NAME
 from ..types.dataclass import SupportsDataclass
+from ._api_types import ProviderPayload, ResponsesToolSpecDict
 from ._provider_protocols import (
     ProviderChoice,
     ProviderChoiceData,
@@ -91,7 +92,7 @@ class _EvaluationContext[OutputT]:
     prompt_name: str
     render_inputs: tuple[SupportsDataclass, ...]
     rendered: RenderedPrompt[OutputT]
-    response_format: dict[str, Any] | None
+    response_format: ProviderPayload | None
 
 
 ProviderInvoker = Callable[
@@ -177,7 +178,7 @@ def _retry_after_from_error(error: object) -> timedelta | None:
     )
 
 
-def _error_payload(error: object) -> dict[str, Any] | None:
+def _error_payload(error: object) -> ProviderPayload | None:
     payload_candidate = getattr(error, "response", None)
     if isinstance(payload_candidate, Mapping):
         payload_mapping = cast(Mapping[object, Any], payload_candidate)
@@ -254,7 +255,7 @@ def _normalize_content_parts(parts: Sequence[object]) -> list[object]:
 
 def _responses_tool_spec(
     spec: Mapping[str, Any], *, prompt_name: str
-) -> dict[str, Any]:
+) -> ResponsesToolSpecDict:
     """Normalize a provider-agnostic tool spec for the Responses API."""
 
     if spec.get("type") != "function":
@@ -285,7 +286,7 @@ def _responses_tool_spec(
         )
 
     name = name_obj
-    normalized: dict[str, Any] = {
+    normalized: ResponsesToolSpecDict = {
         "type": "function",
         "name": name,
     }
@@ -384,7 +385,13 @@ def _normalize_assistant_tool_calls(
 def _normalize_input_messages(
     messages: Sequence[Mapping[str, Any]], *, prompt_name: str
 ) -> list[dict[str, Any]]:
-    """Strip unsupported fields from request messages for the Responses API."""
+    """Strip unsupported fields from request messages for the Responses API.
+
+    The Responses API uses a different format than standard Chat Completions:
+    - Messages have `type: "message"` added
+    - Tool responses become `function_call_output` with `call_id` and `output`
+    - Tool calls become `function_call` type items
+    """
 
     normalized: list[dict[str, Any]] = []
     for message in messages:
@@ -588,7 +595,9 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                     "client_config cannot be provided when an explicit client is supplied.",
                 )
         else:
-            client_kwargs = client_config.to_client_kwargs() if client_config else {}
+            client_kwargs: dict[str, Any] = (
+                client_config.to_client_kwargs() if client_config else {}
+            )
             client = create_openai_client(**client_kwargs)
 
         self._client = client
@@ -758,7 +767,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         rendered: RenderedPrompt[Any],
         *,
         prompt_name: str,
-    ) -> dict[str, Any] | None:
+    ) -> ProviderPayload | None:
         should_parse_structured_output = (
             rendered.output_type is not None and rendered.container is not None
         )
@@ -768,7 +777,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                 build_json_schema_response_format(rendered, prompt_name),
             )
             json_schema = cast(Mapping[str, Any], response_format["json_schema"])
-            text_format: dict[str, Any] = {
+            text_format: ProviderPayload = {
                 "type": "json_schema",
                 "name": json_schema["name"],
                 "schema": dict(cast(Mapping[str, Any], json_schema["schema"])),
@@ -789,7 +798,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             tool_choice_directive: ToolChoice | None,
             response_format_payload: Mapping[str, Any] | None,
         ) -> object:
-            request_payload: dict[str, Any] = {
+            request_payload: ProviderPayload = {
                 "model": self._model,
                 "input": _normalize_input_messages(messages, prompt_name=prompt_name),
             }

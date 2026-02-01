@@ -23,6 +23,11 @@ from ..types.dataclass import (
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
+from ._api_types import (
+    ParametersSchemaDict,
+    ProviderPayload,
+    ToolArguments,
+)
 from ._provider_protocols import ProviderToolCall
 from .core import (
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -43,11 +48,11 @@ class ToolArgumentsParser(Protocol):
         arguments_json: str | None,
         *,
         prompt_name: str,
-        provider_payload: dict[str, Any] | None,
-    ) -> dict[str, Any]: ...
+        provider_payload: ProviderPayload | None,
+    ) -> ToolArguments: ...
 
 
-_EMPTY_TOOL_PARAMETERS_SCHEMA: dict[str, Any] = {
+_EMPTY_TOOL_PARAMETERS_SCHEMA: ParametersSchemaDict = {
     "type": "object",
     "properties": {},
     "additionalProperties": False,
@@ -92,8 +97,8 @@ def parse_tool_arguments(
     arguments_json: str | None,
     *,
     prompt_name: str,
-    provider_payload: dict[str, Any] | None,
-) -> dict[str, Any]:
+    provider_payload: ProviderPayload | None,
+) -> ToolArguments:
     """Decode tool call arguments from provider payloads."""
 
     if not arguments_json:
@@ -115,7 +120,7 @@ def parse_tool_arguments(
             provider_payload=provider_payload,
         )
     parsed_mapping = cast(Mapping[Any, Any], parsed)
-    arguments: dict[str, Any] = {}
+    arguments: ToolArguments = {}
     for key, value in parsed_mapping.items():
         if not isinstance(key, str):
             raise PromptEvaluationError(
@@ -129,6 +134,8 @@ def parse_tool_arguments(
 
 
 __all__ = [
+    "ProviderPayload",
+    "ToolArguments",
     "ToolArgumentsParser",
     "ToolChoice",
     "parse_tool_arguments",

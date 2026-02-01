@@ -42,6 +42,7 @@ from ..types.dataclass import (
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
+from ._api_types import ProviderPayload
 from ._provider_protocols import ProviderChoice, ProviderMessage, ProviderToolCall
 from .core import (
     PROMPT_EVALUATION_PHASE_BUDGET,
@@ -172,7 +173,7 @@ class InnerLoop[OutputT]:
     _log: StructuredLogger = field(init=False)
     _messages: list[dict[str, Any]] = field(init=False)
     _tool_specs: list[dict[str, Any]] = field(init=False)
-    _provider_payload: dict[str, Any] | None = field(init=False, default=None)
+    _provider_payload: ProviderPayload | None = field(init=False, default=None)
     _next_tool_choice: ToolChoice = field(init=False)
     _tool_executor: ToolExecutor = field(init=False)
     _response_parser: ResponseParser[OutputT] = field(init=False)

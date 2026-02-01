@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
+from ._api_types import ProviderPayload
 from .core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_RESPONSE,
@@ -25,13 +26,13 @@ from .core import (
 from .throttle import ThrottleError
 
 
-def mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
+def mapping_to_str_dict(mapping: Mapping[Any, Any]) -> ProviderPayload | None:
     if any(not isinstance(key, str) for key in mapping):
         return None
     return {cast(str, key): value for key, value in mapping.items()}
 
 
-def extract_payload(response: object) -> dict[str, Any] | None:
+def extract_payload(response: object) -> ProviderPayload | None:
     """Return a provider payload from an SDK response when available."""
 
     model_dump = getattr(response, "model_dump", None)
@@ -78,7 +79,7 @@ def call_provider_with_normalization(
     *,
     prompt_name: str,
     normalize_throttle: Callable[[Exception], ThrottleError | None],
-    provider_payload: Callable[[Exception], dict[str, Any] | None],
+    provider_payload: Callable[[Exception], ProviderPayload | None],
     request_error_message: str,
 ) -> object:
     """Invoke a provider callable and normalize errors into PromptEvaluationError."""
