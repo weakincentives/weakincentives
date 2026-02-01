@@ -88,7 +88,8 @@ class PostToolUseInput:
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> PostToolUseInput | None:
         """Parse a dict into PostToolUseInput, returning None if required fields missing."""
-        if data is None:
+        # Runtime check for non-dict input (defensive, since SDK may pass unexpected types)
+        if data is None or not isinstance(data, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
             return None
         # Check required fields
         if "tool_name" not in data:
