@@ -69,16 +69,11 @@ src/weakincentives/adapters/opencode_acp/
   client.py           # OpenCodeACPClient (ACP Client implementation)
   workspace.py        # OpenCodeWorkspaceSection
   _events.py          # Mapping ACP updates → WINK ToolInvoked
+  _mcp.py             # MCP server integration (reuses claude_agent_sdk/_bridge.py)
   _async.py           # asyncio/run helpers
 ```
 
-Optional MCP bridge (for exposing WINK tools to OpenCode):
-
-```
-src/weakincentives/mcp/
-  server.py           # stdio MCP server: exposes WINK tools as MCP tools
-  bridge.py           # Tool event semantics bridge
-```
+MCP tool bridging reuses components from `src/weakincentives/adapters/claude_agent_sdk/_bridge.py`.
 
 ## Adapter Protocol
 
@@ -389,47 +384,130 @@ Return:
 PromptResponse(prompt_name=..., text=result_text, output=parsed_or_none)
 ```
 
-## MCP Tool Bridging (Optional)
+## MCP Tool Bridging
 
-OpenCode supports MCP servers provided at ACP `session/new` as `mcpServers`.
+MCP tool bridging is **required** for exposing WINK tools to OpenCode. OpenCode
+supports MCP servers via ACP `session/new` `mcpServers` parameter.
 
-### Goal
+### Reusing Claude Agent SDK Bridge Components
 
-Expose WINK tools (Python) to OpenCode as MCP tools, allowing OpenCode to call
-them during its agent loop.
+The adapter reuses tool bridging infrastructure from the Claude Agent SDK:
 
-### Design
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `BridgedTool` | `claude_agent_sdk/_bridge.py` | Wraps WINK tools with transactional semantics |
+| `create_bridged_tools()` | `claude_agent_sdk/_bridge.py` | Factory for creating BridgedTool instances |
+| `VisibilityExpansionSignal` | `claude_agent_sdk/_visibility_signal.py` | Thread-safe exception propagation |
+| `tool_transaction()` | `runtime/transactions.py` | Atomic snapshot/restore for tool calls |
 
-1. Implement MCP server process in WINK (stdio):
+These components are **provider-agnostic**—only the MCP server registration differs.
 
-   - CLI: `python -m weakincentives.mcp.server`
-   - Reads/writes MCP JSON-RPC over stdio
-   - Registers tools from the rendered prompt's tool set
+### In-Process MCP Server
 
-1. In `OpenCodeACPAdapter.evaluate()`:
+Rather than spawning a separate MCP server process, the adapter starts an
+**in-process MCP server** that OpenCode connects to via stdio pipes. This
+approach:
 
-   - Build bridged tool registry (reuse semantics from `claude_agent_sdk/_bridge.py`)
-   - Start MCP server process
-   - Include ACP `McpServerStdio` entry in `mcp_servers`:
-     - `name="wink"`
-     - `command=sys.executable`
-     - `args=["-m", "weakincentives.mcp.server", "--session", <id>, ...]`
+- Keeps tools executing in the same process as WINK session state
+- Enables direct access to `tool_transaction()` for atomic rollback
+- Avoids IPC complexity for snapshot/restore coordination
 
-1. Tool call telemetry:
+### Implementation in `_mcp.py`
 
-   - OpenCode emits ACP `tool_call` / `tool_call_update` for MCP tools
-   - Emit `ToolInvoked` as usual
-   - For bridged tools, enforce WINK transactional semantics inside MCP server
+```python
+from weakincentives.adapters.claude_agent_sdk._bridge import (
+    BridgedTool,
+    create_bridged_tools,
+)
+from weakincentives.adapters.claude_agent_sdk._visibility_signal import (
+    VisibilityExpansionSignal,
+)
 
-### Visibility Expansion (Optional)
+def create_mcp_server_for_acp(
+    bridged_tools: tuple[BridgedTool, ...],
+    *,
+    server_name: str = "wink",
+) -> McpServerConfig:
+    """Create an in-process MCP server exposing WINK tools.
 
-If bridged WINK tools raise `VisibilityExpansionRequired`, replicate the Claude
-adapter's pattern:
+    Returns configuration that can be passed to ACP session/new.
+    """
+    # Start stdio-based MCP server in a background thread
+    # Register each BridgedTool as an MCP tool
+    # Return McpServerStdio config pointing to the server's pipes
+    ...
+```
 
-- MCP server catches `VisibilityExpansionRequired`
-- Returns non-error tool result explaining the expansion
-- Signals back to adapter (shared file, env var, socket)
-- Adapter raises exception after OpenCode completes, so caller can re-render
+### Tool Bridging Flow
+
+```
+1. Adapter renders prompt → rendered.tools
+2. create_bridged_tools(rendered.tools, session, ...)
+   └─ For each tool:
+      ├─ Generate JSON schema via serde.schema(tool.params_type)
+      └─ Create BridgedTool with session, deadline, budget, signal refs
+3. create_mcp_server_for_acp(bridged_tools)
+   ├─ Start in-process MCP server (stdio pipes)
+   ├─ Register tools via MCP protocol
+   └─ Return McpServerStdio config
+4. Pass config to ACP session/new:
+   conn.new_session(cwd=..., mcp_servers=[mcp_config])
+5. OpenCode calls MCP tool → BridgedTool.__call__()
+   ├─ create_snapshot(session, resource_context)
+   ├─ Execute tool handler
+   ├─ On success: dispatch ToolInvoked, return result
+   └─ On failure: restore_snapshot(), return error
+```
+
+### BridgedTool Execution Semantics
+
+Each `BridgedTool` invocation (from `claude_agent_sdk/_bridge.py`):
+
+1. **Snapshot** - Capture session state and resource context before execution
+1. **Execute** - Call the WINK tool handler with parsed parameters
+1. **Dispatch** - Emit `ToolInvoked` event with result/error
+1. **Rollback** - On failure, restore snapshot (transactional semantics)
+
+The same `BridgedTool` class handles:
+
+- Parameter parsing via `serde.parse()`
+- Result formatting for MCP response
+- `VisibilityExpansionRequired` exception capture
+- Deadline and budget enforcement
+
+### Visibility Expansion
+
+When a bridged tool raises `VisibilityExpansionRequired`:
+
+1. `BridgedTool` catches the exception
+1. Stores it in `VisibilityExpansionSignal` (thread-safe)
+1. Returns a non-error MCP result explaining the expansion need
+1. After `conn.prompt()` completes, adapter checks signal
+1. If signal set, re-raises `VisibilityExpansionRequired` to caller
+
+This matches the Claude Agent SDK adapter's behavior exactly.
+
+### MCP Server Configuration
+
+The adapter provides the MCP server to OpenCode via ACP:
+
+```python
+# In OpenCodeACPAdapter.evaluate():
+mcp_config = create_mcp_server_for_acp(
+    bridged_tools,
+    server_name="wink",
+)
+
+# Pass to ACP session
+await conn.new_session(
+    cwd=workspace_cwd,
+    mcp_servers=[mcp_config],  # WINK tools available to OpenCode
+)
+```
+
+OpenCode will connect to the MCP server and can call WINK tools during its
+agent loop. Tool calls appear in ACP `session/update` notifications as
+`tool_call` / `tool_call_update` events with the WINK tool names.
 
 ## Cancellation and Deadlines
 
