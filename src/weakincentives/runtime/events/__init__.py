@@ -133,10 +133,11 @@ from __future__ import annotations
 from dataclasses import field
 from datetime import datetime
 from threading import RLock
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from ...dataclasses import FrozenDataclass
+from ...prompt.overrides import PromptDescriptor
 from ...types import AdapterName
 from ..logging import StructuredLogger, get_logger
 from ..run_context import RunContext
@@ -150,11 +151,6 @@ from .types import (
     TokenUsage,
     ToolInvoked,
 )
-
-if TYPE_CHECKING:
-    from ...prompt.overrides import PromptDescriptor
-else:  # pragma: no cover - runtime alias avoids import cycles during module init
-    PromptDescriptor = Any
 
 
 def _describe_handler(handler: EventHandler) -> str:
@@ -247,8 +243,7 @@ class PromptRendered:
     render_inputs: Annotated[tuple[Any, ...], {"untyped": True}]
     rendered_prompt: str
     created_at: datetime
-    # Runtime alias to Any avoids import cycle; marked untyped for serde.
-    descriptor: Annotated[PromptDescriptor | None, {"untyped": True}] = None
+    descriptor: PromptDescriptor | None = None
     run_context: RunContext | None = None
     event_id: UUID = field(default_factory=uuid4)
 
