@@ -27,6 +27,7 @@ from ..runtime.logging import StructuredLogger, bind_run_context, get_logger
 from ..runtime.run_context import RunContext
 from ..runtime.watchdog import Heartbeat
 from ..types import LITELLM_ADAPTER_NAME
+from ._api_types import ProviderPayload
 from ._provider_protocols import (
     ProviderChoice,
     ProviderCompletionCallable,
@@ -137,7 +138,7 @@ def _retry_after_from_error(error: object) -> timedelta | None:
     return None
 
 
-def _error_payload(error: object) -> dict[str, Any] | None:
+def _error_payload(error: object) -> ProviderPayload | None:
     response = getattr(error, "response", None)
     if isinstance(response, Mapping):
         response_mapping = cast(Mapping[object, Any], response)
@@ -380,7 +381,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             tool_choice_directive: ToolChoice | None,
             response_format_payload: Mapping[str, Any] | None,
         ) -> object:
-            request_payload: dict[str, Any] = {
+            request_payload: ProviderPayload = {
                 "model": self._model,
                 "messages": messages,
             }
