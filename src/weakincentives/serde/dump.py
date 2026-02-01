@@ -12,8 +12,6 @@
 
 """Dataclass serialization helpers."""
 
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportCallIssue=false, reportArgumentType=false, reportPrivateUsage=false
-
 from __future__ import annotations
 
 import dataclasses
@@ -55,7 +53,9 @@ def _serialize(
             cast(set[object], value), by_alias, exclude_none, alias_generator
         )
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return _serialize_sequence(value, by_alias, exclude_none, alias_generator)
+        return _serialize_sequence(
+            cast(Sequence[object], value), by_alias, exclude_none, alias_generator
+        )
     return value
 
 
@@ -282,9 +282,10 @@ def _extract_extras(obj: object) -> dict[str, object]:
     extras_attr = getattr(obj, "__extras__", None)
     obj_dict = getattr(obj, "__dict__", None)
     if isinstance(obj_dict, dict):
-        return {k: v for k, v in obj_dict.items() if k not in field_names}
+        obj_dict_typed = cast(dict[str, object], obj_dict)
+        return {k: v for k, v in obj_dict_typed.items() if k not in field_names}
     if isinstance(extras_attr, Mapping):
-        return dict(extras_attr)
+        return dict(cast(Mapping[str, object], extras_attr))
     return {}
 
 
