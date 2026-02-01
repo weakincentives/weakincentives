@@ -722,6 +722,9 @@ class TestTranscriptCollector:
                         async with collector.run():
                             pass  # pragma: no cover
                     except RuntimeError:
+                        # Expected: failing_create_task raises RuntimeError to
+                        # simulate task creation failure, testing cleanup path
+                        # when poll_task and discovery_task are None
                         pass
 
                 # Collector should have cleaned up even with None tasks
