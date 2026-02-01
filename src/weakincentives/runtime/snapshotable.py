@@ -14,11 +14,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
-class Snapshotable(Protocol):
+class Snapshotable[SnapshotT](Protocol):
     """Protocol for state containers that support snapshot and restore.
 
     This protocol defines the interface for objects that can capture their
@@ -32,14 +32,14 @@ class Snapshotable(Protocol):
 
     Example usage::
 
-        def checkpoint_and_restore(resource: Snapshotable) -> None:
+        def checkpoint_and_restore(resource: Snapshotable[MySnapshot]) -> None:
             snapshot = resource.snapshot(tag="checkpoint")
             # ... perform operations ...
             resource.restore(snapshot)
 
     """
 
-    def snapshot(self, *, tag: str | None = None) -> Any:  # noqa: ANN401
+    def snapshot(self, *, tag: str | None = None) -> SnapshotT:
         """Capture current state as an immutable snapshot.
 
         Args:
@@ -52,7 +52,7 @@ class Snapshotable(Protocol):
         """
         ...
 
-    def restore(self, snapshot: Any) -> None:  # noqa: ANN401
+    def restore(self, snapshot: SnapshotT) -> None:
         """Restore state from a previously captured snapshot.
 
         Args:
