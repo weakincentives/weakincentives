@@ -2145,16 +2145,28 @@ function zoomPrev() {
 
 /**
  * Navigates to the next entry in the zoom modal.
+ * Automatically loads more entries if at the end and more are available.
  */
-function zoomNext() {
+async function zoomNext() {
   if (!state.zoomOpen) {
     return;
   }
-  const maxIndex = state.transcriptEntries.length - 1;
-  if (state.zoomIndex >= maxIndex) {
+  const nextIndex = state.zoomIndex + 1;
+  const hasNextEntry = nextIndex < state.transcriptEntries.length;
+
+  if (hasNextEntry) {
+    openTranscriptZoom(nextIndex);
     return;
   }
-  openTranscriptZoom(state.zoomIndex + 1);
+  const canLoadMore = state.transcriptHasMore && !state.transcriptLoading;
+  if (!canLoadMore) {
+    return;
+  }
+  await loadMoreTranscript();
+  const hasNewEntry = state.zoomOpen && nextIndex < state.transcriptEntries.length;
+  if (hasNewEntry) {
+    openTranscriptZoom(nextIndex);
+  }
 }
 
 /**
@@ -2634,7 +2646,7 @@ function updateZoomNavigation() {
   const maxIndex = state.transcriptEntries.length - 1;
 
   elements.zoomPrev.disabled = state.zoomIndex <= 0;
-  elements.zoomNext.disabled = state.zoomIndex >= maxIndex;
+  elements.zoomNext.disabled = state.zoomIndex >= maxIndex && !state.transcriptHasMore;
 }
 
 /**
