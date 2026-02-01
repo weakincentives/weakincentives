@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 
@@ -307,13 +306,13 @@ class TestRestoreSnapshotErrors:
     def test_restore_handles_resource_restore_failure(self) -> None:
         """Test that resource restore failure raises RestoreFailedError."""
 
-        class FailingFilesystem(Snapshotable):
+        class FailingFilesystem(Snapshotable[dict[str, str]]):
             """Filesystem that fails on restore."""
 
-            def snapshot(self, *, tag: str | None = None) -> Any:  # noqa: ANN401
+            def snapshot(self, *, tag: str | None = None) -> dict[str, str]:
                 return {"state": "snapshot"}
 
-            def restore(self, snapshot: Any) -> None:  # noqa: ANN401
+            def restore(self, snapshot: dict[str, str]) -> None:
                 raise SnapshotRestoreError("Restore failed!")
 
         dispatcher = InProcessDispatcher()
