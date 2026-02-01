@@ -378,6 +378,127 @@ class TestClaudeAgentSDKAdapterEvaluate:
         assert event.prompt_key == "simple"
         assert event.adapter == CLAUDE_AGENT_SDK_ADAPTER_NAME
 
+    def test_publishes_rendered_tools_event(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that RenderedTools event is dispatched during evaluate."""
+        from weakincentives.runtime.session.rendered_tools import RenderedTools
+
+        events: list[RenderedTools] = []
+        session.dispatcher.subscribe(RenderedTools, lambda e: events.append(e))
+
+        _setup_mock_query(
+            [MockResultMessage(result="Hello!", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            adapter.evaluate(simple_prompt, session=session)
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.prompt_ns == "test"
+        assert event.prompt_key == "simple"
+        # Simple prompt has no tools, so tool_schemas should be empty
+        assert event.tools == ()
+
+    def test_rendered_tools_event_correlates_with_prompt_rendered(
+        self, session: Session
+    ) -> None:
+        """Test that RenderedTools event has matching render_event_id with PromptRendered."""
+        from tests.adapters.claude_agent_sdk.test_bridge import search_tool
+        from weakincentives.runtime.session.rendered_tools import RenderedTools
+
+        template_with_tools = PromptTemplate[SimpleOutput](
+            ns="test",
+            key="with_tools",
+            sections=[
+                MarkdownSection(
+                    title="Task",
+                    key="task",
+                    template="Use the tool",
+                    tools=(search_tool,),
+                ),
+            ],
+        )
+        prompt_with_tools = Prompt(template_with_tools)
+
+        prompt_rendered_events: list[PromptRendered] = []
+        rendered_tools_events: list[RenderedTools] = []
+
+        session.dispatcher.subscribe(
+            PromptRendered, lambda e: prompt_rendered_events.append(e)
+        )
+        session.dispatcher.subscribe(
+            RenderedTools, lambda e: rendered_tools_events.append(e)
+        )
+
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            adapter.evaluate(prompt_with_tools, session=session)
+
+        assert len(prompt_rendered_events) == 1
+        assert len(rendered_tools_events) == 1
+
+        # Verify correlation via event_id matching render_event_id
+        prompt_event = prompt_rendered_events[0]
+        tools_event = rendered_tools_events[0]
+
+        assert prompt_event.event_id is not None
+        assert tools_event.render_event_id is not None
+        assert prompt_event.event_id == tools_event.render_event_id
+        # Verify session_id and created_at are also consistent
+        assert prompt_event.session_id == tools_event.session_id
+        assert prompt_event.created_at == tools_event.created_at
+
+    def test_rendered_tools_extracts_correct_schemas(self, session: Session) -> None:
+        """Test that tool schemas are correctly extracted from rendered tools."""
+        from tests.adapters.claude_agent_sdk.test_bridge import search_tool
+        from weakincentives.runtime.session.rendered_tools import RenderedTools
+
+        template_with_tools = PromptTemplate[SimpleOutput](
+            ns="test",
+            key="with_tools",
+            sections=[
+                MarkdownSection(
+                    title="Task",
+                    key="task",
+                    template="Use the tool",
+                    tools=(search_tool,),
+                ),
+            ],
+        )
+        prompt_with_tools = Prompt(template_with_tools)
+
+        events: list[RenderedTools] = []
+        session.dispatcher.subscribe(RenderedTools, lambda e: events.append(e))
+
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            adapter.evaluate(prompt_with_tools, session=session)
+
+        assert len(events) == 1
+        event = events[0]
+
+        # Verify tool schema was extracted correctly
+        assert len(event.tools) == 1
+        tool_schema = event.tools[0]
+        assert tool_schema.name == "search"
+        assert "Search" in tool_schema.description
+        assert "properties" in tool_schema.parameters
+        assert "query" in tool_schema.parameters["properties"]
+
     def test_returns_prompt_response(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:

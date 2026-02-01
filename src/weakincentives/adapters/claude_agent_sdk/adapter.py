@@ -19,7 +19,7 @@ import shutil
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
@@ -59,6 +59,10 @@ from ._transcript_collector import TranscriptCollector
 from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import EphemeralHome, IsolationConfig
+
+if TYPE_CHECKING:
+    from ...prompt.tool import Tool
+    from ...types.dataclass import SupportsDataclassOrNone, SupportsToolResult
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
@@ -423,15 +427,18 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         )
 
         # Dispatch RenderedTools with tool schemas
-        tool_schemas = tuple(
-            ToolSchema(
-                name=spec["function"]["name"],
-                description=spec["function"]["description"],
-                parameters=spec["function"]["parameters"],
+        def _extract_tool_schema(
+            tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+        ) -> ToolSchema:
+            spec = tool_to_spec(tool)
+            fn = spec["function"]
+            return ToolSchema(
+                name=fn["name"],
+                description=fn["description"],
+                parameters=fn["parameters"],
             )
-            for tool in rendered.tools
-            for spec in [tool_to_spec(tool)]
-        )
+
+        tool_schemas = tuple(_extract_tool_schema(tool) for tool in rendered.tools)
         session.dispatcher.dispatch(
             RenderedTools(
                 prompt_ns=prompt.ns,
