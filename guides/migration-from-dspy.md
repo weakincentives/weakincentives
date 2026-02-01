@@ -35,21 +35,15 @@ actually matter for safety or correctness.
 Policies are how you express those constraints:
 
 ```python nocheck
-from weakincentives.prompt import (
-    SequentialDependencyPolicy,
-    ReadBeforeWritePolicy,
-    ToolRateLimitPolicy,
-)
+from weakincentives.prompt import SequentialDependencyPolicy, ReadBeforeWritePolicy
 
 # The agent can call tools freely, but:
 # - Must run tests before deploying
 # - Must read a file before overwriting it
-# - Can't spam expensive tools
 
 policies = (
     SequentialDependencyPolicy(dependencies={"deploy": frozenset({"test"})}),
     ReadBeforeWritePolicy(),
-    ToolRateLimitPolicy(tool="expensive_api", max_calls=5),
 )
 ```
 
