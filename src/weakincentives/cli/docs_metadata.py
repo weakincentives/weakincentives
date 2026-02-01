@@ -38,6 +38,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "MAILBOX": "Message queue abstraction, SQS/Redis semantics, reply patterns, resolver",
     "AGENT_LOOP": "Agent loop orchestration, visibility handling, event-driven execution",
     "MODULE_BOUNDARIES": "Module organization and import boundaries",
+    "OPENCODE_ACP_ADAPTER": "OpenCode ACP adapter, workspace isolation, MCP bridging",
     "POLICIES_OVER_WORKFLOWS": "Philosophy of declarative policies vs rigid workflows",
     "PROMPTS": "Prompt system, composition, overrides, structured output, resources",
     "RESOURCE_REGISTRY": "Dependency injection, resource scopes, transactional snapshots",
