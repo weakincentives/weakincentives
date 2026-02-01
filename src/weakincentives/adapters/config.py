@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from typing import Any, override
 
 from ..dataclasses import FrozenDataclass
+from ._api_types import LLMRequestParams
 
 __all__ = [
     "LLMConfig",
@@ -58,9 +59,9 @@ class LLMConfig:
     stop: tuple[str, ...] | None = None
     seed: int | None = None
 
-    def to_request_params(self) -> dict[str, Any]:
+    def to_request_params(self) -> LLMRequestParams:
         """Convert non-None fields to request parameters."""
-        params: dict[str, Any] = {}
+        params: LLMRequestParams = {}
         if self.temperature is not None:
             params["temperature"] = self.temperature
         if self.max_tokens is not None:
@@ -160,7 +161,7 @@ class OpenAIModelConfig(LLMConfig):
                 + ". Remove them from OpenAIModelConfig."
             )
 
-    def _add_core_params(self, params: dict[str, Any]) -> None:
+    def _add_core_params(self, params: LLMRequestParams) -> None:
         """Add supported core request parameters."""
         if self.temperature is not None:
             params["temperature"] = self.temperature
@@ -169,7 +170,7 @@ class OpenAIModelConfig(LLMConfig):
         if self.top_p is not None:
             params["top_p"] = self.top_p
 
-    def _add_responses_api_params(self, params: dict[str, Any]) -> None:
+    def _add_responses_api_params(self, params: LLMRequestParams) -> None:
         """Add OpenAI Responses API-specific parameters."""
         if self.logprobs is not None:
             params["logprobs"] = self.logprobs
@@ -183,13 +184,13 @@ class OpenAIModelConfig(LLMConfig):
             params["user"] = self.user
 
     @override
-    def to_request_params(self) -> dict[str, Any]:
+    def to_request_params(self) -> LLMRequestParams:
         """Convert non-None fields to request parameters.
 
         The Responses API uses ``max_output_tokens`` instead of ``max_tokens``,
         so this override renames the key accordingly.
         """
-        params: dict[str, Any] = {}
+        params: LLMRequestParams = {}
         self._add_core_params(params)
         self._add_responses_api_params(params)
         return params
@@ -243,7 +244,7 @@ class LiteLLMModelConfig(LLMConfig):
     user: str | None = None
 
     @override
-    def to_request_params(self) -> dict[str, Any]:
+    def to_request_params(self) -> LLMRequestParams:
         """Convert non-None fields to request parameters."""
         params = LLMConfig.to_request_params(self)
         if self.n is not None:

@@ -46,6 +46,7 @@ from ..types.dataclass import (
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
+from ._api_types import ProviderPayload, ToolArguments
 from ._provider_protocols import ProviderToolCall
 from .core import (
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -83,7 +84,7 @@ class ToolMessageSerializer(Protocol):
 class RejectedToolParams:
     """Dataclass used when provider arguments fail validation."""
 
-    raw_arguments: dict[str, Any]
+    raw_arguments: ToolArguments
     error: str
 
 
@@ -120,14 +121,14 @@ class ToolExecutionContext:
     parse_arguments: ToolArgumentsParser
     format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str]
     deadline: Deadline | None
-    provider_payload: dict[str, Any] | None = None
+    provider_payload: ProviderPayload | None = None
     logger_override: StructuredLogger | None = None
     budget_tracker: BudgetTracker | None = None
     heartbeat: Heartbeat | None = None
     run_context: RunContext | None = None
 
     def with_provider_payload(
-        self, provider_payload: dict[str, Any] | None
+        self, provider_payload: ProviderPayload | None
     ) -> ToolExecutionContext:
         """Return a copy of the context with a new provider payload."""
         from dataclasses import replace
@@ -145,7 +146,7 @@ def _resolve_tool_and_handler(
     tool_call: ProviderToolCall,
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
     prompt_name: str,
-    provider_payload: dict[str, Any] | None,
+    provider_payload: ProviderPayload | None,
 ) -> tuple[
     Tool[SupportsDataclassOrNone, SupportsToolResult],
     ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
@@ -176,9 +177,9 @@ def _parse_tool_call_arguments(
     *,
     tool_call: ProviderToolCall,
     prompt_name: str,
-    provider_payload: dict[str, Any] | None,
+    provider_payload: ProviderPayload | None,
     parse_arguments: ToolArgumentsParser,
-) -> dict[str, Any]:
+) -> ToolArguments:
     return parse_arguments(
         tool_call.function.arguments,
         prompt_name=prompt_name,
@@ -378,7 +379,7 @@ def _handle_unexpected_tool_error(
     *,
     log: StructuredLogger,
     tool_name: str,
-    provider_payload: dict[str, Any] | None,
+    provider_payload: ProviderPayload | None,
     error: Exception,
 ) -> ToolResult[SupportsToolResult]:
     log.exception(
@@ -809,7 +810,7 @@ class ToolExecutor:
     def execute(
         self,
         tool_calls: Sequence[ProviderToolCall],
-        provider_payload: dict[str, Any] | None,
+        provider_payload: ProviderPayload | None,
     ) -> tuple[list[dict[str, Any]], ToolChoice]:
         """Execute tool calls and return resulting messages and next tool choice."""
         messages: list[dict[str, Any]] = []
