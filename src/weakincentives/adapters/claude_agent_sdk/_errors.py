@@ -187,8 +187,9 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
 
     if error_type == "ProcessError":
         provider_payload: dict[str, Any] = {}
-        if hasattr(error, "exit_code"):
-            provider_payload["exit_code"] = error.exit_code
+        exit_code = getattr(error, "exit_code", None)
+        if exit_code is not None:
+            provider_payload["exit_code"] = exit_code
         # Include stderr from both error attribute and captured output
         error_stderr = getattr(error, "stderr", None)
         if error_stderr:

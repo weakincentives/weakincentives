@@ -699,7 +699,7 @@ def _copy_skill(
                     if total_bytes > max_total_bytes:
                         msg = f"Skill exceeds total size limit ({total_bytes} > {max_total_bytes})"
                         raise SkillMountError(msg)
-                    shutil.copy2(item, dest_file)
+                    _ = shutil.copy2(item, dest_file)
         else:
             # Single file skill - wrap in directory as SKILL.md
             dest_file = dest_dir / "SKILL.md"
@@ -708,7 +708,7 @@ def _copy_skill(
             if total_bytes > max_total_bytes:
                 msg = f"Skill exceeds total size limit ({total_bytes} > {max_total_bytes})"
                 raise SkillMountError(msg)
-            shutil.copy2(source, dest_file)
+            _ = shutil.copy2(source, dest_file)
     except OSError as e:
         msg = f"Failed to copy skill: {e}"
         raise SkillMountError(msg) from e
@@ -766,6 +766,7 @@ class EphemeralHome:
             workspace_path: Optional workspace directory to include.
             temp_dir_prefix: Prefix for the temporary directory name.
         """
+        super().__init__()
         self._isolation = isolation
         self._workspace_path = workspace_path
         self._temp_dir = tempfile.mkdtemp(prefix=temp_dir_prefix)
@@ -802,29 +803,31 @@ class EphemeralHome:
     def _configure_sandbox_settings(self, settings: dict[str, Any]) -> None:
         """Configure sandbox and network settings."""
         sandbox = self._isolation.sandbox or SandboxConfig()
-        settings["sandbox"] = {
+        sandbox_settings: dict[str, Any] = {
             "enabled": sandbox.enabled,
             "autoAllowBashIfSandboxed": sandbox.bash_auto_allow,
         }
 
         if sandbox.excluded_commands:
-            settings["sandbox"]["excludedCommands"] = list(sandbox.excluded_commands)
+            sandbox_settings["excludedCommands"] = list(sandbox.excluded_commands)
 
-        settings["sandbox"]["allowUnsandboxedCommands"] = (
+        sandbox_settings["allowUnsandboxedCommands"] = (
             sandbox.allow_unsandboxed_commands
         )
 
         if sandbox.writable_paths:
-            settings["sandbox"]["writablePaths"] = list(sandbox.writable_paths)
+            sandbox_settings["writablePaths"] = list(sandbox.writable_paths)
 
         if sandbox.readable_paths:
-            settings["sandbox"]["readablePaths"] = list(sandbox.readable_paths)
+            sandbox_settings["readablePaths"] = list(sandbox.readable_paths)
 
         # Network settings
         network = self._isolation.network_policy or NetworkPolicy.no_network()
-        settings["sandbox"]["network"] = {
+        sandbox_settings["network"] = {
             "allowedDomains": list(network.allowed_domains),
         }
+
+        settings["sandbox"] = sandbox_settings
 
     def _configure_auth_settings(self, settings: dict[str, Any]) -> None:
         """Configure env section based on authentication mode."""
@@ -863,7 +866,7 @@ class EphemeralHome:
         host_settings = _read_host_claude_settings()
         host_env = host_settings.get("env", {})
 
-        inherited_vars = []
+        inherited_vars: list[str] = []
         for key in _SETTINGS_JSON_AUTH_VARS:
             # Prefer shell environment over host settings
             if key in os.environ:
@@ -890,7 +893,7 @@ class EphemeralHome:
     def _write_settings(self, settings: dict[str, Any]) -> None:
         """Write settings.json to the ephemeral .claude directory."""
         settings_path = self._claude_dir / "settings.json"
-        settings_path.write_text(json.dumps(settings, indent=2))
+        _ = settings_path.write_text(json.dumps(settings, indent=2))
 
         _logger.debug(
             "isolation.generate_settings.complete",
@@ -940,7 +943,7 @@ class EphemeralHome:
                 validate_skill(source)
 
             dest = skills_dir / name
-            _copy_skill(source, dest)
+            _ = _copy_skill(source, dest)
 
     def _resolve_aws_config_dir(self, bedrock_enabled: bool) -> AwsConfigResolution:
         """Resolve the AWS config directory path.
@@ -1012,7 +1015,7 @@ class EphemeralHome:
         # Copy AWS config to ephemeral home
         ephemeral_aws_dir = Path(self._temp_dir) / ".aws"
         try:
-            shutil.copytree(aws_dir, ephemeral_aws_dir, dirs_exist_ok=True)
+            _ = shutil.copytree(aws_dir, ephemeral_aws_dir, dirs_exist_ok=True)
             copied_files = list(ephemeral_aws_dir.rglob("*"))
             _logger.debug(
                 "isolation.copy_aws_config.success",
@@ -1099,8 +1102,8 @@ class EphemeralHome:
         host_settings = _read_host_claude_settings()
         host_env = host_settings.get("env", {})
 
-        aws_vars_found = []
-        aws_vars_missing = []
+        aws_vars_found: list[str] = []
+        aws_vars_missing: list[str] = []
         for key in _AWS_PASSTHROUGH_VARS:
             if key in os.environ:
                 env[key] = os.environ[key]

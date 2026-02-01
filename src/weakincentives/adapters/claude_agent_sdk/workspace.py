@@ -132,10 +132,11 @@ def _resolve_mount_path(
             except ValueError:
                 continue
         else:
-            raise WorkspaceSecurityError(
+            msg = (
                 f"Host path '{host_path}' is outside allowed roots: "
                 f"{[str(r) for r in allowed_roots]}"
             )
+            raise WorkspaceSecurityError(msg)
 
     return resolved
 
@@ -187,7 +188,7 @@ def _copy_mount_to_temp(
                 f"File exceeds byte budget: {file_bytes} > {mount.max_bytes}"
             )
 
-        shutil.copy2(source, target)
+        _ = shutil.copy2(source, target)
         bytes_copied = file_bytes
         entries.append(source.name)
 
@@ -208,14 +209,15 @@ def _copy_mount_to_temp(
                 file_bytes = file_path.stat().st_size
 
                 if mount.max_bytes and bytes_copied + file_bytes > mount.max_bytes:
-                    raise WorkspaceBudgetExceededError(
+                    msg = (
                         f"Mount exceeds byte budget: "
                         f"{bytes_copied + file_bytes} > {mount.max_bytes}"
                     )
+                    raise WorkspaceBudgetExceededError(msg)
 
                 dest = target / rel_path
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(file_path, dest)
+                _ = shutil.copy2(file_path, dest)
 
                 bytes_copied += file_bytes
                 entries.append(str(rel_path))
@@ -305,10 +307,11 @@ def _render_workspace_template(previews: tuple[HostMountPreview, ...]) -> str:
                     lines.append(f"  - ... and {remaining} more")
             lines.append(f"  - Total: {preview.bytes_copied:,} bytes")
 
-    lines.append(
+    guidance = (
         "\n\nUse Claude Code's native tools to explore and modify the workspace. "
         "Focus on understanding the project structure before making changes."
     )
+    lines.append(guidance)
 
     return "\n".join(lines)
 

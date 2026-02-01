@@ -10,7 +10,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Hook implementations for Claude Agent SDK state synchronization."""
+"""Hook implementations for Claude Agent SDK state synchronization.
+
+Note: This module processes SDK callback data with Any types. The reportUnknown*
+checks are disabled because the SDK intentionally uses Any for hook input data.
+"""
+
+# pyright: reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownArgumentType=false
 
 from __future__ import annotations
 
@@ -18,7 +26,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
@@ -80,7 +88,7 @@ class PostToolUseInput:
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> PostToolUseInput | None:
         """Parse a dict into PostToolUseInput, returning None if required fields missing."""
-        if data is None or not isinstance(data, dict):
+        if data is None:
             return None
         # Check required fields
         if "tool_name" not in data:
@@ -88,15 +96,19 @@ class PostToolUseInput:
         raw_response = data.get("tool_response")
         # Keep tool_response as raw dict or string
         if isinstance(raw_response, dict):
-            response: dict[str, Any] | str = raw_response
+            response: dict[str, Any] | str = cast("dict[str, Any]", raw_response)
         else:
             response = str(raw_response) if raw_response is not None else ""
+        tool_input_raw = data.get("tool_input", {})
+        tool_input: dict[str, Any] = (
+            cast("dict[str, Any]", tool_input_raw)
+            if isinstance(tool_input_raw, dict)
+            else {}
+        )
         return cls(
             session_id=str(data.get("session_id", "")),
             tool_name=str(data.get("tool_name", "")),
-            tool_input=data.get("tool_input", {})
-            if isinstance(data.get("tool_input"), dict)
-            else {},
+            tool_input=tool_input,
             tool_response=response,
             cwd=str(data.get("cwd", "")),
             transcript_path=str(data.get("transcript_path", "")),
@@ -173,6 +185,7 @@ class HookContext:
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
     ) -> None:
+        super().__init__()
         self._session = session
         self._prompt = prompt
         self.adapter_name = adapter_name
@@ -201,6 +214,21 @@ class HookContext:
     def session(self) -> SessionProtocol:
         """Get session."""
         return self._session
+
+    @property
+    def prompt(self) -> PromptProtocol[object]:
+        """Get prompt."""
+        return self._prompt
+
+    @property
+    def tool_count(self) -> int:
+        """Get current tool count."""
+        return self._tool_count
+
+    @tool_count.setter
+    def tool_count(self, value: int) -> None:
+        """Set current tool count."""
+        self._tool_count = value
 
     @property
     def resources(
@@ -269,9 +297,11 @@ def create_pre_tool_use_hook(
         # Beat before tool execution to prove liveness
         hook_context.beat()
 
-        tool_name = (
-            input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
+        # Parse input_data with proper type annotation
+        input_dict: dict[str, Any] = (
+            cast("dict[str, Any]", input_data) if isinstance(input_data, dict) else {}
         )
+        tool_name = str(input_dict.get("tool_name", ""))
 
         # Compute constraint status for logging
         deadline_remaining_ms: int | None = None
@@ -282,7 +312,7 @@ def create_pre_tool_use_hook(
 
         budget_info: dict[str, Any] = {}
         budget_tracker = hook_context.budget_tracker
-        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
+        if budget_tracker is not None:
             budget = budget_tracker.budget
             consumed = budget_tracker.consumed
             consumed_total = (consumed.input_tokens or 0) + (
@@ -306,7 +336,7 @@ def create_pre_tool_use_hook(
             context={
                 "tool_name": tool_name,
                 "tool_use_id": tool_use_id,
-                "input_data": input_data if isinstance(input_data, dict) else {},
+                "input_data": input_dict,
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "deadline_remaining_ms": deadline_remaining_ms,
@@ -335,7 +365,7 @@ def create_pre_tool_use_hook(
                 }
             }
 
-        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
+        if budget_tracker is not None:
             budget = budget_tracker.budget
             consumed = budget_tracker.consumed
             consumed_total = (consumed.input_tokens or 0) + (
@@ -421,23 +451,32 @@ def _parse_tool_data(input_data: Any) -> _ParsedToolData:  # noqa: ANN401
         )
 
     # Fallback to dict access for malformed input
-    tool_name = input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
-    tool_input = (
-        input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
-    )
-    tool_response_raw = (
-        input_data.get("tool_response", {}) if isinstance(input_data, dict) else {}
-    )
-    tool_error = (
-        tool_response_raw.get("stderr")
-        if isinstance(tool_response_raw, dict) and tool_response_raw.get("stderr")
-        else None
-    )
+    if isinstance(input_data, dict):
+        data: dict[str, Any] = cast("dict[str, Any]", input_data)
+        tool_name = str(data.get("tool_name", ""))
+        tool_input_raw = data.get("tool_input", {})
+        tool_input: dict[str, Any] = (
+            cast("dict[str, Any]", tool_input_raw)
+            if isinstance(tool_input_raw, dict)
+            else {}
+        )
+        tool_response_raw = data.get("tool_response", {})
+    else:  # pragma: no cover - defensive fallback for non-dict input
+        tool_name = ""
+        tool_input = {}
+        tool_response_raw = {}
+
     if isinstance(tool_response_raw, dict):
-        output_text = tool_response_raw.get("stdout", "") or str(tool_response_raw)
+        response_dict: dict[str, Any] = cast("dict[str, Any]", tool_response_raw)
+        stderr = response_dict.get("stderr")
+        tool_error: str | None = str(stderr) if stderr else None
+        stdout = response_dict.get("stdout", "")
+        output_text = str(stdout) if stdout else str(response_dict)
     elif tool_response_raw is not None:
+        tool_error = None
         output_text = str(tool_response_raw)
     else:
+        tool_error = None
         output_text = ""
 
     return _ParsedToolData(
@@ -503,7 +542,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
     ) -> dict[str, Any] | None:
         """Run feedback providers and return hook response if triggered."""
         feedback_text = collect_feedback(
-            prompt=hook_context._prompt,
+            prompt=hook_context.prompt,
             session=hook_context.session,
             deadline=hook_context.deadline,
         )
@@ -539,7 +578,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         hook_context.beat()
 
         # Increment tool count for ALL tools (needed for feedback triggers)
-        hook_context._tool_count += 1
+        hook_context.tool_count += 1
         hook_context.stats.tool_count += 1
 
         # MCP-bridged WINK tools dispatch their own ToolInvoked events via
@@ -565,7 +604,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             call_id=tool_use_id,
             run_context=hook_context.run_context,
         )
-        hook_context.session.dispatcher.dispatch(event)
+        _ = hook_context.session.dispatcher.dispatch(event)
 
         # Determine success status
         success = data.tool_error is None and not _is_tool_error_response(
@@ -894,7 +933,7 @@ def create_task_completion_stop_hook(
 
         # Skip task completion check if budget exhausted - can't do more work
         budget_tracker = hook_context.budget_tracker
-        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
+        if budget_tracker is not None:
             budget = budget_tracker.budget
             consumed = budget_tracker.consumed
             consumed_total = (consumed.input_tokens or 0) + (

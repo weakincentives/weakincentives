@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyright: reportUnknownVariableType=false
+
 """Transcript collection for Claude Agent SDK execution.
 
 This module provides real-time collection and logging of Claude Agent SDK
@@ -245,12 +247,12 @@ class TranscriptCollector:
 
             # Cancel tasks
             if self._poll_task is not None:
-                self._poll_task.cancel()
+                _ = self._poll_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._poll_task
 
             if self._discovery_task is not None:
-                self._discovery_task.cancel()
+                _ = self._discovery_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._discovery_task
 
@@ -456,7 +458,7 @@ class TranscriptCollector:
             Bytes read from file.
         """
         with path.open("rb") as f:
-            f.seek(offset)
+            _ = f.seek(offset)
             return f.read(count)
 
     async def _emit_entries(self, tailer: _TailerState, content: bytes) -> None:

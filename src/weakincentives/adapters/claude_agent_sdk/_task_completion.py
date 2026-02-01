@@ -32,7 +32,7 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, override, runtime_checkable
 
 from ...dataclasses import FrozenDataclass
 from ...runtime.logging import get_logger
@@ -153,8 +153,10 @@ class PlanBasedChecker(TaskCompletionChecker):
                 `weakincentives.contrib.tools.planning.Plan` for standard usage.
                 If None, the checker always returns ok (no plan checking).
         """
+        super().__init__()
         self._plan_type = plan_type
 
+    @override
     def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
         """Check if all plan tasks are complete.
 
@@ -188,7 +190,7 @@ class PlanBasedChecker(TaskCompletionChecker):
             )
             return TaskCompletionResult.ok("No plan has been created.")
 
-        steps = getattr(plan, "steps", ())
+        steps = getattr(plan, "steps", ())  # pyright: ignore[reportUnknownArgumentType]
         incomplete_steps = [
             step for step in steps if getattr(step, "status", "done") != "done"
         ]
@@ -256,9 +258,11 @@ class CompositeChecker(TaskCompletionChecker):
             all_must_pass: If True (default), all checkers must pass.
                 If False, any checker passing is sufficient.
         """
+        super().__init__()
         self._checkers = checkers
         self._all_must_pass = all_must_pass
 
+    @override
     def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
         """Check completion using all configured checkers.
 

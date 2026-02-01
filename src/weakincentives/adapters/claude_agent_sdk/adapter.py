@@ -10,14 +10,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Claude Agent SDK adapter implementation."""
+"""Claude Agent SDK adapter implementation.
+
+Note: This adapter processes SDK response data with Any types. Certain strict
+checks are disabled because the SDK uses Any for message/usage data.
+"""
+
+# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownArgumentType=false
+# pyright: reportUnknownVariableType=false
+# pyright: reportUnnecessaryComparison=false
 
 from __future__ import annotations
 
 import contextlib
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from typing import Any, cast, override
 
@@ -81,10 +90,11 @@ def _import_sdk() -> Any:  # pragma: no cover
 
         return claude_agent_sdk
     except ImportError as error:
-        raise ImportError(
+        msg = (
             "claude-agent-sdk is not installed. Install it with: "
             "pip install 'weakincentives[claude-agent-sdk]'"
-        ) from error
+        )
+        raise ImportError(msg) from error
 
 
 def _extract_content_block(block: dict[str, Any]) -> dict[str, Any]:
@@ -245,6 +255,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             allowed_tools: Tools Claude can use (None = all available).
             disallowed_tools: Tools to explicitly block.
         """
+        super().__init__()
         self._model = model
         self._client_config = client_config or ClaudeAgentSDKClientConfig()
         self._model_config = model_config or ClaudeAgentSDKModelConfig(model=model)
@@ -272,7 +283,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         )
 
     @override
-    def evaluate(
+    def evaluate(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         prompt: Prompt[OutputT],
         *,
@@ -398,7 +409,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
-        session.dispatcher.dispatch(
+        _ = session.dispatcher.dispatch(
             PromptRendered(
                 prompt_ns=prompt.ns,
                 prompt_key=prompt.key,
@@ -463,14 +474,14 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             if temp_workspace_dir:
                 shutil.rmtree(temp_workspace_dir, ignore_errors=True)
 
-    async def _run_with_prompt_context[OutputT](
+    async def _run_with_prompt_context[T](
         self,
         *,
         sdk: Any,
-        prompt: Prompt[OutputT],
+        prompt: Prompt[T],
         prompt_name: str,
         prompt_text: str,
-        rendered: RenderedPrompt[OutputT],
+        rendered: RenderedPrompt[T],
         session: SessionProtocol,
         output_format: dict[str, Any] | None,
         deadline: Deadline | None,
@@ -638,7 +649,10 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         duration_ms = int((end_time - start_time).total_seconds() * 1000)
 
         result_text, output, usage = self._extract_result(
-            messages, rendered, budget_tracker, prompt_name
+            messages,
+            rendered,  # pyright: ignore[reportArgumentType]
+            budget_tracker,
+            prompt_name,
         )
 
         # Final verification: log a warning if tasks are incomplete.
@@ -661,7 +675,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             output=output,
         )
 
-        session.dispatcher.dispatch(
+        _ = session.dispatcher.dispatch(
             PromptExecuted(
                 prompt_name=prompt_name,
                 adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
@@ -913,7 +927,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # Use streaming mode (AsyncIterable) to enable hook support.
         # The SDK's connect() function only initializes hooks when
         # given an AsyncIterable prompt.
-        async def stream_prompt() -> Any:
+        async def stream_prompt() -> AsyncGenerator[dict[str, Any], None]:
             """Yield a single user message in streaming format."""
             yield {
                 "type": "user",
@@ -1188,7 +1202,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         if not output_type or output_type is type(None):
             return None  # pragma: no cover - defensive for prompts without output type
         try:
-            return parse(output_type, message.structured_output, extra="ignore")
+            return parse(output_type, message.structured_output, extra="ignore")  # pyright: ignore[reportReturnType]
         except (TypeError, ValueError) as error:
             logger.warning(
                 "claude_agent_sdk.parse.structured_output_error",

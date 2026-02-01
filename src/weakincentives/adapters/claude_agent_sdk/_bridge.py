@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -47,22 +46,6 @@ __all__ = [
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
-
-
-@dataclass(slots=True, frozen=True)
-class _MCPToolCallFunction:
-    """Adapter for MCP tool call function to ProviderToolCallFunction."""
-
-    name: str
-    arguments: str | None
-
-
-@dataclass(slots=True, frozen=True)
-class _MCPToolCall:
-    """Adapter for MCP tool call to ProviderToolCall."""
-
-    id: str
-    function: _MCPToolCallFunction
 
 
 class BridgedTool:
@@ -98,6 +81,7 @@ class BridgedTool:
         run_context: RunContext | None = None,
         visibility_signal: VisibilityExpansionSignal | None = None,
     ) -> None:
+        super().__init__()
         self.name = name
         self.description = description
         self.input_schema = input_schema
@@ -176,7 +160,7 @@ class BridgedTool:
             context = ToolContext(
                 prompt=self._prompt,
                 rendered_prompt=self._rendered_prompt,
-                adapter=self._adapter,
+                adapter=self._adapter,  # pyright: ignore[reportArgumentType]
                 session=self._session,
                 deadline=self._deadline,
                 heartbeat=self._heartbeat,
@@ -336,7 +320,7 @@ class BridgedTool:
             call_id=None,
             run_context=self._run_context,
         )
-        self._session.dispatcher.dispatch(event)
+        _ = self._session.dispatcher.dispatch(event)
 
 
 def create_bridged_tools(
@@ -457,10 +441,11 @@ def create_mcp_server(
             tool as sdk_tool,
         )
     except ImportError as error:
-        raise ImportError(
+        msg = (
             "claude-agent-sdk is required for custom tool bridging. "
             "Install it with: pip install claude-agent-sdk"
-        ) from error
+        )
+        raise ImportError(msg) from error
 
     sdk_tools: list[SdkMcpTool[Any]] = []
 

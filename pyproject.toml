@@ -260,9 +260,9 @@ exclude = [
     ".pytest_cache",
     ".ruff_cache",
     "dist",
-    "src/weakincentives/adapters/claude_agent_sdk",
     "src/weakincentives/docs",
 ]
+stubPath = "stubs"
 deprecateTypingAliases = true
 reportCallInDefaultInitializer = "error"
 reportMissingTypeStubs = "error"
