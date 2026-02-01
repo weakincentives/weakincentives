@@ -14,10 +14,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from ._api_types import ProviderPayload
+from ._provider_protocols import ProviderChoice, ProviderCompletionResponse
 from .core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_RESPONSE,
@@ -53,35 +54,29 @@ def extract_payload(response: object) -> ProviderPayload | None:
     return None
 
 
-def first_choice(response: object, *, prompt_name: str) -> object:
+def first_choice(
+    response: ProviderCompletionResponse, *, prompt_name: str
+) -> ProviderChoice:
     """Return the first choice in a provider response or raise consistently."""
 
-    choices = getattr(response, "choices", None)
-    if not isinstance(choices, Sequence):
+    choices = response.choices
+    if not choices:
         raise PromptEvaluationError(
             "Provider response did not include any choices.",
             prompt_name=prompt_name,
             phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         )
-    sequence_choices = cast(Sequence[object], choices)
-    try:
-        return sequence_choices[0]
-    except IndexError as error:  # pragma: no cover - defensive
-        raise PromptEvaluationError(
-            "Provider response did not include any choices.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
-        ) from error
+    return choices[0]
 
 
 def call_provider_with_normalization(
-    call_provider: Callable[[], object],
+    call_provider: Callable[[], ProviderCompletionResponse],
     *,
     prompt_name: str,
     normalize_throttle: Callable[[Exception], ThrottleError | None],
     provider_payload: Callable[[Exception], ProviderPayload | None],
     request_error_message: str,
-) -> object:
+) -> ProviderCompletionResponse:
     """Invoke a provider callable and normalize errors into PromptEvaluationError."""
 
     try:

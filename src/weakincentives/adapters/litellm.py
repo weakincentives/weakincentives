@@ -380,7 +380,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             tool_specs: Sequence[Mapping[str, Any]],
             tool_choice_directive: ToolChoice | None,
             response_format_payload: Mapping[str, Any] | None,
-        ) -> object:
+        ) -> ProviderCompletionResponse:
             request_payload: ProviderPayload = {
                 "model": self._model,
                 "messages": messages,
@@ -412,7 +412,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 },
             )
 
-            def _execute_completion() -> object:
+            def _execute_completion() -> ProviderCompletionResponse:
                 response = self._completion(**request_payload)
                 bound_logger.debug(
                     "litellm.provider.response",
@@ -436,11 +436,8 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 request_error_message="LiteLLM request failed.",
             )
 
-        def _select_choice(response: object) -> ProviderChoice:
-            return cast(
-                ProviderChoice,
-                first_choice(response, prompt_name=prompt_name),
-            )
+        def _select_choice(response: ProviderCompletionResponse) -> ProviderChoice:
+            return first_choice(response, prompt_name=prompt_name)
 
         effective_tracker, prompt = _prepare_budget_tracking(
             budget=budget, budget_tracker=budget_tracker, prompt=prompt

@@ -102,7 +102,7 @@ ProviderInvoker = Callable[
         ToolChoice | None,
         Mapping[str, Any] | None,
     ],
-    object,
+    ProviderCompletionResponse,
 ]
 
 
@@ -797,7 +797,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             tool_specs: Sequence[Mapping[str, Any]],
             tool_choice_directive: ToolChoice | None,
             response_format_payload: Mapping[str, Any] | None,
-        ) -> object:
+        ) -> ProviderCompletionResponse:
             request_payload: ProviderPayload = {
                 "model": self._model,
                 "input": _normalize_input_messages(messages, prompt_name=prompt_name),
@@ -890,8 +890,10 @@ class OpenAIAdapter(ProviderAdapter[Any]):
     @staticmethod
     def _build_choice_selector(
         prompt_name: str,
-    ) -> Callable[[object], ProviderChoice]:
-        def _select_choice(response: object) -> ProviderChoice:
+    ) -> Callable[[ProviderCompletionResponse], ProviderChoice]:
+        def _select_choice(response: ProviderCompletionResponse) -> ProviderChoice:
+            # Cast is needed because ProviderChoiceData implements ProviderChoice
+            # but pyright can't verify nested protocol satisfaction automatically
             return cast(
                 ProviderChoice, _choice_from_response(response, prompt_name=prompt_name)
             )

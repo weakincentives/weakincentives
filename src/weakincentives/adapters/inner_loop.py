@@ -43,7 +43,12 @@ from ..types.dataclass import (
     SupportsToolResult,
 )
 from ._api_types import ProviderPayload
-from ._provider_protocols import ProviderChoice, ProviderMessage, ProviderToolCall
+from ._provider_protocols import (
+    ProviderChoice,
+    ProviderCompletionResponse,
+    ProviderMessage,
+    ProviderToolCall,
+)
 from .core import (
     PROMPT_EVALUATION_PHASE_BUDGET,
     PROMPT_EVALUATION_PHASE_REQUEST,
@@ -96,12 +101,12 @@ ProviderCall = Callable[
         ToolChoice | None,
         Mapping[str, Any] | None,
     ],
-    object,
+    ProviderCompletionResponse,
 ]
 """Callable responsible for invoking the provider with assembled payloads."""
 
 
-ChoiceSelector = Callable[[object], ProviderChoice]
+ChoiceSelector = Callable[[ProviderCompletionResponse], ProviderChoice]
 """Callable that extracts the relevant choice from a provider response."""
 
 
@@ -270,7 +275,7 @@ class InnerLoop[OutputT]:
 
             self._handle_tool_calls(message, tool_calls)
 
-    def _issue_provider_request(self) -> object:
+    def _issue_provider_request(self) -> ProviderCompletionResponse:
         attempts = 0
         total_delay = timedelta(0)
         throttle_policy = self.config.throttle_policy
