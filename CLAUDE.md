@@ -94,7 +94,7 @@ make check       # ALL checks - MANDATORY before any commit
 
 ```
 src/weakincentives/
-├── adapters/     # OpenAI, LiteLLM, Claude Agent SDK
+├── adapters/     # OpenAI, LiteLLM, Claude Agent SDK, OpenCode
 ├── contrib/      # Tools (VFS, Podman, asteval), mailbox
 ├── dbc/          # Design-by-contract decorators
 ├── evals/        # Evaluation framework
@@ -197,6 +197,7 @@ Read before modifying related code:
 | `TOOLS.md` | Tool registration, policies |
 | `ADAPTERS.md` | Provider adapters, throttling |
 | `CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
+| `OPENCODE.md` | OpenCode adapter, server lifecycle, SSE |
 | `AGENT_LOOP.md` | AgentLoop orchestration |
 | `POLICIES_OVER_WORKFLOWS.md` | Design philosophy |
 | `MODULE_BOUNDARIES.md` | Layer architecture |
