@@ -403,7 +403,8 @@ def restore_snapshot(
 
         if isinstance(resource, Snapshotable):  # pragma: no branch - tested separately
             try:
-                resource.restore(resource_snapshot)
+                # Snapshot type matches at runtime (stored by calling resource.snapshot())
+                resource.restore(resource_snapshot)  # type: ignore[arg-type]
             except Exception as error:
                 raise RestoreFailedError(
                     f"Failed to restore {resource_type.__qualname__}: {error}"
