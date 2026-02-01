@@ -197,7 +197,9 @@ Read before modifying related code:
 | `TOOLS.md` | Tool registration, policies |
 | `ADAPTERS.md` | Provider adapters, throttling |
 | `CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
-| `OPENCODE.md` | OpenCode adapter, server lifecycle, SSE |
+| `OPENCODE.md` | OpenCode overview, approach comparison |
+| `OPENCODE_ACP.md` | OpenCode ACP adapter (recommended) |
+| `OPENCODE_HTTP_API.md` | OpenCode HTTP API adapter |
 | `AGENT_LOOP.md` | AgentLoop orchestration |
 | `POLICIES_OVER_WORKFLOWS.md` | Design philosophy |
 | `MODULE_BOUNDARIES.md` | Layer architecture |
