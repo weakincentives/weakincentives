@@ -93,13 +93,13 @@ MCP tool bridging reuses `create_mcp_server()` from
 | `opencode_args` | `tuple[str, ...]` | `("acp",)` | Must include `acp` |
 | `cwd` | `str \| None` | `None` | Working directory (must be absolute; defaults to `Path.cwd().resolve()`) |
 | `env` | `Mapping[str, str] \| None` | `None` | Extra environment variables |
-| `suppress_stderr` | `bool` | `True` | Capture stderr for debugging |
+| `suppress_stderr` | `bool` | `True` | Capture stderr for errors (not printed unless debugging) |
 | `startup_timeout_s` | `float` | `10.0` | Max time for initialize/session/new |
-| `permission_mode` | `Literal["auto", "deny", "prompt"]` | `"auto"` | Response to `session/request_permission` |
-| `allow_file_reads` | `bool` | `True` | Advertise `readTextFile` capability |
+| `permission_mode` | `Literal["auto", "deny", "prompt"]` | `"auto"` | Response to `session/request_permission` (prompt must not block) |
+| `allow_file_reads` | `bool` | `False` | Advertise `readTextFile` capability (only with workspace) |
 | `allow_file_writes` | `bool` | `False` | Advertise `writeTextFile` capability |
-| `allow_terminal` | `bool` | `False` | Advertise terminal capability |
-| `mcp_servers` | `tuple[McpServerConfig, ...]` | `()` | Additional MCP servers |
+| `allow_terminal` | `bool` | `False` | Advertise terminal capability (must implement `create_terminal`) |
+| `mcp_servers` | `tuple[McpServerConfig, ...]` | `()` | Additional MCP servers (WINK server always added) |
 | `reuse_session` | `bool` | `False` | Load/reuse OpenCode session ID |
 
 > **CWD requirement:** ACP requires `cwd` to be an absolute path. If `None`, the
@@ -107,7 +107,18 @@ MCP tool bridging reuses `create_mcp_server()` from
 
 > **Capability alignment:** Advertised capabilities in `initialize` must match
 > implemented methods. If `readTextFile=True`, implement the method and enforce
-> workspace boundaries.
+> workspace boundaries. If `allow_terminal=True`, implement `create_terminal`.
+
+> **Workspace gating:** If no `OpenCodeWorkspaceSection` is provided, the adapter
+> must force `allow_file_reads=False` and `allow_file_writes=False` regardless of
+> config to avoid reading or writing the host filesystem.
+
+> **Non-interactive permissions:** `permission_mode="prompt"` must not block.
+> The adapter should respond as `deny` and include a reason indicating that
+> interactive prompting is not supported.
+
+> **MCP merge:** The adapter always injects its own WINK MCP server. User-provided
+> `mcp_servers` are appended; they must not shadow the WINK tool namespace.
 
 ### OpenCodeACPAdapterConfig
 
@@ -132,21 +143,40 @@ from weakincentives.dataclasses import FrozenDataclass
 
 @FrozenDataclass()
 class OpenCodeACPSessionState:
-    """Stores OpenCode session ID for reuse across adapter calls."""
+    """Stores OpenCode session ID and workspace fingerprint for reuse."""
     session_id: str
+    cwd: str
+    workspace_fingerprint: str | None
 ```
 
 Usage:
 
 ```python
-# Store after session/new
-session.seed(OpenCodeACPSessionState(session_id=result.session_id))
+from pathlib import Path
+
+# Store after session/new (use the resolved cwd passed to session/new)
+resolved_cwd = client_config.cwd or str(Path.cwd().resolve())
+session.seed(
+    OpenCodeACPSessionState(
+        session_id=result.session_id,
+        cwd=resolved_cwd,
+        workspace_fingerprint=workspace_fingerprint,
+    )
+)
 
 # Retrieve for session/load
 state = session[OpenCodeACPSessionState].latest()
 if state is not None:
     opencode_session_id = state.session_id
+    cached_cwd = state.cwd
+    cached_workspace_fingerprint = state.workspace_fingerprint
 ```
+
+When `reuse_session=True`, only reuse the session if `cached_cwd` and
+`cached_workspace_fingerprint` match the current workspace. If they differ or
+`session/load` fails, fall back to `session/new` and overwrite the stored state.
+Compute `workspace_fingerprint` from mount config and budgets (stable ordering)
+so reuse is deterministic.
 
 ## Workspace Management
 
@@ -158,6 +188,9 @@ Create by **extracting** generic mount/copy logic from
 - Accepts `HostMount` tuples, `allowed_host_roots`, max-bytes budgets
 - Materializes temporary directory with copied files
 - Exposes `temp_dir` for `OpenCodeACPClientConfig.cwd`
+- Renders a provider-agnostic summary of mounts and budgets
+- Exposes cleanup via `.cleanup()` or a context manager
+- Provides `workspace_fingerprint` for session reuse validation
 
 > **Do not** reuse `ClaudeAgentWorkspaceSection` directly—its template contains
 > Claude-specific wording. Extract the machinery and create a new section with
@@ -181,10 +214,10 @@ Implements `acp.interfaces.Client`:
 | Method | Description |
 |--------|-------------|
 | `session_update(...)` | Feed updates to `SessionAccumulator` |
-| `request_permission(...)` | Auto-respond per `permission_mode` |
+| `request_permission(...)` | Auto-respond per `permission_mode` (prompt -> deny) |
 | `read_text_file(...)` | Read within workspace (if capability advertised) |
 | `write_text_file(...)` | Write within workspace (if capability advertised) |
-| `create_terminal(...)` | Stub unless `allow_terminal=True` |
+| `create_terminal(...)` | Return not-supported unless `allow_terminal=True` and implemented |
 
 Use `acp.spawn_agent_process()` to spawn OpenCode and connect.
 
@@ -203,13 +236,16 @@ approach** rather than prompt augmentation.
 
 ### The `structured_output` Tool
 
-Register a special MCP tool that the model must call to finalize:
+Register a special MCP tool that the model must call to finalize. The `data`
+field accepts any JSON value (object or array) to support array-root schemas:
 
 ```python
 # _structured_output.py
+from typing import Any
+
 @FrozenDataclass()
 class StructuredOutputParams:
-    data: dict[str, Any]
+    data: Any
 
 def structured_output_handler(
     params: StructuredOutputParams,
@@ -250,6 +286,8 @@ After `conn.prompt()` returns:
 1. Check if model called `structured_output`
 1. If called: retrieve validated output
 1. If not called or validation failed: raise `PromptEvaluationError(phase="response")`
+
+`structured_output` should emit a `ToolInvoked` event like any other bridged tool.
 
 ## MCP Tool Bridging
 
@@ -344,13 +382,17 @@ When a tool raises `VisibilityExpansionRequired`:
 
 ```python
 from acp import spawn_agent_process
-# opencode acp --cwd <absolute_cwd>
+# opencode acp
 ```
+
+Pass `cwd` via `session/new` or `session/load` only; do not rely on CLI flags.
 
 ### 5. Initialize + Session
 
 ```python
-conn.initialize(protocol_version=1, client_capabilities={
+from acp import PROTOCOL_VERSION
+
+conn.initialize(protocol_version=PROTOCOL_VERSION, client_capabilities={
     "fs": {"readTextFile": allow_file_reads, "writeTextFile": allow_file_writes},
     "terminal": allow_terminal,
 })
@@ -361,7 +403,8 @@ else:
     conn.new_session(cwd=..., mcp_servers=[...])
 ```
 
-Store session ID via `session.seed(OpenCodeACPSessionState(...))`.
+Store session ID, `cwd`, and `workspace_fingerprint` via
+`session.seed(OpenCodeACPSessionState(...))`.
 
 ### 6. Set Mode/Model (Best-Effort)
 
@@ -378,7 +421,8 @@ conn.prompt(session_id=..., prompt=[TextContentBlock(text=rendered_text)])
 
 ### 8. Drain Updates
 
-Wait until no updates for `quiet_period_ms`, capped by deadline.
+Wait until no updates for `quiet_period_ms`; reset the timer on each update and
+cap total wait by the deadline.
 
 ### 9. Extract Results
 
@@ -391,8 +435,9 @@ Wait until no updates for `quiet_period_ms`, capped by deadline.
 | `completed` | `ToolInvoked` with `success=True` |
 | `failed` | `ToolInvoked` with `success=False` |
 
-**Deduplication:** Skip `ToolInvoked` for bridged WINK tools (`mcp__wink__` prefix)
-—`BridgedTool` already emitted the event.
+**Deduplication:** Skip `ToolInvoked` for bridged WINK tools using explicit MCP
+server metadata when available; fall back to the `mcp__wink__` prefix if needed.
+`BridgedTool` already emitted the event.
 
 ### 10. Structured Output
 
@@ -418,7 +463,8 @@ If deadline expires:
 | `"request"` | Spawn, initialize, session/new, or prompt fails |
 | `"response"` | Structured output missing or invalid |
 
-Include in payload: stderr tail, ACP error details, recent session updates.
+Include in payload: stderr tail (bounded, e.g., last 8k), ACP error details,
+recent session updates (bounded).
 
 Tool telemetry errors: log but don't crash.
 
@@ -431,6 +477,8 @@ Tool telemetry errors: log but don't crash.
 - Verify `ToolInvoked` on terminal status
 - Verify tool deduplication (no double events)
 - Verify structured output retrieval
+- Verify `permission_mode="prompt"` denies without blocking
+- Verify file read/write disabled when no workspace configured
 
 ### Integration Tests
 
@@ -456,7 +504,7 @@ from weakincentives.adapters.opencode_acp import (
 )
 
 bus = InProcessDispatcher()
-session = Session(bus=bus)
+session = Session(dispatcher=bus)
 
 template = PromptTemplate(
     ns="demo",
@@ -475,6 +523,7 @@ adapter = OpenCodeACPAdapter(
     client_config=OpenCodeACPClientConfig(
         cwd="/absolute/path/to/workspace",
         permission_mode="auto",
+        allow_file_reads=True,
         allow_file_writes=False,
     )
 )
