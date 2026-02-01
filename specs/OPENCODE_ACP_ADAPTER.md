@@ -36,8 +36,13 @@ Add a new optional extra in `pyproject.toml`:
 [project.optional-dependencies]
 acp = [
   "agent-client-protocol>=0.7.1",
+  "claude-agent-sdk>=0.1.15",  # For MCP server infrastructure
 ]
 ```
+
+The adapter takes a dependency on `claude-agent-sdk` to reuse its MCP server
+infrastructure rather than implementing a new one. This creates a coupling but
+significantly simplifies the implementation.
 
 The adapter module uses lazy imports and raises a helpful error if the `acp` extra
 is not installed (following the pattern in `openai.py` and `claude_agent_sdk/*`).
@@ -73,12 +78,12 @@ src/weakincentives/adapters/opencode_acp/
   workspace.py        # OpenCodeWorkspaceSection (generic mount logic)
   _state.py           # OpenCodeACPSessionState dataclass for session reuse
   _events.py          # Mapping ACP updates → WINK ToolInvoked
-  _mcp.py             # In-process HTTP MCP server (reuses claude_agent_sdk/_bridge.py)
   _structured_output.py  # structured_output tool for finalization
   _async.py           # asyncio/run helpers
 ```
 
-MCP tool bridging reuses components from `src/weakincentives/adapters/claude_agent_sdk/_bridge.py`.
+MCP tool bridging reuses `create_mcp_server()` from `src/weakincentives/adapters/claude_agent_sdk/_bridge.py`
+(requires `claude-agent-sdk` dependency).
 
 ## Adapter Protocol
 
@@ -454,33 +459,34 @@ PromptResponse(prompt_name=..., text=result_text, output=parsed_or_none)
 MCP tool bridging is **required** for exposing WINK tools to OpenCode. OpenCode
 supports MCP servers via ACP `session/new` `mcpServers` parameter.
 
-### In-Process HTTP MCP Server
+### Reusing Claude Agent SDK MCP Server
 
-Similar to the Claude Agent SDK adapter's architecture, the OpenCode ACP adapter
-hosts the MCP server **in the same process**. This provides:
+The adapter reuses the **exact same MCP server infrastructure** from the Claude
+Agent SDK rather than implementing a new one. This provides:
 
 - Direct access to WINK session state and resources
 - Full transactional semantics (snapshot/restore) without IPC
-- Simpler operational model (no subprocess coordination)
+- Proven, tested implementation
+- Simpler operational model
 
-ACP supports `McpServerSse` which connects to an HTTP server via Server-Sent Events.
-The adapter starts a local HTTP MCP server and passes the URL to OpenCode:
+The adapter takes a dependency on `claude-agent-sdk` and uses `create_mcp_server()`
+from `src/weakincentives/adapters/claude_agent_sdk/_bridge.py`:
 
 ```python
-McpServerSse(
-    name="wink",
-    url=f"http://127.0.0.1:{port}/sse",
+from weakincentives.adapters.claude_agent_sdk._bridge import (
+    BridgedTool,
+    create_bridged_tools,
+    create_mcp_server,
 )
 ```
 
-### Reusing Claude Agent SDK Bridge Components
-
-The adapter reuses tool bridging infrastructure from the Claude Agent SDK:
+### Reused Components
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | `BridgedTool` | `claude_agent_sdk/_bridge.py` | Wraps WINK tools with transactional semantics |
 | `create_bridged_tools()` | `claude_agent_sdk/_bridge.py` | Factory for creating BridgedTool instances |
+| `create_mcp_server()` | `claude_agent_sdk/_bridge.py` | Creates in-process MCP server config |
 | `VisibilityExpansionSignal` | `claude_agent_sdk/_visibility_signal.py` | Thread-safe exception propagation |
 | `tool_transaction()` | `runtime/transactions.py` | Atomic snapshot/restore for tool calls |
 
@@ -488,50 +494,22 @@ The adapter reuses tool bridging infrastructure from the Claude Agent SDK:
 > to ensure `ToolInvoked` events are labeled correctly (the function defaults to
 > `"claude_agent_sdk"`).
 
-### Implementation in `_mcp.py`
-
-```python
-from weakincentives.adapters.claude_agent_sdk._bridge import (
-    BridgedTool,
-    create_bridged_tools,
-)
-
-def create_mcp_server_for_acp(
-    bridged_tools: tuple[BridgedTool, ...],
-    structured_output_tool: BridgedTool | None,
-    *,
-    server_name: str = "wink",
-) -> tuple[McpServerSse, Callable[[], None]]:
-    """Create an in-process HTTP MCP server exposing WINK tools.
-
-    Returns:
-        Tuple of (McpServerSse config, shutdown callback).
-    """
-    # Start HTTP server on random available port
-    # Register bridged tools + structured_output tool
-    # Return config for ACP and cleanup function
-    ...
-```
-
 ### Tool Bridging Flow
 
 ```
 1. Adapter renders prompt → rendered.tools
 2. create_bridged_tools(rendered.tools, session, adapter_name="opencode_acp", ...)
 3. Create structured_output tool if prompt has output_type
-4. create_mcp_server_for_acp(bridged_tools, structured_output_tool)
-   ├─ Start HTTP server on localhost:random_port
-   ├─ Register tools via MCP protocol
-   └─ Return McpServerSse config + shutdown callback
+4. create_mcp_server(bridged_tools + structured_output_tool)
+   └─ Returns McpSdkServerConfig (same as Claude adapter)
 5. Pass config to ACP session/new:
    conn.new_session(cwd=..., mcp_servers=[mcp_config])
-6. OpenCode connects to HTTP MCP server
+6. OpenCode connects to MCP server
 7. OpenCode calls MCP tool → in-process BridgedTool.__call__()
    ├─ create_snapshot(session, resource_context)
    ├─ Execute tool handler with full session access
    ├─ On success: dispatch ToolInvoked, return result
    └─ On failure: restore_snapshot(), return error
-8. After completion, shutdown HTTP server
 ```
 
 ### BridgedTool Execution Semantics
