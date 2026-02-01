@@ -124,20 +124,32 @@ with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
 **Run:**
 
 ```bash
-wink debug debug_bundles/  # Opens most recent bundle
-wink debug debug_bundles/<session_id>.jsonl  # Opens specific snapshot
+wink debug debug_bundles/           # Opens most recent bundle in directory
+wink debug debug_bundles/abc123.zip # Opens specific bundle
 ```
 
-This starts a local server that renders the prompt/tool timeline for inspection.
-You can see:
+This starts a local web server with a visual interface for bundle inspection.
 
-- Exactly what was sent to the model
-- What tools were called and what they returned
-- How state evolved over the session
-- Token usage at each step
+**What you can inspect:**
 
-The debug UI is your primary tool for understanding agent behavior after the
-fact.
+- **Session state**: Browse session slices with markdown rendering
+- **Logs**: Filter by level, logger, event, or search term
+- **Transcripts**: View conversation flow, tool calls, thinking blocks
+- **Tool calls**: See params, results, timing, and success status
+- **Files**: Browse workspace snapshots including image preview support
+- **Environment**: System info, Python version, Git state, container runtime
+- **Metrics**: Token usage and timing data
+- **Errors**: Full error details when execution fails
+
+**Bundle management:**
+
+When pointed at a directory, the debug UI can:
+
+- Auto-detect and load the most recent bundle
+- List and switch between all bundles in the directory
+- Reload bundles after re-running evaluations
+
+The debug UI is your primary tool for visual exploration of agent behavior.
 
 **Loading bundles programmatically:**
 
@@ -180,18 +192,13 @@ print(bundle.logs)
 
 ## Debug CLI Commands
 
+### wink debug
+
+Start the visual debug UI server:
+
 ```bash
-# Start the debug UI server
-wink debug <snapshot_path> [options]
-
-# Access bundled documentation
-wink docs --guide       # Print guides (usage guide)
-wink docs --reference   # Print llms.md (API reference)
-wink docs --specs       # Print all spec files concatenated
-wink docs --changelog   # Print CHANGELOG.md
+wink debug <bundle_path> [options]
 ```
-
-**Debug options:**
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -201,6 +208,91 @@ wink docs --changelog   # Print CHANGELOG.md
 | `--no-open-browser` | - | Disable auto-open |
 | `--log-level` | `INFO` | Log verbosity |
 | `--json-logs` | `true` | Emit structured JSON logs |
+
+### wink query
+
+SQL-based analysis of debug bundles. See [Query Guide](query.md) for full
+details.
+
+```bash
+wink query <bundle_path> --schema                    # Discover tables and hints
+wink query <bundle_path> "SELECT * FROM errors"     # Run SQL query (JSON output)
+wink query <bundle_path> "SQL" --table              # ASCII table output
+wink query <bundle_path> "SQL" --table --no-truncate # Full values
+wink query <bundle_path> --export-jsonl             # Export raw logs as JSONL
+wink query <bundle_path> --export-jsonl=session     # Export session state
+```
+
+**Key tables:**
+
+| Table | Contents |
+| --- | --- |
+| `manifest` | Bundle metadata (ID, status, timestamps) |
+| `logs` | All log entries with structured context |
+| `transcript` | Conversation entries from TranscriptCollector |
+| `tool_calls` | Tool invocations with params, results, timing |
+| `errors` | Aggregated errors from all sources |
+| `files` | Workspace file contents |
+| `metrics` | Token usage and timing |
+
+**Environment tables** (inspect execution context):
+
+| Table | Contents |
+| --- | --- |
+| `env_system` | OS, architecture, CPU, memory |
+| `env_python` | Python version, virtualenv, executable |
+| `env_git` | Commit, branch, dirty state, remotes |
+| `env_container` | Docker/K8s runtime info |
+| `env_vars` | Filtered environment variables |
+
+**Pre-built views:**
+
+| View | Purpose |
+| --- | --- |
+| `tool_timeline` | Tool calls ordered by timestamp |
+| `native_tool_calls` | Native tool calls from transcripts |
+| `transcript_flow` | Conversation flow with message previews |
+| `transcript_tools` | Tool usage with paired calls and results |
+| `transcript_thinking` | Thinking blocks with preview and length |
+| `transcript_agents` | Agent hierarchy and activity metrics |
+| `error_summary` | Errors with truncated tracebacks |
+
+**Common queries:**
+
+```sql
+-- Find all errors
+SELECT * FROM error_summary
+
+-- Slow tool calls
+SELECT * FROM tool_timeline WHERE duration_ms > 1000
+
+-- Conversation flow (last 50 messages)
+SELECT * FROM transcript_flow ORDER BY rowid DESC LIMIT 50
+
+-- Tool usage by frequency
+SELECT tool_name, COUNT(*) as calls FROM tool_calls GROUP BY tool_name
+
+-- Thinking blocks over 1000 chars
+SELECT * FROM transcript_thinking WHERE thinking_length > 1000
+
+-- Sub-agent activity
+SELECT * FROM transcript_agents WHERE transcript_source != 'main'
+
+-- Environment info
+SELECT * FROM env_system
+SELECT * FROM env_git
+```
+
+### wink docs
+
+Access bundled documentation:
+
+```bash
+wink docs --guide       # Print guides (usage guide)
+wink docs --reference   # Print llms.md (API reference)
+wink docs --specs       # Print all spec files concatenated
+wink docs --changelog   # Print CHANGELOG.md
+```
 
 ## Accessing Bundled Documentation
 
@@ -228,9 +320,86 @@ wink docs --reference --specs  # Outputs both, separated by ---
 don't have access to the repository's documentation files. The docs subcommand
 bundles documentation inside the package and exposes it via CLI for easy access.
 
+## Instructing Coding Agents to Use wink query
+
+When working with a coding agent (like Claude Code) to debug WINK agent
+executions, you can instruct it to use `wink query` for systematic analysis.
+This is more effective than manually exploring logs.
+
+### Prompt Instructions for Agents
+
+Include the following guidance in your prompt or system instructions:
+
+> **Debug Bundle Analysis**: When analyzing debug bundles, use `wink query` for
+> SQL-based exploration. Always start with `wink query ./bundle.zip --schema`
+> to discover tables, columns, and pre-built queries.
+
+**Key views to use:**
+
+- `error_summary` - All errors with truncated tracebacks
+- `tool_timeline` - Tool calls ordered by timestamp
+- `transcript_flow` - Conversation flow with message previews
+- `transcript_tools` - Tool usage with paired calls and results
+- `transcript_thinking` - Thinking blocks (for extended thinking)
+- `transcript_agents` - Sub-agent hierarchy and activity
+
+**Investigation queries to provide:**
+
+```sql
+-- What went wrong?
+SELECT * FROM error_summary
+
+-- What did the agent do?
+SELECT * FROM transcript_flow ORDER BY rowid
+
+-- Which tools were slow?
+SELECT * FROM tool_timeline WHERE duration_ms > 1000
+
+-- Failed tool calls
+SELECT tool_name, error_code, params FROM tool_calls WHERE success = 0
+```
+
+**Output formats to mention:**
+
+- Default: JSON (good for parsing)
+- `--table`: ASCII table (good for reading)
+- `--table --no-truncate`: Full values without truncation
+
+### Key Points for Agents
+
+When instructing a coding agent to debug, emphasize:
+
+1. **Schema first**: The `--schema` output includes ready-to-use queries in the
+   `hints.common_queries` section. The agent should start here.
+
+1. **Views over raw tables**: Pre-built views like `transcript_flow` and
+   `tool_timeline` are designed for the most common analysis tasks.
+
+1. **JSON extraction**: Log context and tool params are JSON. Use SQLite's
+   `json_extract()` function for nested data extraction.
+
+1. **Sequence ordering**: Transcript entries have `sequence_number` for
+   ordering. Native tool calls can be queried by sequence range.
+
+1. **Environment context**: When debugging environment-specific issues, query
+   the `env_*` tables (`env_system`, `env_git`, `env_python`, `env_container`).
+
+### Example Agent Workflow
+
+A well-instructed coding agent should follow this pattern:
+
+1. Run `wink query ./bundle.zip --schema` to understand the bundle
+1. Check `SELECT * FROM error_summary` if investigating a failure
+1. Use `transcript_flow` to trace the conversation
+1. Query specific tables based on the schema hints
+1. Use `--table` output for human-readable results when sharing findings
+
+This structured approach ensures thorough analysis while minimizing token usage
+from reading raw log files.
+
 ## Next Steps
 
-- [Query](query.md): SQL-based analysis of debug bundles
+- [Query](query.md): SQL-based analysis of debug bundles (comprehensive guide)
 - [Testing](testing.md): Write tests that catch issues before they hit
   production
 - [Evaluation](evaluation.md): Systematically test agent behavior

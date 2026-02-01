@@ -110,6 +110,38 @@ Example: A slice type `myapp.state:AgentPlan` becomes `slice_agentplan`. These
 tables have columns inferred from the JSON structure, making it easy to query
 typed session state.
 
+## Environment Tables
+
+These tables capture the execution environment at bundle creation time:
+
+| Table | Contents |
+|-------|----------|
+| `env_system` | OS name, kernel version, architecture, CPU count, memory |
+| `env_python` | Python version, implementation, executable, virtualenv status |
+| `env_git` | Repository root, commit SHA, branch, dirty state, remotes, tags |
+| `env_container` | Container runtime, ID, image, cgroup path |
+| `env_vars` | Filtered environment variables (name-value pairs) |
+| `environment` | Flattened key-value view of all environment data |
+
+Example queries:
+
+```sql
+-- System info
+SELECT * FROM env_system
+
+-- Git state at execution time
+SELECT commit_sha, branch, is_dirty FROM env_git
+
+-- Python environment
+SELECT version, is_virtualenv, executable FROM env_python
+
+-- Check if running in container
+SELECT runtime, container_id FROM env_container
+
+-- Specific environment variable
+SELECT value FROM env_vars WHERE name = 'HOME'
+```
+
 ## Views
 
 Pre-built views for common analysis patterns:
@@ -119,6 +151,10 @@ Pre-built views for common analysis patterns:
 | `tool_timeline` | Tool calls ordered by timestamp with extracted commands |
 | `native_tool_calls` | Native tool calls from transcripts (and legacy log aggregator) |
 | `transcript_entries` | TranscriptCollector entries extracted from logs |
+| `transcript_flow` | Conversation flow with message previews |
+| `transcript_tools` | Tool usage analysis with paired calls and results |
+| `transcript_thinking` | Thinking blocks with preview and length |
+| `transcript_agents` | Agent hierarchy and activity metrics |
 | `error_summary` | Errors with truncated tracebacks |
 
 Use views directly in queries:
@@ -128,6 +164,12 @@ SELECT * FROM tool_timeline WHERE duration_ms > 1000
 SELECT * FROM error_summary
 SELECT * FROM native_tool_calls LIMIT 20
 SELECT * FROM transcript_entries LIMIT 20
+
+-- Transcript analysis views
+SELECT * FROM transcript_flow ORDER BY rowid DESC LIMIT 50
+SELECT * FROM transcript_tools WHERE tool_name IS NOT NULL
+SELECT * FROM transcript_thinking WHERE thinking_length > 1000
+SELECT * FROM transcript_agents WHERE transcript_source != 'main'
 ```
 
 ## Common Queries
