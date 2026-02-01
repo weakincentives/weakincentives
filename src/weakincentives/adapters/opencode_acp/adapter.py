@@ -31,11 +31,11 @@ from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.watchdog import Heartbeat
+from ...serde import schema as serde_schema
 from ...types import OPENCODE_ACP_ADAPTER_NAME
 from ..claude_agent_sdk._bridge import create_bridged_tools, create_mcp_server
 from ..claude_agent_sdk._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
-from ..response_parser import build_json_schema_response_format
 from ._async import run_async
 from ._events import is_wink_tool_call, map_tool_call_to_event
 from ._state import OpenCodeACPSessionState
@@ -493,18 +493,11 @@ class OpenCodeACPAdapter[OutputT](ProviderAdapter[OutputT]):
         Returns a tool-like object compatible with create_mcp_server.
         """
 
-        # Build JSON schema
-        schema_format = build_json_schema_response_format(
-            cast(RenderedPrompt[Any], rendered), prompt_name
-        )
+        # Build JSON schema from output type
+        output_type = rendered.output_type
         json_schema: dict[str, Any] = {}
-        if schema_format is not None:
-            json_schema_wrapper = schema_format.get("json_schema")
-            if isinstance(json_schema_wrapper, dict):
-                wrapper_dict = cast(dict[str, Any], json_schema_wrapper)
-                schema_value = wrapper_dict.get("schema")
-                if isinstance(schema_value, dict):
-                    json_schema = cast(dict[str, Any], schema_value)
+        if output_type is not None and output_type is not type(None):
+            json_schema = serde_schema(output_type)
 
         spec = create_structured_output_tool_spec(json_schema)
 
