@@ -1239,6 +1239,199 @@ def test_schema_invalid_extra_value_and_type_errors() -> None:
         schema(object)
 
 
+def test_schema_rejects_object_type_field() -> None:
+    """Schema generation rejects fields with 'object' type for type safety."""
+
+    @dataclass
+    class ObjectFieldSchema:
+        payload: object
+
+    with pytest.raises(TypeError) as exc:
+        schema(ObjectFieldSchema)
+    assert "cannot generate schema for 'object' type" in str(exc.value)
+
+
+def test_schema_rejects_any_type_field() -> None:
+    """Schema generation rejects fields with 'Any' type for type safety."""
+
+    @dataclass
+    class AnyFieldSchema:
+        payload: Any
+
+    with pytest.raises(TypeError) as exc:
+        schema(AnyFieldSchema)
+    assert "cannot generate schema for 'Any' type" in str(exc.value)
+
+
+def test_schema_allows_untyped_object_field() -> None:
+    """Schema generation allows 'object' type with untyped marker."""
+
+    @dataclass
+    class UntypedObjectSchema:
+        payload: Annotated[object, {"untyped": True}]
+
+    schema_dict = schema(UntypedObjectSchema)
+    props = as_dict(schema_dict["properties"])
+    assert props["payload"] == {}
+
+
+def test_schema_allows_untyped_any_field() -> None:
+    """Schema generation allows 'Any' type with untyped marker."""
+
+    @dataclass
+    class UntypedAnySchema:
+        payload: Annotated[Any, {"untyped": True}]
+
+    schema_dict = schema(UntypedAnySchema)
+    props = as_dict(schema_dict["properties"])
+    assert props["payload"] == {}
+
+
+def test_schema_propagates_untyped_to_list_items() -> None:
+    """Schema generation propagates untyped marker to list item types."""
+
+    @dataclass
+    class UntypedListSchema:
+        items: Annotated[list[Any], {"untyped": True}]
+
+    schema_dict = schema(UntypedListSchema)
+    props = as_dict(schema_dict["properties"])
+    assert as_dict(props["items"])["type"] == "array"
+    assert as_dict(props["items"])["items"] == {}
+
+
+def test_schema_propagates_untyped_to_mapping_values() -> None:
+    """Schema generation propagates untyped marker to mapping value types."""
+
+    @dataclass
+    class UntypedMappingSchema:
+        data: Annotated[dict[str, object], {"untyped": True}]
+
+    schema_dict = schema(UntypedMappingSchema)
+    props = as_dict(schema_dict["properties"])
+    assert as_dict(props["data"])["type"] == "object"
+    assert as_dict(props["data"])["additionalProperties"] == {}
+
+
+def test_schema_rejects_untyped_mapping_keys() -> None:
+    """Schema generation rejects mapping with untyped key without marker."""
+
+    @dataclass
+    class UntypedKeySchema:
+        data: dict[Any, str]  # type: ignore[misc]
+
+    with pytest.raises(TypeError, match="cannot generate schema for 'Any' type"):
+        schema(UntypedKeySchema)
+
+
+def test_schema_propagates_untyped_to_mapping_keys() -> None:
+    """Schema generation propagates untyped marker to mapping key types."""
+
+    @dataclass
+    class UntypedKeyMappingSchema:
+        data: Annotated[dict[Any, str], {"untyped": True}]  # type: ignore[misc]
+
+    # Should not raise - untyped marker allows Any in key position
+    schema_dict = schema(UntypedKeyMappingSchema)
+    props = as_dict(schema_dict["properties"])
+    assert as_dict(props["data"])["type"] == "object"
+    # Value type is str, so it gets proper schema
+    assert as_dict(props["data"])["additionalProperties"] == {"type": "string"}
+
+
+def test_parse_untyped_marker_selective_propagation_mapping() -> None:
+    """Untyped marker only propagates to unbound types in mappings."""
+
+    @dataclass
+    class SelectiveMappingModel:
+        # Any keys allowed, but values must be strings
+        data: Annotated[dict[Any, str], {"untyped": True}]  # type: ignore[misc]
+
+    # Valid: Any key type, string values
+    result = parse(SelectiveMappingModel, {"data": {"key1": "value1", 123: "value2"}})
+    assert result.data == {"key1": "value1", 123: "value2"}
+
+    # Invalid: string keys but non-string values should still fail
+    # because str value type is bound and untyped marker doesn't apply to it
+    @dataclass
+    class StrictValuesModel:
+        data: Annotated[dict[str, int], {"untyped": True}]
+
+    # This should work - int is bound but data is valid
+    valid = parse(StrictValuesModel, {"data": {"a": 1}})
+    assert valid.data == {"a": 1}
+
+
+def test_parse_untyped_marker_no_propagation_to_bound_list() -> None:
+    """Untyped marker doesn't propagate to bound types in lists."""
+
+    @dataclass
+    class BoundListModel:
+        items: Annotated[list[str], {"untyped": True}]
+
+    # Should work with strings
+    result = parse(BoundListModel, {"items": ["a", "b", "c"]})
+    assert result.items == ["a", "b", "c"]
+
+
+def test_schema_untyped_marker_no_propagation_to_bound_list() -> None:
+    """Schema untyped marker doesn't propagate to bound list item types."""
+
+    @dataclass
+    class BoundListSchema:
+        items: Annotated[list[str], {"untyped": True}]
+
+    # String type should still produce proper schema
+    schema_dict = schema(BoundListSchema)
+    props = as_dict(schema_dict["properties"])
+    assert as_dict(props["items"])["type"] == "array"
+    assert as_dict(props["items"])["items"] == {"type": "string"}
+
+
+def test_schema_untyped_marker_selective_tuple() -> None:
+    """Schema untyped marker selectively propagates to tuple item types."""
+
+    @dataclass
+    class MixedTupleSchema:
+        data: Annotated[tuple[Any, str, int], {"untyped": True}]  # type: ignore[misc]
+
+    schema_dict = schema(MixedTupleSchema)
+    props = as_dict(schema_dict["properties"])
+    prefix_items = as_dict(props["data"])["prefixItems"]
+    assert isinstance(prefix_items, list)
+    # Any gets empty schema (untyped propagated)
+    assert prefix_items[0] == {}
+    # str and int get proper schemas (untyped not propagated)
+    assert prefix_items[1] == {"type": "string"}
+    assert prefix_items[2] == {"type": "integer"}
+
+
+def test_parse_rejects_untyped_marker_on_bound_type() -> None:
+    """Parse rejects untyped marker applied directly to bound types."""
+
+    @dataclass
+    class InvalidUntypedModel:
+        value: Annotated[str, {"untyped": True}]
+
+    with pytest.raises(
+        TypeError, match="'untyped' marker only applies to unbound types"
+    ):
+        parse(InvalidUntypedModel, {"value": "test"})
+
+
+def test_schema_rejects_untyped_marker_on_bound_type() -> None:
+    """Schema rejects untyped marker applied directly to bound types."""
+
+    @dataclass
+    class InvalidUntypedSchema:
+        value: Annotated[int, {"untyped": True}]
+
+    with pytest.raises(
+        TypeError, match="'untyped' marker only applies to unbound types"
+    ):
+        schema(InvalidUntypedSchema)
+
+
 def test_parse_length_constraints_enforced() -> None:
     with pytest.raises(ValueError) as exc:
         parse(LengthModel, {"token": "a"})
@@ -1353,14 +1546,42 @@ def test_compiled_regex_and_converter_errors() -> None:
     assert "value: boom" in str(exc.value)
 
 
-def test_object_type_and_union_handling() -> None:
+def test_object_type_rejected_in_parse() -> None:
+    """Parsing rejects fields with 'object' type for type safety."""
+
     @dataclass
     class ObjectModel:
         payload: Annotated[object, {"strip": True}]
 
-    parsed = parse(ObjectModel, {"payload": "  data  "})
+    with pytest.raises(TypeError) as exc:
+        parse(ObjectModel, {"payload": "  data  "})
+    assert "payload: cannot parse field with 'object' type" in str(exc.value)
+
+
+def test_object_type_allowed_with_untyped_marker() -> None:
+    """Parsing allows 'object' type with explicit untyped marker."""
+
+    @dataclass
+    class UntypedObjectModel:
+        payload: Annotated[object, {"untyped": True, "strip": True}]
+
+    parsed = parse(UntypedObjectModel, {"payload": "  data  "})
     assert parsed.payload == "data"
 
+
+def test_any_type_rejected_in_parse() -> None:
+    """Parsing rejects fields with 'Any' type for type safety."""
+
+    @dataclass
+    class AnyModel:
+        payload: Any
+
+    with pytest.raises(TypeError) as exc:
+        parse(AnyModel, {"payload": "data"})
+    assert "payload: cannot parse field with 'Any' type" in str(exc.value)
+
+
+def test_union_handling() -> None:
     @dataclass
     class OptionalText:
         token: str | None
@@ -1679,14 +1900,12 @@ def test_schema_additional_types() -> None:
     assert props["anything"] == {}
 
     @dataclass
-    class ObjectSchema:
-        payload: object
+    class NoneFieldSchema:
         none_field: None = None
 
-    object_schema = schema(ObjectSchema)
-    object_props = as_dict(object_schema["properties"])
-    assert object_props["payload"] == {}
-    assert as_dict(object_props["none_field"]) == {"type": "null"}
+    none_schema = schema(NoneFieldSchema)
+    none_props = as_dict(none_schema["properties"])
+    assert as_dict(none_props["none_field"]) == {"type": "null"}
 
     class BoolEnum(Enum):
         YES = True
@@ -2113,3 +2332,163 @@ def test_resolve_generic_string_type_unresolvable_subscript() -> None:
     # Unknown[str] - Unknown is not in any namespace, so base is object
     result = _resolve_generic_string_type("Unknown[str]", localns, module_ns)
     assert result is object
+
+
+def test_parse_rejects_unparameterized_dict() -> None:
+    """Parse rejects bare dict without type parameters."""
+
+    @dataclass
+    class BareDictModel:
+        data: dict  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        parse(BareDictModel, {"data": {"key": "value"}})
+    assert "cannot parse unparameterized 'dict'" in str(exc.value)
+    assert "use concrete type parameters" in str(exc.value)
+
+
+def test_parse_rejects_unparameterized_list() -> None:
+    """Parse rejects bare list without type parameters."""
+
+    @dataclass
+    class BareListModel:
+        items: list  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        parse(BareListModel, {"items": [1, 2, 3]})
+    assert "cannot parse unparameterized 'list'" in str(exc.value)
+    assert "use concrete type parameters" in str(exc.value)
+
+
+def test_parse_accepts_unparameterized_dict_with_untyped_marker() -> None:
+    """Parse accepts bare dict when marked as untyped."""
+
+    @dataclass
+    class UntypedBareDictModel:
+        data: Annotated[dict, {"untyped": True}]  # type: ignore[type-arg]
+
+    result = parse(UntypedBareDictModel, {"data": {"key": "value", "num": 123}})
+    assert result.data == {"key": "value", "num": 123}
+
+
+def test_parse_accepts_unparameterized_list_with_untyped_marker() -> None:
+    """Parse accepts bare list when marked as untyped."""
+
+    @dataclass
+    class UntypedBareListModel:
+        items: Annotated[list, {"untyped": True}]  # type: ignore[type-arg]
+
+    result = parse(UntypedBareListModel, {"items": [1, "two", 3.0]})
+    assert result.items == [1, "two", 3.0]
+
+
+def test_schema_rejects_unparameterized_dict() -> None:
+    """Schema rejects bare dict without type parameters."""
+
+    @dataclass
+    class BareDictSchema:
+        data: dict  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        schema(BareDictSchema)
+    assert "cannot generate schema for unparameterized 'dict'" in str(exc.value)
+
+
+def test_schema_rejects_unparameterized_list() -> None:
+    """Schema rejects bare list without type parameters."""
+
+    @dataclass
+    class BareListSchema:
+        items: list  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        schema(BareListSchema)
+    assert "cannot generate schema for unparameterized 'list'" in str(exc.value)
+
+
+def test_schema_accepts_unparameterized_dict_with_untyped_marker() -> None:
+    """Schema accepts bare dict when marked as untyped."""
+
+    @dataclass
+    class UntypedBareDictSchema:
+        data: Annotated[dict, {"untyped": True}]  # type: ignore[type-arg]
+
+    schema_dict = schema(UntypedBareDictSchema)
+    props = as_dict(schema_dict["properties"])
+    # Should produce permissive object schema
+    assert props["data"]["type"] == "object"
+
+
+def test_schema_accepts_unparameterized_list_with_untyped_marker() -> None:
+    """Schema accepts bare list when marked as untyped."""
+
+    @dataclass
+    class UntypedBareListSchema:
+        items: Annotated[list, {"untyped": True}]  # type: ignore[type-arg]
+
+    schema_dict = schema(UntypedBareListSchema)
+    props = as_dict(schema_dict["properties"])
+    # Should produce permissive array schema
+    assert props["items"]["type"] == "array"
+
+
+def test_parse_untyped_marker_propagates_to_union_branches() -> None:
+    """Untyped marker propagates to union branches containing unbound types."""
+
+    @dataclass
+    class UnionWithAnyModel:
+        # Any | None with untyped marker should work
+        value: Annotated[Any | None, {"untyped": True}]
+
+    # None value should work
+    result = parse(UnionWithAnyModel, {"value": None})
+    assert result.value is None
+
+    # Non-None value should work because untyped marker propagates to Any branch
+    result = parse(UnionWithAnyModel, {"value": "test"})
+    assert result.value == "test"
+
+    result = parse(UnionWithAnyModel, {"value": 123})
+    assert result.value == 123
+
+
+def test_parse_union_without_untyped_marker_rejects_any_branch() -> None:
+    """Union with Any branch without untyped marker should fail on non-None."""
+
+    @dataclass
+    class UnionWithAnyNoMarker:
+        value: Any | None  # type: ignore[misc]
+
+    # None value still works
+    result = parse(UnionWithAnyNoMarker, {"value": None})
+    assert result.value is None
+
+    # Non-None value should fail because Any branch lacks untyped marker
+    with pytest.raises(TypeError) as exc:
+        parse(UnionWithAnyNoMarker, {"value": "test"})
+    assert "cannot parse field with 'Any' type" in str(exc.value)
+
+
+def test_schema_untyped_marker_propagates_to_union_branches() -> None:
+    """Schema untyped marker propagates to union branches containing unbound types."""
+
+    @dataclass
+    class UnionWithAnySchema:
+        value: Annotated[Any | None, {"untyped": True}]
+
+    # Should not raise - untyped marker propagates to Any branch
+    schema_dict = schema(UnionWithAnySchema)
+    props = as_dict(schema_dict["properties"])
+    assert "value" in props
+
+
+def test_schema_union_without_untyped_marker_rejects_any_branch() -> None:
+    """Schema with Any in union without untyped marker should fail."""
+
+    @dataclass
+    class UnionWithAnyNoMarkerSchema:
+        value: Any | None  # type: ignore[misc]
+
+    with pytest.raises(TypeError) as exc:
+        schema(UnionWithAnyNoMarkerSchema)
+    assert "cannot generate schema for 'Any'" in str(exc.value)

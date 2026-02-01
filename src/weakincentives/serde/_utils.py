@@ -67,6 +67,36 @@ def _ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
     return items
 
 
+def _is_typevar(typ: object) -> bool:
+    """Check if a type is a TypeVar (unresolved generic parameter)."""
+    from typing import TypeVar
+
+    return isinstance(typ, TypeVar)
+
+
+def _is_unbound_type(typ: object) -> bool:
+    """Check if a type is unbound (Any, object, or TypeVar).
+
+    Unbound types require the {"untyped": True} marker to be valid for
+    parsing and schema generation.
+    """
+    return typ is _AnyType or typ is object or _is_typevar(typ)
+
+
+def _build_item_meta(
+    merged_meta: Mapping[str, object], item_type: object
+) -> dict[str, object] | None:
+    """Build metadata to propagate to a collection item.
+
+    Only propagates the untyped marker if the item_type is actually unbound
+    (Any, object, or TypeVar). This ensures that `dict[Any, str]` with
+    {"untyped": True} allows untyped keys but still validates string values.
+    """
+    if merged_meta.get("untyped", False) is True and _is_unbound_type(item_type):
+        return {"untyped": True}
+    return None
+
+
 def _get_or_create_extras_descriptor(cls: type[object]) -> _ExtrasDescriptor:
     """Get or create an extras descriptor for a slotted class."""
     descriptor = _SLOTTED_EXTRAS.get(cls)
@@ -349,6 +379,9 @@ __all__ = [  # noqa: RUF022
     "_SLOTTED_EXTRAS",
     "_UNION_TYPE",
     "_apply_constraints",
+    "_build_item_meta",
+    "_is_typevar",
+    "_is_unbound_type",
     "_merge_annotated_meta",
     "_ordered_values",
     "_resolve_type_identifier",

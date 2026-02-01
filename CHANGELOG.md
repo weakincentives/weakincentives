@@ -2,6 +2,41 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Breaking Changes
+
+#### Strict Serde Validation for Unbound Types
+
+**Serde now rejects unbound types (`Any`, `object`, unresolved `TypeVar`) by
+default.** This improves type safety by catching missing type annotations during
+parsing and schema generation.
+
+- `parse()` raises `TypeError` for fields typed as `Any` or `object`
+- `schema()` raises `TypeError` for fields typed as `Any` or `object`
+- Unresolved `TypeVar` fields now raise clear error messages
+
+**Migration:**
+- Add concrete type annotations to replace `Any` or `object` types
+- For legitimate untyped fields, use the escape hatch:
+  `Annotated[Any, {"untyped": True}]` or `Annotated[object, {"untyped": True}]`
+
+#### Experiment.flags Type Change
+
+**Experiment.flags now uses `Mapping[str, str]` instead of `Mapping[str, object]`.**
+All flag values must be strings. This change improves type safety and
+serialization consistency.
+
+- Changed `flags` type from `Mapping[str, object]` to `Mapping[str, str]`
+- Changed `with_flag(key, value)` to accept `str` value instead of `object`
+- Changed `get_flag(key, default?)` to return `str | None` instead of `object`
+
+**Migration:**
+- Convert flag values to strings: `{"verbose": True}` → `{"verbose": "true"}`
+- Parse flags as needed: `int(exp.get_flag("retries", "3"))`
+
+---
+
 ## v0.24.0 — 2026-01-30
 
 *Commits reviewed: 2026-01-25 (e5a00a4) through 2026-01-29 (a1c5996)*
@@ -363,6 +398,8 @@ All 26 public `__init__.py` modules now include NumPy/SciPy-style docstrings
 #### README
 
 Added DeepWiki badge linking to external documentation.
+
+---
 
 ## v0.23.0 - 2026-01-25
 

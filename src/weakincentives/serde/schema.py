@@ -33,7 +33,13 @@ from uuid import UUID
 
 from ..types import JSONValue
 from ._scope import SerdeScope, is_hidden_in_scope
-from ._utils import _UNION_TYPE, _AnyType, _merge_annotated_meta, _ordered_values
+from ._utils import (
+    _UNION_TYPE,
+    _AnyType,
+    _build_item_meta,
+    _merge_annotated_meta,
+    _ordered_values,
+)
 
 NULL_TYPE = type(None)
 NULL_JSON_TYPE = "null"
@@ -99,6 +105,7 @@ def _resolve_schema(
     base_type: object,
     origin: object,
     alias_generator: Callable[[str], str] | None,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue] | None:
     for builder in (
         _schema_for_dataclass,
@@ -108,7 +115,7 @@ def _resolve_schema(
         _schema_for_enum,
         _schema_for_primitive,
     ):
-        schema_data = builder(base_type, alias_generator, origin)
+        schema_data = builder(base_type, alias_generator, origin, merged_meta)
         if schema_data is not None:
             return schema_data
     return None
@@ -122,17 +129,37 @@ def _schema_for_type(
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
     origin = get_origin(base_type)
 
-    schema_data = _resolve_schema(base_type, origin, alias_generator) or {}
+    schema_data = _resolve_schema(base_type, origin, alias_generator, merged_meta) or {}
 
     schema_data.update(_schema_constraints(merged_meta))
     return schema_data
 
 
 def _schema_for_dataclass(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    origin: object,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue] | None:
-    if base_type is object or base_type is _AnyType:
-        return {}
+    # Check for untyped field marker - allows explicit opt-in for Any/object types
+    is_untyped = merged_meta.get("untyped", False) is True
+
+    if base_type is _AnyType:
+        if is_untyped:
+            return {}
+        msg = (
+            "cannot generate schema for 'Any' type - use a concrete type annotation "
+            "or mark with Annotated[Any, {'untyped': True}]"
+        )
+        raise TypeError(msg)
+    if base_type is object:
+        if is_untyped:
+            return {}
+        msg = (
+            "cannot generate schema for 'object' type - use a concrete type annotation "
+            "or mark with Annotated[object, {'untyped': True}]"
+        )
+        raise TypeError(msg)
     if not dataclasses.is_dataclass(base_type):
         return None
     dataclass_type = base_type if isinstance(base_type, type) else type(base_type)
@@ -140,7 +167,10 @@ def _schema_for_dataclass(
 
 
 def _schema_for_literal(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    origin: object,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue] | None:
     if base_type is NULL_TYPE:
         return dict(NULL_TYPE_SCHEMA)
@@ -171,7 +201,9 @@ def _is_object_schema(schema_data: Mapping[str, JSONValue]) -> bool:
 
 
 def _collect_union_subschemas(
-    base_type: object, alias_generator: Callable[[str], str] | None
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    merged_meta: Mapping[str, object],
 ) -> tuple[bool, list[dict[str, JSONValue]], Mapping[str, JSONValue] | None]:
     includes_null = False
     subschemas: list[dict[str, JSONValue]] = []
@@ -180,7 +212,9 @@ def _collect_union_subschemas(
         if arg is NULL_TYPE:
             includes_null = True
             continue
-        subschema = _schema_for_type(arg, None, alias_generator)
+        # Propagate untyped marker to union branch if the branch type is unbound
+        branch_meta = _build_item_meta(merged_meta, arg)
+        subschema = _schema_for_type(arg, branch_meta, alias_generator)
         subschemas.append(subschema)
         if base_schema_ref is None and _is_object_schema(subschema):
             base_schema_ref = subschema
@@ -227,13 +261,16 @@ def _apply_union_metadata(
 
 
 def _schema_for_union(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    origin: object,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue] | None:
     if origin is not _UNION_TYPE:
         return None
 
     includes_null, subschemas, base_schema_ref = _collect_union_subschemas(
-        base_type, alias_generator
+        base_type, alias_generator, merged_meta
     )
     schema_data = _merge_union_schema(subschemas, base_schema_ref, includes_null)
     _apply_union_metadata(schema_data, subschemas, base_schema_ref)
@@ -246,53 +283,80 @@ def _collection_item_type(base_type: object, index: int = 0) -> object:
 
 
 def _list_schema(
-    base_type: object, alias_generator: Callable[[str], str] | None
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue]:
     item_type = _collection_item_type(base_type)
+    item_meta = _build_item_meta(merged_meta, item_type)
     return {
         "type": "array",
-        "items": _schema_for_type(item_type, None, alias_generator),
+        "items": _schema_for_type(item_type, item_meta, alias_generator),
     }
 
 
 def _set_schema(
-    base_type: object, alias_generator: Callable[[str], str] | None
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue]:
-    schema_data = _list_schema(base_type, alias_generator)
+    schema_data = _list_schema(base_type, alias_generator, merged_meta)
     schema_data["uniqueItems"] = True
     return schema_data
 
 
 def _tuple_schema(
-    base_type: object, alias_generator: Callable[[str], str] | None
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue]:
     args = get_args(base_type)
     if args and args[-1] is ELLIPSIS_SENTINEL:
+        item_type = args[0]
+        item_meta = _build_item_meta(merged_meta, item_type)
         return {
             "type": "array",
-            "items": _schema_for_type(args[0], None, alias_generator),
+            "items": _schema_for_type(item_type, item_meta, alias_generator),
         }
     return {
         "type": "array",
-        "prefixItems": [_schema_for_type(arg, None, alias_generator) for arg in args],
+        "prefixItems": [
+            _schema_for_type(arg, _build_item_meta(merged_meta, arg), alias_generator)
+            for arg in args
+        ],
         "minItems": len(args),
         "maxItems": len(args),
     }
 
 
 def _mapping_schema(
-    base_type: object, alias_generator: Callable[[str], str] | None
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue]:
+    key_type = _collection_item_type(base_type, index=0)
     value_type = _collection_item_type(base_type, index=1)
+    # Build separate meta for keys and values based on whether each type is unbound
+    key_meta = _build_item_meta(merged_meta, key_type)
+    value_meta = _build_item_meta(merged_meta, value_type)
+    # Validate key type for consistency with parse behavior.
+    # JSON Schema only supports string keys, so we don't use the result,
+    # but we validate to ensure the type annotation is valid.
+    _ = _schema_for_type(key_type, key_meta, alias_generator)
     return {
         "type": "object",
-        "additionalProperties": _schema_for_type(value_type, None, alias_generator),
+        "additionalProperties": _schema_for_type(
+            value_type, value_meta, alias_generator
+        ),
     }
 
 
-_COLLECTION_BUILDERS: Mapping[
-    object, Callable[[object, Callable[[str], str] | None], dict[str, JSONValue]]
-] = {
+_CollectionBuilder = Callable[
+    [object, Callable[[str], str] | None, Mapping[str, object]],
+    dict[str, JSONValue],
+]
+
+_COLLECTION_BUILDERS: Mapping[object, _CollectionBuilder] = {
     list: _list_schema,
     Sequence: _list_schema,
     set: _set_schema,
@@ -306,15 +370,37 @@ def _schema_for_collection(
     base_type: object,
     alias_generator: Callable[[str], str] | None,
     origin: object,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue] | None:
+    # Check for builder via origin (parameterized case) or base_type (bare type case)
     builder = _COLLECTION_BUILDERS.get(origin)
+    effective_type = origin
     if builder is None:
-        return None
-    return builder(base_type, alias_generator)
+        # Try base_type directly for bare collection types (list, dict, etc.)
+        builder = _COLLECTION_BUILDERS.get(base_type)
+        effective_type = base_type
+        if builder is None:
+            return None
+    # Bare collection types without type parameters require untyped marker
+    args = get_args(base_type)
+    if not args:
+        is_untyped = merged_meta.get("untyped", False) is True
+        if not is_untyped:
+            type_name = getattr(effective_type, "__name__", str(effective_type))
+            msg = (
+                f"cannot generate schema for unparameterized '{type_name}' - "
+                f"use concrete type parameters like list[str] or mark with "
+                f"Annotated[list, {{'untyped': True}}]"
+            )
+            raise TypeError(msg)
+    return builder(base_type, alias_generator, merged_meta)
 
 
 def _schema_for_enum(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    origin: object,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue] | None:
     if not isinstance(base_type, type) or not issubclass(base_type, Enum):
         return None
@@ -338,10 +424,21 @@ def _schema_for_enum(
 
 
 def _schema_for_primitive(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+    base_type: object,
+    alias_generator: Callable[[str], str] | None,
+    origin: object,
+    merged_meta: Mapping[str, object],
 ) -> dict[str, JSONValue] | None:
     for primitive, schema_data in PRIMITIVE_FORMATS.items():
         if base_type is primitive:
+            # Reject untyped marker on primitive types - only valid for unbound types
+            if merged_meta.get("untyped", False) is True:
+                type_name = getattr(base_type, "__name__", str(base_type))
+                msg = (
+                    f"'untyped' marker only applies to unbound types "
+                    f"(Any, object), not '{type_name}'"
+                )
+                raise TypeError(msg)
             return dict(schema_data)
     return None
 
