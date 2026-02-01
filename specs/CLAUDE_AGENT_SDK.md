@@ -62,7 +62,9 @@ At `src/weakincentives/adapters/claude_agent_sdk/config.py`:
 | `api_key` | `str \| None` | `None` | Explicit API key (disables Bedrock) |
 | `aws_config_path` | `Path \| str \| None` | `None` | AWS config path for Docker |
 | `include_host_env` | `bool` | `False` | Copy non-sensitive vars |
-| `skills` | `SkillConfig \| None` | `None` | Skills to mount |
+
+**Note:** Skills are attached to prompt sections, not IsolationConfig.
+See `specs/SKILLS.md` for skill attachment.
 
 **Authentication modes:**
 
@@ -133,6 +135,15 @@ thread-safe mapping of `(tool_name, params_hash)` to `tool_use_id` queues:
 - Same tool with identical params uses a bounded FIFO `deque` per key
 
 At `src/weakincentives/adapters/_shared/_bridge.py`: `MCPToolExecutionState`.
+
+## Skill Mounting
+
+Skills attached to sections are collected during prompt rendering and
+automatically mounted to `$HOME/.claude/skills/` in the ephemeral home.
+Skills follow the same visibility rules as tools—sections with `SUMMARY`
+visibility do not contribute their skills until expanded.
+
+See `specs/SKILLS.md` for skill attachment and format details.
 
 ## Events
 
