@@ -42,6 +42,7 @@ from .tool import Tool
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..runtime.session.protocols import SessionProtocol
+    from ..skills import SkillMount
     from .overrides import PromptDescriptor, ToolOverride
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "prompt"})
@@ -61,6 +62,7 @@ class RenderedPrompt[OutputT_co]:
     _tools: tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...] = field(
         default_factory=tuple
     )
+    _skills: tuple[SkillMount, ...] = field(default_factory=tuple)
     _tool_param_descriptions: Mapping[str, Mapping[str, str]] = field(
         default=_EMPTY_TOOL_PARAM_DESCRIPTIONS
     )
@@ -74,6 +76,12 @@ class RenderedPrompt[OutputT_co]:
         """Tools contributed by enabled sections in traversal order."""
 
         return self._tools
+
+    @property
+    def skills(self) -> tuple[SkillMount, ...]:
+        """Skills contributed by enabled sections in traversal order."""
+
+        return self._skills
 
     @property
     def tool_param_descriptions(
@@ -181,6 +189,7 @@ class PromptRenderer[OutputT]:
         )
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
+        collected_skills: list[SkillMount] = []
         override_lookup = dict(overrides or {})
         tool_override_lookup = dict(tool_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}
@@ -235,7 +244,7 @@ class PromptRenderer[OutputT]:
                 )
                 rendered += suffix
 
-            # Don't collect tools when rendering with SUMMARY visibility
+            # Don't collect tools/skills when rendering with SUMMARY visibility
             if effective_visibility != SectionVisibility.SUMMARY:
                 self._collect_section_tools(
                     node.section,
@@ -243,6 +252,7 @@ class PromptRenderer[OutputT]:
                     collected_tools,
                     field_description_patches,
                 )
+                self._collect_section_skills(node.section, collected_skills)
 
             if rendered:
                 rendered_sections.append(rendered)
@@ -293,6 +303,7 @@ class PromptRenderer[OutputT]:
                 "descriptor": str(descriptor) if descriptor is not None else None,
                 "section_count": len(rendered_sections),
                 "tool_count": len(collected_tools),
+                "skill_count": len(collected_skills),
                 "text_length": len(text),
                 "has_structured_output": self._structured_output is not None,
             },
@@ -303,6 +314,7 @@ class PromptRenderer[OutputT]:
             structured_output=self._structured_output,
             descriptor=descriptor,
             _tools=tuple(collected_tools),
+            _skills=tuple(collected_skills),
             _tool_param_descriptions=_freeze_tool_param_descriptions(
                 field_description_patches
             ),
@@ -353,6 +365,18 @@ class PromptRenderer[OutputT]:
                         override.param_descriptions
                     )
             collected_tools.append(patched_tool)
+
+    def _collect_section_skills(
+        self,
+        section: Section[SupportsDataclass],
+        collected_skills: list[SkillMount],
+    ) -> None:
+        """Collect skills from a section."""
+        section_skills = section.skills()
+        if not section_skills:
+            return
+
+        collected_skills.extend(section_skills)
 
     def _iter_enabled_sections(
         self,

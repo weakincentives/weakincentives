@@ -139,8 +139,7 @@ Skills
 ~~~~~~
 
 - ``Skill``: Core skill representation
-- ``SkillConfig``: Collection of skills to install
-- ``SkillMount``: Configuration for mounting a skill at a path
+- ``SkillMount``: Configuration for mounting a skill to a section
 - ``SkillError``, ``SkillValidationError``, ``SkillNotFoundError``,
   ``SkillMountError``: Skill-related exceptions
 
@@ -264,7 +263,6 @@ from .prompt import (
 from .runtime import StructuredLogger, configure_logging, get_logger
 from .skills import (
     Skill,
-    SkillConfig,
     SkillError,
     SkillMount,
     SkillMountError,
@@ -289,7 +287,6 @@ __all__ = [
     "Prompt",
     "PromptResponse",
     "Skill",
-    "SkillConfig",
     "SkillError",
     "SkillMount",
     "SkillMountError",

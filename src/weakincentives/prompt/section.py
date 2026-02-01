@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 if TYPE_CHECKING:
     from ..resources import ResourceRegistry
     from ..runtime.session.protocols import SessionProtocol
+    from ..skills import SkillMount
     from .policy import ToolPolicy
     from .tool import Tool
 
@@ -63,6 +64,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         children: Sequence[Section[SupportsDataclass]] | None = None,
         enabled: EnabledPredicate | None = None,
         tools: Sequence[object] | None = None,
+        skills: Sequence[object] | None = None,
         policies: Sequence[ToolPolicy] | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
@@ -99,6 +101,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             enabled, params_type
         )
         self._tools = self._normalize_tools(tools)
+        self._skills = self._normalize_skills(skills)
         self._policies = self._normalize_policies(policies)
         self._visibility: NormalizedVisibilitySelector = normalize_visibility_selector(
             visibility, params_type
@@ -278,6 +281,11 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
         return self._tools
 
+    def skills(self) -> tuple[SkillMount, ...]:
+        """Return the skills exposed by this section."""
+
+        return self._skills
+
     def policies(self) -> tuple[ToolPolicy, ...]:
         """Return the policies declared by this section."""
 
@@ -392,6 +400,22 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             normalized.append(
                 cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
             )
+        return tuple(normalized)
+
+    @staticmethod
+    def _normalize_skills(
+        skills: Sequence[object] | None,
+    ) -> tuple[SkillMount, ...]:
+        if not skills:
+            return ()
+
+        from ..skills import SkillMount as SkillMountType
+
+        normalized: list[SkillMount] = []
+        for skill in skills:
+            if not isinstance(skill, SkillMountType):
+                raise TypeError("Section skills must be SkillMount instances.")
+            normalized.append(skill)
         return tuple(normalized)
 
     @staticmethod

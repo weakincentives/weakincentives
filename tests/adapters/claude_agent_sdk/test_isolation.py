@@ -43,7 +43,6 @@ from weakincentives.adapters.claude_agent_sdk.isolation import (
     to_bedrock_model_id,
 )
 from weakincentives.skills import (
-    SkillConfig,
     SkillMount,
     SkillMountError,
     SkillNotFoundError,
@@ -811,37 +810,12 @@ class TestSkillMount:
         mount = SkillMount(source=source)
         assert mount.source == source
         assert mount.name is None
-        assert mount.enabled is True
 
     def test_with_name(self, tmp_path: Path) -> None:
         source = tmp_path / "my-skill"
         source.mkdir()
         mount = SkillMount(source=source, name="custom-name")
         assert mount.name == "custom-name"
-
-    def test_disabled(self, tmp_path: Path) -> None:
-        source = tmp_path / "my-skill"
-        source.mkdir()
-        mount = SkillMount(source=source, enabled=False)
-        assert mount.enabled is False
-
-
-class TestSkillConfig:
-    def test_defaults(self) -> None:
-        config = SkillConfig()
-        assert config.skills == ()
-        assert config.validate_on_mount is True
-
-    def test_with_skills(self, tmp_path: Path) -> None:
-        source = tmp_path / "my-skill"
-        source.mkdir()
-        mount = SkillMount(source=source)
-        config = SkillConfig(skills=(mount,))
-        assert config.skills == (mount,)
-
-    def test_validation_disabled(self) -> None:
-        config = SkillConfig(validate_on_mount=False)
-        assert config.validate_on_mount is False
 
 
 class TestResolveSkillName:
@@ -1061,7 +1035,9 @@ class TestCopySkill:
                 _copy_skill(source, dest)
 
 
-class TestEphemeralHomeSkillMounting:
+class TestEphemeralHomeMountSkills:
+    """Tests for EphemeralHome.mount_skills() method."""
+
     def test_mounts_directory_skill(self, tmp_path: Path) -> None:
         skill_dir = tmp_path / "my-skill"
         skill_dir.mkdir()
@@ -1074,10 +1050,9 @@ class TestEphemeralHomeSkillMounting:
             "# My Skill\n"
         )
 
-        config = IsolationConfig(
-            skills=SkillConfig(skills=(SkillMount(source=skill_dir),))
-        )
+        config = IsolationConfig()
         with EphemeralHome(config) as home:
+            home.mount_skills((SkillMount(source=skill_dir),))
             assert home.skills_dir.is_dir()
             skill_dest = home.skills_dir / "my-skill"
             assert skill_dest.is_dir()
@@ -1095,10 +1070,9 @@ class TestEphemeralHomeSkillMounting:
             "# File Skill\n"
         )
 
-        config = IsolationConfig(
-            skills=SkillConfig(skills=(SkillMount(source=skill_file),))
-        )
+        config = IsolationConfig()
         with EphemeralHome(config) as home:
+            home.mount_skills((SkillMount(source=skill_file),))
             skill_dest = home.skills_dir / "my-skill"
             assert skill_dest.is_dir()
             content = (skill_dest / "SKILL.md").read_text()
@@ -1116,32 +1090,11 @@ class TestEphemeralHomeSkillMounting:
             "# Custom Named\n"
         )
 
-        config = IsolationConfig(
-            skills=SkillConfig(
-                skills=(SkillMount(source=skill_dir, name="custom-name"),)
-            )
-        )
+        config = IsolationConfig()
         with EphemeralHome(config) as home:
+            home.mount_skills((SkillMount(source=skill_dir, name="custom-name"),))
             assert (home.skills_dir / "custom-name").is_dir()
             assert not (home.skills_dir / "original-name").exists()
-
-    def test_skips_disabled_skills(self, tmp_path: Path) -> None:
-        skill_dir = tmp_path / "disabled-skill"
-        skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            "---\n"
-            "name: disabled-skill\n"
-            "description: A disabled test skill\n"
-            "---\n"
-            "\n"
-            "# Disabled\n"
-        )
-
-        config = IsolationConfig(
-            skills=SkillConfig(skills=(SkillMount(source=skill_dir, enabled=False),))
-        )
-        with EphemeralHome(config) as home:
-            assert not (home.skills_dir / "disabled-skill").exists()
 
     def test_mounts_multiple_skills(self, tmp_path: Path) -> None:
         # Create two skills
@@ -1157,15 +1110,14 @@ class TestEphemeralHomeSkillMounting:
             "---\nname: skill-two\ndescription: Second test skill\n---\n\n# Skill Two\n"
         )
 
-        config = IsolationConfig(
-            skills=SkillConfig(
-                skills=(
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            home.mount_skills(
+                (
                     SkillMount(source=skill1),
                     SkillMount(source=skill2),
                 )
             )
-        )
-        with EphemeralHome(config) as home:
             assert (home.skills_dir / "skill-one").is_dir()
             assert (home.skills_dir / "skill-two").is_dir()
 
@@ -1182,38 +1134,32 @@ class TestEphemeralHomeSkillMounting:
             "---\nname: skill-b\ndescription: Second skill\n---\n\n# Skill B\n"
         )
 
-        config = IsolationConfig(
-            skills=SkillConfig(
-                skills=(
-                    SkillMount(source=skill1, name="same-name"),
-                    SkillMount(source=skill2, name="same-name"),
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            with pytest.raises(SkillMountError, match="Duplicate skill name"):
+                home.mount_skills(
+                    (
+                        SkillMount(source=skill1, name="same-name"),
+                        SkillMount(source=skill2, name="same-name"),
+                    )
                 )
-            )
-        )
-        with pytest.raises(SkillMountError, match="Duplicate skill name"):
-            EphemeralHome(config)
 
     def test_raises_on_missing_skill_source(self, tmp_path: Path) -> None:
         nonexistent = tmp_path / "does-not-exist"
-        config = IsolationConfig(
-            skills=SkillConfig(skills=(SkillMount(source=nonexistent),))
-        )
-        with pytest.raises(SkillNotFoundError, match="Skill not found"):
-            EphemeralHome(config)
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            with pytest.raises(SkillNotFoundError, match="Skill not found"):
+                home.mount_skills((SkillMount(source=nonexistent),))
 
     def test_validates_skill_when_enabled(self, tmp_path: Path) -> None:
         # Directory without SKILL.md
         invalid_skill = tmp_path / "invalid-skill"
         invalid_skill.mkdir()
 
-        config = IsolationConfig(
-            skills=SkillConfig(
-                skills=(SkillMount(source=invalid_skill),),
-                validate_on_mount=True,
-            )
-        )
-        with pytest.raises(SkillValidationError, match=r"missing SKILL\.md"):
-            EphemeralHome(config)
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            with pytest.raises(SkillValidationError, match=r"missing SKILL\.md"):
+                home.mount_skills((SkillMount(source=invalid_skill),), validate=True)
 
     def test_skips_validation_when_disabled(self, tmp_path: Path) -> None:
         # Directory without SKILL.md (would fail validation)
@@ -1222,20 +1168,23 @@ class TestEphemeralHomeSkillMounting:
         # Create some content to copy
         (invalid_skill / "README.md").write_text("# Not a skill")
 
-        config = IsolationConfig(
-            skills=SkillConfig(
-                skills=(SkillMount(source=invalid_skill),),
-                validate_on_mount=False,
-            )
-        )
+        config = IsolationConfig()
         # Should not raise because validation is disabled
         with EphemeralHome(config) as home:
+            home.mount_skills((SkillMount(source=invalid_skill),), validate=False)
             assert (home.skills_dir / "invalid-skill").is_dir()
 
-    def test_no_skills_directory_when_no_skills_configured(self) -> None:
+    def test_no_skills_directory_when_no_skills_mounted(self) -> None:
         config = IsolationConfig()
         with EphemeralHome(config) as home:
             # skills_dir property should return path but dir shouldn't exist
+            assert home.skills_dir == home.claude_dir / "skills"
+            assert not home.skills_dir.exists()
+
+    def test_empty_skills_tuple_does_nothing(self) -> None:
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            home.mount_skills(())  # Empty tuple
             assert home.skills_dir == home.claude_dir / "skills"
             assert not home.skills_dir.exists()
 
@@ -1246,29 +1195,11 @@ class TestEphemeralHomeSkillMounting:
             "---\nname: test-skill\ndescription: A test skill\n---\n\n# Test"
         )
 
-        config = IsolationConfig(
-            skills=SkillConfig(skills=(SkillMount(source=skill_dir),))
-        )
+        config = IsolationConfig()
         with EphemeralHome(config) as home:
+            home.mount_skills((SkillMount(source=skill_dir),))
             assert home.skills_dir == home.claude_dir / "skills"
             assert home.skills_dir.is_dir()
-
-
-class TestIsolationConfigWithSkills:
-    def test_isolation_config_accepts_skills(self, tmp_path: Path) -> None:
-        source = tmp_path / "skill"
-        source.mkdir()
-        (source / "SKILL.md").write_text(
-            "---\nname: skill\ndescription: A test skill\n---\n\n# Test"
-        )
-
-        skills = SkillConfig(skills=(SkillMount(source=source),))
-        config = IsolationConfig(skills=skills)
-        assert config.skills is skills
-
-    def test_isolation_config_skills_default_none(self) -> None:
-        config = IsolationConfig()
-        assert config.skills is None
 
 
 class TestIsolationConfigAwsConfigPath:

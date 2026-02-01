@@ -31,7 +31,6 @@ __all__ = [
     "MAX_SKILL_FILE_BYTES",
     "MAX_SKILL_TOTAL_BYTES",
     "Skill",
-    "SkillConfig",
     "SkillMount",
 ]
 
@@ -93,8 +92,12 @@ class SkillMount:
     """Configuration for mounting a skill into an agent environment.
 
     A skill mount specifies how to copy a skill from the host filesystem
-    into an agent's accessible workspace. This enables declarative skill
-    composition without modifying prompts or requiring agent internals.
+    into an agent's accessible workspace. Skills are attached to prompt
+    sections and follow the same visibility rules as tools.
+
+    Conditional skill activation is handled via section visibility:
+    skills attached to sections with SUMMARY visibility are not collected
+    until the section is expanded.
 
     Attributes:
         source: Path to a skill file (SKILL.md) or skill directory on the
@@ -102,67 +105,30 @@ class SkillMount:
             working directory.
         name: Optional skill name override. If None, derived from the source
             path (directory name or filename without extension).
-        enabled: Whether the skill is active. Disabled skills are not copied.
-            Defaults to True.
 
     Example::
 
         from pathlib import Path
-        from weakincentives.skills import SkillMount, SkillConfig
+        from weakincentives.prompt import MarkdownSection
+        from weakincentives.skills import SkillMount
 
-        # Mount a directory skill
-        review_skill = SkillMount(Path("./skills/code-review"))
+        # Attach skills to a section
+        section = MarkdownSection(
+            title="Code Review",
+            key="code-review",
+            template="Review the code.",
+            skills=(
+                SkillMount(Path("./skills/code-review")),
+                SkillMount(Path("./skills/security-audit")),
+            ),
+        )
 
         # Mount with custom name
         custom_skill = SkillMount(
             source=Path("./internal/review-v2"),
             name="code-review",
         )
-
-        # Conditionally disable a skill
-        experimental = SkillMount(
-            source=Path("./skills/experimental"),
-            enabled=False,
-        )
     """
 
     source: Path
     name: str | None = None
-    enabled: bool = True
-
-
-@FrozenDataclass()
-class SkillConfig:
-    """Collection of skills to install in an agent environment.
-
-    This configuration specifies which skills to mount and validation settings.
-    Skills are processed in order, and duplicate names raise an error.
-
-    Attributes:
-        skills: Tuple of skill mounts to copy into the workspace.
-        validate_on_mount: If True, validate skill structure before copying.
-            Validation checks for required SKILL.md file in directories and
-            proper file extension for file skills. Defaults to True.
-
-    Example::
-
-        from pathlib import Path
-        from weakincentives.skills import SkillConfig, SkillMount
-
-        # Basic configuration with multiple skills
-        config = SkillConfig(
-            skills=(
-                SkillMount(Path("./skills/code-review")),
-                SkillMount(Path("./skills/testing")),
-            )
-        )
-
-        # Disable validation during development
-        dev_config = SkillConfig(
-            skills=(SkillMount(Path("./wip-skill")),),
-            validate_on_mount=False,
-        )
-    """
-
-    skills: tuple[SkillMount, ...] = ()
-    validate_on_mount: bool = True
