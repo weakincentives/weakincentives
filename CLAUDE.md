@@ -197,6 +197,7 @@ Read before modifying related code:
 | `TOOLS.md` | Tool registration, policies |
 | `ADAPTERS.md` | Provider adapters, throttling |
 | `CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
+| `OPENCODE_ACP_ADAPTER.md` | OpenCode ACP adapter, workspace |
 | `AGENT_LOOP.md` | AgentLoop orchestration |
 | `POLICIES_OVER_WORKFLOWS.md` | Design philosophy |
 | `MODULE_BOUNDARIES.md` | Layer architecture |
