@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, cast
 
@@ -577,7 +577,7 @@ def test_merge_annotated_meta_and_bool_parsing() -> None:
 def test_object_type_and_union_handling() -> None:
     @dataclass
     class ObjectModel:
-        payload: object = field(metadata={"strip": True})
+        payload: Annotated[object, {"untyped": True, "strip": True}]
 
     parsed = parse(ObjectModel, {"payload": "  data  "})
     assert parsed.payload == "data"
