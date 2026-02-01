@@ -18,6 +18,7 @@ Descriptions are sourced from CLAUDE.md spec table and guides/README.md tables.
 from __future__ import annotations
 
 SPEC_DESCRIPTIONS: dict[str, str] = {
+    "ACP": "ACP adapter (OpenCode, Claude Code), tool exposure",
     "ADAPTERS": "Provider integrations, structured output, throttling",
     "CLAUDE_AGENT_SDK": "Claude Agent SDK adapter, MCP tool bridging, skill mounting",
     "CLOCK": "Controllable time abstractions, clock injection, testing patterns",

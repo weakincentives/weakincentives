@@ -256,6 +256,7 @@ ACP uses JSON-RPC 2.0 with newline-delimited messages over stdio:
 ```
 
 Two message types:
+
 - **Requests**: Have `id`, expect response
 - **Notifications**: No `id`, no response expected
 
