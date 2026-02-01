@@ -165,6 +165,7 @@ from __future__ import annotations
 
 from .adapter import (
     CLAUDE_AGENT_SDK_ADAPTER_NAME,
+    OPENCODE_ACP_ADAPTER_NAME,
     AdapterName,
 )
 from .dataclass import (
@@ -186,6 +187,7 @@ from .json import (
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
+    "OPENCODE_ACP_ADAPTER_NAME",
     "AdapterName",
     "ContractResult",
     "DataclassFieldMapping",

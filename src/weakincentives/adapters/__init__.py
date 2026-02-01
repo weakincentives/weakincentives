@@ -81,6 +81,7 @@ from __future__ import annotations
 
 from ..types import (
     CLAUDE_AGENT_SDK_ADAPTER_NAME,
+    OPENCODE_ACP_ADAPTER_NAME,
     AdapterName,
 )
 from .config import (
@@ -95,6 +96,7 @@ from .throttle import ThrottleError, ThrottlePolicy, new_throttle_policy
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
+    "OPENCODE_ACP_ADAPTER_NAME",
     "AdapterName",
     "LLMConfig",
     "PromptEvaluationError",

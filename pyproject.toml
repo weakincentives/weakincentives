@@ -48,6 +48,10 @@ redis = [
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.27",
 ]
+acp = [
+    "agent-client-protocol>=0.7.1",
+    "claude-agent-sdk>=0.1.15",
+]
 wink = [
     "fastapi>=0.128.0",
     "markdown-it-py[linkify]>=4.0.0",
@@ -157,6 +161,7 @@ combine-as-imports = true
 "src/weakincentives/adapters/claude_agent_sdk/_bridge.py" = ["PLR0913", "TRY300", "RUF029"]
 "src/weakincentives/adapters/claude_agent_sdk/_hooks.py" = ["RUF029"]
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
+"src/weakincentives/adapters/opencode_acp/*.py" = ["PLR0913", "PLR0914", "PLR0911", "PLR6301", "ANN401", "TRY300", "TRY301", "RUF029", "C901", "SIM102", "SIM105"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0904", "PLR0913"]
 "src/weakincentives/runtime/session/slices/_memory.py" = ["PLR6301"]
 "src/weakincentives/runtime/transactions.py" = ["PLR0914"]
@@ -212,6 +217,11 @@ omit = [
     "src/weakincentives/contrib/mailbox/_redis.py",
     # Docs directory contains bundled example files for documentation, not library code
     "src/weakincentives/docs/*",
+    # Claude Agent SDK adapter requires running Claude Code with valid credentials
+    "src/weakincentives/adapters/claude_agent_sdk/*",
+    # OpenCode ACP adapter requires running OpenCode with valid credentials
+    "src/weakincentives/adapters/opencode_acp/adapter.py",
+    "src/weakincentives/adapters/opencode_acp/client.py",
 ]
 
 [tool.coverage.report]
@@ -228,7 +238,7 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["claude-agent-sdk", "mcp", "pyyaml", "redis"]
+DEP002 = ["agent-client-protocol", "claude-agent-sdk", "mcp", "pyyaml", "redis"]
 DEP004 = ["weakincentives"]  # Package imports itself; declared as dev dep for testing
 
 [tool.pyright]
@@ -244,6 +254,7 @@ exclude = [
     ".ruff_cache",
     "dist",
     "src/weakincentives/adapters/claude_agent_sdk",
+    "src/weakincentives/adapters/opencode_acp",
     "src/weakincentives/docs",
 ]
 deprecateTypingAliases = true

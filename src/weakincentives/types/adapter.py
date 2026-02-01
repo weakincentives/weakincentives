@@ -22,7 +22,11 @@ AdapterName = str
 CLAUDE_AGENT_SDK_ADAPTER_NAME: Final[AdapterName] = "claude_agent_sdk"
 """Canonical label for the Claude Agent SDK adapter."""
 
+OPENCODE_ACP_ADAPTER_NAME: Final[AdapterName] = "opencode_acp"
+"""Canonical label for the OpenCode ACP adapter."""
+
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
+    "OPENCODE_ACP_ADAPTER_NAME",
     "AdapterName",
 ]
