@@ -957,6 +957,9 @@ function applyTranscriptResult(result, append) {
 async function loadTranscript(append = false) {
   const requestId = ++state.transcriptRequestId;
   const isCurrentRequest = () => requestId === state.transcriptRequestId;
+  if (!append) {
+    state.transcriptLoadRetries = 0;
+  }
   try {
     state.transcriptLoading = true;
     const offset = append ? state.transcriptEntries.length : 0;
@@ -2121,6 +2124,7 @@ function openTranscriptZoom(index) {
   state.zoomType = "transcript";
   state.zoomIndex = index;
   state.zoomEntry = entry;
+  state.transcriptLoadRetries = 0;
   renderZoomModal();
   elements.zoomModal.classList.remove("hidden");
 }
@@ -2830,14 +2834,14 @@ function handleGlobalShortcuts(e) {
   return handleArrowShortcut(e, key);
 }
 
-document.addEventListener("keydown", (e) => {
+document.addEventListener("keydown", async (e) => {
   if (e.key === "Escape") {
     handleEscapeKey(e);
     return;
   }
 
   if (state.zoomOpen) {
-    handleZoomModalKeys(e);
+    await handleZoomModalKeys(e);
     return;
   }
 
