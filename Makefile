@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix
+.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix slides slides-pdf
 
 # =============================================================================
 # Code Formatting
@@ -61,6 +61,33 @@ markdown-check:
 # Verify Python code examples in documentation
 verify-doc-examples:
 	@uv run --all-extras python check.py -q docs
+
+# =============================================================================
+# Presentation Slides
+# =============================================================================
+
+# Build reveal.js HTML slides with pandoc
+slides:
+	@echo "Building WINK presentation slides..."
+	@mkdir -p docs/presentation/output
+	@pandoc docs/presentation/wink-slides.md \
+		-t revealjs \
+		-s \
+		--slide-level=2 \
+		-V revealjs-url=https://unpkg.com/reveal.js@5.1.0 \
+		-o docs/presentation/output/wink-slides.html
+	@echo "Slides built: docs/presentation/output/wink-slides.html"
+
+# Build PDF slides with pandoc (requires LaTeX)
+slides-pdf:
+	@echo "Building WINK presentation PDF..."
+	@mkdir -p docs/presentation/output
+	@pandoc docs/presentation/wink-slides.md \
+		-t beamer \
+		--slide-level=2 \
+		-V theme:metropolis \
+		-o docs/presentation/output/wink-slides.pdf
+	@echo "PDF built: docs/presentation/output/wink-slides.pdf"
 
 # =============================================================================
 # Type Checking

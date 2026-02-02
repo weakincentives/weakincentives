@@ -321,3 +321,25 @@ jobs:
 
       - name: Run concurrent stress tests
         run: make stress-tests
+
+  # Build presentation slides
+  build-slides:
+    name: Build Presentation Slides
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pandoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc
+
+      - name: Build reveal.js slides
+        run: make slides
+
+      - name: Upload slides artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wink-presentation-slides
+          path: docs/presentation/output/
+          retention-days: 30
