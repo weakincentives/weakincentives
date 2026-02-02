@@ -128,15 +128,10 @@ jobs:
   static-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
         with:
-          enable-cache: true
-      - name: Set up Python
-        run: uv python install 3.14
-      - name: Install dependencies
-        run: uv sync --all-extras
+          sync-args: --all-extras
       - name: Run format check
         run: make format-check
       - name: Run linter
@@ -145,10 +140,6 @@ jobs:
         run: make ty
       - name: Run pyright
         run: make pyright
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
       - name: Run Biome (JS/CSS lint)
         run: make biome
       - name: Run JavaScript tests
@@ -159,19 +150,10 @@ jobs:
     needs: detect-changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
         with:
-          enable-cache: true
-      - name: Set up Python
-        run: uv python install 3.14
-      - name: Install dependencies
-        run: uv sync --all-extras
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+          sync-args: --all-extras
 
       # Always run core tests (fast, high-value smoke tests)
       - name: Run core tests
@@ -220,15 +202,10 @@ jobs:
     if: needs.detect-changes.outputs.run_all != 'true' && needs.detect-changes.outputs.docs_only == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
         with:
-          enable-cache: true
-      - name: Set up Python
-        run: uv python install 3.14
-      - name: Install dependencies
-        run: uv sync
+          sync-args: ''
       - name: Validate Markdown
         run: make markdown-check
       - name: Verify doc examples
