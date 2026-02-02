@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix
+.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix presentation
 
 # =============================================================================
 # Code Formatting
@@ -231,6 +231,16 @@ demo-claude-agent:
 		exit 1; \
 	fi
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
+
+# =============================================================================
+# Presentation
+# =============================================================================
+
+# Serve the WINK presentation locally (opens browser)
+presentation:
+	@echo "Starting presentation server at http://localhost:8000/wink-presentation.html"
+	@echo "Press Ctrl+C to stop"
+	@cd docs/presentation && python -m http.server 8000
 
 # =============================================================================
 # Main Check Target
