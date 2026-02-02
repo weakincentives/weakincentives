@@ -2148,22 +2148,23 @@ function zoomPrev() {
  * Automatically loads more entries if at the end and more are available.
  */
 async function zoomNext() {
-  if (!state.zoomOpen) {
+  if (!state.zoomOpen || state.transcriptLoading) {
     return;
   }
-  const nextIndex = state.zoomIndex + 1;
+  const startIndex = state.zoomIndex;
+  const nextIndex = startIndex + 1;
   const hasNextEntry = nextIndex < state.transcriptEntries.length;
 
   if (hasNextEntry) {
     openTranscriptZoom(nextIndex);
     return;
   }
-  const canLoadMore = state.transcriptHasMore && !state.transcriptLoading;
-  if (!canLoadMore) {
+  if (!state.transcriptHasMore) {
     return;
   }
   await loadMoreTranscript();
-  const hasNewEntry = state.zoomOpen && nextIndex < state.transcriptEntries.length;
+  const indexUnchanged = state.zoomOpen && state.zoomIndex === startIndex;
+  const hasNewEntry = indexUnchanged && nextIndex < state.transcriptEntries.length;
   if (hasNewEntry) {
     openTranscriptZoom(nextIndex);
   }
