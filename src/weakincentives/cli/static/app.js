@@ -2184,7 +2184,9 @@ async function zoomNext() {
     return;
   }
   const canLoadMore =
-    state.transcriptHasMore && state.transcriptLoadRetries < MAX_TRANSCRIPT_LOAD_RETRIES;
+    state.transcriptHasMore &&
+    !state.transcriptLoading &&
+    state.transcriptLoadRetries < MAX_TRANSCRIPT_LOAD_RETRIES;
   if (canLoadMore) {
     await zoomNextWithLoad(startIndex, nextIndex);
   }
@@ -2732,12 +2734,12 @@ function handleEscapeKey(e) {
  * Handles navigation keys when zoom modal is open.
  * Returns true if the event was handled.
  */
-function handleZoomModalKeys(e) {
+async function handleZoomModalKeys(e) {
   const nextKeys = ["j", "J", "ArrowDown", "ArrowRight"];
   const prevKeys = ["k", "K", "ArrowUp", "ArrowLeft"];
   if (nextKeys.includes(e.key)) {
     e.preventDefault();
-    zoomNext();
+    await zoomNext();
     return true;
   }
   if (prevKeys.includes(e.key)) {
