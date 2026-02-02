@@ -376,6 +376,7 @@ const state = {
   transcriptHasMore: false,
   transcriptLoading: false,
   transcriptRequestId: 0, // Tracks current request to ignore stale responses
+  transcriptLoadRetries: 0, // Consecutive failed load attempts
   // Logs state
   allLogs: [],
   filteredLogs: [],
@@ -961,10 +962,12 @@ async function loadTranscript(append = false) {
     const offset = append ? state.transcriptEntries.length : 0;
     const result = await fetchJSON(`/api/transcript?${buildTranscriptQueryParams(offset)}`);
     if (isCurrentRequest()) {
+      state.transcriptLoadRetries = 0;
       applyTranscriptResult(result, append);
     }
   } catch (error) {
     if (isCurrentRequest()) {
+      state.transcriptLoadRetries++;
       showTranscriptError(error.message);
     }
   } finally {
@@ -2143,6 +2146,8 @@ function zoomPrev() {
   openTranscriptZoom(state.zoomIndex - 1);
 }
 
+const MAX_TRANSCRIPT_LOAD_RETRIES = 3;
+
 /**
  * Navigates to the next entry in the zoom modal.
  * Automatically loads more entries if at the end and more are available.
@@ -2159,7 +2164,9 @@ async function zoomNext() {
     openTranscriptZoom(nextIndex);
     return;
   }
-  if (!state.transcriptHasMore) {
+  const canLoadMore =
+    state.transcriptHasMore && state.transcriptLoadRetries < MAX_TRANSCRIPT_LOAD_RETRIES;
+  if (!canLoadMore) {
     return;
   }
   await loadMoreTranscript();
@@ -2645,9 +2652,11 @@ function updateZoomNavigation() {
   }
 
   const maxIndex = state.transcriptEntries.length - 1;
+  const canLoadMore =
+    state.transcriptHasMore && state.transcriptLoadRetries < MAX_TRANSCRIPT_LOAD_RETRIES;
 
   elements.zoomPrev.disabled = state.zoomIndex <= 0;
-  elements.zoomNext.disabled = state.zoomIndex >= maxIndex && !state.transcriptHasMore;
+  elements.zoomNext.disabled = state.zoomIndex >= maxIndex && !canLoadMore;
 }
 
 /**
