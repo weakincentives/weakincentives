@@ -19,7 +19,8 @@ import shutil
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
+from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
 from ...deadlines import Deadline
@@ -32,10 +33,12 @@ from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
+from ...runtime.session.rendered_tools import RenderedTools, ToolSchema
 from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema
 from ...types import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
+from ..tool_spec import tool_to_spec
 from ._async_utils import run_async
 from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
@@ -56,6 +59,10 @@ from ._transcript_collector import TranscriptCollector
 from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import EphemeralHome, IsolationConfig
+
+if TYPE_CHECKING:
+    from ...prompt.tool import Tool
+    from ...types.dataclass import SupportsDataclassOrNone, SupportsToolResult
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
@@ -398,20 +405,68 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
+        # Generate shared event correlation data
+        render_event_id = uuid4()
+        session_id = getattr(session, "session_id", None)
+        created_at = _utcnow()
+
         session.dispatcher.dispatch(
             PromptRendered(
                 prompt_ns=prompt.ns,
                 prompt_key=prompt.key,
                 prompt_name=prompt.name,
                 adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
-                session_id=getattr(session, "session_id", None),
+                session_id=session_id,
                 render_inputs=(),
                 rendered_prompt=prompt_text,
-                created_at=_utcnow(),
+                created_at=created_at,
                 descriptor=None,
                 run_context=run_context,
+                event_id=render_event_id,
             )
         )
+
+        # Dispatch RenderedTools with tool schemas
+        def _extract_tool_schema(
+            tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+        ) -> ToolSchema:
+            spec = tool_to_spec(tool)
+            fn = spec["function"]
+            return ToolSchema(
+                name=fn["name"],
+                description=fn["description"],
+                parameters=fn["parameters"],
+            )
+
+        tool_schemas = tuple(_extract_tool_schema(tool) for tool in rendered.tools)
+        tools_dispatch_result = session.dispatcher.dispatch(
+            RenderedTools(
+                prompt_ns=prompt.ns,
+                prompt_key=prompt.key,
+                tools=tool_schemas,
+                render_event_id=render_event_id,
+                session_id=session_id,
+                created_at=created_at,
+            )
+        )
+        if not tools_dispatch_result.ok:
+            logger.error(
+                "claude_agent_sdk.evaluate.rendered_tools_dispatch_failed",
+                event="rendered_tools_dispatch_failed",
+                context={
+                    "failure_count": len(tools_dispatch_result.errors),
+                    "tool_count": len(tool_schemas),
+                },
+            )
+        else:
+            logger.debug(
+                "claude_agent_sdk.evaluate.rendered_tools_dispatched",
+                event="rendered_tools_dispatched",
+                context={
+                    "tool_count": len(tool_schemas),
+                    "handler_count": tools_dispatch_result.handled_count,
+                },
+            )
 
         output_format = self._build_output_format(rendered)
 
