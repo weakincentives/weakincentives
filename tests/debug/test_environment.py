@@ -271,6 +271,12 @@ class TestGitInfo:
 
     def test_capture_git_info_in_repo(self, git_repo: Path) -> None:
         """Test _capture_git_info in a real repo."""
+        subprocess.run(
+            ["git", "remote", "add", "origin", "https://user:token@host/repo.git"],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
         info = _capture_git_info(git_repo)
 
         assert info is not None
@@ -278,6 +284,7 @@ class TestGitInfo:
         assert len(info.commit_sha) == 40
         assert info.commit_short == info.commit_sha[:8]
         assert info.is_dirty is False
+        assert info.remotes["origin"] == "https://[REDACTED]@host/repo.git"
 
     def test_capture_git_info_detached_head(self, git_repo: Path) -> None:
         """Test _capture_git_info with detached HEAD."""
