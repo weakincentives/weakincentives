@@ -2148,12 +2148,31 @@ function zoomPrev() {
 
 const MAX_TRANSCRIPT_LOAD_RETRIES = 3;
 
+let zoomNextPending = false;
+
+/**
+ * Loads more entries and navigates to the next one if state hasn't changed.
+ */
+async function zoomNextWithLoad(startIndex, nextIndex) {
+  zoomNextPending = true;
+  try {
+    await loadMoreTranscript();
+    const indexUnchanged = state.zoomOpen && state.zoomIndex === startIndex;
+    const hasNewEntry = indexUnchanged && nextIndex < state.transcriptEntries.length;
+    if (hasNewEntry) {
+      openTranscriptZoom(nextIndex);
+    }
+  } finally {
+    zoomNextPending = false;
+  }
+}
+
 /**
  * Navigates to the next entry in the zoom modal.
  * Automatically loads more entries if at the end and more are available.
  */
 async function zoomNext() {
-  if (!state.zoomOpen || state.transcriptLoading) {
+  if (!state.zoomOpen || zoomNextPending) {
     return;
   }
   const startIndex = state.zoomIndex;
@@ -2166,14 +2185,8 @@ async function zoomNext() {
   }
   const canLoadMore =
     state.transcriptHasMore && state.transcriptLoadRetries < MAX_TRANSCRIPT_LOAD_RETRIES;
-  if (!canLoadMore) {
-    return;
-  }
-  await loadMoreTranscript();
-  const indexUnchanged = state.zoomOpen && state.zoomIndex === startIndex;
-  const hasNewEntry = indexUnchanged && nextIndex < state.transcriptEntries.length;
-  if (hasNewEntry) {
-    openTranscriptZoom(nextIndex);
+  if (canLoadMore) {
+    await zoomNextWithLoad(startIndex, nextIndex);
   }
 }
 
