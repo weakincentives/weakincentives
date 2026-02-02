@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WINK - Weak Incentives for Agents</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reset.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+    <style>
+      :root {
+        --r-background-color: #1a1a2e;
+        --r-main-color: #eee;
+        --r-heading-color: #00d4ff;
+        --r-link-color: #00d4ff;
+        --r-link-color-hover: #00ffaa;
+        --r-selection-background-color: #00d4ff;
+      }
+      .reveal h1, .reveal h2, .reveal h3 {
+        text-transform: none;
+      }
+      .reveal .slides section {
+        text-align: left;
+      }
+      .reveal .slides section.center {
+        text-align: center;
+      }
+      .reveal pre {
+        width: 100%;
+        font-size: 0.55em;
+      }
+      .reveal pre code {
+        max-height: 500px;
+        padding: 20px;
+      }
+      .reveal ul {
+        display: block;
+      }
+      .reveal li {
+        margin-bottom: 0.5em;
+      }
+      .highlight {
+        color: #00d4ff;
+      }
+      .reveal table {
+        margin: 0 auto;
+        font-size: 0.7em;
+      }
+      .reveal table th {
+        background: #00d4ff33;
+      }
+      .reveal table td, .reveal table th {
+        padding: 0.4em 0.8em;
+        border: 1px solid #444;
+      }
+      .two-columns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2em;
+      }
+      .icon {
+        font-size: 3em;
+        margin-bottom: 0.3em;
+      }
+      .small {
+        font-size: 0.7em;
+      }
+      .fragment.semi-fade-out.visible {
+        opacity: 0.3;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="reveal">
+      <div class="slides">
+
+        <!-- Title Slide -->
+        <section class="center" data-background-gradient="linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)">
+          <h1 style="font-size: 3em;">WINK</h1>
+          <h3 style="color: #00ffaa;">Weak Incentives for Agents</h3>
+          <p class="small" style="margin-top: 2em;">A Python library for building agents as<br>typed, testable, deterministic objects</p>
+        </section>
+
+        <!-- What is WINK -->
+        <section>
+          <h2>What is WINK?</h2>
+          <ul>
+            <li class="fragment">Python library for building <span class="highlight">LLM agents</span></li>
+            <li class="fragment">Not a workflow engine or framework</li>
+            <li class="fragment">Focuses on the parts that benefit from <span class="highlight">determinism</span></li>
+            <li class="fragment">Provider-agnostic: works with OpenAI, LiteLLM, Claude</li>
+          </ul>
+        </section>
+
+        <!-- Philosophy -->
+        <section>
+          <section class="center">
+            <h2>Core Philosophy</h2>
+            <p class="highlight" style="font-size: 1.3em; margin-top: 1em;">"Weak Incentives"</p>
+          </section>
+
+          <section>
+            <h3>What are Weak Incentives?</h3>
+            <p>Shape prompts, tools, and context so the model's <span class="highlight">easiest path</span> is also the <span class="highlight">correct one</span>.</p>
+            <br>
+            <ul>
+              <li class="fragment">Don't fight the model - guide it</li>
+              <li class="fragment">Make good behavior the path of least resistance</li>
+              <li class="fragment">Use structure, not constraints</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>Definition vs Harness</h3>
+            <div class="two-columns">
+              <div class="fragment">
+                <p class="highlight">Agent Definition (you own)</p>
+                <ul class="small">
+                  <li>Prompt</li>
+                  <li>Tools</li>
+                  <li>Policies</li>
+                  <li>Feedback</li>
+                </ul>
+              </div>
+              <div class="fragment">
+                <p class="highlight">Execution Harness (runtime)</p>
+                <ul class="small">
+                  <li>Planning loop</li>
+                  <li>Sandboxing</li>
+                  <li>Retries</li>
+                  <li>Crash recovery</li>
+                  <li>Deadlines & budgets</li>
+                </ul>
+              </div>
+            </div>
+            <p class="fragment small" style="margin-top: 1em; text-align: center;">The harness keeps changing; your agent definition should not.</p>
+          </section>
+
+          <section>
+            <h3>Policies Over Workflows</h3>
+            <table>
+              <tr>
+                <th>Aspect</th>
+                <th>Workflow</th>
+                <th>Policy</th>
+              </tr>
+              <tr class="fragment">
+                <td>Specifies</td>
+                <td>Steps to execute</td>
+                <td>Constraints to satisfy</td>
+              </tr>
+              <tr class="fragment">
+                <td>On unexpected</td>
+                <td>Fails or branches</td>
+                <td>Agent reasons</td>
+              </tr>
+              <tr class="fragment">
+                <td>Composability</td>
+                <td>Sequential coupling</td>
+                <td>Independent conjunction</td>
+              </tr>
+              <tr class="fragment">
+                <td>Agent role</td>
+                <td>Executor</td>
+                <td>Reasoner</td>
+              </tr>
+            </table>
+          </section>
+        </section>
+
+        <!-- Key Principles -->
+        <section>
+          <h2>Five Key Principles</h2>
+          <ol>
+            <li class="fragment"><span class="highlight">Prompts as First-Class Objects</span><br><span class="small">Not strings - typed immutable graphs</span></li>
+            <li class="fragment"><span class="highlight">Explicit Side Effects</span><br><span class="small">Only tool handlers modify external state</span></li>
+            <li class="fragment"><span class="highlight">Typed Contracts Everywhere</span><br><span class="small">Dataclasses for params, outputs, state</span></li>
+            <li class="fragment"><span class="highlight">Deterministic Inspection</span><br><span class="small">Same inputs → same outputs</span></li>
+            <li class="fragment"><span class="highlight">Provider Agnostic</span><br><span class="small">Same agent, different models</span></li>
+          </ol>
+        </section>
+
+        <!-- Core Abstractions Overview -->
+        <section class="center">
+          <h2>Core Abstractions</h2>
+          <div style="display: flex; justify-content: space-around; margin-top: 2em; flex-wrap: wrap;">
+            <div class="fragment" style="text-align: center; padding: 1em;">
+              <div class="icon">📝</div>
+              <p>Prompts</p>
+            </div>
+            <div class="fragment" style="text-align: center; padding: 1em;">
+              <div class="icon">🔧</div>
+              <p>Tools</p>
+            </div>
+            <div class="fragment" style="text-align: center; padding: 1em;">
+              <div class="icon">💾</div>
+              <p>Sessions</p>
+            </div>
+            <div class="fragment" style="text-align: center; padding: 1em;">
+              <div class="icon">🔌</div>
+              <p>Adapters</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Prompts -->
+        <section>
+          <section>
+            <h2>Prompts</h2>
+            <p>Typed, composable section trees</p>
+          </section>
+
+          <section>
+            <h3>PromptTemplate vs Prompt</h3>
+            <div class="two-columns">
+              <div class="fragment">
+                <p class="highlight">PromptTemplate</p>
+                <ul class="small">
+                  <li>Immutable definition</li>
+                  <li>Section tree structure</li>
+                  <li>Declares parameters</li>
+                  <li>Declares tools</li>
+                </ul>
+              </div>
+              <div class="fragment">
+                <p class="highlight">Prompt</p>
+                <ul class="small">
+                  <li>Runtime binding</li>
+                  <li>Parameters filled in</li>
+                  <li>Overrides applied</li>
+                  <li>Ready for execution</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h3>Sections</h3>
+            <p>Building blocks of prompts</p>
+            <ul>
+              <li class="fragment">Markdown content with placeholders</li>
+              <li class="fragment">Conditional enabling</li>
+              <li class="fragment">Progressive disclosure (FULL / SUMMARY)</li>
+              <li class="fragment">Tools attachment</li>
+              <li class="fragment">Compose into trees</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>Example: Defining a Prompt</h3>
+            <pre><code class="language-python" data-trim data-noescape>
+@PromptTemplate(
+    ns="myagent",
+    key="code-review",
+    sections=(
+        Section(
+            key="role",
+            content="You are a code reviewer.",
+        ),
+        Section(
+            key="instructions",
+            content="Review the following code:\n\n{code}",
+        ),
+    ),
+)
+class CodeReviewPrompt:
+    code: str
+            </code></pre>
+          </section>
+
+          <section>
+            <h3>Structured Output</h3>
+            <pre><code class="language-python" data-trim data-noescape>
+@dataclass(frozen=True, slots=True)
+class ReviewResult:
+    issues: list[str]
+    approved: bool
+    summary: str
+
+# PromptTemplate produces typed output
+@PromptTemplate[ReviewResult](
+    ns="myagent",
+    key="code-review",
+    ...
+)
+            </code></pre>
+          </section>
+        </section>
+
+        <!-- Tools -->
+        <section>
+          <section>
+            <h2>Tools</h2>
+            <p>Typed contracts with transactional execution</p>
+          </section>
+
+          <section>
+            <h3>Tool Structure</h3>
+            <pre><code class="language-python" data-trim data-noescape>
+@dataclass(frozen=True, slots=True)
+class SearchParams:
+    query: str
+    max_results: int = 10
+
+@dataclass(frozen=True, slots=True)
+class SearchResult:
+    matches: list[str]
+
+def search_handler(
+    params: SearchParams,
+    *,
+    context: ToolContext
+) -> ToolResult[SearchResult]:
+    # Implementation here
+    return ToolResult.ok(
+        SearchResult(matches=["..."]),
+        message="Found 5 matches"
+    )
+            </code></pre>
+          </section>
+
+          <section>
+            <h3>Transactional Execution</h3>
+            <ul>
+              <li class="fragment">Every tool call is wrapped in a transaction</li>
+              <li class="fragment">On <span style="color: #00ff00;">success</span>: changes committed</li>
+              <li class="fragment">On <span style="color: #ff6666;">failure</span>: session state + filesystem rolled back</li>
+              <li class="fragment">No partial state - enables safe retries</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>Tool Policies</h3>
+            <p>Declarative constraints on tool usage</p>
+            <pre><code class="language-python" data-trim data-noescape>
+# Must read before write
+policy = ToolPolicy(
+    requires={"write_file": ["read_file"]},
+)
+
+# Sequential dependencies
+policy = ToolPolicy(
+    sequential=[("analyze", "implement", "test")],
+)
+            </code></pre>
+          </section>
+
+          <section>
+            <h3>Tool Suites</h3>
+            <p>Bundle instructions + tools + session state</p>
+            <ul>
+              <li class="fragment">Sections that declare tools</li>
+              <li class="fragment">Instructions colocated with capabilities</li>
+              <li class="fragment">Reusable across prompts</li>
+              <li class="fragment">Example: filesystem tools, git tools, search tools</li>
+            </ul>
+          </section>
+        </section>
+
+        <!-- Sessions -->
+        <section>
+          <section>
+            <h2>Sessions</h2>
+            <p>Deterministic agent memory</p>
+          </section>
+
+          <section>
+            <h3>Event-Driven State</h3>
+            <ul>
+              <li class="fragment"><span class="highlight">Slices</span>: Immutable tuples keyed by dataclass type</li>
+              <li class="fragment"><span class="highlight">Reducers</span>: Pure functions that process events</li>
+              <li class="fragment"><span class="highlight">Events</span>: All mutations flow through dispatch</li>
+            </ul>
+            <pre class="fragment"><code class="language-python" data-trim data-noescape>
+current_state + event → new_state
+            </code></pre>
+          </section>
+
+          <section>
+            <h3>Reducer Example</h3>
+            <pre><code class="language-python" data-trim data-noescape>
+@dataclass(frozen=True, slots=True)
+class FileRead:
+    path: str
+    content: str
+
+@dataclass(frozen=True, slots=True)
+class FilesReadReducer:
+    @reducer(on=FileRead)
+    def on_file_read(self, event: FileRead) -> SliceOp[FileRead]:
+        return SliceOp.append(event)
+
+# Usage
+session.dispatch(FileRead(path="/foo.py", content="..."))
+files = session[FileRead].all()
+            </code></pre>
+          </section>
+
+          <section>
+            <h3>Why This Matters</h3>
+            <ul>
+              <li class="fragment"><span class="highlight">Deterministic</span>: Replay events, get same state</li>
+              <li class="fragment"><span class="highlight">Inspectable</span>: Full history of what happened</li>
+              <li class="fragment"><span class="highlight">Testable</span>: Pure reducers are easy to test</li>
+              <li class="fragment"><span class="highlight">Snapshots</span>: Save and restore for rollback</li>
+            </ul>
+          </section>
+        </section>
+
+        <!-- Adapters -->
+        <section>
+          <section>
+            <h2>Adapters</h2>
+            <p>Provider abstraction layer</p>
+          </section>
+
+          <section>
+            <h3>Same Agent, Different Providers</h3>
+            <div style="text-align: center;">
+              <pre><code class="language-text" data-trim>
+┌─────────────────────────────┐
+│     Agent Definition        │
+│  (Prompt + Tools + State)   │
+└──────────────┬──────────────┘
+               │
+       ┌───────┴───────┐
+       │   Adapter     │
+       └───────┬───────┘
+               │
+    ┌──────────┼──────────┐
+    ▼          ▼          ▼
+ OpenAI    LiteLLM    Claude SDK
+              </code></pre>
+            </div>
+          </section>
+
+          <section>
+            <h3>Available Adapters</h3>
+            <table>
+              <tr>
+                <th>Adapter</th>
+                <th>Best For</th>
+              </tr>
+              <tr class="fragment">
+                <td>OpenAI</td>
+                <td>Direct OpenAI API access</td>
+              </tr>
+              <tr class="fragment">
+                <td>LiteLLM</td>
+                <td>100+ model providers</td>
+              </tr>
+              <tr class="fragment">
+                <td>Claude Agent SDK</td>
+                <td>Production with native tools</td>
+              </tr>
+            </table>
+          </section>
+
+          <section>
+            <h3>Claude Agent SDK</h3>
+            <p>Recommended for production</p>
+            <ul>
+              <li class="fragment">Battle-tested native tools</li>
+              <li class="fragment">Built-in sandboxing</li>
+              <li class="fragment">MCP server bridging</li>
+              <li class="fragment">Network isolation</li>
+            </ul>
+          </section>
+        </section>
+
+        <!-- Progressive Disclosure -->
+        <section>
+          <section>
+            <h2>Progressive Disclosure</h2>
+            <p>Managing context size dynamically</p>
+          </section>
+
+          <section>
+            <h3>How It Works</h3>
+            <ol>
+              <li class="fragment">Sections start <span class="highlight">collapsed</span> (summary only)</li>
+              <li class="fragment">Model requests expansion via <code>open_sections()</code></li>
+              <li class="fragment">AgentLoop catches <code>VisibilityExpansionRequired</code></li>
+              <li class="fragment">Applies overrides and retries</li>
+            </ol>
+          </section>
+
+          <section>
+            <h3>Example</h3>
+            <pre><code class="language-python" data-trim data-noescape>
+Section(
+    key="large-context",
+    content="... lots of detailed content ...",
+    summary="Summary: Available context about X",
+    visibility=Visibility.SUMMARY,  # Start collapsed
+)
+
+# Model calls open_sections(["large-context"])
+# Content expands to FULL visibility
+            </code></pre>
+          </section>
+
+          <section>
+            <h3>Benefits</h3>
+            <ul>
+              <li class="fragment">Keep initial prompts lean</li>
+              <li class="fragment">Model requests what it needs</li>
+              <li class="fragment">Automatic token management</li>
+              <li class="fragment">Better context utilization</li>
+            </ul>
+          </section>
+        </section>
+
+        <!-- Production Pattern -->
+        <section>
+          <section class="center">
+            <h2>Production Pattern</h2>
+          </section>
+
+          <section>
+            <h3>AgentLoop</h3>
+            <pre><code class="language-python" data-trim data-noescape>
+class MyAgent(AgentLoop[Request, Response]):
+    def prepare(
+        self, request: Request
+    ) -> tuple[Prompt, Session]:
+        prompt = MyPrompt(code=request.code).bind()
+        session = Session()
+        return prompt, session
+            </code></pre>
+            <ul class="small">
+              <li class="fragment">Handles request-response lifecycle</li>
+              <li class="fragment">Automatic progressive disclosure</li>
+              <li class="fragment">Enforces deadlines and budgets</li>
+              <li class="fragment">Manages resource lifecycle</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>EvalLoop</h3>
+            <p>Run evaluation alongside production</p>
+            <pre><code class="language-python" data-trim data-noescape>
+eval_loop = EvalLoop(
+    agent=my_agent,
+    dataset=eval_dataset,
+    evaluators=[
+        accuracy_evaluator,
+        latency_evaluator,
+        LLMJudge("Is the response helpful?"),
+    ],
+)
+            </code></pre>
+          </section>
+
+          <section>
+            <h3>LoopGroup</h3>
+            <p>Coordinate multiple loops</p>
+            <pre><code class="language-python" data-trim data-noescape>
+group = LoopGroup([
+    agent_loop,
+    eval_loop,
+])
+
+# Health endpoints
+# /health/live - liveness probe
+# /health/ready - readiness probe
+
+await group.run()
+            </code></pre>
+          </section>
+        </section>
+
+        <!-- Debugging -->
+        <section>
+          <section>
+            <h2>Debugging & Observability</h2>
+          </section>
+
+          <section>
+            <h3>Session Events</h3>
+            <p>Everything is recorded</p>
+            <ul>
+              <li class="fragment"><code>PromptRendered</code> - What was sent</li>
+              <li class="fragment"><code>ToolInvoked</code> - What tools were called</li>
+              <li class="fragment"><code>PromptExecuted</code> - Response received</li>
+              <li class="fragment">Custom events via reducers</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>Debug Bundles</h3>
+            <p>Self-contained execution snapshots</p>
+            <ul>
+              <li class="fragment">Session state and events</li>
+              <li class="fragment">Rendered prompts</li>
+              <li class="fragment">Tool inputs/outputs</li>
+              <li class="fragment">Filesystem snapshots</li>
+              <li class="fragment">Structured logs</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>Debug UI</h3>
+            <pre><code class="language-bash" data-trim>
+wink debug --bundle session.zip
+            </code></pre>
+            <p class="small">Interactive timeline visualization of:</p>
+            <ul class="small">
+              <li>Prompts sent to model</li>
+              <li>Tool calls and results</li>
+              <li>State transitions</li>
+              <li>Token usage</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>SQL Query</h3>
+            <pre><code class="language-sql" data-trim>
+SELECT event_type, COUNT(*)
+FROM events
+GROUP BY event_type;
+
+SELECT * FROM tool_calls
+WHERE duration_ms > 1000;
+            </code></pre>
+            <p class="small">Deep analysis of debug bundles</p>
+          </section>
+        </section>
+
+        <!-- Workspace Tools -->
+        <section>
+          <section>
+            <h2>Workspace Tools</h2>
+            <p>For repository-aware agents</p>
+          </section>
+
+          <section>
+            <h3>VFS (Virtual Filesystem)</h3>
+            <ul>
+              <li class="fragment">Copy-on-write in-memory filesystem</li>
+              <li class="fragment">Mount real directories</li>
+              <li class="fragment">Snapshot and restore</li>
+              <li class="fragment">Safe experimentation</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>Podman Sandbox</h3>
+            <ul>
+              <li class="fragment">Container-based execution</li>
+              <li class="fragment">Full isolation</li>
+              <li class="fragment">Network restrictions</li>
+              <li class="fragment">Resource limits</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>Workspace Digest</h3>
+            <ul>
+              <li class="fragment">Cached repository summary</li>
+              <li class="fragment">Progressive disclosure of files</li>
+              <li class="fragment">Token-efficient exploration</li>
+              <li class="fragment">Automatic cache invalidation</li>
+            </ul>
+          </section>
+        </section>
+
+        <!-- Testing -->
+        <section>
+          <section>
+            <h2>Testing</h2>
+            <p>The testing pyramid</p>
+          </section>
+
+          <section>
+            <h3>Test Levels</h3>
+            <table>
+              <tr>
+                <th>Level</th>
+                <th>Speed</th>
+                <th>What</th>
+              </tr>
+              <tr class="fragment">
+                <td>Prompt</td>
+                <td>Fast</td>
+                <td>Rendering is deterministic</td>
+              </tr>
+              <tr class="fragment">
+                <td>Tool</td>
+                <td>Fast</td>
+                <td>Handler logic</td>
+              </tr>
+              <tr class="fragment">
+                <td>Reducer</td>
+                <td>Fast</td>
+                <td>State transitions</td>
+              </tr>
+              <tr class="fragment">
+                <td>Integration</td>
+                <td>Slow</td>
+                <td>Full agent with model</td>
+              </tr>
+            </table>
+          </section>
+
+          <section>
+            <h3>Example Tests</h3>
+            <pre><code class="language-python" data-trim data-noescape>
+# Prompt test - no model needed
+def test_prompt_renders():
+    prompt = MyPrompt(code="def foo(): pass").bind()
+    rendered = prompt.render()
+    assert "def foo" in rendered
+
+# Reducer test - pure function
+def test_reducer():
+    reducer = FilesReadReducer()
+    op = reducer.on_file_read(FileRead("/a", "content"))
+    assert op == SliceOp.append(FileRead("/a", "content"))
+            </code></pre>
+          </section>
+        </section>
+
+        <!-- Getting Started -->
+        <section>
+          <section class="center">
+            <h2>Getting Started</h2>
+          </section>
+
+          <section>
+            <h3>Installation</h3>
+            <pre><code class="language-bash" data-trim>
+pip install weakincentives
+            </code></pre>
+            <p>or with extras:</p>
+            <pre><code class="language-bash" data-trim>
+pip install weakincentives[openai,litellm,claude]
+            </code></pre>
+          </section>
+
+          <section>
+            <h3>Quickstart</h3>
+            <pre><code class="language-bash" data-trim>
+# Clone the starter project
+git clone https://github.com/weakincentives/starter
+cd starter
+
+# Install dependencies
+uv sync
+
+# Run the example agent
+uv run python -m starter
+            </code></pre>
+          </section>
+
+          <section>
+            <h3>Learning Path</h3>
+            <ol>
+              <li class="fragment"><span class="highlight">Philosophy</span> - Mental model</li>
+              <li class="fragment"><span class="highlight">Prompts</span> - PromptTemplate & Sections</li>
+              <li class="fragment"><span class="highlight">Tools</span> - Contracts & handlers</li>
+              <li class="fragment"><span class="highlight">Sessions</span> - State with reducers</li>
+              <li class="fragment"><span class="highlight">Adapters</span> - Choose a provider</li>
+              <li class="fragment"><span class="highlight">Orchestration</span> - AgentLoop</li>
+            </ol>
+          </section>
+        </section>
+
+        <!-- Summary -->
+        <section class="center" data-background-gradient="linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)">
+          <h2>Summary</h2>
+          <p style="text-align: left; max-width: 700px; margin: 1em auto;">
+            <span class="highlight">Prompts</span> are typed objects, not strings<br><br>
+            <span class="highlight">Tools</span> are the only place side effects happen<br><br>
+            <span class="highlight">Sessions</span> are deterministic ledgers<br><br>
+            <span class="highlight">Adapters</span> are swappable<br><br>
+            <span class="highlight">Composition</span> over orchestration
+          </p>
+        </section>
+
+        <!-- End -->
+        <section class="center" data-background-gradient="linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)">
+          <h2>Thank You</h2>
+          <p style="margin-top: 2em;">
+            <a href="https://github.com/weakincentives/weakincentives">github.com/weakincentives</a>
+          </p>
+          <p class="small" style="margin-top: 2em;">
+            <code>pip install weakincentives</code>
+          </p>
+        </section>
+
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+    <script>
+      Reveal.initialize({
+        hash: true,
+        slideNumber: true,
+        progress: true,
+        history: true,
+        center: false,
+        transition: 'slide',
+        plugins: [ RevealMarkdown, RevealHighlight, RevealNotes ]
+      });
+    </script>
+  </body>
+</html>
+</code></pre>
