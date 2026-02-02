@@ -220,8 +220,13 @@ class PromptRenderer[OutputT]:
             # When rendering with SUMMARY visibility, skip children
             if effective_visibility == SectionVisibility.SUMMARY:
                 summary_skip_depth = node.depth
-                # Track whether summarized section (or its descendants) has tools
-                if self._section_or_descendants_have_tools(node):
+                # Track whether summarized section (or descendants) has tools or skills.
+                # Skills are treated like tools for progressive disclosure - expanding
+                # a section with skills requires open_sections to activate them.
+                has_tools_or_skills = self._section_or_descendants_have_tools(
+                    node
+                ) or self._section_or_descendants_have_skills(node)
+                if has_tools_or_skills:
                     has_summarized_with_tools = True
                 else:
                     has_summarized_without_tools = True
@@ -238,9 +243,12 @@ class PromptRenderer[OutputT]:
             ):
                 section_key = ".".join(node.path)
                 child_keys = self._collect_child_keys(node)
-                has_tools = self._section_or_descendants_have_tools(node)
+                # Skills are treated like tools for progressive disclosure
+                has_tools_or_skills = self._section_or_descendants_have_tools(
+                    node
+                ) or self._section_or_descendants_have_skills(node)
                 suffix = build_summary_suffix(
-                    section_key, child_keys, has_tools=has_tools
+                    section_key, child_keys, has_tools=has_tools_or_skills
                 )
                 rendered += suffix
 
@@ -328,6 +336,15 @@ class PromptRenderer[OutputT]:
         Uses precomputed subtree_has_tools index for O(1) lookup.
         """
         return self._registry.subtree_has_tools.get(parent_node.path, False)
+
+    def _section_or_descendants_have_skills(
+        self, parent_node: SectionNode[SupportsDataclass]
+    ) -> bool:
+        """Check if section or any descendant has skills attached.
+
+        Uses precomputed subtree_has_skills index for O(1) lookup.
+        """
+        return self._registry.subtree_has_skills.get(parent_node.path, False)
 
     def _collect_child_keys(
         self, parent_node: SectionNode[SupportsDataclass]

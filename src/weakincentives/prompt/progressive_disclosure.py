@@ -412,14 +412,16 @@ def build_summary_suffix(
     Args:
         section_key: The dot-notation key for the summarized section.
         child_keys: Keys of child sections that would be revealed on expansion.
-        has_tools: Whether the section has tools attached. When False, the suffix
-            directs the model to use read_section instead of open_sections.
+        has_tools: Whether the section has tools or skills attached. When False,
+            the suffix directs the model to use read_section instead of
+            open_sections. Skills are treated like tools for progressive
+            disclosure - expanding a section with skills activates them.
 
     Returns:
         Formatted instruction text for the model.
     """
     if has_tools:
-        # Section has tools - use open_sections to expand and access tools
+        # Section has tools or skills - use open_sections to expand and activate
         base_instruction = (
             f"[This section is summarized. To view full content, "
             f'call `open_sections` with key "{section_key}".]'
@@ -432,7 +434,7 @@ def build_summary_suffix(
                 f'"{section_key}" to view full content including subsections: {children_str}.]'
             )
     else:
-        # Section has no tools - use read_section for read-only access
+        # Section has no tools or skills - use read_section for read-only access
         base_instruction = (
             f"[This section is summarized. To view full content, "
             f'call `read_section` with key "{section_key}".]'

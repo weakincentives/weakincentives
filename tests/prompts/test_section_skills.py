@@ -254,3 +254,70 @@ def test_rendered_prompt_skills_empty_without_skills() -> None:
     rendered = prompt.render()
 
     assert rendered.skills == ()
+
+
+# ============================================================================
+# Progressive disclosure tests for skills
+# ============================================================================
+
+
+def test_summarized_section_with_skills_uses_open_sections(tmp_path: Path) -> None:
+    """Summarized sections with skills get open_sections instruction (not read_section).
+
+    Skills are treated like tools for progressive disclosure - expanding a section
+    with skills requires open_sections to activate them.
+    """
+    from weakincentives.prompt import Prompt, PromptTemplate, SectionVisibility
+
+    skill_dir = tmp_path / "test-skill"
+    skill_dir.mkdir()
+    skill = SkillMount(source=skill_dir, name="test-skill")
+
+    template = PromptTemplate[None](
+        ns="test",
+        key="skills-progressive-disclosure",
+        sections=(
+            MarkdownSection(
+                title="Section with Skills",
+                template="Full content here.",
+                summary="Summarized content.",
+                key="section-with-skills",
+                visibility=SectionVisibility.SUMMARY,
+                skills=[skill],  # Skills but no tools
+            ),
+        ),
+    )
+
+    prompt = Prompt(template)
+    rendered = prompt.render()
+
+    # Should use open_sections (not read_section) because section has skills
+    assert "open_sections" in rendered.text
+    assert "read_section" not in rendered.text
+
+
+def test_summarized_section_without_tools_or_skills_uses_read_section() -> None:
+    """Summarized sections without tools or skills get read_section instruction."""
+    from weakincentives.prompt import Prompt, PromptTemplate, SectionVisibility
+
+    template = PromptTemplate[None](
+        ns="test",
+        key="no-tools-no-skills",
+        sections=(
+            MarkdownSection(
+                title="Plain Section",
+                template="Full content here.",
+                summary="Summarized content.",
+                key="plain-section",
+                visibility=SectionVisibility.SUMMARY,
+                # No tools and no skills
+            ),
+        ),
+    )
+
+    prompt = Prompt(template)
+    rendered = prompt.render()
+
+    # Should use read_section because section has no tools or skills
+    assert "read_section" in rendered.text
+    assert "open_sections" not in rendered.text
