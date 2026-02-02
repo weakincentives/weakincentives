@@ -54,6 +54,19 @@ class Checker(Protocol):
 DiagnosticParser = Callable[[str, int], tuple[Diagnostic, ...]]
 
 
+def is_ci_environment() -> bool:
+    """Detect if running in a CI environment (GitHub Actions, etc.)."""
+    import os
+
+    # GitHub Actions
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return True
+    # Generic CI variable (used by many CI systems)
+    if os.environ.get("CI") == "true":
+        return True
+    return False
+
+
 def _no_parse(_output: str, _code: int) -> tuple[Diagnostic, ...]:
     """Default parser that produces no diagnostics."""
     return ()
@@ -139,3 +152,167 @@ class SubprocessChecker:
                 diagnostics=(Diagnostic(msg),),
                 output="",
             )
+
+
+@dataclass
+class AutoFormatChecker:
+    """A checker that auto-fixes formatting locally but only checks in CI.
+
+    In local environments: runs the formatter to apply fixes, reports changes.
+    In CI environments: runs the formatter in check mode, fails if changes needed.
+    """
+
+    name: str
+    description: str
+    check_command: list[str]
+    fix_command: list[str]
+    parser: DiagnosticParser = _no_parse
+    timeout: int = 300
+
+    def run(self) -> CheckResult:
+        """Run the check, auto-fixing if not in CI."""
+        start = time.monotonic()
+
+        if is_ci_environment():
+            return self._run_check_only(start)
+        return self._run_with_autofix(start)
+
+    def _run_check_only(self, start: float) -> CheckResult:
+        """Run in check-only mode (CI behavior)."""
+        try:
+            result = subprocess.run(
+                self.check_command,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+            duration_ms = int((time.monotonic() - start) * 1000)
+
+            output = result.stdout
+            if result.stderr:
+                output = f"{output}\n{result.stderr}" if output else result.stderr
+
+            diagnostics = self.parser(output, result.returncode)
+
+            return CheckResult(
+                name=self.name,
+                status="passed" if result.returncode == 0 else "failed",
+                duration_ms=duration_ms,
+                diagnostics=diagnostics,
+                output=output.strip(),
+            )
+        except subprocess.TimeoutExpired:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            return CheckResult(
+                name=self.name,
+                status="failed",
+                duration_ms=duration_ms,
+                diagnostics=(Diagnostic(f"Timed out after {self.timeout}s"),),
+                output="",
+            )
+
+    def _run_with_autofix(self, start: float) -> CheckResult:
+        """Run with auto-fix and report changes (local behavior)."""
+        try:
+            # First check if there are any issues
+            check_result = subprocess.run(
+                self.check_command,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+
+            if check_result.returncode == 0:
+                # No formatting issues
+                duration_ms = int((time.monotonic() - start) * 1000)
+                return CheckResult(
+                    name=self.name,
+                    status="passed",
+                    duration_ms=duration_ms,
+                    diagnostics=(),
+                    output="",
+                )
+
+            # There are formatting issues - apply fixes
+            fix_result = subprocess.run(
+                self.fix_command,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+            duration_ms = int((time.monotonic() - start) * 1000)
+
+            # Check if fix command failed (e.g., syntax error, internal crash)
+            if fix_result.returncode != 0:
+                output = fix_result.stdout
+                if fix_result.stderr:
+                    output = f"{output}\n{fix_result.stderr}" if output else fix_result.stderr
+                return CheckResult(
+                    name=self.name,
+                    status="failed",
+                    duration_ms=duration_ms,
+                    diagnostics=(Diagnostic("Auto-fix command failed"),),
+                    output=output.strip(),
+                )
+
+            # Parse which files were reformatted from the fix output
+            fixed_files = self._parse_fixed_files(fix_result.stdout)
+
+            if fixed_files:
+                # Report the changes in natural language
+                if len(fixed_files) == 1:
+                    message = f"Automatically reformatted 1 file: {fixed_files[0]}"
+                else:
+                    file_list = ", ".join(fixed_files[:5])
+                    if len(fixed_files) > 5:
+                        file_list += f" and {len(fixed_files) - 5} more"
+                    message = (
+                        f"Automatically reformatted {len(fixed_files)} files: "
+                        f"{file_list}"
+                    )
+
+                return CheckResult(
+                    name=self.name,
+                    status="passed",
+                    duration_ms=duration_ms,
+                    diagnostics=(
+                        Diagnostic(message=message, severity="info"),
+                    ),
+                    output=fix_result.stdout.strip(),
+                )
+
+            # Fix ran but no specific files reported - still passed
+            return CheckResult(
+                name=self.name,
+                status="passed",
+                duration_ms=duration_ms,
+                diagnostics=(
+                    Diagnostic(
+                        message="Formatting issues were automatically fixed",
+                        severity="info",
+                    ),
+                ),
+                output=fix_result.stdout.strip(),
+            )
+
+        except subprocess.TimeoutExpired:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            return CheckResult(
+                name=self.name,
+                status="failed",
+                duration_ms=duration_ms,
+                diagnostics=(Diagnostic(f"Timed out after {self.timeout}s"),),
+                output="",
+            )
+
+    def _parse_fixed_files(self, output: str) -> list[str]:
+        """Parse file paths from ruff format output."""
+        files = []
+        for line in output.strip().split("\n"):
+            line = line.strip()
+            # ruff format outputs "1 file reformatted" or lists file paths
+            if line and not line.endswith("reformatted") and not line.startswith("("):
+                # Looks like a file path
+                if line.endswith(".py"):
+                    files.append(line)
+        return files

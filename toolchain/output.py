@@ -106,6 +106,14 @@ class ConsoleFormatter:
         if result.passed:
             mark = "\033[32m✓\033[0m" if use_color else "✓"
             lines.append(f"{mark} {result.name:<20} ({duration})")
+
+            # Show info diagnostics (e.g., auto-format messages)
+            info_diags = [d for d in result.diagnostics if d.severity == "info"]
+            for diag in info_diags:
+                if use_color:
+                    lines.append(f"  \033[36m{diag.message}\033[0m")
+                else:
+                    lines.append(f"  {diag.message}")
         elif result.status == "skipped":
             mark = "\033[33m○\033[0m" if use_color else "○"
             lines.append(f"{mark} {result.name:<20} (skipped)")
@@ -211,12 +219,22 @@ class QuietFormatter:
         return _supports_color(stream)
 
     def format(self, report: Report) -> str:
-        """Format only failures, or a brief success message."""
-        if report.passed:
-            return ""
-
+        """Format only failures, or info messages for auto-fixes."""
         lines = []
         use_color = self._use_color()
+
+        # Show info diagnostics even for passed checks (e.g., auto-format messages)
+        for result in report.results:
+            if result.passed:
+                info_diags = [d for d in result.diagnostics if d.severity == "info"]
+                for diag in info_diags:
+                    if use_color:
+                        lines.append(f"\033[36m{diag.message}\033[0m")
+                    else:
+                        lines.append(diag.message)
+
+        if report.passed:
+            return "\n".join(lines) if lines else ""
 
         for result in report.failed_results:
             if use_color:

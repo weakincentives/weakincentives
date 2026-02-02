@@ -222,6 +222,48 @@ class TestConsoleFormatter:
         formatter = ConsoleFormatter(color=True, stream=stream)
         assert formatter._use_color() is True
 
+    def test_info_diagnostics_shown_for_passed_checks(self) -> None:
+        """Info diagnostics (like auto-format messages) should be shown even for passed checks."""
+        report = Report(
+            results=(
+                CheckResult(
+                    name="format",
+                    status="passed",
+                    duration_ms=100,
+                    diagnostics=(
+                        Diagnostic(
+                            message="Automatically reformatted 2 files: foo.py, bar.py",
+                            severity="info",
+                        ),
+                    ),
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = ConsoleFormatter(color=False)
+        output = formatter.format(report)
+        assert "Automatically reformatted" in output
+        assert "foo.py" in output
+
+    def test_info_diagnostics_shown_with_color(self) -> None:
+        """Info diagnostics should use cyan color."""
+        report = Report(
+            results=(
+                CheckResult(
+                    name="format",
+                    status="passed",
+                    duration_ms=100,
+                    diagnostics=(
+                        Diagnostic(message="Auto-fixed", severity="info"),
+                    ),
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = ConsoleFormatter(color=True)
+        output = formatter.format(report)
+        assert "\033[36m" in output  # Cyan color code
+
 
 class TestJSONFormatter:
     """Tests for JSONFormatter."""
@@ -352,3 +394,44 @@ class TestQuietFormatter:
         stream = io.StringIO()
         formatter = QuietFormatter(stream=stream)
         assert formatter._use_color() is False
+
+    def test_info_diagnostics_shown_for_passed_checks(self) -> None:
+        """Info diagnostics should be shown even in quiet mode for passed checks."""
+        report = Report(
+            results=(
+                CheckResult(
+                    name="format",
+                    status="passed",
+                    duration_ms=100,
+                    diagnostics=(
+                        Diagnostic(
+                            message="Automatically reformatted 2 files",
+                            severity="info",
+                        ),
+                    ),
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = QuietFormatter(color=False)
+        output = formatter.format(report)
+        assert "Automatically reformatted" in output
+
+    def test_info_diagnostics_with_color(self) -> None:
+        """Info diagnostics should use cyan color in quiet mode."""
+        report = Report(
+            results=(
+                CheckResult(
+                    name="format",
+                    status="passed",
+                    duration_ms=100,
+                    diagnostics=(
+                        Diagnostic(message="Auto-fixed", severity="info"),
+                    ),
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = QuietFormatter(color=True)
+        output = formatter.format(report)
+        assert "\033[36m" in output  # Cyan color code
