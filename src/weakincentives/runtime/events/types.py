@@ -114,10 +114,15 @@ class TokenUsage:
     input_tokens: int | None = None
     output_tokens: int | None = None
     cached_tokens: int | None = None
+    thinking_tokens: int | None = None
 
     @property
     def total_tokens(self) -> int | None:
-        """Return a best-effort total when counts are available."""
+        """Return a best-effort total when counts are available.
+
+        Note: thinking_tokens are part of output_tokens in Claude's billing
+        model, so we don't add them separately to avoid double-counting.
+        """
 
         if self.input_tokens is None and self.output_tokens is None:
             return None

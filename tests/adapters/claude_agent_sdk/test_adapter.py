@@ -706,6 +706,44 @@ class TestClaudeAgentSDKAdapterEvaluate:
         assert usage.input_tokens == 150
         assert usage.output_tokens == 75
 
+    def test_accumulates_thinking_tokens(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Adapter should accumulate thinking_tokens from extended thinking mode."""
+        # Message with thinking tokens (from extended thinking)
+        msg1 = MagicMock()
+        msg1.usage = {"input_tokens": 100, "output_tokens": 200, "thinking_tokens": 50}
+
+        _setup_mock_query(
+            [
+                msg1,
+                MockResultMessage(
+                    result="Done",
+                    usage={
+                        "input_tokens": 50,
+                        "output_tokens": 100,
+                        "thinking_tokens": 25,
+                    },
+                    structured_output=None,
+                ),
+            ]
+        )
+
+        events: list[PromptExecuted] = []
+        session.dispatcher.subscribe(PromptExecuted, lambda e: events.append(e))
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            adapter.evaluate(simple_prompt, session=session)
+
+        assert len(events) == 1
+        usage = events[0].usage
+        assert usage is not None
+        assert usage.input_tokens == 150
+        assert usage.output_tokens == 300
+        assert usage.thinking_tokens == 75
+
 
 class TestAdapterName:
     def test_adapter_name_constant(self) -> None:
@@ -1945,6 +1983,33 @@ class TestMessageContentExtraction:
 
         result = _extract_message_content(message)
         assert result["usage"] == {"input_tokens": 100, "output_tokens": 50}
+
+    def test_extract_message_content_with_thinking_tokens(self) -> None:
+        """Message with thinking_tokens includes thinking token count."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_content,
+        )
+
+        message = MagicMock()
+        message.message = None
+        message.result = None
+        message.structured_output = None
+        message.thinking = None
+        message.usage = {
+            "input_tokens": 100,
+            "output_tokens": 200,
+            "thinking_tokens": 50,
+        }
+
+        result = _extract_message_content(message)
+        assert result["usage"] == {
+            "input_tokens": 100,
+            "output_tokens": 200,
+            "thinking_tokens": 50,
+        }
+        assert result["input_tokens"] == 100
+        assert result["output_tokens"] == 200
+        assert result["thinking_tokens"] == 50
 
     def test_extract_message_content_no_attrs(self) -> None:
         """Message without expected attributes returns empty dict."""

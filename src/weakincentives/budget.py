@@ -120,6 +120,9 @@ class BudgetTracker:
                 cached_tokens=sum(
                     u.cached_tokens or 0 for u in self._per_evaluation.values()
                 ),
+                thinking_tokens=sum(
+                    u.thinking_tokens or 0 for u in self._per_evaluation.values()
+                ),
             )
 
     def check(self) -> None:

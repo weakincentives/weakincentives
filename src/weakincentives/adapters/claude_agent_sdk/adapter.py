@@ -162,10 +162,13 @@ def _extract_message_content(message: Any) -> dict[str, Any]:
     usage = getattr(message, "usage", None)
     if usage:
         result["usage"] = usage if isinstance(usage, dict) else str(usage)
-        # Extract thinking tokens for extended thinking mode
+        # Extract token counts for tracking
         if isinstance(usage, dict):
             result["input_tokens"] = usage.get("input_tokens")
             result["output_tokens"] = usage.get("output_tokens")
+            # Extract thinking tokens for extended thinking mode
+            # Claude API reports this as "thinking_tokens" in the usage dict
+            result["thinking_tokens"] = usage.get("thinking_tokens")
             # Check for cache-related fields
             result["cache_read_input_tokens"] = usage.get("cache_read_input_tokens")
             result["cache_creation_input_tokens"] = usage.get(
@@ -759,6 +762,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 "duration_ms": duration_ms,
                 "input_tokens": usage.input_tokens if usage else None,
                 "output_tokens": usage.output_tokens if usage else None,
+                "thinking_tokens": usage.thinking_tokens if usage else None,
                 "stop_reason": hook_context.stop_reason,
             },
         )
@@ -985,6 +989,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             hook_context.stats.total_input_tokens += content["input_tokens"]
         if content.get("output_tokens"):
             hook_context.stats.total_output_tokens += content["output_tokens"]
+        if content.get("thinking_tokens"):
+            hook_context.stats.total_thinking_tokens += content["thinking_tokens"]
 
         # Update budget tracker if available with cumulative totals
         if hook_context.budget_tracker:
@@ -995,6 +1001,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 TokenUsage(
                     input_tokens=hook_context.stats.total_input_tokens,
                     output_tokens=hook_context.stats.total_output_tokens,
+                    thinking_tokens=hook_context.stats.total_thinking_tokens,
                 ),
             )
 
@@ -1057,6 +1064,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 "continuation_round": continuation_round,
                 "cumulative_input_tokens": hook_context.stats.total_input_tokens,
                 "cumulative_output_tokens": hook_context.stats.total_output_tokens,
+                "cumulative_thinking_tokens": hook_context.stats.total_thinking_tokens,
                 **content,
             },
         )
@@ -1343,6 +1351,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         structured_output: OutputT | None = None
         total_input_tokens = 0
         total_output_tokens = 0
+        total_thinking_tokens = 0
 
         for message in reversed(messages):
             if isinstance(message, ResultMessage):
@@ -1355,11 +1364,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 if isinstance(usage_dict, dict):
                     total_input_tokens += usage_dict.get("input_tokens", 0)
                     total_output_tokens += usage_dict.get("output_tokens", 0)
+                    total_thinking_tokens += usage_dict.get("thinking_tokens", 0)
 
         usage = TokenUsage(
             input_tokens=total_input_tokens or None,
             output_tokens=total_output_tokens or None,
             cached_tokens=None,
+            thinking_tokens=total_thinking_tokens or None,
         )
 
         if budget_tracker and (total_input_tokens or total_output_tokens):

@@ -319,6 +319,39 @@ def test_tracker_handles_none_token_counts() -> None:
     assert consumed.output_tokens == 50
 
 
+def test_tracker_sums_thinking_tokens() -> None:
+    """Tracker should sum thinking_tokens across evaluations."""
+    budget = Budget(max_total_tokens=10000)
+    tracker = BudgetTracker(budget=budget)
+
+    tracker.record_cumulative(
+        "eval-1", TokenUsage(input_tokens=100, output_tokens=200, thinking_tokens=50)
+    )
+    tracker.record_cumulative(
+        "eval-2", TokenUsage(input_tokens=150, output_tokens=250, thinking_tokens=75)
+    )
+
+    consumed = tracker.consumed
+    assert consumed.thinking_tokens == 125  # 50 + 75
+
+
+def test_tracker_handles_none_thinking_tokens() -> None:
+    """Tracker should handle TokenUsage with None thinking_tokens."""
+    budget = Budget(max_total_tokens=1000)
+    tracker = BudgetTracker(budget=budget)
+
+    # Mix of usage with and without thinking tokens
+    tracker.record_cumulative(
+        "eval-1", TokenUsage(input_tokens=100, output_tokens=50, thinking_tokens=25)
+    )
+    tracker.record_cumulative(
+        "eval-2", TokenUsage(input_tokens=100, output_tokens=50, thinking_tokens=None)
+    )
+
+    consumed = tracker.consumed
+    assert consumed.thinking_tokens == 25  # Only the first eval had thinking tokens
+
+
 # BudgetExceededError tests
 
 
