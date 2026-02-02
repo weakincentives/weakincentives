@@ -1201,6 +1201,34 @@ class TestEphemeralHomeMountSkills:
             assert home.skills_dir == home.claude_dir / "skills"
             assert home.skills_dir.is_dir()
 
+    def test_mount_skills_rejects_second_call(self, tmp_path: Path) -> None:
+        """mount_skills() can only be called once per EphemeralHome instance."""
+        skill_dir = tmp_path / "test-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: test-skill\ndescription: A test skill\n---\n\n# Test"
+        )
+
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            # First call succeeds
+            home.mount_skills((SkillMount(source=skill_dir),))
+
+            # Second call raises
+            with pytest.raises(SkillMountError, match="Skills already mounted"):
+                home.mount_skills((SkillMount(source=skill_dir),))
+
+    def test_mount_skills_rejects_second_call_even_with_empty_first(self) -> None:
+        """mount_skills() can only be called once even if first call was empty."""
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            # First call with empty tuple succeeds
+            home.mount_skills(())
+
+            # Second call raises even though first was empty
+            with pytest.raises(SkillMountError, match="Skills already mounted"):
+                home.mount_skills(())
+
 
 class TestIsolationConfigAwsConfigPath:
     """Tests for IsolationConfig with aws_config_path."""

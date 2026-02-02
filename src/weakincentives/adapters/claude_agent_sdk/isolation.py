@@ -54,7 +54,7 @@ from typing import Any, NamedTuple
 from ...dataclasses import FrozenDataclass
 from ...skills import (
     MAX_SKILL_TOTAL_BYTES,
-    SkillConfig,
+    SkillMount,
     SkillMountError,
     SkillNotFoundError,
     resolve_skill_name,
@@ -391,9 +391,6 @@ class IsolationOptions:
     include_host_env: bool = False
     """If True, inherit non-sensitive host environment variables."""
 
-    skills: SkillConfig | None = None
-    """Skills to mount in the isolated environment."""
-
 
 @FrozenDataclass()
 class IsolationConfig:
@@ -447,9 +444,10 @@ class IsolationConfig:
         include_host_env: If True, inherit non-sensitive host env vars.
             Sensitive vars (HOME, CLAUDE_*, ANTHROPIC_*, AWS_*, GOOGLE_*)
             are always excluded.
-        skills: Skills to mount in the hermetic environment. Skills are
-            copied to {ephemeral_home}/.claude/skills/ before spawning
-            Claude Code.
+
+    Note:
+        Skills are attached to prompt sections, not IsolationConfig.
+        See ``specs/SKILLS.md`` for skill attachment patterns.
     """
 
     network_policy: NetworkPolicy | None = None
@@ -458,7 +456,6 @@ class IsolationConfig:
     api_key: str | None = None
     aws_config_path: Path | str | None = None
     include_host_env: bool = False
-    skills: SkillConfig | None = None
 
     @classmethod
     def inherit_host_auth(
@@ -468,7 +465,6 @@ class IsolationConfig:
         sandbox: SandboxConfig | None = None,
         env: Mapping[str, str] | None = None,
         include_host_env: bool = False,
-        skills: SkillConfig | None = None,
     ) -> IsolationConfig:
         """Create config that inherits authentication from the host environment.
 
@@ -480,7 +476,6 @@ class IsolationConfig:
             sandbox: Sandbox configuration.
             env: Additional environment variables.
             include_host_env: If True, inherit non-sensitive host env vars.
-            skills: Skills to mount.
 
         Returns:
             IsolationConfig configured to inherit host authentication.
@@ -503,7 +498,6 @@ class IsolationConfig:
             api_key=None,
             aws_config_path=None,
             include_host_env=include_host_env,
-            skills=skills,
         )
 
     @classmethod
@@ -519,7 +513,7 @@ class IsolationConfig:
 
         Args:
             api_key: Anthropic API key (required).
-            options: Optional isolation options (network, sandbox, env, skills).
+            options: Optional isolation options (network, sandbox, env).
 
         Returns:
             IsolationConfig configured with the explicit API key.
@@ -539,7 +533,6 @@ class IsolationConfig:
             api_key=api_key,
             aws_config_path=None,
             include_host_env=opts.include_host_env,
-            skills=opts.skills,
         )
 
     @classmethod
@@ -550,7 +543,6 @@ class IsolationConfig:
         sandbox: SandboxConfig | None = None,
         env: Mapping[str, str] | None = None,
         include_host_env: bool = False,
-        skills: SkillConfig | None = None,
     ) -> IsolationConfig:
         """Create config that requires Anthropic API key from environment.
 
@@ -562,7 +554,6 @@ class IsolationConfig:
             sandbox: Sandbox configuration.
             env: Additional environment variables.
             include_host_env: If True, inherit non-sensitive host env vars.
-            skills: Skills to mount.
 
         Returns:
             IsolationConfig configured for Anthropic API authentication.
@@ -581,7 +572,6 @@ class IsolationConfig:
             api_key=None,
             aws_config_path=None,
             include_host_env=include_host_env,
-            skills=skills,
         )
 
     @classmethod
@@ -599,7 +589,7 @@ class IsolationConfig:
         Args:
             aws_config_path: Path to AWS config directory. Use this when running
                 in a container where AWS config is mounted at a non-standard path.
-            options: Optional isolation options (network, sandbox, env, skills).
+            options: Optional isolation options (network, sandbox, env).
 
         Returns:
             IsolationConfig configured for Bedrock authentication.
@@ -623,7 +613,6 @@ class IsolationConfig:
             api_key=None,
             aws_config_path=aws_config_path,
             include_host_env=opts.include_host_env,
-            skills=opts.skills,
         )
 
 
@@ -799,9 +788,9 @@ class EphemeralHome:
         )
 
         self._generate_settings()
-        self._mount_skills()
         self._copy_aws_config()
         self._cleaned_up = False
+        self._skills_mounted = False
 
     def _generate_settings(self) -> None:
         """Generate settings.json from IsolationConfig."""
@@ -933,20 +922,41 @@ class EphemeralHome:
             },
         )
 
-    def _mount_skills(self) -> None:
-        """Mount configured skills into the ephemeral home."""
-        skills_config = self._isolation.skills
-        if skills_config is None:
+    def mount_skills(
+        self,
+        skills: tuple[SkillMount, ...],
+        *,
+        validate: bool = True,
+    ) -> None:
+        """Mount skills into the ephemeral home.
+
+        Skills are typically collected from the rendered prompt and passed
+        to this method by the adapter before spawning Claude Code.
+
+        This method can only be called once per EphemeralHome instance.
+
+        Args:
+            skills: Tuple of SkillMount instances from RenderedPrompt.skills.
+            validate: If True, validate skill structure before copying.
+
+        Raises:
+            SkillMountError: If skills have already been mounted, if a skill
+                name is duplicated, or if copy fails.
+            SkillNotFoundError: If a skill source path does not exist.
+            SkillValidationError: If validation is enabled and a skill is invalid.
+        """
+        if self._skills_mounted:
+            raise SkillMountError("Skills already mounted on this ephemeral home")
+        self._skills_mounted = True
+
+        if not skills:
             return
 
         skills_dir = self._claude_dir / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
 
         seen_names: set[str] = set()
-        for mount in skills_config.skills:
-            if not mount.enabled:
-                continue
-
+        for mount in skills:
             name = resolve_skill_name(mount)
             validate_skill_name(name)
 
@@ -960,7 +970,7 @@ class EphemeralHome:
                 msg = f"Skill not found: {mount.source}"
                 raise SkillNotFoundError(msg)
 
-            if skills_config.validate_on_mount:
+            if validate:
                 validate_skill(source)
 
             dest = skills_dir / name
