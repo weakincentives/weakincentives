@@ -418,33 +418,46 @@ def run_feedback_providers(
     1. Check if trigger conditions are met
     2. Check if provider.should_run() returns True
     3. Call provider.provide() to get feedback
-    4. Store feedback in session and return rendered text
 
-    First matching provider wins; subsequent providers are not evaluated.
+    All matching providers are evaluated and their feedback is combined.
+    Each provider's feedback is rendered as a separate block in the output.
 
     Args:
         providers: Sequence of provider configurations to evaluate.
         context: Feedback context with session state.
 
     Returns:
-        Rendered feedback text if a provider triggered, None otherwise.
+        Combined rendered feedback text if any provider triggered, None otherwise.
     """
-    for config in providers:
-        if _should_trigger(config.trigger, context) and config.provider.should_run(
-            context=context
-        ):
-            feedback = config.provider.provide(context=context)
-            # Update call_index and prompt_name for trigger state tracking
-            feedback = replace(
-                feedback,
-                call_index=context.tool_call_count,
-                prompt_name=context.prompt_name,
-            )
-            # Store in session for history and trigger calculations
-            _ = context.session.dispatch(feedback)
-            return feedback.render()
+    # First pass: identify which providers should run based on initial state
+    triggered_configs = [
+        config
+        for config in providers
+        if _should_trigger(config.trigger, context)
+        and config.provider.should_run(context=context)
+    ]
 
-    return None
+    if not triggered_configs:
+        return None
+
+    # Collect feedback from all triggered providers
+    feedback_items: list[Feedback] = []
+    for config in triggered_configs:
+        feedback = config.provider.provide(context=context)
+        # Update call_index and prompt_name for trigger state tracking
+        feedback = replace(
+            feedback,
+            call_index=context.tool_call_count,
+            prompt_name=context.prompt_name,
+        )
+        feedback_items.append(feedback)
+
+    # Store all feedback in session for history and trigger calculations
+    for feedback in feedback_items:
+        _ = context.session.dispatch(feedback)
+
+    # Render all feedback blocks, separated by blank lines
+    return "\n\n".join(feedback.render() for feedback in feedback_items)
 
 
 def collect_feedback(

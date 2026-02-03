@@ -649,7 +649,7 @@ class TestRunFeedbackProviders:
         assert latest.provider_name == "Mock"
         assert latest.call_index == 5  # Updated to current count
 
-    def test_first_matching_provider_wins(self) -> None:
+    def test_all_matching_providers_collected(self) -> None:
         context = self._make_context(tool_calls=5)
         configs = (
             FeedbackProviderConfig(
@@ -666,7 +666,57 @@ class TestRunFeedbackProviders:
 
         assert result is not None
         assert "First" in result
-        assert "Second" not in result
+        assert "Second" in result
+        # Verify both are rendered as separate blocks
+        assert result.count("<feedback provider='Mock'>") == 2
+        assert result.count("</feedback>") == 2
+
+    def test_all_matching_feedback_stored_in_session(self) -> None:
+        context = self._make_context(tool_calls=5)
+        configs = (
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(feedback_summary="First"),
+                trigger=FeedbackTrigger(every_n_calls=3),
+            ),
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(feedback_summary="Second"),
+                trigger=FeedbackTrigger(every_n_calls=3),
+            ),
+        )
+
+        run_feedback_providers(providers=configs, context=context)
+
+        all_feedback = context.session[Feedback].all()
+        assert len(all_feedback) == 2
+        summaries = {fb.summary for fb in all_feedback}
+        assert "First" in summaries
+        assert "Second" in summaries
+
+    def test_only_matching_providers_included(self) -> None:
+        context = self._make_context(tool_calls=5)
+        configs = (
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(feedback_summary="Matches"),
+                trigger=FeedbackTrigger(every_n_calls=3),
+            ),
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(
+                    feedback_summary="Skipped", should_run_return=False
+                ),
+                trigger=FeedbackTrigger(every_n_calls=3),
+            ),
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(feedback_summary="No trigger"),
+                trigger=FeedbackTrigger(every_n_calls=100),  # Won't trigger
+            ),
+        )
+
+        result = run_feedback_providers(providers=configs, context=context)
+
+        assert result is not None
+        assert "Matches" in result
+        assert "Skipped" not in result
+        assert "No trigger" not in result
 
 
 # =============================================================================
