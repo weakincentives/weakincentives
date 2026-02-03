@@ -20,7 +20,7 @@ jobs:
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
-        sync-args: ''
+        sync-args: --frozen
 
     - name: Run checks
       run: make check

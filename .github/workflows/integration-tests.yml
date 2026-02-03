@@ -43,7 +43,7 @@ jobs:
         uses: ./.github/actions/setup-env
         with:
           ref: ${{ steps.pr.outputs.ref }}
-          sync-args: --all-extras
+          sync-args: --all-extras --frozen
 
       - name: Run integration tests
         env:
