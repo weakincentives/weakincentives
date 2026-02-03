@@ -47,7 +47,6 @@ jobs:
         uses: ./.github/actions/setup-env
         with:
           checkout: 'false'
-          ref: ${{ steps.pr.outputs.ref }}
           sync-args: --all-extras --frozen
 
       - name: Run integration tests
