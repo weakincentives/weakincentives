@@ -371,6 +371,37 @@ class FeedbackProvider(Protocol):
 
 
 @FrozenDataclass()
+class FileCreatedTrigger:
+    """Trigger that fires once when a specified file is created.
+
+    Checks filesystem state after each tool call. When the file exists and
+    the trigger has not yet fired, it fires and marks itself as fired.
+    The trigger will not fire again even if the file is deleted and recreated.
+
+    Attributes:
+        filename: Path to watch for creation.
+
+    Example:
+        >>> trigger = FeedbackTrigger(
+        ...     on_file_created=FileCreatedTrigger(filename="AGENTS.md"),
+        ... )
+    """
+
+    filename: str
+
+
+@FrozenDataclass()
+class FileCreatedTriggerState:
+    """Tracks which file creation triggers have fired.
+
+    This dataclass is stored in a session slice to track trigger state
+    across tool invocations. Ensures file creation triggers fire only once.
+    """
+
+    fired_filenames: frozenset[str] = frozenset()
+
+
+@FrozenDataclass()
 class FeedbackTrigger:
     """Conditions that determine when a feedback provider runs.
 
@@ -381,14 +412,21 @@ class FeedbackTrigger:
     Attributes:
         every_n_calls: Run after this many tool calls since last feedback.
         every_n_seconds: Run after this many seconds since last feedback.
+        on_file_created: Run once when specified file is created.
 
     Example:
         >>> # Run every 10 tool calls OR every 60 seconds
         >>> trigger = FeedbackTrigger(every_n_calls=10, every_n_seconds=60)
+        >>>
+        >>> # Run once when AGENTS.md is created
+        >>> trigger = FeedbackTrigger(
+        ...     on_file_created=FileCreatedTrigger(filename="AGENTS.md"),
+        ... )
     """
 
     every_n_calls: int | None = None
     every_n_seconds: float | None = None
+    on_file_created: FileCreatedTrigger | None = None
 
 
 @FrozenDataclass()
@@ -453,7 +491,35 @@ def _should_trigger(
             # early in execution rather than waiting the full interval.
             return True
 
+    # Check file creation condition
+    if trigger.on_file_created is not None:
+        filename = trigger.on_file_created.filename
+        fs = context.filesystem
+        if fs is not None and fs.exists(filename):
+            # Check if trigger has already fired
+            state = context.session[FileCreatedTriggerState].latest()
+            fired: frozenset[str] = state.fired_filenames if state else frozenset[str]()
+            if filename not in fired:
+                return True
+
     return False
+
+
+def _mark_file_trigger_fired(filename: str, context: FeedbackContext) -> None:
+    """Mark a file creation trigger as fired in session state.
+
+    Args:
+        filename: The filename to mark as fired.
+        context: Feedback context with session for state storage.
+    """
+    state = context.session[FileCreatedTriggerState].latest()
+    if state is None:
+        state = FileCreatedTriggerState()
+
+    new_state = FileCreatedTriggerState(
+        fired_filenames=state.fired_filenames | {filename},
+    )
+    context.session[FileCreatedTriggerState].seed(new_state)
 
 
 def run_feedback_providers(
@@ -505,6 +571,11 @@ def run_feedback_providers(
     # Store all feedback in session for history and trigger calculations
     for feedback in feedback_items:
         _ = context.session.dispatch(feedback)
+
+    # Mark file creation triggers as fired (fires only once per file)
+    for config in triggered_configs:
+        if config.trigger.on_file_created is not None:
+            _mark_file_trigger_fired(config.trigger.on_file_created.filename, context)
 
     # Render all feedback blocks, separated by blank lines
     return "\n\n".join(feedback.render() for feedback in feedback_items)
@@ -560,6 +631,8 @@ __all__ = [
     "FeedbackProvider",
     "FeedbackProviderConfig",
     "FeedbackTrigger",
+    "FileCreatedTrigger",
+    "FileCreatedTriggerState",
     "Observation",
     "collect_feedback",
     "run_feedback_providers",

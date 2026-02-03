@@ -123,12 +123,13 @@ class TestAppendFeedbackToResult:
         result: ToolResult[EchoPayload] = ToolResult.ok(
             EchoPayload(value="test"), message="Tool completed"
         )
-        feedback_text = "[Feedback - Test]\n\nStatus update."
+        feedback_text = "<feedback provider='Test'>\nStatus update.\n</feedback>"
 
         updated = _append_feedback_to_result(result, feedback_text)
 
         assert (
-            updated.message == "Tool completed\n\n[Feedback - Test]\n\nStatus update."
+            updated.message
+            == "Tool completed\n\n<feedback provider='Test'>\nStatus update.\n</feedback>"
         )
         assert updated.value == result.value
         assert updated.success == result.success
@@ -146,12 +147,14 @@ class TestAppendFeedbackToResult:
         result: ToolResult[EchoPayload] = ToolResult.ok(
             EchoPayload(value="test"), message=""
         )
-        feedback_text = "[Feedback - Test]\n\nStatus update."
+        feedback_text = "<feedback provider='Test'>\nStatus update.\n</feedback>"
 
         updated = _append_feedback_to_result(result, feedback_text)
 
         # Feedback is delivered even when tool message is empty
-        assert updated.message == "[Feedback - Test]\n\nStatus update."
+        assert (
+            updated.message == "<feedback provider='Test'>\nStatus update.\n</feedback>"
+        )
         assert updated.value == result.value
 
 

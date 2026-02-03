@@ -160,8 +160,46 @@ produce contextual feedback delivered immediately after tool execution.
 |-------|------|-------------|
 | `every_n_calls` | `int \| None` | Run after N tool calls |
 | `every_n_seconds` | `float \| None` | Run after N seconds elapsed |
+| `on_file_created` | `FileCreatedTrigger \| None` | Run once when file created |
 
 Conditions are OR'd together.
+
+### FileCreatedTrigger
+
+Triggers when a specified file is created on the filesystem. Fires exactly once
+per session—after initial detection, subsequent tool calls will not re-trigger
+even if the file is deleted and recreated.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `filename` | `str` | Path to watch for creation |
+
+#### Behavior
+
+1. After tool execution completes, check if `filename` exists
+1. If file exists and trigger has not fired → fire, mark as fired
+1. If file does not exist or trigger already fired → skip
+1. Trigger state persists in session; reset clears it
+
+### StaticFeedbackProvider
+
+A built-in provider that delivers a fixed feedback message. Useful with
+`FileCreatedTrigger` for one-time guidance when specific files are detected.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `feedback` | `str` | Feedback content to deliver |
+
+```python
+config = FeedbackProviderConfig(
+    provider=StaticFeedbackProvider(
+        feedback="AGENTS.md detected. Follow the conventions defined within.",
+    ),
+    trigger=FeedbackTrigger(
+        on_file_created=FileCreatedTrigger(filename="AGENTS.md"),
+    ),
+)
+```
 
 ### FeedbackProviderConfig
 
@@ -280,12 +318,14 @@ via `prompt_name` field.
 
 ```python
 from weakincentives.prompt import (
-    DeadlineFeedback,        # Built-in
+    DeadlineFeedback,        # Built-in provider
     Feedback,                # Dataclass
     FeedbackContext,         # Context
     FeedbackProvider,        # Protocol
     FeedbackProviderConfig,  # Config
     FeedbackTrigger,         # Trigger
+    FileCreatedTrigger,      # File creation trigger
+    StaticFeedbackProvider,  # Built-in provider
     collect_feedback,        # Primary entry point
 )
 ```

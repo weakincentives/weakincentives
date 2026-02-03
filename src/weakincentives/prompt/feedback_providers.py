@@ -181,9 +181,72 @@ class DeadlineFeedback:
 
 
 # ---------------------------------------------------------------------------
+# StaticFeedbackProvider
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StaticFeedbackProvider:
+    """Feedback provider that delivers a fixed message.
+
+    This provider returns a static feedback message configured at construction
+    time. Useful with ``FileCreatedTrigger`` for one-time guidance when specific
+    files are detected.
+
+    Attributes:
+        feedback: The feedback content to deliver.
+
+    Example:
+        >>> from weakincentives.prompt import (
+        ...     FeedbackProviderConfig,
+        ...     FeedbackTrigger,
+        ...     FileCreatedTrigger,
+        ...     StaticFeedbackProvider,
+        ... )
+        >>>
+        >>> config = FeedbackProviderConfig(
+        ...     provider=StaticFeedbackProvider(
+        ...         feedback="AGENTS.md detected. Follow the conventions within.",
+        ...     ),
+        ...     trigger=FeedbackTrigger(
+        ...         on_file_created=FileCreatedTrigger(filename="AGENTS.md"),
+        ...     ),
+        ... )
+    """
+
+    feedback: str
+
+    @property
+    def name(self) -> str:
+        """Return the provider name."""
+        return "Static"
+
+    # PLR6301: Method doesn't use self, but must be instance method per Protocol
+    def should_run(self, *, context: FeedbackContext) -> bool:
+        """Always return True; trigger controls when this provider runs."""
+        return True
+
+    def provide(self, *, context: FeedbackContext) -> Feedback:
+        """Return the configured static feedback message.
+
+        Args:
+            context: Feedback context (not used by this provider).
+
+        Returns:
+            Feedback containing the static message.
+        """
+        return Feedback(
+            provider_name=self.name,
+            summary=self.feedback,
+            severity="info",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 __all__ = [
     "DeadlineFeedback",
+    "StaticFeedbackProvider",
 ]
