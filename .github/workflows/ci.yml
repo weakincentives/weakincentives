@@ -56,7 +56,6 @@ jobs:
 
   # Static analysis - always runs (fast and high value)
   static-analysis:
-    needs: detect-changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -80,7 +79,6 @@ jobs:
 
   # Parallel test jobs - full suite runs on every PR
   test:
-    needs: detect-changes
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
