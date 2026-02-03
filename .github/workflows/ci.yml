@@ -126,6 +126,10 @@ jobs:
 
   # Static analysis - always runs (fast and high value)
   static-analysis:
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.run_all == 'true' ||
+      needs.detect-changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -157,6 +161,9 @@ jobs:
   # Test job - always runs core tests, then targeted or full suite based on changes
   test:
     needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.run_all == 'true' ||
+      needs.detect-changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
