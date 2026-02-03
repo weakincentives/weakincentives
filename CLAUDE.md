@@ -81,7 +81,7 @@ ______________________________________________________________________
 ## Commands
 
 ```bash
-uv sync && ./install-hooks.sh   # Setup
+uv sync && ./install-hooks.sh   # Setup - BOTH STEPS ARE MANDATORY
 
 make format      # Ruff format (88-char lines)
 make lint        # Ruff lint --preview
@@ -89,6 +89,49 @@ make typecheck   # ty + pyright (strict)
 make test        # Pytest, 100% coverage required
 make check       # ALL checks - MANDATORY before any commit
 ```
+
+______________________________________________________________________
+
+## MANDATORY: Git Hooks Installation
+
+**Git hooks MUST be installed in every new development environment.**
+
+```bash
+./install-hooks.sh   # Run this after cloning or in any new environment
+```
+
+### Why This Matters
+
+The pre-commit hook runs `CI=true make check`, which:
+
+1. **Runs the FULL test suite** (not the testmon subset used for local iteration)
+1. **Enforces 100% coverage** on all code paths
+1. **Exactly emulates CI verification** that runs on pull requests
+
+### The Problem Without Hooks
+
+Without hooks, you might:
+
+- Run `make check` locally (uses testmon, runs only affected tests)
+- Commit code that passes local checks
+- **Fail CI** because the full test suite reveals issues testmon skipped
+
+### The Solution
+
+The pre-commit hook automatically runs `CI=true make check` before every
+commit, ensuring:
+
+- ✅ What passes locally **will** pass in CI
+- ✅ No surprises when your PR is reviewed
+- ✅ Coverage gaps are caught immediately
+
+**If hooks aren't installed, install them now:**
+
+```bash
+./install-hooks.sh
+```
+
+______________________________________________________________________
 
 ### Efficient Testing Workflow
 
