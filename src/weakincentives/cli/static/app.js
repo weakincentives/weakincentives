@@ -2842,6 +2842,10 @@ document.addEventListener("keydown", async (e) => {
   }
 
   if (state.zoomOpen) {
+    if (zoomNextPending) {
+      e.preventDefault();
+      return;
+    }
     await handleZoomModalKeys(e);
     return;
   }
