@@ -66,6 +66,7 @@ class ConsoleFormatter:
         "lint": "ruff",
         "typecheck": "ty + pyright",
         "test": "pytest",
+        "bun-test": "bun test",
         "bandit": "bandit",
         "deptry": "deptry",
         "pip-audit": "pip-audit",

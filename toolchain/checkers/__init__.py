@@ -21,6 +21,7 @@ from __future__ import annotations
 from ..checker import Checker, SubprocessChecker
 from ..parsers import (
     parse_bandit,
+    parse_bun_test,
     parse_deptry,
     parse_mdformat,
     parse_pip_audit,
@@ -124,6 +125,26 @@ def create_test_checker() -> SubprocessChecker:
     )
 
 
+def create_bun_test_checker() -> SubprocessChecker:
+    """Create the JavaScript test checker (bun test).
+
+    Uses --coverage for coverage reporting and --only-failures to reduce output noise.
+    The bash wrapper handles the case where bun is not installed by exiting 0.
+    """
+    return SubprocessChecker(
+        name="bun-test",
+        description="Run JavaScript tests with bun",
+        command=[
+            "bash",
+            "-c",
+            'command -v bun >/dev/null 2>&1 || { echo "bun not installed, skipping"; exit 0; }; '
+            "bun test --coverage --only-failures tests/js/",
+        ],
+        parser=parse_bun_test,
+        timeout=120,  # 2 minutes for JS tests
+    )
+
+
 def create_bandit_checker() -> SubprocessChecker:
     """Create the security checker (bandit)."""
     return SubprocessChecker(
@@ -207,6 +228,7 @@ def create_all_checkers() -> list[Checker]:
         create_architecture_checker(),
         create_docs_checker(),
         create_markdown_checker(),
+        create_bun_test_checker(),
         create_test_checker(),
     ]
 
@@ -217,6 +239,7 @@ __all__ = [
     "create_lint_checker",
     "create_typecheck_checker",
     "create_test_checker",
+    "create_bun_test_checker",
     "create_bandit_checker",
     "create_deptry_checker",
     "create_pip_audit_checker",
