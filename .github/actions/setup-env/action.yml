@@ -21,6 +21,14 @@ inputs:
     description: Whether to enable uv caching.
     required: false
     default: 'true'
+  bun-cache:
+    description: Whether to enable Bun cache reuse.
+    required: false
+    default: 'true'
+  biome-cache:
+    description: Whether to enable Biome cache reuse.
+    required: false
+    default: 'true'
 runs:
   using: composite
   steps:
@@ -37,6 +45,26 @@ runs:
     - name: Install dependencies
       shell: bash
       run: uv sync ${{ inputs.sync-args }}
+    - name: Cache Bun downloads
+      if: ${{ inputs.bun-cache == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.bun/install/cache
+          ~/.bun/install/global
+        key: bun-${{ runner.os }}-${{ hashFiles('package-lock.json', 'bunfig.toml') }}
+        restore-keys: |
+          bun-${{ runner.os }}-
+    - name: Cache Biome
+      if: ${{ inputs.biome-cache == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/biome
+          ~/.cache/biomejs
+        key: biome-${{ runner.os }}-${{ hashFiles('biome.json', 'package-lock.json') }}
+        restore-keys: |
+          biome-${{ runner.os }}-
     - name: Install Bun
       uses: oven-sh/setup-bun@v2
       with:
