@@ -2168,6 +2168,7 @@ async function zoomNextWithLoad(startIndex, nextIndex) {
     }
   } finally {
     zoomNextPending = false;
+    updateZoomNavigation();
   }
 }
 
@@ -2699,7 +2700,7 @@ elements.zoomClose.addEventListener("click", closeZoomModal);
 elements.zoomModal.querySelector(".zoom-modal-backdrop").addEventListener("click", closeZoomModal);
 elements.zoomCopy.addEventListener("click", copyZoomEntry);
 elements.zoomPrev.addEventListener("click", zoomPrev);
-elements.zoomNext.addEventListener("click", zoomNext);
+elements.zoomNext.addEventListener("click", async () => await zoomNext());
 
 // Event delegation for zoom buttons in transcript list
 elements.transcriptList.addEventListener("click", (e) => {
