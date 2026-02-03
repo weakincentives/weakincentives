@@ -106,6 +106,8 @@ jobs:
   coverage:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      CI: true  # Ensures make test runs full coverage (vs testmon locally)
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
