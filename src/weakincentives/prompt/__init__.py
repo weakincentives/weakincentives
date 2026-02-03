@@ -269,11 +269,13 @@ from .feedback import (
     FeedbackProvider,
     FeedbackProviderConfig,
     FeedbackTrigger,
+    FileCreatedTrigger,
+    FileCreatedTriggerState,
     Observation,
     collect_feedback,
     run_feedback_providers,
 )
-from .feedback_providers import DeadlineFeedback
+from .feedback_providers import DeadlineFeedback, StaticFeedbackProvider
 from .markdown import MarkdownSection
 from .overrides import (
     LocalPromptOverridesStore,
@@ -328,6 +330,8 @@ __all__ = [
     "FeedbackProvider",
     "FeedbackProviderConfig",
     "FeedbackTrigger",
+    "FileCreatedTrigger",
+    "FileCreatedTriggerState",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "Observation",
@@ -361,6 +365,7 @@ __all__ = [
     "SectionPath",
     "SectionVisibility",
     "SequentialDependencyPolicy",
+    "StaticFeedbackProvider",
     "StructuredOutputConfig",
     "TaskExample",
     "TaskExamplesSection",

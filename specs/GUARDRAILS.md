@@ -177,9 +177,9 @@ even if the file is deleted and recreated.
 #### Behavior
 
 1. After tool execution completes, check if `filename` exists
-2. If file exists and trigger has not fired → fire, mark as fired
-3. If file does not exist or trigger already fired → skip
-4. Trigger state persists in session; reset clears it
+1. If file exists and trigger has not fired → fire, mark as fired
+1. If file does not exist or trigger already fired → skip
+1. Trigger state persists in session; reset clears it
 
 ### StaticFeedbackProvider
 
