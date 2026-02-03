@@ -2,6 +2,304 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+*Commits reviewed: 2026-01-29 (be065a9) through 2026-02-03 (642048e)*
+
+### TL;DR
+
+This release focuses on **developer experience and type safety improvements**.
+**Faster local testing** via pytest-testmon runs only tests affected by your
+changes while CI still enforces 100% coverage. The **Claude Agent SDK adapter**
+now enables **transcript collection by default** and emits **RenderedTools
+events** for better observability of tool schemas during prompt evaluation.
+**Feedback messages** switch to **XML-style tags** (`<feedback>`, `<blocker>`)
+for clearer LLM parsing. **BundleConfig** replaces the simple `debug_bundle_dir`
+path, enabling **external storage handlers** for cloud uploads. The **Session**
+class is **refactored into focused subsystems** (SliceStore, ReducerRegistry,
+SessionSnapshotter) for better maintainability. **Type safety** improves with
+**TypedDict definitions** for all LLM API payloads and a **generic Snapshotable
+protocol**. The **debug web UI** gains **comprehensive JavaScript testing** with
+77 unit tests via Bun. **CI is parallelized** into 6 test groups for faster
+feedback. A new **OpenCode ACP Adapter specification** documents delegating
+execution to OpenCode via the Agent Client Protocol. **Documentation** is
+reorganized with the **quickstart guide rewritten** to use a starter project and
+**guardrails specs consolidated** into a unified document.
+
+---
+
+### Breaking Changes
+
+#### EvalLoopConfig.debug_bundle_dir → debug_bundle
+
+The `debug_bundle_dir: Path | None` field is replaced with `debug_bundle:
+BundleConfig | None`, enabling advanced bundle management features like storage
+handlers and conditional creation.
+
+**Migration:**
+```python
+# Old ❌
+config = EvalLoopConfig(debug_bundle_dir=Path("/bundles"))
+
+# New ✅
+from weakincentives.debug.bundle import BundleConfig
+config = EvalLoopConfig(debug_bundle=BundleConfig(target=Path("/bundles")))
+```
+
+#### Transcript Collection Now Enabled by Default
+
+The Claude Agent SDK adapter now enables transcript collection by default for
+better observability. To restore the previous behavior:
+
+```python
+config = ClaudeAgentSDKClientConfig(transcript_collection=None)
+```
+
+---
+
+### New Features
+
+#### Intelligent Test Selection with pytest-testmon
+
+Local test runs now only execute tests affected by your changes using
+coverage-based selection:
+
+- First run builds `.testmondata` coverage database
+- Subsequent runs skip unaffected tests automatically
+- CI still validates 100% coverage on all tests
+- No configuration required—automatically detected via `CI` environment variable
+
+```bash
+make test      # Local: runs only affected tests
+CI=true make test  # CI: runs full suite with 100% coverage
+```
+
+#### Tool Schema Rendering and Event Correlation
+
+The Claude Agent SDK adapter now emits `RenderedTools` events alongside
+`PromptRendered` events, providing visibility into which tools are available
+for each prompt evaluation:
+
+- Tool schemas (name, description, parameters) extracted and included in events
+- Events correlated via `render_event_id` for tracking
+- Both events share `session_id` and `created_at` for consistency
+
+#### XML-Style Feedback Formatting
+
+Feedback messages now use semantic XML tags for clearer LLM parsing:
+
+```xml
+<feedback provider='DeadlineFeedback'>
+You have 30 seconds remaining.
+</feedback>
+
+<blocker>
+You have 2 incomplete tasks. Please complete them before producing output.
+</blocker>
+```
+
+The `<blocker>` tag explicitly marks blocking issues for agent comprehension.
+
+#### External Storage Handler for Bundles
+
+Upload bundles to external storage (S3, GCS, etc.) after creation:
+
+```python
+config = EvalLoopConfig(
+    debug_bundle=BundleConfig(
+        target=Path("/bundles"),
+        storage_handler=S3StorageHandler(bucket="my-bucket"),
+        enabled=True,
+    )
+)
+```
+
+Storage handler failures are logged but don't fail evaluations.
+
+#### OpenCode ACP Adapter Specification
+
+New specification (`specs/OPENCODE_ACP_ADAPTER.md`) documents `OpenCodeACPAdapter`
+for delegating agentic execution to OpenCode via the Agent Client Protocol while
+retaining WINK's prompt composition and session telemetry. Features:
+
+- MCP server bridging via Claude Agent SDK infrastructure
+- Structured output via dedicated MCP tool (no text parsing)
+- Workspace isolation with file boundary enforcement
+- Session persistence and reuse with validation
+
+---
+
+### Improvements
+
+#### Generic Snapshotable Protocol
+
+The `Snapshotable` protocol now accepts a type parameter for better type safety:
+
+```python
+# Before
+class MyResource(Snapshotable):
+    def snapshot(self, *, tag: str | None = None) -> Any: ...
+    def restore(self, snapshot: Any) -> None: ...
+
+# After
+class MyResource(Snapshotable[MySnapshot]):
+    def snapshot(self, *, tag: str | None = None) -> MySnapshot: ...
+    def restore(self, snapshot: MySnapshot) -> None: ...
+```
+
+#### TypedDict Definitions for LLM API Payloads
+
+New `_api_types.py` module provides type-safe definitions for all LLM provider
+payloads, replacing generic `dict[str, Any]` annotations:
+
+- `MessageDict`, `AssistantMessageDict`, `ToolMessageDict` for messages
+- `ToolSpecDict`, `FunctionSpecDict` for tool specifications
+- `LLMRequestParams` for generation parameters
+- `ProviderPayload`, `ToolArguments` for decoded payloads
+
+Enables static type checking and IDE autocompletion across all adapters.
+
+#### Session Refactored into Specialized Subsystems
+
+Session's internal state management extracted into three focused components:
+
+- **SliceStore**: Manages slice storage and policy-based factory selection
+- **ReducerRegistry**: Routes events to registered reducers
+- **SessionSnapshotter**: Handles snapshot creation and restoration
+
+Session remains a thin facade coordinating these subsystems. No public API
+changes; internal structure is cleaner and more testable.
+
+#### Type Safety in Serialization
+
+Replaced blanket pyright suppression in `serde/dump.py` with explicit `cast()`
+calls, improving code clarity without changing behavior.
+
+---
+
+### Documentation
+
+#### Quickstart Guide Redesigned
+
+The quickstart guide now prioritizes hands-on learning:
+
+- Clone the [WINK starter project](https://github.com/weakincentives/starter)
+- Run a working agent immediately with `make` commands
+- Learn concepts through a concrete "secret trivia game" example
+- Added development workflow commands and `wink` CLI debugging
+- Preserved pip installation as alternative for starting from scratch
+
+#### CLAUDE.md Enhanced with Architectural Guidance
+
+Added comprehensive "Core Philosophy" and "Guiding Principles" sections:
+
+- **The prompt is the agent**: Prompts bundle instructions and tools together
+- **Event-driven state**: Immutable state via pure reducers
+- **Definition vs Harness**: Clear boundary between agent definition and runtime
+- **Policies over Workflows**: Declarative constraints over prescriptive steps
+- **Transactional Tools**: Atomic tool calls with automatic rollback
+- Added Key Specs reference table for design documents
+
+#### Guardrails Specification Consolidated
+
+Three separate specs (FEEDBACK_PROVIDERS.md, TASK_COMPLETION.md, tool policies
+from TOOLS.md) merged into unified `specs/GUARDRAILS.md`:
+
+- Tool policies: Gate tool invocations (hard block)
+- Feedback providers: Soft guidance over time (advisory)
+- Task completion: Verify goals before stopping
+
+---
+
+### CI / Infrastructure
+
+#### Parallelized Test Execution
+
+Tests now run in 6 parallel groups for faster CI feedback:
+
+- `test-group-1`: Adapters (~220 tests)
+- `test-group-2`: CLI + Contrib (~150 tests)
+- `test-group-3`: Evals + Serde (~280 tests)
+- `test-group-4`: Prompt + Prompts (~400 tests)
+- `test-group-5`: Runtime (~290 tests)
+- `test-group-6`: Tools + Root (~540 tests)
+
+Coverage combined after all groups complete with unified 100% enforcement.
+New `make test-parallel` target for local testing that mirrors CI behavior.
+
+#### Simplified Change Detection
+
+Removed 12 module-specific change detection outputs. Heavy tests (formal
+verification, property tests) now gated by single `run_heavy_tests` flag.
+Standard tests run on every PR for consistent coverage.
+
+#### JavaScript Testing Infrastructure
+
+Added Bun test runner for debug web UI with 77 unit tests:
+
+- Extracted 12 pure utility functions to `lib.js` for testability
+- 100% coverage requirement for pure functions
+- Integrated with `make test` and `make check` targets
+- Biome cognitive complexity threshold lowered to 8
+
+#### Shared CI Setup Action
+
+New `.github/actions/setup-env` composite action centralizes:
+
+- Python installation via uv
+- Dependency synchronization with frozen resolution
+- Bun and Biome caching for faster runs
+
+#### Skip CI for Docs-Only Changes
+
+Static analysis and test jobs now skip for documentation-only PRs while
+`docs-check` provides feedback path.
+
+---
+
+### Dependencies
+
+#### Major Updates
+
+| Package | Old | New | Notes |
+|---------|-----|-----|-------|
+| redis | 5.0.0 | 7.1.0 | Major version bump |
+| fastapi | 0.115.0 | 0.128.0 | 13 minor versions |
+| uvicorn | 0.30.0 | 0.40.0 | 10 minor versions |
+| openai | 2.8.0 | 2.16.0 | 8 minor versions |
+| claude-agent-sdk | 0.1.15 | 0.1.27 | 12 patch releases |
+| pip | 25.3 | 26.0 | Major version bump |
+
+#### Other Updates
+
+- litellm: 1.79.3 → 1.81.6
+- pyjwt: 2.10.1 → 2.11.0
+- tqdm: 4.67.1 → 4.67.2
+- pyyaml: 6.0.0 → 6.0.3
+- asteval: 1.0.7 → 1.0.8
+- podman: 5.6.0 → 5.7.0
+- pytest-testmon: Added (≥2.1.0)
+- Development tools: ruff, pyright, pytest, hypothesis, bandit, pip-audit updated
+
+---
+
+### Internal
+
+#### Test Infrastructure Improvements
+
+- Consolidated mock exception classes into `tests/adapters/claude_agent_sdk/error_mocks.py`
+- Centralized CLI test helpers (FakeLogger, FakeContextManager) into `tests/cli/helpers.py`
+- Enhanced `tests/helpers/__init__.py` with comprehensive documentation
+- Refactored `wink query` tests into focused modules (helpers, database, CLI)
+
+#### Bug Fixes
+
+- JavaScript tests now properly executed in CI test job (Bun was only installed
+  in static-analysis job)
+- Improved test coverage for git remote credential redaction
+
+---
+
 ## v0.24.0 — 2026-01-30
 
 *Commits reviewed: 2026-01-25 (e5a00a4) through 2026-01-29 (a1c5996)*
