@@ -203,6 +203,14 @@ class FeedbackContext:
             fb for fb in self.session[Feedback].all() if fb.prompt_name == prompt_name
         )
 
+    def _feedback_for_provider(self, provider_name: str) -> Sequence[Feedback]:
+        """Return all feedback for a specific provider on the current prompt."""
+        return tuple(
+            fb
+            for fb in self._feedback_for_prompt()
+            if fb.provider_name == provider_name
+        )
+
     @property
     def last_feedback(self) -> Feedback | None:
         """Return the most recent feedback for the current prompt.
@@ -211,6 +219,21 @@ class FeedbackContext:
         behave consistently when sessions are reused across prompts.
         """
         feedback_list = self._feedback_for_prompt()
+        return feedback_list[-1] if feedback_list else None
+
+    def last_feedback_for_provider(self, provider_name: str) -> Feedback | None:
+        """Return the most recent feedback for a specific provider.
+
+        Used for provider-scoped trigger calculations to ensure each provider
+        maintains independent trigger cadences.
+
+        Args:
+            provider_name: The name of the provider to filter by.
+
+        Returns:
+            The most recent feedback from this provider, or None if none exists.
+        """
+        feedback_list = self._feedback_for_provider(provider_name)
         return feedback_list[-1] if feedback_list else None
 
     def _tool_calls_for_prompt(self) -> Sequence[ToolInvoked]:
@@ -240,6 +263,24 @@ class FeedbackContext:
         for the current prompt.
         """
         last = self.last_feedback
+        if last is None:
+            return self.tool_call_count
+        return self.tool_call_count - last.call_index
+
+    def tool_calls_since_last_feedback_for_provider(self, provider_name: str) -> int:
+        """Return the number of tool calls since the last feedback from a provider.
+
+        Used for provider-scoped trigger calculations to ensure each provider
+        maintains independent trigger cadences.
+
+        Args:
+            provider_name: The name of the provider to filter by.
+
+        Returns:
+            Number of tool calls since this provider's last feedback, or total
+            tool call count if this provider has not produced feedback yet.
+        """
+        last = self.last_feedback_for_provider(provider_name)
         if last is None:
             return self.tool_call_count
         return self.tool_call_count - last.call_index
@@ -374,34 +415,42 @@ class FeedbackProviderConfig:
 # ---------------------------------------------------------------------------
 
 
-def _should_trigger(trigger: FeedbackTrigger, context: FeedbackContext) -> bool:
-    """Check if trigger conditions are met.
+def _should_trigger(
+    trigger: FeedbackTrigger, context: FeedbackContext, provider_name: str
+) -> bool:
+    """Check if trigger conditions are met for a specific provider.
+
+    Trigger state is tracked per-provider to ensure each provider maintains
+    independent trigger cadences. This prevents providers from interfering
+    with each other's timing when multiple providers run simultaneously.
 
     Args:
         trigger: The trigger configuration to check.
         context: Feedback context with state for evaluation.
+        provider_name: Name of the provider for scoped trigger calculations.
 
     Returns:
         True if any trigger condition is met, False otherwise.
     """
-    # Check call count condition
+    # Check call count condition (provider-scoped)
     if (
         trigger.every_n_calls is not None
-        and context.tool_calls_since_last_feedback() >= trigger.every_n_calls
+        and context.tool_calls_since_last_feedback_for_provider(provider_name)
+        >= trigger.every_n_calls
     ):
         return True
 
-    # Check time-based condition
+    # Check time-based condition (provider-scoped)
     if trigger.every_n_seconds is not None:
-        last = context.last_feedback
+        last = context.last_feedback_for_provider(provider_name)
         if last is not None:
             elapsed = (_utcnow() - last.timestamp).total_seconds()
             if elapsed >= trigger.every_n_seconds:
                 return True
         else:
-            # No previous feedback exists - trigger on first opportunity.
-            # This ensures time-based providers fire at least once early in execution
-            # rather than waiting the full interval from an undefined start time.
+            # No previous feedback exists for this provider - trigger on first
+            # opportunity. This ensures time-based providers fire at least once
+            # early in execution rather than waiting the full interval.
             return True
 
     return False
@@ -418,33 +467,47 @@ def run_feedback_providers(
     1. Check if trigger conditions are met
     2. Check if provider.should_run() returns True
     3. Call provider.provide() to get feedback
-    4. Store feedback in session and return rendered text
 
-    First matching provider wins; subsequent providers are not evaluated.
+    All matching providers are evaluated and their feedback is combined.
+    Each provider's feedback is rendered as a separate block in the output.
 
     Args:
         providers: Sequence of provider configurations to evaluate.
         context: Feedback context with session state.
 
     Returns:
-        Rendered feedback text if a provider triggered, None otherwise.
+        Combined rendered feedback text if any provider triggered, None otherwise.
     """
-    for config in providers:
-        if _should_trigger(config.trigger, context) and config.provider.should_run(
-            context=context
-        ):
-            feedback = config.provider.provide(context=context)
-            # Update call_index and prompt_name for trigger state tracking
-            feedback = replace(
-                feedback,
-                call_index=context.tool_call_count,
-                prompt_name=context.prompt_name,
-            )
-            # Store in session for history and trigger calculations
-            _ = context.session.dispatch(feedback)
-            return feedback.render()
+    # First pass: identify which providers should run based on initial state
+    # Each provider's trigger is evaluated against its own feedback history
+    triggered_configs = [
+        config
+        for config in providers
+        if _should_trigger(config.trigger, context, config.provider.name)
+        and config.provider.should_run(context=context)
+    ]
 
-    return None
+    if not triggered_configs:
+        return None
+
+    # Collect feedback from all triggered providers
+    feedback_items: list[Feedback] = []
+    for config in triggered_configs:
+        feedback = config.provider.provide(context=context)
+        # Update call_index and prompt_name for trigger state tracking
+        feedback = replace(
+            feedback,
+            call_index=context.tool_call_count,
+            prompt_name=context.prompt_name,
+        )
+        feedback_items.append(feedback)
+
+    # Store all feedback in session for history and trigger calculations
+    for feedback in feedback_items:
+        _ = context.session.dispatch(feedback)
+
+    # Render all feedback blocks, separated by blank lines
+    return "\n\n".join(feedback.render() for feedback in feedback_items)
 
 
 def collect_feedback(

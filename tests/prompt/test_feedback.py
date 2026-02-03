@@ -82,10 +82,11 @@ class MockFeedbackProvider:
 
     should_run_return: bool = True
     feedback_summary: str = "Mock feedback"
+    provider_name: str = "Mock"
 
     @property
     def name(self) -> str:
-        return "Mock"
+        return self.provider_name
 
     def should_run(self, *, context: FeedbackContext) -> bool:
         return self.should_run_return
@@ -340,6 +341,80 @@ class TestFeedbackContext:
         # 5 total - 3 at last feedback = 2 since
         assert context.tool_calls_since_last_feedback() == 2
 
+    def test_last_feedback_for_provider_returns_none_when_no_feedback(self) -> None:
+        session = make_session()
+        prompt = make_prompt()
+        context = FeedbackContext(session=session, prompt=prompt)
+
+        assert context.last_feedback_for_provider("A") is None
+
+    def test_last_feedback_for_provider_filters_by_provider(self) -> None:
+        session = make_session()
+        prompt = make_prompt()
+
+        session[Feedback].append(
+            Feedback(provider_name="A", summary="From A", prompt_name="test")
+        )
+        session[Feedback].append(
+            Feedback(provider_name="B", summary="From B", prompt_name="test")
+        )
+        session[Feedback].append(
+            Feedback(provider_name="A", summary="From A again", prompt_name="test")
+        )
+
+        context = FeedbackContext(session=session, prompt=prompt)
+
+        # Should get the most recent from provider A
+        last_a = context.last_feedback_for_provider("A")
+        assert last_a is not None
+        assert last_a.summary == "From A again"
+
+        # Should get the only one from provider B
+        last_b = context.last_feedback_for_provider("B")
+        assert last_b is not None
+        assert last_b.summary == "From B"
+
+        # Provider C has no feedback
+        assert context.last_feedback_for_provider("C") is None
+
+    def test_tool_calls_since_last_feedback_for_provider_all_when_none(self) -> None:
+        session = make_session()
+        prompt = make_prompt()
+
+        for i in range(5):
+            session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
+
+        context = FeedbackContext(session=session, prompt=prompt)
+
+        # No feedback from any provider, so all tool calls count
+        assert context.tool_calls_since_last_feedback_for_provider("A") == 5
+
+    def test_tool_calls_since_last_feedback_for_provider_independent(self) -> None:
+        session = make_session()
+        prompt = make_prompt()
+
+        # 3 tool calls
+        for i in range(3):
+            session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
+
+        # Provider A gives feedback at call 3
+        session[Feedback].append(
+            Feedback(
+                provider_name="A", summary="From A", call_index=3, prompt_name="test"
+            )
+        )
+
+        # 2 more tool calls
+        for i in range(2):
+            session.dispatcher.dispatch(make_tool_invoked(f"more_{i}"))
+
+        context = FeedbackContext(session=session, prompt=prompt)
+
+        # Provider A: 5 total - 3 at last feedback = 2 since
+        assert context.tool_calls_since_last_feedback_for_provider("A") == 2
+        # Provider B: no feedback, so all 5 tool calls count
+        assert context.tool_calls_since_last_feedback_for_provider("B") == 5
+
     def test_recent_tool_calls_returns_last_n(self) -> None:
         session = make_session()
         prompt = make_prompt()
@@ -502,32 +577,32 @@ class TestShouldTrigger:
         trigger = FeedbackTrigger()
         context = self._make_context(tool_calls=10)
 
-        assert _should_trigger(trigger, context) is False
+        assert _should_trigger(trigger, context, "A") is False
 
     def test_call_count_trigger_fires_when_threshold_met(self) -> None:
         trigger = FeedbackTrigger(every_n_calls=5)
         context = self._make_context(tool_calls=5)
 
-        assert _should_trigger(trigger, context) is True
+        assert _should_trigger(trigger, context, "A") is True
 
     def test_call_count_trigger_does_not_fire_below_threshold(self) -> None:
         trigger = FeedbackTrigger(every_n_calls=5)
         context = self._make_context(tool_calls=3)
 
-        assert _should_trigger(trigger, context) is False
+        assert _should_trigger(trigger, context, "A") is False
 
     def test_call_count_trigger_counts_since_last_feedback(self) -> None:
         trigger = FeedbackTrigger(every_n_calls=3)
         # 5 total, last at 3, so only 2 since
         context = self._make_context(tool_calls=5, last_feedback_call_index=3)
 
-        assert _should_trigger(trigger, context) is False
+        assert _should_trigger(trigger, context, "A") is False
 
     def test_time_trigger_fires_when_no_previous_feedback(self) -> None:
         trigger = FeedbackTrigger(every_n_seconds=30)
         context = self._make_context(tool_calls=1)
 
-        assert _should_trigger(trigger, context) is True
+        assert _should_trigger(trigger, context, "A") is True
 
     def test_time_trigger_fires_when_time_elapsed(self) -> None:
         trigger = FeedbackTrigger(every_n_seconds=30)
@@ -538,7 +613,7 @@ class TestShouldTrigger:
             last_feedback_timestamp=old_time,
         )
 
-        assert _should_trigger(trigger, context) is True
+        assert _should_trigger(trigger, context, "A") is True
 
     def test_time_trigger_does_not_fire_when_too_recent(self) -> None:
         trigger = FeedbackTrigger(every_n_seconds=30)
@@ -549,7 +624,7 @@ class TestShouldTrigger:
             last_feedback_timestamp=recent_time,
         )
 
-        assert _should_trigger(trigger, context) is False
+        assert _should_trigger(trigger, context, "A") is False
 
     def test_or_logic_fires_on_call_count_when_time_not_met(self) -> None:
         trigger = FeedbackTrigger(every_n_calls=3, every_n_seconds=300)
@@ -561,7 +636,7 @@ class TestShouldTrigger:
         )
         # 5 - 1 = 4 calls since last >= 3 threshold
 
-        assert _should_trigger(trigger, context) is True
+        assert _should_trigger(trigger, context, "A") is True
 
     def test_or_logic_fires_on_time_when_calls_not_met(self) -> None:
         trigger = FeedbackTrigger(every_n_calls=10, every_n_seconds=30)
@@ -573,7 +648,18 @@ class TestShouldTrigger:
         )
         # Only 1 call since, but time elapsed
 
-        assert _should_trigger(trigger, context) is True
+        assert _should_trigger(trigger, context, "A") is True
+
+    def test_trigger_scoped_to_provider(self) -> None:
+        """Trigger state is independent per provider."""
+        trigger = FeedbackTrigger(every_n_calls=3)
+        # Feedback from provider "A" at call 3
+        context = self._make_context(tool_calls=5, last_feedback_call_index=3)
+
+        # Provider "A" should NOT trigger (5 - 3 = 2 calls since)
+        assert _should_trigger(trigger, context, "A") is False
+        # Provider "B" should trigger (no feedback from B, so 5 calls since start)
+        assert _should_trigger(trigger, context, "B") is True
 
 
 # =============================================================================
@@ -649,7 +735,7 @@ class TestRunFeedbackProviders:
         assert latest.provider_name == "Mock"
         assert latest.call_index == 5  # Updated to current count
 
-    def test_first_matching_provider_wins(self) -> None:
+    def test_all_matching_providers_collected(self) -> None:
         context = self._make_context(tool_calls=5)
         configs = (
             FeedbackProviderConfig(
@@ -666,7 +752,116 @@ class TestRunFeedbackProviders:
 
         assert result is not None
         assert "First" in result
-        assert "Second" not in result
+        assert "Second" in result
+        # Verify both are rendered as separate blocks
+        assert result.count("<feedback provider='Mock'>") == 2
+        assert result.count("</feedback>") == 2
+
+    def test_all_matching_feedback_stored_in_session(self) -> None:
+        context = self._make_context(tool_calls=5)
+        configs = (
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(feedback_summary="First"),
+                trigger=FeedbackTrigger(every_n_calls=3),
+            ),
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(feedback_summary="Second"),
+                trigger=FeedbackTrigger(every_n_calls=3),
+            ),
+        )
+
+        run_feedback_providers(providers=configs, context=context)
+
+        all_feedback = context.session[Feedback].all()
+        assert len(all_feedback) == 2
+        summaries = {fb.summary for fb in all_feedback}
+        assert "First" in summaries
+        assert "Second" in summaries
+
+    def test_only_matching_providers_included(self) -> None:
+        context = self._make_context(tool_calls=5)
+        configs = (
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(feedback_summary="Matches"),
+                trigger=FeedbackTrigger(every_n_calls=3),
+            ),
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(
+                    feedback_summary="Skipped", should_run_return=False
+                ),
+                trigger=FeedbackTrigger(every_n_calls=3),
+            ),
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(feedback_summary="No trigger"),
+                trigger=FeedbackTrigger(every_n_calls=100),  # Won't trigger
+            ),
+        )
+
+        result = run_feedback_providers(providers=configs, context=context)
+
+        assert result is not None
+        assert "Matches" in result
+        assert "Skipped" not in result
+        assert "No trigger" not in result
+
+    def test_providers_maintain_independent_trigger_cadences(self) -> None:
+        """Each provider tracks its own feedback history for triggers."""
+        session = make_session()
+        prompt = make_prompt()
+
+        # Provider A triggers every 3 calls, Provider B triggers every 5 calls
+        configs = (
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(
+                    provider_name="ProviderA", feedback_summary="From A"
+                ),
+                trigger=FeedbackTrigger(every_n_calls=3),
+            ),
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(
+                    provider_name="ProviderB", feedback_summary="From B"
+                ),
+                trigger=FeedbackTrigger(every_n_calls=5),
+            ),
+        )
+
+        # Simulate tool calls and run feedback collection
+        def run_at_call_count(n: int) -> str | None:
+            # Add tool calls to reach count n
+            while len(session[ToolInvoked].all()) < n:
+                session.dispatcher.dispatch(make_tool_invoked("tool"))
+            context = FeedbackContext(session=session, prompt=prompt)
+            return run_feedback_providers(providers=configs, context=context)
+
+        # At call 3: A triggers (3 calls since start), B doesn't (only 3, needs 5)
+        result = run_at_call_count(3)
+        assert result is not None
+        assert "From A" in result
+        assert "From B" not in result
+
+        # At call 5: B triggers (5 calls since start), A doesn't (only 2 since last)
+        result = run_at_call_count(5)
+        assert result is not None
+        assert "From A" not in result
+        assert "From B" in result
+
+        # At call 6: A triggers (3 calls since last at 3), B doesn't (1 since last)
+        result = run_at_call_count(6)
+        assert result is not None
+        assert "From A" in result
+        assert "From B" not in result
+
+        # At call 9: A triggers (3 calls since last at 6), B doesn't (4 since last)
+        result = run_at_call_count(9)
+        assert result is not None
+        assert "From A" in result
+        assert "From B" not in result
+
+        # At call 10: B triggers (5 calls since last at 5), A doesn't (1 since last)
+        result = run_at_call_count(10)
+        assert result is not None
+        assert "From A" not in result
+        assert "From B" in result
 
 
 # =============================================================================
