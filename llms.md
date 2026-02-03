@@ -1025,9 +1025,8 @@ Read before modifying related code:
 | --------------------------- | ---------------------------------------- |
 | `specs/PROMPTS.md` | Prompt system, composition, overrides |
 | `specs/SESSIONS.md` | Session lifecycle, events, budgets |
-| `specs/TOOLS.md` | Tool registration, planning tools, policies |
-| `specs/FEEDBACK_PROVIDERS.md` | Trajectory feedback, stall detection |
-| `specs/TASK_COMPLETION.md` | Task completion verification |
+| `specs/TOOLS.md` | Tool registration, planning tools |
+| `specs/GUARDRAILS.md` | Tool policies, feedback providers, task completion |
 | `specs/ADAPTERS.md` | Provider adapters, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval |

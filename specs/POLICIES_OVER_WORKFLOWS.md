@@ -64,12 +64,14 @@ Expose reasoning. Denial feedback enables self-correction.
 
 ## Policies in WINK
 
-| Mechanism | Description | Spec |
-|-----------|-------------|------|
-| Tool Policies | Gate tool invocations | `TOOLS.md` |
-| Feedback Providers | Soft guidance over time | `FEEDBACK_PROVIDERS.md` |
-| Budget Constraints | Resource limits | `SESSIONS.md` |
-| Task Completion | Goal verification | `TASK_COMPLETION.md` |
+| Mechanism | Description |
+|-----------|-------------|
+| Tool Policies | Gate tool invocations |
+| Feedback Providers | Soft guidance over time |
+| Budget Constraints | Resource limits |
+| Task Completion | Goal verification |
+
+**Full specification:** `GUARDRAILS.md`
 
 ## Anti-Patterns
 
