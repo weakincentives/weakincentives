@@ -636,9 +636,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                         },
                     )
                     feedback_message = (
-                        f"Tasks incomplete: {result.feedback}. "
-                        "Please complete the remaining tasks, then call "
-                        "StructuredOutput again with your final output."
+                        result.feedback or "<blocker>Tasks are incomplete.</blocker>"
                     )
                     return {
                         "continue_": True,
