@@ -194,7 +194,8 @@ Read before modifying related code:
 |------|-------|
 | `PROMPTS.md` | Prompt system, sections, composition |
 | `SESSIONS.md` | Session lifecycle, events, budgets |
-| `TOOLS.md` | Tool registration, policies |
+| `TOOLS.md` | Tool registration, planning tools |
+| `GUARDRAILS.md` | Tool policies, feedback providers, task completion |
 | `ADAPTERS.md` | Provider adapters, throttling |
 | `CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
 | `OPENCODE_ACP_ADAPTER.md` | OpenCode ACP adapter, workspace |
