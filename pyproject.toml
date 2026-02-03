@@ -40,30 +40,30 @@ Repository = "https://github.com/weakincentives/weakincentives"
 
 [project.optional-dependencies]
 skills = [
-    "pyyaml>=6.0.0",
+    "pyyaml>=6.0.3",
 ]
 asteval = [
-    "asteval>=1.0.7",
+    "asteval>=1.0.8",
 ]
 openai = [
-    "openai>=2.8.0",
+    "openai>=2.16.0",
 ]
 litellm = [
-    "litellm>=1.79.3",
+    "litellm>=1.81.6",
 ]
 podman = [
-    "podman>=5.6.0",
+    "podman>=5.7.0",
 ]
 redis = [
-    "redis>=5.0.0",
+    "redis>=7.1.0",
 ]
 claude-agent-sdk = [
-    "claude-agent-sdk>=0.1.15",
+    "claude-agent-sdk>=0.1.27",
 ]
 wink = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.128.0",
     "markdown-it-py[linkify]>=4.0.0",
-    "uvicorn>=0.30.0",
+    "uvicorn>=0.40.0",
 ]
 
 [project.scripts]
@@ -93,19 +93,19 @@ path = "hatch_build.py"
 [dependency-groups]
 dev = [
     "weakincentives[skills]",
-    "bandit>=1.8.6",
+    "bandit>=1.9.3",
     "deptry>=0.24.0",
-    "pytest>=9.0.1",
+    "pytest>=9.0.2",
     "pytest-timeout>=2.4.0",
     "pytest-cov>=7.0.0",
     "pytest-randomly>=4.0.1",
     "pytest-rerunfailures>=16.1",
-    "pip-audit>=2.9.0",
-    "ruff>=0.14.5",
-    "pyright>=1.1.407",
+    "pip-audit>=2.10.0",
+    "ruff>=0.14.14",
+    "pyright>=1.1.408",
     "ty==0.0.1a35",
     "mdformat>=1.0.0",
-    "hypothesis>=6.100.0",
+    "hypothesis>=6.151.4",
     "vulture>=2.14",
 ]
 
