@@ -90,6 +90,17 @@ make test        # Pytest, 100% coverage required
 make check       # ALL checks - MANDATORY before any commit
 ```
 
+### Efficient Testing Workflow
+
+`make check` and `make test` automatically detect local vs CI execution:
+
+- **In CI:** Full test suite with 100% coverage enforcement
+- **Locally:** Only tests affected by changes (uses testmon coverage database)
+
+The first local run builds a coverage database (`.testmondata`). Subsequent
+runs use this database to identify which tests cover changed code and skip the rest.
+This dramatically reduces iteration time when working on focused changes.
+
 ## Architecture
 
 ```

@@ -86,9 +86,15 @@ typecheck:
 # Testing
 # =============================================================================
 
-# Run tests with coverage (100% minimum) and 10s per-test timeout
+# Run tests. In CI: full coverage (100% required). Locally: only tests affected by changes.
+# Local mode uses testmon coverage database for fast iteration. First run builds the
+# database, subsequent runs skip tests unaffected by changes.
 test: bun-test
-	@uv run --all-extras python check.py -q test
+	@if [ -n "$$CI" ]; then \
+		uv run --all-extras python check.py -q test; \
+	else \
+		uv run --all-extras pytest --testmon --no-cov --strict-config --strict-markers --timeout=10 --timeout-method=thread --tb=short tests; \
+	fi
 
 # Run integration tests (tests skip automatically when API keys are not set)
 integration-tests:
@@ -237,6 +243,7 @@ demo-claude-agent:
 # =============================================================================
 
 # Run all checks (format, lint, typecheck, security, dependencies, architecture, docs, tests)
+# In CI: full test coverage required. Locally: only tests affected by changes (via testmon).
 check: format-check lint typecheck bandit deptry pip-audit markdown-check biome bun-test test
 	@uv run --all-extras python check.py -q architecture docs
 

@@ -107,6 +107,7 @@ dev = [
     "mdformat>=1.0.0",
     "hypothesis>=6.100.0",
     "vulture>=2.14",
+    "pytest-testmon>=2.1.0",
 ]
 
 [tool.ruff]
