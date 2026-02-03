@@ -1,8 +1,9 @@
 #!/bin/sh
-# Pre-commit hook to run make check
+# Pre-commit hook to run full CI checks
+# Uses CI=true to ensure full test suite runs (not testmon subset)
 
-echo "Running make check..."
-make check
+echo "Running CI=true make check..."
+CI=true make check
 
 if [ $? -ne 0 ]; then
     echo "❌ make check failed. Commit aborted."
