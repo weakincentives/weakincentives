@@ -120,13 +120,18 @@ class TokenUsage:
     def total_tokens(self) -> int | None:
         """Return a best-effort total when counts are available.
 
-        Note: thinking_tokens are part of output_tokens in Claude's billing
-        model, so we don't add them separately to avoid double-counting.
+        When extended thinking is enabled, thinking_tokens is reported
+        separately from output_tokens, so both must be summed for accurate
+        total token accounting.
         """
 
         if self.input_tokens is None and self.output_tokens is None:
             return None
-        return (self.input_tokens or 0) + (self.output_tokens or 0)
+        return (
+            (self.input_tokens or 0)
+            + (self.output_tokens or 0)
+            + (self.thinking_tokens or 0)
+        )
 
 
 @FrozenDataclass()

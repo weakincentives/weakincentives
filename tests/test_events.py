@@ -282,9 +282,9 @@ def test_token_usage_thinking_tokens_field() -> None:
     usage = TokenUsage(input_tokens=100, output_tokens=200, thinking_tokens=50)
 
     assert usage.thinking_tokens == 50
-    # Thinking tokens are part of output_tokens in Claude's billing model,
-    # so total_tokens should NOT double-count them
-    assert usage.total_tokens == 300
+    # Thinking tokens are reported separately from output_tokens,
+    # so total_tokens should include all three
+    assert usage.total_tokens == 350  # 100 + 200 + 50
 
 
 def test_token_usage_thinking_tokens_defaults_none() -> None:
