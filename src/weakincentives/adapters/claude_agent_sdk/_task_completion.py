@@ -216,10 +216,12 @@ class PlanBasedChecker(TaskCompletionChecker):
         if len(incomplete_titles) > max_titles_in_message:
             task_list += "..."
         feedback = (
+            f"<blocker>\n"
             f"You have {incomplete_count} incomplete task(s) out of {total_count}. "
             f"Please either complete all remaining tasks or update the plan to "
             f"remove tasks that are no longer needed before producing output: "
-            f"{task_list}"
+            f"{task_list}\n"
+            f"</blocker>"
         )
 
         logger.info(

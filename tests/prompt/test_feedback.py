@@ -180,7 +180,8 @@ class TestFeedbackRender:
         feedback = Feedback(provider_name="Test", summary="Status check")
         rendered = feedback.render()
 
-        assert "[Feedback - Test]" in rendered
+        assert "<feedback provider='Test'>" in rendered
+        assert "</feedback>" in rendered
         assert "Status check" in rendered
 
     def test_render_with_observations(self) -> None:
@@ -217,7 +218,8 @@ class TestFeedbackRender:
         )
         rendered = feedback.render()
 
-        assert "[Feedback - Progress]" in rendered
+        assert "<feedback provider='Progress'>" in rendered
+        assert "</feedback>" in rendered
         assert "Making progress" in rendered
         assert "• Files: 10 files read" in rendered
         assert "• Time: 5 minutes elapsed" in rendered
@@ -631,7 +633,7 @@ class TestRunFeedbackProviders:
 
         assert result is not None
         assert "Test feedback" in result
-        assert "[Feedback - Mock]" in result
+        assert "<feedback provider='Mock'>" in result
 
     def test_stores_feedback_in_session(self) -> None:
         context = self._make_context(tool_calls=5)

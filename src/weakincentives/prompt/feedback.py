@@ -129,11 +129,9 @@ class Feedback:
         Returns:
             Formatted text suitable for injection into agent context.
         """
-        lines = [
-            f"[Feedback - {self.provider_name}]",
-            "",
-            self.summary,
-        ]
+        lines = [f"<feedback provider={self.provider_name!r}>"]
+
+        lines.append(self.summary)
 
         if self.observations:
             lines.append("")
@@ -144,6 +142,8 @@ class Feedback:
         if self.suggestions:
             lines.append("")
             lines.extend(f"→ {suggestion}" for suggestion in self.suggestions)
+
+        lines.append("</feedback>")
 
         return "\n".join(lines)
 
