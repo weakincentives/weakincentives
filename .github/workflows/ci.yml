@@ -12,23 +12,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Single change detection step - short-circuits on main push to run all checks
+  # Change detection - only used for property tests and TLA+ formal verification
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      run_all: ${{ steps.detect.outputs.run_all }}
-      docs_only: ${{ steps.detect.outputs.docs_only }}
-      adapters: ${{ steps.detect.outputs.adapters }}
-      runtime: ${{ steps.detect.outputs.runtime }}
-      prompt: ${{ steps.detect.outputs.prompt }}
-      contrib: ${{ steps.detect.outputs.contrib }}
-      evals: ${{ steps.detect.outputs.evals }}
-      serde: ${{ steps.detect.outputs.serde }}
-      cli: ${{ steps.detect.outputs.cli }}
-      core: ${{ steps.detect.outputs.core }}
-      ci: ${{ steps.detect.outputs.ci }}
-      formal: ${{ steps.detect.outputs.formal }}
-      mailbox: ${{ steps.detect.outputs.mailbox }}
+      run_heavy_tests: ${{ steps.detect.outputs.run_heavy_tests }}
     steps:
       - uses: actions/checkout@v6
         if: github.event_name != 'push'
@@ -38,45 +26,6 @@ jobs:
         if: github.event_name != 'push'
         with:
           filters: |
-            docs_only:
-              - '**/*.md'
-              - 'docs/**'
-              - '!src/**'
-              - '!tests/**'
-              - '!.github/**'
-            adapters:
-              - 'src/weakincentives/adapters/**'
-              - 'tests/adapters/**'
-            runtime:
-              - 'src/weakincentives/runtime/**'
-              - 'tests/runtime/**'
-            prompt:
-              - 'src/weakincentives/prompt/**'
-              - 'tests/prompt/**'
-              - 'tests/prompts/**'
-            contrib:
-              - 'src/weakincentives/contrib/**'
-              - 'tests/contrib/**'
-            evals:
-              - 'src/weakincentives/evals/**'
-              - 'tests/evals/**'
-            serde:
-              - 'src/weakincentives/serde/**'
-              - 'tests/serde/**'
-            cli:
-              - 'src/weakincentives/cli/**'
-              - 'tests/cli/**'
-            core:
-              - 'src/weakincentives/dbc/**'
-              - 'src/weakincentives/types/**'
-              - 'src/weakincentives/dataclasses/**'
-              - 'src/weakincentives/resources/**'
-              - 'src/weakincentives/filesystem/**'
-              - 'pyproject.toml'
-              - 'uv.lock'
-            ci:
-              - '.github/workflows/**'
-              - 'Makefile'
             formal:
               - 'src/weakincentives/formal/**'
               - 'formal-tests/**'
@@ -84,52 +33,29 @@ jobs:
             mailbox:
               - 'src/weakincentives/contrib/mailbox/**'
               - 'tests/contrib/mailbox/**'
+            runtime:
+              - 'src/weakincentives/runtime/**'
+              - 'tests/runtime/**'
 
       - name: Set outputs
         id: detect
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            # Main branch push: run all checks
-            cat >> $GITHUB_OUTPUT << 'EOF'
-          run_all=true
-          docs_only=false
-          adapters=true
-          runtime=true
-          prompt=true
-          contrib=true
-          evals=true
-          serde=true
-          cli=true
-          core=true
-          ci=true
-          formal=true
-          mailbox=true
-          EOF
+            # Main branch push: run all checks including heavy tests
+            echo "run_heavy_tests=true" >> $GITHUB_OUTPUT
           else
-            # PR: use change detection results
-            cat >> $GITHUB_OUTPUT << EOF
-          run_all=false
-          docs_only=${{ steps.filter.outputs.docs_only }}
-          adapters=${{ steps.filter.outputs.adapters }}
-          runtime=${{ steps.filter.outputs.runtime }}
-          prompt=${{ steps.filter.outputs.prompt }}
-          contrib=${{ steps.filter.outputs.contrib }}
-          evals=${{ steps.filter.outputs.evals }}
-          serde=${{ steps.filter.outputs.serde }}
-          cli=${{ steps.filter.outputs.cli }}
-          core=${{ steps.filter.outputs.core }}
-          ci=${{ steps.filter.outputs.ci }}
-          formal=${{ steps.filter.outputs.formal }}
-          mailbox=${{ steps.filter.outputs.mailbox }}
-          EOF
+            # PR: run heavy tests if formal, mailbox, or runtime changed
+            if [ "${{ steps.filter.outputs.formal }}" = "true" ] || \
+               [ "${{ steps.filter.outputs.mailbox }}" = "true" ] || \
+               [ "${{ steps.filter.outputs.runtime }}" = "true" ]; then
+              echo "run_heavy_tests=true" >> $GITHUB_OUTPUT
+            else
+              echo "run_heavy_tests=false" >> $GITHUB_OUTPUT
+            fi
           fi
 
   # Static analysis - always runs (fast and high value)
   static-analysis:
-    needs: detect-changes
-    if: |
-      needs.detect-changes.outputs.run_all == 'true' ||
-      needs.detect-changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -151,12 +77,34 @@ jobs:
       - name: Run JavaScript tests
         run: make bun-test
 
-  # Test job - always runs core tests, then targeted or full suite based on changes
+  # Parallel test jobs - full suite runs on every PR
   test:
-    needs: detect-changes
-    if: |
-      needs.detect-changes.outputs.run_all == 'true' ||
-      needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+        with:
+          checkout: 'false'
+          sync-args: --all-extras --frozen
+
+      - name: Run test group ${{ matrix.group }}
+        run: make test-group-${{ matrix.group }}
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.group }}
+          path: .coverage.${{ matrix.group }}
+          include-hidden-files: true
+
+  # Combine coverage from all parallel test groups
+  coverage:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -166,73 +114,23 @@ jobs:
           checkout: 'false'
           sync-args: --all-extras --frozen
 
-      # Always run core tests (fast, high-value smoke tests)
-      - name: Run core tests
-        run: uv run --all-extras pytest -m core --strict-config --strict-markers -q --no-header --no-cov
-
-      # Run full test suite when core infrastructure changes
-      - name: Run full test suite
-        if: |
-          needs.detect-changes.outputs.run_all == 'true' ||
-          needs.detect-changes.outputs.core == 'true' ||
-          needs.detect-changes.outputs.ci == 'true'
-        run: make test
-
-      # Run targeted tests for isolated module changes
-      - name: Run targeted tests
-        if: |
-          needs.detect-changes.outputs.run_all != 'true' &&
-          needs.detect-changes.outputs.core != 'true' &&
-          needs.detect-changes.outputs.ci != 'true'
-        env:
-          ADAPTERS: ${{ needs.detect-changes.outputs.adapters }}
-          RUNTIME: ${{ needs.detect-changes.outputs.runtime }}
-          PROMPT: ${{ needs.detect-changes.outputs.prompt }}
-          CONTRIB: ${{ needs.detect-changes.outputs.contrib }}
-          EVALS: ${{ needs.detect-changes.outputs.evals }}
-          SERDE: ${{ needs.detect-changes.outputs.serde }}
-          CLI: ${{ needs.detect-changes.outputs.cli }}
-        run: |
-          TEST_PATHS=""
-          [ "$ADAPTERS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/adapters"
-          [ "$RUNTIME" = "true" ] && TEST_PATHS="$TEST_PATHS tests/runtime"
-          [ "$PROMPT" = "true" ] && TEST_PATHS="$TEST_PATHS tests/prompt tests/prompts"
-          [ "$CONTRIB" = "true" ] && TEST_PATHS="$TEST_PATHS tests/contrib tests/tools"
-          [ "$EVALS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/evals"
-          [ "$SERDE" = "true" ] && TEST_PATHS="$TEST_PATHS tests/serde"
-          [ "$CLI" = "true" ] && TEST_PATHS="$TEST_PATHS tests/cli"
-
-          if [ -n "$TEST_PATHS" ]; then
-            echo "Running targeted tests: $TEST_PATHS"
-            uv run --all-extras pytest --strict-config --strict-markers -q --no-header --no-cov $TEST_PATHS
-          fi
-
-  # Fast feedback for docs-only PRs
-  docs-check:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.run_all != 'true' && needs.detect-changes.outputs.docs_only == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Setup environment
-        uses: ./.github/actions/setup-env
+      - name: Download all coverage data
+        uses: actions/download-artifact@v4
         with:
-          checkout: 'false'
-          sync-args: --frozen
-      - name: Validate Markdown
-        run: make markdown-check
-      - name: Verify doc examples
-        run: make verify-doc-examples
+          pattern: coverage-*
+          merge-multiple: true
 
-  # TLA+ formal verification
+      - name: Combine coverage
+        run: |
+          uv run coverage combine .coverage.*
+          uv run coverage report --fail-under=100
+          uv run coverage report --format=markdown >> $GITHUB_STEP_SUMMARY
+
+  # TLA+ formal verification - only runs when formal/mailbox/runtime changes
   formal-verification:
     name: TLA+ Model Checking
     needs: detect-changes
-    if: |
-      needs.detect-changes.outputs.run_all == 'true' ||
-      needs.detect-changes.outputs.formal == 'true' ||
-      needs.detect-changes.outputs.mailbox == 'true' ||
-      needs.detect-changes.outputs.runtime == 'true'
+    if: needs.detect-changes.outputs.run_heavy_tests == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -278,14 +176,11 @@ jobs:
           path: specs/tla/extracted/
           if-no-files-found: ignore
 
-  # Hypothesis property-based tests and stress tests
+  # Hypothesis property-based tests and stress tests - only runs when mailbox/runtime changes
   property-tests:
     name: Property-Based Tests
     needs: detect-changes
-    if: |
-      needs.detect-changes.outputs.run_all == 'true' ||
-      needs.detect-changes.outputs.mailbox == 'true' ||
-      needs.detect-changes.outputs.runtime == 'true'
+    if: needs.detect-changes.outputs.run_heavy_tests == 'true'
     runs-on: ubuntu-latest
     services:
       redis:

@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix
+.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 test-group-6 test-parallel
 
 # =============================================================================
 # Code Formatting
@@ -89,6 +89,55 @@ typecheck:
 # Run tests with coverage (100% minimum) and 10s per-test timeout
 test: bun-test
 	@uv run --all-extras python check.py -q test
+
+# =============================================================================
+# Parallel Test Groups (for CI)
+# =============================================================================
+# These targets split the test suite into 6 groups for parallel execution.
+# Each group saves coverage data with a unique suffix for later combination.
+# Use `make test` for local development (runs all tests sequentially).
+
+# Disable fail-under for individual groups; coverage is checked after combining
+PYTEST_COMMON = uv run --all-extras pytest --strict-config --strict-markers \
+	--timeout=10 --timeout-method=thread --tb=short --no-header \
+	--cov=src/weakincentives --cov=toolchain --cov-report= --cov-fail-under=0
+
+# Group 1: Adapters tests (~220 tests)
+test-group-1:
+	@$(PYTEST_COMMON) tests/adapters --cov-report=
+	@mv .coverage .coverage.1
+
+# Group 2: CLI + Contrib tests (~150 tests)
+test-group-2:
+	@$(PYTEST_COMMON) tests/cli tests/contrib --cov-report=
+	@mv .coverage .coverage.2
+
+# Group 3: Evals + Serde tests (~280 tests)
+test-group-3:
+	@$(PYTEST_COMMON) tests/evals tests/serde --cov-report=
+	@mv .coverage .coverage.3
+
+# Group 4: Prompt + Prompts tests (~400 tests)
+test-group-4:
+	@$(PYTEST_COMMON) tests/prompt tests/prompts --cov-report=
+	@mv .coverage .coverage.4
+
+# Group 5: Runtime tests (~290 tests)
+test-group-5:
+	@$(PYTEST_COMMON) tests/runtime --cov-report=
+	@mv .coverage .coverage.5
+
+# Group 6: Tools + Root tests + Misc (~540 tests)
+test-group-6:
+	@$(PYTEST_COMMON) tests/tools tests/filesystem tests/resources tests/skills \
+		tests/optimizers tests/toolchain tests/debug tests/formal formal-tests \
+		tests/test_*.py --cov-report=
+	@mv .coverage .coverage.6
+
+# Run all test groups locally and combine coverage
+test-parallel: bun-test test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 test-group-6
+	@uv run coverage combine .coverage.*
+	@uv run coverage report --fail-under=100
 
 # Run integration tests (tests skip automatically when API keys are not set)
 integration-tests:
