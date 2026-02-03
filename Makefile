@@ -93,7 +93,7 @@ test: bun-test
 	@if [ -n "$$CI" ]; then \
 		uv run --all-extras python check.py -q test; \
 	else \
-		uv run --all-extras pytest --testmon --no-cov --strict-config --strict-markers --timeout=10 --timeout-method=thread --tb=short tests; \
+		uv run --all-extras pytest -p no:cov -o addopts= --testmon --strict-config --strict-markers --timeout=10 --timeout-method=thread --tb=short --reruns=2 --reruns-delay=0.5 tests; \
 	fi
 
 # Run integration tests (tests skip automatically when API keys are not set)
