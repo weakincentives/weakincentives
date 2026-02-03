@@ -1215,7 +1215,7 @@ class TestShouldTriggerWithFileCreated:
         )
         context = self._make_context_with_filesystem(files={"AGENTS.md": "content"})
 
-        assert _should_trigger(trigger, context) is True
+        assert _should_trigger(trigger, context, "TestProvider") is True
 
     def test_file_trigger_does_not_fire_when_file_missing(self) -> None:
         from weakincentives.prompt import FeedbackTrigger, FileCreatedTrigger
@@ -1225,7 +1225,7 @@ class TestShouldTriggerWithFileCreated:
         )
         context = self._make_context_with_filesystem(files={})
 
-        assert _should_trigger(trigger, context) is False
+        assert _should_trigger(trigger, context, "TestProvider") is False
 
     def test_file_trigger_does_not_fire_when_already_fired(self) -> None:
         from weakincentives.prompt import FeedbackTrigger, FileCreatedTrigger
@@ -1238,7 +1238,7 @@ class TestShouldTriggerWithFileCreated:
             fired_filenames=frozenset({"AGENTS.md"}),
         )
 
-        assert _should_trigger(trigger, context) is False
+        assert _should_trigger(trigger, context, "TestProvider") is False
 
     def test_file_trigger_does_not_fire_without_filesystem(self) -> None:
         from weakincentives.prompt import FeedbackTrigger, FileCreatedTrigger
@@ -1252,7 +1252,7 @@ class TestShouldTriggerWithFileCreated:
         context = FeedbackContext(session=session, prompt=prompt)
 
         with prompt.resources:
-            assert _should_trigger(trigger, context) is False
+            assert _should_trigger(trigger, context, "TestProvider") is False
 
 
 class TestRunFeedbackProvidersWithFileCreated:
@@ -1426,5 +1426,6 @@ class TestStaticFeedbackProvider:
         feedback = provider.provide(context=context)
         rendered = feedback.render()
 
-        assert "[Feedback - Static]" in rendered
+        assert "<feedback provider='Static'>" in rendered
+        assert "</feedback>" in rendered
         assert "Custom guidance message" in rendered

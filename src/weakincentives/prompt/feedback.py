@@ -575,9 +575,7 @@ def run_feedback_providers(
     # Mark file creation triggers as fired (fires only once per file)
     for config in triggered_configs:
         if config.trigger.on_file_created is not None:
-            _mark_file_trigger_fired(
-                config.trigger.on_file_created.filename, context
-            )
+            _mark_file_trigger_fired(config.trigger.on_file_created.filename, context)
 
     # Render all feedback blocks, separated by blank lines
     return "\n\n".join(feedback.render() for feedback in feedback_items)
