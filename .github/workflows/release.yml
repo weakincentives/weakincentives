@@ -21,6 +21,7 @@ jobs:
     - name: Setup environment
       uses: ./.github/actions/setup-env
       with:
+        checkout: 'false'
         sync-args: --frozen
 
     - name: Run checks

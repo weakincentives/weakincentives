@@ -5,6 +5,10 @@ inputs:
     description: Optional git ref to checkout.
     required: false
     default: ''
+  checkout:
+    description: Whether to run actions/checkout in the action.
+    required: false
+    default: 'true'
   python-version:
     description: Python version to install with uv.
     required: false
@@ -33,6 +37,7 @@ runs:
   using: composite
   steps:
     - uses: actions/checkout@v6
+      if: ${{ inputs.checkout == 'true' }}
       with:
         ref: ${{ inputs.ref }}
     - name: Install uv

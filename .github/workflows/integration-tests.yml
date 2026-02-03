@@ -46,6 +46,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-env
         with:
+          checkout: 'false'
           ref: ${{ steps.pr.outputs.ref }}
           sync-args: --all-extras --frozen
 

@@ -132,6 +132,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-env
         with:
+          checkout: 'false'
           sync-args: --all-extras --frozen
       - name: Run format check
         run: make format-check
@@ -155,6 +156,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-env
         with:
+          checkout: 'false'
           sync-args: --all-extras --frozen
 
       # Always run core tests (fast, high-value smoke tests)
@@ -208,6 +210,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-env
         with:
+          checkout: 'false'
           sync-args: --frozen
       - name: Validate Markdown
         run: make markdown-check
