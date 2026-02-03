@@ -57,7 +57,7 @@ runs:
         path: |
           ~/.bun/install/cache
           ~/.bun/install/global
-        key: bun-${{ runner.os }}-${{ hashFiles('package-lock.json', 'bunfig.toml') }}
+        key: bun-${{ runner.os }}-${{ hashFiles('bun.lockb', 'bunfig.toml') }}
         restore-keys: |
           bun-${{ runner.os }}-
     - name: Cache Biome
@@ -67,7 +67,7 @@ runs:
         path: |
           ~/.cache/biome
           ~/.cache/biomejs
-        key: biome-${{ runner.os }}-${{ hashFiles('biome.json', 'package-lock.json') }}
+        key: biome-${{ runner.os }}-${{ hashFiles('biome.json', 'bun.lockb') }}
         restore-keys: |
           biome-${{ runner.os }}-
     - name: Install Bun
