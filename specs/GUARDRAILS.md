@@ -160,8 +160,43 @@ produce contextual feedback delivered immediately after tool execution.
 |-------|------|-------------|
 | `every_n_calls` | `int \| None` | Run after N tool calls |
 | `every_n_seconds` | `float \| None` | Run after N seconds elapsed |
+| `on_file_created` | `FileCreatedTrigger \| None` | Run once when file created |
 
 Conditions are OR'd together.
+
+### FileCreatedTrigger
+
+Triggers feedback when a specified file is created on the filesystem. Fires
+exactly once per session—after initial detection, subsequent tool calls will
+not re-trigger even if the file is deleted and recreated.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `filename` | `str` | Path to watch for creation |
+| `feedback` | `str` | Feedback content to deliver |
+
+The trigger checks filesystem state after each tool call. When the file exists
+and the trigger has not yet fired, it produces feedback containing the
+configured message and marks itself as fired.
+
+```python
+config = FeedbackProviderConfig(
+    provider=StaticFeedbackProvider(),
+    trigger=FeedbackTrigger(
+        on_file_created=FileCreatedTrigger(
+            filename="AGENTS.md",
+            feedback="AGENTS.md detected. Follow the conventions defined within.",
+        ),
+    ),
+)
+```
+
+#### Behavior
+
+1. After tool execution completes, check if `filename` exists
+2. If file exists and trigger has not fired → deliver feedback, mark fired
+3. If file does not exist or trigger already fired → skip
+4. Trigger state persists in session; reset clears it
 
 ### FeedbackProviderConfig
 
@@ -286,6 +321,7 @@ from weakincentives.prompt import (
     FeedbackProvider,        # Protocol
     FeedbackProviderConfig,  # Config
     FeedbackTrigger,         # Trigger
+    FileCreatedTrigger,      # File creation trigger
     collect_feedback,        # Primary entry point
 )
 ```
