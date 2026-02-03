@@ -326,6 +326,26 @@ class TestGitInfo:
         assert info is not None
         assert "v1.0.0" in info.tags
 
+    def test_capture_git_info_with_remote(self, git_repo: Path) -> None:
+        """Test _capture_git_info captures remotes with redaction."""
+        subprocess.run(
+            [
+                "git",
+                "remote",
+                "add",
+                "origin",
+                "https://user:token@github.com/test/repo.git",
+            ],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
+
+        info = _capture_git_info(git_repo)
+
+        assert info is not None
+        assert info.remotes["origin"] == "https://[REDACTED]@github.com/test/repo.git"
+
     def test_capture_git_info_not_in_repo(self, tmp_path: Path) -> None:
         """Test _capture_git_info outside a git repo."""
         info = _capture_git_info(tmp_path)
