@@ -15,12 +15,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from tests.cli._query_fixtures import create_bundle_with_logs, create_test_bundle
+from tests.cli._query_fixtures import (
+    _AgentPlan,
+    create_bundle_with_logs,
+    create_test_bundle,
+)
 from weakincentives.cli.query import (
     ColumnInfo,
     QueryError,
@@ -37,12 +40,6 @@ from weakincentives.debug.bundle import (
     DebugBundle,
 )
 from weakincentives.runtime.session import Session
-
-
-@dataclass(slots=True, frozen=True)
-class _AgentPlan:
-    goal: str
-    steps: int
 
 
 class TestQueryDatabase:
