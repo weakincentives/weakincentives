@@ -19,6 +19,7 @@ from toolchain.parsers import (
     _extract_uncovered_files,
     _find_test_failure_line,
     parse_bandit,
+    parse_bun_test,
     parse_deptry,
     parse_mdformat,
     parse_pip_audit,
@@ -396,6 +397,163 @@ Also: tests/unit/test_bar.py"""
 tests/test_foo.py error"""
         result = _extract_test_files(output)
         assert len(result) == 1
+
+
+class TestParseBunTest:
+    """Tests for parse_bun_test."""
+
+    def test_returns_empty_on_success(self) -> None:
+        output = """bun test v1.3.6 (d530ed99)
+--------------------------------------|---------|---------|-------------------
+File                                  | % Funcs | % Lines | Uncovered Line #s
+--------------------------------------|---------|---------|-------------------
+All files                             |  100.00 |  100.00 |
+--------------------------------------|---------|---------|-------------------
+
+ 78 pass
+ 0 fail
+Ran 78 tests across 1 file. [42.00ms]"""
+        diagnostics = parse_bun_test(output, 0)
+        assert len(diagnostics) == 0
+
+    def test_parses_failed_test(self) -> None:
+        output = """bun test v1.3.6 (d530ed99)
+
+tests/js/lib.test.js:
+1 | import { expect, test } from "bun:test"; test("should fail", () => { expect(1).toBe(2); });
+                                                                                   ^
+error: expect(received).toBe(expected)
+
+Expected: 2
+Received: 1
+
+      at <anonymous> (/home/user/tests/js/lib.test.js:1:80)
+(fail) should fail [0.47ms]
+
+ 0 pass
+ 1 fail
+Ran 1 test across 1 file. [22.00ms]"""
+        diagnostics = parse_bun_test(output, 1)
+        assert len(diagnostics) == 1
+        assert "should fail" in diagnostics[0].message
+        assert "Expected: 2" in diagnostics[0].message
+        assert "Received: 1" in diagnostics[0].message
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "/home/user/tests/js/lib.test.js"
+        assert diagnostics[0].location.line == 1
+
+    def test_parses_multiple_failures(self) -> None:
+        output = """bun test v1.3.6 (d530ed99)
+
+error: expect(received).toBe(expected)
+
+Expected: 2
+Received: 1
+
+      at <anonymous> (/home/user/tests/js/test1.js:10:5)
+(fail) test one [0.1ms]
+
+error: expect(received).toBe(expected)
+
+Expected: "hello"
+Received: "world"
+
+      at <anonymous> (/home/user/tests/js/test2.js:20:10)
+(fail) test two [0.2ms]
+
+ 0 pass
+ 2 fail
+Ran 2 tests across 2 files. [50.00ms]"""
+        diagnostics = parse_bun_test(output, 1)
+        assert len(diagnostics) == 2
+        assert "test one" in diagnostics[0].message
+        assert "test two" in diagnostics[1].message
+
+    def test_parses_failed_test_without_error_details(self) -> None:
+        output = """bun test v1.3.6 (d530ed99)
+
+(fail) test something [0.5ms]
+
+ 0 pass
+ 1 fail
+Ran 1 test across 1 file. [22.00ms]"""
+        diagnostics = parse_bun_test(output, 1)
+        assert len(diagnostics) == 1
+        assert "test something" in diagnostics[0].message
+
+    def test_generic_failure_message(self) -> None:
+        output = """bun test v1.3.6 (d530ed99)
+
+ 5 pass
+ 3 fail
+Ran 8 tests across 2 files. [100.00ms]"""
+        diagnostics = parse_bun_test(output, 1)
+        assert len(diagnostics) == 1
+        assert "JS tests failed" in diagnostics[0].message
+        assert "3 failed" in diagnostics[0].message
+        assert "5 passed" in diagnostics[0].message
+
+    def test_skipped_message_returns_empty(self) -> None:
+        """Test that 'bun not installed' message returns no diagnostics."""
+        output = "bun not installed, skipping"
+        diagnostics = parse_bun_test(output, 0)
+        assert len(diagnostics) == 0
+
+    def test_parses_import_error(self) -> None:
+        """Test parsing import/syntax errors."""
+        output = """bun test v1.3.6 (d530ed99)
+
+error: Could not resolve: "nonexistent-module"
+      at /home/user/tests/js/broken.test.js:1:0
+
+ 0 pass
+ 0 fail
+Ran 0 tests across 1 file. [10.00ms]"""
+        diagnostics = parse_bun_test(output, 1)
+        assert len(diagnostics) == 1
+        assert "Import/syntax error" in diagnostics[0].message
+        assert "Could not resolve" in diagnostics[0].message
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "/home/user/tests/js/broken.test.js"
+        assert diagnostics[0].location.line == 1
+
+    def test_deduplicates_error_already_in_diagnostics(self) -> None:
+        """Test that syntax errors aren't duplicated if already captured in failure.
+
+        The syntax_pattern matches 'error: ...' immediately followed by 'at file:line:col'
+        on the next line. If this error is already captured in the (fail) diagnostic,
+        it should not be added again.
+        """
+        # This output has the error pattern matching both:
+        # 1. The (fail) line's error extraction
+        # 2. The syntax_pattern regex
+        output = """bun test v1.3.6 (d530ed99)
+
+error: TypeError: undefined is not a function
+      at testFunc (/home/user/tests/js/lib.test.js:5:10)
+(fail) test with thrown error [0.47ms]
+
+ 0 pass
+ 1 fail
+Ran 1 test across 1 file. [22.00ms]"""
+        diagnostics = parse_bun_test(output, 1)
+        # Should have exactly 1 diagnostic (the test failure), not 2
+        # The error "TypeError: undefined is not a function" appears in the
+        # (fail) diagnostic and would also match syntax_pattern
+        assert len(diagnostics) == 1
+        assert "test with thrown error" in diagnostics[0].message
+        # Error should be included in the message
+        assert "TypeError" in diagnostics[0].message
+
+    def test_generic_failure_without_summary(self) -> None:
+        """Test fallback when no pass/fail summary is present."""
+        output = """bun test v1.3.6 (d530ed99)
+
+Something went wrong"""
+        diagnostics = parse_bun_test(output, 1)
+        assert len(diagnostics) == 1
+        assert "JS tests failed" in diagnostics[0].message
+        assert "Reproduce" in diagnostics[0].message
 
 
 class TestParseBandit:

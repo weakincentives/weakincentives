@@ -448,6 +448,94 @@ def parse_pip_audit(output: str, code: int) -> tuple[Diagnostic, ...]:
     return tuple(diagnostics)
 
 
+def parse_bun_test(output: str, code: int) -> tuple[Diagnostic, ...]:
+    """Parse bun test output for failures.
+
+    Bun test failure format:
+    - File path with code snippet showing error location
+    - Error message with Expected/Received values
+    - Stack trace with file:line:col
+    - (fail) test_name [duration]
+    - Summary: N pass, M fail
+    """
+    if code == 0:
+        return ()
+
+    diagnostics: list[Diagnostic] = []
+
+    # Parse failed test lines: (fail) test_name [duration]
+    fail_pattern = re.compile(r"^\(fail\) (.+?) \[[\d.]+m?s\]$", re.MULTILINE)
+
+    for match in fail_pattern.finditer(output):
+        test_name = match.group(1)
+
+        # Try to find associated error details before this line
+        # Look for the error block that precedes this failure
+        match_pos = match.start()
+        preceding = output[:match_pos]
+
+        # Extract file and line from stack trace: at <anonymous> (file:line:col)
+        # or at functionName (file:line:col)
+        stack_pattern = re.compile(r"at (?:<anonymous>|\S+) \(([^:]+):(\d+):(\d+)\)")
+        stack_matches = list(stack_pattern.finditer(preceding))
+
+        file_path = None
+        line_num = None
+        if stack_matches:
+            # Get the most recent stack frame
+            last_match = stack_matches[-1]
+            file_path = last_match.group(1)
+            line_num = int(last_match.group(2))
+
+        # Extract error message (lines starting with 'error:' or 'Expected:'/'Received:')
+        error_lines = []
+        for line in preceding.split("\n")[-20:]:  # Look at last 20 lines
+            line = line.strip()
+            if line.startswith("error:"):
+                error_lines.append(line[6:].strip())
+            elif line.startswith("Expected:") or line.startswith("Received:"):
+                error_lines.append(line)
+
+        # Build diagnostic message
+        if error_lines:
+            msg = f"{test_name}\n" + "\n".join(error_lines[:5])
+        else:
+            msg = test_name
+
+        location = Location(file=file_path, line=line_num) if file_path else None
+        diagnostics.append(Diagnostic(message=msg, location=location))
+
+    # Check for syntax/import errors
+    # Format: error: Could not resolve: "module"
+    syntax_pattern = re.compile(
+        r'^error: (.+?)$\n.*?at ([^:]+):(\d+):(\d+)',
+        re.MULTILINE,
+    )
+    for match in syntax_pattern.finditer(output):
+        error_msg, file_path, line, col = match.groups()
+        if not any(error_msg in d.message for d in diagnostics):
+            diagnostics.append(
+                Diagnostic(
+                    message=f"Import/syntax error: {error_msg}",
+                    location=Location(file=file_path, line=int(line), column=int(col)),
+                )
+            )
+
+    # If nothing parsed but failed, add generic message
+    if not diagnostics and code != 0:
+        # Extract summary line
+        summary_match = re.search(r"(\d+) pass\n\s*(\d+) fail", output)
+        if summary_match:
+            passed, failed = summary_match.groups()
+            msg = f"JS tests failed: {failed} failed, {passed} passed"
+        else:
+            msg = "JS tests failed"
+        msg += "\nReproduce: bun test tests/js/"
+        diagnostics.append(Diagnostic(message=msg))
+
+    return tuple(diagnostics)
+
+
 def parse_mdformat(output: str, code: int) -> tuple[Diagnostic, ...]:
     """Parse mdformat --check output."""
     if code == 0:

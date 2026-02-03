@@ -89,7 +89,7 @@ typecheck:
 # Run tests. In CI: full coverage (100% required). Locally: only tests affected by changes.
 # Local mode uses testmon coverage database for fast iteration. First run builds the
 # database, subsequent runs skip tests unaffected by changes.
-test: bun-test
+test:
 	@if [ -n "$$CI" ]; then \
 		uv run --all-extras python check.py -q test; \
 	else \
@@ -141,7 +141,7 @@ test-group-6:
 	@mv .coverage .coverage.6
 
 # Run all test groups locally and combine coverage
-test-parallel: bun-test test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 test-group-6
+test-parallel: test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 test-group-6
 	@uv run coverage combine .coverage.*
 	@uv run coverage report --fail-under=100
 
@@ -161,13 +161,9 @@ redis-standalone-tests:
 redis-cluster-tests:
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv -m redis_cluster integration-tests
 
-# Run JavaScript tests with Bun
+# Run JavaScript tests with Bun (via toolchain for consistent output)
 bun-test:
-	@if command -v bun >/dev/null 2>&1; then \
-		bun test tests/js/; \
-	else \
-		echo "Bun not installed, skipping JS tests. Install with: curl -fsSL https://bun.sh/install | bash"; \
-	fi
+	@uv run --all-extras python check.py -q bun-test
 
 # =============================================================================
 # Setup
