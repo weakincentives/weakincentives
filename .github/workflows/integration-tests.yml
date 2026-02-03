@@ -39,6 +39,10 @@ jobs:
             core.setOutput('ref', pr.data.head.ref);
             core.setOutput('sha', pr.data.head.sha);
 
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.pr.outputs.ref }}
+
       - name: Setup environment
         uses: ./.github/actions/setup-env
         with:
