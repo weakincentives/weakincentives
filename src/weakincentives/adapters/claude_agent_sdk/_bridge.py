@@ -61,6 +61,20 @@ class MCPToolExecutionState:
 
     This enables MCP-bridged tools to have proper call_id in ToolInvoked events,
     matching the behavior of native SDK tools.
+
+    Thread Safety
+    -------------
+    This class assumes the Claude Agent SDK executes tools **sequentially**
+    within a single query. The SDK processes one tool at a time: PreToolUse
+    fires, then tool executes, then PostToolUse fires, before the next tool
+    begins. If this assumption is violated (e.g., parallel tool execution),
+    race conditions would occur where one tool reads another's tool_use_id.
+
+    The sequential execution model is fundamental to how the SDK manages
+    tool lifecycles and is documented in SDK behavior. If the SDK ever
+    changes to support parallel tool execution, this implementation would
+    need to use a dict mapping (e.g., tool_name -> tool_use_id) instead
+    of a single shared field.
     """
 
     current_tool_use_id: str | None = None
