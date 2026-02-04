@@ -26,7 +26,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ...runtime.logging import StructuredLogger, get_logger
 
@@ -167,6 +167,8 @@ class TranscriptCollector:
         Returns:
             Empty dict (no modifications to hook behavior).
         """
+        _ = tool_use_id
+        _ = context
         transcript_path = input_data.get("transcript_path")
         if transcript_path:
             await self._remember_transcript_path(transcript_path)
@@ -182,20 +184,32 @@ class TranscriptCollector:
         - Stop
         - PreCompact
 
+        Note: The SDK does not support SubagentStart or Notification hooks.
+
         Returns:
             Hook configuration dict for ClaudeAgentOptions.hooks.
         """
-        # Import the SDK's HookMatcher type
-        from claude_agent_sdk.types import HookMatcher
+        # Import SDK types for hook configuration
+        from claude_agent_sdk.types import (
+            HookContext as SdkHookContext,
+            HookInput,
+            HookMatcher,
+            SyncHookJSONOutput,
+        )
 
-        # Create a wrapper function that captures self
+        # Create a wrapper function that calls the public hook_callback method
         async def hook_fn(
-            input_data: Any,  # noqa: ANN401
+            input_data: HookInput,
             tool_use_id: str | None,
-            context: Any,  # noqa: ANN401
-        ) -> dict[str, Any]:
-            """Wrapper function for the hook callback."""
-            return await self.hook_callback(input_data, tool_use_id, context)
+            context: SdkHookContext,
+        ) -> SyncHookJSONOutput:
+            """SDK hook wrapper that delegates to hook_callback."""
+            # HookInput is a TypedDict union - cast to dict[str, Any] for hook_callback
+            await self.hook_callback(
+                cast(dict[str, Any], input_data), tool_use_id, context
+            )
+            # Return empty dict (no hook modifications)
+            return cast(SyncHookJSONOutput, {})
 
         matcher = HookMatcher(matcher=None, hooks=[hook_fn])
 

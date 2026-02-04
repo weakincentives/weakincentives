@@ -150,6 +150,14 @@ class MockSDKQuery:
             yield result
 
 
+class MockTransport:
+    """Mock transport for ClaudeSDKClient."""
+
+    async def end_input(self) -> None:
+        """Mock end_input - signals EOF to subprocess."""
+        pass
+
+
 class MockClaudeSDKClient:
     """Mock for ClaudeSDKClient."""
 
@@ -161,6 +169,7 @@ class MockClaudeSDKClient:
         """Initialize mock client."""
         self.options = options or MockClaudeAgentOptions()
         self._connected = False
+        self._transport: MockTransport | None = None
         MockSDKQuery.captured_options.append(self.options)
 
     async def connect(
@@ -168,15 +177,21 @@ class MockClaudeSDKClient:
     ) -> None:
         """Mock connect method."""
         self._connected = True
+        self._transport = MockTransport()
+        self._prompt_stream = prompt  # Store for background consumption
         # Handle AsyncIterable prompts (streaming mode)
         if prompt is not None and not isinstance(prompt, str):
-            # Consume the async generator to get prompt content
+            # Get only the FIRST message from the generator (like the real SDK does)
+            # The real SDK runs stream_input() in a background task which consumes
+            # messages as they come, so we shouldn't block waiting for all messages.
             prompt_content = ""
             async for msg in prompt:
                 if isinstance(msg, dict) and "message" in msg:
                     message = msg["message"]
                     if isinstance(message, dict) and "content" in message:
                         prompt_content = message["content"]
+                # Only get the first message, then break
+                break
             MockSDKQuery.captured_prompts.append(prompt_content)
         elif isinstance(prompt, str):
             MockSDKQuery.captured_prompts.append(prompt)
@@ -184,6 +199,11 @@ class MockClaudeSDKClient:
     async def disconnect(self) -> None:
         """Mock disconnect method."""
         self._connected = False
+        self._transport = None
+
+    async def query(self, prompt: str, session_id: str = "default") -> None:
+        """Mock query method for sending messages."""
+        MockSDKQuery.captured_prompts.append(prompt)
 
     async def receive_messages(self) -> AsyncGenerator[object, None]:
         """Mock receive_messages that yields configured results."""
@@ -192,6 +212,18 @@ class MockClaudeSDKClient:
 
         for result in MockSDKQuery._results:
             yield result
+
+    async def receive_response(self) -> AsyncGenerator[object, None]:
+        """Mock receive_response that yields results until ResultMessage."""
+        if MockSDKQuery._error is not None:
+            raise MockSDKQuery._error
+
+        for result in MockSDKQuery._results:
+            yield result
+            # Exit after ResultMessage (like real SDK)
+            # Check for MockResultMessage specifically since MagicMock has all attributes
+            if isinstance(result, MockResultMessage):
+                return
 
 
 @dataclass(slots=True, frozen=True)
@@ -1526,23 +1558,24 @@ class TestMessageContentExtraction:
             ) -> None:
                 self.options = options
                 self.query_count = 0
-                self.receive_count = 0  # Track receive_messages calls
+                self.receive_count = 0  # Track receive_response calls
                 self.feedback_received: list[str] = []
+                self._transport = MockTransport()
                 MockSDKQuery.captured_options.append(options)
 
             async def connect(self, prompt: object | None = None) -> None:
-                if prompt:
-                    async for _ in prompt:
-                        pass
-
-            async def disconnect(self) -> None:
+                # With the new approach, prompt=None is passed
                 pass
 
-            async def query(self, prompt: str, session_id: str) -> None:
+            async def disconnect(self) -> None:
+                self._transport = None
+
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                # Called for initial message and continuations
                 self.query_count += 1
                 self.feedback_received.append(prompt)
 
-            async def receive_messages(self) -> AsyncGenerator[object, None]:
+            async def receive_response(self) -> AsyncGenerator[object, None]:
                 # Track which call this is
                 current_receive = self.receive_count
                 self.receive_count += 1
@@ -2189,20 +2222,19 @@ class TestMultiturnEdgeCases:
             ) -> None:
                 self.options = options
                 self.receive_count = 0
+                self._transport = MockTransport()
                 MockSDKQuery.captured_options.append(options)
 
             async def connect(self, prompt: object | None = None) -> None:
-                if prompt and not isinstance(prompt, str):
-                    async for _ in prompt:
-                        pass
+                pass  # prompt=None with new approach
 
             async def disconnect(self) -> None:
-                pass
+                self._transport = None
 
-            async def query(self, prompt: str, session_id: str) -> None:
-                pass  # Handle continuation query
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                pass  # Handle initial and continuation queries
 
-            async def receive_messages(self) -> AsyncGenerator[object, None]:
+            async def receive_response(self) -> AsyncGenerator[object, None]:
                 self.receive_count += 1
                 yield MockResultMessage(
                     result=f"Response {self.receive_count}",
@@ -2274,20 +2306,19 @@ class TestMultiturnEdgeCases:
             ) -> None:
                 self.options = options
                 self.receive_count = 0
+                self._transport = MockTransport()
                 MockSDKQuery.captured_options.append(options)
 
             async def connect(self, prompt: object | None = None) -> None:
-                if prompt and not isinstance(prompt, str):
-                    async for _ in prompt:
-                        pass
+                pass  # prompt=None with new approach
 
             async def disconnect(self) -> None:
-                pass
+                self._transport = None
 
-            async def query(self, prompt: str, session_id: str) -> None:
-                pass  # Handle continuation query
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                pass  # Handle initial and continuation queries
 
-            async def receive_messages(self) -> AsyncGenerator[object, None]:
+            async def receive_response(self) -> AsyncGenerator[object, None]:
                 self.receive_count += 1
                 yield MockResultMessage(
                     result=f"Response {self.receive_count}",
@@ -2315,7 +2346,7 @@ class TestMultiturnEdgeCases:
     def test_empty_message_stream_breaks_continuation(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        """Test that continuation stops when receive_messages returns no messages."""
+        """Test that continuation stops when receive_response returns no messages."""
 
         # Mock client that returns empty message stream
         class MockClientEmptyStream:
@@ -2323,17 +2354,19 @@ class TestMultiturnEdgeCases:
                 self, options: object | None = None, transport: object | None = None
             ) -> None:
                 self.options = options
+                self._transport = MockTransport()
                 MockSDKQuery.captured_options.append(options)
 
             async def connect(self, prompt: object | None = None) -> None:
-                if prompt and not isinstance(prompt, str):
-                    async for _ in prompt:
-                        pass
+                pass  # prompt=None with new approach
 
             async def disconnect(self) -> None:
-                pass
+                self._transport = None
 
-            async def receive_messages(self) -> AsyncGenerator[object, None]:
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                pass  # Handle initial query
+
+            async def receive_response(self) -> AsyncGenerator[object, None]:
                 # Return empty stream - no messages
                 return
                 yield  # pragma: no cover - makes this an async generator
@@ -2347,6 +2380,45 @@ class TestMultiturnEdgeCases:
 
         # Should return with no text (empty stream)
         assert response.text is None
+
+    def test_cleanup_handles_none_transport(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that cleanup handles the case where _transport is None."""
+
+        # Mock client where _transport is None (simulates edge case)
+        class MockClientNoTransport:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                self._transport = None  # Transport is None
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                pass  # prompt=None with new approach
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                pass  # Handle initial query
+
+            async def receive_response(self) -> AsyncGenerator[object, None]:
+                yield MockResultMessage(
+                    result="Response with no transport",
+                    usage={"input_tokens": 10, "output_tokens": 5},
+                )
+
+        _setup_mock_query([])
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClientNoTransport):
+                response = adapter.evaluate(simple_prompt, session=session)
+
+        # Should complete successfully even with None transport
+        assert response.text == "Response with no transport"
 
     def test_structured_output_used_for_completion_check(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
@@ -2376,17 +2448,19 @@ class TestMultiturnEdgeCases:
                 self, options: object | None = None, transport: object | None = None
             ) -> None:
                 self.options = options
+                self._transport = MockTransport()
                 MockSDKQuery.captured_options.append(options)
 
             async def connect(self, prompt: object | None = None) -> None:
-                if prompt and not isinstance(prompt, str):
-                    async for _ in prompt:
-                        pass
+                pass  # prompt=None with new approach
 
             async def disconnect(self) -> None:
-                pass
+                self._transport = None
 
-            async def receive_messages(self) -> AsyncGenerator[object, None]:
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                pass  # Handle initial query
+
+            async def receive_response(self) -> AsyncGenerator[object, None]:
                 # Return message with structured_output set
                 yield MockResultMessage(
                     result="Text result",
@@ -2437,17 +2511,19 @@ class TestMultiturnEdgeCases:
             ) -> None:
                 self.options = options
                 self.receive_count = 0
+                self._transport = MockTransport()
                 MockSDKQuery.captured_options.append(options)
 
             async def connect(self, prompt: object | None = None) -> None:
-                if prompt and not isinstance(prompt, str):
-                    async for _ in prompt:
-                        pass
+                pass  # prompt=None with new approach
 
             async def disconnect(self) -> None:
-                pass
+                self._transport = None
 
-            async def receive_messages(self) -> AsyncGenerator[object, None]:
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                pass  # Handle initial query
+
+            async def receive_response(self) -> AsyncGenerator[object, None]:
                 self.receive_count += 1
                 yield MockResultMessage(
                     result=f"Response {self.receive_count}",
@@ -2467,3 +2543,37 @@ class TestMultiturnEdgeCases:
 
         # Should exit after first round due to no feedback
         assert response.text == "Response 1"
+
+
+class TestCheckTaskCompletion:
+    """Tests for _check_task_completion helper method."""
+
+    def test_returns_false_none_for_empty_messages(self, session: Session) -> None:
+        """_check_task_completion returns (False, None) for empty message list."""
+        adapter = ClaudeAgentSDKAdapter()
+        checker = MagicMock()
+
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+        from weakincentives.prompt import Prompt, PromptTemplate
+
+        template: PromptTemplate[None] = PromptTemplate(
+            ns="test", key="test", name="test"
+        )
+        prompt: Prompt[None] = Prompt(template)
+        constraints = HookConstraints()
+        hook_context = HookContext(
+            prompt=prompt,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+        result = adapter._check_task_completion(checker, [], hook_context)
+
+        assert result == (False, None)
+        # Checker should not be called when round_messages is empty
+        checker.check.assert_not_called()

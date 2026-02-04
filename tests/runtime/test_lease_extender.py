@@ -377,7 +377,10 @@ def test_tool_execution_context_beat_with_heartbeat() -> None:
 
 def test_hook_context_beat_with_heartbeat() -> None:
     """Verify HookContext.beat() invokes heartbeat.beat() when set."""
-    from weakincentives.adapters.claude_agent_sdk._hooks import HookContext
+    from weakincentives.adapters.claude_agent_sdk._hooks import (
+        HookConstraints,
+        HookContext,
+    )
     from weakincentives.prompt import Prompt, PromptTemplate
     from weakincentives.runtime.session import Session
 
@@ -388,12 +391,13 @@ def test_hook_context_beat_with_heartbeat() -> None:
     session = Session()
     template: PromptTemplate[None] = PromptTemplate(ns="test", key="test", name="test")
     prompt: Prompt[None] = Prompt(template)
+    constraints = HookConstraints(heartbeat=heartbeat)
     context = HookContext(
         prompt=prompt,
         session=session,
         adapter_name="test",
         prompt_name="test",
-        heartbeat=heartbeat,
+        constraints=constraints,
     )
 
     context.beat()

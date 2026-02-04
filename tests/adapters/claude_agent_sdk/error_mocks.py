@@ -12,10 +12,8 @@
 
 """Mock exception classes for Claude Agent SDK error testing.
 
-These mocks simulate the exception types from the Claude Agent SDK
-without requiring the actual SDK to be installed. They use __name__
-manipulation to match the real exception class names that the error
-normalization code checks.
+These mocks inherit from the actual SDK exception types to work with
+isinstance checks in the error normalization code.
 
 Example::
 
@@ -33,50 +31,67 @@ Example::
 
 from __future__ import annotations
 
+from claude_agent_sdk import (
+    CLIConnectionError,
+    CLIJSONDecodeError,
+    CLINotFoundError,
+    ProcessError,
+)
 
-class MockCLINotFoundError(Exception):
+
+class MockCLINotFoundError(CLINotFoundError):
     """Mock for CLINotFoundError from the Claude Agent SDK."""
 
-    pass
+    def __init__(self, message: str) -> None:
+        super().__init__(message=message)
 
 
-class MockCLIConnectionError(Exception):
+class MockCLIConnectionError(CLIConnectionError):
     """Mock for CLIConnectionError from the Claude Agent SDK."""
 
-    pass
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
 
 
-class MockProcessError(Exception):
+class MockProcessError(ProcessError):
     """Mock for ProcessError from the Claude Agent SDK.
 
     Includes exit_code and stderr attributes that the real error has.
     """
 
     def __init__(self, message: str, exit_code: int, stderr: str) -> None:
-        super().__init__(message)
-        self.exit_code = exit_code
-        self.stderr = stderr
+        # ProcessError takes (message, exit_code, stderr) in constructor
+        super().__init__(message, exit_code, stderr)
 
 
-class MockProcessErrorMinimal(Exception):
-    """Mock for ProcessError without optional attributes.
+class MockProcessErrorMinimal(ProcessError):
+    """Mock for ProcessError without optional stderr attribute.
 
     Used to test handling when stderr attribute is missing.
     """
 
     def __init__(self, message: str, exit_code: int) -> None:
-        super().__init__(message)
-        self.exit_code = exit_code
+        # ProcessError without stderr
+        super().__init__(message, exit_code, None)
+        # Remove stderr attribute to simulate minimal error
+        if hasattr(self, "stderr"):
+            del self.stderr
 
 
-class MockCLIJSONDecodeError(Exception):
+class MockCLIJSONDecodeError(CLIJSONDecodeError):
     """Mock for CLIJSONDecodeError from the Claude Agent SDK."""
 
-    pass
+    def __init__(self, message: str) -> None:
+        # CLIJSONDecodeError takes (line, original_error)
+        super().__init__(message, ValueError(message))
 
 
 class MockMaxTurnsExceededError(Exception):
-    """Mock for MaxTurnsExceededError from the Claude Agent SDK."""
+    """Mock for MaxTurnsExceededError from the Claude Agent SDK.
+
+    Note: MaxTurnsExceededError is not exported by the SDK, so we use
+    name-based matching for this error type.
+    """
 
     pass
 
@@ -93,7 +108,7 @@ class MockCodeError(Exception):
     pass
 
 
-# Set __name__ attributes to match what the error normalization code checks
+# Set __name__ to match SDK class names (for error message formatting)
 MockCLINotFoundError.__name__ = "CLINotFoundError"
 MockCLIConnectionError.__name__ = "CLIConnectionError"
 MockProcessError.__name__ = "ProcessError"
