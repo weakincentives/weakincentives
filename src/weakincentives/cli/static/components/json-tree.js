@@ -14,7 +14,7 @@ import {
 /**
  * Creates a JSON tree renderer with state management callbacks.
  * @param {Object} options
- * @param {function(string[]): boolean} options.shouldOpen - Check if path should be expanded
+ * @param {function(string[], number): boolean} options.shouldOpen - Check if path should be expanded
  * @param {function(string[], boolean): void} options.setOpen - Set path expansion state
  * @param {function(string[]): string} options.getMarkdownView - Get markdown view mode for path
  * @param {function(string[], string): void} options.setMarkdownView - Set markdown view mode
