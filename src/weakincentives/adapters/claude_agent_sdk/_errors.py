@@ -360,7 +360,7 @@ def normalize_sdk_error(
 
 def _get_error_handler(
     error: Exception, error_type: str
-) -> Callable[[Any, str, str | None], PromptEvaluationError]:
+) -> Callable[[Any, str, str | None], PromptEvaluationError | ThrottleError]:
     """Get the appropriate handler function for an error type."""
     # Use isinstance checks with SDK native exception types for type safety
     if isinstance(error, CLINotFoundError):
