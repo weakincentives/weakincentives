@@ -237,7 +237,7 @@ class CompositeSnapshot:
             if not isinstance(entry, Mapping):
                 raise SnapshotRestoreError("Resource entry must be an object")
 
-            resource_type_str = entry.get("resource_type")
+            resource_type_str = entry.get("resource_type")  # ty: ignore[invalid-argument-type]
             if not isinstance(resource_type_str, str):  # pragma: no cover - defensive
                 raise SnapshotRestoreError("Resource type must be a string")
 
@@ -248,12 +248,12 @@ class CompositeSnapshot:
                     f"Unknown resource type: {resource_type_str}"
                 ) from error
 
-            snapshot_data = entry.get("snapshot")
+            snapshot_data = entry.get("snapshot")  # ty: ignore[invalid-argument-type]
             if not isinstance(snapshot_data, Mapping):  # pragma: no cover - defensive
                 raise SnapshotRestoreError("Resource snapshot must be an object")
 
             # Determine snapshot type from entry field
-            snapshot_type_str = entry.get("snapshot_type")
+            snapshot_type_str = entry.get("snapshot_type")  # ty: ignore[invalid-argument-type]
             if not isinstance(snapshot_type_str, str):  # pragma: no cover - defensive
                 raise SnapshotRestoreError("Resource entry must include snapshot_type")
 
