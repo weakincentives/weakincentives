@@ -145,7 +145,7 @@ def normalize_visibility_selector(
         session: SessionProtocol | None,
     ) -> SectionVisibility:
         del session
-        return constant_visibility  # ty: ignore[invalid-return-type]  # ty narrowing issue
+        return constant_visibility
 
     return _constant
 

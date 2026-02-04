@@ -549,7 +549,7 @@ def _resolve_subscript(
     # Multiple args: pass as tuple (e.g., Dict[str, int])
     subscript_arg = type_args[0] if len(type_args) == 1 else type_args
     try:
-        return base_type[subscript_arg]  # pyright: ignore[reportIndexIssue]
+        return base_type[subscript_arg]  # pyright: ignore[reportIndexIssue] # ty: ignore[not-subscriptable]
     except TypeError:
         return base_type
 

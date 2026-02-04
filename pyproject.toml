@@ -49,7 +49,7 @@ openai = [
     "openai>=2.16.0",
 ]
 litellm = [
-    "litellm>=1.81.6",
+    "litellm>=1.81.7",
 ]
 podman = [
     "podman>=5.7.0",
@@ -70,7 +70,7 @@ wink = [
 wink = "weakincentives.cli.wink:main"
 
 [build-system]
-requires = ["hatchling>=1.27.0", "hatch-vcs>=0.5.0"]
+requires = ["hatchling>=1.28.0", "hatch-vcs>=0.5.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
@@ -101,13 +101,13 @@ dev = [
     "pytest-randomly>=4.0.1",
     "pytest-rerunfailures>=16.1",
     "pip-audit>=2.10.0",
-    "ruff>=0.14.14",
+    "ruff>=0.15.0",
     "pyright>=1.1.408",
-    "ty==0.0.1a35",
+    "ty>=0.0.14",
     "mdformat>=1.0.0",
     "hypothesis>=6.151.4",
     "vulture>=2.14",
-    "pytest-testmon>=2.1.0",
+    "pytest-testmon>=2.2.0",
 ]
 
 [tool.ruff]
