@@ -1585,3 +1585,91 @@ class TestHookEventNameValidation:
         result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result == {}
+
+    def test_pre_tool_use_sets_in_subagent_for_task_tool(self) -> None:
+        """PreToolUse hook sets in_subagent flag when Task tool is called."""
+        context = self._make_context()
+        hook = create_pre_tool_use_hook(context)
+
+        # Verify flag is initially False
+        assert context.stats.in_subagent is False
+
+        # Call with Task tool
+        input_data = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Task",
+            "tool_input": {"prompt": "test subagent"},
+        }
+        asyncio.run(hook(input_data, "tool-123", {"signal": None}))
+
+        # Flag should be set
+        assert context.stats.in_subagent is True
+
+    def test_pre_tool_use_does_not_set_in_subagent_for_other_tools(self) -> None:
+        """PreToolUse hook does not set in_subagent for non-Task tools."""
+        context = self._make_context()
+        hook = create_pre_tool_use_hook(context)
+
+        # Verify flag is initially False
+        assert context.stats.in_subagent is False
+
+        # Call with regular tool
+        input_data = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/test"},
+        }
+        asyncio.run(hook(input_data, "tool-123", {"signal": None}))
+
+        # Flag should remain False
+        assert context.stats.in_subagent is False
+
+    def test_subagent_stop_increments_count_and_clears_flag(self) -> None:
+        """SubagentStop hook increments subagent_count and clears in_subagent."""
+        context = self._make_context()
+        hook = create_subagent_stop_hook(context)
+
+        # Set up initial state as if subagent was running
+        context.stats.in_subagent = True
+        context.stats.subagent_count = 0
+
+        # Call SubagentStop
+        input_data = {
+            "hook_event_name": "SubagentStop",
+            "session_id": "subagent-123",
+            "stop_hook_active": False,
+        }
+        asyncio.run(hook(input_data, None, {"signal": None}))
+
+        # Flag should be cleared and count incremented
+        assert context.stats.in_subagent is False
+        assert context.stats.subagent_count == 1
+
+    def test_subagent_lifecycle_flag_management(self) -> None:
+        """Test full subagent lifecycle: PreToolUse(Task) -> SubagentStop."""
+        context = self._make_context()
+        pre_hook = create_pre_tool_use_hook(context)
+        subagent_stop_hook = create_subagent_stop_hook(context)
+
+        # Initially not in subagent
+        assert context.stats.in_subagent is False
+        assert context.stats.subagent_count == 0
+
+        # PreToolUse for Task sets flag
+        task_input = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Task",
+            "tool_input": {"prompt": "run subagent"},
+        }
+        asyncio.run(pre_hook(task_input, "task-tool-1", {"signal": None}))
+        assert context.stats.in_subagent is True
+
+        # SubagentStop clears flag and increments count
+        stop_input = {
+            "hook_event_name": "SubagentStop",
+            "session_id": "subagent-1",
+            "stop_hook_active": False,
+        }
+        asyncio.run(subagent_stop_hook(stop_input, None, {"signal": None}))
+        assert context.stats.in_subagent is False
+        assert context.stats.subagent_count == 1

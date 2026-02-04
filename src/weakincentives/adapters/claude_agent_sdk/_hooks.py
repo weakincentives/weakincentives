@@ -394,6 +394,11 @@ def create_pre_tool_use_hook(
         if (deny := _check_budget_constraint(hook_context, tool_name)) is not None:
             return deny
 
+        # Set subagent flag when Task tool is called (subagent spawn)
+        # This flag is cleared by SubagentStop hook when subagent completes
+        if tool_name == "Task":
+            hook_context.stats.in_subagent = True
+
         # Take snapshot for transactional rollback on native tools
         if tool_use_id is not None and not tool_name.startswith("mcp__wink__"):
             hook_context.begin_tool_execution(
@@ -967,7 +972,8 @@ def create_subagent_stop_hook(
         _ = tool_use_id
         _ = sdk_context
 
-        # Clear the sub-agent flag when exiting sub-agent context
+        # Increment subagent count and clear the sub-agent flag
+        hook_context.stats.subagent_count += 1
         hook_context.stats.in_subagent = False
 
         # Type narrow to SubagentStopHookInput
