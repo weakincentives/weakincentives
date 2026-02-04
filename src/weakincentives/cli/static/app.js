@@ -376,6 +376,7 @@ const state = {
   transcriptHasMore: false,
   transcriptLoading: false,
   transcriptRequestId: 0, // Tracks current request to ignore stale responses
+  transcriptLoadRetries: 0, // Consecutive failed load attempts
   // Logs state
   allLogs: [],
   filteredLogs: [],
@@ -956,15 +957,20 @@ function applyTranscriptResult(result, append) {
 async function loadTranscript(append = false) {
   const requestId = ++state.transcriptRequestId;
   const isCurrentRequest = () => requestId === state.transcriptRequestId;
+  if (!append) {
+    state.transcriptLoadRetries = 0;
+  }
   try {
     state.transcriptLoading = true;
     const offset = append ? state.transcriptEntries.length : 0;
     const result = await fetchJSON(`/api/transcript?${buildTranscriptQueryParams(offset)}`);
     if (isCurrentRequest()) {
+      state.transcriptLoadRetries = 0;
       applyTranscriptResult(result, append);
     }
   } catch (error) {
     if (isCurrentRequest()) {
+      state.transcriptLoadRetries++;
       showTranscriptError(error.message);
     }
   } finally {
@@ -2118,6 +2124,7 @@ function openTranscriptZoom(index) {
   state.zoomType = "transcript";
   state.zoomIndex = index;
   state.zoomEntry = entry;
+  state.transcriptLoadRetries = 0;
   renderZoomModal();
   elements.zoomModal.classList.remove("hidden");
 }
@@ -2143,18 +2150,51 @@ function zoomPrev() {
   openTranscriptZoom(state.zoomIndex - 1);
 }
 
+const MAX_TRANSCRIPT_LOAD_RETRIES = 3;
+
+let zoomNextPending = false;
+
+/**
+ * Loads more entries and navigates to the next one if state hasn't changed.
+ */
+async function zoomNextWithLoad(startIndex, nextIndex) {
+  zoomNextPending = true;
+  try {
+    await loadMoreTranscript();
+    const indexUnchanged = state.zoomOpen && state.zoomIndex === startIndex;
+    const hasNewEntry = indexUnchanged && nextIndex < state.transcriptEntries.length;
+    if (hasNewEntry) {
+      openTranscriptZoom(nextIndex);
+    }
+  } finally {
+    zoomNextPending = false;
+    updateZoomNavigation();
+  }
+}
+
 /**
  * Navigates to the next entry in the zoom modal.
+ * Automatically loads more entries if at the end and more are available.
  */
-function zoomNext() {
-  if (!state.zoomOpen) {
+async function zoomNext() {
+  if (!state.zoomOpen || zoomNextPending) {
     return;
   }
-  const maxIndex = state.transcriptEntries.length - 1;
-  if (state.zoomIndex >= maxIndex) {
+  const startIndex = state.zoomIndex;
+  const nextIndex = startIndex + 1;
+  const hasNextEntry = nextIndex < state.transcriptEntries.length;
+
+  if (hasNextEntry) {
+    openTranscriptZoom(nextIndex);
     return;
   }
-  openTranscriptZoom(state.zoomIndex + 1);
+  const canLoadMore =
+    state.transcriptHasMore &&
+    !state.transcriptLoading &&
+    state.transcriptLoadRetries < MAX_TRANSCRIPT_LOAD_RETRIES;
+  if (canLoadMore) {
+    await zoomNextWithLoad(startIndex, nextIndex);
+  }
 }
 
 /**
@@ -2632,9 +2672,11 @@ function updateZoomNavigation() {
   }
 
   const maxIndex = state.transcriptEntries.length - 1;
+  const canLoadMore =
+    state.transcriptHasMore && state.transcriptLoadRetries < MAX_TRANSCRIPT_LOAD_RETRIES;
 
   elements.zoomPrev.disabled = state.zoomIndex <= 0;
-  elements.zoomNext.disabled = state.zoomIndex >= maxIndex;
+  elements.zoomNext.disabled = state.zoomIndex >= maxIndex && !canLoadMore;
 }
 
 /**
@@ -2658,7 +2700,7 @@ elements.zoomClose.addEventListener("click", closeZoomModal);
 elements.zoomModal.querySelector(".zoom-modal-backdrop").addEventListener("click", closeZoomModal);
 elements.zoomCopy.addEventListener("click", copyZoomEntry);
 elements.zoomPrev.addEventListener("click", zoomPrev);
-elements.zoomNext.addEventListener("click", zoomNext);
+elements.zoomNext.addEventListener("click", async () => await zoomNext());
 
 // Event delegation for zoom buttons in transcript list
 elements.transcriptList.addEventListener("click", (e) => {
@@ -2697,12 +2739,12 @@ function handleEscapeKey(e) {
  * Handles navigation keys when zoom modal is open.
  * Returns true if the event was handled.
  */
-function handleZoomModalKeys(e) {
+async function handleZoomModalKeys(e) {
   const nextKeys = ["j", "J", "ArrowDown", "ArrowRight"];
   const prevKeys = ["k", "K", "ArrowUp", "ArrowLeft"];
   if (nextKeys.includes(e.key)) {
     e.preventDefault();
-    zoomNext();
+    await zoomNext();
     return true;
   }
   if (prevKeys.includes(e.key)) {
@@ -2793,14 +2835,18 @@ function handleGlobalShortcuts(e) {
   return handleArrowShortcut(e, key);
 }
 
-document.addEventListener("keydown", (e) => {
+document.addEventListener("keydown", async (e) => {
   if (e.key === "Escape") {
     handleEscapeKey(e);
     return;
   }
 
   if (state.zoomOpen) {
-    handleZoomModalKeys(e);
+    if (zoomNextPending) {
+      e.preventDefault();
+      return;
+    }
+    await handleZoomModalKeys(e);
     return;
   }
 
