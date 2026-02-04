@@ -211,7 +211,7 @@ class TestNormalizeSDKError:
         assert result.provider_payload["sub_exceptions"][1]["type"] == "RuntimeError"
 
     def test_exception_group_without_exceptions_attribute(self) -> None:
-        """ExceptionGroup without exceptions attribute is handled."""
+        """ExceptionGroup without exceptions attribute is handled as generic error."""
 
         # Create a mock ExceptionGroup without the exceptions attribute
         class MockExceptionGroup(Exception):
@@ -223,11 +223,13 @@ class TestNormalizeSDKError:
         result = normalize_sdk_error(error, "test_prompt")
 
         assert isinstance(result, PromptEvaluationError)
-        # Empty sub_exceptions list is treated as all CLI connection errors
-        assert "SDK cleanup error" in result.message
-        assert "0 pending control requests" in result.message
-        assert result.phase == "response"
-        assert result.provider_payload is None  # No stderr_output
+        # Empty sub_exceptions should be treated as generic exception group,
+        # not cleanup errors (vacuous truth protection)
+        assert result.message == "Some exception group"  # Uses str(error)
+        assert "SDK cleanup error" not in result.message  # NOT a cleanup error
+        assert result.phase == "request"  # Generic errors use "request" phase
+        # provider_payload is None when sub_exceptions is empty and no stderr
+        assert result.provider_payload is None
 
     def test_exception_group_with_stderr_output(self) -> None:
         """ExceptionGroup includes stderr_output in payload."""

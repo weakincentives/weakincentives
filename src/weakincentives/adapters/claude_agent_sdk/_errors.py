@@ -97,9 +97,10 @@ def _handle_exception_group(
 
     # Check if all sub-exceptions are CLIConnectionError during cleanup
     # using isinstance() for type-safe checking consistent with the rest of the module.
-    # Note: all() returns True for empty sequences (vacuous truth), which means
-    # ExceptionGroups without sub-exceptions are treated as cleanup errors.
-    all_cli_connection_errors = all(
+    # Note: all() returns True for empty sequences (vacuous truth), so we must
+    # explicitly check for non-empty to avoid classifying empty ExceptionGroups
+    # as cleanup errors.
+    all_cli_connection_errors = len(exceptions) > 0 and all(
         isinstance(exc, CLIConnectionError) and "not ready for writing" in str(exc)
         for exc in exceptions
     )
