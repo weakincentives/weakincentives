@@ -552,6 +552,18 @@ class TestEphemeralHomeSettingsGeneration:
             expected = ["/tmp/output", "/var/log", f"/tmp/claude-{os.getuid()}"]
             assert settings["sandbox"]["writablePaths"] == expected
 
+    def test_sandbox_writable_paths_already_includes_claude_temp(self) -> None:
+        """Test that Claude temp dir is not duplicated if already in writable_paths."""
+        claude_temp_dir = f"/tmp/claude-{os.getuid()}"
+        config = IsolationConfig(
+            sandbox=SandboxConfig(writable_paths=("/tmp/output", claude_temp_dir))
+        )
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            # Should not duplicate the Claude temp dir
+            expected = ["/tmp/output", claude_temp_dir]
+            assert settings["sandbox"]["writablePaths"] == expected
+
     def test_sandbox_readable_paths(self) -> None:
         config = IsolationConfig(
             sandbox=SandboxConfig(readable_paths=("/data/readonly",))

@@ -2381,6 +2381,45 @@ class TestMultiturnEdgeCases:
         # Should return with no text (empty stream)
         assert response.text is None
 
+    def test_cleanup_handles_none_transport(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that cleanup handles the case where _transport is None."""
+
+        # Mock client where _transport is None (simulates edge case)
+        class MockClientNoTransport:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                self._transport = None  # Transport is None
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                pass  # prompt=None with new approach
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                pass  # Handle initial query
+
+            async def receive_response(self) -> AsyncGenerator[object, None]:
+                yield MockResultMessage(
+                    result="Response with no transport",
+                    usage={"input_tokens": 10, "output_tokens": 5},
+                )
+
+        _setup_mock_query([])
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClientNoTransport):
+                response = adapter.evaluate(simple_prompt, session=session)
+
+        # Should complete successfully even with None transport
+        assert response.text == "Response with no transport"
+
     def test_structured_output_used_for_completion_check(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
