@@ -547,7 +547,9 @@ class TestEphemeralHomeSettingsGeneration:
         )
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
-            assert settings["sandbox"]["writablePaths"] == ["/tmp/output", "/var/log"]
+            # When sandbox is enabled, Claude Code's temp dir is auto-added
+            expected = ["/tmp/output", "/var/log", f"/tmp/claude-{os.getuid()}"]
+            assert settings["sandbox"]["writablePaths"] == expected
 
     def test_sandbox_readable_paths(self) -> None:
         config = IsolationConfig(
