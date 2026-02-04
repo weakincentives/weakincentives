@@ -10,12 +10,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Error normalization for Claude Agent SDK exceptions."""
+"""Error normalization for Claude Agent SDK exceptions.
+
+This module uses SDK native exception types for type-safe error handling.
+"""
 
 from __future__ import annotations
 
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
+
+from claude_agent_sdk import (
+    CLIConnectionError,
+    CLIJSONDecodeError,
+    CLINotFoundError,
+    ProcessError,
+)
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ..core import PromptEvaluationError
@@ -154,7 +164,8 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
             else None,
         )
 
-    if error_type == "CLINotFoundError":
+    # Use isinstance checks with SDK native exception types for type safety
+    if isinstance(error, CLINotFoundError):
         logger.debug(
             "claude_agent_sdk.error.cli_not_found",
             event="error.cli_not_found",
@@ -169,7 +180,7 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
             phase="request",
         )
 
-    if error_type == "CLIConnectionError":
+    if isinstance(error, CLIConnectionError):
         logger.debug(
             "claude_agent_sdk.error.cli_connection_error",
             event="error.cli_connection_error",
@@ -185,9 +196,9 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
             retry_after=None,
         )
 
-    if error_type == "ProcessError":
+    if isinstance(error, ProcessError):
         provider_payload: dict[str, Any] = {}
-        if hasattr(error, "exit_code"):
+        if hasattr(error, "exit_code"):  # pragma: no branch - SDK always has exit_code
             provider_payload["exit_code"] = error.exit_code
         # Include stderr from both error attribute and captured output
         error_stderr = getattr(error, "stderr", None)
@@ -217,7 +228,7 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
             provider_payload=provider_payload if provider_payload else None,
         )
 
-    if error_type == "CLIJSONDecodeError":
+    if isinstance(error, CLIJSONDecodeError):
         logger.debug(
             "claude_agent_sdk.error.json_decode_error",
             event="error.json_decode_error",
@@ -236,6 +247,7 @@ def normalize_sdk_error(  # noqa: C901, PLR0911, PLR0912 - complexity needed for
             provider_payload=provider_payload_json if provider_payload_json else None,
         )
 
+    # MaxTurnsExceededError is checked by name since it may not be exported
     if error_type == "MaxTurnsExceededError":
         logger.debug(
             "claude_agent_sdk.error.max_turns_exceeded",

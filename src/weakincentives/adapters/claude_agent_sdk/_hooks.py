@@ -10,15 +10,52 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Hook implementations for Claude Agent SDK state synchronization."""
+"""Hook implementations for Claude Agent SDK state synchronization.
+
+This module provides hook callbacks that integrate WINK's session state management
+with the Claude Agent SDK's execution model. Hooks use SDK native types for
+type-safe integration.
+
+SDK Hook Types Used
+-------------------
+- ``PreToolUseHookInput``: Input for PreToolUse hooks
+- ``PostToolUseHookInput``: Input for PostToolUse hooks
+- ``StopHookInput``: Input for Stop hooks
+- ``UserPromptSubmitHookInput``: Input for UserPromptSubmit hooks
+- ``SubagentStopHookInput``: Input for SubagentStop hooks
+- ``PreCompactHookInput``: Input for PreCompact hooks
+- ``HookContext``: SDK hook execution context
+- ``SyncHookJSONOutput``: Synchronous hook return type
+- ``PreToolUseHookSpecificOutput``: PreToolUse-specific output fields
+- ``PostToolUseHookSpecificOutput``: PostToolUse-specific output fields
+
+Note
+----
+The SDK does not support SessionStart, SessionEnd, SubagentStart, or Notification
+hooks in the Python SDK. Only the hook types listed above are available.
+"""
 
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
+from claude_agent_sdk.types import (
+    HookCallback,
+    HookContext as SdkHookContext,
+    HookInput,
+    PostToolUseHookInput,
+    PostToolUseHookSpecificOutput,
+    PreCompactHookInput,
+    PreToolUseHookInput,
+    PreToolUseHookSpecificOutput,
+    StopHookInput,
+    SubagentStopHookInput,
+    SyncHookJSONOutput,
+    UserPromptSubmitHookInput,
+)
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
@@ -41,17 +78,13 @@ if TYPE_CHECKING:
     from ...prompt.prompt import PromptResources
 
 __all__ = [
-    "AsyncHookCallback",
     "HookCallback",
     "HookContext",
     "HookStats",
-    "PostToolUseInput",
-    "create_notification_hook",
     "create_post_tool_use_hook",
     "create_pre_compact_hook",
     "create_pre_tool_use_hook",
     "create_stop_hook",
-    "create_subagent_start_hook",
     "create_subagent_stop_hook",
     "create_task_completion_stop_hook",
     "create_user_prompt_submit_hook",
@@ -59,64 +92,7 @@ __all__ = [
 ]
 
 
-@dataclass(slots=True, frozen=True)
-class PostToolUseInput:
-    """Typed representation of PostToolUse hook input.
-
-    Mirrors the SDK's PostToolUseHookInput TypedDict but as a frozen dataclass
-    for immutability and better type safety. The tool_response is kept as a raw
-    value (dict or string) to avoid creating dataclasses that could be added
-    to session state.
-    """
-
-    session_id: str
-    tool_name: str
-    tool_input: dict[str, Any]
-    tool_response: dict[str, Any] | str
-    cwd: str = ""
-    transcript_path: str = ""
-    permission_mode: str | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> PostToolUseInput | None:
-        """Parse a dict into PostToolUseInput, returning None if required fields missing."""
-        if data is None or not isinstance(data, dict):
-            return None
-        # Check required fields
-        if "tool_name" not in data:
-            return None
-        raw_response = data.get("tool_response")
-        # Keep tool_response as raw dict or string
-        if isinstance(raw_response, dict):
-            response: dict[str, Any] | str = raw_response
-        else:
-            response = str(raw_response) if raw_response is not None else ""
-        return cls(
-            session_id=str(data.get("session_id", "")),
-            tool_name=str(data.get("tool_name", "")),
-            tool_input=data.get("tool_input", {})
-            if isinstance(data.get("tool_input"), dict)
-            else {},
-            tool_response=response,
-            cwd=str(data.get("cwd", "")),
-            transcript_path=str(data.get("transcript_path", "")),
-            permission_mode=data.get("permission_mode"),
-        )
-
-
 logger: StructuredLogger = get_logger(__name__, context={"component": "sdk_hooks"})
-
-HookCallback = Callable[
-    [dict[str, Any], str | None, "HookContext"],
-    dict[str, Any],
-]
-"""Type alias for synchronous hook callbacks."""
-
-AsyncHookCallback = Callable[
-    [Any, str | None, Any],
-    Awaitable[dict[str, Any]],
-]
-"""Type alias for async hook callbacks matching SDK signature."""
 
 
 @dataclass(slots=True)
@@ -159,6 +135,12 @@ class HookContext:
 
     Provides unified access to session, prompt resources, and tool transaction
     tracking for hook-based execution management.
+
+    Note
+    ----
+    This is WINK's HookContext, distinct from the SDK's ``HookContext`` TypedDict
+    which only contains a ``signal`` field for future abort support. WINK's
+    HookContext provides richer functionality for session state management.
     """
 
     def __init__(  # noqa: PLR0913 - context objects often need many parameters
@@ -243,9 +225,9 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def create_pre_tool_use_hook(
+def create_pre_tool_use_hook(  # noqa: C901 - constraint checking complexity
     hook_context: HookContext,
-) -> AsyncHookCallback:
+) -> HookCallback:
     """Create a PreToolUse hook for constraint enforcement and state snapshots.
 
     The hook checks deadlines and budgets before tool execution, blocking
@@ -259,19 +241,25 @@ def create_pre_tool_use_hook(
     """
 
     async def pre_tool_use_hook(
-        input_data: Any,  # noqa: ANN401
+        input_data: HookInput,
         tool_use_id: str | None,
-        sdk_context: Any,  # noqa: ANN401
-    ) -> dict[str, Any]:
+        sdk_context: SdkHookContext,
+    ) -> SyncHookJSONOutput:
         _ = sdk_context
         hook_start = time.monotonic()
 
         # Beat before tool execution to prove liveness
         hook_context.beat()
 
-        tool_name = (
-            input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
-        )
+        # Type narrow to PreToolUseHookInput
+        if (
+            not isinstance(input_data, dict)
+            or input_data.get("hook_event_name") != "PreToolUse"
+        ):
+            return {}
+
+        pre_input: PreToolUseHookInput = input_data  # type: ignore[assignment]
+        tool_name = pre_input.get("tool_name", "")
 
         # Compute constraint status for logging
         deadline_remaining_ms: int | None = None
@@ -306,7 +294,7 @@ def create_pre_tool_use_hook(
             context={
                 "tool_name": tool_name,
                 "tool_use_id": tool_use_id,
-                "input_data": input_data if isinstance(input_data, dict) else {},
+                "tool_input": pre_input.get("tool_input", {}),
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "deadline_remaining_ms": deadline_remaining_ms,
@@ -327,13 +315,12 @@ def create_pre_tool_use_hook(
                     "tool_count": hook_context.stats.tool_count,
                 },
             )
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "Deadline exceeded",
-                }
+            output: PreToolUseHookSpecificOutput = {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Deadline exceeded",
             }
+            return {"hookSpecificOutput": output}
 
         if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
             budget = budget_tracker.budget
@@ -355,13 +342,12 @@ def create_pre_tool_use_hook(
                         "elapsed_ms": hook_context.elapsed_ms,
                     },
                 )
-                return {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": "Token budget exhausted",
-                    }
+                output_budget: PreToolUseHookSpecificOutput = {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Token budget exhausted",
                 }
+                return {"hookSpecificOutput": output_budget}
 
         # Take snapshot for transactional rollback on native tools
         # Skip MCP-bridged WINK tools - they handle their own transactions
@@ -397,55 +383,33 @@ class _ParsedToolData:
     result_raw: Any
 
 
-def _parse_tool_data(input_data: Any) -> _ParsedToolData:  # noqa: ANN401
+def _parse_tool_data(input_data: PostToolUseHookInput) -> _ParsedToolData:
     """Parse tool data from PostToolUse hook input.
 
-    Attempts typed parsing first, falling back to dict access.
+    Uses the SDK's PostToolUseHookInput TypedDict for type-safe access.
     """
-    parsed = PostToolUseInput.from_dict(input_data)
+    tool_name = input_data.get("tool_name", "")
+    tool_input = input_data.get("tool_input", {})
+    tool_response = input_data.get("tool_response")
 
-    if parsed is not None:
-        response = parsed.tool_response
-        if isinstance(response, dict):
-            tool_error = response.get("stderr") if response.get("stderr") else None
-            output_text = response.get("stdout", "") or str(response)
-        else:
-            tool_error = None
-            output_text = response
-        return _ParsedToolData(
-            tool_name=parsed.tool_name,
-            tool_input=parsed.tool_input,
-            tool_error=tool_error,
-            output_text=output_text,
-            result_raw=response,
-        )
+    # Extract error and output text from response
+    tool_error: str | None = None
+    output_text: str = ""
 
-    # Fallback to dict access for malformed input
-    tool_name = input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
-    tool_input = (
-        input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
-    )
-    tool_response_raw = (
-        input_data.get("tool_response", {}) if isinstance(input_data, dict) else {}
-    )
-    tool_error = (
-        tool_response_raw.get("stderr")
-        if isinstance(tool_response_raw, dict) and tool_response_raw.get("stderr")
-        else None
-    )
-    if isinstance(tool_response_raw, dict):
-        output_text = tool_response_raw.get("stdout", "") or str(tool_response_raw)
-    elif tool_response_raw is not None:
-        output_text = str(tool_response_raw)
-    else:
-        output_text = ""
+    if isinstance(tool_response, dict):
+        stderr = tool_response.get("stderr")
+        tool_error = stderr if stderr else None
+        stdout = tool_response.get("stdout", "")
+        output_text = stdout or str(tool_response)
+    elif tool_response is not None:
+        output_text = str(tool_response)
 
     return _ParsedToolData(
         tool_name=tool_name,
-        tool_input=tool_input,
+        tool_input=tool_input if isinstance(tool_input, dict) else {},
         tool_error=tool_error,
         output_text=output_text,
-        result_raw=tool_response_raw,
+        result_raw=tool_response,
     )
 
 
@@ -454,12 +418,11 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
     *,
     stop_on_structured_output: bool = True,
     task_completion_checker: TaskCompletionChecker | None = None,
-) -> AsyncHookCallback:
+) -> HookCallback:
     """Create a PostToolUse hook for tool result recording and state rollback.
 
-    The hook dispatches ToolInvoked events to the session dispatcher. It attempts to
-    parse the input data into typed dataclasses (PostToolUseInput, ToolResponse)
-    for better type safety, falling back to dict access if parsing fails.
+    The hook dispatches ToolInvoked events to the session dispatcher using the
+    SDK's native PostToolUseHookInput TypedDict for type-safe access.
 
     If the tool failed, the hook restores state from the pre-execution snapshot.
 
@@ -500,7 +463,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
 
     def _run_feedback_providers(  # pragma: no cover - integration tested
         data: _ParsedToolData,
-    ) -> dict[str, Any] | None:
+    ) -> SyncHookJSONOutput | None:
         """Run feedback providers and return hook response if triggered."""
         feedback_text = collect_feedback(
             prompt=hook_context._prompt,
@@ -518,22 +481,30 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                     "elapsed_ms": hook_context.elapsed_ms,
                 },
             )
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PostToolUse",
-                    "additionalContext": feedback_text,
-                }
+            output: PostToolUseHookSpecificOutput = {
+                "hookEventName": "PostToolUse",
+                "additionalContext": feedback_text,
             }
+            return {"hookSpecificOutput": output}
         return None
 
-    async def post_tool_use_hook(  # noqa: C901 - observer dispatch
-        input_data: Any,  # noqa: ANN401
+    async def post_tool_use_hook(  # noqa: C901, PLR0911 - observer dispatch
+        input_data: HookInput,
         tool_use_id: str | None,
-        sdk_context: Any,  # noqa: ANN401
-    ) -> dict[str, Any]:
+        sdk_context: SdkHookContext,
+    ) -> SyncHookJSONOutput:
         _ = sdk_context
         hook_start = time.monotonic()
-        data = _parse_tool_data(input_data)
+
+        # Type narrow to PostToolUseHookInput
+        if (
+            not isinstance(input_data, dict)
+            or input_data.get("hook_event_name") != "PostToolUse"
+        ):
+            return {}
+
+        post_input: PostToolUseHookInput = input_data  # type: ignore[assignment]
+        data = _parse_tool_data(post_input)
 
         # Beat after tool execution to prove liveness
         hook_context.beat()
@@ -615,8 +586,8 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             # Only apply task completion checker to main agent, not sub-agents
             # Sub-agents (spawned via Task tool) should not be subject to
             # the parent agent's task completion requirements.
-            # The in_subagent flag is set by SubagentStart hook and cleared by
-            # SubagentStop hook to track when we're executing within a sub-agent.
+            # The in_subagent flag is set by SubagentStop hook to track
+            # when we're executing within a sub-agent.
             if (
                 task_completion_checker is not None
                 and not hook_context.stats.in_subagent
@@ -638,12 +609,13 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                     feedback_message = (
                         result.feedback or "<blocker>Tasks are incomplete.</blocker>"
                     )
+                    output: PostToolUseHookSpecificOutput = {
+                        "hookEventName": "PostToolUse",
+                        "additionalContext": feedback_message,
+                    }
                     return {
                         "continue_": True,
-                        "hookSpecificOutput": {
-                            "hookEventName": "PostToolUse",
-                            "additionalContext": feedback_message,
-                        },
+                        "hookSpecificOutput": output,
                     }
                 # Tasks complete - allow stop
                 logger.debug(
@@ -655,7 +627,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                         "tool_count": hook_context.stats.tool_count,
                     },
                 )
-                return {"continue": False}
+                return {"continue_": False}
             if stop_on_structured_output:
                 # No checker - stop immediately
                 logger.debug(
@@ -667,7 +639,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                         "tool_count": hook_context.stats.tool_count,
                     },
                 )
-                return {"continue": False}
+                return {"continue_": False}
 
         # Run feedback providers AFTER ToolInvoked dispatch so tool_call_count
         # includes this tool. Return feedback response if triggered.
@@ -710,7 +682,7 @@ def _is_tool_error_response(response: Any) -> bool:  # noqa: ANN401
 
 def create_user_prompt_submit_hook(
     hook_context: HookContext,
-) -> AsyncHookCallback:
+) -> HookCallback:
     """Create a UserPromptSubmit hook for turn boundary tracking.
 
     Logs turn start events and tracks turn count for debugging multi-turn
@@ -724,28 +696,28 @@ def create_user_prompt_submit_hook(
     """
 
     async def user_prompt_submit_hook(
-        input_data: Any,  # noqa: ANN401
+        input_data: HookInput,
         tool_use_id: str | None,
-        sdk_context: Any,  # noqa: ANN401
-    ) -> dict[str, Any]:
+        sdk_context: SdkHookContext,
+    ) -> SyncHookJSONOutput:
         _ = tool_use_id
         _ = sdk_context
 
         hook_context.stats.turn_count += 1
 
-        # Extract prompt info from input
-        payload = input_data if isinstance(input_data, dict) else {}
-        prompt_content = payload.get("prompt", "")
-        session_id = payload.get("session_id", "")
+        # Type narrow to UserPromptSubmitHookInput
+        if (
+            not isinstance(input_data, dict)
+            or input_data.get("hook_event_name") != "UserPromptSubmit"
+        ):
+            return {}
+
+        prompt_input: UserPromptSubmitHookInput = input_data  # type: ignore[assignment]
+        prompt_content = prompt_input.get("prompt", "")
+        session_id = prompt_input.get("session_id", "")
 
         # Calculate prompt preview (truncate for logging)
-        prompt_preview = ""
-        if isinstance(prompt_content, str):
-            prompt_preview = prompt_content[:200] if prompt_content else ""
-        elif isinstance(prompt_content, dict):  # pragma: no cover
-            content = prompt_content.get("content", "")
-            if isinstance(content, str):
-                prompt_preview = content[:200]
+        prompt_preview = prompt_content[:200] if prompt_content else ""
 
         logger.debug(
             "claude_agent_sdk.hook.turn_start",
@@ -754,11 +726,7 @@ def create_user_prompt_submit_hook(
                 "turn_number": hook_context.stats.turn_count,
                 "session_id": session_id,
                 "prompt_preview": prompt_preview,
-                "prompt_length": (
-                    len(prompt_content)
-                    if isinstance(prompt_content, str)
-                    else len(str(prompt_content))
-                ),
+                "prompt_length": len(prompt_content),
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "cumulative_input_tokens": hook_context.stats.total_input_tokens,
@@ -773,7 +741,7 @@ def create_user_prompt_submit_hook(
 
 def create_stop_hook(
     hook_context: HookContext,
-) -> AsyncHookCallback:
+) -> HookCallback:
     """Create a Stop hook for execution finalization.
 
     Records the stop reason and logs final execution statistics for debugging.
@@ -786,31 +754,30 @@ def create_stop_hook(
     """
 
     async def stop_hook(
-        input_data: Any,  # noqa: ANN401
+        input_data: HookInput,
         tool_use_id: str | None,
-        sdk_context: Any,  # noqa: ANN401
-    ) -> dict[str, Any]:
+        sdk_context: SdkHookContext,
+    ) -> SyncHookJSONOutput:
         _ = tool_use_id
         _ = sdk_context
 
-        payload = input_data if isinstance(input_data, dict) else {}
-        stop_reason = payload.get("stopReason", "end_turn")
-        hook_context.stop_reason = stop_reason
+        # Type narrow to StopHookInput
+        if (
+            not isinstance(input_data, dict)
+            or input_data.get("hook_event_name") != "Stop"
+        ):
+            return {}
 
-        # Extract additional stop context if available
-        num_turns = payload.get("numTurns")
-        duration_ms = payload.get("durationMs")
-        final_result = payload.get("result", "")
-        result_preview = final_result[:200] if isinstance(final_result, str) else ""
+        stop_input: StopHookInput = input_data  # type: ignore[assignment]
+        stop_reason = "end_turn"  # StopHookInput doesn't have stopReason field
+        hook_context.stop_reason = stop_reason
 
         logger.debug(
             "claude_agent_sdk.hook.stop",
             event="hook.stop",
             context={
                 "stop_reason": stop_reason,
-                "sdk_num_turns": num_turns,
-                "sdk_duration_ms": duration_ms,
-                "result_preview": result_preview,
+                "stop_hook_active": stop_input.get("stop_hook_active", False),
                 "elapsed_ms": hook_context.elapsed_ms,
                 "stats_tool_count": hook_context.stats.tool_count,
                 "stats_turn_count": hook_context.stats.turn_count,
@@ -828,11 +795,11 @@ def create_stop_hook(
     return stop_hook
 
 
-def create_task_completion_stop_hook(
+def create_task_completion_stop_hook(  # noqa: C901 - constraint checking complexity
     hook_context: HookContext,
     *,
     checker: TaskCompletionChecker,
-) -> AsyncHookCallback:
+) -> HookCallback:
     """Create a Stop hook that checks task completion before allowing stop.
 
     This hook uses the provided TaskCompletionChecker to verify that all tasks
@@ -864,18 +831,21 @@ def create_task_completion_stop_hook(
             return None
 
     async def task_completion_stop_hook(
-        input_data: Any,  # noqa: ANN401
+        input_data: HookInput,
         tool_use_id: str | None,
-        sdk_context: Any,  # noqa: ANN401
-    ) -> dict[str, Any]:
+        sdk_context: SdkHookContext,
+    ) -> SyncHookJSONOutput:
         _ = tool_use_id
         _ = sdk_context
 
-        stop_reason = (
-            input_data.get("stopReason", "end_turn")
-            if isinstance(input_data, dict)
-            else "end_turn"
-        )
+        # Type narrow to StopHookInput
+        if (
+            not isinstance(input_data, dict)
+            or input_data.get("hook_event_name") != "Stop"
+        ):
+            return {}
+
+        stop_reason = "end_turn"
         hook_context.stop_reason = stop_reason
 
         # Skip task completion check if deadline exceeded - can't do more work
@@ -942,67 +912,23 @@ def create_task_completion_stop_hook(
 
         return {
             "continue_": True,
-            "reason": result.feedback,
+            "reason": result.feedback or "Tasks are incomplete",
         }
 
     return task_completion_stop_hook
 
 
-def create_subagent_start_hook(
-    hook_context: HookContext,
-) -> AsyncHookCallback:
-    """Create a SubagentStart hook to capture subagent launch events.
-
-    Tracks subagent statistics for debugging when subagents are spawned.
-
-    Args:
-        hook_context: Context with session references.
-
-    Returns:
-        An async hook callback function matching SDK signature.
-    """
-
-    async def subagent_start_hook(
-        input_data: Any,  # noqa: ANN401
-        tool_use_id: str | None,
-        sdk_context: Any,  # noqa: ANN401
-    ) -> dict[str, Any]:
-        _ = tool_use_id
-        _ = sdk_context
-
-        hook_context.stats.subagent_count += 1
-        hook_context.stats.in_subagent = True
-        payload = input_data if isinstance(input_data, dict) else {}
-
-        # Extract subagent details for logging
-        subagent_type = payload.get("subagent_type", "")
-        subagent_description = payload.get("description", "")
-        subagent_id = payload.get("subagent_id", "")
-
-        logger.debug(
-            "claude_agent_sdk.hook.subagent_start",
-            event="hook.subagent_start",
-            context={
-                "subagent_number": hook_context.stats.subagent_count,
-                "subagent_type": subagent_type,
-                "subagent_id": subagent_id,
-                "description": subagent_description,
-                "elapsed_ms": hook_context.elapsed_ms,
-                "tool_count": hook_context.stats.tool_count,
-            },
-        )
-
-        return {}
-
-    return subagent_start_hook
-
-
 def create_subagent_stop_hook(
     hook_context: HookContext,
-) -> AsyncHookCallback:
+) -> HookCallback:
     """Create a SubagentStop hook to capture subagent completion events.
 
-    Logs subagent completion details for debugging.
+    Logs subagent completion details and clears the in_subagent flag.
+
+    Note
+    ----
+    The SDK does not support SubagentStart hooks. Subagent tracking is done
+    via SubagentStop only, which clears the in_subagent flag.
 
     Args:
         hook_context: Context with session references.
@@ -1012,35 +938,31 @@ def create_subagent_stop_hook(
     """
 
     async def subagent_stop_hook(
-        input_data: Any,  # noqa: ANN401
+        input_data: HookInput,
         tool_use_id: str | None,
-        sdk_context: Any,  # noqa: ANN401
-    ) -> dict[str, Any]:
+        sdk_context: SdkHookContext,
+    ) -> SyncHookJSONOutput:
         _ = tool_use_id
         _ = sdk_context
 
         # Clear the sub-agent flag when exiting sub-agent context
         hook_context.stats.in_subagent = False
 
-        payload = input_data if isinstance(input_data, dict) else {}
+        # Type narrow to SubagentStopHookInput
+        if (
+            not isinstance(input_data, dict)
+            or input_data.get("hook_event_name") != "SubagentStop"
+        ):
+            return {}
 
-        # Extract subagent completion details for logging
-        subagent_id = payload.get("subagent_id", "")
-        subagent_result = payload.get("result", "")
-        result_preview = (
-            subagent_result[:200] if isinstance(subagent_result, str) else ""
-        )
-        subagent_duration_ms = payload.get("duration_ms")
-        subagent_tool_count = payload.get("tool_count")
+        subagent_input: SubagentStopHookInput = input_data  # type: ignore[assignment]
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_stop",
             event="hook.subagent_stop",
             context={
-                "subagent_id": subagent_id,
-                "result_preview": result_preview,
-                "subagent_duration_ms": subagent_duration_ms,
-                "subagent_tool_count": subagent_tool_count,
+                "session_id": subagent_input.get("session_id", ""),
+                "stop_hook_active": subagent_input.get("stop_hook_active", False),
                 "elapsed_ms": hook_context.elapsed_ms,
                 "parent_tool_count": hook_context.stats.tool_count,
                 "subagent_count": hook_context.stats.subagent_count,
@@ -1054,7 +976,7 @@ def create_subagent_stop_hook(
 
 def create_pre_compact_hook(
     hook_context: HookContext,
-) -> AsyncHookCallback:
+) -> HookCallback:
     """Create a PreCompact hook to capture context compaction events.
 
     Tracks context window utilization for debugging memory-constrained scenarios
@@ -1068,37 +990,31 @@ def create_pre_compact_hook(
     """
 
     async def pre_compact_hook(
-        input_data: Any,  # noqa: ANN401
+        input_data: HookInput,
         tool_use_id: str | None,
-        sdk_context: Any,  # noqa: ANN401
-    ) -> dict[str, Any]:
+        sdk_context: SdkHookContext,
+    ) -> SyncHookJSONOutput:
         _ = tool_use_id
         _ = sdk_context
 
         hook_context.stats.compact_count += 1
-        payload = input_data if isinstance(input_data, dict) else {}
 
-        # Extract context window details for logging
-        context_tokens = payload.get("context_tokens")
-        max_context_tokens = payload.get("max_context_tokens")
-        message_count = payload.get("message_count")
-        compaction_reason = payload.get("reason", "")
+        # Type narrow to PreCompactHookInput
+        if (
+            not isinstance(input_data, dict)
+            or input_data.get("hook_event_name") != "PreCompact"
+        ):
+            return {}
 
-        # Calculate utilization percentage if available
-        utilization_pct: float | None = None
-        if context_tokens is not None and max_context_tokens:  # pragma: no cover
-            utilization_pct = round((context_tokens / max_context_tokens) * 100, 1)
+        compact_input: PreCompactHookInput = input_data  # type: ignore[assignment]
 
         logger.debug(
             "claude_agent_sdk.hook.pre_compact",
             event="hook.pre_compact",
             context={
                 "compact_number": hook_context.stats.compact_count,
-                "context_tokens": context_tokens,
-                "max_context_tokens": max_context_tokens,
-                "utilization_pct": utilization_pct,
-                "message_count": message_count,
-                "compaction_reason": compaction_reason,
+                "trigger": compact_input.get("trigger", ""),
+                "custom_instructions": compact_input.get("custom_instructions"),
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "turn_count": hook_context.stats.turn_count,
@@ -1110,62 +1026,12 @@ def create_pre_compact_hook(
     return pre_compact_hook
 
 
-def create_notification_hook(
-    hook_context: HookContext,
-) -> AsyncHookCallback:
-    """Create a Notification hook to capture user-facing notifications.
-
-    Extracts notification type and content for structured logging from
-    the SDK's notification system.
-
-    Args:
-        hook_context: Context with session references.
-
-    Returns:
-        An async hook callback function matching SDK signature.
-    """
-
-    async def notification_hook(
-        input_data: Any,  # noqa: ANN401
-        tool_use_id: str | None,
-        sdk_context: Any,  # noqa: ANN401
-    ) -> dict[str, Any]:
-        _ = tool_use_id
-        _ = sdk_context
-
-        payload = input_data if isinstance(input_data, dict) else {}
-
-        # Extract notification details for logging
-        notification_type = payload.get("type", "")
-        notification_message = payload.get("message", "")
-        message_preview = (
-            notification_message[:200] if isinstance(notification_message, str) else ""
-        )
-        notification_level = payload.get("level", "info")
-
-        logger.debug(
-            "claude_agent_sdk.hook.notification",
-            event="hook.notification",
-            context={
-                "notification_type": notification_type,
-                "notification_level": notification_level,
-                "message_preview": message_preview,
-                "elapsed_ms": hook_context.elapsed_ms,
-                "tool_count": hook_context.stats.tool_count,
-            },
-        )
-
-        return {}
-
-    return notification_hook
-
-
 def safe_hook_wrapper(
     hook_fn: HookCallback,
-    input_data: dict[str, Any],
+    input_data: HookInput,
     tool_use_id: str | None,
     context: HookContext,
-) -> dict[str, Any]:
+) -> SyncHookJSONOutput:
     """Wrap a hook to catch exceptions and convert to responses.
 
     Prevents hook errors from crashing the SDK execution by catching
@@ -1181,8 +1047,15 @@ def safe_hook_wrapper(
     Returns:
         Hook response dict, potentially with denial for errors.
     """
+    # Note: This function wraps async hooks but runs synchronously.
+    # It's used for error handling at the boundary, not for actual hook execution.
+    # The SDK handles async execution of hooks internally.
     try:
-        return hook_fn(input_data, tool_use_id, context)
+        import asyncio
+
+        return asyncio.get_event_loop().run_until_complete(
+            hook_fn(input_data, tool_use_id, {"signal": None})
+        )
     except Exception as error:
         error_name = type(error).__name__
         context.stats.hook_errors += 1
@@ -1197,13 +1070,12 @@ def safe_hook_wrapper(
                     "elapsed_ms": context.elapsed_ms,
                 },
             )
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": input_data.get("hookEventName", "PreToolUse"),
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "Deadline exceeded",
-                }
+            output: PreToolUseHookSpecificOutput = {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Deadline exceeded",
             }
+            return {"hookSpecificOutput": output}
 
         if error_name in {"BudgetExhaustedError", "BudgetExceeded"}:
             logger.debug(
@@ -1215,13 +1087,12 @@ def safe_hook_wrapper(
                     "elapsed_ms": context.elapsed_ms,
                 },
             )
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": input_data.get("hookEventName", "PreToolUse"),
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "Budget exhausted",
-                }
+            output_budget: PreToolUseHookSpecificOutput = {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Budget exhausted",
             }
+            return {"hookSpecificOutput": output_budget}
 
         logger.exception(
             "claude_agent_sdk.hook.error",

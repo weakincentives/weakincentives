@@ -22,13 +22,10 @@ import pytest
 
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
-    PostToolUseInput,
-    create_notification_hook,
     create_post_tool_use_hook,
     create_pre_compact_hook,
     create_pre_tool_use_hook,
     create_stop_hook,
-    create_subagent_start_hook,
     create_subagent_stop_hook,
     create_task_completion_stop_hook,
     create_user_prompt_submit_hook,
@@ -169,9 +166,13 @@ class TestHookContext:
 class TestPreToolUseHook:
     def test_allows_tool_by_default(self, hook_context: HookContext) -> None:
         hook = create_pre_tool_use_hook(hook_context)
-        input_data = {"tool_name": "Read", "tool_input": {"path": "/test"}}
+        input_data = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_input": {"path": "/test"},
+        }
 
-        result = asyncio.run(hook(input_data, "call-123", hook_context))
+        result = asyncio.run(hook(input_data, "call-123", {"signal": None}))
 
         assert result == {}
 
@@ -192,9 +193,9 @@ class TestPreToolUseHook:
             deadline=deadline,
         )
         hook = create_pre_tool_use_hook(context)
-        input_data = {"tool_name": "Read"}
+        input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
 
-        result = asyncio.run(hook(input_data, "call-123", context))
+        result = asyncio.run(hook(input_data, "call-123", {"signal": None}))
 
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
         assert "Deadline exceeded" in result.get("hookSpecificOutput", {}).get(
@@ -216,9 +217,9 @@ class TestPreToolUseHook:
             budget_tracker=tracker,
         )
         hook = create_pre_tool_use_hook(context)
-        input_data = {"tool_name": "Read"}
+        input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
 
-        result = asyncio.run(hook(input_data, "call-123", context))
+        result = asyncio.run(hook(input_data, "call-123", {"signal": None}))
 
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
         assert "budget exhausted" in result.get("hookSpecificOutput", {}).get(
@@ -240,9 +241,9 @@ class TestPreToolUseHook:
             budget_tracker=tracker,
         )
         hook = create_pre_tool_use_hook(context)
-        input_data = {"tool_name": "Read"}
+        input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
 
-        result = asyncio.run(hook(input_data, "call-123", context))
+        result = asyncio.run(hook(input_data, "call-123", {"signal": None}))
 
         assert result == {}
 
@@ -260,12 +261,13 @@ class TestPostToolUseHook:
         )
         hook = create_post_tool_use_hook(context)
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "Read",
             "tool_input": {"path": "/test.txt"},
             "tool_response": {"stdout": "file contents"},
         }
 
-        asyncio.run(hook(input_data, "call-123", context))
+        asyncio.run(hook(input_data, "call-123", {"signal": None}))
 
         assert len(events) == 1
         event = events[0]
@@ -283,18 +285,28 @@ class TestPostToolUseHook:
 
         asyncio.run(
             hook(
-                {"tool_name": "Read", "tool_input": {}, "tool_response": {}},
+                {
+                    "hook_event_name": "PostToolUse",
+                    "tool_name": "Read",
+                    "tool_input": {},
+                    "tool_response": {},
+                },
                 None,
-                hook_context,
+                {"signal": None},
             )
         )
         assert hook_context._tool_count == 1
 
         asyncio.run(
             hook(
-                {"tool_name": "Write", "tool_input": {}, "tool_response": {}},
+                {
+                    "hook_event_name": "PostToolUse",
+                    "tool_name": "Write",
+                    "tool_input": {},
+                    "tool_response": {},
+                },
                 None,
-                hook_context,
+                {"signal": None},
             )
         )
         assert hook_context._tool_count == 2
@@ -311,12 +323,13 @@ class TestPostToolUseHook:
         )
         hook = create_post_tool_use_hook(context)
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "Read",
             "tool_input": {"path": "/missing.txt"},
             "tool_response": {"stderr": "File not found"},
         }
 
-        asyncio.run(hook(input_data, "call-456", context))
+        asyncio.run(hook(input_data, "call-456", {"signal": None}))
 
         assert len(events) == 1
         event = events[0]
@@ -336,12 +349,13 @@ class TestPostToolUseHook:
         hook = create_post_tool_use_hook(context)
         # tool_response is a non-dict, non-None value (e.g., a string)
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "Echo",
             "tool_input": {"message": "hello"},
             "tool_response": "hello world",  # Non-dict response
         }
 
-        asyncio.run(hook(input_data, "call-789", context))
+        asyncio.run(hook(input_data, "call-789", {"signal": None}))
 
         assert len(events) == 1
         event = events[0]
@@ -361,12 +375,13 @@ class TestPostToolUseHook:
         hook = create_post_tool_use_hook(context)
         long_output = "x" * 2000
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "Read",
             "tool_input": {},
             "tool_response": {"stdout": long_output},
         }
 
-        asyncio.run(hook(input_data, None, context))
+        asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert len(events) == 1
         assert len(events[0].rendered_output) == 1000
@@ -380,14 +395,16 @@ class TestPostToolUseHook:
         )
         hook = create_post_tool_use_hook(context)
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "StructuredOutput",
             "tool_input": {"output": {"key": "value"}},
             "tool_response": {"stdout": ""},
         }
 
-        result = asyncio.run(hook(input_data, "call-structured", context))
+        result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
-        assert result == {"continue": False}
+        # SDK uses continue_ to avoid Python keyword conflict
+        assert result == {"continue_": False}
 
     def test_does_not_stop_on_structured_output_when_disabled(
         self, session: Session
@@ -400,12 +417,13 @@ class TestPostToolUseHook:
         )
         hook = create_post_tool_use_hook(context, stop_on_structured_output=False)
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "StructuredOutput",
             "tool_input": {"output": {"key": "value"}},
             "tool_response": {"stdout": ""},
         }
 
-        result = asyncio.run(hook(input_data, "call-structured", context))
+        result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
         assert result == {}
 
@@ -422,12 +440,13 @@ class TestPostToolUseHook:
         )
         hook = create_post_tool_use_hook(context)
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "mcp__wink__planning_setup_plan",
             "tool_input": {"objective": "test plan"},
             "tool_response": {"stdout": "Plan created"},
         }
 
-        result = asyncio.run(hook(input_data, "call-mcp", context))
+        result = asyncio.run(hook(input_data, "call-mcp", {"signal": None}))
 
         # Should return empty without publishing ToolInvoked event
         assert result == {}
@@ -449,6 +468,7 @@ class TestPostToolUseHook:
         hook = create_post_tool_use_hook(context)
         # Full SDK-format input that will be parsed successfully
         input_data = {
+            "hook_event_name": "PostToolUse",
             "session_id": "sess-123",
             "tool_name": "mcp__wink__open_sections",
             "tool_input": {"section_keys": ["reference-docs"]},
@@ -456,7 +476,7 @@ class TestPostToolUseHook:
             "cwd": "/home",
         }
 
-        result = asyncio.run(hook(input_data, "call-mcp-full", context))
+        result = asyncio.run(hook(input_data, "call-mcp-full", {"signal": None}))
 
         assert result == {}
         assert len(events) == 0
@@ -487,12 +507,13 @@ class TestPostToolUseHook:
             context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
         )
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "StructuredOutput",
             "tool_input": {"output": {"key": "value"}},
             "tool_response": {"stdout": ""},
         }
 
-        result = asyncio.run(hook(input_data, "call-structured", context))
+        result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
         # Should return continue_: True to force continuation (SDK converts to "continue")
         assert result.get("continue_") is True
@@ -529,15 +550,16 @@ class TestPostToolUseHook:
             context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
         )
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "StructuredOutput",
             "tool_input": {"output": {"key": "value"}},
             "tool_response": {"stdout": ""},
         }
 
-        result = asyncio.run(hook(input_data, "call-structured", context))
+        result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
         # Should stop - all tasks complete
-        assert result == {"continue": False}
+        assert result == {"continue_": False}
 
     def test_stops_when_structured_output_without_plan(self, session: Session) -> None:
         """PostToolUse stops after StructuredOutput when no plan exists."""
@@ -553,15 +575,16 @@ class TestPostToolUseHook:
             context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
         )
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "StructuredOutput",
             "tool_input": {"output": {"key": "value"}},
             "tool_response": {"stdout": ""},
         }
 
-        result = asyncio.run(hook(input_data, "call-structured", context))
+        result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
         # Should stop - no plan means nothing to enforce
-        assert result == {"continue": False}
+        assert result == {"continue_": False}
 
     def test_returns_feedback_when_provider_triggers(self, session: Session) -> None:
         """PostToolUse returns additionalContext when feedback provider triggers."""
@@ -579,12 +602,13 @@ class TestPostToolUseHook:
 
         # Use a regular tool (not StructuredOutput) so we hit the feedback path
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_name": "Read",
             "tool_input": {"file_path": "/test.txt"},
             "tool_response": {"stdout": "file content"},
         }
 
-        result = asyncio.run(hook(input_data, "call-read", context))
+        result = asyncio.run(hook(input_data, "call-read", {"signal": None}))
 
         # Should return additionalContext with feedback
         hook_output = result.get("hookSpecificOutput", {})
@@ -596,9 +620,9 @@ class TestPostToolUseHook:
 class TestUserPromptSubmitHook:
     def test_returns_empty_by_default(self, hook_context: HookContext) -> None:
         hook = create_user_prompt_submit_hook(hook_context)
-        input_data = {"prompt": "Do something"}
+        input_data = {"hook_event_name": "UserPromptSubmit", "prompt": "Do something"}
 
-        result = asyncio.run(hook(input_data, None, hook_context))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result == {}
 
@@ -606,38 +630,46 @@ class TestUserPromptSubmitHook:
 class TestStopHook:
     def test_records_stop_reason(self, hook_context: HookContext) -> None:
         hook = create_stop_hook(hook_context)
-        input_data = {"stopReason": "tool_use"}
+        # SDK StopHookInput doesn't have stopReason field, so hook defaults to end_turn
+        input_data = {"hook_event_name": "Stop", "stop_hook_active": False}
 
         assert hook_context.stop_reason is None
 
-        asyncio.run(hook(input_data, None, hook_context))
+        asyncio.run(hook(input_data, None, {"signal": None}))
 
-        assert hook_context.stop_reason == "tool_use"
+        # StopHookInput doesn't have stopReason; hook always sets end_turn
+        assert hook_context.stop_reason == "end_turn"
 
     def test_defaults_to_end_turn(self, hook_context: HookContext) -> None:
         hook = create_stop_hook(hook_context)
-        input_data = {}
+        input_data = {"hook_event_name": "Stop"}
 
-        asyncio.run(hook(input_data, None, hook_context))
+        asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert hook_context.stop_reason == "end_turn"
 
 
 class TestSafeHookWrapper:
     def test_passes_through_successful_result(self, hook_context: HookContext) -> None:
-        def success_hook(
+        async def success_hook(
             input_data: dict[str, Any],
             tool_use_id: str | None,
-            context: HookContext,
+            context: Any,  # noqa: ANN401 - SDK context
         ) -> dict[str, Any]:
             return {"result": "success"}
 
-        result = safe_hook_wrapper(
-            success_hook,
-            {"tool_name": "test"},
-            "call-123",
-            hook_context,
-        )
+        # safe_hook_wrapper uses asyncio.get_event_loop() which requires an active loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = safe_hook_wrapper(
+                success_hook,
+                {"hook_event_name": "PreToolUse", "tool_name": "test"},
+                "call-123",
+                hook_context,
+            )
+        finally:
+            loop.close()
 
         assert result == {"result": "success"}
 
@@ -645,19 +677,25 @@ class TestSafeHookWrapper:
         class DeadlineExceededError(Exception):
             pass
 
-        def deadline_hook(
+        async def deadline_hook(
             input_data: dict[str, Any],
             tool_use_id: str | None,
-            context: HookContext,
+            context: Any,  # noqa: ANN401 - SDK context
         ) -> dict[str, Any]:
             raise DeadlineExceededError("Deadline exceeded")
 
-        result = safe_hook_wrapper(
-            deadline_hook,
-            {"hookEventName": "PreToolUse", "tool_name": "test"},
-            "call-123",
-            hook_context,
-        )
+        # safe_hook_wrapper uses asyncio.get_event_loop() which requires an active loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = safe_hook_wrapper(
+                deadline_hook,
+                {"hook_event_name": "PreToolUse", "tool_name": "test"},
+                "call-123",
+                hook_context,
+            )
+        finally:
+            loop.close()
 
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
         assert "Deadline exceeded" in result.get("hookSpecificOutput", {}).get(
@@ -668,19 +706,25 @@ class TestSafeHookWrapper:
         class BudgetExhaustedError(Exception):
             pass
 
-        def budget_hook(
+        async def budget_hook(
             input_data: dict[str, Any],
             tool_use_id: str | None,
-            context: HookContext,
+            context: Any,  # noqa: ANN401 - SDK context
         ) -> dict[str, Any]:
             raise BudgetExhaustedError("Budget exhausted")
 
-        result = safe_hook_wrapper(
-            budget_hook,
-            {"hookEventName": "PreToolUse", "tool_name": "test"},
-            "call-123",
-            hook_context,
-        )
+        # safe_hook_wrapper uses asyncio.get_event_loop() which requires an active loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = safe_hook_wrapper(
+                budget_hook,
+                {"hook_event_name": "PreToolUse", "tool_name": "test"},
+                "call-123",
+                hook_context,
+            )
+        finally:
+            loop.close()
 
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
         assert "Budget exhausted" in result.get("hookSpecificOutput", {}).get(
@@ -688,86 +732,27 @@ class TestSafeHookWrapper:
         )
 
     def test_catches_unknown_errors(self, hook_context: HookContext) -> None:
-        def failing_hook(
+        async def failing_hook(
             input_data: dict[str, Any],
             tool_use_id: str | None,
-            context: HookContext,
+            context: Any,  # noqa: ANN401 - SDK context
         ) -> dict[str, Any]:
             raise RuntimeError("Unexpected error")
 
-        result = safe_hook_wrapper(
-            failing_hook,
-            {"tool_name": "test"},
-            "call-123",
-            hook_context,
-        )
+        # safe_hook_wrapper uses asyncio.get_event_loop() which requires an active loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = safe_hook_wrapper(
+                failing_hook,
+                {"hook_event_name": "PreToolUse", "tool_name": "test"},
+                "call-123",
+                hook_context,
+            )
+        finally:
+            loop.close()
 
         assert result == {}
-
-
-class TestPostToolUseInput:
-    def test_from_dict_with_full_input(self) -> None:
-        data = {
-            "session_id": "sess-123",
-            "tool_name": "Read",
-            "tool_input": {"path": "/test.txt"},
-            "tool_response": {"stdout": "file contents", "stderr": ""},
-            "cwd": "/home/user",
-            "transcript_path": "/path/to/transcript",
-            "permission_mode": "bypassPermissions",
-        }
-        parsed = PostToolUseInput.from_dict(data)
-
-        assert parsed is not None
-        assert parsed.session_id == "sess-123"
-        assert parsed.tool_name == "Read"
-        assert parsed.tool_input == {"path": "/test.txt"}
-        # tool_response is now a raw dict
-        assert parsed.tool_response == {"stdout": "file contents", "stderr": ""}
-        assert parsed.cwd == "/home/user"
-        assert parsed.permission_mode == "bypassPermissions"
-
-    def test_from_dict_with_none(self) -> None:
-        assert PostToolUseInput.from_dict(None) is None
-
-    def test_from_dict_with_non_dict(self) -> None:
-        assert PostToolUseInput.from_dict("not a dict") is None  # type: ignore[arg-type]
-
-    def test_from_dict_missing_tool_name(self) -> None:
-        data = {"session_id": "sess-123", "tool_input": {}}
-        assert PostToolUseInput.from_dict(data) is None
-
-    def test_from_dict_with_non_dict_tool_response(self) -> None:
-        data = {
-            "tool_name": "Echo",
-            "tool_response": "plain string output",
-        }
-        parsed = PostToolUseInput.from_dict(data)
-
-        assert parsed is not None
-        # tool_response is kept as string when non-dict
-        assert parsed.tool_response == "plain string output"
-
-    def test_from_dict_with_none_tool_response(self) -> None:
-        data = {
-            "tool_name": "Echo",
-            "tool_response": None,
-        }
-        parsed = PostToolUseInput.from_dict(data)
-
-        assert parsed is not None
-        # None becomes empty string
-        assert parsed.tool_response == ""
-
-    def test_is_frozen(self) -> None:
-        parsed = PostToolUseInput(
-            session_id="sess",
-            tool_name="Test",
-            tool_input={},
-            tool_response={},
-        )
-        with pytest.raises(AttributeError):
-            parsed.tool_name = "modified"  # type: ignore[misc]
 
 
 class TestPostToolUseHookWithTypedParsing:
@@ -785,6 +770,7 @@ class TestPostToolUseHookWithTypedParsing:
         hook = create_post_tool_use_hook(context)
         # Full SDK-format input
         input_data = {
+            "hook_event_name": "PostToolUse",
             "session_id": "sess-123",
             "tool_name": "Read",
             "tool_input": {"path": "/test.txt"},
@@ -798,7 +784,7 @@ class TestPostToolUseHookWithTypedParsing:
             "transcript_path": "/transcript",
         }
 
-        asyncio.run(hook(input_data, "call-typed", context))
+        asyncio.run(hook(input_data, "call-typed", {"signal": None}))
 
         assert len(events) == 1
         event = events[0]
@@ -825,11 +811,12 @@ class TestPostToolUseHookWithTypedParsing:
         hook = create_post_tool_use_hook(context)
         # Malformed input missing tool_name
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_input": {"key": "value"},
             "tool_response": {"stdout": "output"},
         }
 
-        asyncio.run(hook(input_data, "call-fallback", context))
+        asyncio.run(hook(input_data, "call-fallback", {"signal": None}))
 
         assert len(events) == 1
         event = events[0]
@@ -850,11 +837,12 @@ class TestPostToolUseHookWithTypedParsing:
         hook = create_post_tool_use_hook(context)
         # Missing tool_name causes parsing failure, and tool_response is a string
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_input": {"key": "value"},
             "tool_response": "string output",  # Non-dict
         }
 
-        asyncio.run(hook(input_data, "call-string", context))
+        asyncio.run(hook(input_data, "call-string", {"signal": None}))
 
         assert len(events) == 1
         event = events[0]
@@ -875,11 +863,12 @@ class TestPostToolUseHookWithTypedParsing:
         hook = create_post_tool_use_hook(context)
         # Missing tool_name causes parsing failure, and tool_response is None
         input_data = {
+            "hook_event_name": "PostToolUse",
             "tool_input": {"key": "value"},
             "tool_response": None,
         }
 
-        asyncio.run(hook(input_data, "call-none", context))
+        asyncio.run(hook(input_data, "call-none", {"signal": None}))
 
         assert len(events) == 1
         event = events[0]
@@ -887,28 +876,16 @@ class TestPostToolUseHookWithTypedParsing:
         assert event.rendered_output == ""
 
 
-class TestSubagentStartHook:
-    def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook = create_subagent_start_hook(hook_context)
-        result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
-
-        assert result == {}
-
-    def test_increments_subagent_count(self, hook_context: HookContext) -> None:
-        assert hook_context.stats.subagent_count == 0
-        hook = create_subagent_start_hook(hook_context)
-
-        asyncio.run(hook({"session_id": "test"}, None, hook_context))
-        assert hook_context.stats.subagent_count == 1
-
-        asyncio.run(hook({"session_id": "test2"}, None, hook_context))
-        assert hook_context.stats.subagent_count == 2
-
-
 class TestSubagentStopHook:
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
         hook = create_subagent_stop_hook(hook_context)
-        result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
+        result = asyncio.run(
+            hook(
+                {"hook_event_name": "SubagentStop", "session_id": "test"},
+                None,
+                {"signal": None},
+            )
+        )
 
         assert result == {}
 
@@ -916,7 +893,13 @@ class TestSubagentStopHook:
 class TestPreCompactHook:
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
         hook = create_pre_compact_hook(hook_context)
-        result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
+        result = asyncio.run(
+            hook(
+                {"hook_event_name": "PreCompact", "session_id": "test"},
+                None,
+                {"signal": None},
+            )
+        )
 
         assert result == {}
 
@@ -924,19 +907,23 @@ class TestPreCompactHook:
         assert hook_context.stats.compact_count == 0
         hook = create_pre_compact_hook(hook_context)
 
-        asyncio.run(hook({"session_id": "test"}, None, hook_context))
+        asyncio.run(
+            hook(
+                {"hook_event_name": "PreCompact", "session_id": "test"},
+                None,
+                {"signal": None},
+            )
+        )
         assert hook_context.stats.compact_count == 1
 
-        asyncio.run(hook({"session_id": "test2"}, None, hook_context))
+        asyncio.run(
+            hook(
+                {"hook_event_name": "PreCompact", "session_id": "test2"},
+                None,
+                {"signal": None},
+            )
+        )
         assert hook_context.stats.compact_count == 2
-
-
-class TestNotificationHook:
-    def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook = create_notification_hook(hook_context)
-        result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
-
-        assert result == {}
 
 
 class TestPreToolUseHookTransactional:
@@ -956,7 +943,13 @@ class TestPreToolUseHookTransactional:
         )
 
         hook = create_pre_tool_use_hook(context)
-        result = asyncio.run(hook({"tool_name": "Edit"}, "tool-123", None))
+        result = asyncio.run(
+            hook(
+                {"hook_event_name": "PreToolUse", "tool_name": "Edit"},
+                "tool-123",
+                {"signal": None},
+            )
+        )
 
         assert result == {}
         assert "tool-123" in context._tracker._pending_tools
@@ -976,7 +969,13 @@ class TestPreToolUseHookTransactional:
         )
 
         hook = create_pre_tool_use_hook(context)
-        asyncio.run(hook({"tool_name": "mcp__wink__search"}, "tool-123", None))
+        asyncio.run(
+            hook(
+                {"hook_event_name": "PreToolUse", "tool_name": "mcp__wink__search"},
+                "tool-123",
+                {"signal": None},
+            )
+        )
 
         # Should NOT have pending execution for MCP tools (tracker not even initialized)
         assert (
@@ -1003,7 +1002,13 @@ class TestPostToolUseHookTransactional:
 
         # Take snapshot via pre-tool hook
         pre_hook = create_pre_tool_use_hook(context)
-        asyncio.run(pre_hook({"tool_name": "Edit"}, "tool-123", None))
+        asyncio.run(
+            pre_hook(
+                {"hook_event_name": "PreToolUse", "tool_name": "Edit"},
+                "tool-123",
+                {"signal": None},
+            )
+        )
 
         # Modify state (simulates tool making changes)
         fs.write("/test.txt", "modified")
@@ -1013,12 +1018,13 @@ class TestPostToolUseHookTransactional:
         asyncio.run(
             post_hook(
                 {
+                    "hook_event_name": "PostToolUse",
                     "tool_name": "Edit",
                     "tool_input": {},
                     "tool_response": {"stderr": "Error: file not found"},
                 },
                 "tool-123",
-                None,
+                {"signal": None},
             )
         )
 
@@ -1041,7 +1047,13 @@ class TestPostToolUseHookTransactional:
 
         # Take snapshot via pre-tool hook
         pre_hook = create_pre_tool_use_hook(context)
-        asyncio.run(pre_hook({"tool_name": "Edit"}, "tool-123", None))
+        asyncio.run(
+            pre_hook(
+                {"hook_event_name": "PreToolUse", "tool_name": "Edit"},
+                "tool-123",
+                {"signal": None},
+            )
+        )
 
         # Modify state (simulates tool making changes)
         fs.write("/test.txt", "modified")
@@ -1051,12 +1063,13 @@ class TestPostToolUseHookTransactional:
         asyncio.run(
             post_hook(
                 {
+                    "hook_event_name": "PostToolUse",
                     "tool_name": "Edit",
                     "tool_input": {},
                     "tool_response": {"stdout": "File edited successfully"},
                 },
                 "tool-123",
-                None,
+                {"signal": None},
             )
         )
 
@@ -1168,9 +1181,9 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(
             hook_context, checker=PlanBasedChecker(plan_type=Plan)
         )
-        input_data = {"stopReason": "end_turn"}
+        input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
-        result = asyncio.run(hook(input_data, None, None))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result == {}
         assert hook_context.stop_reason == "end_turn"
@@ -1190,9 +1203,9 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(
             context, checker=PlanBasedChecker(plan_type=Plan)
         )
-        input_data = {"stopReason": "end_turn"}
+        input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
-        result = asyncio.run(hook(input_data, None, None))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result == {}
         assert context.stop_reason == "end_turn"
@@ -1222,9 +1235,9 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(
             context, checker=PlanBasedChecker(plan_type=Plan)
         )
-        input_data = {"stopReason": "end_turn"}
+        input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
-        result = asyncio.run(hook(input_data, None, None))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result == {}
         assert context.stop_reason == "end_turn"
@@ -1255,9 +1268,9 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(
             context, checker=PlanBasedChecker(plan_type=Plan)
         )
-        input_data = {"stopReason": "end_turn"}
+        input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
-        result = asyncio.run(hook(input_data, None, None))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         # Should return continue_: True to force continuation (SDK converts to "continue")
         assert result.get("continue_") is True
@@ -1279,11 +1292,13 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(
             context, checker=PlanBasedChecker(plan_type=Plan)
         )
-        input_data = {"stopReason": "max_turns_reached"}
+        # SDK StopHookInput doesn't have stopReason field; hook defaults to end_turn
+        input_data = {"hook_event_name": "Stop", "stop_hook_active": False}
 
         assert context.stop_reason is None
-        asyncio.run(hook(input_data, None, None))
-        assert context.stop_reason == "max_turns_reached"
+        asyncio.run(hook(input_data, None, {"signal": None}))
+        # StopHookInput doesn't have stopReason; hook always sets end_turn
+        assert context.stop_reason == "end_turn"
 
     def test_defaults_stop_reason_to_end_turn(self, session: Session) -> None:
         """Stop hook defaults stopReason to end_turn when not provided."""
@@ -1300,7 +1315,7 @@ class TestTaskCompletionStopHook:
             context, checker=PlanBasedChecker(plan_type=Plan)
         )
 
-        asyncio.run(hook({}, None, None))
+        asyncio.run(hook({"hook_event_name": "Stop"}, None, {"signal": None}))
 
         assert context.stop_reason == "end_turn"
 
@@ -1326,9 +1341,9 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(
             context, checker=PlanBasedChecker(plan_type=Plan)
         )
-        input_data = {"stopReason": "end_turn"}
+        input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
-        result = asyncio.run(hook(input_data, None, None))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result == {}
 
@@ -1357,9 +1372,9 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(
             context, checker=PlanBasedChecker(plan_type=Plan)
         )
-        input_data = {"stopReason": "end_turn"}
+        input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
-        result = asyncio.run(hook(input_data, None, None))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         # Should return continue_: True to force continuation (SDK converts to "continue")
         assert result.get("continue_") is True
@@ -1386,10 +1401,10 @@ class TestTaskCompletionStopHook:
         # Create hook with PlanBasedChecker - verifies protocol compatibility
         checker = PlanBasedChecker(plan_type=Plan)
         hook = create_task_completion_stop_hook(context, checker=checker)
-        input_data = {"stopReason": "end_turn"}
+        input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
         # Should work with checker protocol
-        result = asyncio.run(hook(input_data, None, None))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         # No plan initialized, so stop is allowed
         assert result == {}
@@ -1427,10 +1442,10 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(
             context, checker=PlanBasedChecker(plan_type=Plan)
         )
-        input_data = {"stopReason": "end_turn"}
+        input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
         # Even with incomplete tasks, stop is allowed due to expired deadline
-        result = asyncio.run(hook(input_data, None, None))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result == {}
 
@@ -1464,9 +1479,103 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(
             context, checker=PlanBasedChecker(plan_type=Plan)
         )
-        input_data = {"stopReason": "end_turn"}
+        input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
         # Even with incomplete tasks, stop is allowed due to exhausted budget
-        result = asyncio.run(hook(input_data, None, None))
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
+
+        assert result == {}
+
+
+class TestHookEventNameValidation:
+    """Tests for early return when hooks receive wrong event names."""
+
+    def _make_context(self) -> HookContext:
+        """Create a basic hook context for testing."""
+        prompt = _make_prompt()
+        session = Session(dispatcher=InProcessDispatcher())
+        return HookContext(
+            prompt=cast("PromptProtocol[object]", prompt),
+            prompt_name="test-prompt",
+            session=session,
+            adapter_name="claude_agent_sdk",
+        )
+
+    def test_pre_tool_use_hook_wrong_event_name(self) -> None:
+        """PreToolUse hook returns empty dict for wrong event name."""
+        context = self._make_context()
+        hook = create_pre_tool_use_hook(context)
+
+        # Call with wrong event name
+        input_data = {"hook_event_name": "PostToolUse", "tool_name": "Read"}
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
+
+        assert result == {}
+
+    def test_post_tool_use_hook_wrong_event_name(self) -> None:
+        """PostToolUse hook returns empty dict for wrong event name."""
+        context = self._make_context()
+        hook = create_post_tool_use_hook(context)
+
+        # Call with wrong event name
+        input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
+
+        assert result == {}
+
+    def test_user_prompt_submit_hook_wrong_event_name(self) -> None:
+        """UserPromptSubmit hook returns empty dict for wrong event name."""
+        context = self._make_context()
+        hook = create_user_prompt_submit_hook(context)
+
+        # Call with wrong event name
+        input_data = {"hook_event_name": "Stop", "prompt": "test"}
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
+
+        assert result == {}
+
+    def test_stop_hook_wrong_event_name(self) -> None:
+        """Stop hook returns empty dict for wrong event name."""
+        context = self._make_context()
+        hook = create_stop_hook(context)
+
+        # Call with wrong event name
+        input_data = {"hook_event_name": "PreToolUse", "tool_name": "test"}
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
+
+        assert result == {}
+
+    def test_task_completion_stop_hook_wrong_event_name(self) -> None:
+        """TaskCompletion stop hook returns empty dict for wrong event name."""
+        context = self._make_context()
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
+
+        # Call with wrong event name
+        input_data = {"hook_event_name": "PreCompact", "session_id": "test"}
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
+
+        assert result == {}
+
+    def test_subagent_stop_hook_wrong_event_name(self) -> None:
+        """SubagentStop hook returns empty dict for wrong event name."""
+        context = self._make_context()
+        hook = create_subagent_stop_hook(context)
+
+        # Call with wrong event name
+        input_data = {"hook_event_name": "Stop", "session_id": "test"}
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
+
+        assert result == {}
+
+    def test_pre_compact_hook_wrong_event_name(self) -> None:
+        """PreCompact hook returns empty dict for wrong event name."""
+        context = self._make_context()
+        hook = create_pre_compact_hook(context)
+
+        # Call with wrong event name
+        input_data = {"hook_event_name": "Stop", "session_id": "test"}
+        result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result == {}

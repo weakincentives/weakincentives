@@ -30,8 +30,13 @@ __all__ = [
     "PermissionMode",
 ]
 
+# Re-export PermissionMode from SDK types for backwards compatibility.
+# This is the canonical type - matches SDK's definition exactly.
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
-"""Permission handling mode for Claude Agent SDK tool execution."""
+"""Permission handling mode for Claude Agent SDK tool execution.
+
+This type alias matches the SDK's ``claude_agent_sdk.types.PermissionMode`` exactly.
+"""
 
 
 @FrozenDataclass()

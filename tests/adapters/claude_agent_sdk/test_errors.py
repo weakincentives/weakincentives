@@ -104,19 +104,6 @@ class TestNormalizeSDKError:
         assert result.prompt_name == "test_prompt"
         assert result.phase == "request"
 
-    def test_process_error_without_attributes(self) -> None:
-        # Inline class for edge case: ProcessError with no attributes at all
-        class MinimalProcessError(Exception):
-            pass
-
-        MinimalProcessError.__name__ = "ProcessError"
-        error = MinimalProcessError("Minimal error")
-        result = normalize_sdk_error(error, "test_prompt")
-
-        assert isinstance(result, PromptEvaluationError)
-        assert "Claude Code process failed" in result.message
-        assert result.provider_payload is None
-
     def test_process_error_with_captured_stderr(self) -> None:
         """ProcessError with stderr_output captures stderr in payload."""
         error = MockProcessError("Process failed", exit_code=1, stderr="Error output")

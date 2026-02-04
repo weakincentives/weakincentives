@@ -44,12 +44,10 @@ from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
 from ._hooks import (
     HookContext,
-    create_notification_hook,
     create_post_tool_use_hook,
     create_pre_compact_hook,
     create_pre_tool_use_hook,
     create_stop_hook,
-    create_subagent_start_hook,
     create_subagent_stop_hook,
     create_task_completion_stop_hook,
     create_user_prompt_submit_hook,
@@ -880,22 +878,19 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         else:
             stop_hook_fn = create_stop_hook(hook_context)
         prompt_hook = create_user_prompt_submit_hook(hook_context)
-        subagent_start_hook = create_subagent_start_hook(hook_context)
         subagent_stop_hook = create_subagent_stop_hook(hook_context)
         pre_compact_hook = create_pre_compact_hook(hook_context)
-        notification_hook = create_notification_hook(hook_context)
 
         # Build hooks dict with HookMatcher wrappers
         # matcher=None matches all tools
+        # Note: SDK does not support SubagentStart or Notification hooks in Python
         hook_types = [
             "PreToolUse",
             "PostToolUse",
             "Stop",
             "UserPromptSubmit",
-            "SubagentStart",
             "SubagentStop",
             "PreCompact",
-            "Notification",
         ]
 
         # Get collector hooks (empty if collector is disabled)
@@ -920,10 +915,6 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 HookMatcher(matcher=None, hooks=[prompt_hook]),
                 *collector_hooks.get("UserPromptSubmit", []),
             ],
-            "SubagentStart": [
-                HookMatcher(matcher=None, hooks=[subagent_start_hook]),
-                *collector_hooks.get("SubagentStart", []),
-            ],
             "SubagentStop": [
                 HookMatcher(matcher=None, hooks=[subagent_stop_hook]),
                 *collector_hooks.get("SubagentStop", []),
@@ -932,7 +923,6 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 HookMatcher(matcher=None, hooks=[pre_compact_hook]),
                 *collector_hooks.get("PreCompact", []),
             ],
-            "Notification": [HookMatcher(matcher=None, hooks=[notification_hook])],
         }
 
         logger.debug(
