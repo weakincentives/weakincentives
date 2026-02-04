@@ -1529,6 +1529,12 @@ def iter_bundle_files(root: Path) -> list[Path]:
 
 __all__ = [  # noqa: RUF022
     "ColumnInfo",
+    "QueryDatabase",
+    "QueryError",
+    "SCHEMA_VERSION",
+    "SchemaHints",
+    "SchemaOutput",
+    "TableInfo",
     "create_dynamic_slice_table",
     "flatten_json",
     "get_table_description",
@@ -1538,11 +1544,5 @@ __all__ = [  # noqa: RUF022
     "json_to_sql_value",
     "normalize_slice_type",
     "process_session_line",
-    "QueryDatabase",
-    "QueryError",
     "resolve_bundle_path",
-    "SCHEMA_VERSION",
-    "SchemaHints",
-    "SchemaOutput",
-    "TableInfo",
 ]

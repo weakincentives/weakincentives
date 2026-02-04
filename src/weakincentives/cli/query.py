@@ -21,66 +21,49 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..debug.bundle import BundleValidationError, DebugBundle
-from .query_format import format_as_json, format_as_table
-from .query_parsers import (
-    apply_tool_result_details,
-    apply_transcript_content_fallbacks,
-    extract_slices_from_snapshot,
-    extract_tool_call_from_entry,
-    extract_tool_use_from_content,
-    extract_transcript_details,
-    extract_transcript_message_details,
-    extract_transcript_parsed_obj,
-    extract_transcript_row,
-    is_tool_event,
-    safe_json_dumps,
-    stringify_transcript_content,
-    stringify_transcript_mapping,
-    stringify_transcript_tool_use,
-)
-from .query_schema import (
-    SCHEMA_VERSION,
-    ColumnInfo,
-    QueryDatabase,
-    QueryError,
-    SchemaHints,
-    SchemaOutput,
-    TableInfo,
-    create_dynamic_slice_table,
-    flatten_json,
-    get_table_description,
-    infer_sqlite_type,
-    is_cache_valid,
-    iter_bundle_files,
-    json_to_sql_value,
-    normalize_slice_type,
-    process_session_line,
-    resolve_bundle_path,
+from . import (
+    query_format as _query_format,
+    query_parsers as _query_parsers,
+    query_schema as _query_schema,
 )
 
-_apply_tool_result_details = apply_tool_result_details
-_apply_transcript_content_fallbacks = apply_transcript_content_fallbacks
-_create_dynamic_slice_table = create_dynamic_slice_table
-_extract_slices_from_snapshot = extract_slices_from_snapshot
-_extract_tool_call_from_entry = extract_tool_call_from_entry
-_extract_tool_use_from_content = extract_tool_use_from_content
-_extract_transcript_details = extract_transcript_details
-_extract_transcript_message_details = extract_transcript_message_details
-_extract_transcript_parsed_obj = extract_transcript_parsed_obj
-_extract_transcript_row = extract_transcript_row
-_flatten_json = flatten_json
-_get_table_description = get_table_description
-_infer_sqlite_type = infer_sqlite_type
-_is_tool_event = is_tool_event
-_json_to_sql_value = json_to_sql_value
-_SCHEMA_VERSION = SCHEMA_VERSION
-_normalize_slice_type = normalize_slice_type
-_is_cache_valid = is_cache_valid
-_process_session_line = process_session_line
-_safe_json_dumps = safe_json_dumps
-_stringify_transcript_content = stringify_transcript_content
-_stringify_transcript_mapping = stringify_transcript_mapping
-_stringify_transcript_tool_use = stringify_transcript_tool_use
+ColumnInfo = _query_schema.ColumnInfo
+QueryDatabase = _query_schema.QueryDatabase
+QueryError = _query_schema.QueryError
+SchemaHints = _query_schema.SchemaHints
+SchemaOutput = _query_schema.SchemaOutput
+TableInfo = _query_schema.TableInfo
+
+format_as_json = _query_format.format_as_json
+format_as_table = _query_format.format_as_table
+
+_apply_tool_result_details = _query_parsers.apply_tool_result_details
+_apply_transcript_content_fallbacks = _query_parsers.apply_transcript_content_fallbacks
+_create_dynamic_slice_table = _query_schema.create_dynamic_slice_table
+_extract_slices_from_snapshot = _query_parsers.extract_slices_from_snapshot
+_extract_tool_call_from_entry = _query_parsers.extract_tool_call_from_entry
+_extract_tool_use_from_content = _query_parsers.extract_tool_use_from_content
+_extract_transcript_details = _query_parsers.extract_transcript_details
+_extract_transcript_message_details = _query_parsers.extract_transcript_message_details
+_extract_transcript_parsed_obj = _query_parsers.extract_transcript_parsed_obj
+_extract_transcript_row = _query_parsers.extract_transcript_row
+_flatten_json = _query_schema.flatten_json
+_get_table_description = _query_schema.get_table_description
+_infer_sqlite_type = _query_schema.infer_sqlite_type
+_is_tool_event = _query_parsers.is_tool_event
+is_cache_valid = _query_schema.is_cache_valid
+_json_to_sql_value = _query_schema.json_to_sql_value
+_SCHEMA_VERSION = _query_schema.SCHEMA_VERSION
+_normalize_slice_type = _query_schema.normalize_slice_type
+_is_cache_valid = _query_schema.is_cache_valid
+_process_session_line = _query_schema.process_session_line
+_safe_json_dumps = _query_parsers.safe_json_dumps
+_stringify_transcript_content = _query_parsers.stringify_transcript_content
+_stringify_transcript_mapping = _query_parsers.stringify_transcript_mapping
+_stringify_transcript_tool_use = _query_parsers.stringify_transcript_tool_use
+
+iter_bundle_files = _query_schema.iter_bundle_files
+resolve_bundle_path = _query_schema.resolve_bundle_path
 
 
 def open_query_database(bundle_path: Path) -> QueryDatabase:
@@ -139,6 +122,13 @@ def export_jsonl(bundle: DebugBundle, source: str) -> str | None:
 
 
 __all__ = [  # noqa: RUF022
+    "ColumnInfo",
+    "QueryDatabase",
+    "QueryError",
+    "SchemaHints",
+    "SchemaOutput",
+    "TableInfo",
+    "_SCHEMA_VERSION",
     "_apply_tool_result_details",
     "_apply_transcript_content_fallbacks",
     "_create_dynamic_slice_table",
@@ -158,20 +148,13 @@ __all__ = [  # noqa: RUF022
     "_normalize_slice_type",
     "_process_session_line",
     "_safe_json_dumps",
-    "_SCHEMA_VERSION",
     "_stringify_transcript_content",
     "_stringify_transcript_mapping",
     "_stringify_transcript_tool_use",
-    "ColumnInfo",
     "export_jsonl",
     "format_as_json",
     "format_as_table",
     "iter_bundle_files",
     "open_query_database",
-    "QueryDatabase",
-    "QueryError",
     "resolve_bundle_path",
-    "SchemaHints",
-    "SchemaOutput",
-    "TableInfo",
 ]
