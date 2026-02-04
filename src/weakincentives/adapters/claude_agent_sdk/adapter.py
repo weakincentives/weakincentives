@@ -1131,26 +1131,23 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # Create ClaudeSDKClient for direct control
         client = ClaudeSDKClient(options=options)
 
-        # Use streaming mode (AsyncIterable) to enable hook support.
-        # The SDK's connect() function only initializes hooks when
-        # given an AsyncIterable prompt.
-        async def stream_prompt() -> Any:
-            """Yield a single user message in streaming format."""
-            yield {
-                "type": "user",
-                "message": {"role": "user", "content": prompt_text},
-                "parent_tool_use_id": None,
-                "session_id": hook_context.prompt_name,
-            }
-
         logger.debug(
             "claude_agent_sdk.sdk_query.connecting",
             event="sdk_query.connecting",
             context={"prompt_name": hook_context.prompt_name},
         )
 
-        # Connect with the initial prompt
-        await client.connect(prompt=stream_prompt())
+        # Connect WITHOUT a prompt stream. This prevents the SDK from starting
+        # stream_input() which would close stdin after the generator finishes.
+        # Instead, we use client.query() for the initial message and all
+        # continuations, then manually close stdin when done.
+        #
+        # This approach allows multi-turn conversations where continuation
+        # messages are sent based on task completion checking.
+        await client.connect(prompt=None)
+
+        # Send the initial prompt via query() - this writes directly to transport
+        await client.query(prompt=prompt_text, session_id=hook_context.prompt_name)
 
         logger.debug(
             "claude_agent_sdk.sdk_query.executing",
@@ -1188,9 +1185,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 ):
                     break
 
-                # Receive messages from the client
+                # Receive messages until ResultMessage using receive_response().
+                # This exits after ResultMessage without waiting for subprocess to exit,
+                # allowing us to send continuation messages if needed.
                 round_messages: list[Any] = []
-                async for message in client.receive_messages():
+                async for message in client.receive_response():
                     messages.append(message)
                     round_messages.append(message)
 
@@ -1238,7 +1237,10 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 break
 
         finally:
-            # Always disconnect the client to clean up resources
+            # Close stdin to signal EOF to the subprocess, then disconnect.
+            # Since we didn't use stream_input(), we need to manually close stdin.
+            if client._transport is not None:
+                await client._transport.end_input()
             logger.debug(
                 "claude_agent_sdk.sdk_query.disconnecting",
                 event="sdk_query.disconnecting",

@@ -825,8 +825,20 @@ class EphemeralHome:
             sandbox.allow_unsandboxed_commands
         )
 
-        if sandbox.writable_paths:
-            settings["sandbox"]["writablePaths"] = list(sandbox.writable_paths)
+        # Build writable paths list, including Claude Code's temp directory
+        writable_paths: list[str] = list(sandbox.writable_paths)
+
+        # Claude Code creates temp directories under /tmp/claude-{uid}/ for
+        # sandbox operations. When sandbox is enabled, we must allow writing
+        # there or commands will fail with "operation not permitted".
+        # This is Claude Code's internal temp directory, not our temp files.
+        if sandbox.enabled:
+            claude_temp_dir = f"/tmp/claude-{os.getuid()}"  # nosec B108
+            if claude_temp_dir not in writable_paths:
+                writable_paths.append(claude_temp_dir)
+
+        if writable_paths:
+            settings["sandbox"]["writablePaths"] = writable_paths
 
         if sandbox.readable_paths:
             settings["sandbox"]["readablePaths"] = list(sandbox.readable_paths)
