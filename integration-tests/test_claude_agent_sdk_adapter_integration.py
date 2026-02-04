@@ -619,6 +619,12 @@ def test_claude_agent_sdk_adapter_multiple_tool_invocations(tmp_path: Path) -> N
     each tool invocation is captured via the PostToolUse hook and published
     as a ToolInvoked event.
     """
+    # Create src directory with Python files for Claude to discover and read
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def main():\n    print('Hello, world!')\n")
+    (src_dir / "utils.py").write_text("def helper():\n    return 42\n")
+
     config = _make_config(tmp_path)
 
     # Allow tools that can be used for file discovery and reading
@@ -630,7 +636,7 @@ def test_claude_agent_sdk_adapter_multiple_tool_invocations(tmp_path: Path) -> N
     )
 
     prompt_template = _build_multi_tool_prompt()
-    # Use the src directory in tmp_path (created by fixture)
+    # Use the src directory in tmp_path (created above)
     params = MultiStepParams(target_dir="src")
     prompt = Prompt(prompt_template).bind(params)
 
