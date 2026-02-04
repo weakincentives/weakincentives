@@ -352,8 +352,8 @@ def _setup_tool_execution_state(
     For native tools: begins transactional execution with snapshot.
     """
     is_mcp_tool = tool_name.startswith("mcp__wink__")
-    if is_mcp_tool and hook_context.mcp_tool_state:
-        hook_context.mcp_tool_state.current_tool_use_id = tool_use_id
+    if is_mcp_tool and hook_context.mcp_tool_state and tool_use_id is not None:
+        hook_context.mcp_tool_state.set_tool_use_id(tool_name, tool_use_id)
     elif tool_use_id is not None and not is_mcp_tool:
         hook_context.begin_tool_execution(tool_use_id=tool_use_id, tool_name=tool_name)
         hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
@@ -571,7 +571,7 @@ def _handle_mcp_tool_post(
     MCP tools dispatch their own ToolInvoked events via the bridge.
     """
     if hook_context.mcp_tool_state:
-        hook_context.mcp_tool_state.current_tool_use_id = None
+        hook_context.mcp_tool_state.clear_tool_use_id(data.tool_name)
     result = _run_feedback_providers(hook_context, data)
     if result is not None:
         return result

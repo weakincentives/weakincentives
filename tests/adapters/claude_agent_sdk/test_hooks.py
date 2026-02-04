@@ -524,9 +524,10 @@ class TestPostToolUseHook:
         assert len(events) == 0
 
     def test_clears_mcp_tool_state_after_mcp_tool(self, session: Session) -> None:
-        """PostToolUse clears mcp_tool_state.current_tool_use_id after MCP tool completes."""
+        """PostToolUse clears mcp_tool_state for the tool after MCP tool completes."""
         mcp_state = MCPToolExecutionState()
-        mcp_state.current_tool_use_id = "call-mcp-456"  # Simulate PreToolUse set this
+        # Simulate PreToolUse setting this
+        mcp_state.set_tool_use_id("mcp__wink__planning_update", "call-mcp-456")
 
         context = HookContext(
             session=session,
@@ -545,8 +546,8 @@ class TestPostToolUseHook:
 
         asyncio.run(hook(input_data, "call-mcp-456", {"signal": None}))
 
-        # mcp_tool_state should be cleared after execution
-        assert mcp_state.current_tool_use_id is None
+        # mcp_tool_state should be cleared for this tool after execution
+        assert mcp_state.get_tool_use_id("planning_update") is None
 
     def test_returns_context_when_structured_output_with_incomplete_tasks(
         self, session: Session
@@ -1118,8 +1119,8 @@ class TestPreToolUseHookTransactional:
             )
         )
 
-        # mcp_tool_state should have the tool_use_id set
-        assert mcp_state.current_tool_use_id == "call-mcp-123"
+        # mcp_tool_state should have the tool_use_id set for this tool
+        assert mcp_state.get_tool_use_id("planning") == "call-mcp-123"
 
     def test_does_not_set_mcp_tool_state_for_native_tools(
         self, session: Session
@@ -1144,8 +1145,8 @@ class TestPreToolUseHookTransactional:
             )
         )
 
-        # mcp_tool_state should remain None for native tools
-        assert mcp_state.current_tool_use_id is None
+        # mcp_tool_state should remain empty for native tools
+        assert mcp_state.get_tool_use_id("Read") is None
 
 
 class TestPostToolUseHookTransactional:

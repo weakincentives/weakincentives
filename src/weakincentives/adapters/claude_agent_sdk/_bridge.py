@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -50,12 +50,15 @@ __all__ = [
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
 
 
+MCP_TOOL_PREFIX = "mcp__wink__"
+
+
 @dataclass(slots=True)
 class MCPToolExecutionState:
     """Shared state between hooks and MCP bridge for tool_use_id tracking.
 
     Created once per SDK query and passed to both HookContext and BridgedTools.
-    PreToolUse hook sets current_tool_use_id before MCP tool executes.
+    PreToolUse hook sets the tool_use_id for the MCP tool name before execution.
     BridgedTool reads it when dispatching ToolInvoked events.
     PostToolUse hook clears it after MCP tool completes.
 
@@ -64,20 +67,64 @@ class MCPToolExecutionState:
 
     Thread Safety
     -------------
-    This class assumes the Claude Agent SDK executes tools **sequentially**
-    within a single query. The SDK processes one tool at a time: PreToolUse
-    fires, then tool executes, then PostToolUse fires, before the next tool
-    begins. If this assumption is violated (e.g., parallel tool execution),
-    race conditions would occur where one tool reads another's tool_use_id.
+    Uses a dict mapping tool_name -> tool_use_id to support concurrent tool
+    execution. Each MCP tool's tool_use_id is stored by its unprefixed name
+    (e.g., "planning_setup_plan" not "mcp__wink__planning_setup_plan").
 
-    The sequential execution model is fundamental to how the SDK manages
-    tool lifecycles and is documented in SDK behavior. If the SDK ever
-    changes to support parallel tool execution, this implementation would
-    need to use a dict mapping (e.g., tool_name -> tool_use_id) instead
-    of a single shared field.
+    This design is safe if:
+    - Different MCP tools execute concurrently (each has its own key)
+    - The same tool is called multiple times sequentially (overwrite is fine)
+
+    Edge case: If the same MCP tool is called twice in parallel, only one
+    tool_use_id will be stored at a time. This is unlikely in practice since
+    Claude rarely calls the same tool twice with different inputs in parallel.
     """
 
-    current_tool_use_id: str | None = None
+    _tool_use_ids: dict[str, str] = field(default_factory=dict)
+
+    def set_tool_use_id(self, tool_name: str, tool_use_id: str) -> None:
+        """Store tool_use_id for an MCP tool.
+
+        Args:
+            tool_name: The tool name (with or without mcp__wink__ prefix).
+            tool_use_id: The SDK's tool_use_id for this invocation.
+        """
+        # Normalize to unprefixed name for consistent lookup
+        key = (
+            tool_name[len(MCP_TOOL_PREFIX) :]
+            if tool_name.startswith(MCP_TOOL_PREFIX)
+            else tool_name
+        )
+        self._tool_use_ids[key] = tool_use_id
+
+    def get_tool_use_id(self, tool_name: str) -> str | None:
+        """Get tool_use_id for an MCP tool.
+
+        Args:
+            tool_name: The tool name (with or without mcp__wink__ prefix).
+
+        Returns:
+            The tool_use_id if found, None otherwise.
+        """
+        key = (
+            tool_name[len(MCP_TOOL_PREFIX) :]
+            if tool_name.startswith(MCP_TOOL_PREFIX)
+            else tool_name
+        )
+        return self._tool_use_ids.get(key)
+
+    def clear_tool_use_id(self, tool_name: str) -> None:
+        """Clear tool_use_id for an MCP tool.
+
+        Args:
+            tool_name: The tool name (with or without mcp__wink__ prefix).
+        """
+        key = (
+            tool_name[len(MCP_TOOL_PREFIX) :]
+            if tool_name.startswith(MCP_TOOL_PREFIX)
+            else tool_name
+        )
+        self._tool_use_ids.pop(key, None)
 
 
 @dataclass(slots=True, frozen=True)
@@ -159,7 +206,9 @@ class BridgedTool:
         Uses transactional semantics: snapshot before execution, restore on failure.
         """
         tool_use_id = (
-            self._mcp_tool_state.current_tool_use_id if self._mcp_tool_state else None
+            self._mcp_tool_state.get_tool_use_id(self.name)
+            if self._mcp_tool_state
+            else None
         )
         logger.debug(
             "claude_agent_sdk.bridge.tool_call.start",
@@ -363,7 +412,9 @@ class BridgedTool:
         the PreToolUse hook before tool execution.
         """
         call_id = (
-            self._mcp_tool_state.current_tool_use_id if self._mcp_tool_state else None
+            self._mcp_tool_state.get_tool_use_id(self.name)
+            if self._mcp_tool_state
+            else None
         )
         event = ToolInvoked(
             prompt_name=self._prompt_name,

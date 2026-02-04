@@ -1374,7 +1374,7 @@ class TestMCPToolExecutionState:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         mcp_state = MCPToolExecutionState()
-        mcp_state.current_tool_use_id = "call-from-hook-789"
+        mcp_state.set_tool_use_id("search", "call-from-hook-789")
 
         bridged = BridgedTool(
             name="search",
@@ -1431,17 +1431,50 @@ class TestMCPToolExecutionState:
         assert len(events) == 1
         assert events[0].call_id is None
 
-    def test_mcp_state_defaults_to_none(self) -> None:
-        """MCPToolExecutionState defaults current_tool_use_id to None."""
+    def test_mcp_state_defaults_to_empty(self) -> None:
+        """MCPToolExecutionState defaults to empty dict."""
         state = MCPToolExecutionState()
-        assert state.current_tool_use_id is None
+        assert state.get_tool_use_id("any_tool") is None
 
     def test_mcp_state_can_be_set_and_cleared(self) -> None:
-        """MCPToolExecutionState can be set and cleared."""
+        """MCPToolExecutionState can set and clear tool_use_ids by name."""
         state = MCPToolExecutionState()
 
-        state.current_tool_use_id = "test-call-id"
-        assert state.current_tool_use_id == "test-call-id"
+        state.set_tool_use_id("my_tool", "test-call-id")
+        assert state.get_tool_use_id("my_tool") == "test-call-id"
 
-        state.current_tool_use_id = None
-        assert state.current_tool_use_id is None
+        state.clear_tool_use_id("my_tool")
+        assert state.get_tool_use_id("my_tool") is None
+
+    def test_mcp_state_handles_prefix_normalization(self) -> None:
+        """MCPToolExecutionState normalizes mcp__wink__ prefix."""
+        state = MCPToolExecutionState()
+
+        # Set with prefix, get without
+        state.set_tool_use_id("mcp__wink__planning_setup_plan", "call-123")
+        assert state.get_tool_use_id("planning_setup_plan") == "call-123"
+
+        # Set without prefix, get with prefix
+        state.set_tool_use_id("search", "call-456")
+        assert state.get_tool_use_id("mcp__wink__search") == "call-456"
+
+        # Clear with prefix
+        state.clear_tool_use_id("mcp__wink__search")
+        assert state.get_tool_use_id("search") is None
+
+    def test_mcp_state_supports_multiple_concurrent_tools(self) -> None:
+        """MCPToolExecutionState can track multiple tools concurrently."""
+        state = MCPToolExecutionState()
+
+        state.set_tool_use_id("tool_a", "call-a")
+        state.set_tool_use_id("tool_b", "call-b")
+        state.set_tool_use_id("tool_c", "call-c")
+
+        assert state.get_tool_use_id("tool_a") == "call-a"
+        assert state.get_tool_use_id("tool_b") == "call-b"
+        assert state.get_tool_use_id("tool_c") == "call-c"
+
+        state.clear_tool_use_id("tool_b")
+        assert state.get_tool_use_id("tool_a") == "call-a"
+        assert state.get_tool_use_id("tool_b") is None
+        assert state.get_tool_use_id("tool_c") == "call-c"
