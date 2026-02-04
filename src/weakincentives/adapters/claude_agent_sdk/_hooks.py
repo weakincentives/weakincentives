@@ -69,6 +69,7 @@ from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
 from ...runtime.watchdog import Heartbeat
+from ._bridge import MCPToolExecutionState
 from ._task_completion import (
     TaskCompletionChecker,
     TaskCompletionContext,
@@ -136,8 +137,8 @@ class HookStats:
 class HookConstraints:
     """Constraint configuration for hook execution.
 
-    Groups optional deadline, budget, heartbeat, and run context together
-    to simplify HookContext construction.
+    Groups optional deadline, budget, heartbeat, run context, and MCP tool state
+    together to simplify HookContext construction.
     """
 
     deadline: Deadline | None = None
@@ -151,6 +152,9 @@ class HookConstraints:
 
     run_context: RunContext | None = None
     """Optional run context for tracing."""
+
+    mcp_tool_state: MCPToolExecutionState | None = None
+    """Shared state for passing tool_use_id from hooks to MCP bridge."""
 
 
 class HookContext:
@@ -184,6 +188,7 @@ class HookContext:
         self.budget_tracker = constraints.budget_tracker if constraints else None
         self.heartbeat = constraints.heartbeat if constraints else None
         self.run_context = constraints.run_context if constraints else None
+        self.mcp_tool_state = constraints.mcp_tool_state if constraints else None
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
@@ -335,6 +340,34 @@ def _check_budget_constraint(
     return {"hookSpecificOutput": output}
 
 
+def _setup_tool_execution_state(
+    hook_context: HookContext,
+    tool_name: str,
+    tool_use_id: str | None,
+    hook_start: float,
+) -> None:
+    """Set up tool execution state for MCP or native tools.
+
+    For MCP tools: stores tool_use_id in mcp_tool_state for BridgedTool.
+    For native tools: begins transactional execution with snapshot.
+    """
+    is_mcp_tool = tool_name.startswith("mcp__wink__")
+    if is_mcp_tool and hook_context.mcp_tool_state:
+        hook_context.mcp_tool_state.current_tool_use_id = tool_use_id
+    elif tool_use_id is not None and not is_mcp_tool:
+        hook_context.begin_tool_execution(tool_use_id=tool_use_id, tool_name=tool_name)
+        hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
+        logger.debug(
+            "claude_agent_sdk.hook.snapshot_taken",
+            event="hook.snapshot_taken",
+            context={
+                "tool_name": tool_name,
+                "tool_use_id": tool_use_id,
+                "hook_duration_ms": hook_duration_ms,
+            },
+        )
+
+
 def create_pre_tool_use_hook(
     hook_context: HookContext,
 ) -> HookCallback:
@@ -399,21 +432,8 @@ def create_pre_tool_use_hook(
         if tool_name == "Task":
             hook_context.stats.in_subagent = True
 
-        # Take snapshot for transactional rollback on native tools
-        if tool_use_id is not None and not tool_name.startswith("mcp__wink__"):
-            hook_context.begin_tool_execution(
-                tool_use_id=tool_use_id, tool_name=tool_name
-            )
-            hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
-            logger.debug(
-                "claude_agent_sdk.hook.snapshot_taken",
-                event="hook.snapshot_taken",
-                context={
-                    "tool_name": tool_name,
-                    "tool_use_id": tool_use_id,
-                    "hook_duration_ms": hook_duration_ms,
-                },
-            )
+        # Set up tool execution state (MCP tool_use_id or native snapshot)
+        _setup_tool_execution_state(hook_context, tool_name, tool_use_id, hook_start)
 
         return {}
 
@@ -540,6 +560,23 @@ def _dispatch_tool_invoked_event(
         run_context=hook_context.run_context,
     )
     hook_context.session.dispatcher.dispatch(event)
+
+
+def _handle_mcp_tool_post(
+    hook_context: HookContext, data: _ParsedToolData
+) -> SyncHookJSONOutput:
+    """Handle post-processing for MCP tools.
+
+    Clears the tool_use_id from mcp_tool_state and runs feedback providers.
+    MCP tools dispatch their own ToolInvoked events via the bridge.
+    """
+    if hook_context.mcp_tool_state:
+        hook_context.mcp_tool_state.current_tool_use_id = None
+    result = _run_feedback_providers(hook_context, data)
+    if result is not None:
+        return result
+    empty: SyncHookJSONOutput = {}
+    return empty
 
 
 def _run_feedback_providers(  # pragma: no cover - integration tested
@@ -675,10 +712,9 @@ def create_post_tool_use_hook(
         hook_context._tool_count += 1
         hook_context.stats.tool_count += 1
 
-        # MCP tools already dispatch events - just run feedback providers
+        # MCP tools dispatch their own events - just clear state and run feedback
         if data.tool_name.startswith("mcp__wink__"):
-            result = _run_feedback_providers(hook_context, data)
-            return result if result is not None else {}
+            return _handle_mcp_tool_post(hook_context, data)
 
         # Native tools: dispatch event, handle transaction, check completion
         _dispatch_tool_invoked_event(hook_context, data, tool_use_id)

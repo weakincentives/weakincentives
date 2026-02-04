@@ -23,6 +23,7 @@ import pytest
 
 from weakincentives.adapters.claude_agent_sdk._bridge import (
     BridgedTool,
+    MCPToolExecutionState,
     _make_async_handler,
     create_bridged_tools,
     create_mcp_server,
@@ -41,6 +42,7 @@ from weakincentives.prompt import (
 from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.runtime.events import InProcessDispatcher
+from weakincentives.runtime.events.types import ToolInvoked
 from weakincentives.runtime.session import Session
 
 
@@ -1356,3 +1358,90 @@ class TestVisibilityExpansionSignal:
 
         assert not signal.is_set()
         assert signal.get_and_clear() is None
+
+
+class TestMCPToolExecutionState:
+    """Tests for MCPToolExecutionState shared state between hooks and bridge."""
+
+    def test_bridged_tool_uses_call_id_from_mcp_state(
+        self,
+        session: Session,
+        prompt: Prompt[object],
+        mock_adapter: MagicMock,
+    ) -> None:
+        """BridgedTool includes call_id from mcp_tool_state in ToolInvoked event."""
+        events: list[ToolInvoked] = []
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        mcp_state = MCPToolExecutionState()
+        mcp_state.current_tool_use_id = "call-from-hook-789"
+
+        bridged = BridgedTool(
+            name="search",
+            description="Search tool",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=cast("PromptProtocol[object]", prompt),
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            mcp_tool_state=mcp_state,
+        )
+
+        bridged({"query": "test"})
+
+        assert len(events) == 1
+        assert events[0].call_id == "call-from-hook-789"
+        assert events[0].name == "search"
+
+    def test_bridged_tool_without_mcp_state_has_none_call_id(
+        self,
+        session: Session,
+        prompt: Prompt[object],
+        mock_adapter: MagicMock,
+    ) -> None:
+        """BridgedTool without mcp_tool_state has None call_id in ToolInvoked event."""
+        events: list[ToolInvoked] = []
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        bridged = BridgedTool(
+            name="search",
+            description="Search tool",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=cast("PromptProtocol[object]", prompt),
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            # No mcp_tool_state
+        )
+
+        bridged({"query": "test"})
+
+        assert len(events) == 1
+        assert events[0].call_id is None
+
+    def test_mcp_state_defaults_to_none(self) -> None:
+        """MCPToolExecutionState defaults current_tool_use_id to None."""
+        state = MCPToolExecutionState()
+        assert state.current_tool_use_id is None
+
+    def test_mcp_state_can_be_set_and_cleared(self) -> None:
+        """MCPToolExecutionState can be set and cleared."""
+        state = MCPToolExecutionState()
+
+        state.current_tool_use_id = "test-call-id"
+        assert state.current_tool_use_id == "test-call-id"
+
+        state.current_tool_use_id = None
+        assert state.current_tool_use_id is None

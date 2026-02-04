@@ -40,7 +40,7 @@ from ...types import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import tool_to_spec
 from ._async_utils import run_async
-from ._bridge import create_bridged_tools, create_mcp_server
+from ._bridge import MCPToolExecutionState, create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
 from ._hooks import (
     HookConstraints,
@@ -544,12 +544,16 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
+        # Create shared state for MCP tool_use_id tracking between hooks and bridge
+        mcp_tool_state = MCPToolExecutionState()
+
         # Create hook context for native tool transactions
         constraints = HookConstraints(
             deadline=deadline,
             budget_tracker=budget_tracker,
             heartbeat=heartbeat,
             run_context=run_context,
+            mcp_tool_state=mcp_tool_state,
         )
         hook_context = HookContext(
             session=session,
@@ -577,6 +581,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             heartbeat=heartbeat,
             run_context=run_context,
             visibility_signal=visibility_signal,
+            mcp_tool_state=mcp_tool_state,
         )
 
         logger.debug(

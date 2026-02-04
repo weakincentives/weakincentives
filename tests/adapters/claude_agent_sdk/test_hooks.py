@@ -20,6 +20,7 @@ from typing import Any, cast
 
 import pytest
 
+from weakincentives.adapters.claude_agent_sdk._bridge import MCPToolExecutionState
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookConstraints,
     HookContext,
@@ -484,6 +485,31 @@ class TestPostToolUseHook:
 
         assert result == {}
         assert len(events) == 0
+
+    def test_clears_mcp_tool_state_after_mcp_tool(self, session: Session) -> None:
+        """PostToolUse clears mcp_tool_state.current_tool_use_id after MCP tool completes."""
+        mcp_state = MCPToolExecutionState()
+        mcp_state.current_tool_use_id = "call-mcp-456"  # Simulate PreToolUse set this
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            constraints=HookConstraints(mcp_tool_state=mcp_state),
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "mcp__wink__planning_update",
+            "tool_input": {"step_id": 1},
+            "tool_response": {"stdout": "Updated"},
+        }
+
+        asyncio.run(hook(input_data, "call-mcp-456", {"signal": None}))
+
+        # mcp_tool_state should be cleared after execution
+        assert mcp_state.current_tool_use_id is None
 
     def test_returns_context_when_structured_output_with_incomplete_tasks(
         self, session: Session
@@ -986,6 +1012,56 @@ class TestPreToolUseHookTransactional:
             context._tool_tracker is None
             or "tool-123" not in context._tracker._pending_tools
         )
+
+    def test_sets_mcp_tool_state_for_mcp_tools(self, session: Session) -> None:
+        """Pre-tool hook sets tool_use_id on mcp_tool_state for MCP tools."""
+        mcp_state = MCPToolExecutionState()
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="claude_agent_sdk",
+            prompt_name="test_prompt",
+            constraints=HookConstraints(mcp_tool_state=mcp_state),
+        )
+
+        hook = create_pre_tool_use_hook(context)
+        asyncio.run(
+            hook(
+                {"hook_event_name": "PreToolUse", "tool_name": "mcp__wink__planning"},
+                "call-mcp-123",
+                {"signal": None},
+            )
+        )
+
+        # mcp_tool_state should have the tool_use_id set
+        assert mcp_state.current_tool_use_id == "call-mcp-123"
+
+    def test_does_not_set_mcp_tool_state_for_native_tools(
+        self, session: Session
+    ) -> None:
+        """Pre-tool hook does not set tool_use_id for native SDK tools."""
+        mcp_state = MCPToolExecutionState()
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="claude_agent_sdk",
+            prompt_name="test_prompt",
+            constraints=HookConstraints(mcp_tool_state=mcp_state),
+        )
+
+        hook = create_pre_tool_use_hook(context)
+        asyncio.run(
+            hook(
+                {"hook_event_name": "PreToolUse", "tool_name": "Read"},
+                "call-native-123",
+                {"signal": None},
+            )
+        )
+
+        # mcp_tool_state should remain None for native tools
+        assert mcp_state.current_tool_use_id is None
 
 
 class TestPostToolUseHookTransactional:

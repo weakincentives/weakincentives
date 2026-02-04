@@ -42,11 +42,28 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BridgedTool",
+    "MCPToolExecutionState",
     "create_bridged_tools",
     "create_mcp_server",
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
+
+
+@dataclass(slots=True)
+class MCPToolExecutionState:
+    """Shared state between hooks and MCP bridge for tool_use_id tracking.
+
+    Created once per SDK query and passed to both HookContext and BridgedTools.
+    PreToolUse hook sets current_tool_use_id before MCP tool executes.
+    BridgedTool reads it when dispatching ToolInvoked events.
+    PostToolUse hook clears it after MCP tool completes.
+
+    This enables MCP-bridged tools to have proper call_id in ToolInvoked events,
+    matching the behavior of native SDK tools.
+    """
+
+    current_tool_use_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -97,6 +114,7 @@ class BridgedTool:
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
         visibility_signal: VisibilityExpansionSignal | None = None,
+        mcp_tool_state: MCPToolExecutionState | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -113,6 +131,7 @@ class BridgedTool:
         self._heartbeat = heartbeat
         self._run_context = run_context
         self._visibility_signal = visibility_signal
+        self._mcp_tool_state = mcp_tool_state
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
@@ -125,11 +144,15 @@ class BridgedTool:
 
         Uses transactional semantics: snapshot before execution, restore on failure.
         """
+        tool_use_id = (
+            self._mcp_tool_state.current_tool_use_id if self._mcp_tool_state else None
+        )
         logger.debug(
             "claude_agent_sdk.bridge.tool_call.start",
             event="bridge.tool_call.start",
             context={
                 "tool_name": self.name,
+                "tool_use_id": tool_use_id,
                 "prompt_name": self._prompt_name,
                 "arguments": args,
             },
@@ -322,7 +345,12 @@ class BridgedTool:
         """Dispatch a ToolInvoked event for session reducer dispatch.
 
         The session extracts the value from result.value for slice routing.
+        The call_id is obtained from MCPToolExecutionState, which is set by
+        the PreToolUse hook before tool execution.
         """
+        call_id = (
+            self._mcp_tool_state.current_tool_use_id if self._mcp_tool_state else None
+        )
         event = ToolInvoked(
             prompt_name=self._prompt_name,
             adapter=self._adapter_name,
@@ -333,7 +361,7 @@ class BridgedTool:
             created_at=datetime.now(UTC),
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
-            call_id=None,
+            call_id=call_id,
             run_context=self._run_context,
         )
         self._session.dispatcher.dispatch(event)
@@ -353,6 +381,7 @@ def create_bridged_tools(
     heartbeat: Heartbeat | None = None,
     run_context: RunContext | None = None,
     visibility_signal: VisibilityExpansionSignal | None = None,
+    mcp_tool_state: MCPToolExecutionState | None = None,
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -370,6 +399,7 @@ def create_bridged_tools(
         run_context: Optional execution context with correlation identifiers.
         visibility_signal: Signal for propagating VisibilityExpansionRequired
             exceptions from tool handlers to the adapter.
+        mcp_tool_state: Shared state for passing tool_use_id from hooks to bridge.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
@@ -412,6 +442,7 @@ def create_bridged_tools(
             heartbeat=heartbeat,
             run_context=run_context,
             visibility_signal=visibility_signal,
+            mcp_tool_state=mcp_tool_state,
         )
         bridged.append(bridged_tool)
 
