@@ -73,37 +73,42 @@ def _handle_exception_group(
     stderr_output: str | None,
 ) -> PromptEvaluationError:
     """Handle ExceptionGroup from TaskGroup cleanup (Python 3.11+)."""
-    sub_exceptions: list[dict[str, str]] = []
+    # Get actual exception objects for isinstance() checking
+    exceptions: list[BaseException] = []
     if hasattr(error, "exceptions"):
-        exceptions = getattr(error, "exceptions", [])
-        sub_exceptions = [
-            {"type": type(sub_error).__name__, "message": str(sub_error)}
-            for sub_error in exceptions
-        ]
+        exceptions = list(getattr(error, "exceptions", []))
+
+    # Create dict representation for logging
+    sub_exceptions_info = [
+        {"type": type(sub_error).__name__, "message": str(sub_error)}
+        for sub_error in exceptions
+    ]
 
     logger.debug(
         "claude_agent_sdk.error.exception_group",
         event="error.exception_group",
         context={
             "prompt_name": prompt_name,
-            "sub_exception_count": len(sub_exceptions),
-            "sub_exceptions": sub_exceptions,
+            "sub_exception_count": len(exceptions),
+            "sub_exceptions": sub_exceptions_info,
             "stderr_output": stderr_output,
         },
     )
 
     # Check if all sub-exceptions are CLIConnectionError during cleanup
+    # using isinstance() for type-safe checking consistent with the rest of the module.
+    # Note: all() returns True for empty sequences (vacuous truth), which means
+    # ExceptionGroups without sub-exceptions are treated as cleanup errors.
     all_cli_connection_errors = all(
-        exc["type"] == "CLIConnectionError"
-        and "not ready for writing" in exc["message"]
-        for exc in sub_exceptions
+        isinstance(exc, CLIConnectionError) and "not ready for writing" in str(exc)
+        for exc in exceptions
     )
 
     if all_cli_connection_errors:
-        return _create_cleanup_error(sub_exceptions, prompt_name, stderr_output)
+        return _create_cleanup_error(sub_exceptions_info, prompt_name, stderr_output)
 
     return _create_generic_exception_group_error(
-        error, sub_exceptions, prompt_name, stderr_output
+        error, sub_exceptions_info, prompt_name, stderr_output
     )
 
 
