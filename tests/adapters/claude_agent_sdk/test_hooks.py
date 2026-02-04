@@ -164,6 +164,43 @@ class TestHookContext:
         assert context.deadline is deadline
         assert context.budget_tracker is tracker
 
+    def test_beat_with_heartbeat_configured(self, session: Session) -> None:
+        from weakincentives.runtime.watchdog import Heartbeat
+
+        beat_count = 0
+
+        def on_beat() -> None:
+            nonlocal beat_count
+            beat_count += 1
+
+        heartbeat = Heartbeat()
+        heartbeat.add_callback(on_beat)
+
+        constraints = HookConstraints(heartbeat=heartbeat)
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            constraints=constraints,
+        )
+
+        assert context.heartbeat is heartbeat
+        context.beat()
+        assert beat_count == 1
+
+    def test_beat_without_heartbeat_is_noop(self, session: Session) -> None:
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        assert context.heartbeat is None
+        # Should not raise
+        context.beat()
+
 
 class TestPreToolUseHook:
     def test_allows_tool_by_default(self, hook_context: HookContext) -> None:
@@ -639,6 +676,53 @@ class TestPostToolUseHook:
         }
 
         result = asyncio.run(hook(input_data, "call-read", {"signal": None}))
+
+        # Should return additionalContext with feedback
+        hook_output = result.get("hookSpecificOutput", {})
+        assert hook_output.get("hookEventName") == "PostToolUse"
+        additional_context = hook_output.get("additionalContext", "")
+        assert "Test feedback triggered" in additional_context
+
+    def test_returns_feedback_for_mcp_tool_when_provider_triggers(
+        self, session: Session
+    ) -> None:
+        """PostToolUse returns additionalContext for MCP tools when feedback triggers."""
+        # Seed ToolInvoked with an existing event so feedback provider triggers.
+        # MCP tools dispatch their ToolInvoked via the bridge, so we simulate that
+        # by pre-seeding an event. The feedback trigger checks tool_call_count.
+        existing_event = ToolInvoked(
+            prompt_name="test_prompt",
+            adapter="claude_agent_sdk",
+            name="mcp__wink__some_tool",
+            params={},
+            result={},
+            session_id=None,
+            created_at=datetime.now(UTC),
+            call_id="prev-call",
+        )
+        session[ToolInvoked].seed((existing_event,))
+
+        prompt = _make_prompt_with_feedback_provider()
+        mcp_tool_state = MCPToolExecutionState()
+        constraints = HookConstraints(mcp_tool_state=mcp_tool_state)
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            constraints=constraints,
+        )
+        hook = create_post_tool_use_hook(context)
+
+        # Use an MCP tool name to hit the _handle_mcp_tool_post path
+        input_data = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "mcp__wink__planning_setup_plan",
+            "tool_input": {"plan": "test plan"},
+            "tool_response": {"success": True},
+        }
+
+        result = asyncio.run(hook(input_data, "call-mcp", {"signal": None}))
 
         # Should return additionalContext with feedback
         hook_output = result.get("hookSpecificOutput", {})

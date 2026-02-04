@@ -41,7 +41,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from claude_agent_sdk.types import (
     HookCallback,
@@ -1117,8 +1117,11 @@ def safe_hook_wrapper(
     try:
         import asyncio
 
-        return asyncio.get_event_loop().run_until_complete(
-            hook_fn(input_data, tool_use_id, {"signal": None})
+        return cast(
+            SyncHookJSONOutput,
+            asyncio.get_event_loop().run_until_complete(
+                hook_fn(input_data, tool_use_id, {"signal": None})
+            ),
         )
     except Exception as error:
         error_name = type(error).__name__
