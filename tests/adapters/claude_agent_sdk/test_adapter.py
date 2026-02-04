@@ -2467,3 +2467,37 @@ class TestMultiturnEdgeCases:
 
         # Should exit after first round due to no feedback
         assert response.text == "Response 1"
+
+
+class TestCheckTaskCompletion:
+    """Tests for _check_task_completion helper method."""
+
+    def test_returns_false_none_for_empty_messages(self, session: Session) -> None:
+        """_check_task_completion returns (False, None) for empty message list."""
+        adapter = ClaudeAgentSDKAdapter()
+        checker = MagicMock()
+
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+        from weakincentives.prompt import Prompt, PromptTemplate
+
+        template: PromptTemplate[None] = PromptTemplate(
+            ns="test", key="test", name="test"
+        )
+        prompt: Prompt[None] = Prompt(template)
+        constraints = HookConstraints()
+        hook_context = HookContext(
+            prompt=prompt,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+        result = adapter._check_task_completion(checker, [], hook_context)
+
+        assert result == (False, None)
+        # Checker should not be called when round_messages is empty
+        checker.check.assert_not_called()

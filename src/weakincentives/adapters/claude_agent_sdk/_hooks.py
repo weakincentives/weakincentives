@@ -38,6 +38,7 @@ hooks in the Python SDK. Only the hook types listed above are available.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -79,6 +80,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "HookCallback",
+    "HookConstraints",
     "HookContext",
     "HookStats",
     "create_post_tool_use_hook",
@@ -130,6 +132,27 @@ class HookStats:
     """Number of hook execution errors encountered."""
 
 
+@dataclass(slots=True)
+class HookConstraints:
+    """Constraint configuration for hook execution.
+
+    Groups optional deadline, budget, heartbeat, and run context together
+    to simplify HookContext construction.
+    """
+
+    deadline: Deadline | None = None
+    """Optional deadline for constraint checking."""
+
+    budget_tracker: BudgetTracker | None = None
+    """Optional budget tracker for token limits."""
+
+    heartbeat: Heartbeat | None = None
+    """Optional heartbeat for liveness monitoring."""
+
+    run_context: RunContext | None = None
+    """Optional run context for tracing."""
+
+
 class HookContext:
     """Context passed to hook callbacks for state access.
 
@@ -143,26 +166,24 @@ class HookContext:
     HookContext provides richer functionality for session state management.
     """
 
-    def __init__(  # noqa: PLR0913 - context objects often need many parameters
+    def __init__(
         self,
         *,
         session: SessionProtocol,
         prompt: PromptProtocol[object],
         adapter_name: str,
         prompt_name: str,
-        deadline: Deadline | None = None,
-        budget_tracker: BudgetTracker | None = None,
-        heartbeat: Heartbeat | None = None,
-        run_context: RunContext | None = None,
+        constraints: HookConstraints | None = None,
     ) -> None:
         self._session = session
         self._prompt = prompt
         self.adapter_name = adapter_name
         self.prompt_name = prompt_name
-        self.deadline = deadline
-        self.budget_tracker = budget_tracker
-        self.heartbeat = heartbeat
-        self.run_context = run_context
+        # Unpack constraints or use defaults
+        self.deadline = constraints.deadline if constraints else None
+        self.budget_tracker = constraints.budget_tracker if constraints else None
+        self.heartbeat = constraints.heartbeat if constraints else None
+        self.run_context = constraints.run_context if constraints else None
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
@@ -225,7 +246,96 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def create_pre_tool_use_hook(  # noqa: C901 - constraint checking complexity
+def _compute_budget_info(budget_tracker: BudgetTracker | None) -> dict[str, Any]:
+    """Compute budget info for logging."""
+    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):
+        return {}
+    budget = budget_tracker.budget
+    consumed = budget_tracker.consumed
+    consumed_total = (consumed.input_tokens or 0) + (consumed.output_tokens or 0)
+    return {
+        "budget_consumed_input": consumed.input_tokens,
+        "budget_consumed_output": consumed.output_tokens,
+        "budget_consumed_total": consumed_total,
+        "budget_max_total": budget.max_total_tokens,
+        "budget_remaining": (
+            budget.max_total_tokens - consumed_total
+            if budget.max_total_tokens
+            else None
+        ),
+    }
+
+
+def _is_deadline_exceeded(deadline: Deadline | None) -> bool:
+    """Check if deadline has been exceeded."""
+    return deadline is not None and deadline.remaining().total_seconds() <= 0
+
+
+def _is_budget_exhausted(budget_tracker: BudgetTracker | None) -> bool:
+    """Check if token budget has been exhausted."""
+    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):
+        return False
+    budget = budget_tracker.budget
+    consumed = budget_tracker.consumed
+    consumed_total = (consumed.input_tokens or 0) + (consumed.output_tokens or 0)
+    return (
+        budget.max_total_tokens is not None
+        and consumed_total >= budget.max_total_tokens
+    )
+
+
+def _check_deadline_constraint(
+    hook_context: HookContext, tool_name: str
+) -> SyncHookJSONOutput | None:
+    """Check deadline constraint and return deny response if exceeded."""
+    if not _is_deadline_exceeded(hook_context.deadline):
+        return None
+    logger.warning(
+        "claude_agent_sdk.hook.deadline_exceeded",
+        event="hook.deadline_exceeded",
+        context={
+            "tool_name": tool_name,
+            "elapsed_ms": hook_context.elapsed_ms,
+            "tool_count": hook_context.stats.tool_count,
+        },
+    )
+    output: PreToolUseHookSpecificOutput = {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Deadline exceeded",
+    }
+    return {"hookSpecificOutput": output}
+
+
+def _check_budget_constraint(
+    hook_context: HookContext, tool_name: str
+) -> SyncHookJSONOutput | None:
+    """Check budget constraint and return deny response if exhausted."""
+    budget_tracker = hook_context.budget_tracker
+    if budget_tracker is None or not _is_budget_exhausted(budget_tracker):
+        return None
+    budget = budget_tracker.budget
+    consumed = budget_tracker.consumed
+    consumed_total = (consumed.input_tokens or 0) + (consumed.output_tokens or 0)
+    logger.warning(
+        "claude_agent_sdk.hook.budget_exhausted",
+        event="hook.budget_exhausted",
+        context={
+            "tool_name": tool_name,
+            "consumed_total": consumed_total,
+            "max_total": budget.max_total_tokens,
+            "elapsed_ms": hook_context.elapsed_ms,
+        },
+    )
+    output: PreToolUseHookSpecificOutput = {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Token budget exhausted",
+    }
+    return {"hookSpecificOutput": output}
+
+
+def create_pre_tool_use_hook(
     hook_context: HookContext,
 ) -> HookCallback:
     """Create a PreToolUse hook for constraint enforcement and state snapshots.
@@ -247,11 +357,8 @@ def create_pre_tool_use_hook(  # noqa: C901 - constraint checking complexity
     ) -> SyncHookJSONOutput:
         _ = sdk_context
         hook_start = time.monotonic()
-
-        # Beat before tool execution to prove liveness
         hook_context.beat()
 
-        # Type narrow to PreToolUseHookInput
         if (
             not isinstance(input_data, dict)
             or input_data.get("hook_event_name") != "PreToolUse"
@@ -261,33 +368,12 @@ def create_pre_tool_use_hook(  # noqa: C901 - constraint checking complexity
         pre_input: PreToolUseHookInput = input_data  # type: ignore[assignment]
         tool_name = pre_input.get("tool_name", "")
 
-        # Compute constraint status for logging
+        # Log with constraint status
         deadline_remaining_ms: int | None = None
         if hook_context.deadline:
             deadline_remaining_ms = int(
                 hook_context.deadline.remaining().total_seconds() * 1000
             )
-
-        budget_info: dict[str, Any] = {}
-        budget_tracker = hook_context.budget_tracker
-        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
-            budget = budget_tracker.budget
-            consumed = budget_tracker.consumed
-            consumed_total = (consumed.input_tokens or 0) + (
-                consumed.output_tokens or 0
-            )
-            budget_info = {
-                "budget_consumed_input": consumed.input_tokens,
-                "budget_consumed_output": consumed.output_tokens,
-                "budget_consumed_total": consumed_total,
-                "budget_max_total": budget.max_total_tokens,
-                "budget_remaining": (
-                    budget.max_total_tokens - consumed_total
-                    if budget.max_total_tokens
-                    else None
-                ),
-            }
-
         logger.debug(
             "claude_agent_sdk.hook.pre_tool_use",
             event="hook.pre_tool_use",
@@ -298,63 +384,20 @@ def create_pre_tool_use_hook(  # noqa: C901 - constraint checking complexity
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "deadline_remaining_ms": deadline_remaining_ms,
-                **budget_info,
+                **_compute_budget_info(hook_context.budget_tracker),
             },
         )
 
-        if (
-            hook_context.deadline
-            and hook_context.deadline.remaining().total_seconds() <= 0
-        ):
-            logger.warning(
-                "claude_agent_sdk.hook.deadline_exceeded",
-                event="hook.deadline_exceeded",
-                context={
-                    "tool_name": tool_name,
-                    "elapsed_ms": hook_context.elapsed_ms,
-                    "tool_count": hook_context.stats.tool_count,
-                },
-            )
-            output: PreToolUseHookSpecificOutput = {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": "Deadline exceeded",
-            }
-            return {"hookSpecificOutput": output}
-
-        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
-            budget = budget_tracker.budget
-            consumed = budget_tracker.consumed
-            consumed_total = (consumed.input_tokens or 0) + (
-                consumed.output_tokens or 0
-            )
-            if (
-                budget.max_total_tokens is not None
-                and consumed_total >= budget.max_total_tokens
-            ):
-                logger.warning(
-                    "claude_agent_sdk.hook.budget_exhausted",
-                    event="hook.budget_exhausted",
-                    context={
-                        "tool_name": tool_name,
-                        "consumed_total": consumed_total,
-                        "max_total": budget.max_total_tokens,
-                        "elapsed_ms": hook_context.elapsed_ms,
-                    },
-                )
-                output_budget: PreToolUseHookSpecificOutput = {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "Token budget exhausted",
-                }
-                return {"hookSpecificOutput": output_budget}
+        # Check constraints - return early if violated
+        if (deny := _check_deadline_constraint(hook_context, tool_name)) is not None:
+            return deny
+        if (deny := _check_budget_constraint(hook_context, tool_name)) is not None:
+            return deny
 
         # Take snapshot for transactional rollback on native tools
-        # Skip MCP-bridged WINK tools - they handle their own transactions
         if tool_use_id is not None and not tool_name.startswith("mcp__wink__"):
             hook_context.begin_tool_execution(
-                tool_use_id=tool_use_id,
-                tool_name=tool_name,
+                tool_use_id=tool_use_id, tool_name=tool_name
             )
             hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
             logger.debug(
@@ -413,7 +456,157 @@ def _parse_tool_data(input_data: PostToolUseHookInput) -> _ParsedToolData:
     )
 
 
-def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task completion
+def _handle_structured_output_completion(
+    hook_context: HookContext,
+    data: _ParsedToolData,
+    task_completion_checker: TaskCompletionChecker | None,
+    check_task_completion: Callable[[dict[str, Any]], TaskCompletionResult],
+    stop_on_structured_output: bool,
+) -> SyncHookJSONOutput | None:
+    """Handle StructuredOutput task completion logic.
+
+    Returns a hook response if stop/continue decision was made, None otherwise.
+    """
+    if data.tool_name != "StructuredOutput":
+        return None
+
+    # Only apply checker to main agent, not sub-agents
+    if task_completion_checker is not None and not hook_context.stats.in_subagent:
+        result = check_task_completion(data.tool_input)
+        if not result.complete:
+            logger.info(
+                "claude_agent_sdk.hook.structured_output_incomplete",
+                event="hook.structured_output_incomplete",
+                context={
+                    "feedback": result.feedback,
+                    "elapsed_ms": hook_context.elapsed_ms,
+                },
+            )
+            feedback_message = (
+                result.feedback or "<blocker>Tasks are incomplete.</blocker>"
+            )
+            output: PostToolUseHookSpecificOutput = {
+                "hookEventName": "PostToolUse",
+                "additionalContext": feedback_message,
+            }
+            return {"continue_": True, "hookSpecificOutput": output}
+        # Tasks complete - allow stop
+        logger.debug(
+            "claude_agent_sdk.hook.structured_output_complete",
+            event="hook.structured_output_complete",
+            context={
+                "feedback": result.feedback,
+                "elapsed_ms": hook_context.elapsed_ms,
+                "tool_count": hook_context.stats.tool_count,
+            },
+        )
+        return {"continue_": False}
+
+    if stop_on_structured_output:
+        logger.debug(
+            "claude_agent_sdk.hook.structured_output_stop",
+            event="hook.structured_output_stop",
+            context={
+                "tool_name": data.tool_name,
+                "elapsed_ms": hook_context.elapsed_ms,
+                "tool_count": hook_context.stats.tool_count,
+            },
+        )
+        return {"continue_": False}
+
+    return None
+
+
+def _dispatch_tool_invoked_event(
+    hook_context: HookContext, data: _ParsedToolData, tool_use_id: str | None
+) -> None:
+    """Dispatch ToolInvoked event for native tools."""
+    event = ToolInvoked(
+        prompt_name=hook_context.prompt_name,
+        adapter=hook_context.adapter_name,
+        name=data.tool_name,
+        params=data.tool_input,
+        result=data.result_raw,
+        session_id=getattr(hook_context.session, "session_id", None),
+        created_at=_utcnow(),
+        usage=None,
+        rendered_output=data.output_text[:1000] if data.output_text else "",
+        call_id=tool_use_id,
+        run_context=hook_context.run_context,
+    )
+    hook_context.session.dispatcher.dispatch(event)
+
+
+def _run_feedback_providers(  # pragma: no cover - integration tested
+    hook_context: HookContext, data: _ParsedToolData
+) -> SyncHookJSONOutput | None:
+    """Run feedback providers and return hook response if triggered."""
+    feedback_text = collect_feedback(
+        prompt=hook_context._prompt,
+        session=hook_context.session,
+        deadline=hook_context.deadline,
+    )
+    if feedback_text is not None:
+        logger.debug(
+            "claude_agent_sdk.hook.feedback_provided",
+            event="hook.feedback_provided",
+            context={
+                "tool_name": data.tool_name,
+                "feedback_length": len(feedback_text),
+                "elapsed_ms": hook_context.elapsed_ms,
+            },
+        )
+        output: PostToolUseHookSpecificOutput = {
+            "hookEventName": "PostToolUse",
+            "additionalContext": feedback_text,
+        }
+        return {"hookSpecificOutput": output}
+    return None
+
+
+def _handle_tool_transaction(
+    hook_context: HookContext,
+    data: _ParsedToolData,
+    tool_use_id: str | None,
+    hook_start: float,
+) -> None:
+    """Handle tool transaction - log completion and restore state on failure."""
+    success = data.tool_error is None and not _is_tool_error_response(data.result_raw)
+    logger.debug(
+        "claude_agent_sdk.hook.tool_call.complete",
+        event="hook.tool_call.complete",
+        context={
+            "tool_name": data.tool_name,
+            "success": success,
+            "call_id": tool_use_id,
+            "tool_input": data.tool_input,
+            "tool_response": data.result_raw,
+            "output_text": data.output_text,
+            "elapsed_ms": hook_context.elapsed_ms,
+            "tool_count": hook_context.stats.tool_count,
+            "turn_count": hook_context.stats.turn_count,
+        },
+    )
+    if tool_use_id is not None:
+        restored = hook_context.end_tool_execution(
+            tool_use_id=tool_use_id, success=success
+        )
+        if restored:
+            hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
+            logger.info(
+                "claude_agent_sdk.hook.state_restored",
+                event="hook.state_restored",
+                context={
+                    "tool_name": data.tool_name,
+                    "tool_use_id": tool_use_id,
+                    "reason": "tool_failure",
+                    "hook_duration_ms": hook_duration_ms,
+                    "elapsed_ms": hook_context.elapsed_ms,
+                },
+            )
+
+
+def create_post_tool_use_hook(
     hook_context: HookContext,
     *,
     stop_on_structured_output: bool = True,
@@ -443,16 +636,12 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
     """
 
     def _get_filesystem() -> Filesystem | None:
-        """Get filesystem from hook context resources if available."""
         try:
             return hook_context.resources.get(Filesystem)
         except (LookupError, AttributeError):
             return None
 
-    def _check_task_completion(
-        tool_input: dict[str, Any],
-    ) -> TaskCompletionResult:
-        """Check task completion using the configured checker."""
+    def _check_task_completion(tool_input: dict[str, Any]) -> TaskCompletionResult:
         context = TaskCompletionContext(
             session=hook_context.session,
             tentative_output=tool_input.get("output"),
@@ -461,34 +650,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         )
         return task_completion_checker.check(context)  # type: ignore[union-attr]
 
-    def _run_feedback_providers(  # pragma: no cover - integration tested
-        data: _ParsedToolData,
-    ) -> SyncHookJSONOutput | None:
-        """Run feedback providers and return hook response if triggered."""
-        feedback_text = collect_feedback(
-            prompt=hook_context._prompt,
-            session=hook_context.session,
-            deadline=hook_context.deadline,
-        )
-
-        if feedback_text is not None:
-            logger.debug(
-                "claude_agent_sdk.hook.feedback_provided",
-                event="hook.feedback_provided",
-                context={
-                    "tool_name": data.tool_name,
-                    "feedback_length": len(feedback_text),
-                    "elapsed_ms": hook_context.elapsed_ms,
-                },
-            )
-            output: PostToolUseHookSpecificOutput = {
-                "hookEventName": "PostToolUse",
-                "additionalContext": feedback_text,
-            }
-            return {"hookSpecificOutput": output}
-        return None
-
-    async def post_tool_use_hook(  # noqa: C901, PLR0911 - observer dispatch
+    async def post_tool_use_hook(
         input_data: HookInput,
         tool_use_id: str | None,
         sdk_context: SdkHookContext,
@@ -496,7 +658,6 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         _ = sdk_context
         hook_start = time.monotonic()
 
-        # Type narrow to PostToolUseHookInput
         if (
             not isinstance(input_data, dict)
             or input_data.get("hook_event_name") != "PostToolUse"
@@ -505,149 +666,32 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
 
         post_input: PostToolUseHookInput = input_data  # type: ignore[assignment]
         data = _parse_tool_data(post_input)
-
-        # Beat after tool execution to prove liveness
         hook_context.beat()
-
-        # Increment tool count for ALL tools (needed for feedback triggers)
         hook_context._tool_count += 1
         hook_context.stats.tool_count += 1
 
-        # MCP-bridged WINK tools dispatch their own ToolInvoked events via
-        # BridgedTool with richer context (typed values). By the time this hook
-        # runs, BridgedTool has already dispatched the event, so tool_call_count
-        # in FeedbackContext is accurate. Run feedback providers and return.
+        # MCP tools already dispatch events - just run feedback providers
         if data.tool_name.startswith("mcp__wink__"):
-            feedback_response = _run_feedback_providers(data)
-            return feedback_response if feedback_response else {}
+            result = _run_feedback_providers(hook_context, data)
+            return result if result is not None else {}
 
-        # For native tools, dispatch ToolInvoked BEFORE running feedback providers
-        # so that FeedbackContext.tool_call_count includes this tool call.
-        event = ToolInvoked(
-            prompt_name=hook_context.prompt_name,
-            adapter=hook_context.adapter_name,
-            name=data.tool_name,
-            params=data.tool_input,
-            result=data.result_raw,
-            session_id=getattr(hook_context.session, "session_id", None),
-            created_at=_utcnow(),
-            usage=None,
-            rendered_output=data.output_text[:1000] if data.output_text else "",
-            call_id=tool_use_id,
-            run_context=hook_context.run_context,
+        # Native tools: dispatch event, handle transaction, check completion
+        _dispatch_tool_invoked_event(hook_context, data, tool_use_id)
+        _handle_tool_transaction(hook_context, data, tool_use_id, hook_start)
+
+        # Handle StructuredOutput completion
+        completion_response = _handle_structured_output_completion(
+            hook_context,
+            data,
+            task_completion_checker,
+            _check_task_completion,
+            stop_on_structured_output,
         )
-        hook_context.session.dispatcher.dispatch(event)
+        if completion_response is not None:
+            return completion_response
 
-        # Determine success status
-        success = data.tool_error is None and not _is_tool_error_response(
-            data.result_raw
-        )
-
-        logger.debug(
-            "claude_agent_sdk.hook.tool_call.complete",
-            event="hook.tool_call.complete",
-            context={
-                "tool_name": data.tool_name,
-                "success": success,
-                "call_id": tool_use_id,
-                "tool_input": data.tool_input,
-                "tool_response": data.result_raw,
-                "output_text": data.output_text,
-                "elapsed_ms": hook_context.elapsed_ms,
-                "tool_count": hook_context.stats.tool_count,
-                "turn_count": hook_context.stats.turn_count,
-            },
-        )
-
-        # Complete tool transaction - restore state on failure
-        if tool_use_id is not None:
-            restored = hook_context.end_tool_execution(
-                tool_use_id=tool_use_id,
-                success=success,
-            )
-            if restored:
-                hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
-                logger.info(
-                    "claude_agent_sdk.hook.state_restored",
-                    event="hook.state_restored",
-                    context={
-                        "tool_name": data.tool_name,
-                        "tool_use_id": tool_use_id,
-                        "reason": "tool_failure",
-                        "hook_duration_ms": hook_duration_ms,
-                        "elapsed_ms": hook_context.elapsed_ms,
-                    },
-                )
-
-        # Handle StructuredOutput: check task completion BEFORE feedback providers.
-        # This ensures completion logic (continue: false) always runs and final
-        # outputs aren't ignored when a feedback trigger fires.
-        if data.tool_name == "StructuredOutput":
-            # Only apply task completion checker to main agent, not sub-agents
-            # Sub-agents (spawned via Task tool) should not be subject to
-            # the parent agent's task completion requirements.
-            # The in_subagent flag is set by SubagentStop hook to track
-            # when we're executing within a sub-agent.
-            if (
-                task_completion_checker is not None
-                and not hook_context.stats.in_subagent
-            ):
-                result = _check_task_completion(data.tool_input)
-                if not result.complete:
-                    # Tasks incomplete - provide feedback via additionalContext
-                    # Don't return continue: False - let model continue working.
-                    # When model calls StructuredOutput again after completing tasks,
-                    # we'll return continue: False and the SDK will use that output.
-                    logger.info(
-                        "claude_agent_sdk.hook.structured_output_incomplete",
-                        event="hook.structured_output_incomplete",
-                        context={
-                            "feedback": result.feedback,
-                            "elapsed_ms": hook_context.elapsed_ms,
-                        },
-                    )
-                    feedback_message = (
-                        result.feedback or "<blocker>Tasks are incomplete.</blocker>"
-                    )
-                    output: PostToolUseHookSpecificOutput = {
-                        "hookEventName": "PostToolUse",
-                        "additionalContext": feedback_message,
-                    }
-                    return {
-                        "continue_": True,
-                        "hookSpecificOutput": output,
-                    }
-                # Tasks complete - allow stop
-                logger.debug(
-                    "claude_agent_sdk.hook.structured_output_complete",
-                    event="hook.structured_output_complete",
-                    context={
-                        "feedback": result.feedback,
-                        "elapsed_ms": hook_context.elapsed_ms,
-                        "tool_count": hook_context.stats.tool_count,
-                    },
-                )
-                return {"continue_": False}
-            if stop_on_structured_output:
-                # No checker - stop immediately
-                logger.debug(
-                    "claude_agent_sdk.hook.structured_output_stop",
-                    event="hook.structured_output_stop",
-                    context={
-                        "tool_name": data.tool_name,
-                        "elapsed_ms": hook_context.elapsed_ms,
-                        "tool_count": hook_context.stats.tool_count,
-                    },
-                )
-                return {"continue_": False}
-
-        # Run feedback providers AFTER ToolInvoked dispatch so tool_call_count
-        # includes this tool. Return feedback response if triggered.
-        feedback_response = _run_feedback_providers(data)
-        if feedback_response is not None:
-            return feedback_response
-
-        return {}
+        feedback_result = _run_feedback_providers(hook_context, data)
+        return feedback_result if feedback_result is not None else {}
 
     return post_tool_use_hook
 
@@ -795,7 +839,26 @@ def create_stop_hook(
     return stop_hook
 
 
-def create_task_completion_stop_hook(  # noqa: C901 - constraint checking complexity
+def _should_skip_task_completion(hook_context: HookContext, stop_reason: str) -> bool:
+    """Check if task completion should be skipped due to constraints."""
+    if _is_deadline_exceeded(hook_context.deadline):
+        logger.debug(
+            "claude_agent_sdk.hook.task_completion_stop.deadline_exceeded",
+            event="hook.task_completion_stop.deadline_exceeded",
+            context={"stop_reason": stop_reason},
+        )
+        return True
+    if _is_budget_exhausted(hook_context.budget_tracker):
+        logger.debug(
+            "claude_agent_sdk.hook.task_completion_stop.budget_exhausted",
+            event="hook.task_completion_stop.budget_exhausted",
+            context={"stop_reason": stop_reason},
+        )
+        return True
+    return False
+
+
+def create_task_completion_stop_hook(
     hook_context: HookContext,
     *,
     checker: TaskCompletionChecker,
@@ -824,7 +887,6 @@ def create_task_completion_stop_hook(  # noqa: C901 - constraint checking comple
     """
 
     def _get_filesystem() -> Filesystem | None:
-        """Get filesystem from hook context resources if available."""
         try:
             return hook_context.resources.get(Filesystem)
         except (LookupError, AttributeError):
@@ -838,7 +900,6 @@ def create_task_completion_stop_hook(  # noqa: C901 - constraint checking comple
         _ = tool_use_id
         _ = sdk_context
 
-        # Type narrow to StopHookInput
         if (
             not isinstance(input_data, dict)
             or input_data.get("hook_event_name") != "Stop"
@@ -848,38 +909,11 @@ def create_task_completion_stop_hook(  # noqa: C901 - constraint checking comple
         stop_reason = "end_turn"
         hook_context.stop_reason = stop_reason
 
-        # Skip task completion check if deadline exceeded - can't do more work
-        if (
-            hook_context.deadline
-            and hook_context.deadline.remaining().total_seconds() <= 0
-        ):
-            logger.debug(
-                "claude_agent_sdk.hook.task_completion_stop.deadline_exceeded",
-                event="hook.task_completion_stop.deadline_exceeded",
-                context={"stop_reason": stop_reason},
-            )
+        # Skip if constraints exceeded - can't do more work
+        if _should_skip_task_completion(hook_context, stop_reason):
             return {}
 
-        # Skip task completion check if budget exhausted - can't do more work
-        budget_tracker = hook_context.budget_tracker
-        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
-            budget = budget_tracker.budget
-            consumed = budget_tracker.consumed
-            consumed_total = (consumed.input_tokens or 0) + (
-                consumed.output_tokens or 0
-            )
-            if (  # pragma: no branch
-                budget.max_total_tokens is not None
-                and consumed_total >= budget.max_total_tokens
-            ):
-                logger.debug(
-                    "claude_agent_sdk.hook.task_completion_stop.budget_exhausted",
-                    event="hook.task_completion_stop.budget_exhausted",
-                    context={"stop_reason": stop_reason},
-                )
-                return {}
-
-        # Check task completion using the checker
+        # Check task completion
         context = TaskCompletionContext(
             session=hook_context.session,
             tentative_output=None,
@@ -889,31 +923,19 @@ def create_task_completion_stop_hook(  # noqa: C901 - constraint checking comple
         result = checker.check(context)
 
         if result.complete:
-            # All tasks complete - allow stop
             logger.debug(
                 "claude_agent_sdk.hook.task_completion_stop.allow",
                 event="hook.task_completion_stop.allow",
-                context={
-                    "stop_reason": stop_reason,
-                    "feedback": result.feedback,
-                },
+                context={"stop_reason": stop_reason, "feedback": result.feedback},
             )
             return {}
 
-        # Tasks incomplete - signal to continue
         logger.info(
             "claude_agent_sdk.hook.task_completion_stop.incomplete",
             event="hook.task_completion_stop.incomplete",
-            context={
-                "stop_reason": stop_reason,
-                "feedback": result.feedback,
-            },
+            context={"stop_reason": stop_reason, "feedback": result.feedback},
         )
-
-        return {
-            "continue_": True,
-            "reason": result.feedback or "Tasks are incomplete",
-        }
+        return {"continue_": True, "reason": result.feedback or "Tasks are incomplete"}
 
     return task_completion_stop_hook
 

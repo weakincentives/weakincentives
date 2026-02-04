@@ -30,6 +30,7 @@ from weakincentives.adapters.claude_agent_sdk.isolation import (
     EphemeralHome,
     IsolationAuthError,
     IsolationConfig,
+    IsolationOptions,
     NetworkPolicy,
     SandboxConfig,
     _copy_skill,
@@ -189,10 +190,10 @@ class TestIsolationConfigFactoryMethods:
     def test_with_api_key_passes_options(self) -> None:
         """with_api_key passes through optional parameters."""
         policy = NetworkPolicy.no_network()
+        options = IsolationOptions(network_policy=policy, include_host_env=True)
         config = IsolationConfig.with_api_key(
             "sk-ant-key",
-            network_policy=policy,
-            include_host_env=True,
+            options=options,
         )
         assert config.api_key == "sk-ant-key"
         assert config.network_policy is policy
@@ -236,14 +237,14 @@ class TestIsolationConfigFactoryMethods:
     def test_for_bedrock_passes_options(self) -> None:
         """for_bedrock passes through optional parameters."""
         sandbox = SandboxConfig(enabled=False)
+        options = IsolationOptions(sandbox=sandbox, include_host_env=True)
         with mock.patch.dict(
             os.environ,
             {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "eu-west-1"},
             clear=True,
         ):
             config = IsolationConfig.for_bedrock(
-                sandbox=sandbox,
-                include_host_env=True,
+                options=options,
             )
             assert config.sandbox is sandbox
             assert config.include_host_env is True

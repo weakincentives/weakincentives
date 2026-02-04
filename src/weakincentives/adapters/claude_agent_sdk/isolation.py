@@ -70,6 +70,7 @@ __all__ = [
     "EphemeralHome",
     "IsolationAuthError",
     "IsolationConfig",
+    "IsolationOptions",
     "NetworkPolicy",
     "SandboxConfig",
 ]
@@ -370,6 +371,30 @@ def to_anthropic_model_name(bedrock_model_id: str) -> str:
 
 
 @FrozenDataclass()
+class IsolationOptions:
+    """Common optional parameters for IsolationConfig factory methods.
+
+    Groups network, sandbox, environment, and skills configuration to simplify
+    factory method signatures.
+    """
+
+    network_policy: NetworkPolicy | None = None
+    """Network access constraints for tools."""
+
+    sandbox: SandboxConfig | None = None
+    """Sandbox configuration for OS-level isolation."""
+
+    env: Mapping[str, str] | None = None
+    """Additional environment variables to set."""
+
+    include_host_env: bool = False
+    """If True, inherit non-sensitive host environment variables."""
+
+    skills: SkillConfig | None = None
+    """Skills to mount in the isolated environment."""
+
+
+@FrozenDataclass()
 class IsolationConfig:
     """Configuration for hermetic SDK isolation.
 
@@ -481,15 +506,11 @@ class IsolationConfig:
         )
 
     @classmethod
-    def with_api_key(  # noqa: PLR0913
+    def with_api_key(
         cls,
         api_key: str,
         *,
-        network_policy: NetworkPolicy | None = None,
-        sandbox: SandboxConfig | None = None,
-        env: Mapping[str, str] | None = None,
-        include_host_env: bool = False,
-        skills: SkillConfig | None = None,
+        options: IsolationOptions | None = None,
     ) -> IsolationConfig:
         """Create config with an explicit Anthropic API key.
 
@@ -497,11 +518,7 @@ class IsolationConfig:
 
         Args:
             api_key: Anthropic API key (required).
-            network_policy: Network access constraints for tools.
-            sandbox: Sandbox configuration.
-            env: Additional environment variables.
-            include_host_env: If True, inherit non-sensitive host env vars.
-            skills: Skills to mount.
+            options: Optional isolation options (network, sandbox, env, skills).
 
         Returns:
             IsolationConfig configured with the explicit API key.
@@ -513,14 +530,15 @@ class IsolationConfig:
             msg = "api_key is required and cannot be empty"
             raise IsolationAuthError(msg)
 
+        opts = options or IsolationOptions()
         return cls(
-            network_policy=network_policy,
-            sandbox=sandbox,
-            env=env,
+            network_policy=opts.network_policy,
+            sandbox=opts.sandbox,
+            env=opts.env,
             api_key=api_key,
             aws_config_path=None,
-            include_host_env=include_host_env,
-            skills=skills,
+            include_host_env=opts.include_host_env,
+            skills=opts.skills,
         )
 
     @classmethod
@@ -566,15 +584,11 @@ class IsolationConfig:
         )
 
     @classmethod
-    def for_bedrock(  # noqa: PLR0913
+    def for_bedrock(
         cls,
         *,
         aws_config_path: Path | str | None = None,
-        network_policy: NetworkPolicy | None = None,
-        sandbox: SandboxConfig | None = None,
-        env: Mapping[str, str] | None = None,
-        include_host_env: bool = False,
-        skills: SkillConfig | None = None,
+        options: IsolationOptions | None = None,
     ) -> IsolationConfig:
         """Create config that requires AWS Bedrock authentication.
 
@@ -584,11 +598,7 @@ class IsolationConfig:
         Args:
             aws_config_path: Path to AWS config directory. Use this when running
                 in a container where AWS config is mounted at a non-standard path.
-            network_policy: Network access constraints for tools.
-            sandbox: Sandbox configuration.
-            env: Additional environment variables.
-            include_host_env: If True, inherit non-sensitive host env vars.
-            skills: Skills to mount.
+            options: Optional isolation options (network, sandbox, env, skills).
 
         Returns:
             IsolationConfig configured for Bedrock authentication.
@@ -604,14 +614,15 @@ class IsolationConfig:
             )
             raise IsolationAuthError(msg)
 
+        opts = options or IsolationOptions()
         return cls(
-            network_policy=network_policy,
-            sandbox=sandbox,
-            env=env,
+            network_policy=opts.network_policy,
+            sandbox=opts.sandbox,
+            env=opts.env,
             api_key=None,
             aws_config_path=aws_config_path,
-            include_host_env=include_host_env,
-            skills=skills,
+            include_host_env=opts.include_host_env,
+            skills=opts.skills,
         )
 
 

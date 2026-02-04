@@ -43,6 +43,7 @@ from ._async_utils import run_async
 from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
 from ._hooks import (
+    HookConstraints,
     HookContext,
     create_post_tool_use_hook,
     create_pre_compact_hook,
@@ -544,15 +545,18 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         )
 
         # Create hook context for native tool transactions
+        constraints = HookConstraints(
+            deadline=deadline,
+            budget_tracker=budget_tracker,
+            heartbeat=heartbeat,
+            run_context=run_context,
+        )
         hook_context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", prompt),
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
-            deadline=deadline,
-            budget_tracker=budget_tracker,
-            heartbeat=heartbeat,
-            run_context=run_context,
+            constraints=constraints,
         )
 
         # Create visibility signal for progressive disclosure support.
@@ -759,68 +763,52 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         return stderr_handler
 
-    async def _run_sdk_query(  # noqa: C901, PLR0912, PLR0915 - complexity needed for debug logging
+    def _add_client_config_options(
         self,
-        *,
-        sdk: Any,
-        prompt_text: str,
+        options_kwargs: dict[str, Any],
+        effective_cwd: str | None,
         output_format: dict[str, Any] | None,
-        hook_context: HookContext,
-        bridged_tools: tuple[Any, ...],
-        ephemeral_home: EphemeralHome,
-        effective_cwd: str | None = None,
-        visibility_signal: VisibilityExpansionSignal,
-        collector: TranscriptCollector | None,
-    ) -> list[Any]:
-        """Execute the SDK query and return message list."""
-        # Import the SDK's types
-        from claude_agent_sdk import ClaudeSDKClient
-        from claude_agent_sdk.types import ClaudeAgentOptions, HookMatcher
-
-        logger.debug(
-            "claude_agent_sdk.sdk_query.entry",
-            event="sdk_query.entry",
-            context={
-                "prompt_text_preview": prompt_text[:500] if prompt_text else "",
-                "has_output_format": output_format is not None,
-                "bridged_tool_count": len(bridged_tools),
-            },
+    ) -> None:
+        """Add client config options to the options dictionary."""
+        # Add non-None optional values using dict comprehension
+        optional_values = {
+            "cwd": effective_cwd,
+            "permission_mode": self._client_config.permission_mode,
+            "max_turns": self._client_config.max_turns,
+            "output_format": output_format,
+            "max_thinking_tokens": self._model_config.max_thinking_tokens,
+        }
+        options_kwargs.update(
+            {k: v for k, v in optional_values.items() if v is not None}
         )
 
-        # Build options dict then convert to ClaudeAgentOptions
-        options_kwargs: dict[str, Any] = {
-            "model": self._model,
-        }
-
-        if effective_cwd:
-            options_kwargs["cwd"] = effective_cwd
-
-        if self._client_config.permission_mode:
-            options_kwargs["permission_mode"] = self._client_config.permission_mode
-
-        if self._client_config.max_turns:
-            options_kwargs["max_turns"] = self._client_config.max_turns
-
+        # Handle special cases that need explicit None checks or transformations
         if self._client_config.max_budget_usd is not None:
             options_kwargs["max_budget_usd"] = self._client_config.max_budget_usd
-
         if self._client_config.betas:
             options_kwargs["betas"] = list(self._client_config.betas)
-
-        if output_format:
-            options_kwargs["output_format"] = output_format
-
         if self._allowed_tools is not None:
             options_kwargs["allowed_tools"] = list(self._allowed_tools)
-
         if self._disallowed_tools:
             options_kwargs["disallowed_tools"] = list(self._disallowed_tools)
 
+    def _build_sdk_options_kwargs(
+        self,
+        *,
+        output_format: dict[str, Any] | None,
+        bridged_tools: tuple[Any, ...],
+        ephemeral_home: EphemeralHome,
+        effective_cwd: str | None,
+    ) -> dict[str, Any]:
+        """Build the SDK options dictionary for ClaudeAgentOptions."""
+        options_kwargs: dict[str, Any] = {"model": self._model}
+
+        # Add client config options
+        self._add_client_config_options(options_kwargs, effective_cwd, output_format)
+
         # Apply isolation configuration from ephemeral home
-        # Set environment variables including redirected HOME
         env_vars = ephemeral_home.get_env()
         options_kwargs["env"] = env_vars
-        # Prevent loading any external settings
         options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
 
         logger.debug(
@@ -830,38 +818,32 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 "home_override": env_vars.get("HOME"),
                 "has_api_key": "ANTHROPIC_API_KEY" in env_vars,
                 "env_var_count": len(env_vars),
-                # Log non-sensitive env vars for debugging
                 "env_keys": [k for k in env_vars if "KEY" not in k.upper()],
             },
         )
 
-        # Apply model config parameters
-        # Note: The Claude Agent SDK does not expose max_tokens or temperature
-        # parameters directly. It manages token budgets internally.
-        if self._model_config.max_thinking_tokens is not None:
-            options_kwargs["max_thinking_tokens"] = (
-                self._model_config.max_thinking_tokens
-            )
-
         # Register custom tools via MCP server if any are provided
         if bridged_tools:
-            # create_mcp_server returns an McpSdkServerConfig directly
             mcp_server_config = create_mcp_server(bridged_tools)
-            options_kwargs["mcp_servers"] = {
-                "wink": mcp_server_config,
-            }
+            options_kwargs["mcp_servers"] = {"wink": mcp_server_config}
             logger.debug(
                 "claude_agent_sdk.sdk_query.mcp_server_configured",
                 event="sdk_query.mcp_server_configured",
                 context={"mcp_server_name": "wink"},
             )
 
-        # Always capture stderr for debug logging, but suppress display if configured
-        # This allows us to capture stderr output for error debugging even when
-        # suppress_stderr is True
         options_kwargs["stderr"] = self._create_stderr_handler()
+        return options_kwargs
 
-        # Create async hook callbacks
+    def _build_hooks_config(
+        self,
+        *,
+        hook_context: HookContext,
+        collector: TranscriptCollector | None,
+    ) -> dict[str, list[Any]]:
+        """Build the hooks configuration for the SDK client."""
+        from claude_agent_sdk.types import HookMatcher
+
         checker = self._client_config.task_completion_checker
         pre_hook = create_pre_tool_use_hook(hook_context)
         post_hook = create_post_tool_use_hook(
@@ -869,7 +851,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             stop_on_structured_output=self._client_config.stop_on_structured_output,
             task_completion_checker=checker,
         )
-        # Use task completion stop hook if checker is configured, otherwise regular stop hook
+
+        # Use task completion stop hook if checker is configured
         if checker is not None:  # pragma: no cover - tested via hook tests
             stop_hook_fn = create_task_completion_stop_hook(
                 hook_context,
@@ -877,13 +860,14 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             )
         else:
             stop_hook_fn = create_stop_hook(hook_context)
+
         prompt_hook = create_user_prompt_submit_hook(hook_context)
         subagent_stop_hook = create_subagent_stop_hook(hook_context)
         pre_compact_hook = create_pre_compact_hook(hook_context)
 
-        # Build hooks dict with HookMatcher wrappers
-        # matcher=None matches all tools
-        # Note: SDK does not support SubagentStart or Notification hooks in Python
+        # Get collector hooks (empty if collector is disabled)
+        collector_hooks = collector.hooks_config() if collector else {}
+
         hook_types = [
             "PreToolUse",
             "PostToolUse",
@@ -893,12 +877,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             "PreCompact",
         ]
 
-        # Get collector hooks (empty if collector is disabled)
-        collector_hooks = collector.hooks_config() if collector else {}
+        logger.debug(
+            "claude_agent_sdk.sdk_query.hooks_registered",
+            event="sdk_query.hooks_registered",
+            context={"hook_types": hook_types},
+        )
 
-        # Merge hooks - both adapter hooks (for tool bridging) and collector hooks
-        # (for transcript discovery) must receive callbacks
-        options_kwargs["hooks"] = {
+        return {
             "PreToolUse": [
                 HookMatcher(matcher=None, hooks=[pre_hook]),
                 *collector_hooks.get("PreToolUse", []),
@@ -925,10 +910,201 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             ],
         }
 
+    def _check_continuation_constraints(
+        self,
+        hook_context: HookContext,
+        continuation_round: int,
+    ) -> bool:
+        """Check deadline and budget constraints before a round.
+
+        Returns True if constraints are satisfied and we should continue.
+        Returns False if constraints are exceeded and we should stop.
+        """
+        # Check deadline before each round
+        if (
+            hook_context.deadline
+            and hook_context.deadline.remaining().total_seconds() <= 0
+        ):
+            logger.info(
+                "claude_agent_sdk.sdk_query.deadline_exceeded",
+                event="sdk_query.deadline_exceeded",
+                context={
+                    "continuation_round": continuation_round,
+                    "prompt_name": hook_context.prompt_name,
+                },
+            )
+            return False
+
+        # Check token budget before each round
+        if hook_context.budget_tracker:
+            try:
+                hook_context.budget_tracker.check()
+            except Exception as budget_error:
+                logger.info(
+                    "claude_agent_sdk.sdk_query.token_budget_exceeded",
+                    event="sdk_query.token_budget_exceeded",
+                    context={
+                        "continuation_round": continuation_round,
+                        "total_input_tokens": hook_context.stats.total_input_tokens,
+                        "total_output_tokens": hook_context.stats.total_output_tokens,
+                        "error": str(budget_error),
+                    },
+                )
+                return False
+
+        return True
+
+    def _update_token_stats(
+        self,
+        hook_context: HookContext,
+        content: dict[str, Any],
+    ) -> None:
+        """Update token statistics from message content."""
+        if content.get("input_tokens"):
+            hook_context.stats.total_input_tokens += content["input_tokens"]
+        if content.get("output_tokens"):
+            hook_context.stats.total_output_tokens += content["output_tokens"]
+
+        # Update budget tracker if available with cumulative totals
+        if hook_context.budget_tracker:
+            from ...runtime.events import TokenUsage
+
+            hook_context.budget_tracker.record_cumulative(
+                hook_context.prompt_name,
+                TokenUsage(
+                    input_tokens=hook_context.stats.total_input_tokens,
+                    output_tokens=hook_context.stats.total_output_tokens,
+                ),
+            )
+
+    def _check_task_completion(
+        self,
+        checker: Any,
+        round_messages: list[Any],
+        hook_context: HookContext,
+    ) -> tuple[bool, str | None]:
+        """Check if task is complete and return (should_continue, feedback).
+
+        Returns:
+            Tuple of (should_continue, feedback). If should_continue is True,
+            feedback contains the continuation message to send.
+        """
+        if not round_messages:
+            return (False, None)
+
+        last_message = round_messages[-1]
+        tentative_output = getattr(last_message, "structured_output", None)
+        if tentative_output is None:
+            tentative_output = getattr(last_message, "result", None)
+
+        completion_context = TaskCompletionContext(
+            session=hook_context.session,
+            tentative_output=tentative_output,
+            stop_reason="message_stream_complete",
+            filesystem=None,
+        )
+
+        result = checker.check(completion_context)
+
+        if not result.complete and result.feedback:
+            return (True, result.feedback)
+
+        if result.complete:
+            logger.debug(
+                "claude_agent_sdk.sdk_query.task_complete",
+                event="sdk_query.task_complete",
+                context={"feedback": result.feedback},
+            )
+
+        return (False, None)
+
+    def _log_message_received(
+        self,
+        message: Any,
+        messages: list[Any],
+        continuation_round: int,
+        hook_context: HookContext,
+        content: dict[str, Any],
+    ) -> None:
+        """Log message receipt at DEBUG level."""
         logger.debug(
-            "claude_agent_sdk.sdk_query.hooks_registered",
-            event="sdk_query.hooks_registered",
-            context={"hook_types": hook_types},
+            "claude_agent_sdk.sdk_query.message_received",
+            event="sdk_query.message_received",
+            context={
+                "message_type": type(message).__name__,
+                "message_index": len(messages) - 1,
+                "continuation_round": continuation_round,
+                "cumulative_input_tokens": hook_context.stats.total_input_tokens,
+                "cumulative_output_tokens": hook_context.stats.total_output_tokens,
+                **content,
+            },
+        )
+
+    def _should_continue_loop(
+        self,
+        continuation_round: int,
+        max_continuation_rounds: int | None,
+    ) -> bool:
+        """Check if continuation loop should continue."""
+        return (
+            max_continuation_rounds is None
+            or continuation_round < max_continuation_rounds
+        )
+
+    def _check_and_raise_visibility_signal(
+        self,
+        visibility_signal: VisibilityExpansionSignal,
+    ) -> None:
+        """Check for visibility expansion signal and raise if present."""
+        stored_exc = visibility_signal.get_and_clear()
+        if stored_exc is not None:
+            logger.debug(
+                "claude_agent_sdk.sdk_query.visibility_expansion_detected",
+                event="sdk_query.visibility_expansion_detected",
+                context={
+                    "section_keys": stored_exc.section_keys,
+                    "reason": stored_exc.reason,
+                },
+            )
+            raise stored_exc
+
+    async def _run_sdk_query(
+        self,
+        *,
+        sdk: Any,
+        prompt_text: str,
+        output_format: dict[str, Any] | None,
+        hook_context: HookContext,
+        bridged_tools: tuple[Any, ...],
+        ephemeral_home: EphemeralHome,
+        effective_cwd: str | None = None,
+        visibility_signal: VisibilityExpansionSignal,
+        collector: TranscriptCollector | None,
+    ) -> list[Any]:
+        """Execute the SDK query and return message list."""
+        from claude_agent_sdk import ClaudeSDKClient
+        from claude_agent_sdk.types import ClaudeAgentOptions
+
+        logger.debug(
+            "claude_agent_sdk.sdk_query.entry",
+            event="sdk_query.entry",
+            context={
+                "prompt_text_preview": (prompt_text or "")[:500],
+                "has_output_format": output_format is not None,
+                "bridged_tool_count": len(bridged_tools),
+            },
+        )
+
+        # Build options using helper methods
+        options_kwargs = self._build_sdk_options_kwargs(
+            output_format=output_format,
+            bridged_tools=bridged_tools,
+            ephemeral_home=ephemeral_home,
+            effective_cwd=effective_cwd,
+        )
+        options_kwargs["hooks"] = self._build_hooks_config(
+            hook_context=hook_context,
+            collector=collector,
         )
 
         # Log SDK options (excluding sensitive data)
@@ -984,71 +1160,33 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         messages: list[Any] = []
         # Only use max rounds as fallback if no deadline or budget configured
-        has_constraints = (
-            hook_context.deadline is not None or hook_context.budget_tracker is not None
-        )
-        max_continuation_rounds = (
-            None if has_constraints else 100
-        )  # Generous fallback limit
+        has_constraints = bool(hook_context.deadline or hook_context.budget_tracker)
+        max_continuation_rounds = None if has_constraints else 100
         continuation_round = 0
 
-        if has_constraints:
-            logger.debug(
-                "claude_agent_sdk.sdk_query.using_constraints",
-                event="sdk_query.using_constraints",
-                context={
-                    "has_deadline": hook_context.deadline is not None,
-                    "has_budget": hook_context.budget_tracker is not None,
-                    "prompt_name": hook_context.prompt_name,
-                },
-            )
-        else:
-            logger.debug(
-                "claude_agent_sdk.sdk_query.using_fallback_limit",
-                event="sdk_query.using_fallback_limit",
-                context={
-                    "max_rounds": max_continuation_rounds,
-                    "prompt_name": hook_context.prompt_name,
-                },
-            )
+        logger.debug(
+            "claude_agent_sdk.sdk_query.loop_config",
+            event="sdk_query.loop_config",
+            context={
+                "has_constraints": has_constraints,
+                "has_deadline": hook_context.deadline is not None,
+                "has_budget": hook_context.budget_tracker is not None,
+                "max_rounds": max_continuation_rounds,
+                "prompt_name": hook_context.prompt_name,
+            },
+        )
+
+        checker = self._client_config.task_completion_checker
 
         try:
-            while (  # pragma: no branch - safety limit, tested via unit logic
-                max_continuation_rounds is None
-                or continuation_round < max_continuation_rounds
+            while self._should_continue_loop(  # pragma: no branch
+                continuation_round, max_continuation_rounds
             ):
-                # Check deadline before each round
-                if (
-                    hook_context.deadline
-                    and hook_context.deadline.remaining().total_seconds() <= 0
+                # Check deadline and budget constraints
+                if not self._check_continuation_constraints(
+                    hook_context, continuation_round
                 ):
-                    logger.info(
-                        "claude_agent_sdk.sdk_query.deadline_exceeded",
-                        event="sdk_query.deadline_exceeded",
-                        context={
-                            "continuation_round": continuation_round,
-                            "prompt_name": hook_context.prompt_name,
-                        },
-                    )
                     break
-
-                # Check token budget before each round
-                if hook_context.budget_tracker:
-                    try:
-                        hook_context.budget_tracker.check()
-                    except Exception as budget_error:
-                        # Budget exceeded - this is expected behavior, not a warning
-                        logger.info(
-                            "claude_agent_sdk.sdk_query.token_budget_exceeded",
-                            event="sdk_query.token_budget_exceeded",
-                            context={
-                                "continuation_round": continuation_round,
-                                "total_input_tokens": hook_context.stats.total_input_tokens,
-                                "total_output_tokens": hook_context.stats.total_output_tokens,
-                                "error": str(budget_error),
-                            },
-                        )
-                        break
 
                 # Receive messages from the client
                 round_messages: list[Any] = []
@@ -1056,41 +1194,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     messages.append(message)
                     round_messages.append(message)
 
-                    # Extract message content for logging
+                    # Extract message content, update token stats, and log
                     content = _extract_message_content(message)
-
-                    # Update cumulative token stats in hook context
-                    if content.get("input_tokens"):
-                        hook_context.stats.total_input_tokens += content["input_tokens"]
-                    if content.get("output_tokens"):
-                        hook_context.stats.total_output_tokens += content[
-                            "output_tokens"
-                        ]
-
-                    # Update budget tracker if available with cumulative totals
-                    if hook_context.budget_tracker:
-                        from ...runtime.events import TokenUsage
-
-                        hook_context.budget_tracker.record_cumulative(
-                            hook_context.prompt_name,
-                            TokenUsage(
-                                input_tokens=hook_context.stats.total_input_tokens,
-                                output_tokens=hook_context.stats.total_output_tokens,
-                            ),
-                        )
-
-                    # Log each message at DEBUG level for troubleshooting
-                    logger.debug(
-                        "claude_agent_sdk.sdk_query.message_received",
-                        event="sdk_query.message_received",
-                        context={
-                            "message_type": type(message).__name__,
-                            "message_index": len(messages) - 1,
-                            "continuation_round": continuation_round,
-                            "cumulative_input_tokens": hook_context.stats.total_input_tokens,
-                            "cumulative_output_tokens": hook_context.stats.total_output_tokens,
-                            **content,
-                        },
+                    self._update_token_stats(hook_context, content)
+                    self._log_message_received(
+                        message, messages, continuation_round, hook_context, content
                     )
 
                 # Handle empty message stream (e.g., after continuation)
@@ -1106,57 +1214,25 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     break  # Exit if no messages received
 
                 # Check if we should continue based on task completion
-                if checker is not None and round_messages:
-                    # Import task completion types
-                    from ._task_completion import TaskCompletionContext
-
-                    # Extract the last message for completion checking
-                    last_message = round_messages[
-                        -1
-                    ]  # We know round_messages is non-empty
-                    tentative_output = None
-
-                    # Try to extract structured output from the last message
-                    tentative_output = getattr(last_message, "structured_output", None)
-                    if tentative_output is None:
-                        tentative_output = getattr(last_message, "result", None)
-
-                    # Check task completion
-                    completion_context = TaskCompletionContext(
-                        session=hook_context.session,
-                        tentative_output=tentative_output,
-                        stop_reason="message_stream_complete",
-                        filesystem=None,  # Could be enhanced to get filesystem from resources
+                if checker is not None:
+                    should_continue, feedback = self._check_task_completion(
+                        checker, round_messages, hook_context
                     )
-
-                    result = checker.check(completion_context)
-
-                    if not result.complete and result.feedback:
+                    if should_continue and feedback:
                         logger.info(
                             "claude_agent_sdk.sdk_query.continuation_required",
                             event="sdk_query.continuation_required",
                             context={
-                                "feedback": result.feedback[:200],
+                                "feedback": feedback[:200],
                                 "continuation_round": continuation_round + 1,
                             },
                         )
-
-                        # Send feedback to continue the conversation
                         continuation_round += 1
                         await client.query(
-                            prompt=result.feedback,
+                            prompt=feedback,
                             session_id=hook_context.prompt_name,
                         )
-                        # Continue the loop to receive more messages
                         continue
-
-                    # Task is complete or no feedback, log and exit
-                    if result.complete:
-                        logger.debug(
-                            "claude_agent_sdk.sdk_query.task_complete",
-                            event="sdk_query.task_complete",
-                            context={"feedback": result.feedback},
-                        )
 
                 # Exit loop if no checker, no messages, or completion check passed
                 break
@@ -1189,20 +1265,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
-        # Check for visibility expansion signal from progressive disclosure.
-        # If a tool raised VisibilityExpansionRequired, the bridge stored it
-        # in the signal. We re-raise it here so the caller can handle it.
-        stored_exc = visibility_signal.get_and_clear()
-        if stored_exc is not None:
-            logger.debug(
-                "claude_agent_sdk.sdk_query.visibility_expansion_detected",
-                event="sdk_query.visibility_expansion_detected",
-                context={
-                    "section_keys": stored_exc.section_keys,
-                    "reason": stored_exc.reason,
-                },
-            )
-            raise stored_exc
+        # Check for visibility expansion signal and re-raise if present
+        self._check_and_raise_visibility_signal(visibility_signal)
 
         return messages
 

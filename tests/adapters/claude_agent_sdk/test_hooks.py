@@ -21,6 +21,7 @@ from typing import Any, cast
 import pytest
 
 from weakincentives.adapters.claude_agent_sdk._hooks import (
+    HookConstraints,
     HookContext,
     create_post_tool_use_hook,
     create_pre_compact_hook,
@@ -151,13 +152,13 @@ class TestHookContext:
         budget = Budget(max_total_tokens=1000)
         tracker = BudgetTracker(budget)
 
+        constraints = HookConstraints(deadline=deadline, budget_tracker=tracker)
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            deadline=deadline,
-            budget_tracker=tracker,
+            constraints=constraints,
         )
         assert context.deadline is deadline
         assert context.budget_tracker is tracker
@@ -185,12 +186,13 @@ class TestPreToolUseHook:
         deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
         clock.advance(10)
 
+        constraints = HookConstraints(deadline=deadline)
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            deadline=deadline,
+            constraints=constraints,
         )
         hook = create_pre_tool_use_hook(context)
         input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
@@ -209,12 +211,13 @@ class TestPreToolUseHook:
             "eval1", TokenUsage(input_tokens=100, output_tokens=50)
         )
 
+        constraints = HookConstraints(budget_tracker=tracker)
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            budget_tracker=tracker,
+            constraints=constraints,
         )
         hook = create_pre_tool_use_hook(context)
         input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
@@ -233,12 +236,13 @@ class TestPreToolUseHook:
             "eval1", TokenUsage(input_tokens=50, output_tokens=50)
         )
 
+        constraints = HookConstraints(budget_tracker=tracker)
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            budget_tracker=tracker,
+            constraints=constraints,
         )
         hook = create_pre_tool_use_hook(context)
         input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
@@ -1431,12 +1435,13 @@ class TestTaskCompletionStopHook:
         expired_deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
         clock.advance(10)  # Now expired
 
+        constraints = HookConstraints(deadline=expired_deadline)
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            deadline=expired_deadline,
+            constraints=constraints,
         )
 
         hook = create_task_completion_stop_hook(
@@ -1468,12 +1473,13 @@ class TestTaskCompletionStopHook:
             "eval-1", TokenUsage(input_tokens=500, output_tokens=600)
         )  # Over budget
 
+        constraints = HookConstraints(budget_tracker=tracker)
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            budget_tracker=tracker,
+            constraints=constraints,
         )
 
         hook = create_task_completion_stop_hook(
