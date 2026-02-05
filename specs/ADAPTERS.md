@@ -5,6 +5,22 @@
 Adapters bridge prompts and external LLM services, handling request formatting,
 response parsing, rate limiting, and error recovery. Core at `src/weakincentives/adapters/core.py`.
 
+## Design Philosophy
+
+WINK only integrates with **agentic harnesses** and their SDKs. Native SDK
+integrations (like direct OpenAI or Anthropic API calls) are too low-level to
+qualify as an execution harness.
+
+An **execution harness** provides:
+
+- Planning loops and tool orchestration
+- Sandboxing and isolation
+- Retry handling and crash recovery
+- Deadline and budget enforcement
+
+WINK's agent definition (prompts, tools, policies, feedback) is portable across
+harnesses. The harness owns execution; you own the definition.
+
 ## Principles
 
 - **Provider-agnostic orchestration**: Uniform protocol; provider differences encapsulated
@@ -44,39 +60,16 @@ Provider-specific configs extend this.
 
 ## Provider Implementations
 
-### OpenAI Adapter
-
-At `src/weakincentives/adapters/openai.py`:
-
-| Config | Description |
-| --- | --- |
-| `OpenAIClientConfig` | api_key, base_url, organization, timeout, max_retries |
-| `OpenAIModelConfig` | logprobs, top_logprobs, parallel_tool_calls, store, user |
-
-**Note:** `max_tokens` renamed to `max_output_tokens` for Responses API. `seed`,
-`stop`, `presence_penalty`, `frequency_penalty` not accepted—raises `ValueError`.
-
-**Structured output:** Uses native JSON schema response format with `.parsed` payload.
-
-### LiteLLM Adapter
-
-At `src/weakincentives/adapters/litellm.py`:
-
-| Config | Description |
-| --- | --- |
-| `LiteLLMClientConfig` | api_key, api_base, timeout, num_retries |
-| `LiteLLMModelConfig` | Model parameters |
-
-**Caveats:** Tool calling/structured output varies by provider. LiteLLM exceptions
-normalized to `ThrottleError` or `PromptEvaluationError`. Always sets
-`require_structured_output_text=True`.
-
 ### Claude Agent SDK Adapter
 
 At `src/weakincentives/adapters/claude_agent_sdk/adapter.py`:
 
 - Async execution with MCP tool bridging
 - Skill mounting support
+- Hermetic isolation and sandboxing
+- Native Claude Code tooling (Read, Write, Bash, Glob, Grep)
+
+See [CLAUDE_AGENT_SDK.md](CLAUDE_AGENT_SDK.md) for complete documentation.
 
 ## Rate Limiting and Throttling
 

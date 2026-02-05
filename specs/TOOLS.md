@@ -131,7 +131,7 @@ Built-in: `SequentialDependencyPolicy`, `ReadBeforeWritePolicy`
 
 ## Runtime Dispatch
 
-Via `ToolExecutor` at `src/weakincentives/adapters/tool_executor.py`:
+Tool dispatch is handled by the adapter's execution hooks:
 
 1. **Registry lookup** - Resolve tool name
 1. **Argument parsing** - `serde.parse(..., extra="forbid")`

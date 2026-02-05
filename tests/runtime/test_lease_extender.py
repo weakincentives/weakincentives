@@ -344,37 +344,6 @@ def test_tool_context_beat_with_heartbeat() -> None:
     assert beat_count[0] == 1
 
 
-def test_tool_execution_context_beat_with_heartbeat() -> None:
-    """Verify ToolExecutionContext.beat() invokes heartbeat.beat() when set."""
-    from weakincentives.adapters.tool_executor import ToolExecutionContext
-    from weakincentives.prompt import Prompt, PromptTemplate
-    from weakincentives.runtime.session import Session
-
-    heartbeat = Heartbeat()
-    beat_count = [0]
-    heartbeat.add_callback(lambda: beat_count.__setitem__(0, beat_count[0] + 1))
-
-    session = Session()
-    template: PromptTemplate[None] = PromptTemplate(ns="test", key="test", name="test")
-    prompt: Prompt[None] = Prompt(template)
-    context = ToolExecutionContext(
-        adapter_name="test",
-        adapter=None,  # type: ignore[arg-type]
-        prompt=prompt,
-        rendered_prompt=None,
-        tool_registry={},
-        session=session,
-        prompt_name="test",
-        parse_arguments=lambda _tc, _h: None,  # type: ignore[arg-type,return-value]
-        format_dispatch_failures=lambda _: "",
-        deadline=None,
-        heartbeat=heartbeat,
-    )
-
-    context.beat()
-    assert beat_count[0] == 1
-
-
 def test_hook_context_beat_with_heartbeat() -> None:
     """Verify HookContext.beat() invokes heartbeat.beat() when set."""
     from weakincentives.adapters.claude_agent_sdk._hooks import (
@@ -401,52 +370,6 @@ def test_hook_context_beat_with_heartbeat() -> None:
     )
 
     context.beat()
-    assert beat_count[0] == 1
-
-
-def test_inner_loop_beat_method_with_heartbeat() -> None:
-    """Verify InnerLoop._beat() invokes heartbeat.beat() when configured."""
-    from weakincentives.adapters.inner_loop import InnerLoop, InnerLoopConfig
-    from weakincentives.prompt import Prompt, PromptTemplate
-    from weakincentives.prompt.prompt import RenderedPrompt
-    from weakincentives.runtime.session import Session
-
-    heartbeat = Heartbeat()
-    beat_count = [0]
-    heartbeat.add_callback(lambda: beat_count.__setitem__(0, beat_count[0] + 1))
-
-    session = Session()
-    template = PromptTemplate[None](ns="test", key="test", name="test")
-    prompt = Prompt(template)
-    rendered = RenderedPrompt[None](text="test prompt")
-
-    # Import InnerLoopInputs
-    from weakincentives.adapters.inner_loop import InnerLoopInputs
-
-    inputs = InnerLoopInputs[None](
-        adapter_name="test",
-        adapter=None,  # type: ignore[arg-type]
-        prompt=prompt,
-        prompt_name="test",
-        rendered=rendered,
-        render_inputs=(),
-        initial_messages=[{"role": "system", "content": "test"}],
-    )
-    config = InnerLoopConfig(
-        session=session,
-        tool_choice="auto",
-        response_format=None,
-        require_structured_output_text=False,
-        call_provider=lambda *args: None,  # type: ignore[arg-type,return-value]
-        select_choice=lambda r: r,  # type: ignore[arg-type,return-value]
-        serialize_tool_message_fn=lambda *args: {},  # type: ignore[arg-type,return-value]
-        heartbeat=heartbeat,
-    )
-
-    loop = InnerLoop(inputs=inputs, config=config)
-    # Directly call _beat to test the heartbeat invocation
-    loop._beat()
-
     assert beat_count[0] == 1
 
 

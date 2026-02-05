@@ -56,21 +56,15 @@ It showcases several key features of the library:
 - **AgentLoop integration**: Background worker processing requests from a mailbox
 - **Prompt composition**: Structured prompts with multiple sections and tools
 - **Session management**: Persistent state across multiple review requests
-- **Provider adapters**: Support for OpenAI and Claude Agent SDK
+- **Provider adapters**: Support for Claude Agent SDK
 - **Planning tools**: Plan-Act-Reflect workflow for structured investigations
 - **Workspace tools**: VFS, Podman, and Claude Agent SDK sandbox modes
 
 ## Running the Example
 
 ```bash
-# With OpenAI adapter (default)
-OPENAI_API_KEY=... python code_reviewer_example.py
-
-# With Podman sandbox
-OPENAI_API_KEY=... python code_reviewer_example.py --podman
-
 # With Claude Agent SDK
-ANTHROPIC_API_KEY=... python code_reviewer_example.py --claude-agent
+ANTHROPIC_API_KEY=... python code_reviewer_example.py
 
 # With workspace optimization
 python code_reviewer_example.py --optimize

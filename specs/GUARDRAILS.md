@@ -103,9 +103,9 @@ template = PromptTemplate(
 
 ### Execution Flow
 
-Via `ToolExecutor` at `src/weakincentives/adapters/tool_executor.py`:
+Policy enforcement happens in the adapter's tool execution hooks:
 
-```python
+```python nocheck
 def execute_tool(call, *, context):
     tool, params = resolve_and_parse(call)
     policies = [*section.policies, *prompt.policies]

@@ -44,7 +44,6 @@ from weakincentives.adapters.claude_agent_sdk import (
     SandboxConfig,
     get_default_model,
 )
-from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
 from weakincentives.contrib.tools import (
     AstevalSection,
@@ -545,19 +544,6 @@ def parse_args() -> argparse.Namespace:
         description="Interactive code review agent example."
     )
     parser.add_argument(
-        "--podman",
-        action="store_true",
-        help="Use Podman sandbox instead of VFS + Asteval (requires Podman connection).",
-    )
-    parser.add_argument(
-        "--claude-agent",
-        action="store_true",
-        help=(
-            "Use Claude Agent SDK adapter with native agentic capabilities. "
-            "Requires ANTHROPIC_API_KEY. Uses SDK's built-in tools."
-        ),
-    )
-    parser.add_argument(
         "--optimize",
         action="store_true",
         help="Enable workspace digest optimization on first request.",
@@ -570,32 +556,16 @@ def main() -> None:
     args = parse_args()
     configure_logging()
 
-    if args.claude_agent:
-        adapter, workspace_section = build_claude_agent_adapter()
-        app = CodeReviewApp(
-            adapter,
-            use_podman=False,
-            use_claude_agent=True,
-            workspace_section=workspace_section,
-            enable_optimization=args.optimize,
-        )
-    else:
-        adapter = build_adapter()
-        app = CodeReviewApp(
-            adapter,
-            use_podman=args.podman,
-            enable_optimization=args.optimize,
-        )
+    adapter, workspace_section = build_claude_agent_adapter()
+    app = CodeReviewApp(
+        adapter,
+        use_podman=False,
+        use_claude_agent=True,
+        workspace_section=workspace_section,
+        enable_optimization=args.optimize,
+    )
 
     app.run()
-
-
-def build_adapter() -> ProviderAdapter[ReviewResponse]:
-    """Build the OpenAI adapter, checking for the required API key."""
-    if "OPENAI_API_KEY" not in os.environ:
-        raise SystemExit("Set OPENAI_API_KEY before running this example.")
-    model = os.getenv("OPENAI_MODEL", "gpt-5.2")
-    return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
 def build_claude_agent_adapter() -> tuple[

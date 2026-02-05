@@ -124,9 +124,8 @@ capabilities once, in one place, and the definition ports across runtimes.
   process published events. State is immutable and inspectable—you can snapshot
   at any point. See [Session State](specs/SESSIONS.md).
 - **Harness-swappable adapters.** Keep the agent definition stable while
-  switching runtimes (OpenAI, LiteLLM, Claude Agent SDK). The Claude Agent SDK
-  adapter is an example of "renting the harness": native tools + OS-level
-  sandboxing, while WINK supplies the definition.
+  switching runtimes. WINK integrates with agentic harnesses like Claude Agent
+  SDK—native tools + OS-level sandboxing, while WINK supplies the definition.
   See [Adapters](specs/ADAPTERS.md).
 
 ## Getting Started
@@ -136,8 +135,6 @@ capabilities once, in one place, and the definition ports across runtimes.
 ```bash
 uv add weakincentives
 # optional extras
-uv add "weakincentives[openai]"           # OpenAI adapter
-uv add "weakincentives[litellm]"          # LiteLLM adapter
 uv add "weakincentives[claude-agent-sdk]" # Claude Agent SDK adapter
 uv add "weakincentives[podman]"           # Podman sandbox
 uv add "weakincentives[wink]"             # debug UI
@@ -214,7 +211,7 @@ from dataclasses import dataclass
 from typing import Any
 from weakincentives.runtime import AgentLoop, Session
 from weakincentives.runtime.events import InProcessDispatcher
-from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 from weakincentives.prompt import Prompt, PromptTemplate
 
 # Type stubs for example (defined in your application)
@@ -239,7 +236,7 @@ class ReviewLoop(AgentLoop[ReviewTurnParams, ReviewResponse]):
         return Prompt(self._template).bind(request), self._session
 
 dispatcher = InProcessDispatcher()
-loop = ReviewLoop(OpenAIAdapter(model="gpt-4o"), dispatcher)
+loop = ReviewLoop(ClaudeAgentSDKAdapter(), dispatcher)
 response, _ = loop.execute(ReviewTurnParams(request="Find bugs in main.py"))
 if response.output is not None:
     review: ReviewResponse = response.output  # typed, validated

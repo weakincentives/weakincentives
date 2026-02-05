@@ -66,7 +66,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "tools": "Define tool contracts and handlers",
     "sessions": "Manage state with reducers",
     "serialization": "Parse and serialize dataclasses without Pydantic",
-    "adapters": "Connect to OpenAI, LiteLLM, Claude Agent SDK",
+    "adapters": "Connect to agentic harnesses like Claude Agent SDK",
     "claude-agent-sdk": "Production integration with Claude Code",
     "skills-authoring": "Create and mount custom skills",
     "orchestration": "Use AgentLoop for request handling",
