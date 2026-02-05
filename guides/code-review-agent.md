@@ -167,16 +167,14 @@ class ReferenceParams:
    - Visibility: `SectionVisibility.SUMMARY`
    - Summary: "Documentation for ${project_name} is available..."
 
-1. **Planning Tools** (`PlanningToolsSection`)
+1. **Workspace Digest** (`WorkspaceDigestSection`)
 
-   - Strategy: `PlanningStrategy.PLAN_ACT_REFLECT`
-   - `accepts_overrides=True`
+   - Renders cached workspace summary from session state
 
-1. **Workspace Tools** (conditional)
+1. **Workspace Tools** (`ClaudeAgentWorkspaceSection`)
 
-   - `PodmanSandboxSection` if Podman connection available
-   - `VfsToolsSection` fallback otherwise
-   - Both use `_sunfish_mounts()` configuration
+   - Provides file tools via Claude Agent SDK
+   - Uses configured host mounts
 
 1. **Review Request** (`MarkdownSection[ReviewTurnParams]`)
 
@@ -322,7 +320,7 @@ The example imports several helpers from the `examples` package:
 
 ## Next Steps
 
-- [Workspace Tools](workspace-tools.md): Deep dive into VFS, Podman, planning
+- [Claude Agent SDK](claude-agent-sdk.md): Deep dive into workspace tools
 - [Progressive Disclosure](progressive-disclosure.md): Understand visibility
   management
 - [Prompt Overrides](prompt-overrides.md): Customize prompts without code

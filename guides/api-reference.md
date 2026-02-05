@@ -128,20 +128,17 @@ PromptResponse(prompt_name, text, output)
 
 ## weakincentives.contrib.tools
 
-**Planning:**
+**Workspace Digest:**
 
-- `PlanningToolsSection(session, strategy=...)`
+- `WorkspaceDigestSection(session)` — Renders cached workspace summary
+- `set_workspace_digest(session, digest)` — Store digest in session state
 
-**Workspace:**
+## weakincentives.adapters.claude_agent_sdk (Workspace)
 
-- `VfsToolsSection(session, config=VfsConfig(...))`
-- `HostMount(host_path, mount_path=None, include_glob=(), exclude_glob=())`
-- `WorkspaceDigestSection(session)`
+**Workspace sections:**
 
-**Sandboxes:**
-
-- `AstevalSection(session)`
-- `PodmanSandboxSection(session, config=PodmanSandboxConfig(...))`
+- `ClaudeAgentWorkspaceSection(session, mounts)` — Workspace with file access
+- `HostMount(host_path, include_glob=(), exclude_glob=(), max_bytes=None)`
 
 ## weakincentives.evals
 

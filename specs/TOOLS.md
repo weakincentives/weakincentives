@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Tool registration, context injection, failure semantics, policy enforcement,
-and planning tools. Core at `src/weakincentives/prompt/tool.py`.
+Tool registration, context injection, failure semantics, and policy enforcement.
+Core at `src/weakincentives/prompt/tool.py`.
 
 ## Principles
 

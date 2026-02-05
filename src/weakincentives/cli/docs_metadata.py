@@ -48,14 +48,14 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "SLICES": "Slice storage backends, factory configuration, JSONL persistence",
     "TESTING": "Test harnesses, fault injection, fuzzing, coverage standards",
     "THREAD_SAFETY": "Concurrency and shared state",
-    "TOOLS": "Tool runtime, planning tools, failure semantics",
+    "TOOLS": "Tool runtime, failure semantics, transactional rollback",
     "TRANSCRIPT_COLLECTION": "Claude Agent SDK transcript tailing, sub-agent discovery, DEBUG logs",
     "VERIFICATION": "Redis mailbox detailed specification, invariants, property tests",
     "VERIFICATION_TOOLBOX": "Verification toolchain (check.py), checker protocol, failure reporting",
     "WINK_DEBUG": "Debug bundle viewer UI, proposed enhancements, timeline visualization",
     "WINK_DOCS": "CLI docs command, bundled documentation access",
     "WINK_QUERY": "SQL CLI for debug bundle exploration, dynamic schemas, agent diagnostics",
-    "WORKSPACE": "VFS, Podman, asteval, workspace digest",
+    "WORKSPACE": "Claude Agent SDK workspace, host mounts, workspace digest",
 }
 
 GUIDE_DESCRIPTIONS: dict[str, str] = {
@@ -75,7 +75,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "resources": "Dependency injection, scopes, and lifecycle management",
     "progressive-disclosure": "Control context size with summaries",
     "prompt-overrides": "Iterate on prompts without code changes",
-    "workspace-tools": "Use VFS, Podman, planning, workspace digests",
+    "workspace-tools": "Use Claude Agent SDK workspace, host mounts, workspace digests",
     "debugging": "Inspect sessions and use the debug UI",
     "query": "SQL-based exploration of debug bundles",
     "testing": "Test prompts, tools, and reducers",

@@ -153,6 +153,6 @@ expanding it.
 
 - [Prompt Overrides](prompt-overrides.md): Iterate on prompts without code
   changes
-- [Workspace Tools](workspace-tools.md): See progressive disclosure in action
-  with WorkspaceDigestSection
+- [Claude Agent SDK](claude-agent-sdk.md): See progressive disclosure with
+  WorkspaceDigestSection
 - [Orchestration](orchestration.md): Learn how AgentLoop handles expansion

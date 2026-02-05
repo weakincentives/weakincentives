@@ -221,12 +221,10 @@ Some sections are **pure**: they depend only on params and render the same text
 every time. You can safely store those in a module-level `PromptTemplate`.
 
 Other sections are **session-bound**: they capture runtime resources (a session,
-filesystem, sandbox connection, etc.). Examples:
+workspace connection, etc.). Examples:
 
-- `PlanningToolsSection(session=...)`
-- `VfsToolsSection(session=...)`
+- `ClaudeAgentWorkspaceSection(session=..., mounts=...)`
 - `WorkspaceDigestSection(session=...)`
-- `PodmanSandboxSection(session=...)`
 
 For those, prefer one of these patterns:
 
@@ -234,19 +232,21 @@ For those, prefer one of these patterns:
 
 ```python nocheck
 from typing import Any
-from weakincentives.contrib.tools import PlanningToolsSection, VfsToolsSection
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentWorkspaceSection, HostMount
+from weakincentives.contrib.tools import WorkspaceDigestSection
 from weakincentives.prompt import PromptTemplate, MarkdownSection
 from weakincentives.runtime import Session
 
 
 def build_prompt_template(*, session: Session) -> PromptTemplate[Any]:
+    mounts = [HostMount(host_path="/path/to/project")]
     return PromptTemplate(
         ns="example",
         key="session-bound",
         sections=(
             MarkdownSection(title="Instructions", key="instructions"),
-            PlanningToolsSection(session=session),
-            VfsToolsSection(session=session),
+            WorkspaceDigestSection(session=session),
+            ClaudeAgentWorkspaceSection(session=session, mounts=mounts),
         ),
     )
 ```

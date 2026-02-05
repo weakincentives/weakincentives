@@ -177,11 +177,10 @@ In WINK, "a tool suite" is usually a section:
 That co-location is intentional: **tools without guidance are unreliable, and
 guidance without tools is toothless**.
 
-Examples in `weakincentives.contrib.tools`:
+Examples:
 
-- Planning tools (`PlanningToolsSection`)
-- VFS tools (`VfsToolsSection`)
-- Sandbox tools (`PodmanSandboxSection`, `AstevalSection`)
+- `WorkspaceDigestSection` — Renders cached workspace digest
+- `ClaudeAgentWorkspaceSection` — Workspace with file tools (Claude Agent SDK)
 
 Each section bundles the instructions ("here's how to use these tools") with the
 tools themselves. The model sees them together.
@@ -206,9 +205,8 @@ This happens by default—you don't need to opt in or write rollback logic.
 
 **What gets rolled back:**
 
-- Session slices marked as `STATE` (working state like plans, visibility
-  overrides)
-- Filesystem changes (both in-memory VFS and disk-backed via git)
+- Session slices marked as `STATE` (working state like visibility overrides)
+- Filesystem changes (disk-backed via git)
 
 **What's preserved:**
 
@@ -221,65 +219,6 @@ This happens by default—you don't need to opt in or write rollback logic.
 - Consistent state: failed operations never leave inconsistent state
 - Easier debugging: when something fails, you know exactly what state you're in
 - Adapter parity: all adapters use the same transaction semantics
-
-## Planning Tools
-
-*Canonical spec: [specs/TOOLS.md](../specs/TOOLS.md) (Planning Tool Suite section)*
-
-WINK provides a built-in planning tool suite that helps agents externalize their
-reasoning. Many models plan better when they have explicit tools for managing a
-plan rather than keeping it in their context.
-
-**The four planning tools:**
-
-- `planning_setup_plan`: Create a new plan with an objective
-- `planning_add_step`: Add a step to the current plan
-- `planning_update_step`: Update a step's status or details
-- `planning_read_plan`: Read the current plan state
-
-```python nocheck
-from weakincentives.contrib.tools import PlanningToolsSection, PlanningStrategy
-
-planning = PlanningToolsSection(
-    session=session,
-    strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-)
-```
-
-The plan is stored in the session as a typed slice. Each step has an ID, title,
-details, status, and notes. The agent can update steps as it works through them.
-
-## Planning Strategies
-
-Different tasks benefit from different planning styles. WINK supports two
-built-in strategies that shape the prompt instructions:
-
-**REACT (Reason-Act-Observe):**
-
-The model reasons about what to do next, takes an action, observes the result,
-then repeats. Good for exploratory tasks where the path isn't clear upfront.
-
-```python nocheck
-planning = PlanningToolsSection(
-    session=session,
-    strategy=PlanningStrategy.REACT,
-)
-```
-
-**PLAN_ACT_REFLECT:**
-
-The model creates a plan upfront, executes the steps, then reflects on results.
-Good for structured tasks where the steps are predictable.
-
-```python nocheck
-planning = PlanningToolsSection(
-    session=session,
-    strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-)
-```
-
-The strategy affects the instructions rendered in the prompt, not the available
-tools. Both strategies use the same four planning tools.
 
 ## Tool Policies
 
@@ -332,9 +271,6 @@ section = MarkdownSection(
 `ToolResult.error()` without executing the handler. The error message explains
 which policy was violated.
 
-**Default policies on contrib sections:** `VfsToolsSection` and
-`PodmanSandboxSection` apply `ReadBeforeWritePolicy` by default.
-
 ## The ToolPolicy Protocol
 
 You can implement custom policies by following the `ToolPolicy` protocol:
@@ -381,4 +317,4 @@ class MyCustomPolicy(ToolPolicy):
 
 - [Sessions](sessions.md): Manage state with reducers
 - [Adapters](adapters.md): Connect to different providers
-- [Workspace Tools](workspace-tools.md): Use VFS, Podman, and planning tools
+- [Claude Agent SDK](claude-agent-sdk.md): Production integration with workspace tools
