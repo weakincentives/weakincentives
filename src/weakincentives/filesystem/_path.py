@@ -13,8 +13,8 @@
 """Shared path normalization utilities.
 
 This module provides the canonical path normalization functions used throughout
-the codebase. Both the core filesystem types and VFS tools use these utilities
-to ensure consistent path handling.
+the codebase. Both the core filesystem types and workspace tools use these
+utilities to ensure consistent path handling.
 
 Constants:
     MAX_PATH_DEPTH: Maximum allowed path depth (16 segments)

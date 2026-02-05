@@ -163,7 +163,7 @@ weakincentives.runtime.events     # Dispatcher, event types
 weakincentives.runtime.mailbox    # Message queues
 weakincentives.adapters           # Provider base, config, throttling
 weakincentives.adapters.claude_agent_sdk  # ClaudeAgentSDKAdapter
-weakincentives.contrib.tools      # VFS, planning, asteval, podman
+weakincentives.contrib.tools      # Workspace digest tools
 weakincentives.contrib.optimizers # WorkspaceDigestOptimizer
 weakincentives.contrib.mailbox    # RedisMailbox
 weakincentives.resources          # Dependency injection
@@ -987,7 +987,7 @@ src/weakincentives/
 │   └── claude_agent_sdk/
 ├── cli/                # wink CLI
 ├── contrib/
-│   ├── tools/          # Planning, VFS, asteval, podman, workspace digest
+│   ├── tools/          # Workspace digest tools
 │   ├── optimizers/     # WorkspaceDigestOptimizer
 │   └── mailbox/        # RedisMailbox
 ├── dataclasses/        # FrozenDataclass utilities
@@ -996,7 +996,6 @@ src/weakincentives/
 ├── evals/              # Evaluation framework
 ├── filesystem/         # Filesystem protocol
 ├── formal/             # TLA+ embedding
-├── optimizers/         # Optimizer framework
 ├── prompt/             # Sections, tools, rendering, overrides
 │   └── overrides/      # LocalPromptOverridesStore
 ├── resources/          # DI with Binding, Scope
@@ -1020,11 +1019,11 @@ Read before modifying related code:
 | --------------------------- | ---------------------------------------- |
 | `specs/PROMPTS.md` | Prompt system, composition, overrides |
 | `specs/SESSIONS.md` | Session lifecycle, events, budgets |
-| `specs/TOOLS.md` | Tool registration, planning tools |
+| `specs/TOOLS.md` | Tool registration, failure semantics |
 | `specs/GUARDRAILS.md` | Tool policies, feedback providers, task completion |
 | `specs/ADAPTERS.md` | Provider adapters, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
-| `specs/WORKSPACE.md` | VFS, Podman, asteval |
+| `specs/WORKSPACE.md` | Claude Agent SDK workspace, host mounts |
 | `specs/DBC.md` | Design-by-contract patterns |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection |
 | `specs/AGENT_LOOP.md` | AgentLoop orchestration |
@@ -1128,11 +1127,10 @@ ______________________________________________________________________
 See `code_reviewer_example.py` for production patterns:
 
 - Structured output types
-- VFS/Planning tool sections
-- AgentLoop implementation
-- Event subscription
-- Prompt overrides
-- Claude Agent SDK mode
+- Workspace digest and Claude Agent SDK workspace sections
+- AgentLoop with in-memory mailbox
+- Session telemetry via InProcessDispatcher
+- Claude Agent SDK adapter
 
 ______________________________________________________________________
 

@@ -13,9 +13,8 @@
 """Filesystem protocol for workspace operations.
 
 This module provides a unified `Filesystem` protocol that abstracts over
-workspace backends (in-memory VFS, Podman containers, host filesystem) so
-tool handlers can perform file operations without coupling to a specific
-storage implementation.
+workspace backends so tool handlers can perform file operations without
+coupling to a specific storage implementation.
 
 The protocol uses simple `str` paths throughout - tool handlers convert these
 to structured result types for serialization to the LLM.
