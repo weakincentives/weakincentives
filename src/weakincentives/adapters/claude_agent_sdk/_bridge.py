@@ -147,7 +147,9 @@ class MCPToolExecutionState:
             if queue:
                 try:
                     return queue.popleft()
-                except IndexError:
+                except (
+                    IndexError
+                ):  # pragma: no cover - defensive, can't happen with lock
                     return None
             return None
 
