@@ -217,7 +217,7 @@ _LUA_REAP = """
 -- ARGV: [ttl] (computes now from server time)
 local t = redis.call('TIME')
 local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
-local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, 100)
+local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', '(' .. tostring(now), 'LIMIT', 0, 100)
 local count = 0
 for i, msg_id in ipairs(expired) do
     redis.call('ZREM', KEYS[1], msg_id)
