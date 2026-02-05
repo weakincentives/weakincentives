@@ -2480,6 +2480,10 @@ function getTreeTypeBadge(value, type) {
 
 /**
  * Renders a markdown leaf node with toggle between rendered and raw views.
+ *
+ * Security note: markdown.html is pre-rendered by the trusted debug server
+ * (via Python's markdown library) and is intentionally not escaped here.
+ * The raw text view uses escapeHtml for safe display of the source.
  */
 function renderMarkdownLeaf(wrapper, markdown, path) {
   const view = getMarkdownView(path);
