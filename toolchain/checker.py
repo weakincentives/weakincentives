@@ -160,12 +160,15 @@ class AutoFormatChecker:
 
     In local environments: runs the formatter to apply fixes, reports changes.
     In CI environments: runs the formatter in check mode, fails if changes needed.
+
+    Uses JSON output format internally for reliable file path extraction.
     """
 
     name: str
     description: str
     check_command: list[str]
     fix_command: list[str]
+    json_check_command: list[str] | None = None  # For JSON output parsing
     parser: DiagnosticParser = _no_parse
     timeout: int = 300
 
@@ -230,11 +233,36 @@ class AutoFormatChecker:
     def _run_with_autofix(self, start: float) -> CheckResult:
         """Run with auto-fix and report changes (local behavior).
 
-        Runs the fix command directly (single execution) and parses output
-        to report which files were reformatted.
+        Uses JSON check command (if available) to get precise file list,
+        then runs fix command to apply changes.
         """
         try:
-            result = subprocess.run(
+            # First, check what files need formatting using JSON output
+            files_to_format: list[str] = []
+            if self.json_check_command:
+                check_result = subprocess.run(
+                    self.json_check_command,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout,
+                )
+                # Parse JSON output to get file list (non-zero exit means files need formatting)
+                if check_result.returncode != 0:
+                    files_to_format = self._parse_json_output(check_result.stdout)
+
+                # If check passed, nothing needs formatting
+                if check_result.returncode == 0:
+                    duration_ms = int((time.monotonic() - start) * 1000)
+                    return CheckResult(
+                        name=self.name,
+                        status="passed",
+                        duration_ms=duration_ms,
+                        diagnostics=(),
+                        output="",
+                    )
+
+            # Run fix command to apply formatting
+            fix_result = subprocess.run(
                 self.fix_command,
                 capture_output=True,
                 text=True,
@@ -243,10 +271,10 @@ class AutoFormatChecker:
             duration_ms = int((time.monotonic() - start) * 1000)
 
             # Check if fix command failed (e.g., syntax error, internal crash)
-            if result.returncode != 0:
-                output = result.stdout
-                if result.stderr:
-                    output = f"{output}\n{result.stderr}" if output else result.stderr
+            if fix_result.returncode != 0:
+                output = fix_result.stdout
+                if fix_result.stderr:
+                    output = f"{output}\n{fix_result.stderr}" if output else fix_result.stderr
                 return CheckResult(
                     name=self.name,
                     status="failed",
@@ -255,22 +283,9 @@ class AutoFormatChecker:
                     output=output.strip(),
                 )
 
-            # Parse which files were reformatted from the output
-            fixed_files = self._parse_fixed_files(result.stdout)
-
-            if fixed_files:
-                # Report the changes in natural language with file names
-                if len(fixed_files) == 1:
-                    message = f"Automatically reformatted 1 file: {fixed_files[0]}"
-                else:
-                    file_list = ", ".join(fixed_files[:5])
-                    if len(fixed_files) > 5:
-                        file_list += f" and {len(fixed_files) - 5} more"
-                    message = (
-                        f"Automatically reformatted {len(fixed_files)} files: "
-                        f"{file_list}"
-                    )
-
+            # Report which files were reformatted
+            if files_to_format:
+                message = self._format_file_message(files_to_format)
                 return CheckResult(
                     name=self.name,
                     status="passed",
@@ -278,11 +293,11 @@ class AutoFormatChecker:
                     diagnostics=(
                         Diagnostic(message=message, severity="info"),
                     ),
-                    output=result.stdout.strip(),
+                    output=fix_result.stdout.strip(),
                 )
 
-            # No file paths found - check if ruff reported a count in the summary
-            reformat_count = self._parse_reformat_count(result.stdout)
+            # No JSON check command - fall back to parsing fix output
+            reformat_count = self._parse_reformat_count(fix_result.stdout)
             if reformat_count > 0:
                 if reformat_count == 1:
                     message = "Automatically reformatted 1 file"
@@ -296,7 +311,7 @@ class AutoFormatChecker:
                     diagnostics=(
                         Diagnostic(message=message, severity="info"),
                     ),
-                    output=result.stdout.strip(),
+                    output=fix_result.stdout.strip(),
                 )
 
             # No files reformatted - everything was already formatted
@@ -334,27 +349,41 @@ class AutoFormatChecker:
                 output="",
             )
 
-    def _parse_fixed_files(self, output: str) -> list[str]:
-        """Parse file paths from ruff format output."""
-        files = []
-        for line in output.strip().split("\n"):
-            line = line.strip()
-            # ruff format outputs "1 file reformatted" or lists file paths
-            if line and not line.endswith("reformatted") and not line.startswith("("):
-                # Looks like a file path
-                if line.endswith(".py"):
-                    files.append(line)
-        return files
+    def _parse_json_output(self, output: str) -> list[str]:
+        """Parse file paths from ruff JSON output.
+
+        Expected format is a JSON array of objects with 'filename' field.
+        """
+        import json
+
+        try:
+            data = json.loads(output)
+            if isinstance(data, list):
+                # Extract unique filenames
+                filenames = {item.get("filename") for item in data if isinstance(item, dict)}
+                return sorted(f for f in filenames if f)
+        except json.JSONDecodeError:
+            pass
+        return []
+
+    def _format_file_message(self, files: list[str]) -> str:
+        """Format a human-readable message about reformatted files."""
+        if len(files) == 1:
+            return f"Automatically reformatted 1 file: {files[0]}"
+        file_list = ", ".join(files[:5])
+        if len(files) > 5:
+            file_list += f" and {len(files) - 5} more"
+        return f"Automatically reformatted {len(files)} files: {file_list}"
 
     def _parse_reformat_count(self, output: str) -> int:
-        """Parse the number of reformatted files from ruff output.
+        """Parse the number of reformatted files from ruff text output.
 
+        Fallback for when JSON output is not available.
         Looks for patterns like "1 file reformatted" or "3 files reformatted".
         """
         import re
 
         for line in output.strip().split("\n"):
-            # Match "N file reformatted" or "N files reformatted"
             match = re.search(r"(\d+)\s+files?\s+reformatted", line)
             if match:
                 return int(match.group(1))

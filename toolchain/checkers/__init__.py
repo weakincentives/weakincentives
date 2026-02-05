@@ -38,12 +38,18 @@ def create_format_checker() -> AutoFormatChecker:
 
     In local environments: auto-fixes formatting and reports changes.
     In CI environments: checks formatting without modifications.
+
+    Uses JSON output internally for precise file path reporting.
     """
     return AutoFormatChecker(
         name="format",
         description="Check code formatting with ruff",
         check_command=["uv", "run", "ruff", "format", "--check", "."],
         fix_command=["uv", "run", "ruff", "format", "."],
+        json_check_command=[
+            "uv", "run", "ruff", "format",
+            "--preview", "--check", "--output-format=json", ".",
+        ],
         parser=parse_ruff,
     )
 

@@ -177,13 +177,16 @@ class TestAutoFormatChecker:
             result = checker.run()
         assert result.status == "failed"
 
-    def test_autofix_locally_reports_changes(self) -> None:
-        """Locally, should run fix and report changes."""
+    def test_autofix_locally_reports_changes_with_json(self) -> None:
+        """Locally with JSON check, should report file names from JSON."""
+        # JSON check returns file info, fix command runs
+        json_output = '[{"filename": "src/changed.py", "message": "File would be reformatted"}]'
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
-            fix_command=["bash", "-c", "echo 'src/changed.py'"],
+            fix_command=["true"],
+            json_check_command=["bash", "-c", f"echo '{json_output}'; exit 1"],
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
@@ -192,18 +195,35 @@ class TestAutoFormatChecker:
         assert len(info_diags) == 1
         assert "src/changed.py" in info_diags[0].message
 
-    def test_no_changes_needed_locally(self) -> None:
-        """Locally, no diagnostics when nothing needs formatting."""
+    def test_no_changes_needed_locally_with_json(self) -> None:
+        """Locally with JSON check, no diagnostics when nothing needs formatting."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
-            fix_command=["true"],  # No output means nothing changed
+            fix_command=["true"],
+            json_check_command=["true"],  # Exit 0 means nothing needs formatting
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
         assert result.status == "passed"
         assert len(result.diagnostics) == 0
+
+    def test_autofix_locally_fallback_without_json(self) -> None:
+        """Locally without JSON check, should fall back to count parsing."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["bash", "-c", "echo '2 files reformatted'"],
+            # No json_check_command
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            result = checker.run()
+        assert result.status == "passed"
+        info_diags = [d for d in result.diagnostics if d.severity == "info"]
+        assert len(info_diags) == 1
+        assert "2 files" in info_diags[0].message
 
     def test_timeout_handling(self) -> None:
         """Timeout should be reported as failure."""
@@ -219,68 +239,88 @@ class TestAutoFormatChecker:
         assert result.status == "failed"
         assert any("Timed out" in d.message for d in result.diagnostics)
 
-    def test_parse_fixed_files(self) -> None:
-        """Test parsing of reformatted file paths."""
+    def test_parse_json_output(self) -> None:
+        """Test parsing of JSON formatted output."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
             fix_command=["true"],
         )
-        output = "src/foo.py\nsrc/bar.py\n1 file reformatted"
-        files = checker._parse_fixed_files(output)
-        assert files == ["src/foo.py", "src/bar.py"]
+        json_output = '[{"filename": "src/foo.py"}, {"filename": "src/bar.py"}]'
+        files = checker._parse_json_output(json_output)
+        assert files == ["src/bar.py", "src/foo.py"]  # Sorted
 
-    def test_reports_single_file_fixed(self) -> None:
-        """Should report single file fix in natural language."""
+    def test_parse_json_output_invalid(self) -> None:
+        """Test parsing invalid JSON returns empty list."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
-            fix_command=["bash", "-c", "echo src/test.py"],
+            fix_command=["true"],
         )
-        with mock.patch.dict(os.environ, {}, clear=True):
-            result = checker.run()
-        assert result.status == "passed"
-        info_diags = [d for d in result.diagnostics if d.severity == "info"]
-        assert len(info_diags) == 1
-        assert "1 file" in info_diags[0].message
-        assert "src/test.py" in info_diags[0].message
+        assert checker._parse_json_output("not json") == []
+        assert checker._parse_json_output("") == []
 
-    def test_reports_multiple_files_fixed(self) -> None:
-        """Should report multiple files fix in natural language."""
+    def test_parse_json_output_not_list(self) -> None:
+        """Test parsing valid JSON that's not a list returns empty list."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
-            fix_command=["bash", "-c", "echo -e 'a.py\nb.py\nc.py'"],
+            fix_command=["true"],
         )
-        with mock.patch.dict(os.environ, {}, clear=True):
-            result = checker.run()
-        assert result.status == "passed"
-        info_diags = [d for d in result.diagnostics if d.severity == "info"]
-        assert len(info_diags) == 1
-        assert "3 files" in info_diags[0].message
+        assert checker._parse_json_output('{"filename": "test.py"}') == []
+        assert checker._parse_json_output('"just a string"') == []
 
-    def test_reports_many_files_truncated(self) -> None:
-        """Should truncate file list when more than 5 files are fixed."""
+    def test_parse_json_output_deduplicates(self) -> None:
+        """Test that duplicate filenames are deduplicated."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
-            fix_command=[
-                "bash",
-                "-c",
-                "echo -e 'a.py\nb.py\nc.py\nd.py\ne.py\nf.py\ng.py'",
-            ],
+            fix_command=["true"],
         )
-        with mock.patch.dict(os.environ, {}, clear=True):
-            result = checker.run()
-        assert result.status == "passed"
-        info_diags = [d for d in result.diagnostics if d.severity == "info"]
-        assert len(info_diags) == 1
-        assert "7 files" in info_diags[0].message
-        assert "and 2 more" in info_diags[0].message
+        # Same file can have multiple issues
+        json_output = '[{"filename": "a.py"}, {"filename": "a.py"}, {"filename": "b.py"}]'
+        files = checker._parse_json_output(json_output)
+        assert files == ["a.py", "b.py"]
+
+    def test_format_file_message_single(self) -> None:
+        """Test message formatting for single file."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["true"],
+        )
+        msg = checker._format_file_message(["src/test.py"])
+        assert "1 file" in msg
+        assert "src/test.py" in msg
+
+    def test_format_file_message_multiple(self) -> None:
+        """Test message formatting for multiple files."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["true"],
+        )
+        msg = checker._format_file_message(["a.py", "b.py", "c.py"])
+        assert "3 files" in msg
+
+    def test_format_file_message_truncated(self) -> None:
+        """Test message formatting truncates at 5 files."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["true"],
+        )
+        files = ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py", "g.py"]
+        msg = checker._format_file_message(files)
+        assert "7 files" in msg
+        assert "and 2 more" in msg
 
     def test_stderr_captured_in_ci(self) -> None:
         """In CI, stderr should be captured in the output."""
@@ -309,12 +349,13 @@ class TestAutoFormatChecker:
         assert any("Timed out" in d.message for d in result.diagnostics)
 
     def test_no_files_in_output_means_nothing_changed(self) -> None:
-        """When no .py files and no count in output, nothing needed formatting."""
+        """When no count in output, nothing needed formatting."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
             fix_command=["bash", "-c", "echo 'All files already formatted'"],
+            # No json_check_command - falls back to count parsing
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
@@ -352,13 +393,14 @@ class TestAutoFormatChecker:
         output = "warning: some warning\n3 files reformatted\n"
         assert checker._parse_reformat_count(output) == 3
 
-    def test_reports_count_when_no_file_paths_plural(self) -> None:
-        """Should report count from summary when file paths not available."""
+    def test_fallback_count_plural(self) -> None:
+        """Without JSON, should report count from fix output."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
             fix_command=["bash", "-c", "echo '2 files reformatted'"],
+            # No json_check_command
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
@@ -367,13 +409,14 @@ class TestAutoFormatChecker:
         assert len(info_diags) == 1
         assert "2 files" in info_diags[0].message
 
-    def test_reports_count_when_no_file_paths_singular(self) -> None:
-        """Should report singular count from summary."""
+    def test_fallback_count_singular(self) -> None:
+        """Without JSON, should report singular count from fix output."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
             fix_command=["bash", "-c", "echo '1 file reformatted'"],
+            # No json_check_command
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
@@ -385,11 +428,14 @@ class TestAutoFormatChecker:
 
     def test_fix_command_failure_reports_error(self) -> None:
         """Should fail when fix command exits non-zero with stderr."""
+        # JSON check says files need formatting, but fix fails
+        json_output = '[{"filename": "test.py"}]'
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
             fix_command=["bash", "-c", "echo 'error message' >&2; exit 1"],
+            json_check_command=["bash", "-c", f"echo '{json_output}'; exit 1"],
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
@@ -399,11 +445,13 @@ class TestAutoFormatChecker:
 
     def test_fix_command_failure_stdout_only(self) -> None:
         """Should fail when fix command exits non-zero with only stdout."""
+        json_output = '[{"filename": "test.py"}]'
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
             check_command=["true"],
             fix_command=["bash", "-c", "echo 'stdout error'; exit 1"],
+            json_check_command=["bash", "-c", f"echo '{json_output}'; exit 1"],
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
