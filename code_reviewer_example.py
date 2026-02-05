@@ -11,18 +11,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Code review agent using Claude Agent SDK.
+"""Code review agent using AgentLoop with in-memory mailbox.
 
-This example demonstrates how to build a code review agent using the Claude
-Agent SDK adapter. The agent can explore a workspace, understand its structure,
-and provide code review feedback.
+This example demonstrates how to build a code review agent using the WINK
+framework's core concepts:
 
-Key concepts demonstrated:
-- Using ClaudeAgentWorkspaceSection to mount files for review
-- Configuring the Claude Agent SDK adapter
-- Using WorkspaceDigestSection to cache workspace analysis
-- Running optimization to pre-populate workspace digests
-- Handling structured output from the agent
+- **AgentLoop**: Durable request processing with visibility timeout semantics
+- **InMemoryMailbox**: Thread-safe in-memory queue for request/response routing
+- **InProcessDispatcher**: Synchronous event delivery for telemetry
+- **ClaudeAgentSDKAdapter**: Provider adapter for Claude evaluation
+- **Session**: Event-sourced state container
+
+The agent runs in a single process with the dispatcher, mailboxes, and loop
+all in the same address space. This pattern is ideal for development and
+testing before moving to distributed processing with Redis mailboxes.
+
+Architecture:
+
+    +-----------+     +----------------+     +-------------+
+    |  Client   | --> | Request Mailbox| --> | CodeReview  |
+    |           |     |                |     | Loop        |
+    +-----------+     +----------------+     +-------------+
+         ^                                          |
+         |           +----------------+             |
+         +---------- | Response Mailbox| <----------+
+                     +----------------+
 
 Usage:
     python code_reviewer_example.py /path/to/project "Review the main module"
@@ -38,9 +51,11 @@ import argparse
 import logging
 import sys
 import textwrap
+import threading
 from dataclasses import field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING, override
 
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
@@ -54,7 +69,18 @@ from weakincentives.contrib.tools import WorkspaceDigestSection
 from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.runtime import InProcessDispatcher, Session
+from weakincentives.runtime import (
+    AgentLoop,
+    AgentLoopConfig,
+    AgentLoopRequest,
+    AgentLoopResult,
+    InMemoryMailbox,
+    InProcessDispatcher,
+    Session,
+)
+
+if TYPE_CHECKING:
+    from weakincentives.experiment import Experiment
 
 # Configure logging for the example
 logging.basicConfig(
@@ -95,14 +121,30 @@ DEFAULT_DEADLINE_MINUTES = 5
 # Truncation limit for log messages
 LOG_SUMMARY_TRUNCATE_LENGTH = 100
 
+# Wait time for mailbox operations
+MAILBOX_WAIT_SECONDS = 1
+MAILBOX_VISIBILITY_TIMEOUT = 300
+
+
+# =============================================================================
+# Domain Types
+# =============================================================================
+
 
 @FrozenDataclass()
 class ReviewRequest:
     """Input parameters for a code review request."""
 
+    project_path: str = field(
+        metadata={"description": "Path to the project to review."}
+    )
     focus: str = field(
         default="Review the code for quality, correctness, and best practices.",
         metadata={"description": "What to focus on in the review."},
+    )
+    optimize: bool = field(
+        default=True,
+        metadata={"description": "Whether to pre-populate workspace digest."},
     )
 
 
@@ -127,101 +169,290 @@ class ReviewResponse:
     )
 
 
-def create_review_prompt(
-    session: Session,
-    workspace: ClaudeAgentWorkspaceSection,
-    focus: str,
-) -> Prompt[ReviewResponse]:
-    """Create a code review prompt with workspace context.
+# =============================================================================
+# AgentLoop Implementation
+# =============================================================================
 
-    Args:
-        session: The session for state management.
-        workspace: The workspace section with mounted files.
-        focus: What to focus on in the review.
+
+class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
+    """AgentLoop implementation for code review tasks.
+
+    This loop processes ReviewRequest messages from its request mailbox,
+    evaluates them using the Claude Agent SDK, and sends ReviewResponse
+    results to the reply mailbox.
+
+    Key features:
+    - Durable processing with visibility timeout
+    - Automatic workspace digest optimization
+    - Structured output parsing
+    - Session telemetry via dispatcher
+    """
+
+    def __init__(
+        self,
+        *,
+        adapter: ClaudeAgentSDKAdapter[ReviewResponse],
+        requests: InMemoryMailbox[
+            AgentLoopRequest[ReviewRequest], AgentLoopResult[ReviewResponse]
+        ],
+        config: AgentLoopConfig | None = None,
+        worker_id: str = "code-reviewer",
+    ) -> None:
+        """Initialize the code review loop.
+
+        Args:
+            adapter: Claude Agent SDK adapter for evaluation.
+            requests: Mailbox to receive review requests from.
+            config: Optional configuration for deadlines/budgets.
+            worker_id: Identifier for this worker instance.
+        """
+        super().__init__(
+            adapter=adapter,
+            requests=requests,
+            config=config,
+            worker_id=worker_id,
+        )
+        self._template = self._create_template()
+        self._last_session: Session | None = None
+
+    @property
+    def last_session(self) -> Session | None:
+        """Access the most recent session for telemetry inspection."""
+        return self._last_session
+
+    @staticmethod
+    def _create_template() -> PromptTemplate[ReviewResponse]:
+        """Create the prompt template for code review."""
+        return PromptTemplate[ReviewResponse](
+            ns="code-review",
+            key="review-agent",
+            name="Code Review Agent",
+            sections=(
+                MarkdownSection(
+                    title="Role",
+                    template=textwrap.dedent("""
+                        You are an expert code reviewer. Your job is to analyze code
+                        and provide constructive feedback that helps developers improve
+                        their work.
+
+                        Be thorough but fair. Point out issues while also acknowledging
+                        good practices. Focus on actionable feedback.
+                    """).strip(),
+                    key="role",
+                ),
+                MarkdownSection(
+                    title="Review Focus",
+                    template="${focus}",
+                    key="focus",
+                ),
+                # Workspace digest section placeholder - filled during prepare()
+                MarkdownSection(
+                    title="Instructions",
+                    template=textwrap.dedent("""
+                        1. Explore the workspace to understand the project structure
+                        2. Read key files to understand the codebase
+                        3. Identify issues, risks, or areas for improvement
+                        4. Note positive aspects and good practices
+                        5. Provide specific, actionable suggestions
+
+                        Use the workspace tools to explore files as needed.
+                    """).strip(),
+                    key="instructions",
+                ),
+                MarkdownSection(
+                    title="Output Format",
+                    template=textwrap.dedent("""
+                        Return a structured review with:
+                        - **summary**: 1-2 sentence overview of findings
+                        - **issues**: List of problems or concerns found
+                        - **suggestions**: Specific improvement recommendations
+                        - **positive_notes**: Good practices observed
+                    """).strip(),
+                    key="output-format",
+                ),
+            ),
+        )
+
+    def prepare(
+        self,
+        request: ReviewRequest,
+        *,
+        experiment: Experiment | None = None,
+    ) -> tuple[Prompt[ReviewResponse], Session]:
+        """Prepare prompt and session for the review request.
+
+        This method is called by AgentLoop before evaluation. It:
+        1. Creates a session with in-process dispatcher
+        2. Configures workspace mounts for the project
+        3. Optionally runs workspace digest optimization
+        4. Builds the complete prompt with workspace sections
+
+        Args:
+            request: The review request to process.
+            experiment: Optional experiment configuration (unused).
+
+        Returns:
+            Tuple of (prompt, session) ready for evaluation.
+        """
+        _ = experiment  # Not used in this example
+
+        # Create session with in-process dispatcher for telemetry
+        dispatcher = InProcessDispatcher()
+        session = Session(
+            dispatcher=dispatcher,
+            tags={"type": "code-review", "project": request.project_path},
+        )
+        self._last_session = session
+
+        # Configure workspace mounts
+        mounts = [
+            HostMount(
+                host_path=request.project_path,
+                include_glob=DEFAULT_INCLUDE_GLOBS,
+                exclude_glob=DEFAULT_EXCLUDE_GLOBS,
+                max_bytes=DEFAULT_MAX_BYTES,
+            )
+        ]
+
+        # Optionally run optimization to pre-populate workspace digest
+        if request.optimize:
+            self._run_optimization(session, mounts)
+
+        # Create workspace sections
+        digest_section = WorkspaceDigestSection(session=session)
+        workspace_section = ClaudeAgentWorkspaceSection(
+            session=session,
+            mounts=mounts,
+        )
+
+        # Build prompt with all sections
+        # Insert digest and workspace sections into the template
+        template_with_workspace = PromptTemplate[ReviewResponse](
+            ns=self._template.ns,
+            key=self._template.key,
+            name=self._template.name,
+            sections=(
+                self._template.sections[0],  # role
+                self._template.sections[1],  # focus
+                digest_section,
+                workspace_section,
+                self._template.sections[2],  # instructions
+                self._template.sections[3],  # output-format
+            ),
+        )
+
+        prompt = Prompt(template_with_workspace).bind({"focus": request.focus})
+        return prompt, session
+
+    @staticmethod
+    def _run_optimization(
+        session: Session,
+        mounts: list[HostMount],
+    ) -> None:
+        """Run workspace digest optimization to pre-populate context."""
+        _LOGGER.info("Running workspace optimization...")
+
+        optimizer = WorkspaceDigestOptimizer(mounts=mounts, max_turns=5)
+        result = optimizer.optimize(session)
+
+        if result.success:
+            truncated = (
+                result.summary[:LOG_SUMMARY_TRUNCATE_LENGTH] + "..."
+                if len(result.summary) > LOG_SUMMARY_TRUNCATE_LENGTH
+                else result.summary
+            )
+            _LOGGER.info("Optimization complete: %s", truncated)
+        else:
+            _LOGGER.warning("Optimization failed: %s", result.error)
+
+    @override
+    def finalize(
+        self,
+        prompt: Prompt[ReviewResponse],
+        session: Session,
+        output: ReviewResponse | None,
+    ) -> ReviewResponse | None:
+        """Finalize after execution completes.
+
+        Clean up workspace resources and log completion.
+
+        Args:
+            prompt: The prompt that was evaluated.
+            session: The session used for evaluation.
+            output: The parsed output from the model response.
+
+        Returns:
+            The output unchanged.
+        """
+        # Clean up workspace sections
+        for section in prompt.template.sections:
+            if isinstance(section, ClaudeAgentWorkspaceSection):
+                section.cleanup()
+
+        if output is not None:
+            _LOGGER.info("Review complete: %s", output.summary[:50] + "...")
+
+        return output
+
+
+# =============================================================================
+# Mailbox Setup and Processing
+# =============================================================================
+
+
+def create_mailboxes() -> tuple[
+    InMemoryMailbox[AgentLoopRequest[ReviewRequest], AgentLoopResult[ReviewResponse]],
+    InMemoryMailbox[AgentLoopResult[ReviewResponse], None],
+]:
+    """Create request and response mailboxes for the review loop.
 
     Returns:
-        A configured Prompt for code review.
+        Tuple of (requests_mailbox, responses_mailbox).
     """
-    digest_section = WorkspaceDigestSection(session=session)
+    requests: InMemoryMailbox[
+        AgentLoopRequest[ReviewRequest], AgentLoopResult[ReviewResponse]
+    ] = InMemoryMailbox(name="review-requests")
 
-    template = PromptTemplate[ReviewResponse](
-        ns="code-review",
-        key="review-agent",
-        name="Code Review Agent",
-        sections=(
-            MarkdownSection(
-                title="Role",
-                template=textwrap.dedent("""
-                    You are an expert code reviewer. Your job is to analyze code
-                    and provide constructive feedback that helps developers improve
-                    their work.
-
-                    Be thorough but fair. Point out issues while also acknowledging
-                    good practices. Focus on actionable feedback.
-                """).strip(),
-                key="role",
-            ),
-            MarkdownSection(
-                title="Review Focus",
-                template=f"Focus your review on: {focus}",
-                key="focus",
-            ),
-            digest_section,
-            workspace,
-            MarkdownSection(
-                title="Instructions",
-                template=textwrap.dedent("""
-                    1. Explore the workspace to understand the project structure
-                    2. Read key files to understand the codebase
-                    3. Identify issues, risks, or areas for improvement
-                    4. Note positive aspects and good practices
-                    5. Provide specific, actionable suggestions
-
-                    Use the workspace tools to explore files as needed.
-                """).strip(),
-                key="instructions",
-            ),
-            MarkdownSection(
-                title="Output Format",
-                template=textwrap.dedent("""
-                    Return a structured review with:
-                    - **summary**: 1-2 sentence overview of findings
-                    - **issues**: List of problems or concerns found
-                    - **suggestions**: Specific improvement recommendations
-                    - **positive_notes**: Good practices observed
-                """).strip(),
-                key="output-format",
-            ),
-        ),
+    responses: InMemoryMailbox[AgentLoopResult[ReviewResponse], None] = InMemoryMailbox(
+        name="review-responses"
     )
 
-    return Prompt(template)
+    return requests, responses
 
 
-def run_optimization(
-    session: Session,
-    mounts: list[HostMount],
+def create_adapter() -> ClaudeAgentSDKAdapter[ReviewResponse]:
+    """Create the Claude Agent SDK adapter for evaluation."""
+    return ClaudeAgentSDKAdapter[ReviewResponse](
+        client_config=ClaudeAgentSDKClientConfig(
+            permission_mode="bypassPermissions",
+            max_turns=20,
+            isolation=IsolationConfig.inherit_host_auth(),
+        )
+    )
+
+
+def run_loop_worker(
+    loop: CodeReviewLoop,
+    max_iterations: int = 1,
 ) -> None:
-    """Run workspace digest optimization to pre-populate context.
+    """Run the loop worker to process messages.
 
     Args:
-        session: The session to store the digest in.
-        mounts: Host mounts for the workspace.
+        loop: The code review loop to run.
+        max_iterations: Maximum number of messages to process.
     """
-    _LOGGER.info("Running workspace optimization...")
+    _LOGGER.info("Starting loop worker (max_iterations=%d)...", max_iterations)
+    loop.run(
+        max_iterations=max_iterations,
+        visibility_timeout=MAILBOX_VISIBILITY_TIMEOUT,
+        wait_time_seconds=MAILBOX_WAIT_SECONDS,
+    )
+    _LOGGER.info("Loop worker finished")
 
-    optimizer = WorkspaceDigestOptimizer(mounts=mounts, max_turns=5)
-    result = optimizer.optimize(session)
 
-    if result.success:
-        truncated = (
-            result.summary[:LOG_SUMMARY_TRUNCATE_LENGTH] + "..."
-            if len(result.summary) > LOG_SUMMARY_TRUNCATE_LENGTH
-            else result.summary
-        )
-        _LOGGER.info("Optimization complete: %s", truncated)
-    else:
-        _LOGGER.warning("Optimization failed: %s", result.error)
+# =============================================================================
+# Main Entry Point
+# =============================================================================
 
 
 def run_review(
@@ -231,7 +462,14 @@ def run_review(
     optimize: bool = True,
     deadline_minutes: int = DEFAULT_DEADLINE_MINUTES,
 ) -> ReviewResponse | None:
-    """Run a code review on the specified project.
+    """Run a code review using the AgentLoop pattern.
+
+    This function demonstrates the complete request/response flow:
+    1. Create mailboxes for communication
+    2. Create the AgentLoop with adapter
+    3. Send a request to the request mailbox
+    4. Run the loop worker to process the request
+    5. Receive the response from the response mailbox
 
     Args:
         project_path: Path to the project to review.
@@ -244,63 +482,69 @@ def run_review(
     """
     _LOGGER.info("Starting code review for: %s", project_path)
 
-    # Create session and dispatcher
-    dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    # Create mailboxes for request/response routing
+    requests, responses = create_mailboxes()
 
-    # Configure workspace mount
-    mounts = [
-        HostMount(
-            host_path=str(project_path),
-            include_glob=DEFAULT_INCLUDE_GLOBS,
-            exclude_glob=DEFAULT_EXCLUDE_GLOBS,
-            max_bytes=DEFAULT_MAX_BYTES,
-        )
-    ]
-
-    # Optionally run optimization to pre-populate workspace digest
-    if optimize:
-        run_optimization(session, mounts)
-
-    # Create workspace section
-    workspace = ClaudeAgentWorkspaceSection(
-        session=session,
-        mounts=mounts,
+    # Create the adapter and loop
+    adapter = create_adapter()
+    config = AgentLoopConfig(
+        deadline=Deadline(
+            expires_at=datetime.now(UTC) + timedelta(minutes=deadline_minutes)
+        ),
+    )
+    loop = CodeReviewLoop(
+        adapter=adapter,
+        requests=requests,
+        config=config,
     )
 
-    try:
-        # Create the review prompt
-        prompt = create_review_prompt(session, workspace, focus)
+    # Create and send the review request
+    review_request = ReviewRequest(
+        project_path=str(project_path),
+        focus=focus,
+        optimize=optimize,
+    )
+    loop_request = AgentLoopRequest(request=review_request)
 
-        # Configure adapter with isolation and reasonable limits
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                permission_mode="bypassPermissions",
-                max_turns=20,
-                isolation=IsolationConfig.inherit_host_auth(),
-            )
-        )
+    _LOGGER.info("Sending review request to mailbox...")
+    _ = requests.send(loop_request, reply_to=responses)
 
-        # Create deadline
-        deadline = Deadline(
-            expires_at=datetime.now(UTC) + timedelta(minutes=deadline_minutes)
-        )
+    # Run the loop worker in a separate thread
+    worker_thread = threading.Thread(
+        target=run_loop_worker,
+        args=(loop, 1),
+        name="review-worker",
+    )
+    worker_thread.start()
+    worker_thread.join(timeout=deadline_minutes * 60 + 30)
 
-        _LOGGER.info("Running code review...")
+    if worker_thread.is_alive():
+        _LOGGER.warning("Worker timed out, requesting shutdown...")
+        loop.shutdown(timeout=10.0)
+        worker_thread.join(timeout=10.0)
 
-        # Evaluate the prompt
-        response = adapter.evaluate(prompt, session=session, deadline=deadline)
+    # Receive the response from the response mailbox
+    _LOGGER.info("Checking response mailbox...")
+    response_messages = responses.receive(
+        max_messages=1,
+        visibility_timeout=30,
+        wait_time_seconds=MAILBOX_WAIT_SECONDS,
+    )
 
-        if response.output is not None:
-            _LOGGER.info("Review complete!")
-            return response.output
-
-        _LOGGER.warning("Review returned no structured output")
+    if not response_messages:
+        _LOGGER.error("No response received from review loop")
         return None
 
-    finally:
-        # Clean up workspace
-        workspace.cleanup()
+    msg = response_messages[0]
+    result: AgentLoopResult[ReviewResponse] = msg.body
+    msg.acknowledge()
+
+    if result.success and result.output is not None:
+        _LOGGER.info("Review completed successfully!")
+        return result.output
+
+    _LOGGER.error("Review failed: %s", result.error)
+    return None
 
 
 def format_review(review: ReviewResponse) -> str:
@@ -364,13 +608,20 @@ def format_review(review: ReviewResponse) -> str:
 def _create_argument_parser() -> argparse.ArgumentParser:
     """Create the argument parser for the CLI."""
     parser = argparse.ArgumentParser(
-        description="Code review agent using Claude Agent SDK",
+        description="Code review agent using AgentLoop with in-memory mailbox",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""
             Examples:
               %(prog)s /path/to/project
               %(prog)s /path/to/project "Review authentication logic"
               %(prog)s /path/to/project --no-optimize
+
+            Architecture:
+              This example demonstrates the AgentLoop pattern with:
+              - InMemoryMailbox for request/response routing
+              - InProcessDispatcher for session telemetry
+              - ClaudeAgentSDKAdapter for LLM evaluation
+              - Durable processing with visibility timeouts
         """),
     )
     parser.add_argument(
