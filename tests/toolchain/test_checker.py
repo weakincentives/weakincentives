@@ -352,7 +352,7 @@ class TestAutoFormatChecker:
         output = "warning: some warning\n3 files reformatted\n"
         assert checker._parse_reformat_count(output) == 3
 
-    def test_reports_count_when_no_file_paths(self) -> None:
+    def test_reports_count_when_no_file_paths_plural(self) -> None:
         """Should report count from summary when file paths not available."""
         checker = AutoFormatChecker(
             name="format",
@@ -366,6 +366,22 @@ class TestAutoFormatChecker:
         info_diags = [d for d in result.diagnostics if d.severity == "info"]
         assert len(info_diags) == 1
         assert "2 files" in info_diags[0].message
+
+    def test_reports_count_when_no_file_paths_singular(self) -> None:
+        """Should report singular count from summary."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["bash", "-c", "echo '1 file reformatted'"],
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            result = checker.run()
+        assert result.status == "passed"
+        info_diags = [d for d in result.diagnostics if d.severity == "info"]
+        assert len(info_diags) == 1
+        assert "1 file" in info_diags[0].message
+        assert "files" not in info_diags[0].message
 
     def test_fix_command_failure_reports_error(self) -> None:
         """Should fail when fix command exits non-zero with stderr."""
