@@ -434,7 +434,12 @@ class TestFactoryFunctions:
     def test_create_markdown_checker(self) -> None:
         checker = create_markdown_checker()
         assert checker.name == "markdown"
-        assert "mdformat" in checker.command
+        assert "mdformat" in checker.check_command
+        assert "mdformat" in checker.fix_command
+        assert "--check" in checker.check_command
+        assert "--check" not in checker.fix_command
+        # Should have file list parser for text output
+        assert checker.file_list_parser is not None
 
     def test_create_architecture_checker(self) -> None:
         checker = create_architecture_checker()
@@ -456,3 +461,61 @@ class TestFactoryFunctions:
         assert "test" in names
         assert "architecture" in names
         assert "docs" in names
+
+
+class TestParseMdformatFileList:
+    """Tests for _parse_mdformat_file_list helper."""
+
+    def test_parses_single_file(self) -> None:
+        from toolchain.checkers import _parse_mdformat_file_list
+
+        output = 'Error: File "README.md" is not formatted.'
+        files = _parse_mdformat_file_list(output)
+        assert files == ["README.md"]
+
+    def test_parses_multiple_files(self) -> None:
+        from toolchain.checkers import _parse_mdformat_file_list
+
+        output = (
+            'Error: File "README.md" is not formatted.\n'
+            'Error: File "docs/guide.md" is not formatted.\n'
+            'Error: File "specs/DESIGN.md" is not formatted.'
+        )
+        files = _parse_mdformat_file_list(output)
+        assert files == ["README.md", "docs/guide.md", "specs/DESIGN.md"]
+
+    def test_returns_sorted_files(self) -> None:
+        from toolchain.checkers import _parse_mdformat_file_list
+
+        output = (
+            'Error: File "z.md" is not formatted.\n'
+            'Error: File "a.md" is not formatted.\n'
+            'Error: File "m.md" is not formatted.'
+        )
+        files = _parse_mdformat_file_list(output)
+        assert files == ["a.md", "m.md", "z.md"]
+
+    def test_returns_empty_for_no_errors(self) -> None:
+        from toolchain.checkers import _parse_mdformat_file_list
+
+        output = ""
+        files = _parse_mdformat_file_list(output)
+        assert files == []
+
+    def test_ignores_non_matching_lines(self) -> None:
+        from toolchain.checkers import _parse_mdformat_file_list
+
+        output = (
+            "Some other output\n"
+            'Error: File "docs/guide.md" is not formatted.\n'
+            "More text here"
+        )
+        files = _parse_mdformat_file_list(output)
+        assert files == ["docs/guide.md"]
+
+    def test_handles_paths_with_spaces(self) -> None:
+        from toolchain.checkers import _parse_mdformat_file_list
+
+        output = 'Error: File "docs/my guide.md" is not formatted.'
+        files = _parse_mdformat_file_list(output)
+        assert files == ["docs/my guide.md"]

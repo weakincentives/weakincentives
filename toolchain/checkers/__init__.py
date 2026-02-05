@@ -195,24 +195,44 @@ def create_pip_audit_checker() -> SubprocessChecker:
     )
 
 
-def create_markdown_checker() -> SubprocessChecker:
-    """Create the markdown formatting checker."""
-    return SubprocessChecker(
+def _parse_mdformat_file_list(output: str) -> list[str]:
+    """Parse file paths from mdformat check output.
+
+    mdformat outputs: Error: File "path/to/file.md" is not formatted.
+    """
+    import re
+
+    files = []
+    error_pattern = re.compile(r'Error: File "([^"]+)" is not formatted\.')
+    for match in error_pattern.finditer(output):
+        files.append(match.group(1))
+    return sorted(files)
+
+
+# Markdown targets for formatting
+_MARKDOWN_TARGETS = [
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "llms.md",
+    "GLOSSARY.md",
+    "guides",
+    "specs",
+]
+
+
+def create_markdown_checker() -> AutoFormatChecker:
+    """Create the markdown formatting checker.
+
+    In local environments: auto-fixes formatting and reports changes.
+    In CI environments: checks formatting without modifications.
+    """
+    return AutoFormatChecker(
         name="markdown",
         description="Check markdown formatting with mdformat",
-        command=[
-            "uv",
-            "run",
-            "mdformat",
-            "--check",
-            "README.md",
-            "AGENTS.md",
-            "CLAUDE.md",
-            "llms.md",
-            "GLOSSARY.md",
-            "guides",
-            "specs",
-        ],
+        check_command=["uv", "run", "mdformat", "--check", *_MARKDOWN_TARGETS],
+        fix_command=["uv", "run", "mdformat", *_MARKDOWN_TARGETS],
+        file_list_parser=_parse_mdformat_file_list,
         parser=parse_mdformat,
     )
 

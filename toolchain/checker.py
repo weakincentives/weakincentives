@@ -154,6 +154,15 @@ class SubprocessChecker:
             )
 
 
+# Type alias for functions that parse check output into file paths
+FileListParser = Callable[[str], list[str]]
+
+
+def _no_file_list_parse(_output: str) -> list[str]:
+    """Default file list parser that returns empty list."""
+    return []
+
+
 @dataclass
 class AutoFormatChecker:
     """A checker that auto-fixes formatting locally but only checks in CI.
@@ -162,6 +171,7 @@ class AutoFormatChecker:
     In CI environments: runs the formatter in check mode, fails if changes needed.
 
     Uses JSON output format internally for reliable file path extraction.
+    Alternatively, can use a text-based file list parser for tools without JSON output.
     """
 
     name: str
@@ -169,6 +179,7 @@ class AutoFormatChecker:
     check_command: list[str]
     fix_command: list[str]
     json_check_command: list[str] | None = None  # For JSON output parsing
+    file_list_parser: FileListParser = _no_file_list_parse  # For text output parsing
     parser: DiagnosticParser = _no_parse
     timeout: int = 300
 
@@ -234,11 +245,14 @@ class AutoFormatChecker:
         """Run with auto-fix and report changes (local behavior).
 
         Uses JSON check command (if available) to get precise file list,
+        or text-based file list parser for tools without JSON support,
         then runs fix command to apply changes.
         """
         try:
-            # First, check what files need formatting using JSON output
+            # First, check what files need formatting
             files_to_format: list[str] = []
+
+            # Option 1: JSON check command (e.g., ruff with --output-format=json)
             if self.json_check_command:
                 check_result = subprocess.run(
                     self.json_check_command,
@@ -246,10 +260,6 @@ class AutoFormatChecker:
                     text=True,
                     timeout=self.timeout,
                 )
-                # Parse JSON output to get file list (non-zero exit means files need formatting)
-                if check_result.returncode != 0:
-                    files_to_format = self._parse_json_output(check_result.stdout)
-
                 # If check passed, nothing needs formatting
                 if check_result.returncode == 0:
                     duration_ms = int((time.monotonic() - start) * 1000)
@@ -260,8 +270,39 @@ class AutoFormatChecker:
                         diagnostics=(),
                         output="",
                     )
+                # Check failed - parse JSON output to get file list
+                files_to_format = self._parse_json_output(check_result.stdout)
 
-            # Run fix command to apply formatting
+            # Option 2: Text-based file list parser (e.g., mdformat)
+            elif self.file_list_parser is not _no_file_list_parse:
+                check_result = subprocess.run(
+                    self.check_command,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout,
+                )
+                # If check passed, nothing needs formatting
+                if check_result.returncode == 0:
+                    duration_ms = int((time.monotonic() - start) * 1000)
+                    return CheckResult(
+                        name=self.name,
+                        status="passed",
+                        duration_ms=duration_ms,
+                        diagnostics=(),
+                        output="",
+                    )
+                # Check failed - parse text output to get file list
+                output = check_result.stdout
+                if check_result.stderr:
+                    output = f"{output}\n{check_result.stderr}" if output else check_result.stderr
+                files_to_format = self.file_list_parser(output)
+
+            # Run fix command to apply formatting.
+            # At this point, either:
+            # 1. json_check_command or file_list_parser confirmed files need formatting
+            # 2. Neither was provided (fallback) - fix runs directly and we parse its output
+            #    for the count (e.g., "2 files reformatted"). This is intentional for tools
+            #    that don't support check-mode file listing but do report reformatted counts.
             fix_result = subprocess.run(
                 self.fix_command,
                 capture_output=True,
