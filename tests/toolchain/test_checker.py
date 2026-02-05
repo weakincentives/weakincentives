@@ -177,29 +177,28 @@ class TestAutoFormatChecker:
             result = checker.run()
         assert result.status == "failed"
 
-    def test_autofix_locally_when_check_fails(self) -> None:
-        """Locally, should apply fix when check fails."""
+    def test_autofix_locally_reports_changes(self) -> None:
+        """Locally, should run fix and report changes."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
-            check_command=["false"],  # Check fails
-            fix_command=["true"],  # Fix succeeds
+            check_command=["true"],
+            fix_command=["bash", "-c", "echo 'src/changed.py'"],
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
-        # Should pass because fix was applied
         assert result.status == "passed"
-        # Should have info diagnostic about fixing
         info_diags = [d for d in result.diagnostics if d.severity == "info"]
         assert len(info_diags) == 1
+        assert "src/changed.py" in info_diags[0].message
 
-    def test_no_autofix_when_check_passes(self) -> None:
-        """Locally, should not fix when check passes."""
+    def test_no_changes_needed_locally(self) -> None:
+        """Locally, no diagnostics when nothing needs formatting."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
-            check_command=["true"],  # Check passes
-            fix_command=["echo", "should not run"],
+            check_command=["true"],
+            fix_command=["true"],  # No output means nothing changed
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
@@ -237,7 +236,7 @@ class TestAutoFormatChecker:
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
-            check_command=["false"],
+            check_command=["true"],
             fix_command=["bash", "-c", "echo src/test.py"],
         )
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -253,7 +252,7 @@ class TestAutoFormatChecker:
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
-            check_command=["false"],
+            check_command=["true"],
             fix_command=["bash", "-c", "echo -e 'a.py\nb.py\nc.py'"],
         )
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -268,7 +267,7 @@ class TestAutoFormatChecker:
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
-            check_command=["false"],
+            check_command=["true"],
             fix_command=[
                 "bash",
                 "-c",
@@ -300,7 +299,7 @@ class TestAutoFormatChecker:
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
-            check_command=["false"],
+            check_command=["true"],
             fix_command=["sleep", "10"],
             timeout=1,
         )
@@ -309,27 +308,25 @@ class TestAutoFormatChecker:
         assert result.status == "failed"
         assert any("Timed out" in d.message for d in result.diagnostics)
 
-    def test_fallback_message_when_no_files_parsed(self) -> None:
-        """Should use generic message when no .py files in output."""
+    def test_no_files_in_output_means_nothing_changed(self) -> None:
+        """When no .py files in output, nothing needed formatting."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
-            check_command=["false"],
-            fix_command=["bash", "-c", "echo 'reformatting complete'"],
+            check_command=["true"],
+            fix_command=["bash", "-c", "echo 'All files already formatted'"],
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             result = checker.run()
         assert result.status == "passed"
-        info_diags = [d for d in result.diagnostics if d.severity == "info"]
-        assert len(info_diags) == 1
-        assert "automatically fixed" in info_diags[0].message.lower()
+        assert len(result.diagnostics) == 0
 
     def test_fix_command_failure_reports_error(self) -> None:
         """Should fail when fix command exits non-zero with stderr."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
-            check_command=["false"],  # Check fails, triggers fix
+            check_command=["true"],
             fix_command=["bash", "-c", "echo 'error message' >&2; exit 1"],
         )
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -343,7 +340,7 @@ class TestAutoFormatChecker:
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
-            check_command=["false"],  # Check fails, triggers fix
+            check_command=["true"],
             fix_command=["bash", "-c", "echo 'stdout error'; exit 1"],
         )
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -351,3 +348,31 @@ class TestAutoFormatChecker:
         assert result.status == "failed"
         assert "Auto-fix command failed" in result.diagnostics[0].message
         assert "stdout error" in result.output
+
+    def test_command_not_found_in_ci(self) -> None:
+        """In CI, should handle missing command gracefully."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["nonexistent_command_12345"],
+            fix_command=["true"],
+        )
+        with mock.patch.dict(os.environ, {"CI": "true"}, clear=True):
+            result = checker.run()
+        assert result.status == "failed"
+        assert any("Command not found" in d.message for d in result.diagnostics)
+        assert any("uv sync" in d.message for d in result.diagnostics)
+
+    def test_command_not_found_locally(self) -> None:
+        """Locally, should handle missing fix command gracefully."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["nonexistent_command_12345"],
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            result = checker.run()
+        assert result.status == "failed"
+        assert any("Command not found" in d.message for d in result.diagnostics)
+        assert any("uv sync" in d.message for d in result.diagnostics)

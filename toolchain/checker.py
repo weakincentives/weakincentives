@@ -210,31 +210,31 @@ class AutoFormatChecker:
                 diagnostics=(Diagnostic(f"Timed out after {self.timeout}s"),),
                 output="",
             )
-
-    def _run_with_autofix(self, start: float) -> CheckResult:
-        """Run with auto-fix and report changes (local behavior)."""
-        try:
-            # First check if there are any issues
-            check_result = subprocess.run(
-                self.check_command,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
+        except FileNotFoundError as e:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            cmd_str = " ".join(self.check_command)
+            msg = (
+                f"Command not found: {e.filename}\n"
+                f"Attempted: {cmd_str}\n"
+                f"Fix: Ensure dependencies are installed\n"
+                f"Run: uv sync && ./install-hooks.sh"
+            )
+            return CheckResult(
+                name=self.name,
+                status="failed",
+                duration_ms=duration_ms,
+                diagnostics=(Diagnostic(msg),),
+                output="",
             )
 
-            if check_result.returncode == 0:
-                # No formatting issues
-                duration_ms = int((time.monotonic() - start) * 1000)
-                return CheckResult(
-                    name=self.name,
-                    status="passed",
-                    duration_ms=duration_ms,
-                    diagnostics=(),
-                    output="",
-                )
+    def _run_with_autofix(self, start: float) -> CheckResult:
+        """Run with auto-fix and report changes (local behavior).
 
-            # There are formatting issues - apply fixes
-            fix_result = subprocess.run(
+        Runs the fix command directly (single execution) and parses output
+        to report which files were reformatted.
+        """
+        try:
+            result = subprocess.run(
                 self.fix_command,
                 capture_output=True,
                 text=True,
@@ -243,10 +243,10 @@ class AutoFormatChecker:
             duration_ms = int((time.monotonic() - start) * 1000)
 
             # Check if fix command failed (e.g., syntax error, internal crash)
-            if fix_result.returncode != 0:
-                output = fix_result.stdout
-                if fix_result.stderr:
-                    output = f"{output}\n{fix_result.stderr}" if output else fix_result.stderr
+            if result.returncode != 0:
+                output = result.stdout
+                if result.stderr:
+                    output = f"{output}\n{result.stderr}" if output else result.stderr
                 return CheckResult(
                     name=self.name,
                     status="failed",
@@ -255,8 +255,8 @@ class AutoFormatChecker:
                     output=output.strip(),
                 )
 
-            # Parse which files were reformatted from the fix output
-            fixed_files = self._parse_fixed_files(fix_result.stdout)
+            # Parse which files were reformatted from the output
+            fixed_files = self._parse_fixed_files(result.stdout)
 
             if fixed_files:
                 # Report the changes in natural language
@@ -278,21 +278,16 @@ class AutoFormatChecker:
                     diagnostics=(
                         Diagnostic(message=message, severity="info"),
                     ),
-                    output=fix_result.stdout.strip(),
+                    output=result.stdout.strip(),
                 )
 
-            # Fix ran but no specific files reported - still passed
+            # No files reformatted - everything was already formatted
             return CheckResult(
                 name=self.name,
                 status="passed",
                 duration_ms=duration_ms,
-                diagnostics=(
-                    Diagnostic(
-                        message="Formatting issues were automatically fixed",
-                        severity="info",
-                    ),
-                ),
-                output=fix_result.stdout.strip(),
+                diagnostics=(),
+                output="",
             )
 
         except subprocess.TimeoutExpired:
@@ -302,6 +297,22 @@ class AutoFormatChecker:
                 status="failed",
                 duration_ms=duration_ms,
                 diagnostics=(Diagnostic(f"Timed out after {self.timeout}s"),),
+                output="",
+            )
+        except FileNotFoundError as e:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            cmd_str = " ".join(self.fix_command)
+            msg = (
+                f"Command not found: {e.filename}\n"
+                f"Attempted: {cmd_str}\n"
+                f"Fix: Ensure dependencies are installed\n"
+                f"Run: uv sync && ./install-hooks.sh"
+            )
+            return CheckResult(
+                name=self.name,
+                status="failed",
+                duration_ms=duration_ms,
+                diagnostics=(Diagnostic(msg),),
                 output="",
             )
 
