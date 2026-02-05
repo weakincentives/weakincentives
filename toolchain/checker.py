@@ -297,7 +297,12 @@ class AutoFormatChecker:
                     output = f"{output}\n{check_result.stderr}" if output else check_result.stderr
                 files_to_format = self.file_list_parser(output)
 
-            # Run fix command to apply formatting
+            # Run fix command to apply formatting.
+            # At this point, either:
+            # 1. json_check_command or file_list_parser confirmed files need formatting
+            # 2. Neither was provided (fallback) - fix runs directly and we parse its output
+            #    for the count (e.g., "2 files reformatted"). This is intentional for tools
+            #    that don't support check-mode file listing but do report reformatted counts.
             fix_result = subprocess.run(
                 self.fix_command,
                 capture_output=True,
