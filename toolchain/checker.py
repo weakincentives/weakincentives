@@ -260,10 +260,6 @@ class AutoFormatChecker:
                     text=True,
                     timeout=self.timeout,
                 )
-                # Parse JSON output to get file list (non-zero exit means files need formatting)
-                if check_result.returncode != 0:
-                    files_to_format = self._parse_json_output(check_result.stdout)
-
                 # If check passed, nothing needs formatting
                 if check_result.returncode == 0:
                     duration_ms = int((time.monotonic() - start) * 1000)
@@ -274,6 +270,8 @@ class AutoFormatChecker:
                         diagnostics=(),
                         output="",
                     )
+                # Check failed - parse JSON output to get file list
+                files_to_format = self._parse_json_output(check_result.stdout)
 
             # Option 2: Text-based file list parser (e.g., mdformat)
             elif self.file_list_parser is not _no_file_list_parse:
@@ -283,13 +281,6 @@ class AutoFormatChecker:
                     text=True,
                     timeout=self.timeout,
                 )
-                # Parse text output to get file list (non-zero exit means files need formatting)
-                if check_result.returncode != 0:
-                    output = check_result.stdout
-                    if check_result.stderr:
-                        output = f"{output}\n{check_result.stderr}" if output else check_result.stderr
-                    files_to_format = self.file_list_parser(output)
-
                 # If check passed, nothing needs formatting
                 if check_result.returncode == 0:
                     duration_ms = int((time.monotonic() - start) * 1000)
@@ -300,6 +291,11 @@ class AutoFormatChecker:
                         diagnostics=(),
                         output="",
                     )
+                # Check failed - parse text output to get file list
+                output = check_result.stdout
+                if check_result.stderr:
+                    output = f"{output}\n{check_result.stderr}" if output else check_result.stderr
+                files_to_format = self.file_list_parser(output)
 
             # Run fix command to apply formatting
             fix_result = subprocess.run(
