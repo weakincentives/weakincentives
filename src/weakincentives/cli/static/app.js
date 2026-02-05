@@ -197,6 +197,10 @@ async function refreshBundles() {
 }
 
 function resetViewState() {
+  // Cancel pending async operations and clear timeouts
+  transcriptView.reset();
+  logsView.reset();
+
   state.transcriptRawEntries = [];
   state.transcriptEntries = [];
   state.transcriptTotalCount = 0;

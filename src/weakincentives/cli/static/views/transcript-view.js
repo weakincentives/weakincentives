@@ -629,12 +629,21 @@ export function initTranscriptView({ store, fetchJSON, showToast }) {
     }
   });
 
+  function reset() {
+    clearTimeout(searchTimeout);
+    searchTimeout = null;
+    // Invalidate any in-flight requests by bumping the request ID
+    state.transcriptRequestId++;
+    state.transcriptLoading = false;
+  }
+
   return {
     loadTranscript,
     loadTranscriptFacets,
     loadMoreTranscript,
     scrollBy,
     initVirtualScroller,
+    reset,
     get list() {
       return els.list;
     },

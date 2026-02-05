@@ -215,6 +215,8 @@ export function initZoomModal({ store, transcriptView, showToast }) {
       if (hasNewEntry) {
         openTranscriptZoom(nextIndex);
       }
+    } catch (error) {
+      showToast(`Failed to load more entries: ${error.message}`, "error");
     } finally {
       zoomNextPending = false;
       updateNavigation();
@@ -290,7 +292,9 @@ export function initZoomModal({ store, transcriptView, showToast }) {
   els.modal.querySelector(".zoom-modal-backdrop").addEventListener("click", closeZoomModal);
   els.copy.addEventListener("click", copyEntry);
   els.prev.addEventListener("click", zoomPrev);
-  els.next.addEventListener("click", async () => await zoomNext());
+  els.next.addEventListener("click", () => {
+    zoomNext().catch((error) => showToast(`Navigation failed: ${error.message}`, "error"));
+  });
 
   // Event delegation for zoom buttons in transcript list
   transcriptView.list.addEventListener("click", (e) => {

@@ -92,8 +92,15 @@ export function initFilesystemView({ store, fetchJSON, showToast }) {
 
   function renderImageFile(result, displayPath) {
     const mimeType = ALLOWED_MIME_TYPES.has(result.mime_type) ? result.mime_type : "image/png";
-    const dataUrl = `data:${mimeType};base64,${result.content}`;
-    els.viewer.innerHTML = `<div class="image-container"><img src="${dataUrl}" alt="${escapeHtml(displayPath)}" class="filesystem-image" /></div>`;
+    const container = document.createElement("div");
+    container.className = "image-container";
+    const img = document.createElement("img");
+    img.src = `data:${mimeType};base64,${result.content}`;
+    img.alt = displayPath;
+    img.className = "filesystem-image";
+    container.appendChild(img);
+    els.viewer.innerHTML = "";
+    els.viewer.appendChild(container);
     state.fileContent = null;
   }
 

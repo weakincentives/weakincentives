@@ -472,11 +472,20 @@ export function initLogsView({ store, fetchJSON, showToast }) {
     }
   });
 
+  function reset() {
+    clearTimeout(searchTimeout);
+    searchTimeout = null;
+    // Invalidate any in-flight requests by bumping the request ID
+    state.logsRequestId++;
+    state.logsLoading = false;
+  }
+
   return {
     loadLogs,
     loadLogFacets,
     loadMoreLogs,
     scrollBy,
     initVirtualScroller,
+    reset,
   };
 }
