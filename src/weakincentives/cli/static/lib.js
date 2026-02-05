@@ -312,3 +312,29 @@ export function getTotalHeight(itemCount, getItemHeight) {
   }
   return total;
 }
+
+/**
+ * Split a qualified type name into class name and module.
+ * Supports colon format (module:ClassName) and dot format (module.ClassName).
+ * @param {string} qualifiedName - e.g. "events:PromptExecuted" or "weakincentives.events.SomeEvent"
+ * @returns {{className: string, modulePath: string}}
+ */
+export function splitQualifiedName(qualifiedName) {
+  // First try colon separator (e.g., "events:PromptExecuted")
+  const colonIndex = qualifiedName.lastIndexOf(":");
+  if (colonIndex !== -1) {
+    return {
+      className: qualifiedName.slice(colonIndex + 1),
+      packagePath: qualifiedName.slice(0, colonIndex),
+    };
+  }
+  // Fall back to dot separator (e.g., "weakincentives.events.SomeEvent")
+  const lastDot = qualifiedName.lastIndexOf(".");
+  if (lastDot === -1) {
+    return { className: qualifiedName, packagePath: "" };
+  }
+  return {
+    className: qualifiedName.slice(lastDot + 1),
+    packagePath: qualifiedName.slice(0, lastDot),
+  };
+}

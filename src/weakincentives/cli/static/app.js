@@ -12,6 +12,7 @@ import {
   isObject,
   isSimpleArray,
   pathKey,
+  splitQualifiedName,
   valueType,
 } from "./lib.js";
 
@@ -465,9 +466,10 @@ function renderSliceList() {
     filtered.forEach((entry) => {
       const li = document.createElement("li");
       li.className = `slice-item${entry.slice_type === state.selectedSlice ? " active" : ""}`;
+      const { className, packagePath } = splitQualifiedName(entry.slice_type);
       li.innerHTML = `
-        <div class="slice-title">${escapeHtml(entry.display_name || entry.slice_type)}</div>
-        <div class="slice-subtitle">${escapeHtml(entry.item_display_name || entry.item_type)} · ${entry.count} items</div>
+        <div class="slice-title">${escapeHtml(className)}</div>
+        <div class="slice-subtitle">${escapeHtml(packagePath)}</div>
       `;
       li.addEventListener("click", () => selectSlice(entry.slice_type));
       target.appendChild(li);

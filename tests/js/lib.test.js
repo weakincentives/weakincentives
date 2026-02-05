@@ -17,6 +17,7 @@ import {
   calculateVisibleRange,
   getOffsetForIndex,
   getTotalHeight,
+  splitQualifiedName,
 } from "../../src/weakincentives/cli/static/lib.js";
 
 // ============================================================================
@@ -597,5 +598,53 @@ describe("getTotalHeight", () => {
   test("handles variable heights", () => {
     const heights = [50, 100, 150];
     expect(getTotalHeight(3, (i) => heights[i])).toBe(300);
+  });
+});
+
+// ============================================================================
+// splitQualifiedName
+// ============================================================================
+
+describe("splitQualifiedName", () => {
+  test("splits colon-separated name into class and module", () => {
+    const result = splitQualifiedName("events:PromptExecuted");
+    expect(result.className).toBe("PromptExecuted");
+    expect(result.packagePath).toBe("events");
+  });
+
+  test("splits colon-separated name with underscores", () => {
+    const result = splitQualifiedName("agent_loop_types:LoopFinalResponse");
+    expect(result.className).toBe("LoopFinalResponse");
+    expect(result.packagePath).toBe("agent_loop_types");
+  });
+
+  test("splits dot-separated fully qualified name", () => {
+    const result = splitQualifiedName("weakincentives.runtime.events.SomeEvent");
+    expect(result.className).toBe("SomeEvent");
+    expect(result.packagePath).toBe("weakincentives.runtime.events");
+  });
+
+  test("handles single component (no separators)", () => {
+    const result = splitQualifiedName("SomeClass");
+    expect(result.className).toBe("SomeClass");
+    expect(result.packagePath).toBe("");
+  });
+
+  test("handles two dot-separated components", () => {
+    const result = splitQualifiedName("module.Class");
+    expect(result.className).toBe("Class");
+    expect(result.packagePath).toBe("module");
+  });
+
+  test("handles empty string", () => {
+    const result = splitQualifiedName("");
+    expect(result.className).toBe("");
+    expect(result.packagePath).toBe("");
+  });
+
+  test("prefers colon over dot when both present", () => {
+    const result = splitQualifiedName("weakincentives.events:SomeEvent");
+    expect(result.className).toBe("SomeEvent");
+    expect(result.packagePath).toBe("weakincentives.events");
   });
 });
