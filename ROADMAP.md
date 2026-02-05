@@ -38,7 +38,7 @@
 
 ## Out of Scope (For Now)
 
-- Native SDK integrations (Claude Agent SDK, OpenAI Agents SDK, etc.)—these are not proper execution harnesses for unattended agents and lack the planning loop, sandboxing, and recovery mechanisms that production agent deployments require.
+- Native SDK integrations—these are not proper execution harnesses for unattended agents and lack the planning loop, sandboxing, and recovery mechanisms that production agent deployments require.
 - Graph-based agent composers—current focus is flexible orchestration over rigid node/edge pipelines.
 - Retrieval and memory connectors—the library assumes ambient context rather than external knowledge stores.
 - Human-in-the-loop gating—agents should operate autonomously once launched inside controlled environments.
