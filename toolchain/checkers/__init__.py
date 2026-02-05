@@ -18,7 +18,7 @@ for the weakincentives project.
 
 from __future__ import annotations
 
-from ..checker import Checker, SubprocessChecker
+from ..checker import AutoFormatChecker, Checker, SubprocessChecker
 from ..parsers import (
     parse_bandit,
     parse_bun_test,
@@ -34,12 +34,23 @@ from .architecture import ArchitectureChecker
 from .docs import DocsChecker
 
 
-def create_format_checker() -> SubprocessChecker:
-    """Create the code formatting checker (ruff format)."""
-    return SubprocessChecker(
+def create_format_checker() -> AutoFormatChecker:
+    """Create the code formatting checker (ruff format).
+
+    In local environments: auto-fixes formatting and reports changes.
+    In CI environments: checks formatting without modifications.
+
+    Uses JSON output internally for precise file path reporting.
+    """
+    return AutoFormatChecker(
         name="format",
         description="Check code formatting with ruff",
-        command=["uv", "run", "ruff", "format", "--check", "."],
+        check_command=["uv", "run", "ruff", "format", "--check", "."],
+        fix_command=["uv", "run", "ruff", "format", "."],
+        json_check_command=[
+            "uv", "run", "ruff", "format",
+            "--preview", "--check", "--output-format=json", ".",
+        ],
         parser=parse_ruff,
     )
 

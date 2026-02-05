@@ -394,7 +394,10 @@ class TestFactoryFunctions:
     def test_create_format_checker(self) -> None:
         checker = create_format_checker()
         assert checker.name == "format"
-        assert "ruff" in checker.command
+        assert "ruff" in checker.check_command
+        assert "ruff" in checker.fix_command
+        assert "--check" in checker.check_command
+        assert "--check" not in checker.fix_command
 
     def test_create_lint_checker(self) -> None:
         checker = create_lint_checker()
