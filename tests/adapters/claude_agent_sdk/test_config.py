@@ -81,7 +81,7 @@ class TestClaudeAgentSDKClientConfig:
 class TestClaudeAgentSDKModelConfig:
     def test_defaults(self) -> None:
         config = ClaudeAgentSDKModelConfig()
-        assert config.model == "claude-sonnet-4-5-20250929"
+        assert config.model == "claude-opus-4-6"
         assert config.temperature is None
         assert config.max_tokens is None
         assert config.max_thinking_tokens is None

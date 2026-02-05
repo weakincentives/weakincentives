@@ -203,7 +203,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         >>> session = Session(bus=bus)
         >>>
         >>> adapter = ClaudeAgentSDKAdapter(
-        ...     model="claude-sonnet-4-5-20250929",
+        ...     model="claude-opus-4-6",
         ...     client_config=ClaudeAgentSDKClientConfig(
         ...         permission_mode="acceptEdits",
         ...         cwd="/home/user/project",
@@ -235,7 +235,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
     def __init__(
         self,
         *,
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-opus-4-6",
         client_config: ClaudeAgentSDKClientConfig | None = None,
         model_config: ClaudeAgentSDKModelConfig | None = None,
         allowed_tools: tuple[str, ...] | None = None,

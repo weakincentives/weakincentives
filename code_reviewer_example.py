@@ -647,7 +647,7 @@ def build_claude_agent_adapter() -> tuple[
     except IsolationAuthError as e:
         raise SystemExit(str(e)) from None
 
-    # Get the default model (Opus 4.5) in the appropriate format for the auth mode
+    # Get the default model (Opus 4.6) in the appropriate format for the auth mode
     # Environment variable CLAUDE_MODEL can override for both modes
     model = os.getenv("CLAUDE_MODEL", get_default_model())
 

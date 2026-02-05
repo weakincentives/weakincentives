@@ -304,7 +304,7 @@ workspace = ClaudeAgentWorkspaceSection(
 )
 
 adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-5-20250929",
+    model="claude-opus-4-6",
     client_config=ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         cwd=str(workspace.temp_dir),

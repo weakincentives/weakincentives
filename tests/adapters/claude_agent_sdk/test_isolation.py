@@ -254,9 +254,9 @@ class TestModelIdFunctions:
     """Tests for model ID conversion and default model functions."""
 
     def test_default_model_constants(self) -> None:
-        """Default model constants should be Sonnet 4.5."""
-        assert "sonnet" in DEFAULT_MODEL.lower()
-        assert "sonnet" in DEFAULT_BEDROCK_MODEL.lower()
+        """Default model constants should be Opus 4.6."""
+        assert "opus" in DEFAULT_MODEL.lower()
+        assert "opus" in DEFAULT_BEDROCK_MODEL.lower()
 
     def test_get_default_model_anthropic(self) -> None:
         """get_default_model returns Anthropic format when not using Bedrock."""
@@ -278,12 +278,12 @@ class TestModelIdFunctions:
 
     def test_to_bedrock_model_id_converts_known(self) -> None:
         """to_bedrock_model_id converts known Anthropic models."""
-        assert to_bedrock_model_id("claude-opus-4-5-20251101").startswith("us.")
-        assert "opus" in to_bedrock_model_id("claude-opus-4-5-20251101").lower()
+        assert to_bedrock_model_id("claude-opus-4-6").startswith("us.")
+        assert "opus" in to_bedrock_model_id("claude-opus-4-6").lower()
 
     def test_to_bedrock_model_id_passes_through_bedrock(self) -> None:
         """to_bedrock_model_id passes through existing Bedrock IDs."""
-        bedrock_id = "us.anthropic.claude-opus-4-5-20251101-v1:0"
+        bedrock_id = "us.anthropic.claude-opus-4-6-v1:0"
         assert to_bedrock_model_id(bedrock_id) == bedrock_id
 
     def test_to_bedrock_model_id_passes_through_unknown(self) -> None:
@@ -293,12 +293,12 @@ class TestModelIdFunctions:
 
     def test_to_anthropic_model_name_converts_known(self) -> None:
         """to_anthropic_model_name converts known Bedrock IDs."""
-        result = to_anthropic_model_name("us.anthropic.claude-opus-4-5-20251101-v1:0")
-        assert result == "claude-opus-4-5-20251101"
+        result = to_anthropic_model_name("us.anthropic.claude-opus-4-6-v1:0")
+        assert result == "claude-opus-4-6"
 
     def test_to_anthropic_model_name_passes_through_anthropic(self) -> None:
         """to_anthropic_model_name passes through existing Anthropic names."""
-        anthropic_name = "claude-opus-4-5-20251101"
+        anthropic_name = "claude-opus-4-6"
         assert to_anthropic_model_name(anthropic_name) == anthropic_name
 
     def test_to_anthropic_model_name_passes_through_unknown(self) -> None:
@@ -310,8 +310,8 @@ class TestModelIdFunctions:
         """get_supported_bedrock_models returns the model mapping."""
         models = get_supported_bedrock_models()
         assert isinstance(models, dict)
-        assert "claude-opus-4-5-20251101" in models
-        assert models["claude-opus-4-5-20251101"].startswith("us.")
+        assert "claude-opus-4-6" in models
+        assert models["claude-opus-4-6"].startswith("us.")
 
 
 class TestAuthMode:

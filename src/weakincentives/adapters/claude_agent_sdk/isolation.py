@@ -162,11 +162,12 @@ class AuthMode(Enum):
 
 
 # Default model for both Anthropic API and Bedrock
-DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
-DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+DEFAULT_MODEL = "claude-opus-4-6"
+DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-opus-4-6-v1:0"
 
 # Model name mappings between Anthropic API and Bedrock
 _ANTHROPIC_TO_BEDROCK: dict[str, str] = {
+    "claude-opus-4-6": "us.anthropic.claude-opus-4-6-v1:0",
     "claude-opus-4-5-20251101": "us.anthropic.claude-opus-4-5-20251101-v1:0",
     "claude-sonnet-4-5-20250929": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "claude-sonnet-4-20250514": "us.anthropic.claude-sonnet-4-20250514-v1:0",
@@ -308,7 +309,7 @@ def get_default_model() -> str:
     """Get the default model ID for the current authentication mode.
 
     Returns the appropriate model ID format based on whether Bedrock
-    is configured. Both default to Claude Sonnet 4.5.
+    is configured. Both default to Claude Opus 4.6.
 
     Returns:
         Model ID string in the appropriate format.

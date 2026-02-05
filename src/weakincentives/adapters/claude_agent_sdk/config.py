@@ -112,7 +112,7 @@ class ClaudeAgentSDKModelConfig(LLMConfig):
         are provided, ``ClaudeAgentSDKModelConfig`` raises ``ValueError``.
     """
 
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = "claude-opus-4-6"
     max_thinking_tokens: int | None = None
 
     def __post_init__(self) -> None:
