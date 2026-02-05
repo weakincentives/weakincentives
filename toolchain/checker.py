@@ -370,9 +370,7 @@ class AutoFormatChecker:
         """Format a human-readable message about reformatted files."""
         if len(files) == 1:
             return f"Automatically reformatted 1 file: {files[0]}"
-        file_list = ", ".join(files[:5])
-        if len(files) > 5:
-            file_list += f" and {len(files) - 5} more"
+        file_list = ", ".join(files)
         return f"Automatically reformatted {len(files)} files: {file_list}"
 
     def _parse_reformat_count(self, output: str) -> int:

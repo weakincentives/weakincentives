@@ -309,8 +309,8 @@ class TestAutoFormatChecker:
         msg = checker._format_file_message(["a.py", "b.py", "c.py"])
         assert "3 files" in msg
 
-    def test_format_file_message_truncated(self) -> None:
-        """Test message formatting truncates at 5 files."""
+    def test_format_file_message_many_files(self) -> None:
+        """Test message formatting shows all files."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
@@ -320,7 +320,9 @@ class TestAutoFormatChecker:
         files = ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py", "g.py"]
         msg = checker._format_file_message(files)
         assert "7 files" in msg
-        assert "and 2 more" in msg
+        # All files should be listed
+        for f in files:
+            assert f in msg
 
     def test_stderr_captured_in_ci(self) -> None:
         """In CI, stderr should be captured in the output."""
