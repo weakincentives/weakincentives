@@ -57,7 +57,7 @@ Key Components
 
 **Task Completion** (:class:`TaskCompletionChecker`, :class:`PlanBasedChecker`)
     Verification protocols for ensuring tasks are complete before allowing the
-    agent to stop. Integrates with the planning tool state.
+    agent to stop.
 
 **Transcript Collection** (:class:`TranscriptCollector`, :class:`TranscriptCollectorConfig`)
     Real-time collection and logging of Claude Agent SDK transcripts from the

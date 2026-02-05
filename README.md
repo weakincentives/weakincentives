@@ -245,7 +245,7 @@ tools where needed.
 
 Key differences:
 
-- **Native tools**: Uses Claude Code's built-in tools instead of VFS
+- **Native tools**: Uses Claude Code's built-in file and shell tools
 - **Hermetic isolation**: Ephemeral home directory prevents access to host config
 - **Network policy**: Restricted to specific documentation domains
 - **MCP bridging**: Custom WINK tools bridged via MCP

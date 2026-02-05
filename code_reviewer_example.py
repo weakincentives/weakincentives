@@ -265,7 +265,7 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
                     """).strip(),
                     key="role",
                 ),
-                MarkdownSection(
+                MarkdownSection[ReviewParams](
                     title="Review Focus",
                     template="${focus}",
                     key="focus",

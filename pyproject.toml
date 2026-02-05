@@ -42,12 +42,6 @@ Repository = "https://github.com/weakincentives/weakincentives"
 skills = [
     "pyyaml>=6.0.3",
 ]
-asteval = [
-    "asteval>=1.0.8",
-]
-podman = [
-    "podman>=5.7.0",
-]
 redis = [
     "redis>=7.1.0",
 ]
@@ -160,8 +154,6 @@ combine-as-imports = true
 "src/weakincentives/prompt/tool_result.py" = ["PLR0911"]
 "src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915"]
 "src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
-"src/weakincentives/tools/asteval.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
-"src/weakincentives/tools/planning.py" = ["PLR6301"]
 "src/weakincentives/clock.py" = ["PLR6301"]
 "src/weakincentives/contrib/optimizers/workspace_digest.py" = ["PLR0914", "PLR6301"]
 "src/weakincentives/adapters/claude_agent_sdk/_bridge.py" = ["PLR0913", "TRY300", "RUF029"]
@@ -205,7 +197,6 @@ markers = [
     "integration: marks tests that exercise live provider integrations.",
     "timeout(timeout): set per-test timeout in seconds via pytest-timeout.",
     "threadstress: repeat tests under randomized thread-pool conditions.",
-    "podman: marks tests that exercise the Podman tool against a live daemon.",
     "redis: marks all Redis integration tests (standalone and cluster).",
     "redis_standalone: marks tests using standalone Redis.",
     "redis_cluster: marks tests using Redis Cluster.",
@@ -239,7 +230,7 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["asteval", "claude-agent-sdk", "mcp", "podman", "pyyaml", "redis"]
+DEP002 = ["claude-agent-sdk", "mcp", "pyyaml", "redis"]
 DEP004 = ["weakincentives"]  # Package imports itself; declared as dev dep for testing
 
 [tool.pyright]
