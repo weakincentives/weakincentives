@@ -14,8 +14,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import threading
+from collections import deque
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -42,11 +46,116 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BridgedTool",
+    "MCPToolExecutionState",
     "create_bridged_tools",
     "create_mcp_server",
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
+
+
+MCP_TOOL_PREFIX = "mcp__wink__"
+
+
+def _hash_params(params: dict[str, Any]) -> str:
+    """Create a stable hash of tool parameters for keying.
+
+    Uses JSON serialization with sorted keys for deterministic output,
+    then MD5 hash for a compact key. MD5 is sufficient here since we're
+    not using it for security, just for deduplication.
+    """
+    json_str = json.dumps(params, sort_keys=True, default=str)
+    return hashlib.md5(json_str.encode(), usedforsecurity=False).hexdigest()[:16]
+
+
+def _normalize_tool_name(tool_name: str) -> str:
+    """Normalize tool name by removing mcp__wink__ prefix if present."""
+    if tool_name.startswith(MCP_TOOL_PREFIX):
+        return tool_name[len(MCP_TOOL_PREFIX) :]
+    return tool_name
+
+
+@dataclass(slots=True)
+class MCPToolExecutionState:
+    """Thread-safe state for correlating tool_use_ids between hooks and MCP bridge.
+
+    The MCP protocol doesn't pass tool_use_id to tool handlers, so we need shared
+    state to correlate PreToolUse hook calls with BridgedTool executions.
+
+    Thread Safety
+    -------------
+    Uses a composite key of (tool_name, params_hash) with FIFO queues per key.
+    This handles all concurrency scenarios:
+
+    - Different tools in parallel: Different keys, no conflict
+    - Same tool with different params in parallel: Different hashes, no conflict
+    - Same tool with same params in parallel: FIFO queue ensures correct ordering
+      (assuming PreToolUse hooks fire in the same order as tool executions)
+
+    The implementation uses:
+    - threading.Lock for dict mutations (adding/removing queues)
+    - collections.deque for thread-safe append/popleft within queues
+
+    Usage Flow
+    ----------
+    1. PreToolUse hook: enqueue(tool_name, params, tool_use_id)
+    2. BridgedTool: dequeue(tool_name, params) -> tool_use_id
+    3. PostToolUse hook: (optional cleanup, queues auto-drain)
+    """
+
+    _queues: dict[str, deque[str]] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @staticmethod
+    def _make_key(tool_name: str, params: dict[str, Any]) -> str:
+        """Create composite key from tool name and params hash."""
+        normalized = _normalize_tool_name(tool_name)
+        params_hash = _hash_params(params)
+        return f"{normalized}:{params_hash}"
+
+    def enqueue(self, tool_name: str, params: dict[str, Any], tool_use_id: str) -> None:
+        """Enqueue a tool_use_id for a specific tool+params combination.
+
+        Called by PreToolUse hook before tool execution begins.
+
+        Args:
+            tool_name: The tool name (with or without mcp__wink__ prefix).
+            params: The tool input parameters.
+            tool_use_id: The SDK's tool_use_id for this invocation.
+        """
+        key = self._make_key(tool_name, params)
+        with self._lock:
+            if key not in self._queues:
+                self._queues[key] = deque()
+            self._queues[key].append(tool_use_id)
+
+    def dequeue(self, tool_name: str, params: dict[str, Any]) -> str | None:
+        """Dequeue the oldest tool_use_id for a specific tool+params combination.
+
+        Called by BridgedTool when dispatching ToolInvoked events.
+
+        Args:
+            tool_name: The tool name (with or without mcp__wink__ prefix).
+            params: The tool input parameters.
+
+        Returns:
+            The oldest tool_use_id for this tool+params, or None if queue is empty.
+        """
+        key = self._make_key(tool_name, params)
+        with self._lock:
+            queue = self._queues.get(key)
+            if queue:
+                try:
+                    result = queue.popleft()
+                    # Clean up empty queues to bound memory usage
+                    if not queue:
+                        del self._queues[key]
+                    return result
+                except (
+                    IndexError
+                ):  # pragma: no cover - defensive, can't happen with lock
+                    return None
+            return None
 
 
 @dataclass(slots=True, frozen=True)
@@ -97,6 +206,7 @@ class BridgedTool:
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
         visibility_signal: VisibilityExpansionSignal | None = None,
+        mcp_tool_state: MCPToolExecutionState | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -113,6 +223,7 @@ class BridgedTool:
         self._heartbeat = heartbeat
         self._run_context = run_context
         self._visibility_signal = visibility_signal
+        self._mcp_tool_state = mcp_tool_state
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
@@ -125,11 +236,19 @@ class BridgedTool:
 
         Uses transactional semantics: snapshot before execution, restore on failure.
         """
+        # Dequeue tool_use_id at the start to ensure it's always consumed,
+        # even if tool execution fails early (validation error, exception, etc.)
+        tool_use_id = (
+            self._mcp_tool_state.dequeue(self.name, args)
+            if self._mcp_tool_state
+            else None
+        )
         logger.debug(
             "claude_agent_sdk.bridge.tool_call.start",
             event="bridge.tool_call.start",
             context={
                 "tool_name": self.name,
+                "tool_use_id": tool_use_id,
                 "prompt_name": self._prompt_name,
                 "arguments": args,
             },
@@ -146,7 +265,9 @@ class BridgedTool:
             self._prompt.resources.context,
             tag=f"tool:{self.name}",
         ) as snapshot:
-            return self._execute_handler(handler, args, snapshot=snapshot)
+            return self._execute_handler(
+                handler, args, snapshot=snapshot, tool_use_id=tool_use_id
+            )
 
     def _execute_handler(
         self,
@@ -154,6 +275,7 @@ class BridgedTool:
         args: dict[str, Any],
         *,
         snapshot: CompositeSnapshot,
+        tool_use_id: str | None,
     ) -> dict[str, Any]:
         """Execute tool handler with transactional semantics.
 
@@ -161,6 +283,7 @@ class BridgedTool:
             handler: The tool handler to execute.
             args: Tool arguments.
             snapshot: Pre-execution snapshot for restore on failure.
+            tool_use_id: The SDK's tool_use_id for this invocation.
 
         Returns:
             MCP-format result dict.
@@ -189,7 +312,7 @@ class BridgedTool:
             if not result.success:
                 self._restore_snapshot(snapshot, reason="tool_failure")
 
-            return self._format_success_result(args, result)
+            return self._format_success_result(args, result, tool_use_id)
 
         except (TypeError, ValueError) as error:
             self._restore_snapshot(snapshot, reason="validation_error")
@@ -268,12 +391,14 @@ class BridgedTool:
         self,
         args: dict[str, Any],
         result: ToolResult[Any],
+        tool_use_id: str | None,
     ) -> dict[str, Any]:
         """Format successful tool result as MCP response.
 
         Args:
             args: Original tool arguments.
             result: Tool execution result.
+            tool_use_id: The SDK's tool_use_id for this invocation.
 
         Returns:
             MCP-format result dict.
@@ -290,7 +415,7 @@ class BridgedTool:
 
         # Dispatch ToolInvoked event with the actual tool result value
         # This enables session reducers to dispatch based on the value type
-        self._dispatch_tool_invoked(args, result, output_text)
+        self._dispatch_tool_invoked(args, result, output_text, tool_use_id)
 
         logger.debug(
             "claude_agent_sdk.bridge.tool_call.complete",
@@ -318,10 +443,13 @@ class BridgedTool:
         args: dict[str, Any],
         result: ToolResult[Any],
         rendered_output: str,
+        call_id: str | None,
     ) -> None:
         """Dispatch a ToolInvoked event for session reducer dispatch.
 
         The session extracts the value from result.value for slice routing.
+        The call_id is passed through from __call__ which dequeues it at the
+        start to ensure it's always consumed even on error paths.
         """
         event = ToolInvoked(
             prompt_name=self._prompt_name,
@@ -333,7 +461,7 @@ class BridgedTool:
             created_at=datetime.now(UTC),
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
-            call_id=None,
+            call_id=call_id,
             run_context=self._run_context,
         )
         self._session.dispatcher.dispatch(event)
@@ -353,6 +481,7 @@ def create_bridged_tools(
     heartbeat: Heartbeat | None = None,
     run_context: RunContext | None = None,
     visibility_signal: VisibilityExpansionSignal | None = None,
+    mcp_tool_state: MCPToolExecutionState | None = None,
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -370,6 +499,7 @@ def create_bridged_tools(
         run_context: Optional execution context with correlation identifiers.
         visibility_signal: Signal for propagating VisibilityExpansionRequired
             exceptions from tool handlers to the adapter.
+        mcp_tool_state: Shared state for passing tool_use_id from hooks to bridge.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
@@ -412,6 +542,7 @@ def create_bridged_tools(
             heartbeat=heartbeat,
             run_context=run_context,
             visibility_signal=visibility_signal,
+            mcp_tool_state=mcp_tool_state,
         )
         bridged.append(bridged_tool)
 

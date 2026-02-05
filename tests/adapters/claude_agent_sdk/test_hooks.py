@@ -20,6 +20,7 @@ from typing import Any, cast
 
 import pytest
 
+from weakincentives.adapters.claude_agent_sdk._bridge import MCPToolExecutionState
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookConstraints,
     HookContext,
@@ -162,6 +163,43 @@ class TestHookContext:
         )
         assert context.deadline is deadline
         assert context.budget_tracker is tracker
+
+    def test_beat_with_heartbeat_configured(self, session: Session) -> None:
+        from weakincentives.runtime.watchdog import Heartbeat
+
+        beat_count = 0
+
+        def on_beat() -> None:
+            nonlocal beat_count
+            beat_count += 1
+
+        heartbeat = Heartbeat()
+        heartbeat.add_callback(on_beat)
+
+        constraints = HookConstraints(heartbeat=heartbeat)
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            constraints=constraints,
+        )
+
+        assert context.heartbeat is heartbeat
+        context.beat()
+        assert beat_count == 1
+
+    def test_beat_without_heartbeat_is_noop(self, session: Session) -> None:
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        assert context.heartbeat is None
+        # Should not raise
+        context.beat()
 
 
 class TestPreToolUseHook:
@@ -485,6 +523,31 @@ class TestPostToolUseHook:
         assert result == {}
         assert len(events) == 0
 
+    def test_handles_mcp_tool_post_without_error(self, session: Session) -> None:
+        """PostToolUse handles MCP tools without error."""
+        mcp_state = MCPToolExecutionState()
+        # Note: With queue-based approach, PreToolUse enqueues and BridgedTool dequeues.
+        # PostToolUse just runs feedback providers - no state management needed.
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            constraints=HookConstraints(mcp_tool_state=mcp_state),
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "mcp__wink__planning_update",
+            "tool_input": {"step_id": 1},
+            "tool_response": {"stdout": "Updated"},
+        }
+
+        # Should complete without error
+        result = asyncio.run(hook(input_data, "call-mcp-456", {"signal": None}))
+        assert result == {}
+
     def test_returns_context_when_structured_output_with_incomplete_tasks(
         self, session: Session
     ) -> None:
@@ -613,6 +676,53 @@ class TestPostToolUseHook:
         }
 
         result = asyncio.run(hook(input_data, "call-read", {"signal": None}))
+
+        # Should return additionalContext with feedback
+        hook_output = result.get("hookSpecificOutput", {})
+        assert hook_output.get("hookEventName") == "PostToolUse"
+        additional_context = hook_output.get("additionalContext", "")
+        assert "Test feedback triggered" in additional_context
+
+    def test_returns_feedback_for_mcp_tool_when_provider_triggers(
+        self, session: Session
+    ) -> None:
+        """PostToolUse returns additionalContext for MCP tools when feedback triggers."""
+        # Seed ToolInvoked with an existing event so feedback provider triggers.
+        # MCP tools dispatch their ToolInvoked via the bridge, so we simulate that
+        # by pre-seeding an event. The feedback trigger checks tool_call_count.
+        existing_event = ToolInvoked(
+            prompt_name="test_prompt",
+            adapter="claude_agent_sdk",
+            name="mcp__wink__some_tool",
+            params={},
+            result={},
+            session_id=None,
+            created_at=datetime.now(UTC),
+            call_id="prev-call",
+        )
+        session[ToolInvoked].seed((existing_event,))
+
+        prompt = _make_prompt_with_feedback_provider()
+        mcp_tool_state = MCPToolExecutionState()
+        constraints = HookConstraints(mcp_tool_state=mcp_tool_state)
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            constraints=constraints,
+        )
+        hook = create_post_tool_use_hook(context)
+
+        # Use an MCP tool name to hit the _handle_mcp_tool_post path
+        input_data = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "mcp__wink__planning_setup_plan",
+            "tool_input": {"plan": "test plan"},
+            "tool_response": {"success": True},
+        }
+
+        result = asyncio.run(hook(input_data, "call-mcp", {"signal": None}))
 
         # Should return additionalContext with feedback
         hook_output = result.get("hookSpecificOutput", {})
@@ -986,6 +1096,66 @@ class TestPreToolUseHookTransactional:
             context._tool_tracker is None
             or "tool-123" not in context._tracker._pending_tools
         )
+
+    def test_enqueues_mcp_tool_state_for_mcp_tools(self, session: Session) -> None:
+        """Pre-tool hook enqueues tool_use_id on mcp_tool_state for MCP tools."""
+        mcp_state = MCPToolExecutionState()
+        tool_input = {"objective": "test plan"}
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="claude_agent_sdk",
+            prompt_name="test_prompt",
+            constraints=HookConstraints(mcp_tool_state=mcp_state),
+        )
+
+        hook = create_pre_tool_use_hook(context)
+        asyncio.run(
+            hook(
+                {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "mcp__wink__planning",
+                    "tool_input": tool_input,
+                },
+                "call-mcp-123",
+                {"signal": None},
+            )
+        )
+
+        # mcp_tool_state should have the tool_use_id enqueued for this tool+params
+        assert mcp_state.dequeue("planning", tool_input) == "call-mcp-123"
+
+    def test_does_not_enqueue_mcp_tool_state_for_native_tools(
+        self, session: Session
+    ) -> None:
+        """Pre-tool hook does not enqueue tool_use_id for native SDK tools."""
+        mcp_state = MCPToolExecutionState()
+        tool_input = {"file_path": "/test.txt"}
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="claude_agent_sdk",
+            prompt_name="test_prompt",
+            constraints=HookConstraints(mcp_tool_state=mcp_state),
+        )
+
+        hook = create_pre_tool_use_hook(context)
+        asyncio.run(
+            hook(
+                {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Read",
+                    "tool_input": tool_input,
+                },
+                "call-native-123",
+                {"signal": None},
+            )
+        )
+
+        # mcp_tool_state should remain empty for native tools
+        assert mcp_state.dequeue("Read", tool_input) is None
 
 
 class TestPostToolUseHookTransactional:
