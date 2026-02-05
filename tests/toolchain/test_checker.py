@@ -325,7 +325,7 @@ class TestAutoFormatChecker:
         assert "automatically fixed" in info_diags[0].message.lower()
 
     def test_fix_command_failure_reports_error(self) -> None:
-        """Should fail when fix command exits non-zero."""
+        """Should fail when fix command exits non-zero with stderr."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
@@ -337,3 +337,17 @@ class TestAutoFormatChecker:
         assert result.status == "failed"
         assert "Auto-fix command failed" in result.diagnostics[0].message
         assert "error message" in result.output
+
+    def test_fix_command_failure_stdout_only(self) -> None:
+        """Should fail when fix command exits non-zero with only stdout."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["false"],  # Check fails, triggers fix
+            fix_command=["bash", "-c", "echo 'stdout error'; exit 1"],
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            result = checker.run()
+        assert result.status == "failed"
+        assert "Auto-fix command failed" in result.diagnostics[0].message
+        assert "stdout error" in result.output
