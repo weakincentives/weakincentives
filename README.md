@@ -48,10 +48,8 @@ PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
 ├── WorkspaceDigestSection     ← auto-generated codebase summary
 ├── MarkdownSection (reference docs, progressive disclosure)
-├── PlanningToolsSection       ← contributes planning_* tools
-│   └── (nested planning docs)
-├── VfsToolsSection            ← contributes ls/read_file/write_file/...
-│   └── (nested filesystem docs)
+├── ClaudeAgentWorkspaceSection ← contributes file tools via SDK
+│   └── (nested workspace docs)
 └── MarkdownSection (user request)
 ```
 
@@ -76,8 +74,7 @@ capabilities once, in one place, and the definition ports across runtimes.
 
 1. **Dynamic scoping.** Each section has an `enabled` predicate. Disable a
    section and its entire subtree—tools included—disappears from the prompt.
-   Swap in a `PodmanSandboxSection` instead of `VfsToolsSection` when a shell
-   is available; the prompt adapts automatically.
+   Swap sections based on runtime conditions; the prompt adapts automatically.
 
 1. **Typed all the way down.** Sections are parameterized with dataclasses.
    Placeholders are validated at construction time. Tools declare typed params
@@ -100,10 +97,10 @@ capabilities once, in one place, and the definition ports across runtimes.
 - **Transactional execution.** Tool calls are atomic transactions. When a tool
   fails, WINK automatically rolls back session state and filesystem changes to
   their pre-call state. Failed tools don't leave traces in mutable state.
-- **Sandboxed virtual filesystem.** Agents get an in-memory VFS tracked as
-  session state. Mount host directories read-only when needed; the sandbox
-  prevents accidental writes to the host.
-  See [Workspace Tools](specs/WORKSPACE.md).
+- **Workspace integration.** Mount host directories into agent workspaces with
+  configurable include/exclude patterns. The Claude Agent SDK adapter provides
+  sandboxed file tools with automatic cleanup.
+  See [Workspace](specs/WORKSPACE.md).
 
 ### Policies
 
@@ -136,7 +133,6 @@ capabilities once, in one place, and the definition ports across runtimes.
 uv add weakincentives
 # optional extras
 uv add "weakincentives[claude-agent-sdk]" # Claude Agent SDK adapter
-uv add "weakincentives[podman]"           # Podman sandbox
 uv add "weakincentives[wink]"             # debug UI
 ```
 

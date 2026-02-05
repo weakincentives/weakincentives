@@ -66,10 +66,6 @@ formal
     Formal specification support via TLA+. Decorators attach specification
     metadata that can be extracted and validated by pytest plugins.
 
-optimizers
-    Prompt optimization framework. Provides ``PromptOptimizer`` protocol and
-    base classes; concrete implementations in ``contrib.optimizers``.
-
 prompt
     Prompt authoring primitives:
 

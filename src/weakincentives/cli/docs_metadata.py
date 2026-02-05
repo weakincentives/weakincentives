@@ -75,7 +75,6 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "resources": "Dependency injection, scopes, and lifecycle management",
     "progressive-disclosure": "Control context size with summaries",
     "prompt-overrides": "Iterate on prompts without code changes",
-    "workspace-tools": "Use Claude Agent SDK workspace, host mounts, workspace digests",
     "debugging": "Inspect sessions and use the debug UI",
     "query": "SQL-based exploration of debug bundles",
     "testing": "Test prompts, tools, and reducers",
