@@ -41,7 +41,7 @@ export function initFilesystemView({ state, fetchJSON, showToast }) {
       state.hasFilesystemSnapshot = state.filesystemFiles.length > 0;
       renderList();
     } catch (error) {
-      els.list.innerHTML = `<p class="muted">Failed to load files: ${error.message}</p>`;
+      els.list.innerHTML = `<p class="muted">Failed to load files: ${escapeHtml(error.message)}</p>`;
     }
   }
 
@@ -135,7 +135,7 @@ export function initFilesystemView({ state, fetchJSON, showToast }) {
 
       renderFileResult(result, displayPath);
     } catch (error) {
-      els.viewer.innerHTML = `<p class="muted">Failed to load file: ${error.message}</p>`;
+      els.viewer.innerHTML = `<p class="muted">Failed to load file: ${escapeHtml(error.message)}</p>`;
     }
   }
 

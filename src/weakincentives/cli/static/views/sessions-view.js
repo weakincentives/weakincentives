@@ -410,8 +410,8 @@ export function initSessionsView({ state, fetchJSON, showToast }) {
     els.itemCount.textContent = `${slice.items.length} items`;
 
     els.typeRow.innerHTML = `
-      <span class="pill">slice: ${slice.display_name || slice.slice_type}</span>
-      <span class="pill">item: ${slice.item_display_name || slice.item_type}</span>
+      <span class="pill">slice: ${escapeHtml(slice.display_name || slice.slice_type)}</span>
+      <span class="pill">item: ${escapeHtml(slice.item_display_name || slice.item_type)}</span>
     `;
 
     state.currentItems = slice.items;

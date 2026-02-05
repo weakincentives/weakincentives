@@ -295,7 +295,7 @@ export function initTranscriptView({ state, fetchJSON, showToast }) {
   }
 
   function showError(message) {
-    els.list.innerHTML = `<p class="muted">Failed to load transcript: ${message}</p>`;
+    els.list.innerHTML = `<p class="muted">Failed to load transcript: ${escapeHtml(message)}</p>`;
   }
 
   function applyResult(result, append) {
@@ -306,7 +306,7 @@ export function initTranscriptView({ state, fetchJSON, showToast }) {
   }
 
   async function fetchTranscript(append, isCurrentRequest) {
-    const offset = append ? state.transcriptEntries.length : 0;
+    const offset = append ? state.transcriptRawEntries.length : 0;
     const result = await fetchJSON(`/api/transcript?${buildTranscriptQueryParams(state, offset)}`);
     if (isCurrentRequest()) {
       state.transcriptLoadRetries = 0;

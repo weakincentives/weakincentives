@@ -220,6 +220,8 @@ function resetViewState() {
   state.selectedFile = null;
   state.fileContent = null;
   state.hasFilesystemSnapshot = false;
+  state.environmentData = null;
+  state.hasEnvironmentData = false;
 
   if (state.transcriptScroller) {
     state.transcriptScroller.destroy();

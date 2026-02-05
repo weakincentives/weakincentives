@@ -34,7 +34,7 @@ function renderPythonSection(py) {
   }
   let content = `<dt>Version</dt><dd class="mono">${escapeHtml(py.version)}</dd>`;
   if (py.version_info) {
-    content += `<dt>Version Info</dt><dd class="mono">${JSON.stringify(py.version_info)}</dd>`;
+    content += `<dt>Version Info</dt><dd class="mono">${escapeHtml(JSON.stringify(py.version_info))}</dd>`;
   }
   content +=
     `<dt>Implementation</dt><dd>${escapeHtml(py.implementation)}</dd>` +
@@ -134,7 +134,7 @@ export function initEnvironmentView({ state, fetchJSON, showToast }) {
         data.container !== null;
       render();
     } catch (error) {
-      els.data.innerHTML = `<p class="muted">Failed to load environment data: ${error.message}</p>`;
+      els.data.innerHTML = `<p class="muted">Failed to load environment data: ${escapeHtml(error.message)}</p>`;
     }
   }
 

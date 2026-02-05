@@ -121,7 +121,7 @@ export function initKeyboardShortcuts({
       zoomModal.zoomPrev();
       return true;
     }
-    return true;
+    return false;
   }
 
   function isInputElement(target) {

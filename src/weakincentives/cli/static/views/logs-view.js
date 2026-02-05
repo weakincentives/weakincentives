@@ -137,7 +137,7 @@ export function initLogsView({ state, fetchJSON, showToast }) {
   }
 
   function showError(message) {
-    els.list.innerHTML = `<p class="muted">Failed to load logs: ${message}</p>`;
+    els.list.innerHTML = `<p class="muted">Failed to load logs: ${escapeHtml(message)}</p>`;
   }
 
   function applyResult(result, append) {
