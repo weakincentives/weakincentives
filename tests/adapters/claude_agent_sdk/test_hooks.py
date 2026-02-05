@@ -36,7 +36,7 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
 from weakincentives.adapters.claude_agent_sdk._task_completion import PlanBasedChecker
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-from weakincentives.contrib.tools.planning import Plan, PlanningToolsSection, PlanStep
+from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.deadlines import Deadline
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import (
@@ -50,6 +50,31 @@ from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.events.types import TokenUsage, ToolInvoked
 from weakincentives.runtime.session import Session
+
+
+# Mock Plan types for testing task completion checkers.
+# These replicate the interface of the removed PlanningToolsSection types.
+@FrozenDataclass()
+class PlanStep:
+    """Mock PlanStep for testing."""
+
+    step_id: int
+    title: str
+    status: str = "pending"
+
+
+@FrozenDataclass()
+class Plan:
+    """Mock Plan for testing."""
+
+    objective: str
+    status: str = "active"
+    steps: tuple[PlanStep, ...] = ()
+
+
+def _initialize_plan_session(session: Session) -> None:
+    """Initialize session with Plan slice for testing."""
+    session[Plan].seed(())
 
 
 def _make_prompt() -> Prompt[object]:
@@ -552,7 +577,7 @@ class TestPostToolUseHook:
         self, session: Session
     ) -> None:
         """PostToolUse returns additionalContext for StructuredOutput when tasks incomplete."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
         session.dispatch(
             Plan(
                 objective="Test objective",
@@ -595,7 +620,7 @@ class TestPostToolUseHook:
         self, session: Session
     ) -> None:
         """PostToolUse stops after StructuredOutput when all tasks complete."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
         session.dispatch(
             Plan(
                 objective="Test objective",
@@ -1365,7 +1390,7 @@ class TestTaskCompletionStopHook:
     def test_allows_stop_when_no_plan_initialized(self, session: Session) -> None:
         """Stop is allowed when Plan slice exists but no plan is initialized."""
         # Install Plan slice but don't initialize a plan
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
 
         context = HookContext(
             session=session,
@@ -1386,7 +1411,7 @@ class TestTaskCompletionStopHook:
 
     def test_allows_stop_when_all_tasks_complete(self, session: Session) -> None:
         """Stop is allowed when all plan tasks are marked as done."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
 
         # Create a plan with all steps done
         completed_plan = Plan(
@@ -1418,7 +1443,7 @@ class TestTaskCompletionStopHook:
 
     def test_signals_continue_when_tasks_incomplete(self, session: Session) -> None:
         """Stop hook signals continuation when tasks are incomplete."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
 
         # Create a plan with incomplete steps
         incomplete_plan = Plan(
@@ -1454,7 +1479,7 @@ class TestTaskCompletionStopHook:
 
     def test_records_stop_reason(self, session: Session) -> None:
         """Stop hook records the stop reason regardless of task state."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
 
         context = HookContext(
             session=session,
@@ -1476,7 +1501,7 @@ class TestTaskCompletionStopHook:
 
     def test_defaults_stop_reason_to_end_turn(self, session: Session) -> None:
         """Stop hook defaults stopReason to end_turn when not provided."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
 
         context = HookContext(
             session=session,
@@ -1495,7 +1520,7 @@ class TestTaskCompletionStopHook:
 
     def test_handles_empty_steps(self, session: Session) -> None:
         """Stop is allowed when plan has no steps."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
 
         # Create a plan with no steps
         empty_plan = Plan(
@@ -1523,7 +1548,7 @@ class TestTaskCompletionStopHook:
 
     def test_reminder_message_truncates_long_task_list(self, session: Session) -> None:
         """Reminder message truncates task titles when there are many incomplete."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
 
         # Create a plan with many incomplete steps
         many_steps_plan = Plan(
@@ -1563,7 +1588,7 @@ class TestTaskCompletionStopHook:
 
     def test_checker_protocol_with_plan_based_checker(self, session: Session) -> None:
         """Hook accepts any TaskCompletionChecker implementation."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
 
         context = HookContext(
             session=session,
@@ -1588,7 +1613,7 @@ class TestTaskCompletionStopHook:
         """Stop hook skips task completion check when deadline expired."""
         from weakincentives.clock import FakeClock
 
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
         # Create incomplete plan
         session.dispatch(
             Plan(
@@ -1626,7 +1651,7 @@ class TestTaskCompletionStopHook:
 
     def test_skips_check_when_budget_exhausted(self, session: Session) -> None:
         """Stop hook skips task completion check when budget exhausted."""
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
         # Create incomplete plan
         session.dispatch(
             Plan(
@@ -1843,3 +1868,177 @@ class TestHookEventNameValidation:
         asyncio.run(subagent_stop_hook(stop_input, None, {"signal": None}))
         assert context.stats.in_subagent is False
         assert context.stats.subagent_count == 1
+
+
+class TestPlanBasedCheckerNoPlanType:
+    """Tests for PlanBasedChecker with plan_type=None."""
+
+    def test_no_plan_type_returns_ok(self, session: Session) -> None:
+        """Checker returns ok when plan_type is None."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+            TaskCompletionContext,
+        )
+
+        checker = PlanBasedChecker(plan_type=None)
+        context = TaskCompletionContext(
+            session=session,
+            tentative_output=None,
+            stop_reason="end_turn",
+        )
+
+        result = checker.check(context)
+
+        assert result.complete is True
+        assert "No planning tools available" in result.feedback
+
+
+class TestCompositeChecker:
+    """Tests for CompositeChecker."""
+
+    def test_empty_checkers_returns_ok(self, session: Session) -> None:
+        """Empty composite checker returns ok."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            CompositeChecker,
+            TaskCompletionContext,
+        )
+
+        checker = CompositeChecker(checkers=())
+        context = TaskCompletionContext(
+            session=session,
+            tentative_output=None,
+            stop_reason="end_turn",
+        )
+
+        result = checker.check(context)
+
+        assert result.complete is True
+        assert "No checkers configured" in result.feedback
+
+    def test_all_must_pass_short_circuits_on_failure(self, session: Session) -> None:
+        """Composite checker short-circuits on first failure when all_must_pass=True."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            CompositeChecker,
+            PlanBasedChecker,
+            TaskCompletionContext,
+        )
+
+        _initialize_plan_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Incomplete", status="pending"),),
+            )
+        )
+
+        checker = CompositeChecker(
+            checkers=(
+                PlanBasedChecker(plan_type=Plan),
+                PlanBasedChecker(plan_type=None),  # Would pass but won't be reached
+            ),
+            all_must_pass=True,
+        )
+        context = TaskCompletionContext(
+            session=session,
+            tentative_output=None,
+            stop_reason="end_turn",
+        )
+
+        result = checker.check(context)
+
+        assert result.complete is False
+        assert "incomplete" in result.feedback.lower()
+
+    def test_all_must_pass_all_succeed(self, session: Session) -> None:
+        """Composite checker returns ok when all checkers pass."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            CompositeChecker,
+            PlanBasedChecker,
+            TaskCompletionContext,
+        )
+
+        checker = CompositeChecker(
+            checkers=(
+                PlanBasedChecker(plan_type=None),
+                PlanBasedChecker(plan_type=None),
+            ),
+            all_must_pass=True,
+        )
+        context = TaskCompletionContext(
+            session=session,
+            tentative_output=None,
+            stop_reason="end_turn",
+        )
+
+        result = checker.check(context)
+
+        assert result.complete is True
+
+    def test_any_pass_short_circuits_on_success(self, session: Session) -> None:
+        """Composite checker short-circuits on first success when all_must_pass=False."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            CompositeChecker,
+            PlanBasedChecker,
+            TaskCompletionContext,
+        )
+
+        _initialize_plan_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Incomplete", status="pending"),),
+            )
+        )
+
+        checker = CompositeChecker(
+            checkers=(
+                PlanBasedChecker(plan_type=None),  # Passes
+                PlanBasedChecker(plan_type=Plan),  # Would fail but won't be reached
+            ),
+            all_must_pass=False,
+        )
+        context = TaskCompletionContext(
+            session=session,
+            tentative_output=None,
+            stop_reason="end_turn",
+        )
+
+        result = checker.check(context)
+
+        assert result.complete is True
+
+    def test_any_pass_all_fail(self, session: Session) -> None:
+        """Composite checker returns incomplete when all checkers fail in any mode."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            CompositeChecker,
+            PlanBasedChecker,
+            TaskCompletionContext,
+        )
+
+        _initialize_plan_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Incomplete", status="pending"),),
+            )
+        )
+
+        checker = CompositeChecker(
+            checkers=(
+                PlanBasedChecker(plan_type=Plan),
+                PlanBasedChecker(plan_type=Plan),
+            ),
+            all_must_pass=False,
+        )
+        context = TaskCompletionContext(
+            session=session,
+            tentative_output=None,
+            stop_reason="end_turn",
+        )
+
+        result = checker.check(context)
+
+        assert result.complete is False

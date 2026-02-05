@@ -2,158 +2,56 @@
 
 ## Purpose
 
-Workspace tools provide deterministic, session-scoped surfaces for file
-operations, code execution, and repository context. Covers virtual filesystem
-(VFS), Podman sandbox, Python evaluation (asteval), and workspace digest.
+Workspace tools provide surfaces for caching workspace summaries and testing
+with in-memory filesystems. Tool sections for file operations and shell
+execution are provided by the execution harness (e.g., Claude Agent SDK).
 
 **Implementation:** `src/weakincentives/contrib/tools/`
 
 ## Guiding Principles
 
-- **Sandbox first**: VFS in-memory; Podman no network; host access limited to mounts
+- **Definition vs Harness**: Agent definitions specify what; harness provides how
 - **Predictable paths**: Normalized POSIX-style, ASCII-only, relative to session root
 - **Single source of state**: Reducers own mutations; handlers remain pure
-- **VFS-compatible surface**: All backends expose same tools
 
-## Virtual Filesystem
+## Workspace Digest
 
-Session-scoped file operations without writing to host disk. Content hydrated
-from explicit host mounts at section construction.
+Task-agnostic repository summaries cached in session state.
 
-**Implementation:** `src/weakincentives/contrib/tools/vfs.py`
+**Implementation:** `src/weakincentives/contrib/tools/digests.py`
 
 ### Data Model
 
 | Type | Fields | Description |
 |------|--------|-------------|
-| `VfsPath` | `segments: tuple[str, ...]` | Path as tuple |
-| `VfsFile` | `path`, `content`, `encoding`, `size_bytes`, `version`, timestamps | File metadata |
+| `WorkspaceDigest` | `section_key`, `summary`, `body` | Cached digest entry |
 
-### Tools
+### Section
 
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `ls` | `path: str` | List directory |
-| `read_file` | `file_path`, `offset`, `limit` | Read with pagination |
-| `write_file` | `file_path`, `content` | Create new file |
-| `edit_file` | `file_path`, `old_string`, `new_string`, `replace_all` | String replacement |
-| `glob` | `pattern`, `path` | Match by pattern |
-| `grep` | `pattern`, `path`, `glob` | Regex search |
-| `rm` | `path` | Remove file/directory |
-
-### Limits
-
-| Limit | Value |
-|-------|-------|
-| Content per write | 48,000 characters |
-| Path depth | 16 segments |
-| Segment length | 80 characters |
-| Encoding | UTF-8 text only |
-
-### Host Mounts
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `host_path` | `str` | Source path |
-| `mount_path` | `VfsPath \| None` | Target path |
-| `include_glob` | `tuple[str, ...]` | Include patterns |
-| `exclude_glob` | `tuple[str, ...]` | Exclude patterns |
-| `max_bytes` | `int \| None` | Size limit |
-| `follow_symlinks` | `bool` | Follow symlinks |
-
-### Backend Integration
-
-VFS tools operate through a backend that handles file operations. Host mounts
-hydrate initial content at section construction:
+`WorkspaceDigestSection` renders cached workspace digests from session state.
 
 ```python
-section = VfsToolsSection(
-    session=session,
-    mounts=(HostMount(host_path="docs/", include_glob=("*.md",)),),
-    allowed_host_roots=("/path/to/project",),
+from weakincentives.contrib.tools import (
+    WorkspaceDigestSection,
+    set_workspace_digest,
+    latest_workspace_digest,
 )
+from weakincentives.runtime import Session
+
+session = Session()
+section = WorkspaceDigestSection(session=session)
+
+# Populate digest (typically done by exploration agent)
+set_workspace_digest(
+    session,
+    section_key="workspace-digest",
+    body="Full project analysis with dependencies, structure...",
+    summary="Python web app with FastAPI backend.",
+)
+
+# Query digest
+digest = latest_workspace_digest(session, "workspace-digest")
 ```
-
-## Podman Sandbox
-
-Isolated Linux container for shell commands and file operations.
-
-**Implementation:** `src/weakincentives/contrib/tools/podman.py`
-
-### Workspace Lifecycle
-
-1. **Overlay Root** - Session-specific directory under cache
-1. **Container Creation** - Python 3.12 image, 1 CPU, 1 GiB RAM, no network
-1. **Startup** - `sleep infinity` with health check
-1. **Reuse** - Subsequent calls share container
-1. **Teardown** - Stopped and removed on section close
-
-### Tools
-
-All VFS tools plus:
-
-| Tool | Description |
-|------|-------------|
-| `shell_execute` | Run command in container (\<=120s) |
-| `evaluate_python` | Execute Python via `python3 -c` (\<=5s) |
-
-### Shell Execution
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `command` | `tuple[str, ...]` | - | Commands to execute |
-| `cwd` | `str \| None` | `None` | Working directory |
-| `env` | `Mapping[str, str]` | `{}` | Environment variables |
-| `stdin` | `str \| None` | `None` | Standard input |
-| `timeout_seconds` | `float` | `30.0` | Timeout |
-| `capture_output` | `bool` | `True` | Capture stdout/stderr |
-
-### Limits
-
-- Commands: ASCII, \<=4,096 chars combined
-- Timeout: 1-120 seconds
-- Output: Truncated to 32 KiB
-
-### Configuration
-
-Environment variables: `PODMAN_BASE_URL`, `PODMAN_IDENTITY`, `PODMAN_CONNECTION`,
-`WEAKINCENTIVES_CACHE`
-
-## Python Evaluation (ASTEval)
-
-Sandboxed Python expression evaluation.
-
-**Implementation:** `src/weakincentives/contrib/tools/asteval.py`
-
-### Tool Contract
-
-| Type | Fields |
-|------|--------|
-| `EvalParams` | `code`, `globals`, `reads`, `writes` |
-| `EvalResult` | `value_repr`, `stdout`, `stderr`, `globals`, `reads`, `writes` |
-
-### Sandbox Environment
-
-- `asteval.Interpreter(use_numpy=False, minimal=True)`
-- Whitelisted symtable: math, statistics, `read_text`, `write_text`, `print`
-- Disabled: import, exec, eval, `ALL_DISALLOWED` nodes
-- Timeout: 5 seconds
-
-### VFS Integration
-
-Reads resolve from session VFS snapshot. Writes queue through reducer pipeline.
-
-### Installation
-
-```bash
-pip install weakincentives[asteval]
-```
-
-## Workspace Digest
-
-Task-agnostic repository summaries.
-
-**Implementation:** `src/weakincentives/contrib/optimizers/workspace_digest.py`
 
 ### Resolution Order
 
@@ -167,44 +65,66 @@ Task-agnostic repository summaries.
 - Tooling commands (tests, linting, formatting)
 - Known caveats and recurring pitfalls
 
-### Optimization Workflow
+## In-Memory Filesystem
+
+Session-scoped filesystem for testing and evaluation scenarios.
+
+**Implementation:** `src/weakincentives/contrib/tools/filesystem_memory.py`
+
+### Data Model
+
+| Type | Description |
+|------|-------------|
+| `InMemoryFilesystem` | In-memory implementation of `Filesystem` protocol |
+| `ReadResult` | Result of read operations with content and metadata |
+| `WriteResult` | Result of write operations with path and size |
+
+### Usage
 
 ```python
-context = OptimizationContext(
-    adapter=adapter,
-    dispatcher=session.dispatcher,
-    overrides_store=store,
-    overrides_tag="v1",
-)
-optimizer = WorkspaceDigestOptimizer(context, store_scope=PersistenceScope.SESSION)
-result = optimizer.optimize(prompt, session=session)
+from weakincentives.contrib.tools import InMemoryFilesystem
+
+fs = InMemoryFilesystem()
+fs.write("test.txt", "Hello, world!")
+result = fs.read("test.txt")
+print(result.content)  # "Hello, world!"
 ```
 
-| Scope | Behavior |
-|-------|----------|
-| `SESSION` | Stores in session slice only |
-| `GLOBAL` | Persists to overrides store |
+### Limits
 
-### Result Types
-
-| Type | Fields |
-|------|--------|
-| `OptimizationResult[T]` | `response`, `artifact`, `metadata` |
-| `WorkspaceDigestResult` | `response`, `digest`, `scope`, `section_key` |
+| Limit | Value |
+|-------|-------|
+| Content per write | 48,000 characters |
+| Path depth | 16 segments |
+| Segment length | 80 characters |
+| Encoding | UTF-8 text only |
 
 ## Cloning
 
-All workspace sections support `clone(session=..., dispatcher=...)`:
+Workspace sections support `clone(session=..., dispatcher=...)`:
 
 - Re-registers reducers on new session
 - Binds telemetry to new event dispatcher
-- Reapplies host mount hydration
 - Fully decoupled from original section
+
+## Execution Harness Tools
+
+Tool sections for filesystem operations, planning, and shell execution are
+provided by the execution harness rather than defined in WINK. This keeps
+agent definitions portable across runtimes.
+
+### Claude Agent SDK
+
+When using `ClaudeAgentSDKAdapter`, the harness provides:
+
+- **Native file tools** - Built-in Claude Code file operations
+- **Shell execution** - Command execution in sandboxed environment
+- **Planning tools** - Native task tracking
+
+See `specs/CLAUDE_AGENT_SDK.md` for details on workspace configuration.
 
 ## Limitations
 
 - **Ephemeral state**: All workspace data dies with session
-- **Text-only VFS**: Binary content rejected
-- **No network**: Podman containers have no network access
-- **Cooperative timeout**: ASTEval interrupts cooperatively only
+- **Text-only**: Binary content rejected for in-memory filesystem
 - **Synchronized clocks**: Timestamps require UTC synchronization

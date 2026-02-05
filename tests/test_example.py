@@ -44,7 +44,7 @@ def test_adapters_dir_lists_public_symbols() -> None:
 
 def test_public_namespaces_resolve_symbols() -> None:
     assert runtime.Session is runtime.Session
-    assert contrib.tools.Plan is contrib.tools.Plan
+    assert contrib.tools.WorkspaceDigestSection is contrib.tools.WorkspaceDigestSection
     assert prompt.MarkdownSection is prompt.MarkdownSection
 
 
@@ -55,4 +55,4 @@ def test_submodule_dir_lists_exports() -> None:
     assert prompt_symbols == sorted(prompt_symbols)
     assert "Prompt" in prompt_symbols
     assert tools_symbols == sorted(tools_symbols)
-    assert "Plan" in tools_symbols
+    assert "WorkspaceDigestSection" in tools_symbols

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import textwrap
+from dataclasses import field
 from typing import override
 
 from ...dataclasses import FrozenDataclass
@@ -36,9 +37,9 @@ class WorkspaceDigest(SupportsDataclass):
     to access the full body when needed.
     """
 
-    section_key: str
-    summary: str
-    body: str
+    section_key: str = field(metadata={"description": "Key identifying the section."})
+    summary: str = field(metadata={"description": "Short summary of the digest."})
+    body: str = field(metadata={"description": "Full body content of the digest."})
 
 
 def _normalized_key(section_key: str) -> str:

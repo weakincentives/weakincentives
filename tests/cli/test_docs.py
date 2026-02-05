@@ -239,9 +239,9 @@ def test_docs_read_example(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "# Code Review Agent Example" in captured.out
+    assert "# Minimal WINK Example" in captured.out
     assert "```python" in captured.out
-    assert "CodeReviewLoop" in captured.out
+    assert "PromptTemplate" in captured.out
 
 
 def test_docs_read_spec(capsys: pytest.CaptureFixture[str]) -> None:

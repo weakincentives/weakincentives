@@ -43,7 +43,9 @@ class TestContribLazyImports:
 
         tools = contrib.tools
         assert tools is not None
-        assert hasattr(tools, "PlanningToolsSection")
+        # Check for remaining exports after cleanup
+        assert hasattr(tools, "WorkspaceDigestSection")
+        assert hasattr(tools, "InMemoryFilesystem")
 
     def test_getattr_loads_optimizers(self) -> None:
         """Verify __getattr__ lazily loads optimizers submodule."""
@@ -51,7 +53,8 @@ class TestContribLazyImports:
 
         optimizers = contrib.optimizers
         assert optimizers is not None
-        assert hasattr(optimizers, "WorkspaceDigestOptimizer")
+        # Optimizers package is now empty (reserved for future use)
+        assert optimizers.__all__ == []
 
     def test_getattr_raises_attribute_error_for_unknown(self) -> None:
         """Verify __getattr__ raises AttributeError for unknown attributes."""
@@ -62,20 +65,9 @@ class TestContribLazyImports:
 
     def test_direct_submodule_import_works(self) -> None:
         """Verify direct imports from submodules work correctly."""
-        from weakincentives.contrib.tools import PlanningToolsSection
+        from weakincentives.contrib.tools import WorkspaceDigestSection
 
-        assert PlanningToolsSection is not None
-
-    def test_tools_imported_before_optimizers(self) -> None:
-        """Verify optimizers can import from tools without circular dependency.
-
-        This tests the core issue that lazy imports solve: workspace_digest
-        in optimizers imports from tools.asteval, so if we eagerly import
-        optimizers before tools, we get a ModuleNotFoundError.
-        """
-        from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
-
-        assert WorkspaceDigestOptimizer is not None
+        assert WorkspaceDigestSection is not None
 
     def test_getattr_lazy_load_after_clearing_cache(self) -> None:
         """Verify __getattr__ lazy loading works when module not in globals.

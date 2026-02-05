@@ -169,10 +169,8 @@ class ProviderAdapterProtocol[AdapterOutputT](Protocol):
 class ToolSuiteSection(Protocol):
     """Protocol for sections that expose tool suites.
 
-    All tool suite sections (VfsToolsSection, AstevalSection,
-    PlanningToolsSection, PodmanSandboxSection, WorkspaceDigestSection)
-    should implement this protocol. This enables consistent handling
-    of session binding and cloning across all capability sections.
+    Tool suite sections should implement this protocol to enable consistent
+    handling of session binding and cloning across all capability sections.
 
     The protocol requires:
 
@@ -182,10 +180,20 @@ class ToolSuiteSection(Protocol):
 
     Example::
 
-        from weakincentives.contrib.tools import VfsToolsSection, VfsConfig
+        class MyToolSection:
+            def __init__(self, session: Session) -> None:
+                self._session = session
 
-        vfs = VfsToolsSection(session=session)
-        assert vfs.accepts_overrides is False  # Default
+            @property
+            def session(self) -> Session:
+                return self._session
+
+            @property
+            def accepts_overrides(self) -> bool:
+                return False
+
+            def clone(self, **kwargs) -> MyToolSection:
+                return MyToolSection(session=kwargs["session"])
     """
 
     @property
@@ -214,10 +222,10 @@ class ToolSuiteSection(Protocol):
 class WorkspaceSection(ToolSuiteSection, Protocol):
     """Protocol for workspace sections that manage a filesystem.
 
-    Extends ToolSuiteSection with a filesystem property. All workspace
-    sections (VfsToolsSection, PodmanSandboxSection, ClaudeAgentWorkspaceSection)
-    should implement this protocol. This enables the WorkspaceDigestOptimizer
-    to identify valid workspace sections without importing adapter-specific code.
+    Extends ToolSuiteSection with a filesystem property. Workspace sections
+    (e.g., ClaudeAgentWorkspaceSection) should implement this protocol.
+    This enables tools and optimizers to identify valid workspace sections
+    without importing adapter-specific code.
 
     Additional requirement beyond ToolSuiteSection:
 

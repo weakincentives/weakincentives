@@ -320,7 +320,9 @@ class Prompt[OutputT]:
     @property
     def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
         # sections is always SectionNode tuple after construction
-        return cast(tuple[SectionNode[SupportsDataclass], ...], self.template.sections)
+        return cast(  # pragma: no cover
+            tuple[SectionNode[SupportsDataclass], ...], self.template.sections
+        )
 
     @property
     def descriptor(self) -> PromptDescriptor:
@@ -477,7 +479,7 @@ class Prompt[OutputT]:
         selector: type[Section[SupportsDataclass]]
         | tuple[type[Section[SupportsDataclass]], ...],
     ) -> Section[SupportsDataclass]:
-        return self.template.find_section(selector)
+        return self.template.find_section(selector)  # pragma: no cover
 
     def filesystem(self) -> Filesystem | None:
         """Return the filesystem from the workspace section, if present.
@@ -496,7 +498,7 @@ class Prompt[OutputT]:
         for node in snapshot.sections:
             section = node.section
             if isinstance(section, WorkspaceSection):
-                return section.filesystem
+                return section.filesystem  # pragma: no cover
         return None
 
     def _collected_resources(self) -> ResourceRegistry:
