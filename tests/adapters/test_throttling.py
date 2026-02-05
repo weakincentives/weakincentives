@@ -10,125 +10,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Tests for throttle policy and backoff utilities."""
+
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from datetime import timedelta
 
 import pytest
 
-from tests.adapters._test_stubs import DummyChoice, DummyMessage, DummyResponse
-from tests.adapters.test_conversation_runner import RecordingBus, build_inner_loop
-from weakincentives.adapters import litellm, openai
 from weakincentives.adapters.core import PROMPT_EVALUATION_PHASE_REQUEST
 from weakincentives.adapters.throttle import (
     ThrottleError,
     ThrottlePolicy,
+    details_from_error,
     jittered_backoff,
     new_throttle_policy,
     sleep_for,
     throttle_details,
 )
-from weakincentives.deadlines import Deadline
-from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.runtime.session import Session
 
 
-def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
-    rendered = RenderedPrompt(text="system")
-    dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
-    response = DummyResponse([DummyChoice(DummyMessage(content="ok"))])
-    delays: list[timedelta] = []
-    calls = 0
-
-    def _sleep(delay: timedelta) -> None:
-        delays.append(delay)
-
-    monkeypatch.setattr("weakincentives.adapters.inner_loop.sleep_for", _sleep)
-    monkeypatch.setattr(
-        "weakincentives.adapters.throttle.random.uniform", lambda _a, b: b
-    )
-
-    def provider(
-        messages: list[dict[str, Any]],
-        tool_specs: list[dict[str, Any]],
-        tool_choice: object,
-        response_format: object,
-    ) -> DummyResponse:
-        del messages, tool_specs, tool_choice, response_format
-        nonlocal calls
-        calls += 1
-        if calls < 3:
-            raise ThrottleError(
-                "throttled",
-                prompt_name="example",
-                phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                details=throttle_details(
-                    kind="rate_limit", retry_after=timedelta(seconds=1)
-                ),
-            )
-        return response
-
-    loop = build_inner_loop(
-        rendered=rendered,
-        provider=provider,  # type: ignore[arg-type]
-        session=session,
-        throttle_policy=new_throttle_policy(max_attempts=5),
-    )
-
-    result = loop.run()
-
-    assert calls == 3
-    assert delays[0] >= timedelta(seconds=1)
-    assert result.text == "ok"
-
-
-def test_runner_bubbles_throttle_when_budget_exhausted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    rendered = RenderedPrompt(text="system")
-    dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
-
-    monkeypatch.setattr(
-        "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
-    )
-
-    def provider(
-        messages: list[dict[str, Any]],
-        tool_specs: list[dict[str, Any]],
-        tool_choice: object,
-        response_format: object,
-    ) -> DummyResponse:
-        del messages, tool_specs, tool_choice, response_format
-        raise ThrottleError(
-            "throttled",
-            prompt_name="example",
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            details=throttle_details(
-                kind="rate_limit", retry_after=timedelta(milliseconds=50)
-            ),
-        )
-
-    loop = build_inner_loop(
-        rendered=rendered,
-        provider=provider,  # type: ignore[arg-type]
-        session=session,
-        throttle_policy=new_throttle_policy(
-            max_attempts=2, max_total_delay=timedelta(milliseconds=60)
-        ),
-    )
-
-    with pytest.raises(ThrottleError) as excinfo:
-        loop.run()
-
-    error = cast(ThrottleError, excinfo.value)
-    assert error.attempts == 1
-    assert "budget" in error.message
-
-
-def testjittered_backoff_returns_retry_after(
+def test_jittered_backoff_returns_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -154,118 +56,7 @@ def test_throttle_policy_validation() -> None:
         new_throttle_policy(max_total_delay=timedelta(0))
 
 
-def test_runner_raises_on_non_retryable_throttle() -> None:
-    rendered = RenderedPrompt(text="system")
-    dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
-
-    def provider(
-        messages: list[dict[str, Any]],
-        tool_specs: list[dict[str, Any]],
-        tool_choice: object,
-        response_format: object,
-    ) -> DummyResponse:
-        del messages, tool_specs, tool_choice, response_format
-        raise ThrottleError(
-            "throttled",
-            prompt_name="example",
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            details=throttle_details(kind="rate_limit", retry_safe=False),
-        )
-
-    loop = build_inner_loop(
-        rendered=rendered,
-        provider=provider,  # type: ignore[arg-type]
-        session=session,
-        throttle_policy=new_throttle_policy(max_attempts=2),
-    )
-
-    with pytest.raises(ThrottleError):
-        loop.run()
-
-
-def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
-    rendered = RenderedPrompt(text="system")
-    dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
-    monkeypatch.setattr(
-        "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
-    )
-
-    def provider(
-        messages: list[dict[str, Any]],
-        tool_specs: list[dict[str, Any]],
-        tool_choice: object,
-        response_format: object,
-    ) -> DummyResponse:
-        del messages, tool_specs, tool_choice, response_format
-        raise ThrottleError(
-            "throttled",
-            prompt_name="example",
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            details=throttle_details(
-                kind="rate_limit", retry_after=timedelta(milliseconds=10)
-            ),
-        )
-
-    loop = build_inner_loop(
-        rendered=rendered,
-        provider=provider,  # type: ignore[arg-type]
-        session=session,
-        throttle_policy=new_throttle_policy(
-            max_attempts=1, base_delay=timedelta(milliseconds=10)
-        ),
-    )
-
-    with pytest.raises(ThrottleError):
-        loop.run()
-
-
-def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None:
-    rendered = RenderedPrompt(text="system")
-    dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
-    monkeypatch.setattr(
-        "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
-    )
-    monkeypatch.setattr(
-        "weakincentives.adapters.inner_loop.jittered_backoff",
-        lambda **_: timedelta(seconds=3),
-    )
-
-    def provider(
-        messages: list[dict[str, Any]],
-        tool_specs: list[dict[str, Any]],
-        tool_choice: object,
-        response_format: object,
-    ) -> DummyResponse:
-        del messages, tool_specs, tool_choice, response_format
-        raise ThrottleError(
-            "throttled",
-            prompt_name="example",
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            details=throttle_details(
-                kind="rate_limit", retry_after=timedelta(seconds=1)
-            ),
-        )
-
-    loop = build_inner_loop(
-        rendered=rendered,
-        provider=provider,  # type: ignore[arg-type]
-        session=session,
-        throttle_policy=new_throttle_policy(
-            max_attempts=3, base_delay=timedelta(seconds=1)
-        ),
-        deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=2)),
-    )
-
-    with pytest.raises(ThrottleError) as excinfo:
-        loop.run()
-
-    assert "Deadline expired" in str(excinfo.value)
-
-
-def testjittered_backoff_respects_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_jittered_backoff_respects_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
     policy = new_throttle_policy(
         base_delay=timedelta(seconds=1),
         max_delay=timedelta(seconds=4),
@@ -280,7 +71,7 @@ def testjittered_backoff_respects_retry_after(monkeypatch: pytest.MonkeyPatch) -
     assert delay == timedelta(seconds=2)
 
 
-def testjittered_backoff_clamps_to_retry_after(
+def test_jittered_backoff_clamps_to_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     policy = new_throttle_policy(
@@ -297,7 +88,7 @@ def testjittered_backoff_clamps_to_retry_after(
     assert delay == timedelta(seconds=1)
 
 
-def testjittered_backoff_with_non_positive_base() -> None:
+def test_jittered_backoff_with_non_positive_base() -> None:
     policy = ThrottlePolicy(
         max_attempts=1,
         base_delay=timedelta(0),
@@ -320,127 +111,56 @@ def test_sleep_for_uses_sleeper() -> None:
     assert clock.monotonic() == initial + 0.15
 
 
-class _ThrottleLikeError(Exception):
-    def __init__(self, message: str, **attrs: object) -> None:
-        super().__init__(message)
-        for name, value in attrs.items():
-            setattr(self, name, value)
-
-
-def test_openai_retry_after_extraction_paths() -> None:
-    direct = _ThrottleLikeError("rate limit", retry_after=2)
-    header = _ThrottleLikeError("rate limit", headers={"Retry-After": "3"})
-    response = _ThrottleLikeError(
-        "rate limit",
-        response={"retry_after": 4, "headers": {"retry-after": "5"}},
+def test_throttle_error_properties() -> None:
+    """Test ThrottleError exposes details through properties."""
+    details = throttle_details(
+        kind="rate_limit",
+        retry_after=timedelta(seconds=5),
+        attempts=3,
+        retry_safe=False,
     )
-    response_retry_after_only = _ThrottleLikeError(
-        "rate limit", response={"retry_after": 6}
+    error = ThrottleError(
+        "Rate limited",
+        prompt_name="test",
+        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        details=details,
     )
 
-    assert openai._retry_after_from_error(direct) == timedelta(seconds=2)
-    assert openai._retry_after_from_error(header) == timedelta(seconds=3)
-    assert openai._retry_after_from_error(response) == timedelta(seconds=5)
-    assert openai._retry_after_from_error(response_retry_after_only) == timedelta(
-        seconds=6
+    assert error.kind == "rate_limit"
+    assert error.retry_after == timedelta(seconds=5)
+    assert error.attempts == 3
+    assert error.retry_safe is False
+
+
+def test_throttle_details_defaults() -> None:
+    """Test throttle_details with default values."""
+    details = throttle_details(kind="timeout")
+
+    assert details.kind == "timeout"
+    assert details.retry_after is None
+    assert details.attempts == 1
+    assert details.retry_safe is True
+    assert details.provider_payload is None
+
+
+def test_details_from_error_extracts_and_updates() -> None:
+    """Test details_from_error extracts details and updates attempts."""
+    original_details = throttle_details(
+        kind="quota_exhausted",
+        retry_after=timedelta(seconds=30),
+        provider_payload={"error": "quota exceeded"},
+    )
+    error = ThrottleError(
+        "Quota exhausted",
+        prompt_name="test",
+        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        details=original_details,
     )
 
+    new_details = details_from_error(error, attempts=5, retry_safe=False)
 
-def test_openai_throttle_normalization_and_payloads() -> None:
-    error = _ThrottleLikeError(
-        "insufficient_quota",
-        code="insufficient_quota",
-        response={"detail": "no quota"},
-    )
-    throttle = openai._normalize_openai_throttle(error, prompt_name="prompt")
-
-    assert throttle is not None
-    assert throttle.kind == "quota_exhausted"
-    assert throttle.provider_payload == {"detail": "no quota"}
-
-    timeout_error = _ThrottleLikeError("timeout", status_code=504)
-    assert (
-        openai._normalize_openai_throttle(timeout_error, prompt_name="prompt") is None
-    )
-
-    rate_error = _ThrottleLikeError("ratelimit", status_code=429)
-    rate_throttle = openai._normalize_openai_throttle(rate_error, prompt_name="prompt")
-
-    assert rate_throttle is not None
-    assert rate_throttle.kind == "rate_limit"
-
-
-def test_litellm_retry_after_and_normalization() -> None:
-    header_error = _ThrottleLikeError("rate limited", headers={"retry-after": 1})
-    response_error = _ThrottleLikeError(
-        "rate limited",
-        response={"headers": {"Retry-After": "2"}},
-        status_code=429,
-        code="rate_limit",
-    )
-
-    assert litellm._retry_after_from_error(header_error) == timedelta(seconds=1)
-    assert litellm._retry_after_from_error(response_error) == timedelta(seconds=2)
-
-    throttle = litellm._normalize_litellm_throttle(response_error, prompt_name="prompt")
-
-    assert throttle is not None
-    assert throttle.kind == "rate_limit"
-    assert throttle.retry_after == timedelta(seconds=2)
-
-    direct_error = _ThrottleLikeError("rate limited", retry_after=timedelta(seconds=3))
-    assert litellm._retry_after_from_error(direct_error) == timedelta(seconds=3)
-
-    response_retry_error = _ThrottleLikeError(
-        "rate limited", response={"retry_after": "6"}
-    )
-    assert litellm._retry_after_from_error(response_retry_error) == timedelta(seconds=6)
-
-    quota_error = _ThrottleLikeError("insufficient_quota", code="insufficient_quota")
-    quota_throttle = litellm._normalize_litellm_throttle(
-        quota_error, prompt_name="prompt"
-    )
-
-    assert quota_throttle is not None
-    assert quota_throttle.kind == "quota_exhausted"
-
-    timeout_error = type("TimeoutLiteError", (Exception,), {})("timeout")
-    timeout_throttle = litellm._normalize_litellm_throttle(
-        timeout_error, prompt_name="prompt"
-    )
-
-    assert timeout_throttle is not None
-    assert timeout_throttle.kind == "timeout"
-
-    payload_error = _ThrottleLikeError("rate limited", response={"detail": "x"})
-    assert litellm._error_payload(payload_error) == {"detail": "x"}
-
-
-def test_retry_after_coercion_variants() -> None:
-    assert litellm._coerce_retry_after(timedelta(seconds=2)) == timedelta(seconds=2)
-    assert litellm._coerce_retry_after(timedelta(seconds=-1)) is None
-    assert litellm._coerce_retry_after("not-a-number") is None
-    assert openai._coerce_retry_after(timedelta(seconds=4)) == timedelta(seconds=4)
-    assert openai._coerce_retry_after(timedelta(seconds=-2)) is None
-    assert openai._coerce_retry_after("7") == timedelta(seconds=7)
-    assert openai._coerce_retry_after("abc") is None
-    assert openai._coerce_retry_after(1.5) == timedelta(seconds=1.5)
-    assert openai._coerce_retry_after(None) is None
-
-
-def test_openai_additional_throttle_paths() -> None:
-    timeout_class_error = type("TimeoutIssue", (Exception,), {})("timeout")
-    timeout_throttle = openai._normalize_openai_throttle(
-        timeout_class_error, prompt_name="prompt"
-    )
-
-    assert timeout_throttle is not None
-    assert timeout_throttle.kind == "timeout"
-
-    json_error = _ThrottleLikeError("other", json_body={"info": "payload"})
-    assert openai._error_payload(json_error) == {"info": "payload"}
-
-    neutral_error = _ThrottleLikeError("other")
-    assert (
-        litellm._normalize_litellm_throttle(neutral_error, prompt_name="prompt") is None
-    )
+    assert new_details.kind == "quota_exhausted"
+    assert new_details.retry_after == timedelta(seconds=30)
+    assert new_details.attempts == 5
+    assert new_details.retry_safe is False
+    assert new_details.provider_payload == {"error": "quota exceeded"}

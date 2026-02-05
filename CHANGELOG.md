@@ -30,6 +30,31 @@ reorganized with the **quickstart guide rewritten** to use a starter project and
 
 ### Breaking Changes
 
+#### Removed OpenAI and LiteLLM Adapters
+
+WINK now focuses exclusively on agentic harness integrations. The `OpenAIAdapter`
+and `LiteLLMAdapter` have been removed along with the `InnerLoop` infrastructure.
+Native SDK integrations are too low-level to qualify as execution harnesses.
+
+**Removed:**
+- `weakincentives.adapters.openai` module
+- `weakincentives.adapters.litellm` module
+- `OpenAIClientConfig`, `OpenAIModelConfig` config classes
+- `LiteLLMClientConfig`, `LiteLLMModelConfig` config classes
+- `OPENAI_ADAPTER_NAME`, `LITELLM_ADAPTER_NAME` constants
+- Optional dependencies: `weakincentives[openai]`, `weakincentives[litellm]`
+
+**Migration:**
+```python
+# Old ❌
+from weakincentives.adapters.openai import OpenAIAdapter
+adapter = OpenAIAdapter(model="gpt-4o")
+
+# New ✅
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+adapter = ClaudeAgentSDKAdapter()
+```
+
 #### EvalLoopConfig.debug_bundle_dir → debug_bundle
 
 The `debug_bundle_dir: Path | None` field is replaced with `debug_bundle:

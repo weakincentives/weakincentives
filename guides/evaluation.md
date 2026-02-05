@@ -88,9 +88,9 @@ For subjective criteria, use an LLM to score outputs:
 
 ```text
 from weakincentives.evals import llm_judge, all_of
-from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 
-judge_adapter = OpenAIAdapter(model="gpt-4o-mini")
+judge_adapter = ClaudeAgentSDKAdapter()
 
 evaluator = all_of(
     contains,

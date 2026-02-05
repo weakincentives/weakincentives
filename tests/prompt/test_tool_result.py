@@ -142,6 +142,27 @@ def test_render_tool_payload_warns_when_render_missing(
     assert getattr(record, "dataclass", None) == "PlainData"
 
 
+def test_render_tool_payload_normalizes_primitive_values_in_mapping() -> None:
+    """Test that primitive values in mappings are preserved correctly."""
+    payload = render_tool_payload(
+        {
+            "string": "text",
+            "integer": 42,
+            "floating": 3.14,
+            "boolean": True,
+            "null_val": None,
+            "nested": {"inner_key": "inner_value", "inner_num": 123},
+        }
+    )
+    decoded = json.loads(payload)
+    assert decoded["string"] == "text"
+    assert decoded["integer"] == 42
+    assert decoded["floating"] == 3.14
+    assert decoded["boolean"] is True
+    assert decoded["null_val"] is None
+    assert decoded["nested"] == {"inner_key": "inner_value", "inner_num": 123}
+
+
 class TestToolResultConvenienceConstructors:
     """Tests for ToolResult.ok() and ToolResult.error() class methods."""
 

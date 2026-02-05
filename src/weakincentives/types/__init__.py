@@ -100,12 +100,6 @@ Use these constants to identify provider adapters in a type-safe manner.
 :data:`AdapterName`
     String type alias for adapter identifiers.
 
-:data:`OPENAI_ADAPTER_NAME`
-    Canonical identifier for the OpenAI adapter: ``"openai"``
-
-:data:`LITELLM_ADAPTER_NAME`
-    Canonical identifier for the LiteLLM adapter: ``"litellm"``
-
 :data:`CLAUDE_AGENT_SDK_ADAPTER_NAME`
     Canonical identifier for the Claude Agent SDK adapter: ``"claude_agent_sdk"``
 
@@ -133,11 +127,11 @@ Examples
 
 **Adapter identification**::
 
-    from weakincentives.types import AdapterName, OPENAI_ADAPTER_NAME
+    from weakincentives.types import AdapterName, CLAUDE_AGENT_SDK_ADAPTER_NAME
 
     def get_adapter(name: AdapterName) -> object:
-        if name == OPENAI_ADAPTER_NAME:
-            return create_openai_adapter()
+        if name == CLAUDE_AGENT_SDK_ADAPTER_NAME:
+            return create_claude_agent_sdk_adapter()
         raise ValueError(f"Unknown adapter: {name}")
 
 **Design-by-contract validators**::
@@ -171,8 +165,6 @@ from __future__ import annotations
 
 from .adapter import (
     CLAUDE_AGENT_SDK_ADAPTER_NAME,
-    LITELLM_ADAPTER_NAME,
-    OPENAI_ADAPTER_NAME,
     AdapterName,
 )
 from .dataclass import (
@@ -194,8 +186,6 @@ from .json import (
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
-    "LITELLM_ADAPTER_NAME",
-    "OPENAI_ADAPTER_NAME",
     "AdapterName",
     "ContractResult",
     "DataclassFieldMapping",

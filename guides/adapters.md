@@ -34,48 +34,21 @@ The adapter handles all the provider-specific details: API formatting, tool
 schema translation, response parsing. Your code just calls `evaluate()` and gets
 back typed results.
 
-## OpenAIAdapter
+## Design Philosophy
 
-**Install:** `pip install "weakincentives[openai]"`
+WINK only integrates with agentic harnesses and their SDKs. Native SDK
+integrations (like direct OpenAI or Anthropic API calls) are too low-level to
+qualify as an execution harness.
 
-```python nocheck
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.adapters import OpenAIClientConfig, OpenAIModelConfig
+An **execution harness** provides:
 
-adapter = OpenAIAdapter(
-    model="gpt-4.1-mini",
-    client_config=OpenAIClientConfig(),
-    model_config=OpenAIModelConfig(max_tokens=800),
-)
-response = adapter.evaluate(prompt, session=session)
-```
+- Planning loops and tool orchestration
+- Sandboxing and isolation
+- Retry handling and crash recovery
+- Deadline and budget enforcement
 
-**Key configs:**
-
-- `OpenAIClientConfig(api_key=..., base_url=..., timeout=..., max_retries=...)`
-- `OpenAIModelConfig(temperature=..., max_tokens=..., top_p=..., ...)`
-
-The adapter uses OpenAI's native JSON schema response format for structured
-output. It handles tool calls synchronously, executing each tool and feeding
-results back to the model.
-
-## LiteLLMAdapter
-
-**Install:** `pip install "weakincentives[litellm]"`
-
-LiteLLM provides a unified interface to many providers. Use this when you want
-to switch between providers without changing code.
-
-```python nocheck
-from weakincentives.adapters.litellm import LiteLLMAdapter
-from weakincentives.adapters import LiteLLMClientConfig, LiteLLMModelConfig
-
-adapter = LiteLLMAdapter(
-    model="openai/gpt-4.1-mini",
-    completion_config=LiteLLMClientConfig(),
-    model_config=LiteLLMModelConfig(max_tokens=800),
-)
-```
+WINK's agent definition (prompts, tools, policies, feedback) is portable across
+harnesses. The harness owns execution; you own the definition.
 
 ## Claude Agent SDK Adapter
 
@@ -128,7 +101,7 @@ Adapters support throttle policies for retry handling on rate limits:
 from weakincentives.adapters import new_throttle_policy
 
 policy = new_throttle_policy(max_attempts=5)
-adapter = OpenAIAdapter(model="gpt-4o", throttle_policy=policy)
+adapter = ClaudeAgentSDKAdapter(throttle_policy=policy)
 ```
 
 **Full throttle configuration:**

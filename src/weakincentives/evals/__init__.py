@@ -318,11 +318,11 @@ A/B testing with multiple experiments::
 
 LLM-as-judge evaluation::
 
-    from weakincentives.adapters.openai import OpenAIAdapter
+    from weakincentives.adapters import ProviderAdapter
     from weakincentives.evals import JudgeOutput, llm_judge
 
-    # Create judge evaluator
-    judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
+    # Create judge evaluator with an adapter configured for JudgeOutput
+    judge_adapter: ProviderAdapter[JudgeOutput] = create_judge_adapter()
     evaluator = llm_judge(judge_adapter, "factual accuracy and clarity")
 
     # Use in evaluation

@@ -51,7 +51,7 @@ from weakincentives.prompt.overrides import (
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import Session, SessionProtocol
-from weakincentives.types import OPENAI_ADAPTER_NAME
+from weakincentives.types import CLAUDE_AGENT_SDK_ADAPTER_NAME
 
 
 @dataclass(slots=True, frozen=True)
@@ -166,7 +166,7 @@ class _RecordingAdapter(ProviderAdapter):
         if self._emit_tool_event:
             event = ToolInvoked(
                 prompt_name=prompt_name,
-                adapter=OPENAI_ADAPTER_NAME,
+                adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
                 name="optimize-tool",
                 params=_ToolEventParams(),
                 result=ToolResult.ok(None, message="ok"),

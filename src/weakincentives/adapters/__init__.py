@@ -28,15 +28,8 @@ All adapters share a common interface:
 
 Supported Providers
 -------------------
-The package includes adapters for three providers:
-
-**OpenAI** (``weakincentives.adapters.openai``)
-    Uses the OpenAI Responses API for models like GPT-4o. Requires the ``openai``
-    optional dependency: ``pip install weakincentives[openai]``
-
-**LiteLLM** (``weakincentives.adapters.litellm``)
-    Multi-provider gateway supporting 100+ models through a unified interface.
-    Requires the ``litellm`` optional dependency: ``pip install weakincentives[litellm]``
+WINK only integrates with agentic harnesses and their SDKs. Native SDK integrations
+are too low-level to qualify as an execution harness.
 
 **Claude Agent SDK** (``weakincentives.adapters.claude_agent_sdk``)
     Full agentic capabilities via Claude Code's SDK with native tool execution,
@@ -45,13 +38,7 @@ The package includes adapters for three providers:
 
 Configuration Classes
 ---------------------
-Each adapter has typed configuration dataclasses:
-
 - :class:`LLMConfig`: Base model parameters (temperature, max_tokens, etc.)
-- :class:`OpenAIClientConfig`: OpenAI client settings (api_key, base_url, etc.)
-- :class:`OpenAIModelConfig`: OpenAI-specific model parameters
-- :class:`LiteLLMClientConfig`: LiteLLM completion settings
-- :class:`LiteLLMModelConfig`: LiteLLM-specific model parameters
 
 Throttle Handling
 -----------------
@@ -64,43 +51,6 @@ configure exponential backoff retry behavior:
 - ``max_delay``: Maximum backoff delay
 - ``max_total_delay``: Maximum total time to spend retrying
 
-Usage Example
--------------
-Basic OpenAI adapter usage::
-
-    from weakincentives import Prompt, PromptTemplate, MarkdownSection
-    from weakincentives.adapters.openai import OpenAIAdapter, OpenAIModelConfig
-    from weakincentives.runtime import Session, InProcessDispatcher
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True)
-    class Summary:
-        title: str
-        key_points: list[str]
-
-    template = PromptTemplate[Summary](
-        ns="example",
-        key="summarize",
-        sections=(
-            MarkdownSection(
-                title="Task",
-                key="task",
-                template="Summarize the following text: {{ text }}",
-            ),
-        ),
-    )
-
-    adapter = OpenAIAdapter(
-        model="gpt-4o",
-        model_config=OpenAIModelConfig(temperature=0.7, max_tokens=1000),
-    )
-
-    session = Session(dispatcher=InProcessDispatcher())
-    prompt = Prompt(template).bind(params={"text": "..."})
-
-    response = adapter.evaluate(prompt, session=session)
-    print(response.output)  # Summary(title=..., key_points=[...])
-
 Public Exports
 --------------
 Core Interfaces:
@@ -110,10 +60,6 @@ Core Interfaces:
 
 Configuration:
     - :class:`LLMConfig`: Base model parameter configuration
-    - :class:`OpenAIClientConfig`: OpenAI client instantiation settings
-    - :class:`OpenAIModelConfig`: OpenAI-specific model parameters
-    - :class:`LiteLLMClientConfig`: LiteLLM completion settings
-    - :class:`LiteLLMModelConfig`: LiteLLM-specific model parameters
 
 Throttle Handling:
     - :class:`ThrottleError`: Exception for rate limit/quota/timeout errors
@@ -122,14 +68,10 @@ Throttle Handling:
 
 Adapter Names:
     - :data:`AdapterName`: Type alias for adapter identifiers
-    - :data:`OPENAI_ADAPTER_NAME`: Identifier for OpenAI adapter
-    - :data:`LITELLM_ADAPTER_NAME`: Identifier for LiteLLM adapter
     - :data:`CLAUDE_AGENT_SDK_ADAPTER_NAME`: Identifier for Claude Agent SDK adapter
 
 See Also
 --------
-- :mod:`weakincentives.adapters.openai`: OpenAI adapter implementation
-- :mod:`weakincentives.adapters.litellm`: LiteLLM adapter implementation
 - :mod:`weakincentives.adapters.claude_agent_sdk`: Claude Agent SDK adapter
 - :mod:`weakincentives.prompt`: Prompt and template construction
 - :mod:`weakincentives.runtime`: Session and event infrastructure
@@ -139,16 +81,10 @@ from __future__ import annotations
 
 from ..types import (
     CLAUDE_AGENT_SDK_ADAPTER_NAME,
-    LITELLM_ADAPTER_NAME,
-    OPENAI_ADAPTER_NAME,
     AdapterName,
 )
 from .config import (
-    LiteLLMClientConfig,
-    LiteLLMModelConfig,
     LLMConfig,
-    OpenAIClientConfig,
-    OpenAIModelConfig,
 )
 from .core import (
     PromptEvaluationError,
@@ -159,14 +95,8 @@ from .throttle import ThrottleError, ThrottlePolicy, new_throttle_policy
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
-    "LITELLM_ADAPTER_NAME",
-    "OPENAI_ADAPTER_NAME",
     "AdapterName",
     "LLMConfig",
-    "LiteLLMClientConfig",
-    "LiteLLMModelConfig",
-    "OpenAIClientConfig",
-    "OpenAIModelConfig",
     "PromptEvaluationError",
     "PromptResponse",
     "ProviderAdapter",

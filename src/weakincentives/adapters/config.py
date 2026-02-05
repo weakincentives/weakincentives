@@ -15,17 +15,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, override
+from typing import Any
 
 from ..dataclasses import FrozenDataclass
 from ._api_types import LLMRequestParams
 
 __all__ = [
     "LLMConfig",
-    "LiteLLMClientConfig",
-    "LiteLLMModelConfig",
-    "OpenAIClientConfig",
-    "OpenAIModelConfig",
 ]
 
 
@@ -76,181 +72,6 @@ class LLMConfig:
             params["stop"] = list(self.stop)
         if self.seed is not None:
             params["seed"] = self.seed
-        return params
-
-
-@FrozenDataclass()
-class OpenAIClientConfig:
-    """Configuration for OpenAI client instantiation.
-
-    These parameters are passed to the OpenAI client constructor.
-
-    Attributes:
-        api_key: OpenAI API key. None uses the OPENAI_API_KEY environment variable.
-        base_url: Base URL for API requests. None uses the default OpenAI endpoint.
-        organization: OpenAI organization ID. None uses no organization header.
-        timeout: Request timeout in seconds. None uses the client default.
-        max_retries: Maximum number of retries. None uses the client default.
-    """
-
-    api_key: str | None = None
-    base_url: str | None = None
-    organization: str | None = None
-    timeout: float | None = None
-    max_retries: int | None = None
-
-    def to_client_kwargs(self) -> dict[str, Any]:
-        """Convert non-None fields to client constructor kwargs."""
-        kwargs: dict[str, Any] = {}
-        if self.api_key is not None:
-            kwargs["api_key"] = self.api_key
-        if self.base_url is not None:
-            kwargs["base_url"] = self.base_url
-        if self.organization is not None:
-            kwargs["organization"] = self.organization
-        if self.timeout is not None:
-            kwargs["timeout"] = self.timeout
-        if self.max_retries is not None:
-            kwargs["max_retries"] = self.max_retries
-        return kwargs
-
-
-@FrozenDataclass()
-class OpenAIModelConfig(LLMConfig):
-    """OpenAI-specific model configuration.
-
-    Extends LLMConfig with parameters specific to OpenAI's API.
-
-    Attributes:
-        logprobs: Whether to return log probabilities. None uses the provider default.
-        top_logprobs: Number of top log probabilities to return (0-20). Requires
-            logprobs=True. None uses the provider default.
-        parallel_tool_calls: Whether to allow parallel tool calls. Defaults to True.
-        store: Whether to store the conversation for fine-tuning. None uses the
-            provider default.
-        user: Unique identifier for the end-user. None omits the field.
-
-    Notes:
-        The OpenAI Responses API does not accept ``seed``, ``stop``,
-        ``presence_penalty``, or ``frequency_penalty``. If any of these fields
-        are provided, ``OpenAIModelConfig`` raises ``ValueError`` so callers fail
-        fast instead of issuing an invalid request.
-    """
-
-    logprobs: bool | None = None
-    top_logprobs: int | None = None
-    parallel_tool_calls: bool | None = True
-    store: bool | None = None
-    user: str | None = None
-
-    def __post_init__(self) -> None:
-        unsupported: dict[str, object | None] = {
-            "seed": self.seed,
-            "stop": self.stop,
-            "presence_penalty": self.presence_penalty,
-            "frequency_penalty": self.frequency_penalty,
-        }
-
-        set_unsupported = [
-            key for key, value in unsupported.items() if value is not None
-        ]
-        if set_unsupported:
-            raise ValueError(
-                "Unsupported OpenAI Responses parameters: "
-                + ", ".join(sorted(set_unsupported))
-                + ". Remove them from OpenAIModelConfig."
-            )
-
-    def _add_core_params(self, params: LLMRequestParams) -> None:
-        """Add supported core request parameters."""
-        if self.temperature is not None:
-            params["temperature"] = self.temperature
-        if self.max_tokens is not None:
-            params["max_output_tokens"] = self.max_tokens
-        if self.top_p is not None:
-            params["top_p"] = self.top_p
-
-    def _add_responses_api_params(self, params: LLMRequestParams) -> None:
-        """Add OpenAI Responses API-specific parameters."""
-        if self.logprobs is not None:
-            params["logprobs"] = self.logprobs
-        if self.top_logprobs is not None:
-            params["top_logprobs"] = self.top_logprobs
-        if self.parallel_tool_calls is not None:
-            params["parallel_tool_calls"] = self.parallel_tool_calls
-        if self.store is not None:
-            params["store"] = self.store
-        if self.user is not None:
-            params["user"] = self.user
-
-    @override
-    def to_request_params(self) -> LLMRequestParams:
-        """Convert non-None fields to request parameters.
-
-        The Responses API uses ``max_output_tokens`` instead of ``max_tokens``,
-        so this override renames the key accordingly.
-        """
-        params: LLMRequestParams = {}
-        self._add_core_params(params)
-        self._add_responses_api_params(params)
-        return params
-
-
-@FrozenDataclass()
-class LiteLLMClientConfig:
-    """Configuration for LiteLLM client instantiation.
-
-    These parameters are merged into LiteLLM completion calls.
-
-    Attributes:
-        api_key: API key for the underlying provider. None uses environment variables.
-        api_base: Base URL for API requests. None uses the provider default.
-        timeout: Request timeout in seconds. None uses the client default.
-        num_retries: Number of retries on failure. None uses the client default.
-    """
-
-    api_key: str | None = None
-    api_base: str | None = None
-    timeout: float | None = None
-    num_retries: int | None = None
-
-    def to_completion_kwargs(self) -> dict[str, Any]:
-        """Convert non-None fields to completion kwargs."""
-        kwargs: dict[str, Any] = {}
-        if self.api_key is not None:
-            kwargs["api_key"] = self.api_key
-        if self.api_base is not None:
-            kwargs["api_base"] = self.api_base
-        if self.timeout is not None:
-            kwargs["timeout"] = self.timeout
-        if self.num_retries is not None:
-            kwargs["num_retries"] = self.num_retries
-        return kwargs
-
-
-@FrozenDataclass()
-class LiteLLMModelConfig(LLMConfig):
-    """LiteLLM-specific model configuration.
-
-    Extends LLMConfig with parameters that LiteLLM passes through to
-    the underlying provider.
-
-    Attributes:
-        n: Number of completions to generate. None uses the provider default.
-        user: Unique identifier for the end-user. None omits the field.
-    """
-
-    n: int | None = None
-    user: str | None = None
-
-    @override
-    def to_request_params(self) -> LLMRequestParams:
-        """Convert non-None fields to request parameters."""
-        params = LLMConfig.to_request_params(self)
-        if self.n is not None:
-            params["n"] = self.n
-        if self.user is not None:
-            params["user"] = self.user
         return params
 
 

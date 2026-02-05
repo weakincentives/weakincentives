@@ -13,8 +13,8 @@ live in the prompt definition.
 **Event-driven state.** All mutations flow through pure reducers processing
 typed events. State is immutable and inspectable via snapshots.
 
-**Provider-agnostic.** Same agent definition works across OpenAI, LiteLLM, and
-Claude Agent SDK via adapter abstraction.
+**Provider-agnostic.** Same agent definition works across agentic harnesses via
+adapter abstraction. WINK integrates with execution harnesses like Claude Agent SDK.
 
 ______________________________________________________________________
 
@@ -161,8 +161,6 @@ weakincentives.runtime.session    # Slice ops, reducers, snapshots
 weakincentives.runtime.events     # Dispatcher, event types
 weakincentives.runtime.mailbox    # Message queues
 weakincentives.adapters           # Provider base, config, throttling
-weakincentives.adapters.openai    # OpenAIAdapter
-weakincentives.adapters.litellm   # LiteLLMAdapter
 weakincentives.adapters.claude_agent_sdk  # ClaudeAgentSDKAdapter
 weakincentives.contrib.tools      # VFS, planning, asteval, podman
 weakincentives.contrib.optimizers # WorkspaceDigestOptimizer
@@ -221,8 +219,7 @@ from weakincentives.runtime import (
 )
 
 # Adapters
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.adapters.litellm import LiteLLMAdapter
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 from weakincentives.adapters import PromptResponse
 
 # Contrib tools
@@ -295,7 +292,7 @@ from dataclasses import dataclass
 
 from weakincentives import Prompt, MarkdownSection
 from weakincentives.prompt import PromptTemplate
-from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 from weakincentives.runtime import Session
 
 
@@ -324,7 +321,7 @@ template = PromptTemplate[TaskResult](
 )
 
 session = Session()
-adapter = OpenAIAdapter(model="gpt-4o-mini")
+adapter = ClaudeAgentSDKAdapter()
 prompt = Prompt(template).bind(TaskParams(objective="Review the auth module"))
 response = adapter.evaluate(prompt, session=session)
 result: TaskResult = response.output
@@ -542,16 +539,12 @@ session.restore(snapshot)
 Provider-agnostic evaluation interface.
 
 ```python nocheck
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.adapters.litellm import LiteLLMAdapter
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 from weakincentives.adapters import PromptResponse
 from weakincentives.errors import DeadlineExceededError
 
-# Basic
-adapter = OpenAIAdapter(model="gpt-4o")
-
-# LiteLLM (multi-provider)
-adapter = LiteLLMAdapter(model="claude-3-sonnet-20240229")
+# Claude Agent SDK (recommended)
+adapter = ClaudeAgentSDKAdapter()
 
 # Evaluate
 response = adapter.evaluate(
@@ -890,9 +883,7 @@ ______________________________________________________________________
 ### Which Adapter?
 
 ```text
-Need Claude Code native tools? → ClaudeAgentSDKAdapter
-Need multi-provider support?   → LiteLLMAdapter
-OpenAI only?                   → OpenAIAdapter
+Need agentic harness?          → ClaudeAgentSDKAdapter (recommended)
 ```
 
 ### Which Workspace Tool?
@@ -988,7 +979,7 @@ ______________________________________________________________________
 
 ```text
 src/weakincentives/
-├── adapters/           # OpenAI, LiteLLM, Claude Agent SDK
+├── adapters/           # Claude Agent SDK
 │   └── claude_agent_sdk/
 ├── cli/                # wink CLI
 ├── contrib/

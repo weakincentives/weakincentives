@@ -843,21 +843,11 @@ class AgentLoop[UserRequestT, OutputT](
 
     def _get_adapter_name(self) -> str:
         """Get the canonical adapter name for the current adapter."""
-        from ..adapters import (
-            CLAUDE_AGENT_SDK_ADAPTER_NAME,
-            LITELLM_ADAPTER_NAME,
-            OPENAI_ADAPTER_NAME,
-        )
+        from ..adapters import CLAUDE_AGENT_SDK_ADAPTER_NAME
         from ..adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
-        from ..adapters.litellm import LiteLLMAdapter
-        from ..adapters.openai import OpenAIAdapter
 
         if isinstance(self._adapter, ClaudeAgentSDKAdapter):
             return CLAUDE_AGENT_SDK_ADAPTER_NAME  # pragma: no cover
-        if isinstance(self._adapter, OpenAIAdapter):
-            return OPENAI_ADAPTER_NAME  # pragma: no cover
-        if isinstance(self._adapter, LiteLLMAdapter):
-            return LITELLM_ADAPTER_NAME  # pragma: no cover
         return type(self._adapter).__name__
 
     @staticmethod

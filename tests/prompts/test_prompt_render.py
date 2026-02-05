@@ -380,6 +380,20 @@ def test_rendered_prompt_str_returns_text() -> None:
     assert str(rendered) == "Rendered output"
 
 
+def test_rendered_prompt_container_none_without_structured_output() -> None:
+    """Test container property returns None when structured_output is not set."""
+    rendered = RenderedPrompt(text="No structured output")
+
+    assert rendered.container is None
+
+
+def test_rendered_prompt_allow_extra_keys_none_without_structured_output() -> None:
+    """Test allow_extra_keys property returns None when structured_output is not set."""
+    rendered = RenderedPrompt(text="No structured output")
+
+    assert rendered.allow_extra_keys is None
+
+
 def test_prompt_bind_mutates_and_replaces_params() -> None:
     prompt = PromptTemplate(
         ns="tests/prompts",

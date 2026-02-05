@@ -123,8 +123,8 @@ def llm_judge(
         Evaluator function that scores string outputs.
 
     Example:
-        >>> from weakincentives.adapters.openai import OpenAIAdapter
-        >>> judge_adapter: OpenAIAdapter[JudgeOutput] = OpenAIAdapter(model="gpt-4o-mini")
+        >>> from weakincentives.adapters import ProviderAdapter
+        >>> judge_adapter: ProviderAdapter[JudgeOutput] = create_judge_adapter()
         >>> evaluator = llm_judge(judge_adapter, "factual accuracy")
         >>> score = evaluator("The capital of France is Paris.", "Paris")
     """

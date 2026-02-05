@@ -260,7 +260,7 @@ try:
     from weakincentives.runtime import *
     from weakincentives.runtime.session import *
     from weakincentives.prompt import *
-    from weakincentives.adapters.openai import *
+    from weakincentives.adapters.claude_agent_sdk import *
     from weakincentives.contrib.tools import *
     from weakincentives.dbc import *
     from weakincentives.serde import *
