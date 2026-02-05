@@ -18,11 +18,15 @@ from datetime import timedelta
 
 import pytest
 
+from weakincentives.adapters.core import PROMPT_EVALUATION_PHASE_REQUEST
 from weakincentives.adapters.throttle import (
+    ThrottleError,
     ThrottlePolicy,
+    details_from_error,
     jittered_backoff,
     new_throttle_policy,
     sleep_for,
+    throttle_details,
 )
 
 
@@ -105,3 +109,58 @@ def test_sleep_for_uses_sleeper() -> None:
 
     # FakeClock advances time on sleep instead of blocking
     assert clock.monotonic() == initial + 0.15
+
+
+def test_throttle_error_properties() -> None:
+    """Test ThrottleError exposes details through properties."""
+    details = throttle_details(
+        kind="rate_limit",
+        retry_after=timedelta(seconds=5),
+        attempts=3,
+        retry_safe=False,
+    )
+    error = ThrottleError(
+        "Rate limited",
+        prompt_name="test",
+        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        details=details,
+    )
+
+    assert error.kind == "rate_limit"
+    assert error.retry_after == timedelta(seconds=5)
+    assert error.attempts == 3
+    assert error.retry_safe is False
+
+
+def test_throttle_details_defaults() -> None:
+    """Test throttle_details with default values."""
+    details = throttle_details(kind="timeout")
+
+    assert details.kind == "timeout"
+    assert details.retry_after is None
+    assert details.attempts == 1
+    assert details.retry_safe is True
+    assert details.provider_payload is None
+
+
+def test_details_from_error_extracts_and_updates() -> None:
+    """Test details_from_error extracts details and updates attempts."""
+    original_details = throttle_details(
+        kind="quota_exhausted",
+        retry_after=timedelta(seconds=30),
+        provider_payload={"error": "quota exceeded"},
+    )
+    error = ThrottleError(
+        "Quota exhausted",
+        prompt_name="test",
+        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        details=original_details,
+    )
+
+    new_details = details_from_error(error, attempts=5, retry_safe=False)
+
+    assert new_details.kind == "quota_exhausted"
+    assert new_details.retry_after == timedelta(seconds=30)
+    assert new_details.attempts == 5
+    assert new_details.retry_safe is False
+    assert new_details.provider_payload == {"error": "quota exceeded"}
