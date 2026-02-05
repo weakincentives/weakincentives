@@ -488,3 +488,93 @@ class TestAutoFormatChecker:
         assert result.status == "failed"
         assert any("Command not found" in d.message for d in result.diagnostics)
         assert any("uv sync" in d.message for d in result.diagnostics)
+
+    def test_file_list_parser_extracts_files_locally(self) -> None:
+        """Locally with file_list_parser, should report file names from text output."""
+
+        def parse_files(output: str) -> list[str]:
+            """Parse files from 'Error: File "..." is not formatted.' pattern."""
+            import re
+
+            return sorted(
+                m.group(1)
+                for m in re.finditer(r'Error: File "([^"]+)" is not formatted\.', output)
+            )
+
+        check_output = (
+            'Error: File "docs/README.md" is not formatted.\n'
+            'Error: File "specs/DESIGN.md" is not formatted.'
+        )
+        checker = AutoFormatChecker(
+            name="markdown",
+            description="Test markdown",
+            check_command=["bash", "-c", f"echo '{check_output}'; exit 1"],
+            fix_command=["true"],
+            file_list_parser=parse_files,
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            result = checker.run()
+        assert result.status == "passed"
+        info_diags = [d for d in result.diagnostics if d.severity == "info"]
+        assert len(info_diags) == 1
+        assert "docs/README.md" in info_diags[0].message
+        assert "specs/DESIGN.md" in info_diags[0].message
+
+    def test_file_list_parser_no_changes_needed(self) -> None:
+        """Locally with file_list_parser, no diagnostics when nothing needs formatting."""
+
+        def parse_files(_output: str) -> list[str]:
+            return []
+
+        checker = AutoFormatChecker(
+            name="markdown",
+            description="Test markdown",
+            check_command=["true"],  # Exit 0 means nothing needs formatting
+            fix_command=["true"],
+            file_list_parser=parse_files,
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            result = checker.run()
+        assert result.status == "passed"
+        assert len(result.diagnostics) == 0
+
+    def test_file_list_parser_check_only_in_ci(self) -> None:
+        """In CI, file_list_parser should not be used - check-only mode."""
+
+        def parse_files(_output: str) -> list[str]:
+            return ["should_not_see_this.md"]
+
+        checker = AutoFormatChecker(
+            name="markdown",
+            description="Test markdown",
+            check_command=["true"],
+            fix_command=["echo", "should not run"],
+            file_list_parser=parse_files,
+        )
+        with mock.patch.dict(os.environ, {"CI": "true"}, clear=True):
+            result = checker.run()
+        assert result.status == "passed"
+        # No info diagnostics in CI mode
+        info_diags = [d for d in result.diagnostics if d.severity == "info"]
+        assert len(info_diags) == 0
+
+    def test_file_list_parser_single_file(self) -> None:
+        """Locally with single file, message should be singular."""
+
+        def parse_files(_output: str) -> list[str]:
+            return ["single.md"]
+
+        checker = AutoFormatChecker(
+            name="markdown",
+            description="Test markdown",
+            check_command=["bash", "-c", "exit 1"],
+            fix_command=["true"],
+            file_list_parser=parse_files,
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            result = checker.run()
+        assert result.status == "passed"
+        info_diags = [d for d in result.diagnostics if d.severity == "info"]
+        assert len(info_diags) == 1
+        assert "1 file" in info_diags[0].message
+        assert "single.md" in info_diags[0].message
