@@ -151,8 +151,6 @@ Session state keeps growing over time.
 **Fix**: Install the appropriate extra:
 
 ```bash
-pip install "weakincentives[openai]"           # For OpenAIAdapter
-pip install "weakincentives[litellm]"          # For LiteLLMAdapter
 pip install "weakincentives[claude-agent-sdk]" # For ClaudeAgentSDKAdapter
 pip install "weakincentives[asteval]"          # For AstevalSection
 pip install "weakincentives[podman]"           # For PodmanSandboxSection

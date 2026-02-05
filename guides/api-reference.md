@@ -117,8 +117,7 @@ PromptResponse(prompt_name, text, output)
 
 **Configs:**
 
-- `OpenAIClientConfig`, `OpenAIModelConfig`
-- `LiteLLMClientConfig`, `LiteLLMModelConfig`
+- `LLMConfig` (base model parameters)
 
 **Resources:**
 

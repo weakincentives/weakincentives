@@ -116,15 +116,15 @@ Run `adapter.evaluate` behind a flag:
 ```python nocheck
 import os
 import pytest
-from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 
 
 @pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="Requires OPENAI_API_KEY"
+    not os.environ.get("ANTHROPIC_API_KEY"),
+    reason="Requires ANTHROPIC_API_KEY"
 )
 def test_agent_answers_question():
-    adapter = OpenAIAdapter(model="gpt-4o-mini")
+    adapter = ClaudeAgentSDKAdapter()
     session = Session()
 
     prompt = Prompt(template).bind(QuestionParams(question="What is 2+2?"))
