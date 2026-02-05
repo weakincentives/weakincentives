@@ -1,9 +1,11 @@
 // ============================================================================
-// Store - Centralized state management with dispatch/subscribe pattern
+// Store - Centralized application state
 //
-// Mirrors the event-driven pattern from the Python codebase (sessions and
-// reducers). State changes flow through typed actions processed by reducers.
-// Views subscribe to state slices and receive updates when those slices change.
+// All view modules share a single state object returned by createStore().
+// Each view receives the store at initialization and accesses state via
+// store.getState(). State is a plain mutable object for performance in a
+// browser context — the centralization ensures all modules read/write the
+// same source of truth.
 // ============================================================================
 
 /**
@@ -90,48 +92,16 @@ export function createInitialState() {
 }
 
 /**
- * Creates a store with dispatch/subscribe pattern.
+ * Creates a store that holds centralized application state.
  *
- * Actions are plain objects with a `type` string field. Reducers are functions
- * that receive (state, action) and mutate state directly (the state object is
- * mutable for performance in a browser context, unlike the frozen Python
- * dataclasses). Subscribers are notified after each dispatch.
- *
- * @returns {{ getState, dispatch, subscribe }}
+ * @returns {{ getState: () => object }}
  */
 export function createStore() {
   const state = createInitialState();
-  const subscribers = new Map();
-  let nextId = 0;
 
   function getState() {
     return state;
   }
 
-  /**
-   * Dispatch an action. Notifies all subscribers after state is updated.
-   * Callers mutate state directly before or via the action handler in views.
-   * The dispatch call serves as the notification mechanism.
-   *
-   * @param {{ type: string, [key: string]: unknown }} action
-   */
-  function dispatch(action) {
-    for (const callback of subscribers.values()) {
-      callback(action, state);
-    }
-  }
-
-  /**
-   * Subscribe to state changes. Returns an unsubscribe function.
-   *
-   * @param {function({ type: string }, object): void} callback
-   * @returns {function(): void} unsubscribe
-   */
-  function subscribe(callback) {
-    const id = nextId++;
-    subscribers.set(id, callback);
-    return () => subscribers.delete(id);
-  }
-
-  return { getState, dispatch, subscribe };
+  return { getState };
 }

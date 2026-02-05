@@ -4,7 +4,7 @@
 //
 // Each view is a self-contained module in views/ that owns its DOM elements,
 // event listeners, and rendering. State lives in a centralized store accessed
-// via store.getState(). Views subscribe to state changes via the store.
+// via store.getState().
 // ============================================================================
 
 import { createStore } from "./store.js";
@@ -234,6 +234,7 @@ async function switchBundle(path) {
     });
     resetViewState();
     await sessionsView.refreshMeta();
+    renderBundleInfo(state.meta);
     await refreshBundles();
     showToast("Switched bundle", "success");
   } catch (error) {
@@ -253,6 +254,7 @@ async function reloadBundle() {
     await fetchJSON("/api/reload", { method: "POST" });
     resetViewState();
     await sessionsView.refreshMeta();
+    renderBundleInfo(state.meta);
     await refreshBundles();
     showToast("Bundle reloaded", "success");
   } catch (error) {
@@ -276,12 +278,6 @@ function navigateBundle(delta) {
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
-
-async function refreshMeta() {
-  const meta = await fetchJSON("/api/meta");
-  state.meta = meta;
-  renderBundleInfo(meta);
-}
 
 document.addEventListener("DOMContentLoaded", async () => {
   setLoading(true);
@@ -314,9 +310,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     logsView.initVirtualScroller();
     transcriptView.initVirtualScroller();
 
-    // Load initial data
-    await refreshMeta();
+    // Load initial data (sessionsView.refreshMeta fetches /api/meta and
+    // sets state.meta, so we render bundle info from that same response
+    // rather than making a duplicate request)
     await sessionsView.refreshMeta();
+    renderBundleInfo(state.meta);
     await refreshBundles();
   } catch (error) {
     showToast(`Load failed: ${error.message}`, "error");
