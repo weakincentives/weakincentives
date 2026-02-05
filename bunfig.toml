@@ -13,6 +13,5 @@ coveragePathIgnorePatterns = [
   "src/weakincentives/cli/static/app.js",
   "src/weakincentives/cli/static/components/virtual-scroller.js",
   "src/weakincentives/cli/static/components/filter-chips.js",
-  "src/weakincentives/cli/static/components/zoom-json-tree.js",
-  "src/weakincentives/cli/static/components/json-tree.js"
+  "src/weakincentives/cli/static/components/zoom-json-tree.js"
 ]
