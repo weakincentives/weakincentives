@@ -252,6 +252,7 @@ Read before modifying related code:
 | `GUARDRAILS.md` | Tool policies, feedback providers, task completion |
 | `ADAPTERS.md` | Provider adapters, throttling |
 | `CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
+| `CODEX_APP_SERVER.md` | Codex App Server adapter, stdio JSON-RPC |
 | `OPENCODE_ACP_ADAPTER.md` | OpenCode ACP adapter, workspace |
 | `AGENT_LOOP.md` | AgentLoop orchestration |
 | `POLICIES_OVER_WORKFLOWS.md` | Design philosophy |
