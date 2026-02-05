@@ -1,0 +1,12 @@
+{
+  "model": "claude-opus-4-6",
+  "permissions": {
+    "allow": [
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr checks:*)",
+      "WebSearch"
+    ]
+  }
+}
