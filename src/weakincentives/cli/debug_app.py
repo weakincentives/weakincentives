@@ -895,6 +895,17 @@ class _DebugAppHandlers:
                         }
                     )
 
+            # Check for markdown by extension
+            if lower_path.endswith(".md"):
+                try:
+                    text = content.decode("utf-8")
+                    html = _markdown.render(text)
+                    return JSONResponse(
+                        {"content": text, "html": html, "type": "markdown"}
+                    )
+                except UnicodeDecodeError:
+                    return JSONResponse({"content": None, "type": "binary"})
+
             # Try to parse as JSON
             try:
                 parsed = json.loads(content.decode("utf-8"))

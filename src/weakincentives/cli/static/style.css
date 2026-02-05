@@ -3088,6 +3088,16 @@ select:focus-visible {
   max-height: calc(100vh - 320px);
 }
 
+.filesystem-markdown {
+  white-space: normal;
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+.filesystem-markdown .markdown-rendered {
+  background: var(--color-surface);
+}
+
 .mono {
   font-family: var(--font-mono);
 }

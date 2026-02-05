@@ -1246,6 +1246,73 @@ def test_file_endpoint_image_case_insensitive(tmp_path: Path) -> None:
         assert content["type"] == "image"
 
 
+def test_file_endpoint_markdown(tmp_path: Path) -> None:
+    """Test that .md files are returned with rendered HTML."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    md_content = "# Hello\n\nSome **bold** text."
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/filesystem/README.md", md_content)
+
+    logger = debug_app.get_logger("test.file.markdown")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files/filesystem/README.md")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "markdown"
+    assert data["content"] == md_content
+    assert "<h1>" in data["html"]
+    assert "<strong>bold</strong>" in data["html"]
+
+
+def test_file_endpoint_markdown_case_insensitive(tmp_path: Path) -> None:
+    """Test that .MD files (uppercase) are also detected as markdown."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    md_content = "# Title\n\nParagraph."
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/filesystem/NOTES.MD", md_content)
+
+    logger = debug_app.get_logger("test.file.markdown.case")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files/filesystem/NOTES.MD")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "markdown"
+    assert data["content"] == md_content
+    assert "<h1>" in data["html"]
+
+
+def test_file_endpoint_markdown_binary_fallback(tmp_path: Path) -> None:
+    """Test that a .md file with invalid UTF-8 is returned as binary."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    # Invalid UTF-8 bytes
+    binary_data = b"\x80\x81\x82\xff\xfe"
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/filesystem/broken.md", binary_data)
+
+    logger = debug_app.get_logger("test.file.markdown.binary")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files/filesystem/broken.md")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "binary"
+    assert data["content"] is None
+
+
 def test_bundle_store_close(tmp_path: Path) -> None:
     """Test that BundleStore can be closed."""
     bundle_path = _create_test_bundle(tmp_path, ["one"])

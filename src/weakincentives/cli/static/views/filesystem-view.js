@@ -109,9 +109,57 @@ export function initFilesystemView({ state, fetchJSON, showToast }) {
     els.viewer.innerHTML = `<pre class="file-content">${escapeHtml(content)}</pre>`;
   }
 
+  function renderMarkdownFile(result) {
+    state.fileContent = result.content;
+    const container = document.createElement("div");
+    container.className = "filesystem-markdown";
+
+    const toggle = document.createElement("div");
+    toggle.className = "markdown-toggle";
+    const renderedBtn = document.createElement("button");
+    renderedBtn.type = "button";
+    renderedBtn.textContent = "Rendered";
+    renderedBtn.className = "active";
+    const rawBtn = document.createElement("button");
+    rawBtn.type = "button";
+    rawBtn.textContent = "Raw";
+    toggle.appendChild(renderedBtn);
+    toggle.appendChild(rawBtn);
+
+    const renderedSection = document.createElement("div");
+    renderedSection.className = "markdown-section";
+    renderedSection.innerHTML = `<div class="markdown-rendered">${result.html}</div>`;
+
+    const rawSection = document.createElement("div");
+    rawSection.className = "markdown-section";
+    rawSection.style.display = "none";
+    rawSection.innerHTML = `<pre class="markdown-raw">${escapeHtml(result.content)}</pre>`;
+
+    renderedBtn.addEventListener("click", () => {
+      renderedBtn.classList.add("active");
+      rawBtn.classList.remove("active");
+      renderedSection.style.display = "flex";
+      rawSection.style.display = "none";
+    });
+    rawBtn.addEventListener("click", () => {
+      rawBtn.classList.add("active");
+      renderedBtn.classList.remove("active");
+      rawSection.style.display = "flex";
+      renderedSection.style.display = "none";
+    });
+
+    container.appendChild(toggle);
+    container.appendChild(renderedSection);
+    container.appendChild(rawSection);
+    els.viewer.innerHTML = "";
+    els.viewer.appendChild(container);
+  }
+
   function renderFileResult(result, displayPath) {
     if (result.type === "image") {
       renderImageFile(result, displayPath);
+    } else if (result.type === "markdown") {
+      renderMarkdownFile(result);
     } else if (result.type === "binary") {
       // biome-ignore lint/nursery/noSecrets: HTML string, not a secret
       els.viewer.innerHTML = '<p class="muted">Binary file cannot be displayed</p>';
