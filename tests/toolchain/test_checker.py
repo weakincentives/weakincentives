@@ -309,7 +309,7 @@ class TestAutoFormatChecker:
         assert any("Timed out" in d.message for d in result.diagnostics)
 
     def test_no_files_in_output_means_nothing_changed(self) -> None:
-        """When no .py files in output, nothing needed formatting."""
+        """When no .py files and no count in output, nothing needed formatting."""
         checker = AutoFormatChecker(
             name="format",
             description="Test format",
@@ -320,6 +320,52 @@ class TestAutoFormatChecker:
             result = checker.run()
         assert result.status == "passed"
         assert len(result.diagnostics) == 0
+
+    def test_parse_reformat_count_singular(self) -> None:
+        """Should parse '1 file reformatted' from output."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["true"],
+        )
+        assert checker._parse_reformat_count("1 file reformatted") == 1
+
+    def test_parse_reformat_count_plural(self) -> None:
+        """Should parse 'N files reformatted' from output."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["true"],
+        )
+        assert checker._parse_reformat_count("5 files reformatted") == 5
+
+    def test_parse_reformat_count_with_other_text(self) -> None:
+        """Should parse count even with other text in output."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["true"],
+        )
+        output = "warning: some warning\n3 files reformatted\n"
+        assert checker._parse_reformat_count(output) == 3
+
+    def test_reports_count_when_no_file_paths(self) -> None:
+        """Should report count from summary when file paths not available."""
+        checker = AutoFormatChecker(
+            name="format",
+            description="Test format",
+            check_command=["true"],
+            fix_command=["bash", "-c", "echo '2 files reformatted'"],
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            result = checker.run()
+        assert result.status == "passed"
+        info_diags = [d for d in result.diagnostics if d.severity == "info"]
+        assert len(info_diags) == 1
+        assert "2 files" in info_diags[0].message
 
     def test_fix_command_failure_reports_error(self) -> None:
         """Should fail when fix command exits non-zero with stderr."""

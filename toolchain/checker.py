@@ -259,7 +259,7 @@ class AutoFormatChecker:
             fixed_files = self._parse_fixed_files(result.stdout)
 
             if fixed_files:
-                # Report the changes in natural language
+                # Report the changes in natural language with file names
                 if len(fixed_files) == 1:
                     message = f"Automatically reformatted 1 file: {fixed_files[0]}"
                 else:
@@ -270,6 +270,24 @@ class AutoFormatChecker:
                         f"Automatically reformatted {len(fixed_files)} files: "
                         f"{file_list}"
                     )
+
+                return CheckResult(
+                    name=self.name,
+                    status="passed",
+                    duration_ms=duration_ms,
+                    diagnostics=(
+                        Diagnostic(message=message, severity="info"),
+                    ),
+                    output=result.stdout.strip(),
+                )
+
+            # No file paths found - check if ruff reported a count in the summary
+            reformat_count = self._parse_reformat_count(result.stdout)
+            if reformat_count > 0:
+                if reformat_count == 1:
+                    message = "Automatically reformatted 1 file"
+                else:
+                    message = f"Automatically reformatted {reformat_count} files"
 
                 return CheckResult(
                     name=self.name,
@@ -327,3 +345,17 @@ class AutoFormatChecker:
                 if line.endswith(".py"):
                     files.append(line)
         return files
+
+    def _parse_reformat_count(self, output: str) -> int:
+        """Parse the number of reformatted files from ruff output.
+
+        Looks for patterns like "1 file reformatted" or "3 files reformatted".
+        """
+        import re
+
+        for line in output.strip().split("\n"):
+            # Match "N file reformatted" or "N files reformatted"
+            match = re.search(r"(\d+)\s+files?\s+reformatted", line)
+            if match:
+                return int(match.group(1))
+        return 0
