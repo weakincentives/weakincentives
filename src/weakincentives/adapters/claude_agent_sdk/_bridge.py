@@ -146,7 +146,11 @@ class MCPToolExecutionState:
             queue = self._queues.get(key)
             if queue:
                 try:
-                    return queue.popleft()
+                    result = queue.popleft()
+                    # Clean up empty queues to bound memory usage
+                    if not queue:
+                        del self._queues[key]
+                    return result
                 except (
                     IndexError
                 ):  # pragma: no cover - defensive, can't happen with lock
@@ -232,11 +236,19 @@ class BridgedTool:
 
         Uses transactional semantics: snapshot before execution, restore on failure.
         """
+        # Dequeue tool_use_id at the start to ensure it's always consumed,
+        # even if tool execution fails early (validation error, exception, etc.)
+        tool_use_id = (
+            self._mcp_tool_state.dequeue(self.name, args)
+            if self._mcp_tool_state
+            else None
+        )
         logger.debug(
             "claude_agent_sdk.bridge.tool_call.start",
             event="bridge.tool_call.start",
             context={
                 "tool_name": self.name,
+                "tool_use_id": tool_use_id,
                 "prompt_name": self._prompt_name,
                 "arguments": args,
             },
@@ -253,7 +265,9 @@ class BridgedTool:
             self._prompt.resources.context,
             tag=f"tool:{self.name}",
         ) as snapshot:
-            return self._execute_handler(handler, args, snapshot=snapshot)
+            return self._execute_handler(
+                handler, args, snapshot=snapshot, tool_use_id=tool_use_id
+            )
 
     def _execute_handler(
         self,
@@ -261,6 +275,7 @@ class BridgedTool:
         args: dict[str, Any],
         *,
         snapshot: CompositeSnapshot,
+        tool_use_id: str | None,
     ) -> dict[str, Any]:
         """Execute tool handler with transactional semantics.
 
@@ -268,6 +283,7 @@ class BridgedTool:
             handler: The tool handler to execute.
             args: Tool arguments.
             snapshot: Pre-execution snapshot for restore on failure.
+            tool_use_id: The SDK's tool_use_id for this invocation.
 
         Returns:
             MCP-format result dict.
@@ -296,7 +312,7 @@ class BridgedTool:
             if not result.success:
                 self._restore_snapshot(snapshot, reason="tool_failure")
 
-            return self._format_success_result(args, result)
+            return self._format_success_result(args, result, tool_use_id)
 
         except (TypeError, ValueError) as error:
             self._restore_snapshot(snapshot, reason="validation_error")
@@ -375,12 +391,14 @@ class BridgedTool:
         self,
         args: dict[str, Any],
         result: ToolResult[Any],
+        tool_use_id: str | None,
     ) -> dict[str, Any]:
         """Format successful tool result as MCP response.
 
         Args:
             args: Original tool arguments.
             result: Tool execution result.
+            tool_use_id: The SDK's tool_use_id for this invocation.
 
         Returns:
             MCP-format result dict.
@@ -397,7 +415,7 @@ class BridgedTool:
 
         # Dispatch ToolInvoked event with the actual tool result value
         # This enables session reducers to dispatch based on the value type
-        self._dispatch_tool_invoked(args, result, output_text)
+        self._dispatch_tool_invoked(args, result, output_text, tool_use_id)
 
         logger.debug(
             "claude_agent_sdk.bridge.tool_call.complete",
@@ -425,18 +443,14 @@ class BridgedTool:
         args: dict[str, Any],
         result: ToolResult[Any],
         rendered_output: str,
+        call_id: str | None,
     ) -> None:
         """Dispatch a ToolInvoked event for session reducer dispatch.
 
         The session extracts the value from result.value for slice routing.
-        The call_id is obtained from MCPToolExecutionState via dequeue, which
-        uses FIFO ordering with (tool_name, params_hash) as key.
+        The call_id is passed through from __call__ which dequeues it at the
+        start to ensure it's always consumed even on error paths.
         """
-        call_id = (
-            self._mcp_tool_state.dequeue(self.name, args)
-            if self._mcp_tool_state
-            else None
-        )
         event = ToolInvoked(
             prompt_name=self._prompt_name,
             adapter=self._adapter_name,
