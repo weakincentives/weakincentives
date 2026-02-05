@@ -21,168 +21,123 @@ style: |
     grid-template-columns: 1fr 1fr;
     gap: 1rem;
   }
+  blockquote {
+    border-left: 4px solid #2563eb;
+    padding-left: 1rem;
+    font-style: italic;
+  }
 ---
 
 # WINK
-## Weak Incentives (Is All You Need)
+## The Agent Definition Layer
 
-The agent-definition layer for building unattended/background agents
-
----
-
-# The Problem with Agent Frameworks
-
-Most agent frameworks scatter concerns across multiple places:
-
-- Prompt text in one place
-- Tool definitions in another
-- Schema expectations in yet another
-- Memory management somewhere else
-
-**Result:** Teams add layers (prompt registries, tool catalogs, schema validators) that drift apart over time.
+Separate what you own from what the runtime provides
 
 ---
 
-# What is WINK?
+# The Core Insight
 
-**WINK is the agent-definition layer** for building unattended/background agents.
+High-quality unattended agents have two distinct parts:
 
-You define:
-- **Prompt structure** (context engineering)
-- **Tools** + typed I/O contracts
-- **Policies** (gates on tool use)
-- **Feedback** ("done" criteria)
+1. **What makes your agent yours** — prompt structure, tools, policies, feedback
+2. **Generic execution machinery** — planning loops, sandboxing, retries, scheduling
 
-These stay stable while runtimes change.
+These change at different rates and for different reasons.
 
 ---
 
-# What "Weak Incentives" Means
+# The Problem Today
 
-From mechanism design: a system with the right incentives is one where participants naturally gravitate toward intended behavior.
+Most frameworks conflate definition and execution:
 
-**Applied to agents:** Shape the prompt, tools, and context so the model's easiest path is also the correct one.
-
----
-
-# Encouraging Correct Behavior Through Structure
-
-- **Clear instructions co-located with tools** make the right action obvious
-- **Typed contracts** guide the model toward valid outputs
-- **Progressive disclosure** keeps the model focused on what matters now
-- **Explicit state** gives the model context for good decisions
+- Your prompt logic is tangled with a specific runtime's orchestration
+- Switching providers means rewriting agent code
+- Testing requires mocking the entire execution stack
+- No clear boundary for what you version vs. what you rent
 
 ---
 
-# Definition vs. Harness
+# The Agent Definition Layer
 
 <div class="columns">
 
-**Agent Definition (you own)**
+**Definition (you own)**
 - Prompt structure
-- Tools + typed I/O contracts
-- Policies (gates on tool use)
+- Tools + typed contracts
+- Policies (constraints)
 - Feedback ("done" criteria)
 
-**Execution Harness (runtime-owned)**
+**Harness (runtime-owned)**
 - Planning/act loop
-- Sandboxing/permissions
-- Retries/backoff, throttling
-- Scheduling, budgets, crash recovery
+- Sandboxing
+- Retries, throttling
+- Budgets, crash recovery
 
 </div>
 
----
-
-# Why Separate Definition from Harness?
-
-The harness keeps changing—increasingly from vendor runtimes—but your agent definition should not.
-
-**WINK makes the definition a first-class artifact** you can:
-- Version
-- Review
-- Test
-- Port across runtimes via adapters
+WINK makes the definition a **first-class artifact** you can version, review, test, and port.
 
 ---
 
-# The Prompt is the Agent
+# Why This Split Matters
 
-**WINK inverts the typical approach:** the prompt *is* the agent.
+The harness keeps changing—increasingly provided by vendor runtimes.
 
-You define an agent as a **single hierarchical document** where each section bundles its own instructions and tools together.
+Your agent definition should **not** change when:
+- You switch from OpenAI to Claude
+- The provider upgrades their planning loop
+- You move from development to production sandboxing
+
+**Own the definition. Rent the harness.**
 
 ---
 
-# Prompt Structure Example
+# Novel Concept #1: The Prompt IS the Agent
+
+Most frameworks: prompts are strings, tools are registered separately, schema lives elsewhere.
+
+**WINK inverts this:** The prompt is a typed, hierarchical document where sections bundle instructions and tools together.
 
 ```
 PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
-├── WorkspaceDigestSection     ← auto-generated codebase summary
-├── MarkdownSection (reference docs)
-├── PlanningToolsSection       ← contributes planning_* tools
-│   └── (nested planning docs)
-├── VfsToolsSection            ← contributes ls/read_file/write_file
-│   └── (nested filesystem docs)
-└── MarkdownSection (user request)
+├── PlanningToolsSection       ← contributes planning tools
+│   └── (nested docs)
+├── VfsToolsSection            ← contributes file tools
+│   └── (nested docs)
+└── MarkdownSection (request)
 ```
 
 ---
 
-# Why Co-location Matters
+# Co-location: Why It Matters
 
-1. **Instructions and tools live together** - The section that explains filesystem navigation provides the `read_file` tool
-2. **Documentation can't drift from implementation**
-3. **Progressive disclosure** - Reveal advanced capabilities only when relevant
-4. **Dynamic scoping** - Disable a section and its entire subtree disappears
+The section that explains "here's how to search files" **is the same section** that provides the `grep` tool.
 
----
-
-# Core Abstractions
-
-| Abstraction | Purpose |
-|-------------|---------|
-| **PromptTemplate** | Immutable blueprint with sections |
-| **Prompt** | Runtime binding of template + parameters |
-| **Session** | Event-driven state with pure reducers |
-| **Tools** | Side effects boundary with typed contracts |
-| **Adapters** | Provider-agnostic execution |
+- Documentation and capability live together
+- They **cannot drift**
+- Disable a section → its tools vanish from the prompt
+- No separate tool registry to synchronize
 
 ---
 
-# PromptTemplate
+# Dynamic Scoping
 
-An **immutable object graph** (a tree of sections).
+Each section has an `enabled` predicate:
 
-Each section can:
-- Render markdown instructions
-- Declare typed placeholders
-- Register tools
-- Render as a summary to save tokens
+```python
+VfsToolsSection(
+    enabled=lambda ctx: ctx.session[Workspace].latest() is not None
+)
+```
 
----
+When disabled, the **entire subtree disappears**—instructions and tools.
 
-# Sessions: Event-Driven State
-
-- Every state change flows through **pure reducers** that process published events
-- State is **immutable and inspectable**
-- You can **snapshot at any point**
-- Query with `session[Type].latest()`, `.all()`, `.where(predicate)`
+Swap `VfsToolsSection` for `PodmanSandboxSection` when a shell is available; the prompt adapts automatically.
 
 ---
 
-# Tools: The Side Effects Boundary
-
-**Side effects live in tool handlers.** Everything else is deterministic and pure.
-
-- **Transactional execution** - Tool calls are atomic
-- **Automatic rollback** - Failed tools don't leave partial state
-- **Typed contracts** - Params, results, all validated at construction
-
----
-
-# Tool Policies Over Workflows
+# Novel Concept #2: Policies Over Workflows
 
 | Aspect | Workflow | Policy |
 |--------|----------|--------|
@@ -193,196 +148,220 @@ Each section can:
 
 ---
 
-# Provider Adapters
+# Workflows Encode "How"
 
-Same agent definition works across providers:
+A workflow is a predetermined sequence:
 
-| Adapter | Use Case |
-|---------|----------|
-| **OpenAI** | Full tool execution in WINK |
-| **LiteLLM** | Unified interface to multiple providers |
-| **Claude Agent SDK** | Production with native tools + sandboxing |
-
----
-
-# Claude Agent SDK: "Rent the Harness"
-
-Claude's runtime drives the agent loop and native tools; WINK provides the portable agent definition.
-
-- **Native tools** - Uses Claude Code's built-in tools
-- **Hermetic isolation** - Ephemeral home directory
-- **OS-level sandboxing** - bubblewrap on Linux, seatbelt on macOS
-- **MCP bridging** - Custom WINK tools bridged via MCP
-
----
-
-# Technical Strategy
-
-**Don't compete at the model layer.** Models and agent frameworks will commoditize quickly.
-
-**Differentiate with your system of record.** Long-term advantage comes from owning authoritative data, definitions, permissions—not the reasoning loop.
-
-**Build evaluation as your control plane.** Make model and runtime upgrades safe via scenario tests.
-
----
-
-# The Shift: Orchestration Shrinks
-
-**Models are absorbing more of the reasoning loop.** What required explicit multi-step orchestration yesterday often works in a single prompt today.
-
-**The durable part of agent systems:**
-- Tools define what the agent can do
-- Retrieval determines available information
-- Context engineering shapes how models reason
-
----
-
-# Code Example: Define Structured Output
-
-```python
-from dataclasses import dataclass
-
-@dataclass(slots=True, frozen=True)
-class ReviewResponse:
-    summary: str
-    issues: list[str]
-    next_steps: list[str]
+```
+1. Read the file
+2. Analyze the code
+3. Write the review
 ```
 
+When the agent encounters something unexpected, it fails or needs explicit branching logic.
+
 ---
 
-# Code Example: Compose the Prompt
+# Policies Encode "What"
+
+A policy declares constraints the agent must satisfy:
 
 ```python
-template = PromptTemplate[ReviewResponse](
-    ns="examples/code-review",
-    key="code-review-session",
-    name="code_review_agent",
-    sections=(
-        MarkdownSection(title="Guide", key="guide",
-                        template="Review code."),
-        WorkspaceDigestSection(session=session),
-        PlanningToolsSection(session=session),
-        VfsToolsSection(session=session, mounts=mounts),
-        MarkdownSection(title="Request", key="request",
-                        template="${request}"),
+@policy
+def must_read_before_write(ctx: PolicyContext) -> bool:
+    """Don't write to a file you haven't read."""
+    if ctx.tool_name == "write_file":
+        return ctx.session[ReadFiles].contains(ctx.params["path"])
+    return True
+```
+
+The agent remains free to find **any valid path** that satisfies constraints.
+
+---
+
+# Policy Characteristics
+
+- **Declarative** — state what must hold, not how to achieve it
+- **Composable** — policies combine via conjunction (all must pass)
+- **Fail-closed** — unclear situations block rather than proceed
+- **Observable** — violations are logged with context
+
+---
+
+# Novel Concept #3: Hash-Based Safe Iteration
+
+Prompt overrides carry **content hashes**:
+
+```json
+{
+  "namespace": "code-review",
+  "key": "guide",
+  "hash": "a1b2c3d4",
+  "content": "Be more assertive about security issues."
+}
+```
+
+When you change the section in code, **existing overrides stop applying** until explicitly updated.
+
+No silent drift between "tested" and "running".
+
+---
+
+# Novel Concept #4: Transactional Tools
+
+Tool calls are **atomic transactions**.
+
+When a tool fails:
+1. Session state rolls back to pre-call state
+2. Filesystem changes revert
+3. Error result returned to LLM
+
+**Failed tools don't leave partial state.** This enables aggressive retry and recovery.
+
+---
+
+# Novel Concept #5: Event-Driven State
+
+Every mutation flows through pure reducers:
+
+```python
+@reducer(on=FileRead)
+def track_read(state: ReadFiles, event: FileRead) -> SliceOp[ReadFiles]:
+    return Append(ReadFiles(path=event.path, content=event.content))
+```
+
+- State is **immutable and inspectable**
+- Snapshot at any point, restore later
+- Query with `session[Type].latest()`, `.all()`, `.where(predicate)`
+
+---
+
+# Deterministic Inspection
+
+Because prompts are typed objects and state flows through reducers:
+
+- Render the exact prompt that will be sent
+- Diff prompts between versions
+- Write tests that assert on prompt content
+- Replay sessions for debugging
+
+**Same inputs → same outputs** (except tool side effects)
+
+---
+
+# The Bet: Orchestration Shrinks
+
+Early agent frameworks invested heavily in workflow logic: routers, planners, branching graphs.
+
+**Models are absorbing the reasoning loop.** What required explicit multi-step orchestration yesterday often works in a single prompt today.
+
+---
+
+# Where Durable Value Lives
+
+- **Tools** define what the agent can do
+- **Retrieval** determines available information
+- **Context engineering** shapes how models reason
+
+The model is a commodity. Your domain knowledge—encoded in tools and context—is not.
+
+---
+
+# Context Engineering
+
+A genuinely new discipline:
+
+- What's relevant now vs. what to summarize
+- How to structure information so models reason over it well
+- When to expand detail vs. preserve tokens
+
+No clean precedent from traditional engineering. Builders who master it early win.
+
+---
+
+# Progressive Disclosure
+
+Sections can render as **summaries by default**, expanding on demand:
+
+```python
+DocsSection(
+    content=large_reference_docs,
+    summary="Reference documentation available. Call expand_docs to see.",
+    expanded=lambda ctx: ctx.session[DocsExpanded].latest() is not None
+)
+```
+
+The model requests what it needs. Token counts stay manageable.
+
+---
+
+# Adapters: Same Definition, Different Runtimes
+
+```python
+# Development: full control
+adapter = OpenAIAdapter(model="gpt-4o")
+
+# Production: rent Claude's harness
+adapter = ClaudeAgentSDKAdapter(
+    model="claude-sonnet-4-5-20250929",
+    client_config=ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        sandbox=SandboxConfig(enabled=True),
     ),
 )
 ```
 
----
-
-# Code Example: Run and Get Typed Results
-
-```python
-loop = ReviewLoop(OpenAIAdapter(model="gpt-4o"), dispatcher)
-response, _ = loop.execute(
-    ReviewTurnParams(request="Find bugs in main.py")
-)
-
-if response.output is not None:
-    review: ReviewResponse = response.output  # typed, validated
-```
+Your prompt, tools, and policies stay **identical**.
 
 ---
 
-# Code Example: Inspect State
+# "Rent the Harness" with Claude Agent SDK
 
-```python
-from weakincentives.contrib.tools.planning import Plan
+Claude's runtime handles:
+- Planning and tool-call sequencing
+- OS-level sandboxing (bubblewrap/seatbelt)
+- Native file and shell tools
 
-plan = session[Plan].latest()
-if plan:
-    for step in plan.steps:
-        print(f"[{step.status}] {step.title}")
-```
-
----
-
-# Key Capabilities Summary
-
-| Capability | Benefit |
-|------------|---------|
-| **Typed sections** | Composable prompt objects |
-| **Hash-based overrides** | Safe prompt iteration |
-| **Transactional tools** | Automatic rollback on failure |
-| **Virtual filesystem** | Sandboxed file access |
-| **Pure reducers** | Deterministic state management |
-| **Adapter abstraction** | Provider-agnostic code |
+WINK provides:
+- The portable agent definition
+- Custom tools bridged via MCP
+- Session state and policies
 
 ---
 
 # What WINK Is
 
-- A Python library for building prompts-as-agents
-- A small runtime for state (`Session`) and orchestration (`AgentLoop`)
-- Adapters that execute tools and parse outputs consistently
-- Contributed tool suites for background agents
+- A Python library for building **prompts-as-agents**
+- A runtime for **event-driven state** and **typed tool contracts**
+- **Adapters** that let definitions port across providers
+- A philosophy: **own the definition, rent the harness**
 
 ---
 
 # What WINK Is Not
 
 - Not a distributed workflow engine
-- Not a framework that "owns" your architecture
-- Not a multi-agent coordination system
-- Not an async-first streaming framework
+- Not a multi-agent coordination framework
+- Not trying to own your architecture
 
-**WINK plays well with others** - use it for the pieces that benefit from determinism.
-
----
-
-# Getting Started
-
-```bash
-# Install
-uv add weakincentives
-
-# Optional extras
-uv add "weakincentives[openai]"           # OpenAI adapter
-uv add "weakincentives[litellm]"          # LiteLLM adapter
-uv add "weakincentives[claude-agent-sdk]" # Claude Agent SDK
-uv add "weakincentives[podman]"           # Podman sandbox
-```
-
----
-
-# Learning Path
-
-| Step | Guide |
-|------|-------|
-| 1 | **Quickstart** - Get something running |
-| 2 | **Philosophy** - Understand *why* WINK works this way |
-| 3 | **Prompts** - Learn the core abstraction |
-| 4 | **Tools** - Add capabilities to your agent |
-| 5 | **Sessions** - Manage state correctly |
-| 6 | **Adapters** - Connect to your preferred provider |
+WINK is a library for the pieces that benefit from **determinism and portability**.
 
 ---
 
 # Key Takeaways
 
-1. **The prompt is the agent** - single hierarchical document
-2. **Definition vs harness** - own what matters, rent the rest
-3. **Policies over workflows** - encode constraints, not steps
-4. **Typed contracts everywhere** - catch errors early
-5. **Provider-agnostic** - your definition is portable
+1. **Agent Definition Layer** — separate what you own from runtime machinery
+2. **The Prompt IS the Agent** — co-located instructions and tools
+3. **Policies Over Workflows** — declare constraints, not steps
+4. **Hash-Based Overrides** — no silent drift
+5. **Transactional Tools** — atomic execution with rollback
+6. **Event-Driven State** — deterministic, inspectable, snapshotable
 
 ---
 
-# Resources
+# WINK
+## Weak Incentives (Is All You Need)
 
-- **Guides:** `guides/README.md`
-- **Specs:** `specs/` directory
-- **API Reference:** `llms.md`
-- **Starter:** https://github.com/weakincentives/starter
+*Structure prompts, tools, and context so the model's easiest path is the correct one.*
 
----
-
-# Thank You
-
-## WINK: Weak Incentives (Is All You Need)
-
-*Structure your prompts, tools, and context so the model's easiest path is also the correct one.*
-
-**Status:** Alpha | **License:** Apache 2.0
+**Status:** Alpha | **License:** Apache 2.0 | **github.com/weakincentives**
