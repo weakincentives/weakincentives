@@ -227,6 +227,24 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
         """Access the most recent session for telemetry inspection."""
         return self._last_session
 
+    def _get_section_by_key(self, key: str) -> MarkdownSection:
+        """Find a section in the template by its key.
+
+        Args:
+            key: The section key to find.
+
+        Returns:
+            The section with the matching key.
+
+        Raises:
+            KeyError: If no section with the given key exists.
+        """
+        for node in self._template.sections:
+            if node.section.key == key:
+                # Cast is safe - we know the template only contains MarkdownSections
+                return node.section  # type: ignore[return-value]
+        raise KeyError(f"Section with key '{key}' not found in template")
+
     @staticmethod
     def _create_template() -> PromptTemplate[ReviewResponse]:
         """Create the prompt template for code review."""
@@ -339,12 +357,12 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
             key=self._template.key,
             name=self._template.name,
             sections=(
-                self._template.sections[0],  # role
-                self._template.sections[1],  # focus
+                self._get_section_by_key("role"),
+                self._get_section_by_key("focus"),
                 digest_section,
                 workspace_section,
-                self._template.sections[2],  # instructions
-                self._template.sections[3],  # output-format
+                self._get_section_by_key("instructions"),
+                self._get_section_by_key("output-format"),
             ),
         )
 
