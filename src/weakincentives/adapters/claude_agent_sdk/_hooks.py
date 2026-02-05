@@ -343,17 +343,18 @@ def _check_budget_constraint(
 def _setup_tool_execution_state(
     hook_context: HookContext,
     tool_name: str,
+    tool_input: dict[str, Any],
     tool_use_id: str | None,
     hook_start: float,
 ) -> None:
     """Set up tool execution state for MCP or native tools.
 
-    For MCP tools: stores tool_use_id in mcp_tool_state for BridgedTool.
+    For MCP tools: enqueues tool_use_id in mcp_tool_state for BridgedTool.
     For native tools: begins transactional execution with snapshot.
     """
     is_mcp_tool = tool_name.startswith("mcp__wink__")
     if is_mcp_tool and hook_context.mcp_tool_state and tool_use_id is not None:
-        hook_context.mcp_tool_state.set_tool_use_id(tool_name, tool_use_id)
+        hook_context.mcp_tool_state.enqueue(tool_name, tool_input, tool_use_id)
     elif tool_use_id is not None and not is_mcp_tool:
         hook_context.begin_tool_execution(tool_use_id=tool_use_id, tool_name=tool_name)
         hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
@@ -433,7 +434,10 @@ def create_pre_tool_use_hook(
             hook_context.stats.in_subagent = True
 
         # Set up tool execution state (MCP tool_use_id or native snapshot)
-        _setup_tool_execution_state(hook_context, tool_name, tool_use_id, hook_start)
+        tool_input = pre_input.get("tool_input", {})
+        _setup_tool_execution_state(
+            hook_context, tool_name, tool_input, tool_use_id, hook_start
+        )
 
         return {}
 
@@ -567,11 +571,9 @@ def _handle_mcp_tool_post(
 ) -> SyncHookJSONOutput:
     """Handle post-processing for MCP tools.
 
-    Clears the tool_use_id from mcp_tool_state and runs feedback providers.
-    MCP tools dispatch their own ToolInvoked events via the bridge.
+    Runs feedback providers. MCP tools dispatch their own ToolInvoked events
+    via the bridge, which also dequeues the tool_use_id.
     """
-    if hook_context.mcp_tool_state:
-        hook_context.mcp_tool_state.clear_tool_use_id(data.tool_name)
     result = _run_feedback_providers(hook_context, data)
     if result is not None:
         return result

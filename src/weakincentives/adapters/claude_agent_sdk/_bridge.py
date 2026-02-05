@@ -14,6 +14,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import threading
+from collections import deque
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -53,78 +57,99 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridg
 MCP_TOOL_PREFIX = "mcp__wink__"
 
 
+def _hash_params(params: dict[str, Any]) -> str:
+    """Create a stable hash of tool parameters for keying.
+
+    Uses JSON serialization with sorted keys for deterministic output,
+    then MD5 hash for a compact key. MD5 is sufficient here since we're
+    not using it for security, just for deduplication.
+    """
+    json_str = json.dumps(params, sort_keys=True, default=str)
+    return hashlib.md5(json_str.encode(), usedforsecurity=False).hexdigest()[:16]
+
+
+def _normalize_tool_name(tool_name: str) -> str:
+    """Normalize tool name by removing mcp__wink__ prefix if present."""
+    if tool_name.startswith(MCP_TOOL_PREFIX):
+        return tool_name[len(MCP_TOOL_PREFIX) :]
+    return tool_name
+
+
 @dataclass(slots=True)
 class MCPToolExecutionState:
-    """Shared state between hooks and MCP bridge for tool_use_id tracking.
+    """Thread-safe state for correlating tool_use_ids between hooks and MCP bridge.
 
-    Created once per SDK query and passed to both HookContext and BridgedTools.
-    PreToolUse hook sets the tool_use_id for the MCP tool name before execution.
-    BridgedTool reads it when dispatching ToolInvoked events.
-    PostToolUse hook clears it after MCP tool completes.
-
-    This enables MCP-bridged tools to have proper call_id in ToolInvoked events,
-    matching the behavior of native SDK tools.
+    The MCP protocol doesn't pass tool_use_id to tool handlers, so we need shared
+    state to correlate PreToolUse hook calls with BridgedTool executions.
 
     Thread Safety
     -------------
-    Uses a dict mapping tool_name -> tool_use_id to support concurrent tool
-    execution. Each MCP tool's tool_use_id is stored by its unprefixed name
-    (e.g., "planning_setup_plan" not "mcp__wink__planning_setup_plan").
+    Uses a composite key of (tool_name, params_hash) with FIFO queues per key.
+    This handles all concurrency scenarios:
 
-    This design is safe if:
-    - Different MCP tools execute concurrently (each has its own key)
-    - The same tool is called multiple times sequentially (overwrite is fine)
+    - Different tools in parallel: Different keys, no conflict
+    - Same tool with different params in parallel: Different hashes, no conflict
+    - Same tool with same params in parallel: FIFO queue ensures correct ordering
+      (assuming PreToolUse hooks fire in the same order as tool executions)
 
-    Edge case: If the same MCP tool is called twice in parallel, only one
-    tool_use_id will be stored at a time. This is unlikely in practice since
-    Claude rarely calls the same tool twice with different inputs in parallel.
+    The implementation uses:
+    - threading.Lock for dict mutations (adding/removing queues)
+    - collections.deque for thread-safe append/popleft within queues
+
+    Usage Flow
+    ----------
+    1. PreToolUse hook: enqueue(tool_name, params, tool_use_id)
+    2. BridgedTool: dequeue(tool_name, params) -> tool_use_id
+    3. PostToolUse hook: (optional cleanup, queues auto-drain)
     """
 
-    _tool_use_ids: dict[str, str] = field(default_factory=dict)
+    _queues: dict[str, deque[str]] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def set_tool_use_id(self, tool_name: str, tool_use_id: str) -> None:
-        """Store tool_use_id for an MCP tool.
+    @staticmethod
+    def _make_key(tool_name: str, params: dict[str, Any]) -> str:
+        """Create composite key from tool name and params hash."""
+        normalized = _normalize_tool_name(tool_name)
+        params_hash = _hash_params(params)
+        return f"{normalized}:{params_hash}"
+
+    def enqueue(self, tool_name: str, params: dict[str, Any], tool_use_id: str) -> None:
+        """Enqueue a tool_use_id for a specific tool+params combination.
+
+        Called by PreToolUse hook before tool execution begins.
 
         Args:
             tool_name: The tool name (with or without mcp__wink__ prefix).
+            params: The tool input parameters.
             tool_use_id: The SDK's tool_use_id for this invocation.
         """
-        # Normalize to unprefixed name for consistent lookup
-        key = (
-            tool_name[len(MCP_TOOL_PREFIX) :]
-            if tool_name.startswith(MCP_TOOL_PREFIX)
-            else tool_name
-        )
-        self._tool_use_ids[key] = tool_use_id
+        key = self._make_key(tool_name, params)
+        with self._lock:
+            if key not in self._queues:
+                self._queues[key] = deque()
+            self._queues[key].append(tool_use_id)
 
-    def get_tool_use_id(self, tool_name: str) -> str | None:
-        """Get tool_use_id for an MCP tool.
+    def dequeue(self, tool_name: str, params: dict[str, Any]) -> str | None:
+        """Dequeue the oldest tool_use_id for a specific tool+params combination.
+
+        Called by BridgedTool when dispatching ToolInvoked events.
 
         Args:
             tool_name: The tool name (with or without mcp__wink__ prefix).
+            params: The tool input parameters.
 
         Returns:
-            The tool_use_id if found, None otherwise.
+            The oldest tool_use_id for this tool+params, or None if queue is empty.
         """
-        key = (
-            tool_name[len(MCP_TOOL_PREFIX) :]
-            if tool_name.startswith(MCP_TOOL_PREFIX)
-            else tool_name
-        )
-        return self._tool_use_ids.get(key)
-
-    def clear_tool_use_id(self, tool_name: str) -> None:
-        """Clear tool_use_id for an MCP tool.
-
-        Args:
-            tool_name: The tool name (with or without mcp__wink__ prefix).
-        """
-        key = (
-            tool_name[len(MCP_TOOL_PREFIX) :]
-            if tool_name.startswith(MCP_TOOL_PREFIX)
-            else tool_name
-        )
-        self._tool_use_ids.pop(key, None)
+        key = self._make_key(tool_name, params)
+        with self._lock:
+            queue = self._queues.get(key)
+            if queue:
+                try:
+                    return queue.popleft()
+                except IndexError:
+                    return None
+            return None
 
 
 @dataclass(slots=True, frozen=True)
@@ -205,17 +230,11 @@ class BridgedTool:
 
         Uses transactional semantics: snapshot before execution, restore on failure.
         """
-        tool_use_id = (
-            self._mcp_tool_state.get_tool_use_id(self.name)
-            if self._mcp_tool_state
-            else None
-        )
         logger.debug(
             "claude_agent_sdk.bridge.tool_call.start",
             event="bridge.tool_call.start",
             context={
                 "tool_name": self.name,
-                "tool_use_id": tool_use_id,
                 "prompt_name": self._prompt_name,
                 "arguments": args,
             },
@@ -408,11 +427,11 @@ class BridgedTool:
         """Dispatch a ToolInvoked event for session reducer dispatch.
 
         The session extracts the value from result.value for slice routing.
-        The call_id is obtained from MCPToolExecutionState, which is set by
-        the PreToolUse hook before tool execution.
+        The call_id is obtained from MCPToolExecutionState via dequeue, which
+        uses FIFO ordering with (tool_name, params_hash) as key.
         """
         call_id = (
-            self._mcp_tool_state.get_tool_use_id(self.name)
+            self._mcp_tool_state.dequeue(self.name, args)
             if self._mcp_tool_state
             else None
         )

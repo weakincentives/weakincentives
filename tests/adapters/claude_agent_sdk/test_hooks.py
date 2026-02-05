@@ -523,11 +523,11 @@ class TestPostToolUseHook:
         assert result == {}
         assert len(events) == 0
 
-    def test_clears_mcp_tool_state_after_mcp_tool(self, session: Session) -> None:
-        """PostToolUse clears mcp_tool_state for the tool after MCP tool completes."""
+    def test_handles_mcp_tool_post_without_error(self, session: Session) -> None:
+        """PostToolUse handles MCP tools without error."""
         mcp_state = MCPToolExecutionState()
-        # Simulate PreToolUse setting this
-        mcp_state.set_tool_use_id("mcp__wink__planning_update", "call-mcp-456")
+        # Note: With queue-based approach, PreToolUse enqueues and BridgedTool dequeues.
+        # PostToolUse just runs feedback providers - no state management needed.
 
         context = HookContext(
             session=session,
@@ -544,10 +544,9 @@ class TestPostToolUseHook:
             "tool_response": {"stdout": "Updated"},
         }
 
-        asyncio.run(hook(input_data, "call-mcp-456", {"signal": None}))
-
-        # mcp_tool_state should be cleared for this tool after execution
-        assert mcp_state.get_tool_use_id("planning_update") is None
+        # Should complete without error
+        result = asyncio.run(hook(input_data, "call-mcp-456", {"signal": None}))
+        assert result == {}
 
     def test_returns_context_when_structured_output_with_incomplete_tasks(
         self, session: Session
@@ -1098,9 +1097,10 @@ class TestPreToolUseHookTransactional:
             or "tool-123" not in context._tracker._pending_tools
         )
 
-    def test_sets_mcp_tool_state_for_mcp_tools(self, session: Session) -> None:
-        """Pre-tool hook sets tool_use_id on mcp_tool_state for MCP tools."""
+    def test_enqueues_mcp_tool_state_for_mcp_tools(self, session: Session) -> None:
+        """Pre-tool hook enqueues tool_use_id on mcp_tool_state for MCP tools."""
         mcp_state = MCPToolExecutionState()
+        tool_input = {"objective": "test plan"}
 
         context = HookContext(
             session=session,
@@ -1113,20 +1113,25 @@ class TestPreToolUseHookTransactional:
         hook = create_pre_tool_use_hook(context)
         asyncio.run(
             hook(
-                {"hook_event_name": "PreToolUse", "tool_name": "mcp__wink__planning"},
+                {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "mcp__wink__planning",
+                    "tool_input": tool_input,
+                },
                 "call-mcp-123",
                 {"signal": None},
             )
         )
 
-        # mcp_tool_state should have the tool_use_id set for this tool
-        assert mcp_state.get_tool_use_id("planning") == "call-mcp-123"
+        # mcp_tool_state should have the tool_use_id enqueued for this tool+params
+        assert mcp_state.dequeue("planning", tool_input) == "call-mcp-123"
 
-    def test_does_not_set_mcp_tool_state_for_native_tools(
+    def test_does_not_enqueue_mcp_tool_state_for_native_tools(
         self, session: Session
     ) -> None:
-        """Pre-tool hook does not set tool_use_id for native SDK tools."""
+        """Pre-tool hook does not enqueue tool_use_id for native SDK tools."""
         mcp_state = MCPToolExecutionState()
+        tool_input = {"file_path": "/test.txt"}
 
         context = HookContext(
             session=session,
@@ -1139,14 +1144,18 @@ class TestPreToolUseHookTransactional:
         hook = create_pre_tool_use_hook(context)
         asyncio.run(
             hook(
-                {"hook_event_name": "PreToolUse", "tool_name": "Read"},
+                {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Read",
+                    "tool_input": tool_input,
+                },
                 "call-native-123",
                 {"signal": None},
             )
         )
 
         # mcp_tool_state should remain empty for native tools
-        assert mcp_state.get_tool_use_id("Read") is None
+        assert mcp_state.dequeue("Read", tool_input) is None
 
 
 class TestPostToolUseHookTransactional:

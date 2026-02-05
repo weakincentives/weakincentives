@@ -1374,7 +1374,8 @@ class TestMCPToolExecutionState:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         mcp_state = MCPToolExecutionState()
-        mcp_state.set_tool_use_id("search", "call-from-hook-789")
+        # Enqueue with same params that will be passed to bridged tool
+        mcp_state.enqueue("search", {"query": "test"}, "call-from-hook-789")
 
         bridged = BridgedTool(
             name="search",
@@ -1432,49 +1433,59 @@ class TestMCPToolExecutionState:
         assert events[0].call_id is None
 
     def test_mcp_state_defaults_to_empty(self) -> None:
-        """MCPToolExecutionState defaults to empty dict."""
+        """MCPToolExecutionState defaults to empty queues."""
         state = MCPToolExecutionState()
-        assert state.get_tool_use_id("any_tool") is None
+        assert state.dequeue("any_tool", {}) is None
 
-    def test_mcp_state_can_be_set_and_cleared(self) -> None:
-        """MCPToolExecutionState can set and clear tool_use_ids by name."""
+    def test_mcp_state_enqueue_dequeue_fifo(self) -> None:
+        """MCPToolExecutionState uses FIFO ordering for same tool+params."""
         state = MCPToolExecutionState()
+        params = {"key": "value"}
 
-        state.set_tool_use_id("my_tool", "test-call-id")
-        assert state.get_tool_use_id("my_tool") == "test-call-id"
+        state.enqueue("my_tool", params, "call-1")
+        state.enqueue("my_tool", params, "call-2")
+        state.enqueue("my_tool", params, "call-3")
 
-        state.clear_tool_use_id("my_tool")
-        assert state.get_tool_use_id("my_tool") is None
+        # Dequeue returns in FIFO order
+        assert state.dequeue("my_tool", params) == "call-1"
+        assert state.dequeue("my_tool", params) == "call-2"
+        assert state.dequeue("my_tool", params) == "call-3"
+        assert state.dequeue("my_tool", params) is None
 
     def test_mcp_state_handles_prefix_normalization(self) -> None:
         """MCPToolExecutionState normalizes mcp__wink__ prefix."""
         state = MCPToolExecutionState()
+        params = {"plan": "test"}
 
-        # Set with prefix, get without
-        state.set_tool_use_id("mcp__wink__planning_setup_plan", "call-123")
-        assert state.get_tool_use_id("planning_setup_plan") == "call-123"
+        # Enqueue with prefix, dequeue without
+        state.enqueue("mcp__wink__planning_setup_plan", params, "call-123")
+        assert state.dequeue("planning_setup_plan", params) == "call-123"
 
-        # Set without prefix, get with prefix
-        state.set_tool_use_id("search", "call-456")
-        assert state.get_tool_use_id("mcp__wink__search") == "call-456"
+        # Enqueue without prefix, dequeue with prefix
+        state.enqueue("search", {"query": "test"}, "call-456")
+        assert state.dequeue("mcp__wink__search", {"query": "test"}) == "call-456"
 
-        # Clear with prefix
-        state.clear_tool_use_id("mcp__wink__search")
-        assert state.get_tool_use_id("search") is None
+    def test_mcp_state_different_params_different_queues(self) -> None:
+        """MCPToolExecutionState uses different queues for different params."""
+        state = MCPToolExecutionState()
+
+        # Same tool, different params - should be separate queues
+        state.enqueue("search", {"query": "foo"}, "call-foo")
+        state.enqueue("search", {"query": "bar"}, "call-bar")
+
+        # Each dequeue gets the correct call_id based on params
+        assert state.dequeue("search", {"query": "bar"}) == "call-bar"
+        assert state.dequeue("search", {"query": "foo"}) == "call-foo"
 
     def test_mcp_state_supports_multiple_concurrent_tools(self) -> None:
         """MCPToolExecutionState can track multiple tools concurrently."""
         state = MCPToolExecutionState()
 
-        state.set_tool_use_id("tool_a", "call-a")
-        state.set_tool_use_id("tool_b", "call-b")
-        state.set_tool_use_id("tool_c", "call-c")
+        state.enqueue("tool_a", {"x": 1}, "call-a")
+        state.enqueue("tool_b", {"x": 2}, "call-b")
+        state.enqueue("tool_c", {"x": 3}, "call-c")
 
-        assert state.get_tool_use_id("tool_a") == "call-a"
-        assert state.get_tool_use_id("tool_b") == "call-b"
-        assert state.get_tool_use_id("tool_c") == "call-c"
-
-        state.clear_tool_use_id("tool_b")
-        assert state.get_tool_use_id("tool_a") == "call-a"
-        assert state.get_tool_use_id("tool_b") is None
-        assert state.get_tool_use_id("tool_c") == "call-c"
+        # Can dequeue in any order - each tool has its own queue
+        assert state.dequeue("tool_b", {"x": 2}) == "call-b"
+        assert state.dequeue("tool_a", {"x": 1}) == "call-a"
+        assert state.dequeue("tool_c", {"x": 3}) == "call-c"
