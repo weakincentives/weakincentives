@@ -14,11 +14,30 @@
 
 This package provides specialized optimizers for prompt optimization workflows.
 
-Note: The execution harness is expected to provide workspace exploration and
-digest generation capabilities out of the box. This package is reserved for
-future optimizer implementations.
+Available optimizers:
+
+- :class:`WorkspaceDigestOptimizer`: Generates workspace digests using the
+  Claude Agent SDK adapter. Creates task-agnostic summaries of workspaces
+  that can be cached in sessions for future use.
+
+Example::
+
+    from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
+    from weakincentives.adapters.claude_agent_sdk import HostMount
+    from weakincentives.runtime import Session
+
+    session = Session()
+    optimizer = WorkspaceDigestOptimizer(
+        mounts=[HostMount(host_path="/path/to/project")],
+    )
+    result = optimizer.optimize(session, section_key="workspace-digest")
 """
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .workspace_digest import WorkspaceDigestOptimizer, WorkspaceDigestResult
+
+__all__ = [
+    "WorkspaceDigestOptimizer",
+    "WorkspaceDigestResult",
+]

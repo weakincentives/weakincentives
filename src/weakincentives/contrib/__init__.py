@@ -41,9 +41,11 @@ contrib.tools
         - ``InMemoryFilesystem``: In-memory filesystem implementation
 
 contrib.optimizers
-    Reserved for prompt optimization workflows. The execution harness is
-    expected to provide workspace exploration and digest generation
-    capabilities out of the box.
+    Prompt optimization workflows using the Claude Agent SDK.
+
+    Key exports:
+        - ``WorkspaceDigestOptimizer``: Generates workspace digests
+        - ``WorkspaceDigestResult``: Result of digest optimization
 
 Example Usage
 -------------

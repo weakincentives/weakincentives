@@ -53,8 +53,9 @@ class TestContribLazyImports:
 
         optimizers = contrib.optimizers
         assert optimizers is not None
-        # Optimizers package is now empty (reserved for future use)
-        assert optimizers.__all__ == []
+        # Optimizers exports WorkspaceDigestOptimizer
+        assert hasattr(optimizers, "WorkspaceDigestOptimizer")
+        assert hasattr(optimizers, "WorkspaceDigestResult")
 
     def test_getattr_raises_attribute_error_for_unknown(self) -> None:
         """Verify __getattr__ raises AttributeError for unknown attributes."""
