@@ -273,7 +273,7 @@ class TestClaudeAgentSDKAdapterInit:
     def test_default_values(self) -> None:
         adapter = ClaudeAgentSDKAdapter()
 
-        assert adapter._model == "claude-sonnet-4-5-20250929"
+        assert adapter._model == "claude-opus-4-6"
         assert adapter._client_config.permission_mode == "bypassPermissions"
         assert adapter._allowed_tools is None
         assert adapter._disallowed_tools == ()

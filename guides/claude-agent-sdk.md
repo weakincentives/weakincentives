@@ -151,7 +151,7 @@ Controls model selection and parameters:
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKModelConfig
 
 model_config = ClaudeAgentSDKModelConfig(
-    model="claude-sonnet-4-5-20250929",
+    model="claude-opus-4-6",
     max_thinking_tokens=8000,  # Enable extended thinking
 )
 
@@ -160,7 +160,7 @@ adapter = ClaudeAgentSDKAdapter(model_config=model_config)
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model` | `str` | `"claude-sonnet-4-5-20250929"` | Claude model identifier |
+| `model` | `str` | `"claude-opus-4-6"` | Claude model identifier |
 | `max_thinking_tokens` | `int \| None` | `None` | Extended thinking mode tokens |
 
 **Note**: Parameters like `seed`, `stop`, `presence_penalty`, `frequency_penalty`
@@ -555,7 +555,7 @@ from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKModelConfig
 
 adapter = ClaudeAgentSDKAdapter(
     model_config=ClaudeAgentSDKModelConfig(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         max_thinking_tokens=16000,
     ),
     client_config=ClaudeAgentSDKClientConfig(

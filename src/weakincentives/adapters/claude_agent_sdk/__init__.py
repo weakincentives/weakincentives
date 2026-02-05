@@ -118,7 +118,7 @@ Simple adapter usage without workspace mounts::
     )
 
     adapter = ClaudeAgentSDKAdapter(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         client_config=ClaudeAgentSDKClientConfig(
             permission_mode="bypassPermissions",
         ),
@@ -178,7 +178,7 @@ Using workspace sections to mount host files::
     )
 
     adapter = ClaudeAgentSDKAdapter(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         client_config=ClaudeAgentSDKClientConfig(
             permission_mode="acceptEdits",
             cwd=str(workspace.temp_dir),
@@ -206,7 +206,7 @@ Using task completion checking with planning tools::
     checker = PlanBasedChecker(plan_type=Plan)
 
     adapter = ClaudeAgentSDKAdapter(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         client_config=ClaudeAgentSDKClientConfig(
             task_completion_checker=checker,
             stop_on_structured_output=True,

@@ -36,7 +36,7 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model` | `str` | `"claude-sonnet-4-5-20250929"` | Claude model identifier |
+| `model` | `str` | `"claude-opus-4-6"` | Claude model identifier |
 | `max_thinking_tokens` | `int \| None` | `None` | Extended thinking mode tokens |
 
 **Note:** `seed`, `stop`, `presence_penalty`, `frequency_penalty` not supported—raises `ValueError`.
@@ -207,12 +207,12 @@ Environment variables passed through for Bedrock: `AWS_PROFILE`, `AWS_REGION`,
 
 | Function | Description |
 |----------|-------------|
-| `get_default_model()` | Returns Sonnet 4.5 in appropriate format for auth mode |
+| `get_default_model()` | Returns Opus 4.6 in appropriate format for auth mode |
 | `get_supported_bedrock_models()` | Returns mapping of Anthropic names to Bedrock IDs |
 | `to_bedrock_model_id(name)` | Convert Anthropic model name to Bedrock ID |
 | `to_anthropic_model_name(id)` | Convert Bedrock ID to Anthropic model name |
-| `DEFAULT_MODEL` | Default Anthropic model (Sonnet 4.5) |
-| `DEFAULT_BEDROCK_MODEL` | Default Bedrock model ID (Sonnet 4.5) |
+| `DEFAULT_MODEL` | Default Anthropic model (Opus 4.6) |
+| `DEFAULT_BEDROCK_MODEL` | Default Bedrock model ID (Opus 4.6) |
 
 ### MCP Tool Exposure
 

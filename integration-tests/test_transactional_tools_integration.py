@@ -79,14 +79,14 @@ _PROMPT_NS: Final[str] = "integration/transactional-tools"
 def _get_model() -> str:
     """Return the model name used for integration tests.
 
-    Uses Opus 4.5 for better instruction following with custom tools.
+    Uses Opus 4.6 for better instruction following with custom tools.
     """
     if _MODEL_ENV_VAR in os.environ:
         return os.environ[_MODEL_ENV_VAR]
     # Use Opus for better tool following - Sonnet sometimes uses native tools
     if _is_bedrock_mode():
-        return "us.anthropic.claude-opus-4-5-20251101-v1:0"
-    return "claude-opus-4-5-20251101"
+        return "us.anthropic.claude-opus-4-6-v1:0"
+    return "claude-opus-4-6"
 
 
 def _make_config(cwd: Path, **kwargs: object) -> ClaudeAgentSDKClientConfig:
