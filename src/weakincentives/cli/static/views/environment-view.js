@@ -108,14 +108,12 @@ function renderEnvVarsSection(envVars) {
  * Initializes the environment view.
  *
  * @param {object} deps - Dependencies
- * @param {object} deps.store - The application store
+ * @param {object} deps.state - The shared application state
  * @param {function} deps.fetchJSON - API fetch helper
  * @param {function} deps.showToast - Toast notification helper
  * @returns {{ loadEnvironment }}
  */
-export function initEnvironmentView({ store, fetchJSON, showToast }) {
-  const state = store.getState();
-
+export function initEnvironmentView({ state, fetchJSON, showToast }) {
   const els = {
     emptyState: document.getElementById("environment-empty-state"),
     content: document.getElementById("environment-content"),

@@ -1,11 +1,10 @@
 // ============================================================================
-// Store - Centralized application state
+// State - Centralized application state definition
 //
-// All view modules share a single state object returned by createStore().
-// Each view receives the store at initialization and accesses state via
-// store.getState(). State is a plain mutable object for performance in a
-// browser context — the centralization ensures all modules read/write the
-// same source of truth.
+// All view modules share a single state object created by createInitialState().
+// Each view receives the state object at initialization. State is a plain
+// mutable object — the centralization ensures all modules read/write the same
+// source of truth while keeping the state shape defined in one place.
 // ============================================================================
 
 /**
@@ -89,19 +88,4 @@ export function createInitialState() {
     logsScroller: null,
     transcriptScroller: null,
   };
-}
-
-/**
- * Creates a store that holds centralized application state.
- *
- * @returns {{ getState: () => object }}
- */
-export function createStore() {
-  const state = createInitialState();
-
-  function getState() {
-    return state;
-  }
-
-  return { getState };
 }

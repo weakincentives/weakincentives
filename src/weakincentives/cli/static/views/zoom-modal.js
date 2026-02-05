@@ -152,14 +152,12 @@ function renderRegularEntryZoom(els, entry) {
  * Initializes the zoom modal for transcript entry detail view.
  *
  * @param {object} deps - Dependencies
- * @param {object} deps.store - The application store
+ * @param {object} deps.state - The shared application state
  * @param {object} deps.transcriptView - The transcript view module
  * @param {function} deps.showToast - Toast notification helper
  * @returns {{ openTranscriptZoom, closeZoomModal, zoomPrev, zoomNext, isOpen, isNextPending }}
  */
-export function initZoomModal({ store, transcriptView, showToast }) {
-  const state = store.getState();
-
+export function initZoomModal({ state, transcriptView, showToast }) {
   const els = {
     modal: document.getElementById("zoom-modal"),
     modalType: document.getElementById("zoom-modal-type"),

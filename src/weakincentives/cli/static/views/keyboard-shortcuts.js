@@ -6,7 +6,7 @@
  * Initializes keyboard shortcuts and the help overlay.
  *
  * @param {object} deps - Dependencies
- * @param {object} deps.store - The application store
+ * @param {object} deps.state - The shared application state
  * @param {object} deps.sessionsView - Sessions view module
  * @param {object} deps.transcriptView - Transcript view module
  * @param {object} deps.logsView - Logs view module
@@ -18,7 +18,7 @@
  * @param {function} deps.navigateBundle - Bundle navigation function
  */
 export function initKeyboardShortcuts({
-  store,
+  state,
   sessionsView,
   transcriptView,
   logsView,
@@ -29,8 +29,6 @@ export function initKeyboardShortcuts({
   toggleSidebar,
   navigateBundle,
 }) {
-  const state = store.getState();
-
   const els = {
     shortcutsOverlay: document.getElementById("shortcuts-overlay"),
     shortcutsClose: document.getElementById("shortcuts-close"),

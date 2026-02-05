@@ -1,13 +1,13 @@
 // ============================================================================
-// App - Thin coordinator that initializes the store, mounts views, and handles
+// App - Thin coordinator that initializes state, mounts views, and handles
 // cross-cutting concerns (theme, sidebar, bundle management, view switching).
 //
 // Each view is a self-contained module in views/ that owns its DOM elements,
-// event listeners, and rendering. State lives in a centralized store accessed
-// via store.getState().
+// event listeners, and rendering. All modules share a single state object
+// created by createInitialState() and passed directly at initialization.
 // ============================================================================
 
-import { createStore } from "./store.js";
+import { createInitialState } from "./store.js";
 import { initEnvironmentView } from "./views/environment-view.js";
 import { initFilesystemView } from "./views/filesystem-view.js";
 import { initKeyboardShortcuts } from "./views/keyboard-shortcuts.js";
@@ -17,11 +17,10 @@ import { initTranscriptView } from "./views/transcript-view.js";
 import { initZoomModal } from "./views/zoom-modal.js";
 
 // ============================================================================
-// STORE
+// STATE
 // ============================================================================
 
-const store = createStore();
-const state = store.getState();
+const state = createInitialState();
 
 // ============================================================================
 // API
@@ -117,7 +116,7 @@ function updateViewVisibility(viewName) {
   }
 }
 
-// Initialize views (will be set up after DOM content loads)
+// View modules (initialized in DOMContentLoaded)
 let sessionsView;
 let transcriptView;
 let logsView;
@@ -197,9 +196,16 @@ async function refreshBundles() {
 }
 
 function resetViewState() {
-  // Cancel pending async operations and clear timeouts
-  transcriptView.reset();
-  logsView.reset();
+  // Cancel pending async operations and clear timeouts.
+  // Guard: views are initialized in DOMContentLoaded; resetViewState is only
+  // reachable from user-triggered switchBundle/reloadBundle after that, but
+  // guard defensively against the ordering constraint.
+  if (transcriptView) {
+    transcriptView.reset();
+  }
+  if (logsView) {
+    logsView.reset();
+  }
 
   state.transcriptRawEntries = [];
   state.transcriptEntries = [];
@@ -283,18 +289,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   setLoading(true);
   try {
     // Initialize all view modules with shared dependencies
-    const deps = { store, fetchJSON, showToast };
+    const deps = { state, fetchJSON, showToast };
 
     sessionsView = initSessionsView(deps);
     transcriptView = initTranscriptView(deps);
     logsView = initLogsView(deps);
     filesystemView = initFilesystemView(deps);
     environmentView = initEnvironmentView(deps);
-    zoomModal = initZoomModal({ store, transcriptView, showToast });
+    zoomModal = initZoomModal({ state, transcriptView, showToast });
 
     // Initialize keyboard shortcuts (cross-cutting concern)
     initKeyboardShortcuts({
-      store,
+      state,
       sessionsView,
       transcriptView,
       logsView,

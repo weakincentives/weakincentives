@@ -242,17 +242,15 @@ export function createTranscriptEntryElement(entry, index) {
 // ============================================================================
 
 /**
- * Initializes the transcript view. Subscribes to store and wires up DOM events.
+ * Initializes the transcript view. Wires up DOM events and manages transcript data.
  *
  * @param {object} deps - Dependencies
- * @param {object} deps.store - The application store
+ * @param {object} deps.state - The shared application state
  * @param {function} deps.fetchJSON - API fetch helper
  * @param {function} deps.showToast - Toast notification helper
- * @returns {{ loadTranscript, loadTranscriptFacets, loadMoreTranscript, scrollBy, initVirtualScroller }}
+ * @returns {{ loadTranscript, loadTranscriptFacets, loadMoreTranscript, scrollBy, initVirtualScroller, reset }}
  */
-export function initTranscriptView({ store, fetchJSON, showToast }) {
-  const state = store.getState();
-
+export function initTranscriptView({ state, fetchJSON, showToast }) {
   const els = {
     search: document.getElementById("transcript-search"),
     clearFilters: document.getElementById("transcript-clear-filters"),

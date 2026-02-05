@@ -10,14 +10,12 @@ const FILESYSTEM_PREFIX = "filesystem/";
  * Initializes the filesystem view. Wires up DOM events and provides data loading.
  *
  * @param {object} deps - Dependencies
- * @param {object} deps.store - The application store
+ * @param {object} deps.state - The shared application state
  * @param {function} deps.fetchJSON - API fetch helper
  * @param {function} deps.showToast - Toast notification helper
  * @returns {{ loadFilesystem }}
  */
-export function initFilesystemView({ store, fetchJSON, showToast }) {
-  const state = store.getState();
-
+export function initFilesystemView({ state, fetchJSON, showToast }) {
   const els = {
     filter: document.getElementById("filesystem-filter"),
     list: document.getElementById("filesystem-list"),

@@ -301,14 +301,12 @@ function renderTree(value, path, depth, label, state, renderItemsFn) {
  * Initializes the sessions view with slice browser and JSON tree.
  *
  * @param {object} deps - Dependencies
- * @param {object} deps.store - The application store
+ * @param {object} deps.state - The shared application state
  * @param {function} deps.fetchJSON - API fetch helper
  * @param {function} deps.showToast - Toast notification helper
  * @returns {{ refreshMeta, focusSearch, focusItem, navigateNext, navigatePrev }}
  */
-export function initSessionsView({ store, fetchJSON, showToast }) {
-  const state = store.getState();
-
+export function initSessionsView({ state, fetchJSON, showToast }) {
   const els = {
     sliceFilter: document.getElementById("slice-filter"),
     stateSliceList: document.getElementById("state-slice-list"),

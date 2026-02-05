@@ -86,17 +86,15 @@ function createLogEntryElement(log, index) {
 // ============================================================================
 
 /**
- * Initializes the logs view. Subscribes to store and wires up DOM events.
+ * Initializes the logs view. Wires up DOM events and manages log data.
  *
  * @param {object} deps - Dependencies
- * @param {object} deps.store - The application store
+ * @param {object} deps.state - The shared application state
  * @param {function} deps.fetchJSON - API fetch helper
  * @param {function} deps.showToast - Toast notification helper
- * @returns {{ loadLogs, loadLogFacets, loadMoreLogs, scrollBy, initVirtualScroller }}
+ * @returns {{ loadLogs, loadLogFacets, loadMoreLogs, scrollBy, initVirtualScroller, reset }}
  */
-export function initLogsView({ store, fetchJSON, showToast }) {
-  const state = store.getState();
-
+export function initLogsView({ state, fetchJSON, showToast }) {
   const els = {
     search: document.getElementById("logs-search"),
     clearFilters: document.getElementById("logs-clear-filters"),
