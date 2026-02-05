@@ -169,6 +169,13 @@ class ReviewResponse:
     )
 
 
+@FrozenDataclass()
+class ReviewParams:
+    """Parameters for the review prompt template."""
+
+    focus: str = field(metadata={"description": "What to focus on in the review."})
+
+
 # =============================================================================
 # AgentLoop Implementation
 # =============================================================================
@@ -341,7 +348,7 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
             ),
         )
 
-        prompt = Prompt(template_with_workspace).bind({"focus": request.focus})
+        prompt = Prompt(template_with_workspace).bind(ReviewParams(focus=request.focus))
         return prompt, session
 
     @staticmethod
@@ -385,9 +392,9 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
             The output unchanged.
         """
         # Clean up workspace sections
-        for section in prompt.template.sections:
-            if isinstance(section, ClaudeAgentWorkspaceSection):
-                section.cleanup()
+        for node in prompt.template.sections:
+            if isinstance(node.section, ClaudeAgentWorkspaceSection):
+                node.section.cleanup()
 
         if output is not None:
             _LOGGER.info("Review complete: %s", output.summary[:50] + "...")

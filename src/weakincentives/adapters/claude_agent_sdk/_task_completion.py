@@ -138,10 +138,10 @@ class PlanBasedChecker(TaskCompletionChecker):
     returns incomplete feedback if any are found.
 
     Example:
-        >>> from weakincentives.contrib.tools.planning import Plan
         >>> from weakincentives.adapters.claude_agent_sdk import PlanBasedChecker
         >>>
-        >>> checker = PlanBasedChecker(plan_type=Plan)
+        >>> # Use with a custom plan type that has steps with status attribute
+        >>> checker = PlanBasedChecker(plan_type=MyPlanType)
     """
 
     def __init__(self, plan_type: type | None = None) -> None:
@@ -149,8 +149,7 @@ class PlanBasedChecker(TaskCompletionChecker):
 
         Args:
             plan_type: The Plan dataclass type to check. Must have a `steps`
-                attribute containing items with a `status` attribute. Pass
-                `weakincentives.contrib.tools.planning.Plan` for standard usage.
+                attribute containing items with a `status` attribute.
                 If None, the checker always returns ok (no plan checking).
         """
         self._plan_type = plan_type
