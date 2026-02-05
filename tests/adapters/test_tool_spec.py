@@ -172,10 +172,3 @@ class TestParseToolArguments:
             )
 
         assert "object" in str(excinfo.value).lower()
-
-    def test_non_string_keys_raises_error(self) -> None:
-        """JSON with non-string keys raises PromptEvaluationError."""
-        # This shouldn't happen in practice since JSON only allows string keys,
-        # but the code handles it defensively
-        # We can't actually test this with valid JSON, so we skip this edge case
-        pass

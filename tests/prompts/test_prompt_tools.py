@@ -19,13 +19,17 @@ import pytest
 
 from weakincentives.prompt import (
     MarkdownSection,
+    PolicyDecision,
     Prompt,
     PromptTemplate,
     Section,
     SectionVisibility,
+    Tool,
+    ToolContext,
+    ToolPolicy,
+    ToolResult,
 )
 from weakincentives.prompt.errors import PromptValidationError
-from weakincentives.prompt.tool import Tool
 
 
 @dataclass
@@ -276,3 +280,138 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("primary",)
     assert error.dataclass_type is str
+
+
+@dataclass(frozen=True)
+class _TestPolicy(ToolPolicy):
+    """Test policy for policy collection tests."""
+
+    label: str
+
+    @property
+    def name(self) -> str:
+        return f"test_{self.label}"
+
+    def check(
+        self,
+        tool: Tool[Any, Any],
+        params: object,
+        *,
+        context: ToolContext,
+    ) -> PolicyDecision:
+        del tool, params, context
+        return PolicyDecision.allow()
+
+    def on_result(
+        self,
+        tool: Tool[Any, Any],
+        params: object,
+        result: ToolResult[Any],
+        *,
+        context: ToolContext,
+    ) -> None:
+        pass
+
+
+def test_policies_for_tool_collects_section_and_prompt_policies() -> None:
+    """Test policies_for_tool collects from both section and prompt level."""
+    section_policy = _TestPolicy(label="section")
+    prompt_policy = _TestPolicy(label="prompt")
+
+    primary_tool = _build_primary_tool()
+
+    section = MarkdownSection[PrimarySectionParams](
+        title="Primary",
+        template="",
+        key="primary",
+        tools=[primary_tool],
+        policies=[section_policy],
+        default_params=PrimarySectionParams(),
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="policies-collection",
+        sections=[section],
+        policies=(prompt_policy,),
+    )
+    prompt = Prompt(template)
+
+    policies = prompt.policies_for_tool("primary_lookup")
+
+    assert len(policies) == 2
+    assert policies[0] is section_policy
+    assert policies[1] is prompt_policy
+
+
+def test_policies_for_tool_returns_prompt_policies_for_unknown_tool() -> None:
+    """Test policies_for_tool returns only prompt policies for unknown tools."""
+    prompt_policy = _TestPolicy(label="prompt")
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="policies-unknown-tool",
+        sections=[],
+        policies=(prompt_policy,),
+    )
+    prompt = Prompt(template)
+
+    policies = prompt.policies_for_tool("nonexistent_tool")
+
+    assert len(policies) == 1
+    assert policies[0] is prompt_policy
+
+
+def test_policies_for_tool_iterates_through_sections_and_tools() -> None:
+    """Test policies_for_tool iterates through multiple sections and tools."""
+    first_policy = _TestPolicy(label="first")
+    second_policy = _TestPolicy(label="second")
+
+    # First section with a different tool
+    first_tool = Tool[PrimaryToolParams, PrimaryToolPayload](
+        name="first_tool",
+        description="First tool.",
+        handler=None,
+    )
+    first_section = MarkdownSection[PrimarySectionParams](
+        title="First",
+        template="",
+        key="first",
+        tools=[first_tool],
+        policies=[first_policy],
+        default_params=PrimarySectionParams(),
+    )
+
+    # Second section with multiple tools - target is second tool
+    other_tool = Tool[SecondaryToolParams, SecondaryToolPayload](
+        name="other_tool",
+        description="Other tool.",
+        handler=None,
+    )
+    target_tool = Tool[SecondaryToolParams, SecondaryToolPayload](
+        name="target_tool",
+        description="Target tool.",
+        handler=None,
+    )
+    second_section = MarkdownSection[SecondaryToggleParams](
+        title="Second",
+        template="",
+        key="second",
+        tools=[other_tool, target_tool],
+        policies=[second_policy],
+        default_params=SecondaryToggleParams(),
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="policies-iteration",
+        sections=[first_section, second_section],
+    )
+    prompt = Prompt(template)
+
+    # This should iterate through first_section (no match), then second_section
+    # and within second_section, iterate through other_tool (no match) then target_tool
+    policies = prompt.policies_for_tool("target_tool")
+
+    assert len(policies) == 1
+    assert policies[0] is second_policy

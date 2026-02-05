@@ -122,7 +122,7 @@ def parse_tool_arguments(
     parsed_mapping = cast(Mapping[Any, Any], parsed)
     arguments: ToolArguments = {}
     for key, value in parsed_mapping.items():
-        if not isinstance(key, str):
+        if not isinstance(key, str):  # pragma: no cover - JSON always has string keys
             raise PromptEvaluationError(
                 "Tool call arguments must use string keys.",
                 prompt_name=prompt_name,
