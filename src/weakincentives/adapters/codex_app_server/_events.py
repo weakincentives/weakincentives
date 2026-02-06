@@ -61,7 +61,7 @@ def dispatch_item_tool_invoked(
     if item_type == "commandExecution":
         name = "codex:command"
         params = {"command": item.get("command", ""), "cwd": item.get("cwd", "")}
-        rendered_output = item.get("aggregatedOutput", "")[:1000]
+        rendered_output = (item.get("aggregatedOutput") or "")[:1000]
     elif item_type == "fileChange":
         name = "codex:file_change"
         params = {"file": item.get("file", "")}

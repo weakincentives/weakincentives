@@ -264,12 +264,16 @@ clean-extracted:
 # Demos
 # =============================================================================
 
-# Launch the code reviewer demo using Claude Agent SDK
-# Usage: make demo [PROJECT=/path/to/project] [FOCUS="review focus"]
+# Code reviewer demo
+# Usage: make demo-claude [PROJECT=...] [FOCUS="..."]
+#        make demo-codex  [PROJECT=...] [FOCUS="..."]
 PROJECT ?= test-repositories/sunfish
 FOCUS ?= Review how the UCI implementation is handled via the packaging scripts
-demo:
-	@uv run --all-extras python code_reviewer_example.py "$(PROJECT)" "$(FOCUS)"
+demo-claude:
+	@uv run --all-extras python code_reviewer_example.py --adapter claude "$(PROJECT)" "$(FOCUS)"
+demo-codex:
+	@uv run --all-extras python code_reviewer_example.py --adapter codex "$(PROJECT)" "$(FOCUS)"
+demo: demo-claude
 
 # =============================================================================
 # Main Check Target

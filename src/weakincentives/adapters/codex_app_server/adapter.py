@@ -88,9 +88,12 @@ def _bridged_tools_to_dynamic_specs(
 def _openai_strict_schema(s: dict[str, Any]) -> dict[str, Any]:
     """Adapt a WINK serde schema for OpenAI/Codex structured output.
 
-    OpenAI's structured output requires ``additionalProperties: false``
-    on all object types.  WINK's ``serde.schema()`` emits ``true`` by
-    default, which Codex rejects as ``invalid_json_schema``.
+    OpenAI's structured output requires:
+    - ``additionalProperties: false`` on all object types
+    - All properties listed in ``required`` when additionalProperties is false
+
+    WINK's ``serde.schema()`` emits ``additionalProperties: true`` by
+    default and only marks fields without defaults as required.
     """
     out = dict(s)
     if out.get("type") == "object":
@@ -103,6 +106,9 @@ def _openai_strict_schema(s: dict[str, Any]) -> dict[str, Any]:
                 else v
                 for k, v in props.items()
             }
+            # OpenAI requires all properties in required when
+            # additionalProperties is false.
+            out["required"] = list(props.keys())
     return out
 
 

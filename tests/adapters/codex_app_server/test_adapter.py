@@ -162,6 +162,15 @@ class TestOpenaiStrictSchema:
         result = _openai_strict_schema(s)
         assert result["additionalProperties"] is False
 
+    def test_all_properties_required(self) -> None:
+        s = {
+            "type": "object",
+            "properties": {"a": {"type": "string"}, "b": {"type": "integer"}},
+            "required": ["a"],
+        }
+        result = _openai_strict_schema(s)
+        assert sorted(result["required"]) == ["a", "b"]
+
     def test_nested_objects(self) -> None:
         s = {
             "type": "object",
@@ -177,13 +186,14 @@ class TestOpenaiStrictSchema:
         result = _openai_strict_schema(s)
         assert result["additionalProperties"] is False
         assert result["properties"]["inner"]["additionalProperties"] is False
+        assert result["properties"]["inner"]["required"] == ["x"]
 
     def test_non_object_unchanged(self) -> None:
         s = {"type": "array", "items": {"type": "string"}}
         assert _openai_strict_schema(s) == s
 
     def test_preserves_other_fields(self) -> None:
-        s = {"type": "object", "title": "Foo", "properties": {}, "required": ["a"]}
+        s = {"type": "object", "title": "Foo", "properties": {"a": {"type": "string"}}}
         result = _openai_strict_schema(s)
         assert result["title"] == "Foo"
         assert result["required"] == ["a"]

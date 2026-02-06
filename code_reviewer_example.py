@@ -19,7 +19,7 @@ framework's core concepts:
 - **AgentLoop**: Durable request processing with visibility timeout semantics
 - **InMemoryMailbox**: Thread-safe in-memory queue for request/response routing
 - **InProcessDispatcher**: Synchronous event delivery for telemetry
-- **ClaudeAgentSDKAdapter**: Provider adapter for Claude evaluation
+- **ProviderAdapter**: Provider-agnostic evaluation (Claude SDK or Codex)
 - **Session**: Event-sourced state container
 
 The agent runs in a single process with the dispatcher, mailboxes, and loop
@@ -39,10 +39,12 @@ Architecture:
 
 Usage:
     python code_reviewer_example.py /path/to/project "Review the main module"
+    python code_reviewer_example.py --adapter codex /path/to/project "Focus area"
 
 Requirements:
     pip install weakincentives
-    # Ensure claude-agent-sdk is installed for actual execution
+    # Claude SDK adapter requires claude-agent-sdk
+    # Codex adapter requires codex CLI on PATH
 """
 
 from __future__ import annotations
@@ -61,13 +63,21 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     ClaudeAgentWorkspaceSection,
-    HostMount,
+    HostMount as ClaudeHostMount,
     IsolationConfig,
+)
+from weakincentives.adapters.codex_app_server import (
+    CodexAppServerAdapter,
+    CodexAppServerClientConfig,
+    CodexAppServerModelConfig,
+    CodexWorkspaceSection,
+    HostMount as CodexHostMount,
 )
 from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import BundleConfig
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.prompt.section import Section
 from weakincentives.runtime import (
     AgentLoop,
     AgentLoopConfig,
@@ -80,7 +90,12 @@ from weakincentives.runtime import (
 from weakincentives.runtime.logging import configure_logging
 
 if TYPE_CHECKING:
+    from weakincentives.adapters.core import ProviderAdapter
     from weakincentives.experiment import Experiment
+
+# Adapter name constants
+ADAPTER_CLAUDE = "claude"
+ADAPTER_CODEX = "codex"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -121,7 +136,7 @@ DEFAULT_EXCLUDE_GLOBS: tuple[str, ...] = (
 DEFAULT_MAX_BYTES = 200_000
 
 # Default deadline for review operations
-DEFAULT_DEADLINE_MINUTES = 5
+DEFAULT_DEADLINE_MINUTES = 15
 
 # Wait time for mailbox operations
 MAILBOX_WAIT_SECONDS = 1
@@ -179,24 +194,53 @@ class ReviewParams:
 # =============================================================================
 
 
+def _create_workspace_section(
+    adapter_name: str,
+    session: Session,
+    project_path: str,
+) -> Section:
+    """Create the appropriate workspace section for the chosen adapter."""
+    if adapter_name == ADAPTER_CODEX:
+        return CodexWorkspaceSection(
+            session=session,
+            mounts=[
+                CodexHostMount(
+                    host_path=project_path,
+                    include_glob=DEFAULT_INCLUDE_GLOBS,
+                    exclude_glob=DEFAULT_EXCLUDE_GLOBS,
+                    max_bytes=DEFAULT_MAX_BYTES,
+                )
+            ],
+        )
+    return ClaudeAgentWorkspaceSection(
+        session=session,
+        mounts=[
+            ClaudeHostMount(
+                host_path=project_path,
+                include_glob=DEFAULT_INCLUDE_GLOBS,
+                exclude_glob=DEFAULT_EXCLUDE_GLOBS,
+                max_bytes=DEFAULT_MAX_BYTES,
+            )
+        ],
+    )
+
+
 class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
     """AgentLoop implementation for code review tasks.
 
     This loop processes ReviewRequest messages from its request mailbox,
-    evaluates them using the Claude Agent SDK, and sends ReviewResponse
-    results to the reply mailbox.
-
-    The adapter's ``cwd`` is set to the project path so the SDK's native
-    tools (Read, Glob, Grep, Bash) operate directly on the project files.
+    evaluates them using either the Claude Agent SDK or Codex App Server,
+    and sends ReviewResponse results to the reply mailbox.
     """
 
     def __init__(
         self,
         *,
-        adapter: ClaudeAgentSDKAdapter[ReviewResponse],
+        adapter: ProviderAdapter[ReviewResponse],
         requests: InMemoryMailbox[
             AgentLoopRequest[ReviewRequest], AgentLoopResult[ReviewResponse]
         ],
+        adapter_name: str = ADAPTER_CLAUDE,
         config: AgentLoopConfig | None = None,
         worker_id: str = "code-reviewer",
     ) -> None:
@@ -206,6 +250,7 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
             config=config,
             worker_id=worker_id,
         )
+        self._adapter_name = adapter_name
         self._last_session: Session | None = None
 
     @property
@@ -229,16 +274,8 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
         )
         self._last_session = session
 
-        workspace = ClaudeAgentWorkspaceSection(
-            session=session,
-            mounts=[
-                HostMount(
-                    host_path=request.project_path,
-                    include_glob=DEFAULT_INCLUDE_GLOBS,
-                    exclude_glob=DEFAULT_EXCLUDE_GLOBS,
-                    max_bytes=DEFAULT_MAX_BYTES,
-                )
-            ],
+        workspace = _create_workspace_section(
+            self._adapter_name, session, request.project_path
         )
 
         template = PromptTemplate[ReviewResponse](
@@ -303,8 +340,11 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
     ) -> ReviewResponse | None:
         """Clean up workspace resources after execution."""
         for node in prompt.template.sections:
-            if isinstance(node.section, ClaudeAgentWorkspaceSection):
-                node.section.cleanup()
+            section = node.section
+            if isinstance(
+                section, (ClaudeAgentWorkspaceSection, CodexWorkspaceSection)
+            ):
+                section.cleanup()
 
         if output is not None:
             _LOGGER.info("Review complete: %s", output.summary[:50] + "...")
@@ -333,8 +373,13 @@ def create_mailboxes() -> tuple[
     return requests, responses
 
 
-def create_adapter() -> ClaudeAgentSDKAdapter[ReviewResponse]:
-    """Create the Claude Agent SDK adapter for evaluation."""
+def create_adapter(adapter_name: str) -> ProviderAdapter[ReviewResponse]:
+    """Create the appropriate adapter for evaluation."""
+    if adapter_name == ADAPTER_CODEX:
+        return CodexAppServerAdapter(
+            model_config=CodexAppServerModelConfig(),
+            client_config=CodexAppServerClientConfig(approval_policy="never"),
+        )
     return ClaudeAgentSDKAdapter[ReviewResponse](
         client_config=ClaudeAgentSDKClientConfig(
             permission_mode="bypassPermissions",
@@ -367,14 +412,17 @@ def run_review(
     project_path: Path,
     focus: str,
     *,
+    adapter_name: str = ADAPTER_CLAUDE,
     deadline_minutes: int = DEFAULT_DEADLINE_MINUTES,
 ) -> ReviewResponse | None:
     """Run a code review using the AgentLoop pattern."""
-    _LOGGER.info("Starting code review for: %s", project_path)
+    _LOGGER.info(
+        "Starting code review for: %s (adapter=%s)", project_path, adapter_name
+    )
 
     requests, responses = create_mailboxes()
 
-    adapter = create_adapter()
+    adapter = create_adapter(adapter_name)
     config = AgentLoopConfig(
         deadline=Deadline(
             expires_at=datetime.now(UTC) + timedelta(minutes=deadline_minutes)
@@ -384,6 +432,7 @@ def run_review(
     loop = CodeReviewLoop(
         adapter=adapter,
         requests=requests,
+        adapter_name=adapter_name,
         config=config,
     )
 
@@ -476,15 +525,21 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent("""
             Examples:
               %(prog)s /path/to/project
-              %(prog)s /path/to/project "Review authentication logic"
+              %(prog)s --adapter codex /path/to/project "Review auth logic"
 
             Architecture:
               This example demonstrates the AgentLoop pattern with:
               - InMemoryMailbox for request/response routing
               - InProcessDispatcher for session telemetry
-              - ClaudeAgentSDKAdapter for LLM evaluation
+              - Provider-agnostic adapter (Claude SDK or Codex)
               - Durable processing with visibility timeouts
         """),
+    )
+    parser.add_argument(
+        "--adapter",
+        choices=[ADAPTER_CLAUDE, ADAPTER_CODEX],
+        default=ADAPTER_CLAUDE,
+        help=f"Which adapter to use (default: {ADAPTER_CLAUDE})",
     )
     parser.add_argument(
         "project_path",
@@ -531,6 +586,7 @@ def main() -> int:
         review = run_review(
             args.project_path.resolve(),
             args.focus,
+            adapter_name=args.adapter,
             deadline_minutes=args.deadline,
         )
     except KeyboardInterrupt:
