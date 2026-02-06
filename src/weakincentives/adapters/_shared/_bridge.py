@@ -49,6 +49,7 @@ __all__ = [
     "MCPToolExecutionState",
     "create_bridged_tools",
     "create_mcp_server",
+    "make_async_handler",
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
@@ -103,7 +104,9 @@ class MCPToolExecutionState:
     3. PostToolUse hook: (optional cleanup, queues auto-drain)
     """
 
-    _queues: dict[str, deque[str]] = field(default_factory=dict)
+    _queues: dict[str, deque[str]] = field(
+        default_factory=lambda: dict[str, deque[str]]()
+    )
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     @staticmethod
@@ -158,22 +161,6 @@ class MCPToolExecutionState:
             return None
 
 
-@dataclass(slots=True, frozen=True)
-class _MCPToolCallFunction:
-    """Adapter for MCP tool call function to ProviderToolCallFunction."""
-
-    name: str
-    arguments: str | None
-
-
-@dataclass(slots=True, frozen=True)
-class _MCPToolCall:
-    """Adapter for MCP tool call to ProviderToolCall."""
-
-    id: str
-    function: _MCPToolCallFunction
-
-
 class BridgedTool:
     """A weakincentives tool wrapped for MCP/SDK consumption.
 
@@ -208,6 +195,7 @@ class BridgedTool:
         visibility_signal: VisibilityExpansionSignal | None = None,
         mcp_tool_state: MCPToolExecutionState | None = None,
     ) -> None:
+        super().__init__()
         self.name = name
         self.description = description
         self.input_schema = input_schema
@@ -299,7 +287,7 @@ class BridgedTool:
             context = ToolContext(
                 prompt=self._prompt,
                 rendered_prompt=self._rendered_prompt,
-                adapter=self._adapter,
+                adapter=cast(Any, self._adapter),
                 session=self._session,
                 deadline=self._deadline,
                 heartbeat=self._heartbeat,
@@ -464,7 +452,7 @@ class BridgedTool:
             call_id=call_id,
             run_context=self._run_context,
         )
-        self._session.dispatcher.dispatch(event)
+        _ = self._session.dispatcher.dispatch(event)
 
 
 def create_bridged_tools(
@@ -549,7 +537,7 @@ def create_bridged_tools(
     return tuple(bridged)
 
 
-def _make_async_handler(
+def make_async_handler(
     bt: BridgedTool,
 ) -> Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]:
     """Create an async handler wrapper for a bridged tool.
@@ -588,15 +576,13 @@ def create_mcp_server(
             tool as sdk_tool,
         )
     except ImportError as error:
-        raise ImportError(
-            "claude-agent-sdk is required for custom tool bridging. "
-            "Install it with: pip install claude-agent-sdk"
-        ) from error
+        msg = "claude-agent-sdk is required. Install with: pip install claude-agent-sdk"
+        raise ImportError(msg) from error
 
     sdk_tools: list[SdkMcpTool[Any]] = []
 
     for bridged_tool in bridged_tools:
-        async_handler = _make_async_handler(bridged_tool)
+        async_handler = make_async_handler(bridged_tool)
 
         # Use the SDK's tool decorator to wrap the handler
         decorated_tool: SdkMcpTool[Any] = sdk_tool(

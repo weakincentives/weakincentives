@@ -154,16 +154,17 @@ def _copy_mount_to_temp(
         _ = target.parent.mkdir(parents=True, exist_ok=True)
         file_bytes = source.stat().st_size
 
-        if mount.max_bytes and file_bytes > mount.max_bytes:
+        if mount.max_bytes is not None and file_bytes > mount.max_bytes:
             raise WorkspaceBudgetExceededError(
                 f"File exceeds byte budget: {file_bytes} > {mount.max_bytes}"
             )
 
-        _ = shutil.copy2(source, target)
+        _ = shutil.copy2(source, target, follow_symlinks=mount.follow_symlinks)
         bytes_copied = file_bytes
         entries.append(source.name)
 
     else:
+        resolved_source = source.resolve()
         for root, _dirs, files in os.walk(source, followlinks=mount.follow_symlinks):
             root_path = Path(root)
             rel_root = root_path.relative_to(source)
@@ -177,16 +178,25 @@ def _copy_mount_to_temp(
                     continue
 
                 file_path = root_path / file_name
+
+                if mount.follow_symlinks and not file_path.resolve().is_relative_to(
+                    resolved_source
+                ):
+                    continue  # symlink escapes source — skip
+
                 file_bytes = file_path.stat().st_size
 
-                if mount.max_bytes and bytes_copied + file_bytes > mount.max_bytes:
+                if (
+                    mount.max_bytes is not None
+                    and bytes_copied + file_bytes > mount.max_bytes
+                ):
                     total = bytes_copied + file_bytes
                     msg = f"Mount exceeds byte budget: {total} > {mount.max_bytes}"
                     raise WorkspaceBudgetExceededError(msg)
 
                 dest = target / rel_path
                 _ = dest.parent.mkdir(parents=True, exist_ok=True)
-                _ = shutil.copy2(file_path, dest)
+                _ = shutil.copy2(file_path, dest, follow_symlinks=mount.follow_symlinks)
 
                 bytes_copied += file_bytes
                 entries.append(str(rel_path))
@@ -216,6 +226,9 @@ def _create_workspace(
             resolved = _resolve_mount_path(mount.host_path, list(allowed_host_roots))
             mount_path = mount.mount_path or Path(mount.host_path).name
             target = temp_dir / mount_path
+            if not target.resolve().is_relative_to(temp_dir.resolve()):
+                msg = f"Mount path '{mount_path}' escapes workspace directory"
+                raise WorkspaceSecurityError(msg)
             preview = _copy_mount_to_temp(source=resolved, target=target, mount=mount)
             previews.append(preview)
     except Exception:

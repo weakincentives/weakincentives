@@ -157,6 +157,7 @@ combine-as-imports = true
 "src/weakincentives/adapters/claude_agent_sdk/_bridge.py" = ["PLR0913", "TRY300", "RUF029"]
 "src/weakincentives/adapters/_shared/_bridge.py" = ["PLR0913", "TRY300", "RUF029"]
 "src/weakincentives/adapters/claude_agent_sdk/_hooks.py" = ["RUF029"]
+"src/weakincentives/adapters/codex_app_server/workspace.py" = ["TRY301"]
 "src/weakincentives/adapters/codex_app_server/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
 "src/weakincentives/adapters/codex_app_server/client.py" = ["C901", "PLR6301"]
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
@@ -192,7 +193,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.pytest.ini_options]
-addopts = "--cov=src/weakincentives --cov=toolchain --cov-report=term-missing --cov-fail-under=100"
+addopts = "--cov=src/weakincentives --cov=toolchain --cov-report=term-missing --cov-fail-under=100 --timeout=10 --timeout-method=thread"
 markers = [
     "core: marks fast, high-value tests that always run in CI.",
     "integration: marks tests that exercise live provider integrations.",
@@ -203,7 +204,7 @@ markers = [
     "redis_cluster: marks tests using Redis Cluster.",
     "slow: marks tests that are slow and may be skipped in quick test runs.",
 ]
-norecursedirs = ["test-repositories", ".uv-cache", ".venv", ".hypothesis"]
+norecursedirs = ["test-repositories", ".uv-cache", ".venv", ".hypothesis", "integration-tests"]
 reruns = 2
 reruns_delay = 0.5
 
@@ -247,7 +248,7 @@ exclude = [
     ".ruff_cache",
     "dist",
     "src/weakincentives/adapters/claude_agent_sdk",
-    "src/weakincentives/adapters/_shared",
+
     "src/weakincentives/docs",
 ]
 deprecateTypingAliases = true

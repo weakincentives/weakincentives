@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import unittest.mock
 from pathlib import Path
 
 import pytest
@@ -393,3 +394,66 @@ class TestCodexWorkspaceSection:
         section.cleanup()
         # Second cleanup should be safe
         section.cleanup()
+
+
+class TestPathTraversal:
+    def test_mount_path_traversal_rejected(self, sample_source: Path) -> None:
+        mount = HostMount(host_path=str(sample_source), mount_path="../../escape")
+        with pytest.raises(WorkspaceSecurityError, match="escapes workspace"):
+            _create_workspace([mount], allowed_host_roots=[sample_source.parent])
+
+
+class TestSymlinkEscape:
+    def test_symlink_escape_skipped(self, temp_dir: Path) -> None:
+        """Symlinks pointing outside source are skipped when follow_symlinks=True."""
+        src = temp_dir / "source"
+        src.mkdir()
+        (src / "legit.txt").write_text("ok")
+
+        outside = temp_dir / "outside.txt"
+        outside.write_text("secret")
+        (src / "escape_link").symlink_to(outside)
+
+        tgt = temp_dir / "workspace" / "source"
+        tgt.mkdir(parents=True)
+        mount = HostMount(host_path=str(src), follow_symlinks=True)
+
+        preview = _copy_mount_to_temp(src, tgt, mount)
+
+        assert "legit.txt" in preview.entries
+        assert "escape_link" not in preview.entries
+
+    def test_copy_preserves_follow_symlinks_false(self, temp_dir: Path) -> None:
+        """shutil.copy2 called with follow_symlinks=False for single file."""
+        src = temp_dir / "src.txt"
+        src.write_text("content")
+        tgt = temp_dir / "workspace" / "src.txt"
+        mount = HostMount(host_path=str(src), follow_symlinks=False)
+
+        with unittest.mock.patch("shutil.copy2", wraps=shutil.copy2) as mock_copy:
+            _copy_mount_to_temp(src, tgt, mount)
+            mock_copy.assert_called_once()
+            assert mock_copy.call_args[1].get("follow_symlinks") is False
+
+
+class TestMaxBytesZero:
+    def test_max_bytes_zero_rejects_files(self, temp_dir: Path) -> None:
+        """max_bytes=0 should reject any file."""
+        src = temp_dir / "tiny.txt"
+        src.write_text("a")
+        tgt = temp_dir / "workspace" / "tiny.txt"
+        mount = HostMount(host_path=str(src), max_bytes=0)
+
+        with pytest.raises(WorkspaceBudgetExceededError, match="byte budget"):
+            _copy_mount_to_temp(src, tgt, mount)
+
+    def test_max_bytes_zero_rejects_directory_files(
+        self, sample_source: Path, temp_dir: Path
+    ) -> None:
+        """max_bytes=0 should reject files in a directory walk."""
+        tgt = temp_dir / "workspace" / "source"
+        tgt.mkdir(parents=True)
+        mount = HostMount(host_path=str(sample_source), max_bytes=0)
+
+        with pytest.raises(WorkspaceBudgetExceededError, match="byte budget"):
+            _copy_mount_to_temp(sample_source, tgt, mount)

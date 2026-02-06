@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
+from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, cast
 
@@ -60,7 +62,7 @@ class CodexAppServerClient:
         self._message_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._read_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
-        self._stderr_lines: list[str] = []
+        self._stderr_lines: deque[str] = deque(maxlen=1000)
 
     async def start(self) -> None:
         """Spawn the codex app-server subprocess and begin reading."""
@@ -81,10 +83,14 @@ class CodexAppServerClient:
         """Terminate the subprocess gracefully."""
         if self._read_task is not None:
             _ = self._read_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._read_task
             self._read_task = None
 
         if self._stderr_task is not None:
             _ = self._stderr_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._stderr_task
             self._stderr_task = None
 
         if self._proc is not None:
@@ -203,6 +209,11 @@ class CodexAppServerClient:
 
         except asyncio.CancelledError:
             pass
+        except Exception:
+            logger.warning(
+                "codex_client.read_loop_error",
+                event="client.read_loop_error",
+            )
         finally:
             # Signal end of messages
             await self._message_queue.put(_SENTINEL)

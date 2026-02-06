@@ -594,3 +594,92 @@ class TestStderrLogging:
                 await client.stop()
 
         asyncio.run(_run())
+
+
+class TestStopAwaitsTasksClient:
+    def test_stop_awaits_cancelled_tasks(self) -> None:
+        """stop() awaits cancelled read and stderr tasks."""
+
+        async def _run() -> None:
+            proc = FakeProcess(stdout_lines=[], stderr_lines=[])
+
+            with patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec:
+                mock_exec.return_value = proc
+                client = CodexAppServerClient()
+                await client.start()
+
+                # Wait for read_loop and stderr_loop to finish (EOF)
+                await asyncio.sleep(0.05)
+
+                # Verify tasks exist before stop
+                assert client._read_task is not None
+                assert client._stderr_task is not None
+
+                await client.stop()
+
+                # Tasks should be cleaned up
+                assert client._read_task is None
+                assert client._stderr_task is None
+
+        asyncio.run(_run())
+
+
+class TestStderrBufferBounded:
+    def test_stderr_buffer_bounded(self) -> None:
+        """Stderr buffer only keeps last 1000 lines."""
+
+        async def _run() -> None:
+            lines = [f"line-{i}" for i in range(1200)]
+            proc = FakeProcess(stdout_lines=[], stderr_lines=lines)
+
+            with patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec:
+                mock_exec.return_value = proc
+                client = CodexAppServerClient()
+                await client.start()
+                await asyncio.sleep(0.1)
+
+                output = client.stderr_output
+                output_lines = output.split("\n")
+                assert len(output_lines) == 1000
+                assert output_lines[0] == "line-200"
+                assert output_lines[-1] == "line-1199"
+                await client.stop()
+
+        asyncio.run(_run())
+
+
+class TestReadLoopBroadException:
+    def test_read_loop_handles_unexpected_error(self) -> None:
+        """Unexpected exceptions in _read_loop are caught, sentinel delivered."""
+
+        async def _run() -> None:
+            notif = _notification_line("item/completed", {})
+            proc = FakeProcess(stdout_lines=[notif])
+
+            with patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec:
+                mock_exec.return_value = proc
+                client = CodexAppServerClient()
+
+                # Patch _route_message to raise an unexpected error
+                def exploding_route(parsed: dict[str, Any]) -> None:
+                    raise RuntimeError("unexpected boom")
+
+                client._route_message = exploding_route  # type: ignore[assignment]
+                await client.start()
+
+                # read_messages should terminate (sentinel delivered)
+                messages: list[dict[str, Any]] = []
+                async for msg in client.read_messages():
+                    messages.append(msg)
+
+                # No messages yielded because _route_message exploded
+                assert len(messages) == 0
+                await client.stop()
+
+        asyncio.run(_run())

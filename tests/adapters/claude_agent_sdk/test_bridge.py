@@ -24,9 +24,9 @@ import pytest
 from weakincentives.adapters.claude_agent_sdk._bridge import (
     BridgedTool,
     MCPToolExecutionState,
-    _make_async_handler,
     create_bridged_tools,
     create_mcp_server,
+    make_async_handler,
 )
 from weakincentives.adapters.claude_agent_sdk._visibility_signal import (
     VisibilityExpansionSignal,
@@ -508,7 +508,7 @@ class TestCreateBridgedTools:
 
 
 class TestMakeAsyncHandler:
-    """Tests for _make_async_handler function."""
+    """Tests for make_async_handler function."""
 
     def test_creates_async_wrapper(
         self,
@@ -516,7 +516,7 @@ class TestMakeAsyncHandler:
         prompt: Prompt[object],
         mock_adapter: MagicMock,
     ) -> None:
-        """Test that _make_async_handler creates an async wrapper."""
+        """Test that make_async_handler creates an async wrapper."""
         bridged = BridgedTool(
             name="search",
             description="Search for content",
@@ -533,7 +533,7 @@ class TestMakeAsyncHandler:
             budget_tracker=None,
         )
 
-        async_handler = _make_async_handler(bridged)
+        async_handler = make_async_handler(bridged)
 
         # Verify it's a coroutine function
         assert asyncio.iscoroutinefunction(async_handler)
@@ -561,7 +561,7 @@ class TestMakeAsyncHandler:
             budget_tracker=None,
         )
 
-        async_handler = _make_async_handler(bridged)
+        async_handler = make_async_handler(bridged)
         result = asyncio.run(async_handler({"query": "test"}))
 
         assert result["isError"] is False
@@ -787,7 +787,7 @@ class TestVisibilityExpansionRequiredPropagation:
             visibility_signal=visibility_signal,
         )
 
-        async_handler = _make_async_handler(bridged)
+        async_handler = make_async_handler(bridged)
 
         # The async wrapper should return success response
         result = asyncio.run(async_handler({"query": "test"}))

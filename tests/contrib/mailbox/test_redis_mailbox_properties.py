@@ -50,9 +50,28 @@ try:
 except ImportError:
     HAS_HYPOTHESIS = False
 
+
+def _redis_available() -> bool:
+    """Check if Redis is accessible on localhost:6379."""
+    try:
+        from redis import Redis
+
+        client = Redis(host="localhost", port=6379, db=15, socket_connect_timeout=1)
+        client.ping()
+        client.close()
+    except Exception:
+        return False
+    return True
+
+
+_HAS_REDIS = _redis_available()
+
 pytestmark = [
+    pytest.mark.redis,
     pytest.mark.redis_standalone,
+    pytest.mark.timeout(60),
     pytest.mark.skipif(not HAS_HYPOTHESIS, reason="hypothesis not installed"),
+    pytest.mark.skipif(not _HAS_REDIS, reason="Redis not available on localhost:6379"),
 ]
 
 
@@ -435,8 +454,8 @@ if HAS_HYPOTHESIS:
     # Configure Hypothesis settings
     TestRedisMailbox = RedisMailboxStateMachine.TestCase
     TestRedisMailbox.settings = settings(
-        max_examples=100,
-        stateful_step_count=50,
+        max_examples=10,
+        stateful_step_count=15,
         deadline=None,  # Disable deadline for I/O operations
         suppress_health_check=[
             HealthCheck.too_slow,

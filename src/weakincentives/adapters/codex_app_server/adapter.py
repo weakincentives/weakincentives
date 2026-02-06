@@ -850,9 +850,9 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             "item/fileChange/requestApproval",
         }:
             decision = (
-                "decline"
-                if self._client_config.approval_policy == "on-request"
-                else "accept"
+                "accept"
+                if self._client_config.approval_policy in {"never", "on-failure"}
+                else "decline"
             )
             await client.send_response(request_id, {"decision": decision})
         else:
@@ -887,7 +887,9 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             )
             return
 
-        mcp_result: dict[str, Any] = bridged_tool(cast(dict[str, Any], arguments))
+        mcp_result: dict[str, Any] = await asyncio.to_thread(
+            bridged_tool, cast(dict[str, Any], arguments)
+        )
         is_error: bool = mcp_result.get("isError", False)
         mcp_content: list[dict[str, Any]] = mcp_result.get("content", [])
         content_items: list[dict[str, str]] = [

@@ -1679,3 +1679,66 @@ class TestVisibilitySignalPassthrough:
 
                 with pytest.raises(VisibilityExpansionRequired):
                     adapter.evaluate(prompt, session=session)
+
+
+class TestToolCallRunsInThread:
+    def test_tool_call_runs_in_thread(self) -> None:
+        """Tool dispatch is wrapped in asyncio.to_thread."""
+
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter()
+            client = _make_mock_client()
+            mock_tool = MagicMock()
+            mock_tool.return_value = {
+                "content": [{"type": "text", "text": "threaded"}],
+                "isError": False,
+            }
+            tool_lookup = {"calc": mock_tool}
+
+            with patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = {
+                    "content": [{"type": "text", "text": "threaded"}],
+                    "isError": False,
+                }
+                await adapter._handle_tool_call(
+                    client, 20, {"tool": "calc", "arguments": {"x": 1}}, tool_lookup
+                )
+                mock_to_thread.assert_called_once_with(mock_tool, {"x": 1})
+
+        asyncio.run(_run())
+
+
+class TestApprovalPolicyUntrusted:
+    def test_approval_untrusted_declines(self) -> None:
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter(
+                client_config=CodexAppServerClientConfig(approval_policy="untrusted")
+            )
+            client = _make_mock_client()
+            msg = {
+                "id": 6,
+                "method": "item/commandExecution/requestApproval",
+                "params": {},
+            }
+            await adapter._handle_server_request(client, msg, {})
+            resp = client.send_response.call_args[0][1]
+            assert resp["decision"] == "decline"
+
+        asyncio.run(_run())
+
+    def test_approval_on_failure_accepts(self) -> None:
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter(
+                client_config=CodexAppServerClientConfig(approval_policy="on-failure")
+            )
+            client = _make_mock_client()
+            msg = {
+                "id": 7,
+                "method": "item/commandExecution/requestApproval",
+                "params": {},
+            }
+            await adapter._handle_server_request(client, msg, {})
+            resp = client.send_response.call_args[0][1]
+            assert resp["decision"] == "accept"
+
+        asyncio.run(_run())
