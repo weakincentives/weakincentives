@@ -298,9 +298,11 @@ def untyped_prompt() -> Prompt[None]:
 
 class TestClaudeAgentSDKAdapterInit:
     def test_default_values(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.isolation import get_default_model
+
         adapter = ClaudeAgentSDKAdapter()
 
-        assert adapter._model == "claude-opus-4-6"
+        assert adapter._model == get_default_model()
         assert adapter._client_config.permission_mode == "bypassPermissions"
         assert adapter._allowed_tools is None
         assert adapter._disallowed_tools == ()
@@ -1391,10 +1393,8 @@ class TestIsolationConfig:
         # Temp folder should still be cleaned up
         assert not Path(temp_cwd).exists()
 
-    def test_skips_temp_folder_when_prompt_has_workspace_section(
-        self, session: Session
-    ) -> None:
-        """When prompt has a workspace section, no temp folder is created."""
+    def test_derives_cwd_from_workspace_section(self, session: Session) -> None:
+        """When prompt has a workspace section, cwd is derived from its root."""
         from weakincentives.adapters.claude_agent_sdk.workspace import (
             ClaudeAgentWorkspaceSection,
         )
@@ -1428,14 +1428,104 @@ class TestIsolationConfig:
             assert len(MockSDKQuery.captured_options) == 1
             options = MockSDKQuery.captured_options[0]
 
-            # When prompt has a workspace section, no temp folder is created.
-            # The cwd may be None (not set) or may be a path without wink-sdk- prefix.
+            # cwd should be derived from the workspace section's filesystem root
             cwd = getattr(options, "cwd", None)
-            if cwd is not None:
-                # If cwd is set, it should NOT be a temp folder (no wink-sdk- prefix)
-                assert "wink-sdk-" not in cwd
+            assert cwd is not None
+            assert cwd == str(workspace.temp_dir)
         finally:
             workspace.cleanup()
+
+    def test_explicit_cwd_overrides_workspace_root(
+        self, session: Session, tmp_path: Path
+    ) -> None:
+        """Explicit cwd in client config takes precedence over workspace root."""
+        from weakincentives.adapters.claude_agent_sdk.workspace import (
+            ClaudeAgentWorkspaceSection,
+        )
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        workspace = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            template = PromptTemplate[SimpleOutput](
+                ns="test",
+                key="with-workspace",
+                sections=[
+                    MarkdownSection(
+                        title="Test",
+                        template="Hello",
+                        key="test",
+                    ),
+                    workspace,
+                ],
+            )
+            prompt_with_workspace: Prompt[SimpleOutput] = Prompt(template)
+
+            explicit_cwd = str(tmp_path)
+            adapter = ClaudeAgentSDKAdapter(
+                client_config=ClaudeAgentSDKClientConfig(cwd=explicit_cwd),
+            )
+
+            with sdk_patches():
+                _ = adapter.evaluate(prompt_with_workspace, session=session)
+
+            assert len(MockSDKQuery.captured_options) == 1
+            options = MockSDKQuery.captured_options[0]
+
+            # Explicit cwd should take precedence over workspace root
+            cwd = getattr(options, "cwd", None)
+            assert cwd == explicit_cwd
+        finally:
+            workspace.cleanup()
+
+    def test_non_host_filesystem_does_not_derive_cwd(
+        self, session: Session, tmp_path: Path
+    ) -> None:
+        """When workspace filesystem is not HostFilesystem, cwd stays None."""
+        from weakincentives.adapters.claude_agent_sdk.workspace import (
+            ClaudeAgentWorkspaceSection,
+        )
+        from weakincentives.contrib.tools import InMemoryFilesystem
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        # Create a workspace section with an InMemoryFilesystem via the
+        # cloning constructor path (_temp_dir + _mount_previews + _filesystem).
+        mem_fs = InMemoryFilesystem()
+        workspace = ClaudeAgentWorkspaceSection(
+            session=session,
+            _temp_dir=tmp_path,
+            _mount_previews=(),
+            _filesystem=mem_fs,
+        )
+
+        template = PromptTemplate[SimpleOutput](
+            ns="test",
+            key="with-inmem-fs",
+            sections=[
+                MarkdownSection(
+                    title="Test",
+                    template="Hello",
+                    key="test",
+                ),
+                workspace,
+            ],
+        )
+        prompt: Prompt[SimpleOutput] = Prompt(template)
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            _ = adapter.evaluate(prompt, session=session)
+
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+
+        # cwd should be None since InMemoryFilesystem has no root path
+        cwd = getattr(options, "cwd", None)
+        assert cwd is None
 
 
 class TestMessageContentExtraction:

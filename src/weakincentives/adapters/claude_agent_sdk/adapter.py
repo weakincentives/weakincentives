@@ -57,7 +57,7 @@ from ._task_completion import TaskCompletionContext
 from ._transcript_collector import TranscriptCollector
 from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
-from .isolation import EphemeralHome, IsolationConfig
+from .isolation import EphemeralHome, IsolationConfig, get_default_model
 
 if TYPE_CHECKING:
     from ...prompt.tool import Tool
@@ -235,7 +235,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
     def __init__(
         self,
         *,
-        model: str = "claude-opus-4-6",
+        model: str | None = None,
         client_config: ClaudeAgentSDKClientConfig | None = None,
         model_config: ClaudeAgentSDKModelConfig | None = None,
         allowed_tools: tuple[str, ...] | None = None,
@@ -244,16 +244,21 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         """Initialize the Claude Agent SDK adapter.
 
         Args:
-            model: Claude model identifier.
+            model: Claude model identifier. Defaults to the environment-aware
+                default: Bedrock model ID when Bedrock is configured,
+                Anthropic API model name otherwise.
             client_config: SDK client configuration. Defaults to
                 bypassPermissions mode.
             model_config: Model parameter configuration.
             allowed_tools: Tools Claude can use (None = all available).
             disallowed_tools: Tools to explicitly block.
         """
-        self._model = model
+        resolved_model = model if model is not None else get_default_model()
+        self._model = resolved_model
         self._client_config = client_config or ClaudeAgentSDKClientConfig()
-        self._model_config = model_config or ClaudeAgentSDKModelConfig(model=model)
+        self._model_config = model_config or ClaudeAgentSDKModelConfig(
+            model=resolved_model
+        )
         self._allowed_tools = allowed_tools
         self._disallowed_tools = disallowed_tools
         # Buffer for capturing stderr output for debug logging
@@ -263,7 +268,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             "claude_agent_sdk.adapter.init",
             event="adapter.init",
             context={
-                "model": model,
+                "model": resolved_model,
                 "permission_mode": self._client_config.permission_mode,
                 "cwd": self._client_config.cwd,
                 "max_turns": self._client_config.max_turns,
@@ -494,6 +499,17 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 event="evaluate.filesystem_bound",
                 context={"effective_cwd": effective_cwd},
             )
+        elif effective_cwd is None:
+            # Workspace section provides a filesystem - derive cwd from its root
+            # so the SDK subprocess starts in the workspace directory.
+            fs = prompt.filesystem()
+            if isinstance(fs, HostFilesystem):
+                effective_cwd = fs.root
+                logger.debug(
+                    "claude_agent_sdk.evaluate.cwd_from_workspace",
+                    event="evaluate.cwd_from_workspace",
+                    context={"effective_cwd": effective_cwd},
+                )
 
         try:
             # Enter resource context for lifecycle management
