@@ -110,6 +110,27 @@ class MockClaudeAgentOptions:
 
 
 @dataclass
+class StrictClaudeAgentOptionsNoReasoning:
+    """Mock options type that rejects unsupported keyword arguments."""
+
+    model: str | None = None
+    cwd: str | None = None
+    permission_mode: str | None = None
+    max_turns: int | None = None
+    max_budget_usd: float | None = None
+    betas: list[str] | None = None
+    output_format: dict[str, object] | None = None
+    allowed_tools: list[str] | None = None
+    disallowed_tools: list[str] | None = None
+    mcp_servers: dict[str, object] | None = None
+    hooks: dict[str, list[object]] | None = None
+    can_use_tool: object | None = None
+    setting_sources: list[str] | None = None
+    env: dict[str, str] | None = None
+    stderr: object | None = None
+
+
+@dataclass
 class MockHookMatcher:
     """Mock HookMatcher for testing."""
 
@@ -1008,6 +1029,45 @@ class TestSDKConfigOptions:
             not hasattr(MockSDKQuery.captured_options[0], "reasoning")
             or MockSDKQuery.captured_options[0].reasoning is None
         )
+
+    def test_filters_reasoning_when_sdk_options_do_not_support_it(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            model_config=ClaudeAgentSDKModelConfig(reasoning="high"),
+        )
+
+        with (
+            patch(
+                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
+                return_value=_create_sdk_mock(),
+            ),
+            patch(
+                "claude_agent_sdk.ClaudeSDKClient",
+                MockClaudeSDKClient,
+            ),
+            patch(
+                "claude_agent_sdk.types.ClaudeAgentOptions",
+                StrictClaudeAgentOptionsNoReasoning,
+            ),
+            patch(
+                "claude_agent_sdk.types.HookMatcher",
+                MockHookMatcher,
+            ),
+            patch(
+                "claude_agent_sdk.types.ResultMessage",
+                MockResultMessage,
+            ),
+        ):
+            response = adapter.evaluate(simple_prompt, session=session)
+
+        assert response.text == "Done"
+        assert len(MockSDKQuery.captured_options) == 1
+        assert not hasattr(MockSDKQuery.captured_options[0], "reasoning")
 
 
 class TestSDKErrorHandling:

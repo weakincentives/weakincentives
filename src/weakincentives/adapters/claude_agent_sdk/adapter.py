@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -784,6 +785,68 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         return stderr_handler
 
+    def _supported_option_names(
+        self,
+        options_type: type[Any],
+    ) -> set[str] | None:
+        """Return supported option names for ClaudeAgentOptions.
+
+        Returns None when the options type accepts arbitrary keyword arguments.
+        """
+        dataclass_fields = getattr(options_type, "__dataclass_fields__", None)
+        if isinstance(dataclass_fields, dict):
+            return set(dataclass_fields)
+
+        try:
+            signature = inspect.signature(options_type)
+        except (TypeError, ValueError):
+            return None
+
+        if any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in signature.parameters.values()
+        ):
+            return None
+
+        return {
+            name
+            for name, param in signature.parameters.items()
+            if param.kind
+            in {
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            }
+        }
+
+    def _filter_unsupported_options(
+        self,
+        options_kwargs: dict[str, Any],
+        *,
+        options_type: type[Any],
+    ) -> dict[str, Any]:
+        """Drop SDK option kwargs unsupported by the installed SDK version."""
+        supported_names = self._supported_option_names(options_type)
+        if supported_names is None:
+            return options_kwargs
+
+        unsupported = sorted(
+            key for key in options_kwargs if key not in supported_names
+        )
+        if not unsupported:
+            return options_kwargs
+
+        for key in unsupported:
+            options_kwargs.pop(key, None)
+
+        logger.info(
+            "claude_agent_sdk.sdk_query.options_filtered",
+            event="sdk_query.options_filtered",
+            context={
+                "unsupported_option_names": unsupported,
+            },
+        )
+        return options_kwargs
+
     def _add_client_config_options(
         self,
         options_kwargs: dict[str, Any],
@@ -1126,6 +1189,10 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         options_kwargs["hooks"] = self._build_hooks_config(
             hook_context=hook_context,
             collector=collector,
+        )
+        options_kwargs = self._filter_unsupported_options(
+            options_kwargs,
+            options_type=ClaudeAgentOptions,
         )
 
         # Log SDK options (excluding sensitive data)
