@@ -20,6 +20,7 @@ from __future__ import annotations
 SPEC_DESCRIPTIONS: dict[str, str] = {
     "ADAPTERS": "Provider integrations, structured output, throttling",
     "CLAUDE_AGENT_SDK": "Claude Agent SDK adapter, MCP tool bridging, skill mounting",
+    "CODEX_APP_SERVER": "Codex App Server adapter, stdio JSON-RPC, thread/turn lifecycle",
     "CLOCK": "Controllable time abstractions, clock injection, testing patterns",
     "DATACLASSES": "Serde utilities, frozen dataclass patterns",
     "DBC": "DbC decorators, exhaustiveness checking, assert_never patterns",
