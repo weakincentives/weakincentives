@@ -120,18 +120,15 @@ class TokenUsage:
     def total_tokens(self) -> int | None:
         """Return a best-effort total when counts are available.
 
-        When extended thinking is enabled, thinking_tokens is reported
-        separately from output_tokens, so both must be summed for accurate
-        total token accounting.
+        Note: thinking_tokens are NOT added here because the Claude API
+        includes thinking tokens in output_tokens for billing purposes.
+        The thinking_tokens field exists for observability when/if the API
+        surfaces it separately.
         """
 
         if self.input_tokens is None and self.output_tokens is None:
             return None
-        return (
-            (self.input_tokens or 0)
-            + (self.output_tokens or 0)
-            + (self.thinking_tokens or 0)
-        )
+        return (self.input_tokens or 0) + (self.output_tokens or 0)
 
 
 @FrozenDataclass()

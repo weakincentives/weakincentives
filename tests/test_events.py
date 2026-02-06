@@ -282,9 +282,9 @@ def test_token_usage_thinking_tokens_field() -> None:
     usage = TokenUsage(input_tokens=100, output_tokens=200, thinking_tokens=50)
 
     assert usage.thinking_tokens == 50
-    # Thinking tokens are reported separately from output_tokens,
-    # so total_tokens should include all three
-    assert usage.total_tokens == 350  # 100 + 200 + 50
+    # thinking_tokens is NOT added to total_tokens because the Claude API
+    # includes thinking tokens in output_tokens for billing purposes
+    assert usage.total_tokens == 300  # 100 + 200 (thinking_tokens excluded)
 
 
 def test_token_usage_thinking_tokens_defaults_none() -> None:
