@@ -34,7 +34,6 @@ from ._types import SupportsDataclass
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..budget import Budget, BudgetTracker
     from ..filesystem import Filesystem
-    from ..resources import ResourceRegistry
     from ..runtime.session import Session
     from ..runtime.session.protocols import SessionProtocol
     from ._prompt_resources import PromptResources
@@ -141,10 +140,14 @@ class PromptProtocol[PromptOutputT](Protocol):
     def bind(
         self,
         *params: SupportsDataclass,
-        resources: ResourceRegistry | None = None,
+        resources: Mapping[type[object], object] | None = None,
     ) -> PromptProtocol[PromptOutputT]: ...
 
-    def render(self) -> RenderedPromptProtocol[PromptOutputT]: ...
+    def render(
+        self,
+        *,
+        session: SessionProtocol | None = None,
+    ) -> RenderedPromptProtocol[PromptOutputT]: ...
 
 
 class ProviderAdapterProtocol[AdapterOutputT](Protocol):
