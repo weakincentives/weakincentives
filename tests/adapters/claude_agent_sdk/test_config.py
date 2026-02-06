@@ -84,7 +84,7 @@ class TestClaudeAgentSDKModelConfig:
         assert config.model == "claude-opus-4-6"
         assert config.temperature is None
         assert config.max_tokens is None
-        assert config.max_thinking_tokens is None
+        assert config.reasoning == "high"
 
     def test_with_model(self) -> None:
         config = ClaudeAgentSDKModelConfig(model="claude-opus-4-5-20250929")
@@ -95,9 +95,21 @@ class TestClaudeAgentSDKModelConfig:
         assert config.temperature == 0.7
         assert config.max_tokens == 1000
 
-    def test_with_max_thinking_tokens(self) -> None:
-        config = ClaudeAgentSDKModelConfig(max_thinking_tokens=10000)
-        assert config.max_thinking_tokens == 10000
+    def test_with_reasoning_max(self) -> None:
+        config = ClaudeAgentSDKModelConfig(reasoning="max")
+        assert config.reasoning == "max"
+
+    def test_with_reasoning_disabled(self) -> None:
+        config = ClaudeAgentSDKModelConfig(reasoning=None)
+        assert config.reasoning is None
+
+    def test_with_reasoning_medium(self) -> None:
+        config = ClaudeAgentSDKModelConfig(reasoning="medium")
+        assert config.reasoning == "medium"
+
+    def test_with_reasoning_low(self) -> None:
+        config = ClaudeAgentSDKModelConfig(reasoning="low")
+        assert config.reasoning == "low"
 
     def test_rejects_unsupported_seed(self) -> None:
         with pytest.raises(ValueError, match="seed"):
