@@ -282,13 +282,14 @@ def patch_ast_for_bandit() -> None:
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
+
         for name in ("Num", "Str", "Bytes", "NameConstant", "Ellipsis"):
             if not hasattr(ast, name):  # pragma: no cover
                 setattr(ast, name, constant)
 
-    def _make_prop() -> property:  # pragma: no cover
-        return property(lambda self: self.value)
+        def _make_prop() -> property:  # pragma: no cover
+            return property(lambda self: self.value)
 
-    for attr in ("n", "s", "b"):
-        if not hasattr(constant, attr):  # pragma: no cover
-            setattr(constant, attr, _make_prop())
+        for attr in ("n", "s", "b"):
+            if not hasattr(constant, attr):  # pragma: no cover
+                setattr(constant, attr, _make_prop())

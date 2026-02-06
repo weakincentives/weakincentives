@@ -27,8 +27,8 @@ lint-fix:
 # Run Biome linter and formatter check on frontend static files
 biome:
 	@if [ ! -d node_modules ]; then npm install --silent; fi
-	@npx biome check src/weakincentives/cli/static/ >/dev/null 2>&1 || \
-		npx biome check src/weakincentives/cli/static/
+	@output=$$(npx biome check src/weakincentives/cli/static/ 2>&1) || \
+		{ echo "$$output"; exit 1; }
 
 # Run Biome with auto-fix
 biome-fix:
