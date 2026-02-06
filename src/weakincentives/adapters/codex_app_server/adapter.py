@@ -849,6 +849,8 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             "item/commandExecution/requestApproval",
             "item/fileChange/requestApproval",
         }:
+            # In non-interactive execution, we deterministically accept only
+            # policies intended to proceed without human gating when requested.
             decision = (
                 "accept"
                 if self._client_config.approval_policy in {"never", "on-failure"}

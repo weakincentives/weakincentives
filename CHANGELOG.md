@@ -39,6 +39,20 @@ hooks enforcing full CI test suites**. `BundleConfig` replaces
 
 ---
 
+### Fixed Since Last Review
+
+- Hardened Codex App Server workspace copying to skip symlink files when
+  `follow_symlinks=False`, preventing escaped symlink artifacts from entering
+  the temp workspace.
+- Fixed a Codex client request race that could hang indefinitely when the
+  subprocess exited between pending-registration and response wait.
+- Updated `AgentLoop` debug bundle adapter labeling to emit canonical
+  `"codex_app_server"` for `CodexAppServerAdapter` instances.
+- Removed duplicate `prompt.cleanup()` invocation risk in the bundled execution
+  error path.
+
+---
+
 ### Breaking Changes
 
 #### Removed OpenAI and LiteLLM Adapters
@@ -1845,4 +1859,3 @@ instead of a string identifier for type-safe routing.
 - Fixed documentation broken links and incorrect references
 - Dependency upgrades: aiohttp, anyio, certifi, filelock, huggingface-hub,
   hypothesis, sse-starlette, textual, tokenizers, typer-slim
-

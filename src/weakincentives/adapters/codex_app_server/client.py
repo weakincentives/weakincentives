@@ -126,11 +126,31 @@ class CodexAppServerClient:
         req_id = self._next_id
         msg: dict[str, Any] = {"id": req_id, "method": method, "params": params}
 
+        read_task = self._read_task
+        if read_task is None:
+            raise CodexClientError("Client not started")
+        if read_task.done():
+            raise CodexClientError("Subprocess exited unexpectedly")
+
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         self._pending[req_id] = future
 
-        await self._write(msg)
+        try:
+            await self._write(msg)
+        except Exception as exc:
+            _ = self._pending.pop(req_id, None)
+            if isinstance(exc, CodexClientError):
+                raise
+            raise CodexClientError(
+                f"Failed to send request {method} (id={req_id})"
+            ) from exc
+
+        # If read loop exited between pending registration and write completion,
+        # fail fast instead of waiting forever when timeout=None.
+        if read_task.done() and not future.done():
+            _ = self._pending.pop(req_id, None)
+            future.set_exception(CodexClientError("Subprocess exited unexpectedly"))
 
         try:
             resp = await asyncio.wait_for(future, timeout=timeout)

@@ -733,6 +733,10 @@ def respond_to_approval(request_id: int, params: dict) -> None:
             send_response(request_id, {"decision": "accept"})
 ```
 
+`"on-failure"` is interpreted at the server-protocol boundary: when Codex emits
+an approval request, the non-interactive adapter handles it deterministically
+without additional local failure-state tracking.
+
 ### 11. Extract Results
 
 **Text:** Use the final `agentMessage` item from `item/completed`, or the

@@ -1728,6 +1728,23 @@ def test_loop_debug_bundle_includes_prompt_info(tmp_path: Path) -> None:
         results.close()
 
 
+def test_get_adapter_name_uses_codex_canonical_name() -> None:
+    """AgentLoop maps Codex adapter instances to canonical adapter name."""
+    from weakincentives.adapters.codex_app_server import (
+        CODEX_APP_SERVER_ADAPTER_NAME,
+        CodexAppServerAdapter,
+    )
+
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        loop = _TestLoop(adapter=CodexAppServerAdapter(), requests=requests)
+        assert loop._get_adapter_name() == CODEX_APP_SERVER_ADAPTER_NAME
+    finally:
+        requests.close()
+
+
 def test_loop_debug_bundle_run_context_has_session_id(tmp_path: Path) -> None:
     """AgentLoop writes run_context.json with session_id after execution."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
@@ -2057,6 +2074,44 @@ def test_loop_calls_prompt_cleanup_with_bundle_on_failure(tmp_path: Path) -> Non
         requests.send(request, reply_to=results)
 
         with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is False
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_bundle_reply_failure_does_not_double_cleanup(tmp_path: Path) -> None:
+    """Bundle path failures after cleanup should not trigger cleanup twice."""
+    from weakincentives.debug.bundle import BundleConfig
+
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        bundle_config = BundleConfig(target=tmp_path)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
+
+        request = AgentLoopRequest(request=_Request(message="hello bundle reply fail"))
+        requests.send(request, reply_to=results)
+
+        with (
+            patch(
+                "weakincentives.runtime.agent_loop.reply_and_ack"
+            ) as mock_reply_and_ack,
+            patch.object(Prompt, "cleanup") as mock_cleanup,
+        ):
+            mock_reply_and_ack.side_effect = RuntimeError("reply failed")
             loop.run(max_iterations=1, wait_time_seconds=0)
             assert mock_cleanup.call_count == 1
 

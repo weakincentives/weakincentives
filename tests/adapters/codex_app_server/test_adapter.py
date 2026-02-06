@@ -1726,7 +1726,7 @@ class TestApprovalPolicyUntrusted:
 
         asyncio.run(_run())
 
-    def test_approval_on_failure_accepts(self) -> None:
+    def test_approval_on_failure_accepts_requested_approval(self) -> None:
         async def _run() -> None:
             adapter = CodexAppServerAdapter(
                 client_config=CodexAppServerClientConfig(approval_policy="on-failure")

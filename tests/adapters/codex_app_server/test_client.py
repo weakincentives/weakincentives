@@ -232,6 +232,58 @@ class TestSendRequest:
 
         asyncio.run(_run())
 
+    def test_subprocess_exit_before_request_fails_fast(self) -> None:
+        async def _run() -> None:
+            proc = FakeProcess(stdout_lines=[])
+
+            with patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec:
+                mock_exec.return_value = proc
+                client = CodexAppServerClient()
+                await client.start()
+
+                # Let read loop observe EOF and terminate before request.
+                await asyncio.sleep(0)
+
+                with pytest.raises(CodexClientError, match="exited"):
+                    await client.send_request("initialize", {})
+                await client.stop()
+
+        asyncio.run(_run())
+
+    def test_write_failure_clears_pending(self) -> None:
+        async def _run() -> None:
+            proc = FakeProcess(stdout_lines=[])
+
+            # Keep read loop alive so send_request reaches _write path.
+            async def blocking_readline() -> bytes:
+                await asyncio.sleep(10)
+                return b""
+
+            proc.stdout.readline = blocking_readline  # type: ignore[assignment]
+
+            with patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec:
+                mock_exec.return_value = proc
+                client = CodexAppServerClient()
+                await client.start()
+
+                with patch.object(
+                    client, "_write", new_callable=AsyncMock
+                ) as mock_write:
+                    mock_write.side_effect = BrokenPipeError("broken pipe")
+                    with pytest.raises(
+                        CodexClientError, match="Failed to send request"
+                    ):
+                        await client.send_request("initialize", {})
+
+                assert client._pending == {}
+                await client.stop()
+
+        asyncio.run(_run())
+
 
 class TestSendNotification:
     def test_sends_notification_without_params(self) -> None:

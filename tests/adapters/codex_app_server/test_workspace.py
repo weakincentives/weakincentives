@@ -435,6 +435,26 @@ class TestSymlinkEscape:
             mock_copy.assert_called_once()
             assert mock_copy.call_args[1].get("follow_symlinks") is False
 
+    def test_symlink_file_skipped_when_not_following(self, temp_dir: Path) -> None:
+        """Symlink files are skipped for directory mounts when follow_symlinks=False."""
+        src = temp_dir / "source"
+        src.mkdir()
+        (src / "kept.txt").write_text("ok")
+
+        outside = temp_dir / "outside.txt"
+        outside.write_text("x" * 100)
+        (src / "escape_link").symlink_to(outside)
+
+        tgt = temp_dir / "workspace" / "source"
+        tgt.mkdir(parents=True)
+        mount = HostMount(host_path=str(src), follow_symlinks=False, max_bytes=2)
+
+        preview = _copy_mount_to_temp(src, tgt, mount)
+
+        assert preview.entries == ("kept.txt",)
+        assert preview.bytes_copied == 2
+        assert not (tgt / "escape_link").exists()
+
 
 class TestMaxBytesZero:
     def test_max_bytes_zero_rejects_files(self, temp_dir: Path) -> None:

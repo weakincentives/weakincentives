@@ -717,6 +717,7 @@ class AgentLoop[UserRequestT, OutputT](
         prompt: Prompt[OutputT] | None = None
         started_at = datetime.now(UTC)
         budget_tracker: BudgetTracker | None = None
+        prompt_cleaned_up = False
         try:
             with BundleWriter(
                 bundle_config.target,
@@ -773,6 +774,7 @@ class AgentLoop[UserRequestT, OutputT](
                     run_context=run_context,
                 )
 
+                prompt_cleaned_up = True
                 prompt.cleanup()
 
             # Bundle path is set after context manager exits (in __exit__ -> _finalize)
@@ -789,7 +791,7 @@ class AgentLoop[UserRequestT, OutputT](
 
         except Exception as exc:
             # Clean up prompt resources if prompt was created
-            if prompt is not None:
+            if prompt is not None and not prompt_cleaned_up:
                 prompt.cleanup()
 
             # Check if bundle was created despite the error
@@ -855,11 +857,17 @@ class AgentLoop[UserRequestT, OutputT](
 
     def _get_adapter_name(self) -> str:
         """Get the canonical adapter name for the current adapter."""
-        from ..adapters import CLAUDE_AGENT_SDK_ADAPTER_NAME
+        from ..adapters import (
+            CLAUDE_AGENT_SDK_ADAPTER_NAME,
+            CODEX_APP_SERVER_ADAPTER_NAME,
+        )
         from ..adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+        from ..adapters.codex_app_server import CodexAppServerAdapter
 
         if isinstance(self._adapter, ClaudeAgentSDKAdapter):
             return CLAUDE_AGENT_SDK_ADAPTER_NAME  # pragma: no cover
+        if isinstance(self._adapter, CodexAppServerAdapter):
+            return CODEX_APP_SERVER_ADAPTER_NAME
         return type(self._adapter).__name__
 
     @staticmethod

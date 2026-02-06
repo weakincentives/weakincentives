@@ -143,6 +143,15 @@ def _matches_globs(
     return True
 
 
+def _should_copy_mount_file(
+    file_path: Path, *, resolved_source: Path, follow_symlinks: bool
+) -> bool:
+    """Return whether a mount file is allowed to be copied."""
+    if not follow_symlinks and file_path.is_symlink():
+        return False
+    return not follow_symlinks or file_path.resolve().is_relative_to(resolved_source)
+
+
 def _copy_mount_to_temp(
     source: Path, target: Path, mount: HostMount
 ) -> HostMountPreview:
@@ -179,10 +188,12 @@ def _copy_mount_to_temp(
 
                 file_path = root_path / file_name
 
-                if mount.follow_symlinks and not file_path.resolve().is_relative_to(
-                    resolved_source
+                if not _should_copy_mount_file(
+                    file_path,
+                    resolved_source=resolved_source,
+                    follow_symlinks=mount.follow_symlinks,
                 ):
-                    continue  # symlink escapes source — skip
+                    continue
 
                 file_bytes = file_path.stat().st_size
 
