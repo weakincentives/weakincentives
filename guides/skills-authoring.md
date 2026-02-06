@@ -336,5 +336,4 @@ override if needed.
 ## What's Next
 
 - [Claude Agent SDK](claude-agent-sdk.md): Full adapter configuration
-- [Workspace Tools](workspace-tools.md): VFS and sandbox integration
 - [Progressive Disclosure](progressive-disclosure.md): Manage context size

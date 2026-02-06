@@ -15,7 +15,7 @@
 The ``contrib`` package provides optional, domain-specific extensions to the
 core weakincentives library. These components are useful "batteries included"
 tools for building agents but are not part of the minimal core. They may
-require additional dependencies (e.g., ``redis``, ``podman``, ``asteval``).
+require additional dependencies (e.g., ``redis``).
 
 Subpackages
 -----------
@@ -32,57 +32,23 @@ contrib.mailbox
 
     Requires: ``redis`` package (``pip install weakincentives[redis]``)
 
-contrib.optimizers
-    Prompt optimization utilities that generate task-agnostic workspace summaries
-    and digests. These optimizers analyze workspaces and cache results for
-    efficient reuse across prompt evaluations.
+contrib.tools
+    Utilities for LLM agents, including workspace digest caching and
+    in-memory filesystem for testing.
 
     Key exports:
-        - ``WorkspaceDigestOptimizer``: Generates workspace digests via LLM exploration
+        - ``WorkspaceDigestSection``: Renders cached workspace digests
+        - ``InMemoryFilesystem``: In-memory filesystem implementation
 
-contrib.tools
-    Domain-specific tool suites for LLM agents, providing filesystem operations,
-    sandboxed code execution, containerized shell access, and planning capabilities.
+contrib.optimizers
+    Prompt optimization workflows using the Claude Agent SDK.
 
-    Tool categories:
-        - **Planning**: Session-scoped todo lists with ``PlanningToolsSection``
-        - **Virtual Filesystem**: File operations via ``VfsToolsSection``
-        - **Python Evaluation**: Sandboxed execution via ``AstevalSection``
-        - **Container Execution**: Podman-backed shell via ``PodmanSandboxSection``
-        - **Workspace Digest**: Caching layer via ``WorkspaceDigestSection``
-
-    Requires: Optional extras for specific features:
-        - ``pip install weakincentives[asteval]`` for Python evaluation
-        - ``pip install weakincentives[podman]`` for container execution
+    Key exports:
+        - ``WorkspaceDigestOptimizer``: Generates workspace digests
+        - ``WorkspaceDigestResult``: Result of digest optimization
 
 Example Usage
 -------------
-
-Basic tool section setup::
-
-    from weakincentives.contrib.tools import (
-        PlanningToolsSection,
-        VfsToolsSection,
-        AstevalSection,
-        PodmanSandboxSection,
-        HostMount,
-    )
-    from weakincentives.runtime.session import Session
-
-    session = Session()
-
-    # Planning tools for multi-step workflows
-    planning = PlanningToolsSection(session=session)
-
-    # Virtual filesystem with host mounts
-    vfs = VfsToolsSection(
-        session=session,
-        mounts=(HostMount(host_path="src"),),
-        allowed_host_roots=("/home/user/project",),
-    )
-
-    # Sandboxed Python evaluation
-    asteval = AstevalSection(session=session)
 
 Redis mailbox for inter-agent communication::
 
@@ -104,14 +70,23 @@ Redis mailbox for inter-agent communication::
         msg.reply(result)
         msg.acknowledge()
 
-Workspace optimization::
+Workspace digest caching::
 
-    from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
-    from weakincentives.optimizers.context import OptimizationContext
+    from weakincentives.contrib.tools import (
+        WorkspaceDigestSection,
+        set_workspace_digest,
+    )
+    from weakincentives.runtime.session import Session
 
-    optimizer = WorkspaceDigestOptimizer(context)
-    result = optimizer.optimize(prompt, session=session)
-    # Digest is now cached in session for future prompt renders
+    session = Session()
+    digest_section = WorkspaceDigestSection(session=session)
+
+    set_workspace_digest(
+        session,
+        section_key="workspace-digest",
+        body="Full project analysis...",
+        summary="Python web app with FastAPI backend.",
+    )
 
 Architecture Notes
 ------------------
@@ -119,8 +94,8 @@ Architecture Notes
 All contrib modules follow the core library's design patterns:
 
 - **Immutable dataclasses**: Use ``@FrozenDataclass()`` for state objects
-- **Session integration**: Tool sections bind to ``Session`` for state management
-- **Resource injection**: Filesystems and dependencies use the resource protocol
+- **Session integration**: Sections bind to ``Session`` for state management
+- **Resource injection**: Dependencies use the resource protocol
 - **Design-by-contract**: Public APIs use ``@require``/``@ensure`` decorators
 
 Lazy Loading

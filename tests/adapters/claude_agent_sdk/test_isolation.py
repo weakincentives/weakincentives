@@ -283,7 +283,7 @@ class TestModelIdFunctions:
 
     def test_to_bedrock_model_id_passes_through_bedrock(self) -> None:
         """to_bedrock_model_id passes through existing Bedrock IDs."""
-        bedrock_id = "us.anthropic.claude-opus-4-6-v1:0"
+        bedrock_id = "us.anthropic.claude-opus-4-6-v1"
         assert to_bedrock_model_id(bedrock_id) == bedrock_id
 
     def test_to_bedrock_model_id_passes_through_unknown(self) -> None:
@@ -293,7 +293,7 @@ class TestModelIdFunctions:
 
     def test_to_anthropic_model_name_converts_known(self) -> None:
         """to_anthropic_model_name converts known Bedrock IDs."""
-        result = to_anthropic_model_name("us.anthropic.claude-opus-4-6-v1:0")
+        result = to_anthropic_model_name("us.anthropic.claude-opus-4-6-v1")
         assert result == "claude-opus-4-6"
 
     def test_to_anthropic_model_name_passes_through_anthropic(self) -> None:

@@ -40,72 +40,6 @@ class TestToolSuiteSectionProtocol:
             ToolSuiteSection, "_is_runtime_protocol"
         )
 
-    def test_vfs_tools_section_conforms(self, session: Session) -> None:
-        """VfsToolsSection implements ToolSuiteSection."""
-        from weakincentives.contrib.tools import VfsToolsSection
-
-        section = VfsToolsSection(session=session)
-
-        # Verify protocol attributes exist
-        assert hasattr(section, "session")
-        assert hasattr(section, "accepts_overrides")
-        assert hasattr(section, "clone")
-
-        # Verify runtime check works
-        assert isinstance(section, ToolSuiteSection)
-
-        # Verify attribute types
-        assert section.session is session
-        assert isinstance(section.accepts_overrides, bool)
-
-    def test_planning_tools_section_conforms(self, session: Session) -> None:
-        """PlanningToolsSection implements ToolSuiteSection."""
-        from weakincentives.contrib.tools import PlanningToolsSection
-
-        section = PlanningToolsSection(session=session)
-
-        assert isinstance(section, ToolSuiteSection)
-        assert section.session is session
-        assert isinstance(section.accepts_overrides, bool)
-        assert callable(section.clone)
-
-    def test_asteval_section_conforms(self, session: Session) -> None:
-        """AstevalSection implements ToolSuiteSection."""
-        from weakincentives.contrib.tools import AstevalSection
-
-        section = AstevalSection(session=session)
-
-        assert isinstance(section, ToolSuiteSection)
-        assert section.session is session
-        assert isinstance(section.accepts_overrides, bool)
-        assert callable(section.clone)
-
-    def test_workspace_digest_section_does_not_conform(self, session: Session) -> None:
-        """WorkspaceDigestSection does NOT implement ToolSuiteSection.
-
-        WorkspaceDigestSection is a Section subclass that stores session internally
-        but does not expose a public `session` property required by the protocol.
-        """
-        from weakincentives.contrib.tools import WorkspaceDigestSection
-
-        section = WorkspaceDigestSection(session=session)
-
-        # WorkspaceDigestSection does not expose session as a property
-        assert not isinstance(section, ToolSuiteSection)
-
-    def test_clone_returns_new_instance(self, session: Session) -> None:
-        """Clone creates a new section with the new session."""
-        from weakincentives.contrib.tools import PlanningToolsSection
-
-        section = PlanningToolsSection(session=session)
-        new_session = Session(dispatcher=InProcessDispatcher())
-
-        cloned = section.clone(session=new_session)
-
-        assert cloned is not section
-        assert cloned.session is new_session
-        assert isinstance(cloned, ToolSuiteSection)
-
     def test_non_conforming_class_fails_isinstance(self) -> None:
         """Classes not implementing the protocol fail isinstance check."""
 
@@ -148,21 +82,6 @@ class TestWorkspaceSectionProtocol:
         # Check inheritance via MRO (Method Resolution Order)
         assert ToolSuiteSection in WorkspaceSection.__mro__
 
-    def test_vfs_tools_section_conforms_to_workspace(self, session: Session) -> None:
-        """VfsToolsSection implements WorkspaceSection."""
-        from weakincentives.contrib.tools import VfsToolsSection
-
-        section = VfsToolsSection(session=session)
-
-        # Verify WorkspaceSection protocol
-        assert isinstance(section, WorkspaceSection)
-        assert hasattr(section, "filesystem")
-
-        # Verify filesystem property returns correct type
-        from weakincentives.filesystem import Filesystem
-
-        assert isinstance(section.filesystem, Filesystem)
-
     def test_claude_agent_workspace_section_conforms(self, session: Session) -> None:
         """ClaudeAgentWorkspaceSection implements WorkspaceSection."""
         from weakincentives.adapters.claude_agent_sdk import ClaudeAgentWorkspaceSection
@@ -179,43 +98,6 @@ class TestWorkspaceSectionProtocol:
         finally:
             # Clean up temp directory created by section
             section.cleanup()
-
-    def test_workspace_section_has_all_tool_suite_attrs(self, session: Session) -> None:
-        """WorkspaceSection implementations have all ToolSuiteSection attributes."""
-        from weakincentives.contrib.tools import VfsToolsSection
-
-        section = VfsToolsSection(session=session)
-
-        # ToolSuiteSection attributes
-        assert hasattr(section, "session")
-        assert hasattr(section, "accepts_overrides")
-        assert hasattr(section, "clone")
-
-        # WorkspaceSection attributes
-        assert hasattr(section, "filesystem")
-
-    def test_clone_preserves_workspace_protocol(self, session: Session) -> None:
-        """Cloned workspace sections still implement WorkspaceSection."""
-        from weakincentives.contrib.tools import VfsToolsSection
-
-        section = VfsToolsSection(session=session)
-        new_session = Session(dispatcher=InProcessDispatcher())
-
-        cloned = section.clone(session=new_session)
-
-        assert isinstance(cloned, WorkspaceSection)
-        assert hasattr(cloned, "filesystem")
-
-    def test_non_workspace_tool_suite_fails_isinstance(self, session: Session) -> None:
-        """ToolSuiteSection implementations without filesystem fail WorkspaceSection check."""
-        from weakincentives.contrib.tools import PlanningToolsSection
-
-        section = PlanningToolsSection(session=session)
-
-        # Should pass ToolSuiteSection
-        assert isinstance(section, ToolSuiteSection)
-        # Should fail WorkspaceSection (no filesystem)
-        assert not isinstance(section, WorkspaceSection)
 
 
 class TestProtocolExports:

@@ -31,7 +31,6 @@ Domain-specific helpers:
     - tests.cli.helpers: FakeLogger, FakeContextManager for CLI testing
     - tests.adapters.claude_agent_sdk.error_mocks: SDK error mocks
     - tests.tools.helpers: Tool testing utilities
-    - tests.tools.podman_test_helpers: Podman mocks
 
 Pytest fixtures (auto-registered via conftest.py):
     - fake_clock: Fresh FakeClock instance (from tests.helpers.time)

@@ -27,7 +27,7 @@ being sent to the model and why.
 | Program (composed modules) | `PromptTemplate` (tree of sections) |
 | Optimizer / Teleprompter | Prompt overrides + manual iteration |
 | Compilation | No equivalent (prompts are explicit) |
-| `dspy.ReAct` | `PlanningToolsSection` + tool sections |
+| `dspy.ReAct` | Tool sections with reasoning instructions |
 | Metric | Evaluation framework |
 | Trace | Session events + debug UI |
 

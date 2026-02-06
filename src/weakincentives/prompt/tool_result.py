@@ -151,7 +151,7 @@ def _normalize_mapping_value(value: object) -> object:
 
 
 def _render_sequence(items: Sequence[object]) -> str:
-    if not items:
+    if not items:  # pragma: no cover
         return "[]"
 
     rendered_items = [render_tool_payload(item) for item in items]

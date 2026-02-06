@@ -35,11 +35,7 @@ class ToolDataclassContractCase:
         return f"{self.origin}:{self.cls.__qualname__}"
 
 
-_MODULES_TO_AUDIT: tuple[str, ...] = (
-    "weakincentives.contrib.tools.planning",
-    "weakincentives.contrib.tools.vfs",
-    "weakincentives.contrib.tools.asteval",
-)
+_MODULES_TO_AUDIT: tuple[str, ...] = ("weakincentives.contrib.tools.digests",)
 
 
 def _iter_dataclasses(module_name: str) -> Iterable[type[object]]:

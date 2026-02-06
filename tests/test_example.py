@@ -14,6 +14,16 @@
 
 import weakincentives
 from weakincentives import Prompt, adapters, contrib, prompt, runtime
+from weakincentives.adapters.core import (
+    PromptEvaluationError as _PromptEvaluationError,
+    PromptResponse as _PromptResponse,
+    ProviderAdapter as _ProviderAdapter,
+)
+from weakincentives.contrib.tools.digests import (
+    WorkspaceDigestSection as _WorkspaceDigestSection,
+)
+from weakincentives.prompt.markdown import MarkdownSection as _MarkdownSection
+from weakincentives.runtime.session import Session as _Session
 
 
 def test_example() -> None:
@@ -37,15 +47,15 @@ def test_adapters_dir_lists_public_symbols() -> None:
     symbols = adapters.__dir__()
 
     assert symbols == sorted(symbols)
-    for symbol in ("PromptEvaluationError", "PromptResponse", "ProviderAdapter"):
-        assert hasattr(adapters, symbol)
-        assert getattr(adapters, symbol) is getattr(adapters, symbol)
+    assert adapters.PromptEvaluationError is _PromptEvaluationError
+    assert adapters.PromptResponse is _PromptResponse
+    assert adapters.ProviderAdapter is _ProviderAdapter
 
 
 def test_public_namespaces_resolve_symbols() -> None:
-    assert runtime.Session is runtime.Session
-    assert contrib.tools.Plan is contrib.tools.Plan
-    assert prompt.MarkdownSection is prompt.MarkdownSection
+    assert runtime.Session is _Session
+    assert contrib.tools.WorkspaceDigestSection is _WorkspaceDigestSection
+    assert prompt.MarkdownSection is _MarkdownSection
 
 
 def test_submodule_dir_lists_exports() -> None:
@@ -55,4 +65,4 @@ def test_submodule_dir_lists_exports() -> None:
     assert prompt_symbols == sorted(prompt_symbols)
     assert "Prompt" in prompt_symbols
     assert tools_symbols == sorted(tools_symbols)
-    assert "Plan" in tools_symbols
+    assert "WorkspaceDigestSection" in tools_symbols

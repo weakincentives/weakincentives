@@ -152,8 +152,6 @@ Session state keeps growing over time.
 
 ```bash
 pip install "weakincentives[claude-agent-sdk]" # For ClaudeAgentSDKAdapter
-pip install "weakincentives[asteval]"          # For AstevalSection
-pip install "weakincentives[podman]"           # For PodmanSandboxSection
 pip install "weakincentives[wink]"             # For debug CLI
 ```
 

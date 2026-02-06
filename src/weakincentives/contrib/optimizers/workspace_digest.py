@@ -10,342 +10,244 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Workspace digest optimizer for generating task-agnostic summaries."""
+"""Workspace digest optimizer using Claude Agent SDK.
+
+This module provides an optimizer that generates workspace digests using the
+Claude Agent SDK adapter. The optimizer creates a prompt that explores the
+workspace and produces a task-agnostic summary stored in the session.
+"""
 
 from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass
-from typing import Any, cast, override
+from typing import TYPE_CHECKING
 
-from weakincentives.filesystem import Filesystem
-from weakincentives.prompt.protocols import WorkspaceSection
-
-from ...adapters.core import (
-    PROMPT_EVALUATION_PHASE_REQUEST,
-    PROMPT_EVALUATION_PHASE_RESPONSE,
-    PromptEvaluationError,
-    PromptResponse,
+from ...adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    ClaudeAgentWorkspaceSection,
 )
-from ...optimizers.base import BasePromptOptimizer, OptimizerConfig
-from ...optimizers.context import OptimizationContext
-from ...optimizers.results import PersistenceScope, WorkspaceDigestResult
+from ...dataclasses import FrozenDataclass
 from ...prompt import MarkdownSection, Prompt, PromptTemplate
-from ...prompt.overrides import (
-    HexDigest,
-    PromptDescriptor,
-    PromptLike,
-    PromptOverridesError,
-    SectionOverride,
-)
-from ...prompt.section import Section
+from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
-from ...runtime.session.protocols import SessionProtocol
-from ...types.dataclass import SupportsDataclass
-from ..tools.asteval import AstevalSection
-from ..tools.digests import (
-    WorkspaceDigestSection,
-    clear_workspace_digest,
-    set_workspace_digest,
+from ..tools.digests import set_workspace_digest
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ...adapters.claude_agent_sdk.workspace import HostMount
+
+__all__ = [
+    "WorkspaceDigestOptimizer",
+    "WorkspaceDigestResult",
+]
+
+
+_LOGGER: StructuredLogger = get_logger(
+    __name__, context={"component": "optimizers.workspace_digest"}
 )
-from ..tools.planning import PlanningStrategy, PlanningToolsSection
 
 
-@dataclass(slots=True, frozen=True)
-class _OptimizationResponse:
-    """Structured response emitted by the workspace digest optimization prompt."""
+@FrozenDataclass()
+class _DigestResponse:
+    """Structured response from the workspace digest generation prompt."""
 
     summary: str
     digest: str
 
 
-class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult]):
-    """Generate a workspace digest for prompts containing WorkspaceDigestSection.
+@FrozenDataclass()
+class WorkspaceDigestResult:
+    """Result of workspace digest optimization.
 
-    This optimizer composes an internal prompt that explores the mounted
-    workspace and produces a task-agnostic summary. The result can be
-    persisted to the session (SESSION scope) or the override store
-    (GLOBAL scope).
+    Attributes:
+        section_key: The key of the workspace digest section that was updated.
+        summary: Short summary of the workspace.
+        digest: Full workspace digest content.
+        success: Whether the optimization completed successfully.
+        error: Error message if optimization failed.
     """
 
-    def __init__(
-        self,
-        context: OptimizationContext,
-        *,
-        config: OptimizerConfig | None = None,
-        store_scope: PersistenceScope = PersistenceScope.SESSION,
-    ) -> None:
-        super().__init__(context, config=config)
-        self._store_scope = store_scope
+    section_key: str
+    summary: str = ""
+    digest: str = ""
+    success: bool = True
+    error: str = ""
 
-    @property
-    @override
-    def _optimizer_scope(self) -> str:
-        return "workspace_digest"
 
-    @override
-    def optimize(
-        self,
-        prompt: Prompt[object],
-        *,
-        session: SessionProtocol,
-    ) -> WorkspaceDigestResult:
-        """Generate and persist a workspace digest for the given prompt.
+@dataclass(slots=True)
+class WorkspaceDigestOptimizer:
+    """Generate workspace digests using Claude Agent SDK.
 
-        Raises:
-            PromptEvaluationError: If the prompt lacks required sections
-                or digest extraction fails.
-        """
-        prompt_name = prompt.name or prompt.key
-        outer_session = session
-        inner_session = self._create_optimization_session(prompt)
+    This optimizer creates a prompt that explores a workspace and produces
+    a task-agnostic digest. The result is stored in the session and can
+    be rendered by WorkspaceDigestSection.
 
-        digest_section = self._require_workspace_digest_section(
-            prompt, prompt_name=prompt_name
+    Example::
+
+        from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
+        from weakincentives.adapters.claude_agent_sdk import HostMount
+        from weakincentives.runtime import Session
+
+        session = Session()
+        optimizer = WorkspaceDigestOptimizer(
+            mounts=[HostMount(host_path="/path/to/project")],
         )
-        workspace_section = self._resolve_workspace_section(prompt, prompt_name)
+        result = optimizer.optimize(session, section_key="workspace-digest")
 
-        safe_workspace = self._clone_section(
-            cast(Section[SupportsDataclass], workspace_section), session=inner_session
-        )
-        tool_sections = self._resolve_tool_sections(prompt)
-        # Pass the workspace filesystem to tool sections so they share the same
-        # filesystem instance. This ensures asteval can read/write the same files
-        # that VFS tools expose. We use workspace_section.filesystem directly since
-        # cloning preserves the same filesystem reference.
-        shared_filesystem = workspace_section.filesystem
-        safe_tools = tuple(
-            self._clone_section(
-                section,
-                session=inner_session,
-                filesystem=shared_filesystem,
+    Attributes:
+        mounts: Host mounts to include in the workspace.
+        adapter: Claude Agent SDK adapter for evaluation.
+        max_turns: Maximum agentic turns for exploration.
+    """
+
+    mounts: Sequence[HostMount]
+    adapter: ClaudeAgentSDKAdapter[_DigestResponse] | None = None
+    max_turns: int = 10
+
+    def _create_adapter(self) -> ClaudeAgentSDKAdapter[_DigestResponse]:
+        """Create or return the adapter for optimization."""
+        if self.adapter is not None:
+            return self.adapter
+        return ClaudeAgentSDKAdapter[_DigestResponse](
+            client_config=ClaudeAgentSDKClientConfig(
+                permission_mode="bypassPermissions",
+                max_turns=self.max_turns,
             )
-            for section in tool_sections
         )
 
-        effective_store = self._context.overrides_store or prompt.overrides_store
-        effective_tag = self._context.overrides_tag or prompt.overrides_tag
-        if not self._config.accepts_overrides:
-            effective_store = None
-            effective_tag = None
+    def _build_optimization_prompt(self, session: Session) -> Prompt[_DigestResponse]:
+        """Build the prompt for workspace exploration and digest generation."""
+        workspace = ClaudeAgentWorkspaceSection(
+            session=session,
+            mounts=self.mounts,
+        )
 
-        optimization_prompt_template = PromptTemplate[_OptimizationResponse](
-            ns=f"{prompt.ns}.optimization",
-            key=f"{prompt.key}-workspace-digest",
-            name=(f"{prompt.name}_workspace_digest" if prompt.name else None),
+        template = PromptTemplate[_DigestResponse](
+            ns="weakincentives.optimization",
+            key="workspace-digest-generator",
+            name="Workspace Digest Generator",
             sections=(
                 MarkdownSection(
                     title="Optimization Goal",
                     template=(
-                        "Summarize the workspace so future prompts can rely on a "
-                        "cached digest."
+                        "Explore the workspace and generate a comprehensive, "
+                        "task-agnostic digest that helps future agents understand "
+                        "the project structure."
                     ),
-                    key="optimization-goal",
+                    key="goal",
                 ),
                 MarkdownSection(
                     title="Expectations",
-                    template=textwrap.dedent(
-                        """
-                        Explore README/docs/workflow files first. Capture build/test commands,
-                        dependency managers, and watchouts. Keep the digest task agnostic.
-                        Capture command exec tools (asteval, Podman exec) plus env caps/
-                        versions/libs. Keep it dense.
+                    template=textwrap.dedent("""
+                        1. **Explore README/docs first** - Understand the project purpose
+                        2. **Identify build/test commands** - Document how to build and test
+                        3. **Map key directories** - Note important paths and their purposes
+                        4. **Capture dependencies** - List package managers and key dependencies
+                        5. **Note watchouts** - Document any gotchas or special requirements
 
-                        Your output must include:
-                        - **summary**: A single paragraph (2-3 sentences) overview of the
-                          workspace purpose, primary language/framework, and key capabilities.
-                        - **digest**: The full detailed digest with build commands, dependencies,
-                          testing instructions, and other technical details.
-                        """
-                    ).strip(),
-                    key="optimization-expectations",
+                        Keep the digest task-agnostic. Focus on facts that any future agent
+                        would find useful regardless of their specific task.
+                    """).strip(),
+                    key="expectations",
                 ),
-                PlanningToolsSection(
-                    session=inner_session,
-                    strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
-                    accepts_overrides=self._config.accepts_overrides,
+                workspace,
+                MarkdownSection(
+                    title="Output Format",
+                    template=textwrap.dedent("""
+                        Return a structured response with:
+
+                        - **summary**: A 1-2 sentence overview of the project
+                        - **digest**: A detailed markdown document covering:
+                          - Project purpose and description
+                          - Directory structure overview
+                          - Build and test commands
+                          - Key dependencies
+                          - Important notes or watchouts
+                    """).strip(),
+                    key="output-format",
                 ),
-                safe_workspace,
-                *safe_tools,
             ),
         )
 
-        normalized_tag = effective_tag or "latest"
-        optimization_prompt = Prompt(
-            optimization_prompt_template,
-            overrides_store=effective_store,
-            overrides_tag=normalized_tag,
-        )
-        if self._config.accepts_overrides and effective_store is not None:
-            try:
-                _ = effective_store.seed(
-                    cast(PromptLike, optimization_prompt), tag=normalized_tag
-                )
-            except PromptOverridesError as exc:
-                raise PromptEvaluationError(
-                    "Failed to seed overrides for optimization prompt.",
-                    prompt_name=prompt_name,
-                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                ) from exc
+        return Prompt(template)
 
-        response = self._context.adapter.evaluate(
-            optimization_prompt,
-            session=inner_session,
-            deadline=self._context.deadline,
-        )
-
-        summary, digest = self._extract_summary_and_digest(
-            response=response, prompt_name=prompt_name
-        )
-
-        if self._store_scope is PersistenceScope.SESSION:
-            _ = set_workspace_digest(
-                outer_session, digest_section.key, digest, summary=summary
-            )
-
-        if self._store_scope is PersistenceScope.GLOBAL:
-            global_store = effective_store
-            global_tag = normalized_tag
-            if global_store is None:
-                message = "Global scope requires overrides_store and overrides_tag."
-                raise PromptEvaluationError(
-                    message,
-                    prompt_name=prompt_name,
-                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                )
-            section_path = self._find_section_path(prompt, digest_section.key)
-            descriptor = prompt.descriptor
-            section_hash = self._find_section_hash(descriptor, section_path)
-            override = SectionOverride(
-                path=section_path,
-                expected_hash=section_hash,
-                body=digest,
-            )
-            _ = global_store.store(descriptor, override, tag=global_tag)
-            clear_workspace_digest(outer_session, digest_section.key)
-
-        return WorkspaceDigestResult(
-            response=cast(PromptResponse[object], response),
-            digest=digest,
-            scope=self._store_scope,
-            section_key=digest_section.key,
-        )
-
-    def _resolve_workspace_section(
-        self, prompt: Prompt[object], prompt_name: str
-    ) -> WorkspaceSection:
-        """Find a section implementing the WorkspaceSection protocol."""
-        for node in prompt.sections:
-            if isinstance(node.section, WorkspaceSection):
-                return node.section
-        raise PromptEvaluationError(
-            "Workspace section required for optimization.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-        )
-
-    def _resolve_tool_sections(
-        self, prompt: Prompt[object]
-    ) -> tuple[Section[SupportsDataclass], ...]:
-        sections: list[Section[SupportsDataclass]] = []
-        for section_type in (AstevalSection,):
-            try:
-                sections.append(prompt.find_section(section_type))
-            except KeyError:
-                continue
-        return tuple(sections)
-
-    def _clone_section(
+    def optimize(
         self,
-        section: Section[SupportsDataclass],
-        *,
         session: Session,
-        filesystem: Filesystem | None = None,
-    ) -> Section[SupportsDataclass]:
-        kwargs: dict[str, object] = {
-            "session": session,
-            "dispatcher": session.dispatcher,
-        }
-        if filesystem is not None:
-            kwargs["filesystem"] = filesystem
-        return section.clone(**kwargs)
+        *,
+        section_key: str = "workspace-digest",
+    ) -> WorkspaceDigestResult:
+        """Generate and store a workspace digest.
 
-    def _require_workspace_digest_section(
-        self, prompt: Prompt[object], *, prompt_name: str
-    ) -> WorkspaceDigestSection:
-        try:
-            section = prompt.find_section(WorkspaceDigestSection)
-        except KeyError as error:
-            raise PromptEvaluationError(
-                "Workspace digest section required for optimization.",
-                prompt_name=prompt_name,
-                phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            ) from error
-        return cast(WorkspaceDigestSection, section)
-
-    def _find_section_path(
-        self, prompt: Prompt[object], section_key: str
-    ) -> tuple[str, ...]:
-        for node in prompt.sections:
-            if node.section.key == section_key:
-                return node.path
-        message = f"Section path not found for key: {section_key}"
-        raise PromptEvaluationError(
-            message,
-            prompt_name=prompt.name or prompt.key,
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-        )
-
-    def _find_section_hash(
-        self, descriptor: PromptDescriptor, path: tuple[str, ...]
-    ) -> HexDigest:
-        for section in descriptor.sections:
-            if section.path == path:
-                return section.content_hash
-        msg = f"Section hash not found for path: {path}"
-        raise PromptOverridesError(msg)
-
-    def _extract_summary_and_digest(
-        self, *, response: PromptResponse[Any], prompt_name: str
-    ) -> tuple[str, str]:
-        """Extract summary and digest from the optimization response.
+        Args:
+            session: The session to store the digest in.
+            section_key: The key for the WorkspaceDigestSection to update.
 
         Returns:
-            Tuple of (summary, digest) strings.
+            WorkspaceDigestResult with the generated digest or error.
         """
-        summary: str | None = None
-        digest: str | None = None
+        _LOGGER.info(
+            "Starting workspace digest optimization",
+            event="optimization.start",
+            context={"section_key": section_key, "mounts": len(self.mounts)},
+        )
 
-        if isinstance(response.output, str):
-            # Plain string output - use as digest, generate default summary
-            digest = response.output
-        elif response.output is not None:
-            # Structured output - extract both fields
-            summary_candidate = getattr(response.output, "summary", None)
-            if isinstance(summary_candidate, str):
-                summary = summary_candidate
-            digest_candidate = getattr(response.output, "digest", None)
-            if isinstance(digest_candidate, str):
-                digest = digest_candidate
+        try:
+            adapter = self._create_adapter()
+            prompt = self._build_optimization_prompt(session)
 
-        # Fall back to response text if no digest extracted
-        if digest is None and response.text:
-            digest = response.text
+            # Evaluate the prompt to explore the workspace
+            response = adapter.evaluate(prompt, session=session)
 
-        if digest is None:
-            raise PromptEvaluationError(
-                "Optimization did not return digest content.",
-                prompt_name=prompt_name,
-                phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+            if response.output is None:
+                _LOGGER.warning(
+                    "Optimization returned no structured output",
+                    event="optimization.no_output",
+                    context={"section_key": section_key},
+                )
+                return WorkspaceDigestResult(
+                    section_key=section_key,
+                    success=False,
+                    error="No structured output returned from optimization",
+                )
+
+            # Store the digest in the session
+            digest_response = response.output
+            _ = set_workspace_digest(
+                session,
+                section_key,
+                digest_response.digest,
+                summary=digest_response.summary,
             )
 
-        # Use default summary if not provided
-        if summary is None:
-            summary = (
-                "Workspace digest available. Use read_section to view the full details."
+            _LOGGER.info(
+                "Workspace digest optimization complete",
+                event="optimization.complete",
+                context={
+                    "section_key": section_key,
+                    "summary_length": len(digest_response.summary),
+                    "digest_length": len(digest_response.digest),
+                },
             )
 
-        return summary.strip(), digest.strip()
+            return WorkspaceDigestResult(
+                section_key=section_key,
+                summary=digest_response.summary,
+                digest=digest_response.digest,
+                success=True,
+            )
 
-
-__all__ = ["WorkspaceDigestOptimizer"]
+        except Exception as e:
+            _LOGGER.exception(
+                "Workspace digest optimization failed",
+                event="optimization.error",
+                context={"section_key": section_key, "error": str(e)},
+            )
+            return WorkspaceDigestResult(
+                section_key=section_key,
+                success=False,
+                error=str(e),
+            )

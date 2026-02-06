@@ -57,7 +57,7 @@ Key Components
 
 **Task Completion** (:class:`TaskCompletionChecker`, :class:`PlanBasedChecker`)
     Verification protocols for ensuring tasks are complete before allowing the
-    agent to stop. Integrates with the planning tool state.
+    agent to stop.
 
 **Transcript Collection** (:class:`TranscriptCollector`, :class:`TranscriptCollectorConfig`)
     Real-time collection and logging of Claude Agent SDK transcripts from the
@@ -194,16 +194,16 @@ Using workspace sections to mount host files::
 
 Task Completion Example
 -----------------------
-Using task completion checking with planning tools::
+Using task completion checking with a custom plan type::
 
     from weakincentives.adapters.claude_agent_sdk import (
         ClaudeAgentSDKAdapter,
         ClaudeAgentSDKClientConfig,
         PlanBasedChecker,
     )
-    from weakincentives.contrib.tools.planning import Plan
 
-    checker = PlanBasedChecker(plan_type=Plan)
+    # MyPlan must have a `steps` attribute with items that have `status`
+    checker = PlanBasedChecker(plan_type=MyPlan)
 
     adapter = ClaudeAgentSDKAdapter(
         model="claude-opus-4-6",
@@ -266,7 +266,6 @@ See Also
 - :mod:`weakincentives.adapters`: Parent package with adapter pattern overview
 - :mod:`weakincentives.prompt`: Prompt and section construction
 - :mod:`weakincentives.runtime`: Session and event infrastructure
-- :mod:`weakincentives.contrib.tools.planning`: Planning tools for task tracking
 """
 
 from __future__ import annotations

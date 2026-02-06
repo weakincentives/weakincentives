@@ -171,10 +171,10 @@ class MarkdownSection(Section[MarkdownParamsT]):
     def clone(self, **kwargs: object) -> Self:
         cloned_children: list[Section[SupportsDataclass]] = []
         for child in self.children:
-            if not hasattr(child, "clone"):
-                raise TypeError(
+            if not hasattr(child, "clone"):  # pragma: no branch
+                raise TypeError(  # pragma: no cover - defensive
                     "Section children must implement clone()."
-                )  # pragma: no cover
+                )
             cloned_children.append(child.clone(**kwargs))
 
         cloned_default = (

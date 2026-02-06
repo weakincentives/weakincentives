@@ -25,15 +25,13 @@ understand the individual pieces.
 **Pattern**:
 
 ```python nocheck
-from weakincentives.contrib.tools import (
-    VfsToolsSection,
-    VfsConfig,
-    WorkspaceDigestSection,
-)
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentWorkspaceSection, HostMount
+from weakincentives.contrib.tools import WorkspaceDigestSection
 from weakincentives.prompt import PromptTemplate, MarkdownSection
 
 
 def build_qa_template(*, session):
+    mounts = [HostMount(host_path=".")]
     return PromptTemplate(
         ns="qa",
         key="repo-qa",
@@ -44,17 +42,11 @@ def build_qa_template(*, session):
                 template=(
                     "Answer questions about this repository.\n\n"
                     "Start by reviewing the workspace digest. "
-                    "Use grep and read_file to find specific details."
+                    "Use the workspace tools to find specific details."
                 ),
             ),
             WorkspaceDigestSection(session=session),
-            VfsToolsSection(
-                session=session,
-                config=VfsConfig(
-                    mounts=(HostMount(host_path="."),),
-                    allowed_host_roots=(".",),
-                ),
-            ),
+            ClaudeAgentWorkspaceSection(session=session, mounts=mounts),
             MarkdownSection(
                 title="Question",
                 key="question",
@@ -68,7 +60,7 @@ def build_qa_template(*, session):
 
 - Show workspace digest summary by default
 - Allow the model to expand it via `read_section`
-- Allow VFS `grep`/`glob`/`read_file` for verification
+- Allow workspace tools for file exploration
 - Token usage stays low for simple questions
 
 ## A "Safe Patch" Agent
@@ -86,6 +78,7 @@ class PatchOutput:
 
 
 def build_patch_template(*, session):
+    mounts = [HostMount(host_path=".")]
     return PromptTemplate[PatchOutput](
         ns="patch",
         key="safe-patch",
@@ -95,12 +88,11 @@ def build_patch_template(*, session):
                 key="instructions",
                 template=(
                     "Make the requested change to the codebase.\n\n"
-                    "Work in the virtual filesystem. Your changes won't affect "
-                    "the real files. When done, output a unified diff that can "
+                    "Analyze the code and output a unified diff that can "
                     "be applied with `patch -p1`."
                 ),
             ),
-            VfsToolsSection(session=session, config=...),
+            ClaudeAgentWorkspaceSection(session=session, mounts=mounts),
             MarkdownSection(
                 title="Change Request",
                 key="request",
@@ -112,9 +104,8 @@ def build_patch_template(*, session):
 
 **Key ideas:**
 
-- Use VFS tools for edits (writes go to the virtual copy, not the host)
+- Use workspace tools for code analysis
 - Require the model to output a diff as structured output
-- Optionally run tests in Podman before proposing the patch
 - Humans review the diff before applying it to the real repo
 
 ## A Research Agent with Progressive Disclosure
@@ -193,5 +184,5 @@ fail gracefully with helpful error messages.
 ## Next Steps
 
 - [Code Review Agent](code-review-agent.md): The complete worked example
-- [Workspace Tools](workspace-tools.md): Understand VFS, Podman, and planning
+- [Claude Agent SDK](claude-agent-sdk.md): Workspace and file tools
 - [Progressive Disclosure](progressive-disclosure.md): Control context size

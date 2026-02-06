@@ -48,10 +48,8 @@ PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
 ├── WorkspaceDigestSection     ← auto-generated codebase summary
 ├── MarkdownSection (reference docs, progressive disclosure)
-├── PlanningToolsSection       ← contributes planning_* tools
-│   └── (nested planning docs)
-├── VfsToolsSection            ← contributes ls/read_file/write_file/...
-│   └── (nested filesystem docs)
+├── ClaudeAgentWorkspaceSection ← contributes file tools via SDK
+│   └── (nested workspace docs)
 └── MarkdownSection (user request)
 ```
 
@@ -76,8 +74,7 @@ capabilities once, in one place, and the definition ports across runtimes.
 
 1. **Dynamic scoping.** Each section has an `enabled` predicate. Disable a
    section and its entire subtree—tools included—disappears from the prompt.
-   Swap in a `PodmanSandboxSection` instead of `VfsToolsSection` when a shell
-   is available; the prompt adapts automatically.
+   Swap sections based on runtime conditions; the prompt adapts automatically.
 
 1. **Typed all the way down.** Sections are parameterized with dataclasses.
    Placeholders are validated at construction time. Tools declare typed params
@@ -100,10 +97,10 @@ capabilities once, in one place, and the definition ports across runtimes.
 - **Transactional execution.** Tool calls are atomic transactions. When a tool
   fails, WINK automatically rolls back session state and filesystem changes to
   their pre-call state. Failed tools don't leave traces in mutable state.
-- **Sandboxed virtual filesystem.** Agents get an in-memory VFS tracked as
-  session state. Mount host directories read-only when needed; the sandbox
-  prevents accidental writes to the host.
-  See [Workspace Tools](specs/WORKSPACE.md).
+- **Workspace integration.** Mount host directories into agent workspaces with
+  configurable include/exclude patterns. The Claude Agent SDK adapter provides
+  sandboxed file tools with automatic cleanup.
+  See [Workspace](specs/WORKSPACE.md).
 
 ### Policies
 
@@ -136,7 +133,6 @@ capabilities once, in one place, and the definition ports across runtimes.
 uv add weakincentives
 # optional extras
 uv add "weakincentives[claude-agent-sdk]" # Claude Agent SDK adapter
-uv add "weakincentives[podman]"           # Podman sandbox
 uv add "weakincentives[wink]"             # debug UI
 ```
 
@@ -150,8 +146,7 @@ uv run --extra wink wink debug snapshots/session.jsonl --port 8000
 
 ## Tutorial: Code Review Agent
 
-Build a code review assistant with structured output, sandboxed file access,
-and observable state. Full source: [`code_reviewer_example.py`](code_reviewer_example.py)
+Build a code review assistant with structured output and observable state.
 
 ### 1. Define structured output
 
@@ -169,7 +164,7 @@ class ReviewResponse:
 
 ```python nocheck
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.contrib.tools import PlanningToolsSection, VfsToolsSection, WorkspaceDigestSection
+from weakincentives.contrib.tools import WorkspaceDigestSection
 
 template = PromptTemplate[ReviewResponse](
     ns="examples/code-review",
@@ -177,9 +172,7 @@ template = PromptTemplate[ReviewResponse](
     name="code_review_agent",
     sections=(
         MarkdownSection(title="Guide", key="guide", template="Review code."),
-        WorkspaceDigestSection(session=session),       # auto-generated summary
-        PlanningToolsSection(session=session),         # planning tools
-        VfsToolsSection(session=session, mounts=mounts),  # sandboxed files
+        WorkspaceDigestSection(session=session),       # cached codebase summary
         MarkdownSection(title="Request", key="request", template="${request}"),
     ),
 )
@@ -187,24 +180,11 @@ template = PromptTemplate[ReviewResponse](
 prompt = Prompt(template).bind(ReviewTurnParams(request="Review main.py"))
 ```
 
-### 3. Mount files safely
+**Note:** Filesystem and planning tools are provided by the execution harness
+(e.g., Claude Agent SDK) rather than defined in the prompt. This keeps agent
+definitions portable across runtimes.
 
-```python nocheck
-from weakincentives.contrib.tools import HostMount, VfsPath, VfsToolsSection
-
-mounts = (
-    HostMount(
-        host_path="repo",
-        mount_path=VfsPath(("repo",)),
-        include_glob=("*.py", "*.md", "*.toml"),
-        exclude_glob=("**/*.pickle",),
-        max_bytes=600_000,
-    ),
-)
-vfs_section = VfsToolsSection(session=session, mounts=mounts, allowed_host_roots=(SAFE_ROOT,))
-```
-
-### 4. Run and get typed results
+### 3. Run and get typed results
 
 ```python nocheck
 from dataclasses import dataclass
@@ -242,18 +222,7 @@ if response.output is not None:
     review: ReviewResponse = response.output  # typed, validated
 ```
 
-### 5. Inspect state
-
-```python
-from weakincentives.contrib.tools.planning import Plan
-
-plan = session[Plan].latest()
-if plan:
-    for step in plan.steps:
-        print(f"[{step.status}] {step.title}")
-```
-
-### 6. Iterate prompts without code changes
+### 4. Iterate prompts without code changes
 
 ```python nocheck
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
@@ -274,13 +243,9 @@ This is the "rent the harness" path: Claude's runtime drives the agent loop and
 native tools; WINK provides the portable agent definition and bridges custom
 tools where needed.
 
-```bash
-python code_reviewer_example.py --claude-agent
-```
-
 Key differences:
 
-- **Native tools**: Uses Claude Code's built-in tools instead of VFS
+- **Native tools**: Uses Claude Code's built-in file and shell tools
 - **Hermetic isolation**: Ephemeral home directory prevents access to host config
 - **Network policy**: Restricted to specific documentation domains
 - **MCP bridging**: Custom WINK tools bridged via MCP

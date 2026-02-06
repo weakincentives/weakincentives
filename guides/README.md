@@ -34,7 +34,6 @@ debug issues when they arise.
 
 1. [Resources](resources.md) - Dependency injection and lifecycle management
 1. [Progressive Disclosure](progressive-disclosure.md) - Manage context size
-1. [Workspace Tools](workspace-tools.md) - VFS, Podman, sandboxed execution
 1. [Prompt Overrides](prompt-overrides.md) - A/B test prompts without deploys
 1. [Formal Verification](formal-verification.md) - TLA+ for critical code
 
@@ -78,7 +77,6 @@ debug issues when they arise.
 | [Resources](resources.md) | Dependency injection, scopes, and lifecycle management |
 | [Progressive Disclosure](progressive-disclosure.md) | Control context size with summaries and expansion |
 | [Prompt Overrides](prompt-overrides.md) | Iterate on prompts without code changes |
-| [Workspace Tools](workspace-tools.md) | Use VFS, Podman, planning, and workspace digests |
 | [Debugging](debugging.md) | Inspect sessions, dump snapshots, use the debug UI |
 
 ## Code Quality

@@ -18,6 +18,7 @@ from collections.abc import AsyncGenerator, AsyncIterable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +31,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKModelConfig,
 )
 from weakincentives.adapters.core import PromptEvaluationError
+from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,
@@ -44,6 +46,31 @@ from weakincentives.runtime.events import (
     PromptRendered,
 )
 from weakincentives.runtime.session import Session
+
+
+# Mock Plan types for testing task completion checkers.
+# These replicate the interface of the removed PlanningToolsSection types.
+@FrozenDataclass()
+class PlanStep:
+    """Mock PlanStep for testing."""
+
+    step_id: int
+    title: str
+    status: str = "pending"
+
+
+@FrozenDataclass()
+class Plan:
+    """Mock Plan for testing."""
+
+    objective: str
+    status: str = "active"
+    steps: tuple[PlanStep, ...] = ()
+
+
+def _initialize_plan_session(session: Session) -> None:
+    """Initialize session with Plan slice for testing."""
+    session[Plan].seed(())
 
 
 # Create mock SDK types for testing
@@ -271,9 +298,11 @@ def untyped_prompt() -> Prompt[None]:
 
 class TestClaudeAgentSDKAdapterInit:
     def test_default_values(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.isolation import get_default_model
+
         adapter = ClaudeAgentSDKAdapter()
 
-        assert adapter._model == "claude-opus-4-6"
+        assert adapter._model == get_default_model()
         assert adapter._client_config.permission_mode == "bypassPermissions"
         assert adapter._allowed_tools is None
         assert adapter._disallowed_tools == ()
@@ -1171,36 +1200,6 @@ class TestIsolationConfig:
             with pytest.raises(Exception):  # noqa: B017
                 adapter.evaluate(simple_prompt, session=session)
 
-    def test_uses_prompt_filesystem_when_available(
-        self, session: Session, simple_prompt: Prompt[None]
-    ) -> None:
-        """When prompt has filesystem, adapter uses it instead of creating one."""
-        from weakincentives.contrib.tools.vfs import VfsToolsSection
-
-        # Create a prompt with a VFS workspace section containing a filesystem
-        workspace = VfsToolsSection(session=session)
-
-        template = PromptTemplate[None](
-            ns="test",
-            key="with-fs",
-            name="with_filesystem",
-            sections=[
-                workspace,
-                MarkdownSection(title="Task", template="Do something", key="task"),
-            ],
-        )
-        prompt = Prompt(template)
-
-        adapter = ClaudeAgentSDKAdapter()
-        MockSDKQuery.reset()
-        MockSDKQuery.set_results([MockResultMessage(result="Done")])
-
-        with sdk_patches():
-            response = adapter.evaluate(prompt, session=session)
-
-        # Verify the filesystem from the prompt was used
-        assert response is not None
-
     def test_no_permission_mode_when_none(
         self, session: Session, simple_prompt: Prompt[None]
     ) -> None:
@@ -1359,8 +1358,6 @@ class TestIsolationConfig:
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Temp folder is cleaned up after evaluate completes."""
-        from pathlib import Path
-
         MockSDKQuery.reset()
         MockSDKQuery.set_results([MockResultMessage(result="Done")])
 
@@ -1380,8 +1377,6 @@ class TestIsolationConfig:
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Temp folder is cleaned up even when SDK raises an error."""
-        from pathlib import Path
-
         MockSDKQuery.reset()
         MockSDKQuery.set_error(RuntimeError("SDK error"))
 
@@ -1397,6 +1392,140 @@ class TestIsolationConfig:
 
         # Temp folder should still be cleaned up
         assert not Path(temp_cwd).exists()
+
+    def test_derives_cwd_from_workspace_section(self, session: Session) -> None:
+        """When prompt has a workspace section, cwd is derived from its root."""
+        from weakincentives.adapters.claude_agent_sdk.workspace import (
+            ClaudeAgentWorkspaceSection,
+        )
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        # Create a prompt with a workspace section
+        workspace = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            template = PromptTemplate[SimpleOutput](
+                ns="test",
+                key="with-workspace",
+                sections=[
+                    MarkdownSection(
+                        title="Test",
+                        template="Hello",
+                        key="test",
+                    ),
+                    workspace,
+                ],
+            )
+            prompt_with_workspace: Prompt[SimpleOutput] = Prompt(template)
+
+            adapter = ClaudeAgentSDKAdapter()
+
+            with sdk_patches():
+                _ = adapter.evaluate(prompt_with_workspace, session=session)
+
+            # Verify SDK was called
+            assert len(MockSDKQuery.captured_options) == 1
+            options = MockSDKQuery.captured_options[0]
+
+            # cwd should be derived from the workspace section's filesystem root
+            cwd = getattr(options, "cwd", None)
+            assert cwd is not None
+            assert cwd == str(workspace.temp_dir)
+        finally:
+            workspace.cleanup()
+
+    def test_explicit_cwd_overrides_workspace_root(
+        self, session: Session, tmp_path: Path
+    ) -> None:
+        """Explicit cwd in client config takes precedence over workspace root."""
+        from weakincentives.adapters.claude_agent_sdk.workspace import (
+            ClaudeAgentWorkspaceSection,
+        )
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        workspace = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            template = PromptTemplate[SimpleOutput](
+                ns="test",
+                key="with-workspace",
+                sections=[
+                    MarkdownSection(
+                        title="Test",
+                        template="Hello",
+                        key="test",
+                    ),
+                    workspace,
+                ],
+            )
+            prompt_with_workspace: Prompt[SimpleOutput] = Prompt(template)
+
+            explicit_cwd = str(tmp_path)
+            adapter = ClaudeAgentSDKAdapter(
+                client_config=ClaudeAgentSDKClientConfig(cwd=explicit_cwd),
+            )
+
+            with sdk_patches():
+                _ = adapter.evaluate(prompt_with_workspace, session=session)
+
+            assert len(MockSDKQuery.captured_options) == 1
+            options = MockSDKQuery.captured_options[0]
+
+            # Explicit cwd should take precedence over workspace root
+            cwd = getattr(options, "cwd", None)
+            assert cwd == explicit_cwd
+        finally:
+            workspace.cleanup()
+
+    def test_non_host_filesystem_does_not_derive_cwd(
+        self, session: Session, tmp_path: Path
+    ) -> None:
+        """When workspace filesystem is not HostFilesystem, cwd stays None."""
+        from weakincentives.adapters.claude_agent_sdk.workspace import (
+            ClaudeAgentWorkspaceSection,
+        )
+        from weakincentives.contrib.tools import InMemoryFilesystem
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        # Create a workspace section with an InMemoryFilesystem via the
+        # cloning constructor path (_temp_dir + _mount_previews + _filesystem).
+        mem_fs = InMemoryFilesystem()
+        workspace = ClaudeAgentWorkspaceSection(
+            session=session,
+            _temp_dir=tmp_path,
+            _mount_previews=(),
+            _filesystem=mem_fs,
+        )
+
+        template = PromptTemplate[SimpleOutput](
+            ns="test",
+            key="with-inmem-fs",
+            sections=[
+                MarkdownSection(
+                    title="Test",
+                    template="Hello",
+                    key="test",
+                ),
+                workspace,
+            ],
+        )
+        prompt: Prompt[SimpleOutput] = Prompt(template)
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            _ = adapter.evaluate(prompt, session=session)
+
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+
+        # cwd should be None since InMemoryFilesystem has no root path
+        cwd = getattr(options, "cwd", None)
+        assert cwd is None
 
 
 class TestMessageContentExtraction:
@@ -1823,7 +1952,7 @@ class TestVerifyTaskCompletion:
         from weakincentives.adapters.claude_agent_sdk._task_completion import (
             PlanBasedChecker,
         )
-        from weakincentives.contrib.tools.planning import Plan
+        # Use local mock Plan type
 
         adapter = ClaudeAgentSDKAdapter(
             client_config=ClaudeAgentSDKClientConfig(
@@ -1847,14 +1976,10 @@ class TestVerifyTaskCompletion:
         from weakincentives.adapters.claude_agent_sdk._task_completion import (
             PlanBasedChecker,
         )
-        from weakincentives.contrib.tools.planning import (
-            Plan,
-            PlanningToolsSection,
-            PlanStep,
-        )
+        # Use local mock Plan types (defined at module level)
 
         # Initialize plan with incomplete tasks
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
         session.dispatch(
             Plan(
                 objective="Test",
@@ -1901,14 +2026,10 @@ class TestVerifyTaskCompletion:
         from weakincentives.adapters.claude_agent_sdk._task_completion import (
             PlanBasedChecker,
         )
-        from weakincentives.contrib.tools.planning import (
-            Plan,
-            PlanningToolsSection,
-            PlanStep,
-        )
+        # Use local mock Plan types (defined at module level)
 
         # Initialize plan with all tasks done
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
         session.dispatch(
             Plan(
                 objective="Test",
@@ -1942,14 +2063,10 @@ class TestVerifyTaskCompletion:
         from weakincentives.adapters.claude_agent_sdk._task_completion import (
             PlanBasedChecker,
         )
-        from weakincentives.contrib.tools.planning import (
-            Plan,
-            PlanningToolsSection,
-            PlanStep,
-        )
+        # Use local mock Plan types (defined at module level)
 
         # Initialize plan with incomplete tasks
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
         session.dispatch(
             Plan(
                 objective="Test",
@@ -1983,14 +2100,10 @@ class TestVerifyTaskCompletion:
             PlanBasedChecker,
         )
         from weakincentives.budget import Budget, BudgetTracker
-        from weakincentives.contrib.tools.planning import (
-            Plan,
-            PlanningToolsSection,
-            PlanStep,
-        )
+        # Use local mock Plan types (defined at module level)
 
         # Initialize plan with incomplete tasks
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
         session.dispatch(
             Plan(
                 objective="Test",
@@ -2121,14 +2234,10 @@ class TestVerifyTaskCompletion:
             PlanBasedChecker,
         )
         from weakincentives.budget import Budget, BudgetTracker
-        from weakincentives.contrib.tools.planning import (
-            Plan,
-            PlanningToolsSection,
-            PlanStep,
-        )
+        # Use local mock Plan types (defined at module level)
 
         # Initialize plan with incomplete tasks
-        PlanningToolsSection._initialize_session(session)
+        _initialize_plan_session(session)
         session.dispatch(
             Plan(
                 objective="Test",

@@ -3,13 +3,6 @@
 Key concepts that appear throughout Weak Incentives. Each entry links to the
 canonical specification for deeper context.
 
-## Asteval Section
-
-Provides a deterministic sandbox for evaluating small Python expressions inside a
-session-scoped virtual filesystem. The [`AstevalSection`](specs/WORKSPACE.md)
-registers the tool, enforces strict globals, captures stdout/stderr, and records
-any VFS mutations for traceability.
-
 ## Binding
 
 Associates a protocol type with a provider function and scope in the
@@ -91,18 +84,6 @@ Enhancements to the OpenAI adapter that attach JSON Schema derived from prompt
 metadata so the provider returns parsed structured results. Fallbacks preserve
 text-based parsing when native support is unavailable. See
 [Native OpenAI Structured Outputs](specs/ADAPTERS.md).
-
-## Planning Tool Suite
-
-The `PlanningToolsSection` registers a todo-list tool suite that keeps a single
-session-scoped plan, replacing the current snapshot on each update. Reducers and
-data models are documented in the [Planning Tool specification](specs/TOOLS.md).
-
-## Planning Strategies
-
-A strategy enum customizes the guidance copy rendered by `PlanningToolsSection`
-without altering its tool surface. Available mindsets are cataloged in the
-[Planning Strategy Templates specification](specs/TOOLS.md).
 
 ## Prompt
 
@@ -210,12 +191,6 @@ All session mutations flow through `session.dispatch(event)`, providing a
 consistent, auditable mutation interface. Convenience methods on slice accessors
 (`seed()`, `clear()`) dispatch system events (`InitializeSlice`, `ClearSlice`)
 internally. See [Session State specification](specs/SESSIONS.md).
-
-## Virtual Filesystem (VFS)
-
-A session-scoped, copy-on-write filesystem that lets tools read and write files
-without touching the host disk. `VfsToolsSection` wires the suite and reducer
-integration. Defined in the [Virtual Filesystem Tool specification](specs/WORKSPACE.md).
 
 ## Watchdog
 

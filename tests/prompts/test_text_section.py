@@ -312,6 +312,34 @@ def test_text_section_clone_preserves_summary_and_visibility() -> None:
     assert cloned.visibility == section.visibility
 
 
+def test_text_section_clone_with_children() -> None:
+    """Clone method properly clones child sections."""
+    child = MarkdownSection(
+        title="Child",
+        template="Child content",
+        key="child",
+    )
+    parent = MarkdownSection(
+        title="Parent",
+        template="Parent content",
+        key="parent",
+        children=[child],
+    )
+
+    cloned = parent.clone()
+
+    # Verify parent was cloned
+    assert cloned is not parent
+    assert cloned.title == parent.title
+
+    # Verify children were cloned
+    assert len(cloned.children) == 1
+    cloned_child = cloned.children[0]
+    assert cloned_child is not child
+    assert cloned_child.title == child.title
+    assert cloned_child.key == child.key
+
+
 # --- Tests for SUMMARY visibility behavior in rendering ---
 
 

@@ -149,7 +149,7 @@ This dramatically reduces iteration time when working on focused changes.
 ```
 src/weakincentives/
 ├── adapters/     # OpenAI, LiteLLM, Claude Agent SDK
-├── contrib/      # Tools (VFS, Podman, asteval), mailbox
+├── contrib/      # Mailbox, optimizers
 ├── dbc/          # Design-by-contract decorators
 ├── evals/        # Evaluation framework
 ├── prompt/       # Section/Prompt composition
@@ -248,7 +248,7 @@ Read before modifying related code:
 |------|-------|
 | `PROMPTS.md` | Prompt system, sections, composition |
 | `SESSIONS.md` | Session lifecycle, events, budgets |
-| `TOOLS.md` | Tool registration, planning tools |
+| `TOOLS.md` | Tool registration, tool policies |
 | `GUARDRAILS.md` | Tool policies, feedback providers, task completion |
 | `ADAPTERS.md` | Provider adapters, throttling |
 | `CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |

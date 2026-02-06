@@ -43,39 +43,82 @@ def _read_doc(name: str) -> str:
 
 
 def _read_example() -> str:
-    """Read the code review example and format as markdown documentation."""
-    doc_files = files("weakincentives.docs")
-    source = doc_files.joinpath("code_reviewer_example.py").read_text(encoding="utf-8")
+    """Return a minimal example showing core WINK concepts."""
+    return """\
+# Minimal WINK Example
 
-    intro = """\
-# Code Review Agent Example
+This example demonstrates core WINK concepts: prompt composition,
+session management, and adapter integration.
 
-This example demonstrates a complete code review agent built with WINK.
-It showcases several key features of the library:
+## Features
 
-- **AgentLoop integration**: Background worker processing requests from a mailbox
-- **Prompt composition**: Structured prompts with multiple sections and tools
-- **Session management**: Persistent state across multiple review requests
+- **Prompt composition**: Structured prompts with sections
+- **Session management**: Typed state slices with reducers
 - **Provider adapters**: Support for Claude Agent SDK
-- **Planning tools**: Plan-Act-Reflect workflow for structured investigations
-- **Workspace tools**: VFS, Podman, and Claude Agent SDK sandbox modes
-
-## Running the Example
-
-```bash
-# With Claude Agent SDK
-ANTHROPIC_API_KEY=... python code_reviewer_example.py
-
-# With workspace optimization
-python code_reviewer_example.py --optimize
-```
+- **Workspace digest**: Cached codebase summaries
 
 ## Source Code
 
 ```python
-"""
+from dataclasses import dataclass
 
-    return f"{intro}{source}\n```\n"
+from weakincentives import Prompt
+from weakincentives.prompt import MarkdownSection, PromptTemplate
+from weakincentives.runtime import Session
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewResponse:
+    \"\"\"Structured output from the review agent.\"\"\"
+    summary: str
+    next_steps: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewParams:
+    \"\"\"Parameters for a review request.\"\"\"
+    request: str
+
+
+# Define the prompt template
+template = PromptTemplate[ReviewResponse](
+    ns="examples",
+    key="review-agent",
+    name="review_agent",
+    sections=(
+        MarkdownSection(
+            title="Guide",
+            key="guide",
+            template="You are a helpful code review assistant.",
+        ),
+        MarkdownSection(
+            title="Request",
+            key="request",
+            template="${request}",
+        ),
+    ),
+)
+
+# Create session and prompt
+session = Session()
+prompt = Prompt(template).bind(ReviewParams(request="Review the main function."))
+
+# Evaluate with Claude Agent SDK
+adapter = ClaudeAgentSDKAdapter()
+response = adapter.evaluate(prompt, session=session)
+
+# Access typed output
+if response.output:
+    print(f"Summary: {response.output.summary}")
+```
+
+## Running
+
+```bash
+ANTHROPIC_API_KEY=... python example.py
+```
+"""
 
 
 def _normalize_doc_name(name: str, available: list[str]) -> str | None:

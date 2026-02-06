@@ -19,6 +19,8 @@ import pytest
 from weakincentives.contrib.tools.digests import (
     WorkspaceDigest,
     WorkspaceDigestSection,
+    clear_workspace_digest,
+    latest_workspace_digest,
     set_workspace_digest,
 )
 from weakincentives.prompt import MarkdownSection, PromptTemplate
@@ -205,6 +207,65 @@ def test_workspace_digest_section_render_override_with_full_visibility() -> None
 
     assert "Full body content" in rendered
     assert "Short summary" not in rendered
+
+
+def test_set_workspace_digest_without_summary_uses_default() -> None:
+    """set_workspace_digest generates a default summary when none provided."""
+    session = Session()
+
+    # Call without providing summary parameter
+    digest = set_workspace_digest(session, "test-section", "Test body content")
+
+    assert digest.summary == (
+        "Workspace digest available. Use read_section to view the full details."
+    )
+    assert digest.body == "Test body content"
+
+
+def test_clear_workspace_digest_removes_digest() -> None:
+    """clear_workspace_digest removes the digest for the specified section key."""
+    session = Session()
+
+    # Add a digest first
+    set_workspace_digest(session, "test-section", "Test body", summary="Summary")
+    assert latest_workspace_digest(session, "test-section") is not None
+
+    # Clear it
+    clear_workspace_digest(session, "test-section")
+
+    # Verify it's gone
+    assert latest_workspace_digest(session, "test-section") is None
+
+
+def test_workspace_digest_section_render_override_uses_override_body_when_no_digest() -> (
+    None
+):
+    """render_override uses override_body as fallback when no digest exists."""
+    session = Session()
+    section = WorkspaceDigestSection(session=session)
+
+    # No digest exists - render_override should use the override_body
+    rendered = section.render_override("Fallback override content", None, 0, "1.")
+
+    assert "Fallback override content" in rendered
+    # Should NOT contain the placeholder
+    assert "Workspace digest unavailable" not in rendered
+
+
+def test_latest_workspace_digest_returns_none_for_non_matching_key() -> None:
+    """latest_workspace_digest returns None when no digest matches the key."""
+    session = Session()
+
+    # Add a digest with a different key
+    set_workspace_digest(
+        session, "other-section", "Other body", summary="Other summary"
+    )
+
+    # Look for a different section key
+    result = latest_workspace_digest(session, "non-existent-section")
+
+    # Should return None since the key doesn't match
+    assert result is None
 
 
 """Coverage tests for prompt utilities and workspace digest plumbing."""

@@ -35,16 +35,11 @@ from __future__ import annotations
 import functools
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, is_dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
-from weakincentives.contrib.tools import (
-    asteval as asteval_tools,
-    planning as planning_tools,
-    vfs as vfs_tools,
-)
+from weakincentives.contrib.tools import digests as digests_tools
 from weakincentives.serde import dump, parse
 
 SupportsFactory = Callable[[], object]
@@ -62,151 +57,22 @@ class DataclassSerializationCase:
         return f"{self.origin}:{self.cls.__qualname__}"
 
 
-def _make_plan_step() -> planning_tools.PlanStep:
-    return planning_tools.PlanStep(
-        step_id=1,
-        title="Draft plan",
-        status="pending",
+def _make_workspace_digest() -> digests_tools.WorkspaceDigest:
+    return digests_tools.WorkspaceDigest(
+        section_key="workspace-digest",
+        summary="Python web application with FastAPI.",
+        body="Full workspace analysis including build commands and dependencies.",
     )
 
 
-def _make_plan() -> planning_tools.Plan:
-    return planning_tools.Plan(
-        objective="Ship minimal feature",
-        status="active",
-        steps=(_make_plan_step(),),
-    )
-
-
-def _make_setup_plan() -> planning_tools.SetupPlan:
-    return planning_tools.SetupPlan(
-        objective="Prepare launch",
-        initial_steps=("Write docs",),
-    )
-
-
-def _make_add_step() -> planning_tools.AddStep:
-    return planning_tools.AddStep(steps=("Write docs",))
-
-
-def _make_read_plan() -> planning_tools.ReadPlan:
-    return planning_tools.ReadPlan()
-
-
-def _make_vfs_path() -> vfs_tools.VfsPath:
-    return vfs_tools.VfsPath(("workspace", "notes.txt"))
-
-
-def _make_vfs_file() -> vfs_tools.VfsFile:
-    now = datetime.now(UTC)
-    return vfs_tools.VfsFile(
-        path=_make_vfs_path(),
-        content="Hello, world!",
-        encoding="utf-8",
-        size_bytes=13,
-        version=1,
-        created_at=now,
-        updated_at=now,
-    )
-
-
-def _make_list_directory() -> vfs_tools.ListDirectory:
-    return vfs_tools.ListDirectory(path=_make_vfs_path())
-
-
-def _make_list_directory_result() -> vfs_tools.ListDirectoryResult:
-    return vfs_tools.ListDirectoryResult(
-        path=_make_vfs_path(),
-        directories=("docs",),
-        files=("notes.txt",),
-    )
-
-
-def _make_read_file() -> vfs_tools.ReadFile:
-    return vfs_tools.ReadFile(path=_make_vfs_path())
-
-
-def _make_write_file() -> vfs_tools.WriteFile:
-    return vfs_tools.WriteFile(
-        path=_make_vfs_path(),
-        content="import this",
-        mode="overwrite",
-        encoding="utf-8",
-    )
-
-
-def _make_delete_entry() -> vfs_tools.DeleteEntry:
-    return vfs_tools.DeleteEntry(path=_make_vfs_path())
-
-
-def _make_eval_file_read() -> asteval_tools.EvalFileRead:
-    return asteval_tools.EvalFileRead(path=_make_vfs_path())
-
-
-def _make_eval_file_write() -> asteval_tools.EvalFileWrite:
-    return asteval_tools.EvalFileWrite(
-        path=_make_vfs_path(),
-        content="print('ok')",
-        mode="overwrite",
-    )
-
-
-def _make_eval_params() -> asteval_tools.EvalParams:
-    return asteval_tools.EvalParams(
-        code="1 + 1",
-        reads=(_make_eval_file_read(),),
-        writes=(_make_eval_file_write(),),
-    )
-
-
-def _make_eval_result() -> asteval_tools.EvalResult:
-    return asteval_tools.EvalResult(
-        value_repr="2",
-        stdout="2\n",
-        stderr="",
-        globals={"result": "2"},
-        reads=(_make_eval_file_read(),),
-        writes=(_make_eval_file_write(),),
-    )
-
-
-def _discover_planning() -> dict[type[Any], SupportsFactory]:
-    # Note: UpdateStep is excluded because its Optional[Literal[...]] field
-    # type is not fully supported by the serde parser.
+def _discover_digests() -> dict[type[Any], SupportsFactory]:
     return {
-        planning_tools.PlanStep: _make_plan_step,
-        planning_tools.Plan: _make_plan,
-        planning_tools.SetupPlan: _make_setup_plan,
-        planning_tools.AddStep: _make_add_step,
-        planning_tools.ReadPlan: _make_read_plan,
-    }
-
-
-def _discover_vfs() -> dict[type[Any], SupportsFactory]:
-    return {
-        vfs_tools.VfsPath: _make_vfs_path,
-        vfs_tools.VfsFile: _make_vfs_file,
-        vfs_tools.ListDirectory: _make_list_directory,
-        vfs_tools.ListDirectoryResult: _make_list_directory_result,
-        vfs_tools.ReadFile: _make_read_file,
-        vfs_tools.WriteFile: _make_write_file,
-        vfs_tools.DeleteEntry: _make_delete_entry,
-    }
-
-
-def _discover_asteval() -> dict[type[Any], SupportsFactory]:
-    return {
-        asteval_tools.EvalFileRead: _make_eval_file_read,
-        asteval_tools.EvalFileWrite: _make_eval_file_write,
-        asteval_tools.EvalParams: _make_eval_params,
-        asteval_tools.EvalResult: _make_eval_result,
+        digests_tools.WorkspaceDigest: _make_workspace_digest,
     }
 
 
 _DISCOVERY_BUILDERS: tuple[Callable[[], dict[type[Any], SupportsFactory]], ...] = (
-    _discover_planning,
-    _discover_vfs,
-    _discover_asteval,
+    _discover_digests,
 )
 
 

@@ -85,7 +85,7 @@ def _get_model() -> str:
         return os.environ[_MODEL_ENV_VAR]
     # Use Opus for better tool following - Sonnet sometimes uses native tools
     if _is_bedrock_mode():
-        return "us.anthropic.claude-opus-4-6-v1:0"
+        return "us.anthropic.claude-opus-4-6-v1"
     return "claude-opus-4-6"
 
 

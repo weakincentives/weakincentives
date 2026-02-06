@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean biome biome-fix test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 test-group-6 test-parallel
+.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo sync-docs all clean biome biome-fix test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 test-group-6 test-parallel
 
 # =============================================================================
 # Code Formatting
@@ -263,25 +263,12 @@ clean-extracted:
 # Demos
 # =============================================================================
 
-# Launch the interactive code reviewer demo
+# Launch the code reviewer demo using Claude Agent SDK
+# Usage: make demo [PROJECT=/path/to/project] [FOCUS="review focus"]
+PROJECT ?= test-repositories/sunfish
+FOCUS ?= Review how the UCI implementation is handled via the packaging scripts
 demo:
-	@uv run --all-extras python code_reviewer_example.py
-
-# Launch the interactive code reviewer demo using the Podman sandbox (if available)
-demo-podman:
-	@uv run --all-extras python code_reviewer_example.py --podman
-
-# Launch the interactive code reviewer demo with Claude Agent SDK
-# Supports both Anthropic API (ANTHROPIC_API_KEY) and AWS Bedrock (CLAUDE_CODE_USE_BEDROCK=1 + AWS_REGION)
-# For Bedrock, credentials are resolved via AWS SDK credential chain (~/.aws/config, SSO cache, env vars)
-demo-claude-agent:
-	@if [ -z "$$ANTHROPIC_API_KEY" ] && [ "$$CLAUDE_CODE_USE_BEDROCK" != "1" -o -z "$$AWS_REGION" ]; then \
-		echo "No authentication configured. Set either:" >&2; \
-		echo "  - ANTHROPIC_API_KEY for Anthropic API" >&2; \
-		echo "  - CLAUDE_CODE_USE_BEDROCK=1 and AWS_REGION for AWS Bedrock" >&2; \
-		exit 1; \
-	fi
-	@uv run --all-extras python code_reviewer_example.py --claude-agent
+	@uv run --all-extras python code_reviewer_example.py "$(PROJECT)" "$(FOCUS)"
 
 # =============================================================================
 # Main Check Target

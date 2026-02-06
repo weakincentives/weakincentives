@@ -34,7 +34,7 @@ contrib
 
     - ``contrib.mailbox``: Redis-backed mailbox implementation
     - ``contrib.optimizers``: Workspace digest optimizer
-    - ``contrib.tools``: Planning tools, VFS, Podman sandbox, asteval
+    - ``contrib.tools``: Workspace digest tools
 
 dataclasses
     Enhanced frozen dataclass decorator (``FrozenDataclass``) with copy helpers
@@ -59,16 +59,12 @@ evals
     (``tool_called``, ``all_tools_succeeded``), and LLM-as-judge support.
 
 filesystem
-    Core filesystem protocol abstracting over storage backends (host directory,
-    in-memory VFS, Podman containers). Used by file operation tools.
+    Core filesystem protocol abstracting over storage backends. Used by file
+    operation tools.
 
 formal
     Formal specification support via TLA+. Decorators attach specification
     metadata that can be extracted and validated by pytest plugins.
-
-optimizers
-    Prompt optimization framework. Provides ``PromptOptimizer`` protocol and
-    base classes; concrete implementations in ``contrib.optimizers``.
 
 prompt
     Prompt authoring primitives:

@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Tool registration, context injection, failure semantics, policy enforcement,
-and planning tools. Core at `src/weakincentives/prompt/tool.py`.
+Tool registration, context injection, failure semantics, and policy enforcement.
+Core at `src/weakincentives/prompt/tool.py`.
 
 ## Principles
 
@@ -144,84 +144,6 @@ Tool dispatch is handled by the adapter's execution hooks:
 1. **Restore on failure** - Rollback state
 1. **Telemetry** - Publish `ToolInvoked` to `session.dispatcher`
 1. **Response assembly** - Return result
-
-## Planning Tool Suite
-
-Session-scoped todo list at `src/weakincentives/contrib/tools/planning.py`.
-
-### Data Model
-
-At `src/weakincentives/contrib/tools/planning.py`:
-
-| Type | Description |
-| --- | --- |
-| `StepStatus` | `"pending"`, `"in_progress"`, `"done"` |
-| `PlanStatus` | `"active"`, `"completed"` |
-| `PlanStep` | step_id, title, status |
-| `Plan` | objective, status, steps |
-
-### Tools
-
-| Tool | Purpose |
-| --- | --- |
-| `planning_setup_plan` | Create or replace plan |
-| `planning_add_step` | Append steps |
-| `planning_update_step` | Modify step title/status |
-| `planning_read_plan` | Retrieve current state |
-
-### Parameters
-
-At `src/weakincentives/contrib/tools/planning.py`:
-
-| Event | Fields |
-| --- | --- |
-| `SetupPlan` | objective, initial_steps |
-| `AddStep` | steps |
-| `UpdateStep` | step_id, title, status |
-| `ReadPlan` | (none) |
-
-### Behavior
-
-- `setup_plan` creates/replaces; others require existing plan
-- Step IDs: incrementing integers, never reused
-- All steps `done` → plan `completed`
-- Titles: non-empty, ≤500 chars
-
-### Session Integration
-
-`PlanningToolsSection` at `src/weakincentives/contrib/tools/planning.py` installs
-the `Plan` slice into the session. The `Plan` class defines `@reducer` methods
-that handle `SetupPlan`, `AddStep`, and `UpdateStep` events.
-
-### PlanningConfig
-
-At `src/weakincentives/contrib/tools/planning.py` (`PlanningConfig` class):
-
-| Field | Description |
-| --- | --- |
-| `strategy` | `PlanningStrategy` (default: `REACT`) |
-| `accepts_overrides` | Whether section accepts parameter overrides |
-
-Example:
-
-```python
-from weakincentives.contrib.tools import PlanningConfig, PlanningToolsSection
-
-config = PlanningConfig(strategy=PlanningStrategy.PLAN_ACT_REFLECT)
-section = PlanningToolsSection(session=session, config=config)
-```
-
-## Planning Strategies
-
-At `src/weakincentives/contrib/tools/planning.py` (`PlanningStrategy` enum):
-
-| Strategy | Description |
-| --- | --- |
-| `REACT` | Alternate reasoning, tool calls, observations |
-| `PLAN_ACT_REFLECT` | Outline first, execute with reflections |
-| `GOAL_DECOMPOSE_ROUTE_SYNTHESISE` | Restate goal, decompose, route, synthesize |
-
-Same markdown structure; only mindset paragraphs vary.
 
 ## Failure Semantics
 

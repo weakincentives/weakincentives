@@ -51,14 +51,15 @@ hierarchical document where each section bundles its own instructions and tools.
 ```text
 PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
-├── WorkspaceDigestSection     ← auto-generated codebase summary
+├── WorkspaceDigestSection     ← cached codebase summary
 ├── MarkdownSection (reference docs, progressive disclosure)
-├── PlanningToolsSection       ← contributes planning_* tools
-│   └── (nested planning docs)
-├── VfsToolsSection            ← contributes ls/read_file/write_file/...
-│   └── (nested filesystem docs)
+├── MarkdownSection (task instructions)
 └── MarkdownSection (user request)
 ```
+
+**Note:** Tool sections for filesystem, planning, and shell execution are
+provided by the execution harness (e.g., Claude Agent SDK) rather than
+defined in the prompt. This keeps agent definitions portable across runtimes.
 
 **Why this matters:**
 
@@ -162,7 +163,7 @@ weakincentives.runtime.events     # Dispatcher, event types
 weakincentives.runtime.mailbox    # Message queues
 weakincentives.adapters           # Provider base, config, throttling
 weakincentives.adapters.claude_agent_sdk  # ClaudeAgentSDKAdapter
-weakincentives.contrib.tools      # VFS, planning, asteval, podman
+weakincentives.contrib.tools      # Workspace digest tools
 weakincentives.contrib.optimizers # WorkspaceDigestOptimizer
 weakincentives.contrib.mailbox    # RedisMailbox
 weakincentives.resources          # Dependency injection
@@ -224,18 +225,12 @@ from weakincentives.adapters import PromptResponse
 
 # Contrib tools
 from weakincentives.contrib.tools import (
-    PlanningToolsSection,
-    PlanningStrategy,
-    Plan,
-    PlanStep,
-    VfsToolsSection,
-    HostMount,
-    VfsPath,
     WorkspaceDigestSection,
     WorkspaceDigest,
-    AstevalSection,
-    PodmanSandboxSection,
-    PodmanSandboxConfig,
+    InMemoryFilesystem,
+    set_workspace_digest,
+    clear_workspace_digest,
+    latest_workspace_digest,
 )
 
 # Serde
@@ -270,7 +265,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     ClaudeAgentWorkspaceSection,
-    HostMount,  # Different from contrib.tools.HostMount
+    HostMount,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
@@ -504,23 +499,29 @@ lookup_tool = Tool[LookupParams, LookupResult](
 Redux-style immutable state container with typed slices.
 
 ```python
+from dataclasses import dataclass
 from weakincentives.runtime import Session, InProcessDispatcher, Snapshot
 from weakincentives.runtime import replace_latest, append_all
-from weakincentives.contrib.tools import Plan
+
+@dataclass(frozen=True, slots=True)
+class TaskState:
+    """Example state type for demonstration."""
+    name: str
+    status: str = "pending"
 
 # Create session
 session = Session()  # Creates InProcessDispatcher internally
 
 # Query state
-plan = session[Plan].latest()  # Most recent or None
-all_plans = session[Plan].all()  # All values as tuple
-active = session[Plan].where(lambda p: p.status == "active")
-exists = session[Plan].exists()  # Boolean
+task = session[TaskState].latest()  # Most recent or None
+all_tasks = session[TaskState].all()  # All values as tuple
+active = session[TaskState].where(lambda t: t.status == "active")
+exists = session[TaskState].exists()  # Boolean
 
 # Mutations (all dispatch events internally)
-# session[Plan].seed(initial_plan)  # Initialize/replace slice
-# session[Plan].append(new_plan)    # Append via default reducer
-session[Plan].clear()  # Clear all
+# session[TaskState].seed(initial_task)  # Initialize/replace slice
+# session[TaskState].append(new_task)    # Append via default reducer
+session[TaskState].clear()  # Clear all
 
 # Snapshots
 snapshot = session.snapshot()
@@ -683,18 +684,24 @@ Verify agents complete all tasks before stopping. Critical for unattended
 agents.
 
 ```python
+from dataclasses import dataclass
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     PlanBasedChecker,
     CompositeChecker,
 )
-from weakincentives.contrib.tools import Plan
+
+# Define a plan type that the checker can inspect
+@dataclass(frozen=True, slots=True)
+class TaskPlan:
+    objective: str
+    steps: tuple  # Should have items with .status attribute
 
 # Plan-based: ensure all plan steps are "done"
 adapter = ClaudeAgentSDKAdapter(
     client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(plan_type=Plan),
+        task_completion_checker=PlanBasedChecker(plan_type=TaskPlan),
     ),
 )
 ```
@@ -708,56 +715,51 @@ adapter = ClaudeAgentSDKAdapter(
 
 ### 11. Contrib Tools
 
-**VFS (Virtual Filesystem)**:
-
-```python
-from pathlib import Path
-
-from weakincentives.contrib.tools import VfsToolsSection, HostMount, VfsPath
-from weakincentives.runtime import Session
-
-session = Session()
-
-vfs = VfsToolsSection(
-    session=session,
-    mounts=(
-        HostMount(
-            host_path="./repo",
-            mount_path=VfsPath(("workspace",)),
-            include_glob=("*.py",),
-            exclude_glob=("*.pyc",),
-            max_bytes=600_000,
-        ),
-    ),
-    allowed_host_roots=(Path("."),),
-)
-# Tools: ls, read_file, write_file, edit_file, glob, grep, rm
-```
-
-**Planning**:
+**Workspace Digest**: Caching layer for workspace summaries.
 
 ```python
 from weakincentives.contrib.tools import (
-    PlanningToolsSection,
-    PlanningStrategy,
-    Plan,
+    WorkspaceDigestSection,
+    WorkspaceDigest,
+    set_workspace_digest,
+    latest_workspace_digest,
 )
 from weakincentives.runtime import Session
 
 session = Session()
 
-planning = PlanningToolsSection(
-    session=session,
-    strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-)
-# Tools: planning_setup_plan, planning_add_step, planning_update_step, planning_read_plan
+# Create digest section in prompt
+digest_section = WorkspaceDigestSection(session=session)
 
-# Query plan state
-plan = session[Plan].latest()
-if plan:
-    for step in plan.steps:
-        print(f"[{step.status}] {step.title}")
+# Populate digest (typically done by exploration agent)
+set_workspace_digest(
+    session,
+    section_key="workspace-digest",
+    body="Full project analysis with dependencies, structure...",
+    summary="Python web app with FastAPI backend.",
+)
+
+# Query digest
+digest = latest_workspace_digest(session, "workspace-digest")
+if digest:
+    print(digest.summary)
 ```
+
+**In-Memory Filesystem**: Session-scoped filesystem for testing.
+
+```python
+from weakincentives.contrib.tools import InMemoryFilesystem
+from weakincentives.filesystem import ReadResult
+
+fs = InMemoryFilesystem()
+fs.write("test.txt", "Hello, world!")
+read_result: ReadResult = fs.read("test.txt")
+print(read_result.content)  # "Hello, world!"
+```
+
+**Note:** Tool sections for filesystem operations, planning, and shell execution
+are provided by the execution harness (e.g., Claude Agent SDK) rather than
+defined in WINK. This keeps agent definitions portable across runtimes.
 
 ### 12. Resources
 
@@ -844,7 +846,7 @@ ______________________________________________________________________
 
 ### Agent Design
 
-1. **Plan first**: Use `PlanningToolsSection` to structure work before acting
+1. **Define clear policies**: Use policy sections to specify constraints
 1. **Verify completion**: Enable `TaskCompletionChecker` for unattended agents
 1. **Set budgets**: Always configure `Budget` with token limits
 1. **Use deadlines**: Set wall-clock limits via `Deadline`
@@ -890,9 +892,11 @@ Need agentic harness?          → ClaudeAgentSDKAdapter (recommended)
 
 ```text
 Claude Agent SDK mode?         → ClaudeAgentWorkspaceSection
-Need shell execution?          → PodmanSandboxSection
-Standard file ops only?        → VfsToolsSection
+Testing/evaluation?            → InMemoryFilesystem
 ```
+
+**Note:** Filesystem and shell execution tools are provided by the execution
+harness (e.g., Claude Agent SDK) rather than defined in WINK prompts.
 
 ### Which Reducer?
 
@@ -983,7 +987,7 @@ src/weakincentives/
 │   └── claude_agent_sdk/
 ├── cli/                # wink CLI
 ├── contrib/
-│   ├── tools/          # Planning, VFS, asteval, podman, workspace digest
+│   ├── tools/          # Workspace digest tools
 │   ├── optimizers/     # WorkspaceDigestOptimizer
 │   └── mailbox/        # RedisMailbox
 ├── dataclasses/        # FrozenDataclass utilities
@@ -992,7 +996,6 @@ src/weakincentives/
 ├── evals/              # Evaluation framework
 ├── filesystem/         # Filesystem protocol
 ├── formal/             # TLA+ embedding
-├── optimizers/         # Optimizer framework
 ├── prompt/             # Sections, tools, rendering, overrides
 │   └── overrides/      # LocalPromptOverridesStore
 ├── resources/          # DI with Binding, Scope
@@ -1016,11 +1019,11 @@ Read before modifying related code:
 | --------------------------- | ---------------------------------------- |
 | `specs/PROMPTS.md` | Prompt system, composition, overrides |
 | `specs/SESSIONS.md` | Session lifecycle, events, budgets |
-| `specs/TOOLS.md` | Tool registration, planning tools |
+| `specs/TOOLS.md` | Tool registration, failure semantics |
 | `specs/GUARDRAILS.md` | Tool policies, feedback providers, task completion |
 | `specs/ADAPTERS.md` | Provider adapters, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
-| `specs/WORKSPACE.md` | VFS, Podman, asteval |
+| `specs/WORKSPACE.md` | Claude Agent SDK workspace, host mounts |
 | `specs/DBC.md` | Design-by-contract patterns |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection |
 | `specs/AGENT_LOOP.md` | AgentLoop orchestration |
@@ -1124,11 +1127,10 @@ ______________________________________________________________________
 See `code_reviewer_example.py` for production patterns:
 
 - Structured output types
-- VFS/Planning tool sections
-- AgentLoop implementation
-- Event subscription
-- Prompt overrides
-- Claude Agent SDK mode
+- Workspace digest and Claude Agent SDK workspace sections
+- AgentLoop with in-memory mailbox
+- Session telemetry via InProcessDispatcher
+- Claude Agent SDK adapter
 
 ______________________________________________________________________
 
