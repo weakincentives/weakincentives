@@ -89,7 +89,6 @@ src/weakincentives/adapters/codex_app_server/
   config.py                 # CodexAppServerClientConfig, CodexAppServerModelConfig
   client.py                 # CodexAppServerClient (stdio JSON-RPC client)
   workspace.py              # CodexWorkspaceSection
-  _state.py                 # CodexAppServerSessionState slice for thread reuse
   _events.py                # Codex item/turn notifications → WINK ToolInvoked mapping
   _async.py                 # asyncio helpers for stdio NDJSON processing
 ```
@@ -911,7 +910,7 @@ prompt = Prompt(template)
 
 adapter = CodexAppServerAdapter(
     model_config=CodexAppServerModelConfig(
-        model="gpt-5.1-codex",
+        model="gpt-5.3-codex",
         effort="medium",
     ),
     client_config=CodexAppServerClientConfig(
@@ -1066,7 +1065,7 @@ turn/completed.
 
 ### Available Models (ChatGPT auth)
 
-`gpt-5.2-codex`, `gpt-5.3-codex`, `gpt-5.1-codex-max`, `gpt-5.2`,
+`gpt-5.3-codex` (default), `gpt-5.2-codex`, `gpt-5.1-codex-max`, `gpt-5.2`,
 `gpt-5.1-codex-mini`. Model availability depends on auth type and plan.
 
 ### MCP Server Config Formats

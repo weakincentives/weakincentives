@@ -50,6 +50,8 @@ hooks enforcing full CI test suites**. `BundleConfig` replaces
   `"codex_app_server"` for `CodexAppServerAdapter` instances.
 - Removed duplicate `prompt.cleanup()` invocation risk in the bundled execution
   error path.
+- Switched Codex App Server adapter default model to `"gpt-5.3-codex"` and
+  updated Codex-specific tests/spec examples to match.
 
 ---
 

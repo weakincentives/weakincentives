@@ -75,7 +75,7 @@ _PROMPT_NS: Final[str] = "integration/codex-app-server"
 
 def _get_model() -> str:
     """Return the model name for integration tests."""
-    return os.environ.get(_MODEL_ENV_VAR, "gpt-5.2")
+    return os.environ.get(_MODEL_ENV_VAR, "gpt-5.3-codex")
 
 
 def _make_adapter(

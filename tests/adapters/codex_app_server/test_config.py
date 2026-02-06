@@ -24,8 +24,8 @@ from weakincentives.adapters.codex_app_server.config import (
 
 
 class TestDefaultModel:
-    def test_default_model_is_gpt52(self) -> None:
-        assert DEFAULT_MODEL == "gpt-5.2"
+    def test_default_model_is_gpt53_codex(self) -> None:
+        assert DEFAULT_MODEL == "gpt-5.3-codex"
 
 
 class TestApiKeyAuth:
@@ -99,7 +99,7 @@ class TestCodexAppServerClientConfig:
 class TestCodexAppServerModelConfig:
     def test_defaults(self) -> None:
         cfg = CodexAppServerModelConfig()
-        assert cfg.model == "gpt-5.2"
+        assert cfg.model == "gpt-5.3-codex"
         assert cfg.effort is None
         assert cfg.summary is None
         assert cfg.personality is None

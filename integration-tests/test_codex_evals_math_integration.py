@@ -262,7 +262,7 @@ def _math_evaluator(output: object, expected: object) -> Score:
 
 
 def _get_model() -> str:
-    return os.environ.get(_MODEL_ENV_VAR, "gpt-5.2")
+    return os.environ.get(_MODEL_ENV_VAR, "gpt-5.3-codex")
 
 
 def _make_adapter(cwd: str) -> CodexAppServerAdapter:

@@ -330,7 +330,7 @@ class TestOpenaiStrictSchema:
 class TestAdapterInit:
     def test_defaults(self) -> None:
         adapter = CodexAppServerAdapter()
-        assert adapter._model_config.model == "gpt-5.2"
+        assert adapter._model_config.model == "gpt-5.3-codex"
         assert adapter._client_config.codex_bin == "codex"
 
     def test_custom_config(self) -> None:
