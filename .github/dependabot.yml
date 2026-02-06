@@ -59,8 +59,6 @@ updates:
       contrib:
         patterns:
           - "pyyaml"
-          - "asteval"
-          - "podman"
           - "redis"
         update-types:
           - "minor"
