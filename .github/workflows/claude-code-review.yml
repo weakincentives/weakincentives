@@ -80,7 +80,6 @@ jobs:
           CLAUDE_CODE_EFFORT_LEVEL: max
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          model: claude-opus-4-6
           prompt: |
             Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
 
@@ -88,4 +87,4 @@ jobs:
 
             Post a concise review using `gh pr comment`. Start your comment with `<!-- claude-review -->` (hidden marker for automation).
 
-          claude_args: '--allowed-tools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"'
+          claude_args: '--model claude-opus-4-6 --allowed-tools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"'
