@@ -247,7 +247,8 @@ def _build_transcript_filters(
 
 def _parse_transcript_row(row: sqlite3.Row) -> Mapping[str, JSONValue]:
     """Parse a transcript row into a dictionary."""
-    return {
+    content = row[7]
+    entry: dict[str, JSONValue] = {
         "rowid": row[0],
         "timestamp": row[1],
         "prompt_name": row[2],
@@ -255,12 +256,15 @@ def _parse_transcript_row(row: sqlite3.Row) -> Mapping[str, JSONValue]:
         "sequence_number": row[4],
         "entry_type": row[5],
         "role": row[6],
-        "content": row[7],
+        "content": content,
         "tool_name": row[8],
         "tool_use_id": row[9],
         "raw_json": row[10],
         "parsed": row[11],
     }
+    if isinstance(content, str) and _looks_like_markdown(content):
+        entry["content_html"] = _markdown.render(content)
+    return entry
 
 
 class BundleStore:
@@ -894,6 +898,17 @@ class _DebugAppHandlers:
                             "mime_type": mime_type,
                         }
                     )
+
+            # Check for markdown by extension
+            if lower_path.endswith(".md"):
+                try:
+                    text = content.decode("utf-8")
+                    html = _markdown.render(text)
+                    return JSONResponse(
+                        {"content": text, "html": html, "type": "markdown"}
+                    )
+                except UnicodeDecodeError:
+                    return JSONResponse({"content": None, "type": "binary"})
 
             # Try to parse as JSON
             try:

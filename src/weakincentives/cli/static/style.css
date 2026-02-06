@@ -1780,7 +1780,6 @@ select:focus-visible {
 
 /* Scrollable container for long text content */
 .zoom-text-scroll {
-  max-height: 400px;
   overflow-y: auto;
   background: var(--color-bg-subtle);
   border: 1px solid var(--color-border);
@@ -1928,7 +1927,6 @@ select:focus-visible {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 12px;
-  max-height: 400px;
   overflow: auto;
 }
 
@@ -2002,6 +2000,11 @@ select:focus-visible {
   color: var(--color-text-faint);
   font-style: italic;
   margin-left: 4px;
+}
+
+/* Markdown content in zoom modal */
+.zoom-markdown .markdown-rendered {
+  background: var(--color-surface);
 }
 
 /* Combined tool call + result view */
@@ -3086,6 +3089,16 @@ select:focus-visible {
   word-break: break-word;
   overflow-y: auto;
   max-height: calc(100vh - 320px);
+}
+
+.filesystem-markdown {
+  white-space: normal;
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+.filesystem-markdown .markdown-rendered {
+  background: var(--color-surface);
 }
 
 .mono {

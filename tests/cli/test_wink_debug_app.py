@@ -465,6 +465,118 @@ def test_api_transcript_endpoint(tmp_path: Path) -> None:
     assert "sources" in facets
 
 
+def test_api_transcript_markdown_rendering(tmp_path: Path) -> None:
+    """Test that transcript entries with markdown content include rendered HTML."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    md_content = "# Heading\n\nSome **bold** text and a [link](http://example.com)."
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            transcript_logger = logging.getLogger("test.transcript.md")
+            transcript_logger.setLevel(logging.DEBUG)
+            transcript_logger.debug(
+                "Transcript entry",
+                extra={
+                    "event": "transcript.collector.entry",
+                    "context": {
+                        "prompt_name": "test",
+                        "transcript_source": "main",
+                        "entry_type": "assistant",
+                        "sequence_number": 1,
+                        "raw_json": json.dumps(
+                            {
+                                "type": "assistant",
+                                "message": {
+                                    "role": "assistant",
+                                    "content": md_content,
+                                },
+                            }
+                        ),
+                        "parsed": {
+                            "type": "assistant",
+                            "message": {
+                                "role": "assistant",
+                                "content": md_content,
+                            },
+                        },
+                    },
+                },
+            )
+
+    assert writer.path is not None
+    logger = debug_app.get_logger("test.transcript.markdown")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/transcript")
+    assert response.status_code == 200
+    data = response.json()
+    entry = data["entries"][0]
+    assert entry["content"] == md_content
+    assert "content_html" in entry
+    assert "<h1>" in entry["content_html"]
+    assert "<strong>bold</strong>" in entry["content_html"]
+
+
+def test_api_transcript_no_markdown_for_short_content(tmp_path: Path) -> None:
+    """Test that short or plain text content does not get content_html."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            transcript_logger = logging.getLogger("test.transcript.plain")
+            transcript_logger.setLevel(logging.DEBUG)
+            transcript_logger.debug(
+                "Transcript entry",
+                extra={
+                    "event": "transcript.collector.entry",
+                    "context": {
+                        "prompt_name": "test",
+                        "transcript_source": "main",
+                        "entry_type": "user",
+                        "sequence_number": 1,
+                        "raw_json": json.dumps(
+                            {
+                                "type": "user",
+                                "message": {"role": "user", "content": "Hi"},
+                            }
+                        ),
+                        "parsed": {
+                            "type": "user",
+                            "message": {"role": "user", "content": "Hi"},
+                        },
+                    },
+                },
+            )
+
+    assert writer.path is not None
+    logger = debug_app.get_logger("test.transcript.plain")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/transcript")
+    assert response.status_code == 200
+    data = response.json()
+    entry = data["entries"][0]
+    assert entry["content"] == "Hi"
+    assert "content_html" not in entry
+
+
 def test_api_config_and_metrics_endpoints(tmp_path: Path) -> None:
     """Test config and metrics endpoints."""
     bundle_path = _create_test_bundle(tmp_path, ["test"])
@@ -1244,6 +1356,73 @@ def test_file_endpoint_image_case_insensitive(tmp_path: Path) -> None:
         assert file_response.status_code == 200
         content = file_response.json()
         assert content["type"] == "image"
+
+
+def test_file_endpoint_markdown(tmp_path: Path) -> None:
+    """Test that .md files are returned with rendered HTML."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    md_content = "# Hello\n\nSome **bold** text."
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/filesystem/README.md", md_content)
+
+    logger = debug_app.get_logger("test.file.markdown")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files/filesystem/README.md")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "markdown"
+    assert data["content"] == md_content
+    assert "<h1>" in data["html"]
+    assert "<strong>bold</strong>" in data["html"]
+
+
+def test_file_endpoint_markdown_case_insensitive(tmp_path: Path) -> None:
+    """Test that .MD files (uppercase) are also detected as markdown."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    md_content = "# Title\n\nParagraph."
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/filesystem/NOTES.MD", md_content)
+
+    logger = debug_app.get_logger("test.file.markdown.case")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files/filesystem/NOTES.MD")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "markdown"
+    assert data["content"] == md_content
+    assert "<h1>" in data["html"]
+
+
+def test_file_endpoint_markdown_binary_fallback(tmp_path: Path) -> None:
+    """Test that a .md file with invalid UTF-8 is returned as binary."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    # Invalid UTF-8 bytes
+    binary_data = b"\x80\x81\x82\xff\xfe"
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/filesystem/broken.md", binary_data)
+
+    logger = debug_app.get_logger("test.file.markdown.binary")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files/filesystem/broken.md")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "binary"
+    assert data["content"] is None
 
 
 def test_bundle_store_close(tmp_path: Path) -> None:

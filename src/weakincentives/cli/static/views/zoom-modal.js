@@ -12,11 +12,57 @@ const MAX_TRANSCRIPT_LOAD_RETRIES = 3;
 // Content rendering helpers
 // ============================================================================
 
+function renderMarkdownSection(content) {
+  const container = document.createElement("div");
+  container.className = "zoom-markdown";
+
+  const toggle = document.createElement("div");
+  toggle.className = "markdown-toggle";
+  const renderedBtn = document.createElement("button");
+  renderedBtn.type = "button";
+  renderedBtn.textContent = "Rendered";
+  renderedBtn.className = "active";
+  const rawBtn = document.createElement("button");
+  rawBtn.type = "button";
+  rawBtn.textContent = "Raw";
+  toggle.appendChild(renderedBtn);
+  toggle.appendChild(rawBtn);
+
+  const renderedSection = document.createElement("div");
+  renderedSection.className = "markdown-section";
+  renderedSection.innerHTML = `<div class="markdown-rendered">${content.html}</div>`;
+
+  const rawSection = document.createElement("div");
+  rawSection.className = "markdown-section";
+  rawSection.style.display = "none";
+  rawSection.innerHTML = `<pre class="markdown-raw">${escapeHtml(content.value)}</pre>`;
+
+  renderedBtn.addEventListener("click", () => {
+    renderedBtn.classList.add("active");
+    rawBtn.classList.remove("active");
+    renderedSection.style.display = "flex";
+    rawSection.style.display = "none";
+  });
+  rawBtn.addEventListener("click", () => {
+    rawBtn.classList.add("active");
+    renderedBtn.classList.remove("active");
+    rawSection.style.display = "flex";
+    renderedSection.style.display = "none";
+  });
+
+  container.appendChild(toggle);
+  container.appendChild(renderedSection);
+  container.appendChild(rawSection);
+  return container;
+}
+
 function renderContentSection(content, parentElement) {
   const section = document.createElement("div");
   section.className = "zoom-section";
 
-  if (content.kind === "json") {
+  if (content.kind === "markdown") {
+    section.appendChild(renderMarkdownSection(content));
+  } else if (content.kind === "json") {
     const jsonContainer = document.createElement("div");
     jsonContainer.className = "zoom-json-tree";
     try {
