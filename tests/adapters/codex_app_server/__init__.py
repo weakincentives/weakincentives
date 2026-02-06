@@ -10,22 +10,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tool bridge — re-exports from shared module."""
-
-from __future__ import annotations
-
-from .._shared._bridge import (
-    BridgedTool,
-    MCPToolExecutionState,
-    _make_async_handler,
-    create_bridged_tools,
-    create_mcp_server,
-)
-
-__all__ = [
-    "BridgedTool",
-    "MCPToolExecutionState",
-    "_make_async_handler",
-    "create_bridged_tools",
-    "create_mcp_server",
-]
+"""Tests for the Codex App Server adapter."""

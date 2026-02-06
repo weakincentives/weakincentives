@@ -10,22 +10,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tool bridge — re-exports from shared module."""
+"""Shared utilities used by multiple adapter implementations.
+
+This package contains code that is needed by more than one adapter
+(e.g. both the Claude Agent SDK adapter and the Codex App Server adapter).
+Individual adapters should import from this package rather than from
+each other's private modules.
+"""
 
 from __future__ import annotations
 
-from .._shared._bridge import (
+from ._async_utils import run_async
+from ._bridge import (
     BridgedTool,
     MCPToolExecutionState,
-    _make_async_handler,
     create_bridged_tools,
     create_mcp_server,
 )
+from ._visibility_signal import VisibilityExpansionSignal
 
 __all__ = [
     "BridgedTool",
     "MCPToolExecutionState",
-    "_make_async_handler",
+    "VisibilityExpansionSignal",
     "create_bridged_tools",
     "create_mcp_server",
+    "run_async",
 ]

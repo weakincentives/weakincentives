@@ -82,7 +82,7 @@ class MailboxModel:
     deleted: set[str] = field(default_factory=set)
     delivery_history: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
 
-    def send(self, msg_id: str, body: Any) -> None:  # noqa: ANN401
+    def send(self, msg_id: str, body: Any) -> None:
         """Model a send operation."""
         state = MessageState(id=msg_id, body=body)
         self.data[msg_id] = state

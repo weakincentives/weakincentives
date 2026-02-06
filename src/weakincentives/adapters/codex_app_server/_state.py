@@ -10,23 +10,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Semantic adapter name definitions shared across provider integrations."""
+"""Session state slice for Codex thread reuse."""
 
 from __future__ import annotations
 
-from typing import Final
-
-AdapterName = str
-"""Adapter identifier for provider integrations."""
-
-CLAUDE_AGENT_SDK_ADAPTER_NAME: Final[AdapterName] = "claude_agent_sdk"
-"""Canonical label for the Claude Agent SDK adapter."""
-
-CODEX_APP_SERVER_ADAPTER_NAME: Final[AdapterName] = "codex_app_server"
-"""Canonical label for the Codex App Server adapter."""
+from ...dataclasses import FrozenDataclass
 
 __all__ = [
-    "CLAUDE_AGENT_SDK_ADAPTER_NAME",
-    "CODEX_APP_SERVER_ADAPTER_NAME",
-    "AdapterName",
+    "CodexAppServerSessionState",
 ]
+
+
+@FrozenDataclass()
+class CodexAppServerSessionState:
+    """Stores Codex thread ID and workspace fingerprint for reuse."""
+
+    thread_id: str
+    cwd: str
+    workspace_fingerprint: str | None

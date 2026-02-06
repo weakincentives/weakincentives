@@ -102,14 +102,14 @@ class _AlwaysTriggerProvider:
     def should_run(
         self,
         *,
-        context: Any,  # noqa: ANN401 - test mock
+        context: Any,
     ) -> bool:
         return True
 
     def provide(
         self,
         *,
-        context: Any,  # noqa: ANN401 - test mock
+        context: Any,
     ) -> Feedback:
         return Feedback(
             provider_name=self.name,
@@ -793,7 +793,7 @@ class TestSafeHookWrapper:
         async def success_hook(
             input_data: dict[str, Any],
             tool_use_id: str | None,
-            context: Any,  # noqa: ANN401 - SDK context
+            context: Any,
         ) -> dict[str, Any]:
             return {"result": "success"}
 
@@ -819,7 +819,7 @@ class TestSafeHookWrapper:
         async def deadline_hook(
             input_data: dict[str, Any],
             tool_use_id: str | None,
-            context: Any,  # noqa: ANN401 - SDK context
+            context: Any,
         ) -> dict[str, Any]:
             raise DeadlineExceededError("Deadline exceeded")
 
@@ -848,7 +848,7 @@ class TestSafeHookWrapper:
         async def budget_hook(
             input_data: dict[str, Any],
             tool_use_id: str | None,
-            context: Any,  # noqa: ANN401 - SDK context
+            context: Any,
         ) -> dict[str, Any]:
             raise BudgetExhaustedError("Budget exhausted")
 
@@ -874,7 +874,7 @@ class TestSafeHookWrapper:
         async def failing_hook(
             input_data: dict[str, Any],
             tool_use_id: str | None,
-            context: Any,  # noqa: ANN401 - SDK context
+            context: Any,
         ) -> dict[str, Any]:
             raise RuntimeError("Unexpected error")
 

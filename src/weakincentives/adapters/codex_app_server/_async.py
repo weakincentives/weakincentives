@@ -10,23 +10,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Semantic adapter name definitions shared across provider integrations."""
+"""Async/sync bridging utilities for the Codex App Server adapter."""
 
 from __future__ import annotations
 
-from typing import Final
-
-AdapterName = str
-"""Adapter identifier for provider integrations."""
-
-CLAUDE_AGENT_SDK_ADAPTER_NAME: Final[AdapterName] = "claude_agent_sdk"
-"""Canonical label for the Claude Agent SDK adapter."""
-
-CODEX_APP_SERVER_ADAPTER_NAME: Final[AdapterName] = "codex_app_server"
-"""Canonical label for the Codex App Server adapter."""
+from .._shared._async_utils import run_async
 
 __all__ = [
-    "CLAUDE_AGENT_SDK_ADAPTER_NAME",
-    "CODEX_APP_SERVER_ADAPTER_NAME",
-    "AdapterName",
+    "run_async",
 ]
