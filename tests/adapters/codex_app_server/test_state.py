@@ -38,6 +38,23 @@ class TestCodexAppServerSessionState:
         )
         assert state.workspace_fingerprint is None
 
+    def test_dynamic_tool_names_default(self) -> None:
+        state = CodexAppServerSessionState(
+            thread_id="t1",
+            cwd="/",
+            workspace_fingerprint=None,
+        )
+        assert state.dynamic_tool_names == ()
+
+    def test_dynamic_tool_names_explicit(self) -> None:
+        state = CodexAppServerSessionState(
+            thread_id="t1",
+            cwd="/",
+            workspace_fingerprint=None,
+            dynamic_tool_names=("alpha", "beta"),
+        )
+        assert state.dynamic_tool_names == ("alpha", "beta")
+
     def test_frozen(self) -> None:
         state = CodexAppServerSessionState(
             thread_id="t1", cwd="/", workspace_fingerprint=None

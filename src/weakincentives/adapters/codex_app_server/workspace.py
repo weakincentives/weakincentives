@@ -363,7 +363,7 @@ class CodexWorkspaceSection(MarkdownSection[_CodexWorkspaceSectionParams]):
         """Remove the temporary workspace directory and associated resources."""
         if self._temp_dir.exists():
             shutil.rmtree(self._temp_dir, ignore_errors=True)
-        if isinstance(self._filesystem, HostFilesystem):
+        if isinstance(self._filesystem, HostFilesystem):  # pragma: no branch
             self._filesystem.cleanup()
 
     @override

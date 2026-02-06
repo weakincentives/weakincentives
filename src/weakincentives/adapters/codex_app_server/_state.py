@@ -28,3 +28,4 @@ class CodexAppServerSessionState:
     thread_id: str
     cwd: str
     workspace_fingerprint: str | None
+    dynamic_tool_names: tuple[str, ...] = ()

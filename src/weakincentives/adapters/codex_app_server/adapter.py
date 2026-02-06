@@ -109,6 +109,31 @@ def _openai_strict_schema(s: dict[str, Any]) -> dict[str, Any]:
             # OpenAI requires all properties in required when
             # additionalProperties is false.
             out["required"] = list(props.keys())
+
+    # Recurse into array items
+    if "items" in out and isinstance(out["items"], dict):
+        out["items"] = _openai_strict_schema(cast(dict[str, Any], out["items"]))
+
+    # Recurse into combinators
+    for combinator in ("anyOf", "oneOf", "allOf"):
+        if combinator in out and isinstance(out[combinator], list):
+            out[combinator] = [
+                _openai_strict_schema(cast(dict[str, Any], entry))
+                if isinstance(entry, dict)
+                else entry
+                for entry in out[combinator]
+            ]
+
+    # Recurse into schema definitions
+    for defs_key in ("$defs", "definitions"):
+        if defs_key in out and isinstance(out[defs_key], dict):
+            out[defs_key] = {
+                k: _openai_strict_schema(cast(dict[str, Any], v))
+                if isinstance(v, dict)
+                else v
+                for k, v in out[defs_key].items()
+            }
+
     return out
 
 
@@ -488,7 +513,9 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
     ) -> str:
         """Start or resume a Codex thread. Returns the thread ID."""
         if self._client_config.reuse_thread:
-            thread_id = await self._try_resume_thread(client, session, effective_cwd)
+            thread_id = await self._try_resume_thread(
+                client, session, effective_cwd, dynamic_tool_specs
+            )
             if thread_id is not None:
                 return thread_id
 
@@ -501,10 +528,14 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         client: CodexAppServerClient,
         session: SessionProtocol,
         effective_cwd: str,
+        dynamic_tool_specs: list[dict[str, Any]],
     ) -> str | None:
         """Try to resume an existing thread. Returns thread ID or None."""
         state = session[CodexAppServerSessionState].latest()
         if state is None or state.cwd != effective_cwd:
+            return None
+        current_names = tuple(sorted(spec["name"] for spec in dynamic_tool_specs))
+        if state.dynamic_tool_names != current_names:
             return None
         try:
             result = await client.send_request(
@@ -543,11 +574,13 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         result = await client.send_request("thread/start", thread_params)
         thread_id: str = result["thread"]["id"]
 
+        dynamic_tool_names = tuple(sorted(spec["name"] for spec in dynamic_tool_specs))
         session[CodexAppServerSessionState].seed(
             CodexAppServerSessionState(
                 thread_id=thread_id,
                 cwd=effective_cwd,
                 workspace_fingerprint=None,
+                dynamic_tool_names=dynamic_tool_names,
             )
         )
         return thread_id
@@ -652,6 +685,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         usage: TokenUsage | None,
     ) -> tuple[str, TokenUsage | None]:
         """Consume messages from the client until turn/completed."""
+        turn_completed = False
         async for message in client.read_messages():
             if "id" in message and "method" in message:
                 await self._handle_server_request(client, message, tool_lookup)
@@ -663,18 +697,44 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             if result is None:
                 continue
 
-            kind, value = result
-            if kind == "text":
-                accumulated_text = value
-            elif kind == "delta":
-                accumulated_text += value
-            elif kind == "usage":
-                usage = extract_token_usage(message.get("params", {}))
-            elif kind == "done":
+            accumulated_text, usage, done = self._apply_notification(
+                result, message, accumulated_text, usage, prompt_name
+            )
+            if done:
+                turn_completed = True
                 break
-            else:
-                self._raise_for_terminal_notification(kind, value, prompt_name, message)
+        if not turn_completed:
+            raise PromptEvaluationError(
+                message="Codex stream ended before turn completion",
+                prompt_name=prompt_name,
+                phase="response",
+            )
         return accumulated_text, usage
+
+    def _apply_notification(
+        self,
+        result: tuple[str, str],
+        message: dict[str, Any],
+        accumulated_text: str,
+        usage: TokenUsage | None,
+        prompt_name: str,
+    ) -> tuple[str, TokenUsage | None, bool]:
+        """Apply a single notification result. Returns (text, usage, done)."""
+        kind, value = result
+        if kind == "text":
+            return value, usage, False
+        if kind == "delta":
+            return accumulated_text + value, usage, False
+        if kind == "usage":
+            return (
+                accumulated_text,
+                extract_token_usage(message.get("params", {})),
+                False,
+            )
+        if kind == "done":
+            return accumulated_text, usage, True
+        self._raise_for_terminal_notification(kind, value, prompt_name, message)
+        return accumulated_text, usage, False  # pragma: no cover
 
     def _create_deadline_watchdog(
         self,

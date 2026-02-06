@@ -190,13 +190,141 @@ class TestOpenaiStrictSchema:
 
     def test_non_object_unchanged(self) -> None:
         s = {"type": "array", "items": {"type": "string"}}
-        assert _openai_strict_schema(s) == s
+        result = _openai_strict_schema(s)
+        assert result["type"] == "array"
+        assert result["items"] == {"type": "string"}
+
+    def test_object_without_properties(self) -> None:
+        s = {"type": "object", "additionalProperties": True}
+        result = _openai_strict_schema(s)
+        assert result["additionalProperties"] is False
+        assert "required" not in result
 
     def test_preserves_other_fields(self) -> None:
         s = {"type": "object", "title": "Foo", "properties": {"a": {"type": "string"}}}
         result = _openai_strict_schema(s)
         assert result["title"] == "Foo"
         assert result["required"] == ["a"]
+
+    def test_array_items_strictified(self) -> None:
+        s = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"x": {"type": "integer"}},
+                "additionalProperties": True,
+            },
+        }
+        result = _openai_strict_schema(s)
+        assert result["items"]["additionalProperties"] is False
+        assert result["items"]["required"] == ["x"]
+
+    def test_anyof_strictified(self) -> None:
+        s = {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                    "additionalProperties": True,
+                },
+                {"type": "string"},
+            ]
+        }
+        result = _openai_strict_schema(s)
+        assert result["anyOf"][0]["additionalProperties"] is False
+        assert result["anyOf"][0]["required"] == ["a"]
+        assert result["anyOf"][1] == {"type": "string"}
+
+    def test_oneof_strictified(self) -> None:
+        s = {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {"b": {"type": "integer"}},
+                    "additionalProperties": True,
+                },
+            ]
+        }
+        result = _openai_strict_schema(s)
+        assert result["oneOf"][0]["additionalProperties"] is False
+
+    def test_allof_strictified(self) -> None:
+        s = {
+            "allOf": [
+                {
+                    "type": "object",
+                    "properties": {"c": {"type": "boolean"}},
+                    "additionalProperties": True,
+                },
+            ]
+        }
+        result = _openai_strict_schema(s)
+        assert result["allOf"][0]["additionalProperties"] is False
+
+    def test_defs_strictified(self) -> None:
+        s = {
+            "type": "object",
+            "properties": {"ref": {"$ref": "#/$defs/Inner"}},
+            "$defs": {
+                "Inner": {
+                    "type": "object",
+                    "properties": {"val": {"type": "string"}},
+                    "additionalProperties": True,
+                }
+            },
+        }
+        result = _openai_strict_schema(s)
+        assert result["$defs"]["Inner"]["additionalProperties"] is False
+        assert result["$defs"]["Inner"]["required"] == ["val"]
+
+    def test_definitions_strictified(self) -> None:
+        s = {
+            "definitions": {
+                "Foo": {
+                    "type": "object",
+                    "properties": {"z": {"type": "number"}},
+                    "additionalProperties": True,
+                }
+            }
+        }
+        result = _openai_strict_schema(s)
+        assert result["definitions"]["Foo"]["additionalProperties"] is False
+
+    def test_deeply_nested_array_of_objects(self) -> None:
+        s = {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "nested": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {"v": {"type": "integer"}},
+                                    "additionalProperties": True,
+                                },
+                            }
+                        },
+                        "additionalProperties": True,
+                    },
+                }
+            },
+            "additionalProperties": True,
+        }
+        result = _openai_strict_schema(s)
+        # Top-level object
+        assert result["additionalProperties"] is False
+        # Array items object
+        items_obj = result["properties"]["items"]["items"]
+        assert items_obj["additionalProperties"] is False
+        assert items_obj["required"] == ["nested"]
+        # Deeply nested array items object
+        deep_obj = items_obj["properties"]["nested"]["items"]
+        assert deep_obj["additionalProperties"] is False
+        assert deep_obj["required"] == ["v"]
 
 
 class TestAdapterInit:
@@ -360,7 +488,7 @@ class TestTryResumeThread:
             adapter = CodexAppServerAdapter()
             session, _ = _make_session()
             client = _make_mock_client()
-            result = await adapter._try_resume_thread(client, session, "/tmp")
+            result = await adapter._try_resume_thread(client, session, "/tmp", [])
             assert result is None
 
         asyncio.run(_run())
@@ -377,7 +505,7 @@ class TestTryResumeThread:
                 )
             )
             client = _make_mock_client()
-            result = await adapter._try_resume_thread(client, session, "/tmp")
+            result = await adapter._try_resume_thread(client, session, "/tmp", [])
             assert result is None
 
         asyncio.run(_run())
@@ -395,7 +523,7 @@ class TestTryResumeThread:
             )
             client = _make_mock_client()
             client.send_request.return_value = {"thread": {"id": "old-thread"}}
-            result = await adapter._try_resume_thread(client, session, "/tmp")
+            result = await adapter._try_resume_thread(client, session, "/tmp", [])
             assert result == "old-thread"
 
         asyncio.run(_run())
@@ -413,7 +541,30 @@ class TestTryResumeThread:
             )
             client = _make_mock_client()
             client.send_request.side_effect = CodexClientError("resume failed")
-            result = await adapter._try_resume_thread(client, session, "/tmp")
+            result = await adapter._try_resume_thread(client, session, "/tmp", [])
+            assert result is None
+
+        asyncio.run(_run())
+
+    def test_mismatched_tools_returns_none(self) -> None:
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter()
+            session, _ = _make_session()
+            session[CodexAppServerSessionState].seed(
+                CodexAppServerSessionState(
+                    thread_id="old-thread",
+                    cwd="/tmp",
+                    workspace_fingerprint=None,
+                    dynamic_tool_names=("alpha", "beta"),
+                )
+            )
+            client = _make_mock_client()
+            result = await adapter._try_resume_thread(
+                client,
+                session,
+                "/tmp",
+                [{"name": "gamma", "description": "g", "inputSchema": {}}],
+            )
             assert result is None
 
         asyncio.run(_run())
@@ -428,6 +579,34 @@ class TestStartThread:
             client.send_request.return_value = {"thread": {"id": "new-t"}}
             result = await adapter._start_thread(client, session, "/tmp", [])
             assert result == "new-t"
+
+        asyncio.run(_run())
+
+    def test_creates_new_when_tools_diverge(self) -> None:
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter(
+                client_config=CodexAppServerClientConfig(reuse_thread=True)
+            )
+            session, _ = _make_session()
+            # Seed state with old tool names
+            session[CodexAppServerSessionState].seed(
+                CodexAppServerSessionState(
+                    thread_id="existing",
+                    cwd="/tmp",
+                    workspace_fingerprint=None,
+                    dynamic_tool_names=("old_tool",),
+                )
+            )
+            client = _make_mock_client()
+            client.send_request.return_value = {"thread": {"id": "new-t"}}
+            # Pass different tools — should skip resume and create new
+            new_specs = [{"name": "new_tool", "description": "d", "inputSchema": {}}]
+            result = await adapter._start_thread(client, session, "/tmp", new_specs)
+            assert result == "new-t"
+            # Verify state was updated with new tool names
+            state = session[CodexAppServerSessionState].latest()
+            assert state is not None
+            assert state.dynamic_tool_names == ("new_tool",)
 
         asyncio.run(_run())
 
@@ -952,6 +1131,61 @@ class TestEvaluateEndToEnd:
             with pytest.raises(PromptEvaluationError) as exc_info:
                 adapter.evaluate(prompt, session=session)
             assert exc_info.value.phase == "request"
+
+    def test_stream_eof_before_turn_completed(self) -> None:
+        """Stream ends with messages but no turn/completed → raises."""
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        messages = [
+            {"method": "item/agentMessage/delta", "params": {"delta": "partial"}},
+            {
+                "method": "item/completed",
+                "params": {"item": {"type": "agentMessage", "text": "partial"}},
+            },
+            # No turn/completed — stream ends
+        ]
+
+        with patch(
+            "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+        ) as MockClient:
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+            mock_client.read_messages.return_value = _messages_iterator(messages)
+            MockClient.return_value = mock_client
+
+            with pytest.raises(PromptEvaluationError, match="stream ended before"):
+                adapter.evaluate(prompt, session=session)
+
+    def test_stream_eof_empty_stream(self) -> None:
+        """Zero messages in stream → raises."""
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        with patch(
+            "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+        ) as MockClient:
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+            mock_client.read_messages.return_value = _messages_iterator([])
+            MockClient.return_value = mock_client
+
+            with pytest.raises(PromptEvaluationError, match="stream ended before"):
+                adapter.evaluate(prompt, session=session)
 
     def test_budget_creates_tracker(self) -> None:
         """Budget without tracker creates one automatically."""
