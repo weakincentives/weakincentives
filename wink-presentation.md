@@ -31,113 +31,148 @@ style: |
 # WINK
 ## The Agent Definition Layer
 
-Separate what you own from what the runtime provides
+Portable agents with soft feedback and hard guardrails
 
 ---
 
-# The Core Insight
+# The Problem
 
-High-quality unattended agents have two distinct parts:
+You build an agent. It works with one provider's runtime.
 
-1. **What makes your agent yours** — prompt structure, tools, policies, feedback
-2. **Generic execution machinery** — planning loops, sandboxing, retries, scheduling
+Then:
+- You want to switch providers
+- The runtime upgrades its planning loop
+- You move from dev to production sandboxing
 
-These change at different rates and for different reasons.
+**How much do you rewrite?**
 
 ---
 
-# The Problem Today
+# The Insight
 
-Most frameworks conflate definition and execution:
+High-quality agents have two distinct parts:
 
-- Your prompt logic is tangled with a specific runtime's orchestration
-- Switching providers means rewriting agent code
-- Testing requires mocking the entire execution stack
-- No clear boundary for what you version vs. what you rent
+1. **Definition** — prompt, tools, policies, feedback
+2. **Harness** — planning loop, sandboxing, retries, scheduling
+
+These change at different rates, for different reasons, by different teams.
 
 ---
 
 # The Agent Definition Layer
 
-<div class="columns">
+WINK makes your agent definition a **portable artifact**:
 
-**Definition (you own)**
-- Prompt structure
-- Tools + typed contracts
-- Policies (constraints)
-- Feedback ("done" criteria)
-
-**Harness (runtime-owned)**
-- Planning/act loop
-- Sandboxing
-- Retries, throttling
-- Budgets, crash recovery
-
-</div>
-
-WINK makes the definition a **first-class artifact** you can version, review, test, and port.
-
----
-
-# Why This Split Matters
-
-The harness keeps changing—increasingly provided by vendor runtimes.
-
-Your agent definition should **not** change when:
-- You switch from OpenAI to Claude
-- The provider upgrades their planning loop
-- You move from development to production sandboxing
+- Same definition runs on OpenAI, Claude Agent SDK, or other harnesses
+- Version it, review it, test it independently of runtime
+- Swap harnesses without touching agent logic
 
 **Own the definition. Rent the harness.**
 
 ---
 
-# Novel Concept #1: The Prompt IS the Agent
+# What Lives in the Definition?
 
-Most frameworks: prompts are strings, tools are registered separately, schema lives elsewhere.
-
-**WINK inverts this:** The prompt is a typed, hierarchical document where sections bundle instructions and tools together.
-
-```
-PromptTemplate[ReviewResponse]
-├── MarkdownSection (guidance)
-├── PlanningToolsSection       ← contributes planning tools
-│   └── (nested docs)
-├── VfsToolsSection            ← contributes file tools
-│   └── (nested docs)
-└── MarkdownSection (request)
-```
+| Component | Purpose |
+|-----------|---------|
+| **Prompt structure** | Context engineering, co-located tools |
+| **Tool contracts** | Typed inputs/outputs, side effect boundary |
+| **Hard guardrails** | Policies that gate tool calls |
+| **Soft feedback** | Guidance that nudges behavior |
+| **Completion criteria** | "Done" means what you say it means |
 
 ---
 
-# Co-location: Why It Matters
+# What Lives in the Harness?
 
-The section that explains "here's how to search files" **is the same section** that provides the `grep` tool.
+| Component | Purpose |
+|-----------|---------|
+| Planning loop | Decides what to do next |
+| Sandboxing | OS-level isolation |
+| Retries & throttling | Error recovery |
+| Budgets & deadlines | Resource limits |
+| Native tools | File, shell, network |
 
-- Documentation and capability live together
-- They **cannot drift**
-- Disable a section → its tools vanish from the prompt
-- No separate tool registry to synchronize
+You don't own this. You rent it.
 
 ---
 
-# Dynamic Scoping
-
-Each section has an `enabled` predicate:
+# Portability in Practice
 
 ```python
-VfsToolsSection(
-    enabled=lambda ctx: ctx.session[Workspace].latest() is not None
+# Development: run everything in WINK
+adapter = OpenAIAdapter(model="gpt-4o")
+
+# Production: rent Claude's native harness
+adapter = ClaudeAgentSDKAdapter(
+    model="claude-opus-4-6",
+    sandbox=SandboxConfig(enabled=True),
+)
+
+# Same prompt, same tools, same policies
+response = adapter.evaluate(prompt, session=session)
+```
+
+---
+
+# The Three Control Layers
+
+Agents need control at different strengths:
+
+| Layer | Enforcement | When it fires |
+|-------|-------------|---------------|
+| **Hard guardrails** | Fail-closed block | Before tool executes |
+| **Soft feedback** | Advisory guidance | After tool executes |
+| **Completion check** | Block termination | When agent says "done" |
+
+---
+
+# Hard Guardrails: Tool Policies
+
+Policies **gate tool invocations**. If a policy denies, the tool doesn't run.
+
+```python
+@policy
+def must_read_before_write(ctx: PolicyContext) -> bool:
+    """Don't overwrite a file you haven't read."""
+    if ctx.tool_name == "write_file":
+        path = ctx.params["path"]
+        if ctx.filesystem.exists(path):
+            return ctx.session[ReadFiles].contains(path)
+    return True
+```
+
+---
+
+# Policy Characteristics
+
+- **Fail-closed** — when uncertain, deny
+- **Composable** — multiple policies combine; all must allow
+- **Observable** — denials logged with reason
+- **Agent learns** — denial message helps self-correction
+
+The agent sees: *"Policy denied write_file: file exists but was not read first."*
+
+---
+
+# Built-in Policies
+
+**ReadBeforeWritePolicy** — existing files must be read before overwritten
+
+**SequentialDependencyPolicy** — tool B requires tool A first
+
+```python
+SequentialDependencyPolicy(
+    dependencies={
+        "deploy": frozenset({"test", "build"}),
+        "build": frozenset({"lint"}),
+    }
 )
 ```
 
-When disabled, the **entire subtree disappears**—instructions and tools.
-
-Swap `VfsToolsSection` for `PodmanSandboxSection` when a shell is available; the prompt adapts automatically.
-
 ---
 
-# Novel Concept #2: Policies Over Workflows
+# Why Policies Over Workflows?
 
 | Aspect | Workflow | Policy |
 |--------|----------|--------|
@@ -146,222 +181,255 @@ Swap `VfsToolsSection` for `PodmanSandboxSection` when a shell is available; the
 | Composability | Sequential coupling | Independent conjunction |
 | Agent role | Executor | Reasoner |
 
----
-
-# Workflows Encode "How"
-
-A workflow is a predetermined sequence:
-
-```
-1. Read the file
-2. Analyze the code
-3. Write the review
-```
-
-When the agent encounters something unexpected, it fails or needs explicit branching logic.
+Policies say *what* must hold. The agent finds *how*.
 
 ---
 
-# Policies Encode "What"
+# Soft Feedback: Guidance Without Blocking
 
-A policy declares constraints the agent must satisfy:
+Feedback providers **observe and advise**. They don't block—the agent decides.
 
 ```python
-@policy
-def must_read_before_write(ctx: PolicyContext) -> bool:
-    """Don't write to a file you haven't read."""
-    if ctx.tool_name == "write_file":
-        return ctx.session[ReadFiles].contains(ctx.params["path"])
-    return True
+FeedbackProviderConfig(
+    provider=DeadlineFeedback(warning_threshold_seconds=120),
+    trigger=FeedbackTrigger(every_n_seconds=30),
+)
 ```
 
-The agent remains free to find **any valid path** that satisfies constraints.
+Every 30 seconds: *"2 minutes remaining. Consider wrapping up."*
 
 ---
 
-# Policy Characteristics
+# Feedback vs Policies
 
-- **Declarative** — state what must hold, not how to achieve it
-- **Composable** — policies combine via conjunction (all must pass)
-- **Fail-closed** — unclear situations block rather than proceed
-- **Observable** — violations are logged with context
+| Aspect | Feedback | Policy |
+|--------|----------|--------|
+| Enforcement | Advisory | Mandatory |
+| Timing | After tool completes | Before tool executes |
+| Response | Agent interprets | Hard block |
+| Purpose | Course correction | Invariant protection |
+
+Use feedback for soft nudges. Use policies for hard limits.
 
 ---
 
-# Novel Concept #3: Hash-Based Safe Iteration
+# Feedback Triggers
 
-Prompt overrides carry **content hashes**:
+| Trigger | Use case |
+|---------|----------|
+| `every_n_calls` | After N tool invocations |
+| `every_n_seconds` | Periodic time-based |
+| `on_file_created` | When specific file appears |
 
-```json
-{
-  "namespace": "code-review",
-  "key": "guide",
-  "hash": "a1b2c3d4",
-  "content": "Be more assertive about security issues."
-}
+```python
+FeedbackTrigger(
+    on_file_created=FileCreatedTrigger(filename="AGENTS.md"),
+)
+# → "AGENTS.md detected. Follow conventions defined within."
 ```
 
-When you change the section in code, **existing overrides stop applying** until explicitly updated.
+---
 
-No silent drift between "tested" and "running".
+# Custom Feedback Provider
+
+```python
+@dataclass(frozen=True)
+class ToolUsageMonitor:
+    max_calls: int = 20
+
+    def provide(self, *, context: FeedbackContext) -> Feedback:
+        count = context.tool_call_count
+        if count > self.max_calls:
+            return Feedback(
+                summary=f"{count} tool calls without progress marker.",
+                suggestions=("Review your approach.",),
+                severity="caution",
+            )
+        return Feedback(summary="On track.", severity="info")
+```
 
 ---
 
-# Novel Concept #4: Transactional Tools
+# Completion Checking: "Done" Means Done
 
-Tool calls are **atomic transactions**.
+Agents sometimes declare victory prematurely.
 
-When a tool fails:
-1. Session state rolls back to pre-call state
-2. Filesystem changes revert
-3. Error result returned to LLM
+**Task completion checkers** verify goals before allowing termination.
 
-**Failed tools don't leave partial state.** This enables aggressive retry and recovery.
+```python
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        task_completion_checker=PlanBasedChecker(plan_type=Plan),
+    ),
+)
+```
 
 ---
 
-# Novel Concept #5: Event-Driven State
+# How Completion Checking Works
+
+1. Agent signals completion
+2. Checker inspects session state
+3. If incomplete: inject feedback, request more turns
+4. If complete: allow termination
+
+```python
+class PlanBasedChecker:
+    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+        plan = context.session[Plan].latest()
+        incomplete = [s for s in plan.steps if s.status != "done"]
+        if incomplete:
+            return TaskCompletionResult.incomplete(
+                f"Incomplete: {', '.join(s.title for s in incomplete[:3])}"
+            )
+        return TaskCompletionResult.ok()
+```
+
+---
+
+# The Three Layers Together
+
+```
+┌─────────────────────────────────────────────┐
+│              Agent Definition               │
+│                                             │
+│  ┌─────────────────────────────────────┐   │
+│  │ Completion Checking                  │   │
+│  │ "Block termination until done"       │   │
+│  └─────────────────────────────────────┘   │
+│                                             │
+│  ┌─────────────────────────────────────┐   │
+│  │ Soft Feedback                        │   │
+│  │ "Nudge toward better behavior"       │   │
+│  └─────────────────────────────────────┘   │
+│                                             │
+│  ┌─────────────────────────────────────┐   │
+│  │ Hard Guardrails                      │   │
+│  │ "Block unsafe operations"            │   │
+│  └─────────────────────────────────────┘   │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+# Prompt as Agent
+
+The prompt is a **typed, hierarchical document** where sections bundle instructions and tools together.
+
+```
+PromptTemplate[ReviewResponse]
+├── MarkdownSection (guidance)
+├── PlanningToolsSection       ← contributes tools + policies
+├── VfsToolsSection            ← contributes tools + policies
+└── MarkdownSection (request)
+```
+
+Disable a section → its tools and policies vanish.
+
+---
+
+# Co-location Enables Portability
+
+The section that explains filesystem operations:
+- Provides the `read_file` tool
+- Declares `ReadBeforeWritePolicy`
+- Includes usage documentation
+
+All travel together. Switch harnesses, keep the section.
+
+---
+
+# Event-Driven State
 
 Every mutation flows through pure reducers:
 
 ```python
 @reducer(on=FileRead)
 def track_read(state: ReadFiles, event: FileRead) -> SliceOp[ReadFiles]:
-    return Append(ReadFiles(path=event.path, content=event.content))
+    return Append(ReadFiles(path=event.path))
 ```
 
 - State is **immutable and inspectable**
 - Snapshot at any point, restore later
-- Query with `session[Type].latest()`, `.all()`, `.where(predicate)`
+- Policies and feedback query session state
 
 ---
 
-# Deterministic Inspection
+# Testing the Definition
 
-Because prompts are typed objects and state flows through reducers:
-
-- Render the exact prompt that will be sent
-- Diff prompts between versions
-- Write tests that assert on prompt content
-- Replay sessions for debugging
-
-**Same inputs → same outputs** (except tool side effects)
-
----
-
-# The Bet: Orchestration Shrinks
-
-Early agent frameworks invested heavily in workflow logic: routers, planners, branching graphs.
-
-**Models are absorbing the reasoning loop.** What required explicit multi-step orchestration yesterday often works in a single prompt today.
-
----
-
-# Where Durable Value Lives
-
-- **Tools** define what the agent can do
-- **Retrieval** determines available information
-- **Context engineering** shapes how models reason
-
-The model is a commodity. Your domain knowledge—encoded in tools and context—is not.
-
----
-
-# Context Engineering
-
-A genuinely new discipline:
-
-- What's relevant now vs. what to summarize
-- How to structure information so models reason over it well
-- When to expand detail vs. preserve tokens
-
-No clean precedent from traditional engineering. Builders who master it early win.
-
----
-
-# Progressive Disclosure
-
-Sections can render as **summaries by default**, expanding on demand:
+Because the definition is portable and deterministic:
 
 ```python
-DocsSection(
-    content=large_reference_docs,
-    summary="Reference documentation available. Call expand_docs to see.",
-    expanded=lambda ctx: ctx.session[DocsExpanded].latest() is not None
-)
+def test_policy_blocks_unread_write():
+    session = Session()
+    policy = ReadBeforeWritePolicy()
+
+    # File exists but wasn't read
+    decision = policy.check("write_file", {"path": "config.yaml"},
+                            context=ctx)
+
+    assert not decision.allowed
+    assert "not read" in decision.reason
 ```
 
-The model requests what it needs. Token counts stay manageable.
+No mocking the runtime. Test the definition directly.
 
 ---
 
-# Adapters: Same Definition, Different Runtimes
+# Adapter Integration
 
-```python
-# Development: full control
-adapter = OpenAIAdapter(model="gpt-4o")
+| Adapter | Harness | Your definition |
+|---------|---------|-----------------|
+| Claude Agent SDK | Claude's native loop, sandboxing | Portable |
+| OpenAI | WINK-managed loop | Portable |
+| LiteLLM | WINK loop, multiple providers | Portable |
 
-# Production: rent Claude's harness
-adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-5-20250929",
-    client_config=ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
-        sandbox=SandboxConfig(enabled=True),
-    ),
-)
-```
-
-Your prompt, tools, and policies stay **identical**.
+Custom tools bridge via MCP where needed.
 
 ---
 
-# "Rent the Harness" with Claude Agent SDK
+# What You Get
 
-Claude's runtime handles:
-- Planning and tool-call sequencing
-- OS-level sandboxing (bubblewrap/seatbelt)
-- Native file and shell tools
-
-WINK provides:
-- The portable agent definition
-- Custom tools bridged via MCP
-- Session state and policies
+- **Portability** — same definition, different runtimes
+- **Hard guardrails** — fail-closed policies protect invariants
+- **Soft feedback** — advisory guidance for course correction
+- **Completion checking** — agents finish what they start
+- **Testability** — validate the definition independently
 
 ---
 
 # What WINK Is
 
-- A Python library for building **prompts-as-agents**
-- A runtime for **event-driven state** and **typed tool contracts**
-- **Adapters** that let definitions port across providers
+- A Python library for **portable agent definitions**
+- **Three-tier control**: policies, feedback, completion checking
+- **Adapters** that run definitions on different harnesses
 - A philosophy: **own the definition, rent the harness**
 
 ---
 
 # What WINK Is Not
 
-- Not a distributed workflow engine
-- Not a multi-agent coordination framework
-- Not trying to own your architecture
+- Not a workflow engine
+- Not a multi-agent coordinator
+- Not trying to own the planning loop
 
-WINK is a library for the pieces that benefit from **determinism and portability**.
+WINK is the **definition layer** that makes your agent portable.
 
 ---
 
 # Key Takeaways
 
-1. **Agent Definition Layer** — separate what you own from runtime machinery
-2. **The Prompt IS the Agent** — co-located instructions and tools
-3. **Policies Over Workflows** — declare constraints, not steps
-4. **Hash-Based Overrides** — no silent drift
-5. **Transactional Tools** — atomic execution with rollback
-6. **Event-Driven State** — deterministic, inspectable, snapshotable
+1. **Agent definitions should be portable** across harnesses
+2. **Hard guardrails** (policies) fail-closed to protect invariants
+3. **Soft feedback** nudges without blocking
+4. **Completion checking** ensures agents finish the job
+5. **The prompt is the agent** — co-located tools, policies, docs
 
 ---
 
 # WINK
 ## Weak Incentives (Is All You Need)
 
-*Structure prompts, tools, and context so the model's easiest path is the correct one.*
+*Portable agents with soft feedback and hard guardrails*
 
-**Status:** Alpha | **License:** Apache 2.0 | **github.com/weakincentives**
+**github.com/weakincentives** | Apache 2.0 | Alpha
