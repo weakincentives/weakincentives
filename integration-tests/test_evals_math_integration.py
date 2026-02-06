@@ -10,27 +10,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Integration tests for the evals module with Asteval math operations.
+"""Integration tests for the evals module with math operations.
 
 This test suite verifies the evaluation framework by using an LLM to solve
-mathematical problems using Python as a calculator via the Asteval tool.
+mathematical problems via the Claude Agent SDK's native Bash tool.
+
+The workspace section provides a temporary directory and the SDK provides
+native tools (Bash, Read, Write, etc.) so the agent can run
+``python3 -c "..."`` to compute answers.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
-from typing import override
+from typing import Final, override
 
 import pytest
 
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
+    ClaudeAgentWorkspaceSection,
     get_default_model,
 )
-from weakincentives.contrib.tools import AstevalSection
 from weakincentives.evals import (
     BASELINE,
     Dataset,
@@ -67,8 +70,8 @@ pytestmark = [
     pytest.mark.timeout(300),  # Math evals may take time (10 samples x ~30s each)
 ]
 
-_MODEL_ENV_VAR = "CLAUDE_AGENT_SDK_TEST_MODEL"
-_PROMPT_NS = "integration/evals-math"
+_MODEL_ENV_VAR: Final[str] = "CLAUDE_AGENT_SDK_TEST_MODEL"
+_PROMPT_NS: Final[str] = "integration/evals-math"
 
 # Evaluation constants
 _NUMERIC_TOLERANCE = 0.001
@@ -108,7 +111,7 @@ class _InstructionParams:
 
 
 class MathSolverLoop(AgentLoop[MathProblem, MathAnswer]):
-    """AgentLoop that solves math problems using Asteval."""
+    """AgentLoop that solves math problems using the SDK's native Bash tool."""
 
     _session: Session
     _template: PromptTemplate[MathAnswer]
@@ -120,33 +123,31 @@ class MathSolverLoop(AgentLoop[MathProblem, MathAnswer]):
         requests: InMemoryMailbox[
             AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
         ],
+        session: Session,
+        workspace: ClaudeAgentWorkspaceSection,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
 
-        # Create persistent session for the loop
-        self._session = Session(tags={"loop": "math-solver"})
-
-        # Build template with Asteval section
-        asteval_section = AstevalSection(session=self._session, accepts_overrides=True)
+        self._session = session
         self._template = PromptTemplate[MathAnswer](
             ns=_PROMPT_NS,
             key="math-solver",
             sections=[
+                workspace,
                 MarkdownSection[_InstructionParams](
                     title="Instructions",
                     template="""You are a math assistant. Solve the following problem using Python as a calculator.
 
 **Problem:** $question
 
-Use the evaluate_python tool to compute the answer. After computing, respond with ONLY the final numeric answer (no units, no explanation).
+Use the Bash tool to run a Python one-liner that computes the answer. For example:
+- To compute 2 + 2, run: python3 -c "print(2 + 2)"
+- To compute sqrt(256), run: python3 -c "import math; print(int(math.sqrt(256)))"
 
-For example, if the problem is "What is 2 + 2?", you would:
-1. Use evaluate_python with code: "2 + 2"
-2. Respond with just: "4"
+After computing, respond with ONLY the final numeric answer (no units, no explanation).
 """,
                     key="instructions",
                 ),
-                asteval_section,
             ],
         )
 
@@ -273,40 +274,33 @@ def _math_evaluator(output: object, expected: object) -> Score:
 
 
 # =============================================================================
-# Tests
+# Helpers
 # =============================================================================
 
 
 def _get_model() -> str:
-    """Return the model name used for integration tests.
-
-    Uses get_default_model() which returns Sonnet 4.5 in the appropriate
-    format based on whether Bedrock is configured.
-    """
+    """Return the model name used for integration tests."""
     return os.environ.get(_MODEL_ENV_VAR, get_default_model())
 
 
-def _make_config(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKClientConfig:
-    """Build a ClaudeAgentSDKClientConfig with explicit cwd."""
-    config_kwargs: dict[str, object] = {
-        "permission_mode": "bypassPermissions",
-        "cwd": str(tmp_path),
-    }
-    config_kwargs.update(kwargs)
-    return ClaudeAgentSDKClientConfig(**config_kwargs)
-
-
-def _make_adapter(tmp_path: Path) -> ClaudeAgentSDKAdapter[MathAnswer]:
+def _make_adapter(cwd: str) -> ClaudeAgentSDKAdapter[MathAnswer]:
     """Create a Claude Agent SDK adapter for math solving."""
     return ClaudeAgentSDKAdapter(
         model=_get_model(),
-        client_config=_make_config(tmp_path),
+        client_config=ClaudeAgentSDKClientConfig(
+            permission_mode="bypassPermissions",
+            cwd=cwd,
+        ),
     )
 
 
-def test_math_eval_single_sample(tmp_path: Path) -> None:
+# =============================================================================
+# Tests
+# =============================================================================
+
+
+def test_math_eval_single_sample() -> None:
     """Test a single math problem evaluation."""
-    # Setup mailboxes
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
     requests: InMemoryMailbox[EvalRequest[MathProblem, str], EvalResult] = (
         InMemoryMailbox(name="eval-requests")
@@ -315,11 +309,16 @@ def test_math_eval_single_sample(tmp_path: Path) -> None:
         AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
     ] = InMemoryMailbox(name="dummy-requests")
 
+    session = Session(tags={"loop": "math-solver"})
+    workspace = ClaudeAgentWorkspaceSection(session=session)
+
     try:
-        adapter = _make_adapter(tmp_path)
+        adapter = _make_adapter(str(workspace.temp_dir))
         agent_loop = MathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,
+            session=session,
+            workspace=workspace,
         )
 
         eval_loop: EvalLoop[MathProblem, MathAnswer, str] = EvalLoop(
@@ -328,7 +327,6 @@ def test_math_eval_single_sample(tmp_path: Path) -> None:
             requests=requests,
         )
 
-        # Single sample: 2 + 2 = 4
         sample = Sample(
             id="simple-add",
             input=MathProblem(question="What is 2 + 2?"),
@@ -344,19 +342,18 @@ def test_math_eval_single_sample(tmp_path: Path) -> None:
         assert len(msgs) == 1
         result = msgs[0].body
         assert result.sample_id == "simple-add"
-        # Log result for debugging
         print(f"Result: score={result.score}, error={result.error}")
         msgs[0].acknowledge()
 
     finally:
+        workspace.cleanup()
         requests.close()
         results.close()
         dummy_requests.close()
 
 
-def test_math_eval_full_dataset(tmp_path: Path) -> None:
+def test_math_eval_full_dataset() -> None:
     """Test the full math dataset evaluation."""
-    # Setup mailboxes
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
     requests: InMemoryMailbox[EvalRequest[MathProblem, str], EvalResult] = (
         InMemoryMailbox(name="eval-requests")
@@ -365,11 +362,16 @@ def test_math_eval_full_dataset(tmp_path: Path) -> None:
         AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
     ] = InMemoryMailbox(name="dummy-requests")
 
+    session = Session(tags={"loop": "math-solver"})
+    workspace = ClaudeAgentWorkspaceSection(session=session)
+
     try:
-        adapter = _make_adapter(tmp_path)
+        adapter = _make_adapter(str(workspace.temp_dir))
         agent_loop = MathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,
+            session=session,
+            workspace=workspace,
         )
 
         eval_loop: EvalLoop[MathProblem, MathAnswer, str] = EvalLoop(
@@ -378,22 +380,18 @@ def test_math_eval_full_dataset(tmp_path: Path) -> None:
             requests=requests,
         )
 
-        # Create and submit the full dataset with reply_to
         dataset = _create_math_dataset()
         for sample in dataset:
             _ = requests.send(
                 EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
             )
 
-        # Run evaluations (10 samples, give some headroom for iterations)
         eval_loop.run(max_iterations=15)
 
-        # Collect results
         report = collect_results(
             results, expected_count=_EXPECTED_SAMPLE_COUNT, timeout_seconds=60
         )
 
-        # Log results for debugging
         print("\nEval Report:")
         print(f"  Total: {report.total}")
         print(f"  Successful: {report.successful}")
@@ -405,8 +403,6 @@ def test_math_eval_full_dataset(tmp_path: Path) -> None:
             for fail in report.failed_samples():
                 print(f"  - {fail.sample_id}: {fail.score.reason or fail.error}")
 
-        # We expect most math problems to be solved correctly
-        # Allow some tolerance for LLM variability
         assert report.total == _EXPECTED_SAMPLE_COUNT, (
             f"Expected {_EXPECTED_SAMPLE_COUNT} results, got {report.total}"
         )
@@ -415,6 +411,7 @@ def test_math_eval_full_dataset(tmp_path: Path) -> None:
         )
 
     finally:
+        workspace.cleanup()
         requests.close()
         results.close()
         dummy_requests.close()
