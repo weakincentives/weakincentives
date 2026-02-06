@@ -73,7 +73,7 @@ local_scheme = "no-local-version"
 packages = ["src/weakincentives"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["examples", "src/examples"]
+exclude = ["src/examples"]
 
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
@@ -135,8 +135,6 @@ combine-as-imports = true
 # C901 is ignored because test functions can legitimately have higher complexity.
 "tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "RUF038", "ANN201"]
 "integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
-# Examples may use higher complexity for illustration purposes.
-"examples/**" = ["C901", "CPY001", "ANN201", "ANN204"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
