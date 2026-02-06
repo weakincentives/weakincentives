@@ -313,7 +313,7 @@ unified model selection:
 
 ```python
 from weakincentives.adapters.claude_agent_sdk import (
-    get_default_model,      # Returns Opus 4.5 in correct format
+    get_default_model,      # Returns Opus 4.6 in correct format
     to_bedrock_model_id,    # "claude-opus-4-5-20251101" -> "us.anthropic.claude-opus-4-5-20251101-v1:0"
     to_anthropic_model_name, # Reverse conversion
 )
