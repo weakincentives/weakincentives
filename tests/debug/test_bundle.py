@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -797,9 +798,11 @@ class TestBundleIntegrity:
 
         assert writer.path is not None
 
-        # Tamper with the file
-        with zipfile.ZipFile(writer.path, "a") as zf:
-            zf.writestr("debug_bundle/request/input.json", '{"tampered": true}')
+        # Tamper with the file (duplicate entry is intentional)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with zipfile.ZipFile(writer.path, "a") as zf:
+                zf.writestr("debug_bundle/request/input.json", '{"tampered": true}')
 
         bundle = DebugBundle.load(writer.path)
         assert bundle.verify_integrity() is False

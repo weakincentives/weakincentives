@@ -49,7 +49,7 @@ def create_format_checker() -> AutoFormatChecker:
         fix_command=["uv", "run", "ruff", "format", "."],
         json_check_command=[
             "uv", "run", "ruff", "format",
-            "--preview", "--check", "--output-format=json", ".",
+            "--check", "--output-format=json", ".",
         ],
         parser=parse_ruff,
     )
