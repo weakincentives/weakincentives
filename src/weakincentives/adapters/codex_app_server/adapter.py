@@ -85,6 +85,27 @@ def _bridged_tools_to_dynamic_specs(
     ]
 
 
+def _openai_strict_schema(s: dict[str, Any]) -> dict[str, Any]:
+    """Adapt a WINK serde schema for OpenAI/Codex structured output.
+
+    OpenAI's structured output requires ``additionalProperties: false``
+    on all object types.  WINK's ``serde.schema()`` emits ``true`` by
+    default, which Codex rejects as ``invalid_json_schema``.
+    """
+    out = dict(s)
+    if out.get("type") == "object":
+        out["additionalProperties"] = False
+        props: dict[str, Any] | None = out.get("properties")
+        if isinstance(props, dict):
+            out["properties"] = {
+                k: _openai_strict_schema(cast(dict[str, Any], v))
+                if isinstance(v, dict)
+                else v
+                for k, v in props.items()
+            }
+    return out
+
+
 class CodexAppServerAdapter(ProviderAdapter[Any]):
     """Adapter using the Codex App Server for agentic prompt evaluation.
 
@@ -271,7 +292,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
 
         output_schema: dict[str, Any] | None = None
         if rendered.output_type is not None:
-            output_schema = schema(rendered.output_type)
+            output_schema = _openai_strict_schema(schema(rendered.output_type))
 
         client = CodexAppServerClient(
             codex_bin=self._client_config.codex_bin,

@@ -30,6 +30,7 @@ from weakincentives.adapters.codex_app_server.adapter import (
     CODEX_APP_SERVER_ADAPTER_NAME,
     CodexAppServerAdapter,
     _bridged_tools_to_dynamic_specs,
+    _openai_strict_schema,
 )
 from weakincentives.adapters.codex_app_server.client import (
     CodexAppServerClient,
@@ -149,6 +150,43 @@ class TestBridgedToolsToDynamicSpecs:
         assert specs[0]["name"] == "my_tool"
         assert specs[0]["description"] == "Does something"
         assert specs[0]["inputSchema"] == {"type": "object", "properties": {}}
+
+
+class TestOpenaiStrictSchema:
+    def test_sets_additional_properties_false(self) -> None:
+        s = {
+            "type": "object",
+            "properties": {"a": {"type": "string"}},
+            "additionalProperties": True,
+        }
+        result = _openai_strict_schema(s)
+        assert result["additionalProperties"] is False
+
+    def test_nested_objects(self) -> None:
+        s = {
+            "type": "object",
+            "properties": {
+                "inner": {
+                    "type": "object",
+                    "properties": {"x": {"type": "integer"}},
+                    "additionalProperties": True,
+                }
+            },
+            "additionalProperties": True,
+        }
+        result = _openai_strict_schema(s)
+        assert result["additionalProperties"] is False
+        assert result["properties"]["inner"]["additionalProperties"] is False
+
+    def test_non_object_unchanged(self) -> None:
+        s = {"type": "array", "items": {"type": "string"}}
+        assert _openai_strict_schema(s) == s
+
+    def test_preserves_other_fields(self) -> None:
+        s = {"type": "object", "title": "Foo", "properties": {}, "required": ["a"]}
+        result = _openai_strict_schema(s)
+        assert result["title"] == "Foo"
+        assert result["required"] == ["a"]
 
 
 class TestAdapterInit:
