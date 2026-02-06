@@ -233,3 +233,4 @@ specs/tla/
 dump.rdb
 tla2tools.jar
 node_modules
+scratch/
