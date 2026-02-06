@@ -21,7 +21,7 @@ import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast, override
+from typing import Any, NamedTuple, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
@@ -46,7 +46,6 @@ from ._events import (
     extract_token_usage,
     map_codex_error_phase,
 )
-from ._state import CodexAppServerSessionState
 from .client import CodexAppServerClient, CodexClientError
 from .config import (
     ApiKeyAuth,
@@ -137,6 +136,14 @@ def _openai_strict_schema(s: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+class _ThreadState(NamedTuple):
+    """Adapter-internal state for Codex thread reuse."""
+
+    thread_id: str
+    cwd: str
+    dynamic_tool_names: tuple[str, ...]
+
+
 class CodexAppServerAdapter(ProviderAdapter[Any]):
     """Adapter using the Codex App Server for agentic prompt evaluation.
 
@@ -154,6 +161,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         super().__init__()
         self._model_config = model_config or CodexAppServerModelConfig()
         self._client_config = client_config or CodexAppServerClientConfig()
+        self._last_thread: _ThreadState | None = None
 
         logger.debug(
             "codex_app_server.adapter.init",
@@ -453,9 +461,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         await self._authenticate(client)
 
         # 3. Thread
-        thread_id = await self._start_thread(
-            client, session, effective_cwd, dynamic_tool_specs
-        )
+        thread_id = await self._start_thread(client, effective_cwd, dynamic_tool_specs)
 
         # 4. Turn
         turn_result = await self._start_turn(
@@ -507,31 +513,27 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
     async def _start_thread(
         self,
         client: CodexAppServerClient,
-        session: SessionProtocol,
         effective_cwd: str,
         dynamic_tool_specs: list[dict[str, Any]],
     ) -> str:
         """Start or resume a Codex thread. Returns the thread ID."""
         if self._client_config.reuse_thread:
             thread_id = await self._try_resume_thread(
-                client, session, effective_cwd, dynamic_tool_specs
+                client, effective_cwd, dynamic_tool_specs
             )
             if thread_id is not None:
                 return thread_id
 
-        return await self._create_thread(
-            client, session, effective_cwd, dynamic_tool_specs
-        )
+        return await self._create_thread(client, effective_cwd, dynamic_tool_specs)
 
     async def _try_resume_thread(
         self,
         client: CodexAppServerClient,
-        session: SessionProtocol,
         effective_cwd: str,
         dynamic_tool_specs: list[dict[str, Any]],
     ) -> str | None:
         """Try to resume an existing thread. Returns thread ID or None."""
-        state = session[CodexAppServerSessionState].latest()
+        state = self._last_thread
         if state is None or state.cwd != effective_cwd:
             return None
         current_names = tuple(sorted(spec["name"] for spec in dynamic_tool_specs))
@@ -553,7 +555,6 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
     async def _create_thread(
         self,
         client: CodexAppServerClient,
-        session: SessionProtocol,
         effective_cwd: str,
         dynamic_tool_specs: list[dict[str, Any]],
     ) -> str:
@@ -575,13 +576,10 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         thread_id: str = result["thread"]["id"]
 
         dynamic_tool_names = tuple(sorted(spec["name"] for spec in dynamic_tool_specs))
-        session[CodexAppServerSessionState].seed(
-            CodexAppServerSessionState(
-                thread_id=thread_id,
-                cwd=effective_cwd,
-                workspace_fingerprint=None,
-                dynamic_tool_names=dynamic_tool_names,
-            )
+        self._last_thread = _ThreadState(
+            thread_id=thread_id,
+            cwd=effective_cwd,
+            dynamic_tool_names=dynamic_tool_names,
         )
         return thread_id
 

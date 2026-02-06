@@ -35,9 +35,6 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerModelConfig,
     CodexWorkspaceSection,
 )
-from weakincentives.adapters.codex_app_server._state import (
-    CodexAppServerSessionState,
-)
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -363,13 +360,12 @@ def test_codex_adapter_thread_resume(tmp_path: Path) -> None:
     response1 = adapter.evaluate(prompt, session=session)
     assert response1.text is not None
 
-    # Check that a thread ID was stored in session state
-    state = session[CodexAppServerSessionState].latest()
-    assert state is not None
-    first_thread_id = state.thread_id
+    # Check that a thread ID was stored in adapter state
+    assert adapter._last_thread is not None
+    first_thread_id = adapter._last_thread.thread_id
     assert first_thread_id is not None
 
-    # Second evaluation with the same session should resume the thread
+    # Second evaluation with the same adapter should resume the thread
     prompt2 = Prompt(_build_greeting_prompt()).bind(
         GreetingParams(audience="thread resume test (turn 2)")
     )

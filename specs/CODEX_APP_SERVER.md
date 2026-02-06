@@ -178,7 +178,7 @@ credentials from `~/.codex/`).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model` | `str` | `"gpt-5.1-codex"` | Codex model identifier |
+| `model` | `str` | `"gpt-5.3-codex"` | Codex model identifier |
 | `effort` | `ReasoningEffort \| None` | `None` | Reasoning effort |
 | `summary` | `ReasoningSummary \| None` | `None` | Summary preference |
 | `personality` | `Personality \| None` | `None` | Response personality |
@@ -229,50 +229,23 @@ Codex emits notifications in two parallel namespaces:
 
 The adapter should only process v2 notifications.
 
-## Session State Storage
+## Thread Reuse State
 
-WINK sessions use **typed dataclass slices**. For thread reuse:
+Thread reuse state is stored as an **adapter-internal instance variable**
+(`_last_thread`) rather than in the WINK session. This keeps adapter
+implementation details out of the session's event log.
 
 ```python
-# _state.py
-from weakincentives.dataclasses import FrozenDataclass
-
-@FrozenDataclass()
-class CodexAppServerSessionState:
-    """Stores Codex thread ID and workspace fingerprint for reuse."""
+class _ThreadState(NamedTuple):
     thread_id: str
     cwd: str
-    workspace_fingerprint: str | None
+    dynamic_tool_names: tuple[str, ...]
 ```
 
-Usage:
-
-```python
-from pathlib import Path
-
-# Store after thread/start
-resolved_cwd = client_config.cwd or str(Path.cwd().resolve())
-session.seed(
-    CodexAppServerSessionState(
-        thread_id=result["thread"]["id"],
-        cwd=resolved_cwd,
-        workspace_fingerprint=workspace_fingerprint,
-    )
-)
-
-# Retrieve for thread/resume
-state = session[CodexAppServerSessionState].latest()
-if state is not None:
-    thread_id = state.thread_id
-    cached_cwd = state.cwd
-    cached_workspace_fingerprint = state.workspace_fingerprint
-```
-
-When `reuse_thread=True`, only reuse the thread if `cached_cwd` and
-`cached_workspace_fingerprint` match the current workspace. If they differ or
+When `reuse_thread=True`, only reuse the thread if `cwd` and
+`dynamic_tool_names` match the current invocation. If they differ or
 `thread/resume` fails, fall back to `thread/start` and overwrite the stored
-state. Compute `workspace_fingerprint` from mount config and budgets (stable
-ordering) so reuse is deterministic.
+state.
 
 ## Workspace Management
 
@@ -646,7 +619,7 @@ result = send_request("thread/resume", {
 })
 ```
 
-Store thread ID via `session.seed(CodexAppServerSessionState(...))`.
+Store thread ID in `adapter._last_thread` for potential reuse.
 
 ### 8. Start Turn
 
