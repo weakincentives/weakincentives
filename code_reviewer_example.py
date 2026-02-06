@@ -66,6 +66,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 )
 from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.deadlines import Deadline
+from weakincentives.debug import BundleConfig
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime import (
     AgentLoop,
@@ -378,6 +379,7 @@ def run_review(
         deadline=Deadline(
             expires_at=datetime.now(UTC) + timedelta(minutes=deadline_minutes)
         ),
+        debug_bundle=BundleConfig(target=Path("debug_bundles/")),
     )
     loop = CodeReviewLoop(
         adapter=adapter,
