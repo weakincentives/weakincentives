@@ -142,10 +142,17 @@ export function preprocessTranscriptEntries(entries) {
 // Content formatting
 // ============================================================================
 
+function formatStringContent(entry) {
+  if (entry.content_html) {
+    return { kind: "markdown", value: entry.content, html: entry.content_html };
+  }
+  return { kind: "text", value: entry.content };
+}
+
 export function formatTranscriptContent(entry) {
   if (entry.content !== null && entry.content !== undefined) {
     if (typeof entry.content === "string") {
-      return { kind: "text", value: entry.content };
+      return formatStringContent(entry);
     }
     return { kind: "json", value: JSON.stringify(entry.content, null, 2) };
   }

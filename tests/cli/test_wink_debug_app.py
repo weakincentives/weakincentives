@@ -465,6 +465,118 @@ def test_api_transcript_endpoint(tmp_path: Path) -> None:
     assert "sources" in facets
 
 
+def test_api_transcript_markdown_rendering(tmp_path: Path) -> None:
+    """Test that transcript entries with markdown content include rendered HTML."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    md_content = "# Heading\n\nSome **bold** text and a [link](http://example.com)."
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            transcript_logger = logging.getLogger("test.transcript.md")
+            transcript_logger.setLevel(logging.DEBUG)
+            transcript_logger.debug(
+                "Transcript entry",
+                extra={
+                    "event": "transcript.collector.entry",
+                    "context": {
+                        "prompt_name": "test",
+                        "transcript_source": "main",
+                        "entry_type": "assistant",
+                        "sequence_number": 1,
+                        "raw_json": json.dumps(
+                            {
+                                "type": "assistant",
+                                "message": {
+                                    "role": "assistant",
+                                    "content": md_content,
+                                },
+                            }
+                        ),
+                        "parsed": {
+                            "type": "assistant",
+                            "message": {
+                                "role": "assistant",
+                                "content": md_content,
+                            },
+                        },
+                    },
+                },
+            )
+
+    assert writer.path is not None
+    logger = debug_app.get_logger("test.transcript.markdown")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/transcript")
+    assert response.status_code == 200
+    data = response.json()
+    entry = data["entries"][0]
+    assert entry["content"] == md_content
+    assert "content_html" in entry
+    assert "<h1>" in entry["content_html"]
+    assert "<strong>bold</strong>" in entry["content_html"]
+
+
+def test_api_transcript_no_markdown_for_short_content(tmp_path: Path) -> None:
+    """Test that short or plain text content does not get content_html."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            transcript_logger = logging.getLogger("test.transcript.plain")
+            transcript_logger.setLevel(logging.DEBUG)
+            transcript_logger.debug(
+                "Transcript entry",
+                extra={
+                    "event": "transcript.collector.entry",
+                    "context": {
+                        "prompt_name": "test",
+                        "transcript_source": "main",
+                        "entry_type": "user",
+                        "sequence_number": 1,
+                        "raw_json": json.dumps(
+                            {
+                                "type": "user",
+                                "message": {"role": "user", "content": "Hi"},
+                            }
+                        ),
+                        "parsed": {
+                            "type": "user",
+                            "message": {"role": "user", "content": "Hi"},
+                        },
+                    },
+                },
+            )
+
+    assert writer.path is not None
+    logger = debug_app.get_logger("test.transcript.plain")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/transcript")
+    assert response.status_code == 200
+    data = response.json()
+    entry = data["entries"][0]
+    assert entry["content"] == "Hi"
+    assert "content_html" not in entry
+
+
 def test_api_config_and_metrics_endpoints(tmp_path: Path) -> None:
     """Test config and metrics endpoints."""
     bundle_path = _create_test_bundle(tmp_path, ["test"])
