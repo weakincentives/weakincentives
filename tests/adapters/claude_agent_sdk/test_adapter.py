@@ -1344,6 +1344,66 @@ class TestIsolationConfig:
             with pytest.raises(Exception):  # noqa: B017
                 adapter.evaluate(simple_prompt, session=session)
 
+    def test_evaluate_with_isolation_mounts_section_skills(
+        self, session: Session, tmp_path: Path
+    ) -> None:
+        """Skills attached to sections are mounted via ephemeral home."""
+        from weakincentives.adapters.claude_agent_sdk import (
+            IsolationConfig,
+            NetworkPolicy,
+        )
+        from weakincentives.skills import SkillMount
+
+        # Create a valid skill directory with SKILL.md
+        skill_dir = tmp_path / "test-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: test-skill\ndescription: A test skill\n---\n\n# Test Skill\n"
+        )
+
+        # Create prompt with skill attached to a section
+        skill = SkillMount(source=skill_dir)
+        template = PromptTemplate[SimpleOutput](
+            ns="test",
+            key="with-skills",
+            sections=[
+                MarkdownSection(
+                    title="Section with Skills",
+                    template="Do something",
+                    key="section-with-skills",
+                    skills=[skill],
+                ),
+            ],
+        )
+        prompt_with_skills: Prompt[SimpleOutput] = Prompt(template)
+
+        _setup_mock_query(
+            [MockResultMessage(result="Done!", usage={"input_tokens": 10})]
+        )
+
+        isolation = IsolationConfig(
+            network_policy=NetworkPolicy.no_network(),
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                permission_mode="bypassPermissions",
+                isolation=isolation,
+            ),
+        )
+
+        with sdk_patches():
+            response = adapter.evaluate(prompt_with_skills, session=session)
+
+        assert response.text == "Done!"
+
+        # Verify isolation was used (env was set with ephemeral HOME)
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+        assert hasattr(options, "env")
+        env: dict[str, str] = options.env  # type: ignore[assignment]
+        assert "HOME" in env
+
     def test_no_permission_mode_when_none(
         self, session: Session, simple_prompt: Prompt[None]
     ) -> None:
