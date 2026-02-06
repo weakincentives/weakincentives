@@ -1058,16 +1058,16 @@ def test_file_endpoint_text_file(tmp_path: Path) -> None:
     """Test reading a non-JSON text file."""
     bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
 
-    # Manually add a text file
+    # Manually add a text file (use unique name to avoid duplicate zip entry)
     with zipfile.ZipFile(bundle_path, "a") as zf:
-        zf.writestr("debug_bundle/README.txt", "This is plain text content")
+        zf.writestr("debug_bundle/NOTES.txt", "This is plain text content")
 
     logger = debug_app.get_logger("test.file.text")
     store = debug_app.BundleStore(bundle_path, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
-    file_response = client.get("/api/files/README.txt")
+    file_response = client.get("/api/files/NOTES.txt")
     assert file_response.status_code == 200
     content = file_response.json()
     assert content["type"] == "text"

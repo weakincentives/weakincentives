@@ -10,11 +10,11 @@ format:
 
 # Check formatting without making changes
 format-check:
-	@uv run --all-extras python check.py -q format
+	@uv run --quiet --all-extras python check.py -q format
 
 # Run ruff linter
 lint:
-	@uv run --all-extras python check.py -q lint
+	@uv run --quiet --all-extras python check.py -q lint
 
 # Run ruff linter with fixes
 lint-fix:
@@ -27,7 +27,8 @@ lint-fix:
 # Run Biome linter and formatter check on frontend static files
 biome:
 	@if [ ! -d node_modules ]; then npm install --silent; fi
-	@npx biome check src/weakincentives/cli/static/
+	@output=$$(npx biome check src/weakincentives/cli/static/ 2>&1) || \
+		{ echo "$$output"; exit 1; }
 
 # Run Biome with auto-fix
 biome-fix:
@@ -40,15 +41,15 @@ biome-fix:
 
 # Run Bandit security scanner
 bandit:
-	@uv run --all-extras python check.py -q bandit
+	@uv run --quiet --all-extras python check.py -q bandit
 
 # Check for unused or missing dependencies with deptry
 deptry:
-	@uv run --all-extras python check.py -q deptry
+	@uv run --quiet --all-extras python check.py -q deptry
 
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
-	@uv run --all-extras python check.py -q pip-audit
+	@uv run --quiet --all-extras python check.py -q pip-audit
 
 # =============================================================================
 # Documentation Checks
@@ -56,7 +57,7 @@ pip-audit:
 
 # Validate Markdown formatting
 markdown-check:
-	@uv run --all-extras python check.py -q markdown
+	@uv run --quiet --all-extras python check.py -q markdown
 
 # Verify Python code examples in documentation
 verify-doc-examples:
@@ -80,7 +81,7 @@ pyright:
 
 # Run all type checkers
 typecheck:
-	@uv run --all-extras python check.py -q typecheck
+	@uv run --quiet --all-extras python check.py -q typecheck
 
 # =============================================================================
 # Testing
@@ -91,9 +92,9 @@ typecheck:
 # database, subsequent runs skip tests unaffected by changes.
 test:
 	@if [ -n "$$CI" ]; then \
-		uv run --all-extras python check.py -q test; \
+		uv run --quiet --all-extras python check.py -q test; \
 	else \
-		uv run --all-extras pytest -p no:cov -o addopts= --testmon --strict-config --strict-markers --timeout=10 --timeout-method=thread --tb=short --reruns=2 --reruns-delay=0.5 tests; \
+		uv run --quiet --all-extras pytest -p no:cov -o addopts= --testmon --strict-config --strict-markers --timeout=10 --timeout-method=thread --tb=short --no-header --reruns=2 --reruns-delay=0.5 tests; \
 	fi
 
 # =============================================================================
@@ -163,7 +164,7 @@ redis-cluster-tests:
 
 # Run JavaScript tests with Bun (via toolchain for consistent output)
 bun-test:
-	@uv run --all-extras python check.py -q bun-test
+	@uv run --quiet --all-extras python check.py -q bun-test
 
 # =============================================================================
 # Setup
@@ -277,7 +278,7 @@ demo:
 # Run all checks (format, lint, typecheck, security, dependencies, architecture, docs, tests)
 # In CI: full test coverage required. Locally: only tests affected by changes (via testmon).
 check: format-check lint typecheck bandit deptry pip-audit markdown-check biome bun-test test
-	@uv run --all-extras python check.py -q architecture docs
+	@uv run --quiet --all-extras python check.py -q architecture docs
 
 # Synchronize documentation files into package
 sync-docs:
