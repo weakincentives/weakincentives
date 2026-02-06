@@ -171,6 +171,34 @@ const requestId = document.getElementById("request-id");
 const bundleSelect = document.getElementById("bundle-select");
 const reloadButton = document.getElementById("reload-button");
 
+const transcriptTab = document.querySelector('.main-tab[data-view="transcript"]');
+
+function renumberTabShortcuts() {
+  let shortcut = 1;
+  for (const tab of document.querySelectorAll(".main-tab")) {
+    const kbd = tab.querySelector("kbd");
+    if (!kbd) {
+      continue;
+    }
+    if (tab.classList.contains("hidden")) {
+      kbd.textContent = "";
+    } else {
+      kbd.textContent = String(shortcut);
+      shortcut++;
+    }
+  }
+}
+
+function updateTranscriptTabVisibility(hasTranscript) {
+  state.hasTranscript = hasTranscript;
+  transcriptTab.classList.toggle("hidden", !hasTranscript);
+  // If transcript is the active view but is now hidden, switch to sessions.
+  if (!hasTranscript && state.activeView === "transcript") {
+    switchView("sessions");
+  }
+  renumberTabShortcuts();
+}
+
 function renderBundleInfo(meta) {
   bundleStatus.textContent = meta.status;
   bundleStatus.className = `pill status-${meta.status}`;
@@ -178,6 +206,7 @@ function renderBundleInfo(meta) {
   bundleId.title = meta.bundle_id;
   requestId.textContent = meta.request_id.slice(0, 8);
   requestId.title = meta.request_id;
+  updateTranscriptTabVisibility(meta.has_transcript);
 }
 
 async function refreshBundles() {

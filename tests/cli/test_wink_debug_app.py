@@ -127,6 +127,7 @@ def test_bundle_store_loads_bundle(tmp_path: Path) -> None:
     assert meta["bundle_id"]
     assert meta["status"] == "success"
     assert len(meta["slices"]) == 1
+    assert meta["has_transcript"] is False
 
 
 def test_bundle_store_errors_on_missing(tmp_path: Path) -> None:
@@ -452,6 +453,9 @@ def test_api_transcript_endpoint(tmp_path: Path) -> None:
     store = debug_app.BundleStore(writer.path, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
+
+    meta_response = client.get("/api/meta")
+    assert meta_response.json()["has_transcript"] is True
 
     transcript_response = client.get("/api/transcript")
     assert transcript_response.status_code == 200
@@ -781,6 +785,7 @@ def test_bundle_without_session(tmp_path: Path) -> None:
 
     assert meta["bundle_id"]
     assert len(meta["slices"]) == 0
+    assert meta["has_transcript"] is False
 
 
 def test_logs_endpoint_with_level_filter(tmp_path: Path) -> None:
