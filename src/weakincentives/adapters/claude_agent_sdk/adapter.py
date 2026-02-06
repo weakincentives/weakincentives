@@ -278,7 +278,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 "has_isolation_config": self._client_config.isolation is not None,
                 "allowed_tools": allowed_tools,
                 "disallowed_tools": disallowed_tools,
-                "max_thinking_tokens": self._model_config.max_thinking_tokens,
+                "reasoning": self._model_config.reasoning,
             },
         )
 
@@ -797,7 +797,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             "permission_mode": self._client_config.permission_mode,
             "max_turns": self._client_config.max_turns,
             "output_format": output_format,
-            "max_thinking_tokens": self._model_config.max_thinking_tokens,
+            "reasoning": self._model_config.reasoning,
         }
         options_kwargs.update(
             {k: v for k, v in optional_values.items() if v is not None}
@@ -1138,7 +1138,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 "permission_mode": options_kwargs.get("permission_mode"),
                 "max_turns": options_kwargs.get("max_turns"),
                 "max_budget_usd": options_kwargs.get("max_budget_usd"),
-                "max_thinking_tokens": options_kwargs.get("max_thinking_tokens"),
+                "reasoning": options_kwargs.get("reasoning"),
                 "has_output_format": "output_format" in options_kwargs,
                 "allowed_tools": options_kwargs.get("allowed_tools"),
                 "disallowed_tools": options_kwargs.get("disallowed_tools"),

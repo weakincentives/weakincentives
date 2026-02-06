@@ -96,7 +96,7 @@ class MockClaudeAgentOptions:
     output_format: dict[str, object] | None
     allowed_tools: list[str] | None
     disallowed_tools: list[str] | None
-    max_thinking_tokens: int | None
+    reasoning: str | None
     mcp_servers: dict[str, object] | None
     hooks: dict[str, list[object]] | None
     can_use_tool: object | None  # Added for ClaudeSDKClient compatibility
@@ -957,7 +957,22 @@ class TestSDKConfigOptions:
         assert response.text == "Done"
         assert len(MockSDKQuery.captured_options) == 1
 
-    def test_passes_max_thinking_tokens_option(
+    def test_passes_reasoning_option_default_high(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            adapter.evaluate(simple_prompt, session=session)
+
+        assert len(MockSDKQuery.captured_options) == 1
+        assert MockSDKQuery.captured_options[0].reasoning == "high"
+
+    def test_passes_reasoning_option_max(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         _setup_mock_query(
@@ -965,14 +980,34 @@ class TestSDKConfigOptions:
         )
 
         adapter = ClaudeAgentSDKAdapter(
-            model_config=ClaudeAgentSDKModelConfig(max_thinking_tokens=10000),
+            model_config=ClaudeAgentSDKModelConfig(reasoning="max"),
         )
 
         with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
         assert len(MockSDKQuery.captured_options) == 1
-        assert MockSDKQuery.captured_options[0].max_thinking_tokens == 10000
+        assert MockSDKQuery.captured_options[0].reasoning == "max"
+
+    def test_passes_reasoning_option_disabled(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            model_config=ClaudeAgentSDKModelConfig(reasoning=None),
+        )
+
+        with sdk_patches():
+            adapter.evaluate(simple_prompt, session=session)
+
+        assert len(MockSDKQuery.captured_options) == 1
+        assert (
+            not hasattr(MockSDKQuery.captured_options[0], "reasoning")
+            or MockSDKQuery.captured_options[0].reasoning is None
+        )
 
 
 class TestSDKErrorHandling:

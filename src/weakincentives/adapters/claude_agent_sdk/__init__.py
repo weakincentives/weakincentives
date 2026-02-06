@@ -45,7 +45,7 @@ Key Components
 
 **Configuration** (:class:`ClaudeAgentSDKClientConfig`, :class:`ClaudeAgentSDKModelConfig`)
     Client-level settings (permission mode, max turns, budget) and model-level
-    settings (extended thinking tokens).
+    settings (adaptive reasoning effort).
 
 **Workspace** (:class:`ClaudeAgentWorkspaceSection`, :class:`HostMount`)
     Prompt section that manages a temporary workspace directory with host file
@@ -223,6 +223,7 @@ Configuration:
     - :class:`ClaudeAgentSDKClientConfig`: Client-level SDK configuration
     - :class:`ClaudeAgentSDKModelConfig`: Model-level configuration
     - :data:`PermissionMode`: Literal type for permission handling modes
+    - :data:`ReasoningEffort`: Literal type for adaptive reasoning effort levels
 
 Workspace:
     - :class:`ClaudeAgentWorkspaceSection`: Prompt section for workspace management
@@ -284,6 +285,7 @@ from .config import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
     PermissionMode,
+    ReasoningEffort,
 )
 from .isolation import (
     DEFAULT_BEDROCK_MODEL,
@@ -329,6 +331,7 @@ __all__ = [
     "NetworkPolicy",
     "PermissionMode",
     "PlanBasedChecker",
+    "ReasoningEffort",
     "SandboxConfig",
     "TaskCompletionChecker",
     "TaskCompletionContext",

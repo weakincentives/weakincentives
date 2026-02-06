@@ -28,6 +28,7 @@ __all__ = [
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
     "PermissionMode",
+    "ReasoningEffort",
 ]
 
 # Re-export PermissionMode from SDK types for backwards compatibility.
@@ -36,6 +37,17 @@ PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 """Permission handling mode for Claude Agent SDK tool execution.
 
 This type alias matches the SDK's ``claude_agent_sdk.types.PermissionMode`` exactly.
+"""
+
+ReasoningEffort = Literal["low", "medium", "high", "max"]
+"""Effort level for adaptive reasoning.
+
+Controls how much thinking Claude allocates to each request:
+
+- ``"low"``: Minimizes thinking. Skips thinking for simple tasks.
+- ``"medium"``: Moderate thinking. May skip for very simple queries.
+- ``"high"``: Deep reasoning on complex tasks. Claude almost always thinks.
+- ``"max"``: No constraints on thinking depth. Opus 4.6 only.
 """
 
 
@@ -100,11 +112,11 @@ class ClaudeAgentSDKModelConfig(LLMConfig):
     Claude Agent SDK.
 
     Attributes:
-        model: Claude model identifier. Defaults to the latest Sonnet model.
-        max_thinking_tokens: Maximum tokens for extended thinking mode. When
-            set, enables extended thinking and allocates up to this many
-            tokens for the model's internal reasoning. Requires a minimum
-            of approximately 1024 tokens. None disables extended thinking.
+        model: Claude model identifier. Defaults to the latest Opus model.
+        reasoning: Adaptive reasoning effort level. Defaults to ``"high"``
+            which enables deep reasoning on complex tasks. Set to ``"max"``
+            for unconstrained thinking depth (Opus 4.6 only). Set to
+            ``None`` to disable reasoning entirely.
 
     Notes:
         The Claude Agent SDK does not support ``seed``, ``stop``,
@@ -113,7 +125,7 @@ class ClaudeAgentSDKModelConfig(LLMConfig):
     """
 
     model: str = "claude-opus-4-6"
-    max_thinking_tokens: int | None = None
+    reasoning: ReasoningEffort | None = "high"
 
     def __post_init__(self) -> None:
         unsupported: dict[str, object | None] = {
