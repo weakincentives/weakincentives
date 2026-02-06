@@ -82,6 +82,21 @@ class FakeProcess:
         self._killed = True
 
 
+class _StubReadTask:
+    """Minimal task-like object exposing ``done()`` for send_request tests."""
+
+    def __init__(self, done_values: list[bool]) -> None:
+        self._done_values = done_values
+        self._index = 0
+
+    def done(self) -> bool:
+        if self._index >= len(self._done_values):
+            return self._done_values[-1]
+        value = self._done_values[self._index]
+        self._index += 1
+        return value
+
+
 def _response_line(req_id: int, result: dict[str, Any] | None = None) -> str:
     msg: dict[str, Any] = {"id": req_id}
     if result is not None:
@@ -175,6 +190,15 @@ class TestClientStartStop:
 
 
 class TestSendRequest:
+    def test_request_before_start_raises(self) -> None:
+        async def _run() -> None:
+            client = CodexAppServerClient()
+
+            with pytest.raises(CodexClientError, match="Client not started"):
+                await client.send_request("initialize", {})
+
+        asyncio.run(_run())
+
     def test_send_and_receive_response(self) -> None:
         async def _run() -> None:
             response = _response_line(1, result={"status": "ok"})
@@ -281,6 +305,34 @@ class TestSendRequest:
 
                 assert client._pending == {}
                 await client.stop()
+
+        asyncio.run(_run())
+
+    def test_codex_client_error_from_write_is_reraised(self) -> None:
+        async def _run() -> None:
+            client = CodexAppServerClient()
+            client._read_task = _StubReadTask([False])  # type: ignore[assignment]
+
+            with patch.object(client, "_write", new_callable=AsyncMock) as mock_write:
+                mock_write.side_effect = CodexClientError("write failed")
+                with pytest.raises(CodexClientError, match="write failed"):
+                    await client.send_request("initialize", {})
+
+            assert client._pending == {}
+
+        asyncio.run(_run())
+
+    def test_read_loop_exit_after_write_sets_future_exception(self) -> None:
+        async def _run() -> None:
+            client = CodexAppServerClient()
+            # First done() check passes entry guard, second check triggers fast-fail.
+            client._read_task = _StubReadTask([False, True])  # type: ignore[assignment]
+
+            with patch.object(client, "_write", new_callable=AsyncMock):
+                with pytest.raises(CodexClientError, match="exited unexpectedly"):
+                    await client.send_request("initialize", {})
+
+            assert client._pending == {}
 
         asyncio.run(_run())
 
