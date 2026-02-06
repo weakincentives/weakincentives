@@ -338,14 +338,8 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
         session: Session,
         output: ReviewResponse | None,
     ) -> ReviewResponse | None:
-        """Clean up workspace resources after execution."""
-        for node in prompt.template.sections:
-            section = node.section
-            if isinstance(
-                section, (ClaudeAgentWorkspaceSection, CodexWorkspaceSection)
-            ):
-                section.cleanup()
-
+        """Log review completion. Cleanup is handled by the framework."""
+        _ = (prompt, session)
         if output is not None:
             _LOGGER.info("Review complete: %s", output.summary[:50] + "...")
 

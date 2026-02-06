@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 from uuid import UUID
 
 import pytest
@@ -1940,3 +1941,165 @@ def test_loop_with_debug_bundle_includes_environment(tmp_path: Path) -> None:
     finally:
         requests.close()
         results.close()
+
+
+# =============================================================================
+# Prompt Cleanup Lifecycle Tests
+# =============================================================================
+
+
+def test_loop_calls_prompt_cleanup_on_success() -> None:
+    """AgentLoop calls prompt.cleanup() after successful execution."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is True
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_calls_prompt_cleanup_on_adapter_failure() -> None:
+    """AgentLoop calls prompt.cleanup() even when adapter raises."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter(error=RuntimeError("boom"))
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is False
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_calls_prompt_cleanup_with_bundle(tmp_path: Path) -> None:
+    """AgentLoop calls prompt.cleanup() after bundle artifacts are written."""
+    from weakincentives.debug.bundle import BundleConfig
+
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        bundle_config = BundleConfig(target=tmp_path)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
+
+        request = AgentLoopRequest(request=_Request(message="hello bundle cleanup"))
+        requests.send(request, reply_to=results)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is True
+        assert msgs[0].body.bundle_path is not None
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_calls_prompt_cleanup_with_bundle_on_failure(tmp_path: Path) -> None:
+    """AgentLoop calls prompt.cleanup() in bundle error path."""
+    from weakincentives.debug.bundle import BundleConfig
+
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter(error=RuntimeError("execution failed"))
+        bundle_config = BundleConfig(target=tmp_path)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
+
+        request = AgentLoopRequest(request=_Request(message="hello bundle fail"))
+        requests.send(request, reply_to=results)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is False
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_execute_calls_prompt_cleanup() -> None:
+    """AgentLoop.execute() calls prompt.cleanup()."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.execute(_Request(message="direct"))
+            assert mock_cleanup.call_count == 1
+    finally:
+        requests.close()
+
+
+def test_execute_with_bundle_calls_prompt_cleanup(tmp_path: Path) -> None:
+    """AgentLoop.execute_with_bundle() calls prompt.cleanup()."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            with loop.execute_with_bundle(
+                _Request(message="bundle direct"),
+                bundle_target=tmp_path,
+            ) as ctx:
+                assert ctx.response is not None
+            assert mock_cleanup.call_count == 1
+    finally:
+        requests.close()

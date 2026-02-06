@@ -390,6 +390,8 @@ class AgentLoop[UserRequestT, OutputT](
                 budget_tracker=budget_tracker,
             )
 
+            prompt.cleanup()
+
         # BundleWriter context has exited, bundle is finalized
         # ctx.bundle_path now returns writer.path
 
@@ -518,14 +520,17 @@ class AgentLoop[UserRequestT, OutputT](
         # Use provided heartbeat or fall back to loop's internal heartbeat
         effective_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
 
-        response = self._evaluate_with_retries(
-            prompt=prompt,
-            session=session,
-            deadline=deadline,
-            budget_tracker=budget_tracker,
-            heartbeat=effective_heartbeat,
-            run_context=run_context,
-        )
+        try:
+            response = self._evaluate_with_retries(
+                prompt=prompt,
+                session=session,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=effective_heartbeat,
+                run_context=run_context,
+            )
+        finally:
+            prompt.cleanup()
         return response, session, prompt
 
     def _resolve_settings(
@@ -709,6 +714,7 @@ class AgentLoop[UserRequestT, OutputT](
         trigger = "request" if request_event.debug_bundle is not None else "config"
 
         writer: BundleWriter | None = None
+        prompt: Prompt[OutputT] | None = None
         started_at = datetime.now(UTC)
         budget_tracker: BudgetTracker | None = None
         try:
@@ -767,6 +773,8 @@ class AgentLoop[UserRequestT, OutputT](
                     run_context=run_context,
                 )
 
+                prompt.cleanup()
+
             # Bundle path is set after context manager exits (in __exit__ -> _finalize)
             bundle_path = writer.path
 
@@ -780,6 +788,10 @@ class AgentLoop[UserRequestT, OutputT](
             reply_and_ack(msg, result)
 
         except Exception as exc:
+            # Clean up prompt resources if prompt was created
+            if prompt is not None:
+                prompt.cleanup()
+
             # Check if bundle was created despite the error
             bundle_path = writer.path if writer is not None else None
 

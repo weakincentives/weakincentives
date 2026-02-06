@@ -501,6 +501,22 @@ class Prompt[OutputT]:
                 return section.filesystem  # pragma: no cover
         return None
 
+    def cleanup(self) -> None:
+        """Clean up resources held by prompt sections.
+
+        Calls cleanup() on each section in the prompt. The snapshot
+        already contains all sections (including children) in a flat
+        list, so no recursion is needed.
+
+        Called by the AgentLoop after debug bundle artifacts have been
+        captured.
+        """
+        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
+        if snapshot is None:  # pragma: no cover
+            return
+        for node in snapshot.sections:
+            node.section.cleanup()
+
     def _collected_resources(self) -> ResourceRegistry:
         """Collect resources from template and all sections.
 

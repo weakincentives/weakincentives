@@ -422,6 +422,7 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         """
         return self._filesystem
 
+    @override
     def cleanup(self) -> None:
         """Remove the temporary workspace directory and associated resources."""
         if self._temp_dir.exists():

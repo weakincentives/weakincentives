@@ -358,6 +358,7 @@ class CodexWorkspaceSection(MarkdownSection[_CodexWorkspaceSectionParams]):
         """Return a deterministic fingerprint for reuse detection."""
         return compute_workspace_fingerprint(self._mounts)
 
+    @override
     def cleanup(self) -> None:
         """Remove the temporary workspace directory and associated resources."""
         if self._temp_dir.exists():
