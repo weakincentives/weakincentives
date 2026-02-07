@@ -17,11 +17,11 @@ filesystem access. This creates three problems:
 1. **Security**: An agent with unrestricted access can read credentials,
    overwrite system files, or traverse outside its intended scope.
 
-2. **Portability**: Tool handlers that use `open()` and `os.path` are
+1. **Portability**: Tool handlers that use `open()` and `os.path` are
    coupled to the host. They cannot run in-memory for tests, inside
    containers, or across different backends.
 
-3. **Rollback**: When a tool fails partway through writing files, you
+1. **Rollback**: When a tool fails partway through writing files, you
    need a way to undo the damage. Raw filesystem calls leave partial
    state that is hard to clean up.
 
@@ -100,9 +100,9 @@ roots.
 Workspaces follow a predictable lifecycle:
 
 1. **Create**: Temp directory created, files copied per mount config
-2. **Use**: Agent reads and writes files within the workspace
-3. **Clone**: Sub-agents can share the workspace via reference counting
-4. **Cleanup**: Last reference deletes the temp directory
+1. **Use**: Agent reads and writes files within the workspace
+1. **Clone**: Sub-agents can share the workspace via reference counting
+1. **Cleanup**: Last reference deletes the temp directory
 
 The workspace section implements context manager protocol. When used
 with `Prompt.resources`, cleanup is automatic:
