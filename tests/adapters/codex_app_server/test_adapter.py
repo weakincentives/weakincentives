@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -38,6 +39,9 @@ from weakincentives.adapters.codex_app_server.config import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
     ExternalTokenAuth,
+)
+from weakincentives.adapters.codex_app_server.isolation import (
+    CodexHermeticHomeConfig,
 )
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.budget import Budget, BudgetTracker
@@ -1807,3 +1811,141 @@ class TestApprovalPolicyUntrusted:
             assert resp["decision"] == "accept"
 
         asyncio.run(_run())
+
+
+class TestBuildClientEnv:
+    """Tests for the adapter's _build_client_env method."""
+
+    def test_returns_none_when_no_hermetic_home(self) -> None:
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(env={"MY_VAR": "val"})
+        )
+        rendered = MagicMock()
+        rendered.skills = ()
+        env, replace_env, ephemeral_home = adapter._build_client_env(rendered)
+        assert env == {"MY_VAR": "val"}
+        assert replace_env is False
+        assert ephemeral_home is None
+
+    def test_creates_ephemeral_home_when_configured(self) -> None:
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(
+                hermetic_home=CodexHermeticHomeConfig(copy_host_credentials=False)
+            )
+        )
+        rendered = MagicMock()
+        rendered.skills = ()
+        env, replace_env, ephemeral_home = adapter._build_client_env(rendered)
+        try:
+            assert replace_env is True
+            assert ephemeral_home is not None
+            assert env is not None
+            assert "HOME" in env
+        finally:
+            if ephemeral_home is not None:
+                ephemeral_home.cleanup()
+
+    def test_merges_config_env_over_hermetic_env(self) -> None:
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(
+                hermetic_home=CodexHermeticHomeConfig(
+                    copy_host_credentials=False,
+                    env={"FROM_HERMETIC": "hermetic"},
+                ),
+                env={"OVERRIDE": "config-val"},
+            )
+        )
+        rendered = MagicMock()
+        rendered.skills = ()
+        env, _, ephemeral_home = adapter._build_client_env(rendered)
+        try:
+            assert env is not None
+            env_dict = dict(env)
+            assert env_dict["FROM_HERMETIC"] == "hermetic"
+            assert env_dict["OVERRIDE"] == "config-val"
+        finally:
+            if ephemeral_home is not None:
+                ephemeral_home.cleanup()
+
+    def test_mounts_skills_from_rendered_prompt(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my-skill\ndescription: Test\n---\n\n# Skill\n"
+        )
+        from weakincentives.skills import SkillMount
+
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(
+                hermetic_home=CodexHermeticHomeConfig(copy_host_credentials=False)
+            )
+        )
+        rendered = MagicMock()
+        rendered.skills = (SkillMount(source=skill_dir),)
+        _env, _, ephemeral_home = adapter._build_client_env(rendered)
+        try:
+            assert ephemeral_home is not None
+            assert (ephemeral_home.skills_dir / "my-skill" / "SKILL.md").exists()
+        finally:
+            if ephemeral_home is not None:
+                ephemeral_home.cleanup()
+
+    def test_cleans_up_on_skill_mount_failure(self, tmp_path: Path) -> None:
+        nonexistent = tmp_path / "does-not-exist"
+        from weakincentives.skills import SkillMount, SkillNotFoundError
+
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(
+                hermetic_home=CodexHermeticHomeConfig(copy_host_credentials=False)
+            )
+        )
+        rendered = MagicMock()
+        rendered.skills = (SkillMount(source=nonexistent),)
+
+        with pytest.raises(SkillNotFoundError):
+            adapter._build_client_env(rendered)
+
+
+class TestEvaluateWithHermeticHome:
+    """Test hermetic home integration in the full evaluate flow."""
+
+    def test_ephemeral_home_cleaned_up_after_evaluation(self) -> None:
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(
+                cwd="/tmp/test",
+                hermetic_home=CodexHermeticHomeConfig(copy_host_credentials=False),
+            ),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        messages = [
+            {
+                "method": "item/completed",
+                "params": {"item": {"type": "agentMessage", "text": "ok"}},
+            },
+            {
+                "method": "turn/completed",
+                "params": {"turn": {"status": "completed"}},
+            },
+        ]
+
+        with patch(
+            "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+        ) as MockClient:
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},  # initialize
+                {"thread": {"id": "t-1"}},  # thread/start
+                {"turn": {"id": 1}},  # turn/start
+            ]
+            mock_client.read_messages.return_value = _messages_iterator(messages)
+            MockClient.return_value = mock_client
+
+            result = adapter.evaluate(prompt, session=session)
+
+        assert result.text == "ok"
+        # Verify client was created with replace_env=True
+        call_kwargs = MockClient.call_args[1]
+        assert call_kwargs["replace_env"] is True
+        assert "HOME" in call_kwargs["env"]

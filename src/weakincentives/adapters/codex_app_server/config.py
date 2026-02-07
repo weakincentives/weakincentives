@@ -15,9 +15,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from ...dataclasses import FrozenDataclass
+
+if TYPE_CHECKING:
+    from .isolation import CodexHermeticHomeConfig
 
 __all__ = [
     "ApiKeyAuth",
@@ -91,6 +94,10 @@ class CodexAppServerClientConfig:
         ephemeral: If true, thread is not persisted to disk.
         client_name: Client identifier for initialize.
         client_version: Client version for initialize.
+        hermetic_home: If set, creates an ephemeral home directory that
+            isolates the Codex subprocess. Host credentials are
+            automatically copied and skills from the rendered prompt are
+            mounted into ``$HOME/.codex/skills/``.
     """
 
     codex_bin: str = "codex"
@@ -105,6 +112,7 @@ class CodexAppServerClientConfig:
     ephemeral: bool = False
     client_name: str = "wink"
     client_version: str = "0.1.0"
+    hermetic_home: CodexHermeticHomeConfig | None = None
 
 
 @FrozenDataclass()

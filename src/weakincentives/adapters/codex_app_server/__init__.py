@@ -36,6 +36,7 @@ from .config import (
     ReasoningSummary,
     SandboxMode,
 )
+from .isolation import CodexEphemeralHome, CodexHermeticHomeConfig
 from .workspace import (
     CodexWorkspaceSection,
     HostMount,
@@ -54,6 +55,8 @@ __all__ = [
     "CodexAppServerModelConfig",
     "CodexAuthMode",
     "CodexClientError",
+    "CodexEphemeralHome",
+    "CodexHermeticHomeConfig",
     "CodexWorkspaceSection",
     "ExternalTokenAuth",
     "HostMount",

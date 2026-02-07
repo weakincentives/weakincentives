@@ -140,6 +140,60 @@ class TestCodexAppServerClientInit:
         )
         assert client.stderr_output == ""
 
+    def test_replace_env_default_false(self) -> None:
+        client = CodexAppServerClient()
+        assert client._replace_env is False
+
+    def test_replace_env_true(self) -> None:
+        client = CodexAppServerClient(
+            env={"HOME": "/tmp/fake", "PATH": "/usr/bin"},
+            replace_env=True,
+        )
+        assert client._replace_env is True
+
+
+class TestClientStartReplaceEnv:
+    def test_start_uses_only_provided_env_when_replace_env(self) -> None:
+        async def _run() -> None:
+            proc = FakeProcess(stdout_lines=[])
+            custom_env = {"HOME": "/tmp/fake", "PATH": "/usr/bin"}
+            with patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec:
+                mock_exec.return_value = proc
+                client = CodexAppServerClient(env=custom_env, replace_env=True)
+                await client.start()
+                args = mock_exec.call_args
+                passed_env = args[1]["env"]
+                # Only the provided env vars should be present
+                assert passed_env["HOME"] == "/tmp/fake"
+                assert passed_env["PATH"] == "/usr/bin"
+                # Should NOT include arbitrary host env vars
+                assert len(passed_env) == 2
+                await client.stop()
+
+        asyncio.run(_run())
+
+    def test_start_merges_env_when_not_replace_env(self) -> None:
+        async def _run() -> None:
+            proc = FakeProcess(stdout_lines=[])
+            custom_env = {"MY_CUSTOM_VAR": "value"}
+            with patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec:
+                mock_exec.return_value = proc
+                client = CodexAppServerClient(env=custom_env)
+                await client.start()
+                args = mock_exec.call_args
+                passed_env = args[1]["env"]
+                # Should include both host env and custom vars
+                assert passed_env["MY_CUSTOM_VAR"] == "value"
+                # Should also include PATH from host env
+                assert "PATH" in passed_env
+                await client.stop()
+
+        asyncio.run(_run())
+
 
 class TestClientStartStop:
     def test_start_spawns_process(self) -> None:

@@ -2,6 +2,37 @@
 
 Release highlights for weakincentives.
 
+## v0.26.0 — 2026-02-07
+
+### TL;DR
+
+The **Codex App Server adapter** gains **hermetic home directory** isolation,
+**skills support** via PromptTemplate mount definitions, and **automatic host
+credential copying**.
+
+### Codex Adapter
+
+- **Hermetic home** (`CodexHermeticHomeConfig`): The adapter can now create an
+  ephemeral `$HOME` directory for the Codex subprocess, isolating it from the
+  host's `~/.codex` configuration. Configured via
+  `CodexAppServerClientConfig.hermetic_home`.
+- **Host credential copying**: When hermetic home is active, `~/.codex/` is
+  automatically copied from the host so the Codex CLI retains auth tokens.
+  Credential environment variables (`OPENAI_API_KEY`, `CODEX_API_KEY`, etc.)
+  are passed through automatically.
+- **Skills mounting**: Skills from rendered prompt sections
+  (`RenderedPrompt.skills`) are mounted into `$HOME/.codex/skills/` in the
+  ephemeral home. Supports directory skills, file skills, validation, and
+  duplicate name detection.
+- **`replace_env` on client**: `CodexAppServerClient` now supports
+  `replace_env=True` to use only the provided env dict without merging with
+  `os.environ`.
+
+### New Exports
+
+- `CodexHermeticHomeConfig` — configuration for hermetic home isolation
+- `CodexEphemeralHome` — manages ephemeral home lifecycle
+
 ## v0.25.0 — 2026-02-06
 
 ### TL;DR

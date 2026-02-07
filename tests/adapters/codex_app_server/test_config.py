@@ -21,6 +21,7 @@ from weakincentives.adapters.codex_app_server.config import (
     CodexAppServerModelConfig,
     ExternalTokenAuth,
 )
+from weakincentives.adapters.codex_app_server.isolation import CodexHermeticHomeConfig
 
 
 class TestDefaultModel:
@@ -65,6 +66,17 @@ class TestCodexAppServerClientConfig:
         assert cfg.ephemeral is False
         assert cfg.client_name == "wink"
         assert cfg.client_version == "0.1.0"
+        assert cfg.hermetic_home is None
+
+    def test_with_hermetic_home(self) -> None:
+        home_cfg = CodexHermeticHomeConfig(
+            copy_host_credentials=False,
+            include_host_env=True,
+        )
+        cfg = CodexAppServerClientConfig(hermetic_home=home_cfg)
+        assert cfg.hermetic_home is home_cfg
+        assert cfg.hermetic_home.copy_host_credentials is False
+        assert cfg.hermetic_home.include_host_env is True
 
     def test_custom_values(self) -> None:
         auth = ApiKeyAuth(api_key="key")

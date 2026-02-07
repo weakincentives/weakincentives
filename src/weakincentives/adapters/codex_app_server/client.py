@@ -51,11 +51,13 @@ class CodexAppServerClient:
         codex_bin: str = "codex",
         env: Mapping[str, str] | None = None,
         suppress_stderr: bool = True,
+        replace_env: bool = False,
     ) -> None:
         super().__init__()
         self._codex_bin = codex_bin
         self._extra_env = dict(env) if env else {}
         self._suppress_stderr = suppress_stderr
+        self._replace_env = replace_env
         self._proc: asyncio.subprocess.Process | None = None
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
@@ -66,7 +68,10 @@ class CodexAppServerClient:
 
     async def start(self) -> None:
         """Spawn the codex app-server subprocess and begin reading."""
-        merged_env = {**os.environ, **self._extra_env}
+        if self._replace_env:
+            merged_env = dict(self._extra_env)
+        else:
+            merged_env = {**os.environ, **self._extra_env}
         self._proc = await asyncio.create_subprocess_exec(
             self._codex_bin,
             "app-server",

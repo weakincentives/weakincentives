@@ -86,6 +86,7 @@ src/weakincentives/adapters/codex_app_server/
   adapter.py                # CodexAppServerAdapter
   config.py                 # CodexAppServerClientConfig, CodexAppServerModelConfig
   client.py                 # CodexAppServerClient (stdio JSON-RPC client)
+  isolation.py              # CodexEphemeralHome, CodexHermeticHomeConfig
   workspace.py              # CodexWorkspaceSection
   _events.py                # Codex item/turn notifications → WINK ToolInvoked mapping
   _async.py                 # asyncio helpers for stdio NDJSON processing
@@ -112,6 +113,7 @@ Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
 | `ephemeral` | `bool` | `False` | If true, thread is not persisted to disk |
 | `client_name` | `str` | `"wink"` | Client identifier for `initialize` |
 | `client_version` | `str` | `"0.1.0"` | Client version for `initialize` |
+| `hermetic_home` | `CodexHermeticHomeConfig \| None` | `None` | Hermetic home directory isolation config |
 
 > **CWD requirement:** `thread/start` requires `cwd` to be an absolute path. If
 > `None`, the adapter resolves to `Path.cwd().resolve()`.
@@ -797,10 +799,104 @@ with prompt.resources:
 summary: Summary = resp.output  # Typed structured output
 ```
 
+## Hermetic Home Directory
+
+When `CodexAppServerClientConfig.hermetic_home` is set to a
+`CodexHermeticHomeConfig`, the adapter creates an ephemeral temporary directory
+that serves as `HOME` for the Codex subprocess. This prevents the subprocess
+from reading or modifying the user's `~/.codex` configuration.
+
+At `src/weakincentives/adapters/codex_app_server/isolation.py`:
+
+### CodexHermeticHomeConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `copy_host_credentials` | `bool` | `True` | Copy `~/.codex/` from host into ephemeral home |
+| `include_host_env` | `bool` | `False` | Inherit non-sensitive host environment variables |
+| `env` | `Mapping[str, str] \| None` | `None` | Additional environment variables (highest priority) |
+
+### CodexEphemeralHome
+
+Manages the temporary directory lifecycle:
+
+1. **Created** in `_build_client_env()` before spawning the Codex subprocess
+1. **Credential copying** — `~/.codex/` copied via `shutil.copytree` when
+   `copy_host_credentials=True` (preserves auth tokens, config)
+1. **Skill mounting** — skills from `rendered.skills` placed in
+   `$HOME/.codex/skills/{name}/`
+1. **Environment** — `get_env()` returns complete env dict with `HOME` pointing
+   to the ephemeral directory
+1. **Cleanup** — directory removed in the `finally` block after `client.stop()`
+
+### Credential Passthrough
+
+Regardless of `include_host_env`, these environment variables are always passed
+through from the host when present:
+
+| Variable | Description |
+|----------|-------------|
+| `OPENAI_API_KEY` | OpenAI API key |
+| `OPENAI_ORG_ID` | OpenAI organization ID |
+| `OPENAI_BASE_URL` | Custom OpenAI base URL |
+| `CODEX_API_KEY` | Codex-specific API key |
+
+When `include_host_env=True`, all host environment variables are inherited
+**except** those with sensitive prefixes: `HOME`, `OPENAI_*`, `CODEX_*`,
+`ANTHROPIC_*`, `AWS_*`, `GOOGLE_*`, `AZURE_*`.
+
+`PATH` is always included from the host environment.
+
+### Client `replace_env` Mode
+
+When hermetic home is active, the adapter passes `replace_env=True` to the
+`CodexAppServerClient`. This causes the client to use **only** the provided
+environment dictionary instead of merging with `os.environ`.
+
+### Skill Mounting
+
+Skills are collected from the rendered prompt via `rendered.skills` (a tuple of
+`SkillMount` instances attached to prompt sections). The adapter mounts them
+into the ephemeral home before spawning Codex:
+
+```python
+skills = rendered.skills
+if skills:
+    ephemeral_home.mount_skills(skills)
+```
+
+Skills are placed in `$HOME/.codex/skills/{name}/`:
+
+- **Directory skills**: copied recursively (with symlink safety)
+- **File skills**: wrapped in a directory with the file renamed to `SKILL.md`
+
+Validation is enabled by default — each skill must have valid SKILL.md
+frontmatter. Duplicate skill names are rejected.
+
+### Usage
+
+```python
+from weakincentives.adapters.codex_app_server import (
+    CodexAppServerAdapter,
+    CodexAppServerClientConfig,
+    CodexHermeticHomeConfig,
+)
+
+adapter = CodexAppServerAdapter(
+    client_config=CodexAppServerClientConfig(
+        cwd="/path/to/workspace",
+        hermetic_home=CodexHermeticHomeConfig(
+            copy_host_credentials=True,
+            include_host_env=False,
+            env={"CUSTOM_VAR": "value"},
+        ),
+    ),
+)
+```
+
 ## Non-Goals (v1)
 
 - Full Codex review integration (`review/start`) — can be added later
-- Codex skill invocation — can be added later
 - ChatGPT browser OAuth flow — requires interactive browser
 - Per-turn `sandboxPolicy` overrides — thread-level `SandboxMode` is sufficient
 - Apps/connectors (`app/list`) — can be added later

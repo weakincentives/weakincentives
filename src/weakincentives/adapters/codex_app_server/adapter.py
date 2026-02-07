@@ -19,6 +19,7 @@ import contextlib
 import json
 import shutil
 import tempfile
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast, override
@@ -53,6 +54,7 @@ from .config import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
 )
+from .isolation import CodexEphemeralHome
 
 __all__ = [
     "CODEX_APP_SERVER_ADAPTER_NAME",
@@ -302,6 +304,38 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
 
         return effective_cwd, temp_workspace_dir, prompt
 
+    def _build_client_env(
+        self, rendered: RenderedPrompt[Any]
+    ) -> tuple[Mapping[str, str] | None, bool, CodexEphemeralHome | None]:
+        """Build client environment, optionally with hermetic home.
+
+        When ``hermetic_home`` is configured, creates a
+        :class:`CodexEphemeralHome`, mounts skills from the rendered
+        prompt, and returns a complete replacement environment.
+
+        Returns:
+            (env, replace_env, ephemeral_home) — ``replace_env`` is
+            ``True`` when ``env`` is a complete environment that should
+            replace (not merge with) ``os.environ``.
+        """
+        if self._client_config.hermetic_home is None:
+            return self._client_config.env, False, None
+
+        ephemeral_home = CodexEphemeralHome(self._client_config.hermetic_home)
+        try:
+            skills = rendered.skills
+            if skills:
+                ephemeral_home.mount_skills(skills)
+        except Exception:
+            ephemeral_home.cleanup()
+            raise
+
+        env = ephemeral_home.get_env()
+        if self._client_config.env:
+            env.update(self._client_config.env)
+
+        return env, True, ephemeral_home
+
     async def _run_codex[OutputT](
         self,
         *,
@@ -339,10 +373,13 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
 
         output_schema = _build_output_schema(rendered)
 
+        client_env, replace_env, ephemeral_home = self._build_client_env(rendered)
+
         client = CodexAppServerClient(
             codex_bin=self._client_config.codex_bin,
-            env=self._client_config.env,
+            env=client_env,
             suppress_stderr=self._client_config.suppress_stderr,
+            replace_env=replace_env,
         )
 
         start_time = _utcnow()
@@ -381,6 +418,8 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             ) from error
         finally:
             await client.stop()
+            if ephemeral_home is not None:
+                ephemeral_home.cleanup()
 
         accumulated_text, usage = result
         end_time = _utcnow()
