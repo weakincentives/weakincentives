@@ -23,7 +23,6 @@ from weakincentives.skills import (
     MAX_SKILL_FILE_BYTES,
     MAX_SKILL_TOTAL_BYTES,
     Skill,
-    SkillConfig,
     SkillError,
     SkillMount,
     SkillMountError,
@@ -66,46 +65,15 @@ class TestSkillMount:
         mount = SkillMount(source=Path("/path/to/skill"))
         assert mount.source == Path("/path/to/skill")
         assert mount.name is None
-        assert mount.enabled is True
 
     def test_with_name(self) -> None:
         mount = SkillMount(source=Path("/path/to/skill"), name="custom-name")
         assert mount.name == "custom-name"
 
-    def test_disabled(self) -> None:
-        mount = SkillMount(source=Path("/path/to/skill"), enabled=False)
-        assert mount.enabled is False
-
     def test_is_frozen(self) -> None:
         mount = SkillMount(source=Path("/test"))
         with pytest.raises(AttributeError):
-            mount.enabled = False  # type: ignore[misc]
-
-
-class TestSkillConfig:
-    """Tests for the SkillConfig dataclass."""
-
-    def test_defaults(self) -> None:
-        config = SkillConfig()
-        assert config.skills == ()
-        assert config.validate_on_mount is True
-
-    def test_with_skills(self) -> None:
-        mounts = (
-            SkillMount(source=Path("/skill1")),
-            SkillMount(source=Path("/skill2")),
-        )
-        config = SkillConfig(skills=mounts)
-        assert len(config.skills) == 2
-
-    def test_validation_disabled(self) -> None:
-        config = SkillConfig(validate_on_mount=False)
-        assert config.validate_on_mount is False
-
-    def test_is_frozen(self) -> None:
-        config = SkillConfig()
-        with pytest.raises(AttributeError):
-            config.validate_on_mount = False  # type: ignore[misc]
+            mount.name = "new-name"  # type: ignore[misc]
 
 
 class TestSkillErrors:

@@ -53,10 +53,12 @@ class RegistrySnapshot:
     defaults_by_type: Mapping[type[SupportsDataclass], SupportsDataclass]
     placeholders: Mapping[SectionPath, frozenset[str]]
     tool_name_registry: Mapping[str, SectionPath]
+    skill_name_registry: Mapping[str, SectionPath]
     # Precomputed indices for O(1) lookups
     node_by_path: Mapping[SectionPath, SectionNode[SupportsDataclass]]
     children_by_path: Mapping[SectionPath, tuple[str, ...]]
     subtree_has_tools: Mapping[SectionPath, bool]
+    subtree_has_skills: Mapping[SectionPath, bool]
 
     def resolve_section_params(
         self,
@@ -277,6 +279,7 @@ def _build_registry_indices(
     Mapping[SectionPath, SectionNode[SupportsDataclass]],
     Mapping[SectionPath, tuple[str, ...]],
     Mapping[SectionPath, bool],
+    Mapping[SectionPath, bool],
 ]:
     """Build precomputed indices for O(1) lookups in registry operations.
 
@@ -284,9 +287,11 @@ def _build_registry_indices(
     - node_by_path: Maps section path to its node
     - children_by_path: Maps section path to tuple of direct child keys
     - subtree_has_tools: Maps section path to whether section or descendants have tools
+    - subtree_has_skills: Maps section path to whether section or descendants have skills
 
     Returns:
-        Tuple of (node_by_path, children_by_path, subtree_has_tools) as frozen mappings.
+        Tuple of (node_by_path, children_by_path, subtree_has_tools, subtree_has_skills)
+        as frozen mappings.
     """
     # Build node_by_path in O(n)
     node_by_path: dict[SectionPath, SectionNode[SupportsDataclass]] = {
@@ -302,9 +307,10 @@ def _build_registry_indices(
         if parent_path in children_by_path:
             children_by_path[parent_path].append(node.section.key)
 
-    # Build subtree_has_tools using reverse traversal in O(n)
+    # Build subtree_has_tools and subtree_has_skills using reverse traversal in O(n)
     # Traverse in reverse DFS order to compute children before parents
     subtree_has_tools: dict[SectionPath, bool] = {}
+    subtree_has_skills: dict[SectionPath, bool] = {}
     for node in reversed(sections):
         # Check if this section has tools
         has_tools = bool(node.section.tools())
@@ -318,6 +324,18 @@ def _build_registry_indices(
             )
             subtree_has_tools[node.path] = child_has_tools
 
+        # Check if this section has skills
+        has_skills = bool(node.section.skills())
+        if has_skills:
+            subtree_has_skills[node.path] = True
+        else:
+            # Check if any child subtree has skills
+            child_has_skills = any(
+                subtree_has_skills.get((*node.path, child_key), False)
+                for child_key in children_by_path[node.path]
+            )
+            subtree_has_skills[node.path] = child_has_skills
+
     # Freeze the mappings
     frozen_children: dict[SectionPath, tuple[str, ...]] = {
         path: tuple(children) for path, children in children_by_path.items()
@@ -327,6 +345,7 @@ def _build_registry_indices(
         MappingProxyType(node_by_path),
         MappingProxyType(frozen_children),
         MappingProxyType(subtree_has_tools),
+        MappingProxyType(subtree_has_skills),
     )
 
 
@@ -347,6 +366,7 @@ class PromptRegistry:
         self._defaults_by_type: dict[type[SupportsDataclass], SupportsDataclass] = {}
         self._placeholders: dict[SectionPath, set[str]] = {}
         self._tool_name_registry: dict[str, SectionPath] = {}
+        self._skill_name_registry: dict[str, SectionPath] = {}
         self._numbering_stack: list[int] = []
 
     def register_sections(self, sections: Sequence[Section[SupportsDataclass]]) -> None:
@@ -379,6 +399,7 @@ class PromptRegistry:
         self._register_section_defaults(section, path, params_type)
         self._register_placeholders(section, path, params_type)
         self._register_section_tools_if_present(section, path, params_type)
+        self._register_section_skills_if_present(section, path)
         self._register_child_sections(section, path, depth)
 
     @staticmethod
@@ -493,6 +514,28 @@ class PromptRegistry:
                 path,
             )
 
+    def _register_section_skills_if_present(
+        self,
+        section: Section[SupportsDataclass],
+        path: SectionPath,
+    ) -> None:
+        from ..skills import resolve_skill_name
+
+        section_skills = section.skills()
+        if not section_skills:
+            return
+
+        # Skills are already validated as SkillMount by Section._normalize_skills
+        for mount in section_skills:
+            name = resolve_skill_name(mount)
+            existing_path = self._skill_name_registry.get(name)
+            if existing_path is not None:
+                raise PromptValidationError(
+                    f"Duplicate skill name '{name}' registered for prompt.",
+                    section_path=path,
+                )
+            self._skill_name_registry[name] = path
+
     def _register_child_sections(
         self,
         section: Section[SupportsDataclass],
@@ -562,11 +605,12 @@ class PromptRegistry:
             {path: frozenset(names) for path, names in self._placeholders.items()}
         )
         tool_name_registry = MappingProxyType(dict(self._tool_name_registry))
+        skill_name_registry = MappingProxyType(dict(self._skill_name_registry))
 
         # Build precomputed indices for O(1) lookups
         sections_tuple = tuple(self._section_nodes)
-        node_by_path, children_by_path, subtree_has_tools = _build_registry_indices(
-            sections_tuple
+        node_by_path, children_by_path, subtree_has_tools, subtree_has_skills = (
+            _build_registry_indices(sections_tuple)
         )
 
         return RegistrySnapshot(
@@ -576,9 +620,11 @@ class PromptRegistry:
             defaults_by_type=defaults_by_type,
             placeholders=placeholders,
             tool_name_registry=tool_name_registry,
+            skill_name_registry=skill_name_registry,
             node_by_path=node_by_path,
             children_by_path=children_by_path,
             subtree_has_tools=subtree_has_tools,
+            subtree_has_skills=subtree_has_skills,
         )
 
     def _validate_task_examples(

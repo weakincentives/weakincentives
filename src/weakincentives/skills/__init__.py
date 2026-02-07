@@ -31,9 +31,10 @@ agent environments. Each skill is either:
   supporting resources like examples, templates, and scripts.
 - A **file skill**: A single markdown file with a ``.md`` extension.
 
-Skills enable declarative agent configuration without modifying prompts or
-requiring access to agent internals. They follow a standardized format that
-allows agents to discover and understand available capabilities.
+Skills are attached to prompt sections via the ``skills`` parameter, following
+the same pattern as tools. They follow the same visibility rules: skills
+attached to sections with SUMMARY visibility are not collected until the
+section is expanded.
 
 SKILL.md Format
 ---------------
@@ -84,32 +85,29 @@ Invalid examples: ``My-Skill``, ``-skill``, ``skill--v2``, ``../escape``
 Basic Usage
 -----------
 
-Creating and validating skill mounts::
+Attaching skills to prompt sections::
 
     from pathlib import Path
-    from weakincentives.skills import (
-        Skill,
-        SkillConfig,
-        SkillMount,
-        resolve_skill_name,
-        validate_skill,
-        validate_skill_name,
-    )
+    from weakincentives.prompt import MarkdownSection, PromptTemplate
+    from weakincentives.skills import SkillMount
 
-    # Create a skill configuration with multiple skills
-    config = SkillConfig(
+    # Attach skills to a section
+    section = MarkdownSection(
+        title="Code Review",
+        key="code-review",
+        template="Review the code for issues.",
         skills=(
             SkillMount(Path("./skills/code-review")),
             SkillMount(Path("./skills/testing")),
-        )
+        ),
     )
 
-    # Resolve and validate each skill
-    for mount in config.skills:
-        if mount.enabled:
-            name = resolve_skill_name(mount)
-            validate_skill(mount.source.resolve())
-            print(f"Skill '{name}' validated")
+    # Create prompt with the section
+    template = PromptTemplate(
+        ns="demo",
+        key="reviewer",
+        sections=[section],
+    )
 
 Working with Skill Mounts
 -------------------------
@@ -117,7 +115,7 @@ Working with Skill Mounts
 SkillMount provides flexible configuration options::
 
     from pathlib import Path
-    from weakincentives.skills import SkillMount, SkillConfig
+    from weakincentives.skills import SkillMount
 
     # Mount a directory skill (name derived from directory)
     review_skill = SkillMount(Path("./skills/code-review"))
@@ -128,16 +126,26 @@ SkillMount provides flexible configuration options::
         name="code-review",
     )
 
-    # Conditionally disable a skill
-    experimental = SkillMount(
-        source=Path("./skills/experimental"),
-        enabled=False,
-    )
+Conditional Skills via Section Visibility
+-----------------------------------------
 
-    # Combine into a configuration
-    config = SkillConfig(
-        skills=(review_skill, custom_skill, experimental),
-        validate_on_mount=True,  # Default: validate before copying
+Skills follow section visibility rules. Attach skills to sections with
+``visibility=SUMMARY`` to defer skill loading until the section is expanded::
+
+    from weakincentives.prompt import MarkdownSection, SectionVisibility
+    from weakincentives.skills import SkillMount
+
+    # Skills only loaded when section is expanded
+    advanced_section = MarkdownSection(
+        title="Advanced Analysis",
+        key="advanced",
+        template="Perform deep code analysis.",
+        summary="Advanced analysis capabilities available on request.",
+        visibility=SectionVisibility.SUMMARY,
+        skills=(
+            SkillMount(Path("./skills/deep-analysis")),
+            SkillMount(Path("./skills/performance-profiling")),
+        ),
     )
 
 Skill Name Resolution
@@ -243,9 +251,7 @@ Core Types:
 
 - :class:`Skill`: Core representation of a skill definition with name, source,
   and optional content.
-- :class:`SkillMount`: Configuration for mounting a skill into an agent
-  environment.
-- :class:`SkillConfig`: Collection of skill mounts with validation settings.
+- :class:`SkillMount`: Configuration for mounting a skill to a prompt section.
 
 Error Types:
 
@@ -278,7 +284,6 @@ from ._types import (
     MAX_SKILL_FILE_BYTES,
     MAX_SKILL_TOTAL_BYTES,
     Skill,
-    SkillConfig,
     SkillMount,
 )
 from ._validation import (
@@ -291,7 +296,6 @@ __all__ = [
     "MAX_SKILL_FILE_BYTES",
     "MAX_SKILL_TOTAL_BYTES",
     "Skill",
-    "SkillConfig",
     "SkillError",
     "SkillMount",
     "SkillMountError",

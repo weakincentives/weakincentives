@@ -56,6 +56,7 @@ Abstract base at `src/weakincentives/prompt/section.py`:
 | `key` | Identifier |
 | `children` | Child sections |
 | `tools` | Tools attached to section |
+| `skills` | Skills attached to section (tuple of `SkillMount`) |
 | `enabled` | Conditional rendering callable |
 | `visibility` | FULL or SUMMARY |
 | `accepts_overrides` | Whether overridable |
@@ -66,6 +67,9 @@ Sections must be specialized: `MarkdownSection[MyParams]`
 | --- | --- |
 | `cleanup()` | Release resources held by this section (idempotent no-op by default) |
 | `resources()` | Return `ResourceRegistry` contributed by this section |
+
+Skills are collected alongside tools during rendering and follow the same
+visibility rules. See `specs/SKILLS.md` for skill attachment details.
 
 ### MarkdownSection
 
@@ -147,7 +151,8 @@ At `prompt/rendering.py`:
 | Property | Description |
 | --- | --- |
 | `text` | Rendered markdown |
-| `tools` | Tool tuple |
+| `tools` | Tool tuple from enabled sections |
+| `skills` | Skill mounts from enabled sections |
 | `output_type` | Structured output type |
 | `container` | `"object"` or `"array"` |
 | `deadline` | Propagated deadline |

@@ -42,6 +42,7 @@ from .tool import Tool
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..runtime.session.protocols import SessionProtocol
+    from ..skills import SkillMount
     from .overrides import PromptDescriptor, ToolOverride
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "prompt"})
@@ -61,6 +62,7 @@ class RenderedPrompt[OutputT_co]:
     _tools: tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...] = field(
         default_factory=tuple
     )
+    _skills: tuple[SkillMount, ...] = field(default_factory=tuple)
     _tool_param_descriptions: Mapping[str, Mapping[str, str]] = field(
         default=_EMPTY_TOOL_PARAM_DESCRIPTIONS
     )
@@ -74,6 +76,12 @@ class RenderedPrompt[OutputT_co]:
         """Tools contributed by enabled sections in traversal order."""
 
         return self._tools
+
+    @property
+    def skills(self) -> tuple[SkillMount, ...]:
+        """Skills contributed by enabled sections in traversal order."""
+
+        return self._skills
 
     @property
     def tool_param_descriptions(
@@ -181,6 +189,7 @@ class PromptRenderer[OutputT]:
         )
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
+        collected_skills: list[SkillMount] = []
         override_lookup = dict(overrides or {})
         tool_override_lookup = dict(tool_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}
@@ -211,8 +220,13 @@ class PromptRenderer[OutputT]:
             # When rendering with SUMMARY visibility, skip children
             if effective_visibility == SectionVisibility.SUMMARY:
                 summary_skip_depth = node.depth
-                # Track whether summarized section (or its descendants) has tools
-                if self._section_or_descendants_have_tools(node):
+                # Track whether summarized section (or descendants) has tools or skills.
+                # Skills are treated like tools for progressive disclosure - expanding
+                # a section with skills requires open_sections to activate them.
+                has_tools_or_skills = self._section_or_descendants_have_tools(
+                    node
+                ) or self._section_or_descendants_have_skills(node)
+                if has_tools_or_skills:
                     has_summarized_with_tools = True
                 else:
                     has_summarized_without_tools = True
@@ -229,13 +243,16 @@ class PromptRenderer[OutputT]:
             ):
                 section_key = ".".join(node.path)
                 child_keys = self._collect_child_keys(node)
-                has_tools = self._section_or_descendants_have_tools(node)
+                # Skills are treated like tools for progressive disclosure
+                has_tools_or_skills = self._section_or_descendants_have_tools(
+                    node
+                ) or self._section_or_descendants_have_skills(node)
                 suffix = build_summary_suffix(
-                    section_key, child_keys, has_tools=has_tools
+                    section_key, child_keys, has_tools=has_tools_or_skills
                 )
                 rendered += suffix
 
-            # Don't collect tools when rendering with SUMMARY visibility
+            # Don't collect tools/skills when rendering with SUMMARY visibility
             if effective_visibility != SectionVisibility.SUMMARY:
                 self._collect_section_tools(
                     node.section,
@@ -243,6 +260,7 @@ class PromptRenderer[OutputT]:
                     collected_tools,
                     field_description_patches,
                 )
+                self._collect_section_skills(node.section, collected_skills)
 
             if rendered:
                 rendered_sections.append(rendered)
@@ -293,6 +311,7 @@ class PromptRenderer[OutputT]:
                 "descriptor": str(descriptor) if descriptor is not None else None,
                 "section_count": len(rendered_sections),
                 "tool_count": len(collected_tools),
+                "skill_count": len(collected_skills),
                 "text_length": len(text),
                 "has_structured_output": self._structured_output is not None,
             },
@@ -303,6 +322,7 @@ class PromptRenderer[OutputT]:
             structured_output=self._structured_output,
             descriptor=descriptor,
             _tools=tuple(collected_tools),
+            _skills=tuple(collected_skills),
             _tool_param_descriptions=_freeze_tool_param_descriptions(
                 field_description_patches
             ),
@@ -316,6 +336,15 @@ class PromptRenderer[OutputT]:
         Uses precomputed subtree_has_tools index for O(1) lookup.
         """
         return self._registry.subtree_has_tools.get(parent_node.path, False)
+
+    def _section_or_descendants_have_skills(
+        self, parent_node: SectionNode[SupportsDataclass]
+    ) -> bool:
+        """Check if section or any descendant has skills attached.
+
+        Uses precomputed subtree_has_skills index for O(1) lookup.
+        """
+        return self._registry.subtree_has_skills.get(parent_node.path, False)
 
     def _collect_child_keys(
         self, parent_node: SectionNode[SupportsDataclass]
@@ -353,6 +382,18 @@ class PromptRenderer[OutputT]:
                         override.param_descriptions
                     )
             collected_tools.append(patched_tool)
+
+    def _collect_section_skills(
+        self,
+        section: Section[SupportsDataclass],
+        collected_skills: list[SkillMount],
+    ) -> None:
+        """Collect skills from a section."""
+        section_skills = section.skills()
+        if not section_skills:
+            return
+
+        collected_skills.extend(section_skills)
 
     def _iter_enabled_sections(
         self,

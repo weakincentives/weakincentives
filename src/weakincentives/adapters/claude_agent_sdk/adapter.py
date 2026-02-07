@@ -717,13 +717,15 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             workspace_path=effective_cwd,
         )
 
+        # Mount skills from rendered prompt into ephemeral home
+        skills = rendered.skills
+        if skills:
+            ephemeral_home.mount_skills(skills)
+
         # Build network policy representation for logging
         network_policy_repr: str | None = None
         if isolation.network_policy:
             network_policy_repr = str(isolation.network_policy)
-
-        # Count skills if provided (SkillConfig | None)
-        skill_count = 1 if isolation.skills else 0
 
         logger.debug(
             "claude_agent_sdk.run_context.isolation",
@@ -737,7 +739,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 ),
                 "has_api_key_override": isolation.api_key is not None,
                 "include_host_env": isolation.include_host_env,
-                "skill_count": skill_count,
+                "skill_count": len(skills),
             },
         )
 

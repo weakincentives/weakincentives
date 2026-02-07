@@ -3,7 +3,7 @@
 > Agent Skills: lightweight, open format for extending AI agent capabilities.
 
 This document describes the [Agent Skills specification](https://agentskills.io)
-and WINK's implementation for Claude Code.
+and WINK's implementation.
 
 **Implementation:** `src/weakincentives/skills/`
 
@@ -22,9 +22,14 @@ my-skill/
 
 ### Progressive Disclosure
 
-1. **Discovery**: Load name/description only
-1. **Activation**: Read full instructions when task matches
-1. **Execution**: Load referenced files as needed
+Skills follow the same progressive disclosure rules as tools:
+
+1. Skills attached to enabled sections are collected during rendering
+1. Skills attached to sections with `SUMMARY` visibility are **not** collected
+1. When a section is expanded (via `open_sections`), its skills become available
+
+This allows skills to be conditionally activated based on section visibility,
+matching the behavior of tools.
 
 ## Agent Skills Specification
 
@@ -60,18 +65,47 @@ description: Extract text and tables from PDF files.
 
 ## WINK Implementation
 
+### Section-Level Attachment
+
+Skills are attached to prompt sections via the `skills` parameter, following
+the same pattern as tools:
+
+```python
+from pathlib import Path
+from weakincentives.prompt import MarkdownSection
+from weakincentives.skills import SkillMount
+
+section = MarkdownSection(
+    title="Code Review",
+    key="code-review",
+    template="Review the code for issues.",
+    skills=(
+        SkillMount(Path("./skills/code-review")),
+        SkillMount(Path("./skills/security-audit")),
+    ),
+)
+```
+
+Skills are collected from enabled sections during prompt rendering and made
+available to the adapter for mounting.
+
 ### Architecture
 
 **Core Library (`weakincentives.skills`):**
 
-- Types: `Skill`, `SkillMount`, `SkillConfig`
+- Types: `Skill`, `SkillMount`
 - Validation: `validate_skill()`, `validate_skill_name()`
 - Errors: `SkillError`, `SkillValidationError`, `SkillNotFoundError`, `SkillMountError`
 - Constants: `MAX_SKILL_FILE_BYTES` (1 MiB), `MAX_SKILL_TOTAL_BYTES` (10 MiB)
 
+**Prompt Integration (`weakincentives.prompt`):**
+
+- `Section.skills`: Tuple of `SkillMount` attached to the section
+- `RenderedPrompt.skills`: Collected skills from enabled sections
+
 **Adapter (`src/weakincentives/adapters/claude_agent_sdk`):**
 
-- `IsolationConfig.skills`: Integration point
+- Reads skills from `RenderedPrompt.skills`
 - `EphemeralHome._mount_skills()`: Copies to `$HOME/.claude/skills/`
 
 ### Data Model
@@ -79,8 +113,7 @@ description: Extract text and tables from PDF files.
 | Type | Fields |
 |------|--------|
 | `Skill` | `name`, `source`, `content` |
-| `SkillMount` | `source`, `name` (optional), `enabled` |
-| `SkillConfig` | `skills`, `validate_on_mount` |
+| `SkillMount` | `source`, `name` (optional) |
 
 ### Name Resolution
 
@@ -105,44 +138,84 @@ description: Extract text and tables from PDF files.
 
 ## Usage Examples
 
-### Basic Mounting
+### Attaching Skills to Sections
 
 ```python
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        isolation=IsolationConfig(
-            skills=SkillConfig(
-                skills=(
-                    SkillMount(Path("./skills/code-review")),
-                    SkillMount(Path("./skills/testing")),
-                )
-            ),
-        ),
+from pathlib import Path
+from weakincentives.prompt import MarkdownSection, PromptTemplate
+from weakincentives.skills import SkillMount
+
+# Section with skills
+review_section = MarkdownSection(
+    title="Code Review",
+    key="code-review",
+    template="Review the following code for issues.",
+    skills=(
+        SkillMount(Path("./skills/code-review")),
+        SkillMount(Path("./skills/testing")),
+    ),
+)
+
+# Create prompt with the section
+template = PromptTemplate(
+    ns="demo",
+    key="reviewer",
+    sections=[review_section],
+)
+```
+
+### Conditional Skills via Section Visibility
+
+Skills follow section visibility rules. Attach skills to sections with
+`visibility=SUMMARY` to defer skill loading until the section is expanded:
+
+```python
+from weakincentives.prompt import MarkdownSection, SectionVisibility
+from weakincentives.skills import SkillMount
+
+# Skills only loaded when section is expanded
+advanced_section = MarkdownSection(
+    title="Advanced Analysis",
+    key="advanced",
+    template="Perform deep code analysis.",
+    summary="Advanced analysis capabilities available on request.",
+    visibility=SectionVisibility.SUMMARY,
+    skills=(
+        SkillMount(Path("./skills/deep-analysis")),
+        SkillMount(Path("./skills/performance-profiling")),
     ),
 )
 ```
 
-### Auto-Discovery
+### Auto-Discovery from Directory
 
 ```python
+from pathlib import Path
+from weakincentives.skills import SkillMount
+
+SKILLS_ROOT = Path("./skills")
+
 skill_mounts = tuple(
     SkillMount(source=skill_dir)
     for skill_dir in SKILLS_ROOT.iterdir()
     if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()
 )
-skills = SkillConfig(skills=skill_mounts)
+
+section = MarkdownSection(
+    title="Tasks",
+    key="tasks",
+    template="Complete the assigned tasks.",
+    skills=skill_mounts,
+)
 ```
 
-### Conditional Skills
+### Name Override
 
 ```python
-SkillMount(source=Path("./skills/experimental"), enabled=include_experimental)
-```
-
-### Disable Validation
-
-```python
-SkillConfig(skills=(...), validate_on_mount=False)
+SkillMount(
+    source=Path("./internal/review-v2"),
+    name="code-review",  # Override derived name
+)
 ```
 
 ## Security Considerations
@@ -153,12 +226,12 @@ SkillConfig(skills=(...), validate_on_mount=False)
 
 ## Limitations
 
-- **No runtime updates**: Requires recreating adapter
-- **No dependencies**: Manual composition via SkillConfig
+- **No runtime updates**: Skills are collected at render time
+- **No dependencies**: Compose skills manually via section structure
 - **No templating**: Use prompt composition for dynamic content
 
 ## Related Specifications
 
-- `specs/CLAUDE_AGENT_SDK.md` - Parent adapter specification
+- `specs/PROMPTS.md` - Prompt system, section attachment
+- `specs/CLAUDE_AGENT_SDK.md` - Adapter that mounts skills
 - `specs/WORKSPACE.md` - Workspace and mount patterns
-- `specs/PROMPTS.md` - Prompt composition alternative

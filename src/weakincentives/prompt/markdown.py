@@ -44,6 +44,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
         children: Sequence[Section[SupportsDataclass]] | None = None,
         enabled: Callable[[SupportsDataclass], bool] | None = None,
         tools: Sequence[object] | None = None,
+        skills: Sequence[object] | None = None,
         policies: Sequence[ToolPolicy] | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
@@ -57,6 +58,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
             children=children,
             enabled=enabled,
             tools=tools,
+            skills=skills,
             policies=policies,
             accepts_overrides=accepts_overrides,
             summary=summary,
@@ -192,6 +194,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
             children=cloned_children,
             enabled=self._enabled,  # ty: ignore[invalid-argument-type]  # callback arity
             tools=self.tools(),
+            skills=self.skills(),
             policies=self.policies(),
             accepts_overrides=self.accepts_overrides,
             summary=self.summary,
