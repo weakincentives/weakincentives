@@ -1118,7 +1118,7 @@ Read before modifying related code:
 | `specs/CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
 | `specs/CODEX_APP_SERVER.md` | Codex App Server adapter, stdio JSON-RPC |
 | `specs/WORKSPACE.md` | Workspace sections, host mounts |
-| `specs/TRANSCRIPT_COLLECTION.md` | SDK transcript collection and logging |
+| `specs/TRANSCRIPT.md` | Unified transcript format, adapter mapping |
 | `specs/DEBUG_BUNDLE.md` | Debug bundle format, BundleConfig |
 | `specs/DBC.md` | Design-by-contract patterns |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection |
