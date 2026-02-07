@@ -2874,3 +2874,183 @@ class TestCheckTaskCompletion:
         assert result == (False, None)
         # Checker should not be called when round_messages is empty
         checker.check.assert_not_called()
+
+
+class TestCollapseNullableAnyOf:
+    """Tests for _collapse_nullable_any_of edge cases."""
+
+    def test_non_dict_entries_returns_none(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of(["string", {"type": "null"}])
+        assert result is None
+
+    def test_no_null_entry_returns_none(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of([{"type": "string"}, {"type": "integer"}])
+        assert result is None
+
+    def test_list_type_collapses_with_null(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of(
+            [{"type": ["string", "integer"]}, {"type": "null"}]
+        )
+        assert result is not None
+        assert result["type"] == ["string", "integer", "null"]
+
+    def test_list_type_already_has_null(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of(
+            [{"type": ["string", "null"]}, {"type": "null"}]
+        )
+        assert result is not None
+        assert result["type"] == ["string", "null"]
+
+    def test_unknown_type_returns_none(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of([{"type": 42}, {"type": "null"}])
+        assert result is None
+
+
+class TestNormalizeClaudeOutputSchema:
+    """Tests for _normalize_claude_output_schema recursive cases."""
+
+    def test_object_without_properties(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _normalize_claude_output_schema,
+        )
+
+        schema: dict[str, Any] = {"type": "object"}
+        result = _normalize_claude_output_schema(schema)
+        assert result == {"type": "object"}
+
+    def test_array_items_normalized(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _normalize_claude_output_schema,
+        )
+
+        schema: dict[str, Any] = {
+            "type": "array",
+            "items": {
+                "anyOf": [{"type": "integer"}, {"type": "null"}],
+            },
+        }
+        result = _normalize_claude_output_schema(schema)
+        assert result["items"]["type"] == ["integer", "null"]
+        assert "anyOf" not in result["items"]
+
+    def test_defs_normalized(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _normalize_claude_output_schema,
+        )
+
+        schema: dict[str, Any] = {
+            "$defs": {
+                "Inner": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                },
+            },
+        }
+        result = _normalize_claude_output_schema(schema)
+        assert result["$defs"]["Inner"]["type"] == ["string", "null"]
+
+
+class TestSupportedOptionNames:
+    """Tests for _supported_option_names and _filter_unsupported_options."""
+
+    def test_non_dataclass_with_fixed_params(self) -> None:
+        class FixedOptions:
+            def __init__(self, *, cwd: str, max_turns: int) -> None:
+                pass
+
+        adapter = ClaudeAgentSDKAdapter()
+        result = adapter._supported_option_names(FixedOptions)
+        assert result == {"cwd", "max_turns"}
+
+    def test_signature_raises_returns_none(self) -> None:
+        adapter = ClaudeAgentSDKAdapter()
+        result = adapter._supported_option_names(int)
+        assert result is None
+
+    def test_filter_with_no_unsupported_keys(self) -> None:
+        class FixedOptions:
+            def __init__(self, *, cwd: str) -> None:
+                pass
+
+        adapter = ClaudeAgentSDKAdapter()
+        kwargs = {"cwd": "/tmp"}
+        result = adapter._filter_unsupported_options(kwargs, options_type=FixedOptions)
+        assert result == {"cwd": "/tmp"}
+
+
+class TestResolveResponseWaitTimeout:
+    """Tests for deadline-exceeded path in _resolve_response_wait_timeout."""
+
+    def _make_expired_hook_context(self, session: Session) -> Any:
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+
+        mock_deadline = MagicMock(spec=Deadline)
+        mock_deadline.remaining.return_value = timedelta(seconds=-1)
+
+        template: PromptTemplate[None] = PromptTemplate(
+            ns="test", key="test", name="test"
+        )
+        prompt: Prompt[None] = Prompt(template)
+        constraints = HookConstraints(deadline=mock_deadline)
+        return HookContext(
+            prompt=prompt,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+    def test_deadline_already_expired_returns_stop(self, session: Session) -> None:
+        """When deadline remaining <= 0, should signal stop."""
+        adapter = ClaudeAgentSDKAdapter()
+        hook_context = self._make_expired_hook_context(session)
+
+        timeout_val, should_stop = adapter._resolve_response_wait_timeout(
+            hook_context=hook_context,
+            continuation_round=0,
+            message_count=0,
+        )
+        assert should_stop is True
+        assert timeout_val is None
+
+    def test_next_response_message_returns_none_on_stop(self, session: Session) -> None:
+        """_next_response_message returns None when deadline expired."""
+
+        async def _run() -> None:
+            adapter = ClaudeAgentSDKAdapter()
+            hook_context = self._make_expired_hook_context(session)
+
+            async def fake_stream() -> AsyncGenerator[object, None]:
+                yield "should not reach"
+
+            result = await adapter._next_response_message(
+                response_stream=fake_stream().__aiter__(),
+                hook_context=hook_context,
+                continuation_round=0,
+                message_count=0,
+            )
+            assert result is None
+
+        asyncio.run(_run())
