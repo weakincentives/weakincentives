@@ -71,7 +71,7 @@ jobs:
           sync-args: --all-extras --frozen
 
       - name: Download all coverage data
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: coverage-*
           merge-multiple: true
