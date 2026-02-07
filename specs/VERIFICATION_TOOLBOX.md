@@ -2,6 +2,15 @@
 
 A minimal, extensible verification framework for running checks on the codebase.
 
+**Implementation:**
+
+- Framework: `toolchain/` (excluded from package)
+- Checkers: `toolchain/checkers/`
+- Entry point: `check.py`
+- Makefile targets: `Makefile`
+- Pre-commit hook: `hooks/pre-commit`
+- Hook installer: `install-hooks.sh`
+
 ## Overview
 
 The verification toolchain provides a single entry point (`check.py`) for running
@@ -10,6 +19,7 @@ all verification checks. It is designed for:
 - **Immediate debugging** - Failures include file:line locations you can click
 - **Extensibility** - Add checkers by implementing a simple protocol
 - **Concise output** - Quiet on success, detailed on failure
+- **Dual-mode operation** - Auto-fixes locally, check-only in CI
 - **Not packaged** - Development tooling only, lives outside `src/`
 
 ## Architecture
@@ -32,118 +42,79 @@ toolchain/                # Framework (excluded from package)
 
 ## Result Types
 
-### Location
+See `toolchain/result.py` for the full dataclass definitions.
 
-Pinpoints exactly where an issue occurred:
+| Type | Fields | Description |
+|------|--------|-------------|
+| `Location` | `file`, `line`, `column` | Clickable `file:line:col` format |
+| `Diagnostic` | `message`, `location`, `severity` | Single issue with context |
+| `CheckResult` | `name`, `status`, `duration_ms`, `diagnostics`, `output` | Result from one checker |
+| `Report` | `results`, `total_duration_ms` | Aggregated results from all checkers |
 
-```python
-@dataclass(frozen=True, slots=True)
-class Location:
-    file: str
-    line: int | None = None
-    column: int | None = None
-
-    def __str__(self) -> str:
-        # Returns "file:line:col" format for easy navigation
-        # Examples: "src/foo.py:42:10", "src/bar.py:17", "README.md"
-```
-
-### Diagnostic
-
-A single issue with full context for debugging:
-
-```python
-@dataclass(frozen=True, slots=True)
-class Diagnostic:
-    message: str                              # What went wrong
-    location: Location | None = None          # Where (clickable)
-    severity: Literal["error", "warning", "info"] = "error"
-
-    def __str__(self) -> str:
-        # "src/foo.py:42: Type error: expected int, got str"
-```
-
-### CheckResult
-
-Complete result from a single checker:
-
-```python
-@dataclass(frozen=True, slots=True)
-class CheckResult:
-    name: str                                 # Checker name (e.g., "lint")
-    status: Literal["passed", "failed", "skipped"]
-    duration_ms: int                          # For performance tracking
-    diagnostics: tuple[Diagnostic, ...] = ()  # All issues found
-    output: str = ""                          # Raw output for verbose mode
-```
-
-### Report
-
-Aggregated results from all checkers:
-
-```python
-@dataclass(frozen=True, slots=True)
-class Report:
-    results: tuple[CheckResult, ...]
-    total_duration_ms: int
-
-    @property
-    def passed(self) -> bool:
-        return all(r.status != "failed" for r in self.results)
-```
+Severity levels: `"error"`, `"warning"`, `"info"`.
+Status values: `"passed"`, `"failed"`, `"skipped"`.
 
 ## Checker Protocol
 
-Every checker implements this minimal interface:
+See `toolchain/checker.py` for the protocol and base implementations.
 
-```python
-class Checker(Protocol):
-    @property
-    def name(self) -> str:
-        """Short identifier (e.g., 'lint', 'test')."""
-        ...
-
-    @property
-    def description(self) -> str:
-        """Human-readable description."""
-        ...
-
-    def run(self) -> CheckResult:
-        """Execute the check and return the result."""
-        ...
-```
+Every checker implements the `Checker` protocol: `name` (property), `description`
+(property), `run() -> CheckResult`.
 
 ### SubprocessChecker
 
-Base class for checkers that wrap external tools:
+Base class for checkers that wrap external tools. Runs a command, captures output,
+invokes a parser to extract diagnostics.
 
-```python
-@dataclass
-class SubprocessChecker:
-    name: str
-    description: str
-    command: list[str]                        # Command to run
-    parser: DiagnosticParser = _no_parse      # Extracts diagnostics from output
-    timeout: int = 300                        # 5 minutes default
-```
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | (required) | Checker identifier |
+| `description` | `str` | (required) | Human-readable description |
+| `command` | `list[str]` | (required) | Command to run |
+| `parser` | `DiagnosticParser` | `_no_parse` | Extracts diagnostics from output |
+| `timeout` | `int` | `300` | Timeout in seconds |
+| `env` | `dict[str, str]` | `{}` | Extra environment variables |
 
-The `parser` function extracts structured `Diagnostic` objects from tool output,
-enabling clickable file:line locations in the terminal.
+### AutoFormatChecker
+
+Dual-mode checker for formatting tools. Detects CI vs local environment via
+`is_ci_environment()`.
+
+| Environment | Behavior |
+|-------------|----------|
+| **CI** (`CI=true` or `GITHUB_ACTIONS=true`) | Runs check command only; fails if changes needed |
+| **Local** | Runs formatter to auto-fix; reports changed files as info diagnostics |
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | (required) | Checker identifier |
+| `description` | `str` | (required) | Human-readable description |
+| `check_command` | `list[str]` | (required) | Command for check-only mode |
+| `fix_command` | `list[str]` | (required) | Command for auto-fix mode |
+| `json_check_command` | `list[str] \| None` | `None` | JSON output variant for file list |
+| `file_list_parser` | `FileListParser` | `_no_file_list_parse` | Text-based file list parser |
+| `parser` | `DiagnosticParser` | `_no_parse` | Diagnostic parser |
+| `timeout` | `int` | `300` | Timeout in seconds |
+
+Used by the `format` checker (ruff format) and `markdown` checker (mdformat).
 
 ## Available Checkers
 
-| Checker | Description | What It Checks |
-|---------|-------------|----------------|
-| `format` | Code formatting | `ruff format --check` |
-| `lint` | Code style | `ruff check --preview` |
-| `typecheck` | Type safety | `ty check src && pyright` |
-| `bandit` | Security | Bandit security scanner |
-| `deptry` | Dependencies | Unused/missing dependencies |
-| `pip-audit` | Vulnerabilities | Known CVEs in dependencies |
-| `architecture` | Code structure | Core/contrib separation |
-| `docs` | Documentation | Examples, links, references |
-| `markdown` | Markdown format | `mdformat --check` |
-| `test` | Tests | pytest with 100% coverage |
+See `toolchain/checkers/__init__.py` for factory functions and execution order.
+
+| Checker | Type | Description | What It Checks |
+|---------|------|-------------|----------------|
+| `format` | `AutoFormatChecker` | Code formatting | `ruff format` (auto-fix locally, check in CI) |
+| `lint` | `SubprocessChecker` | Code style | `ruff check --preview` |
+| `typecheck` | `SubprocessChecker` | Type safety | `ty check src && pyright` (diagnostics prefixed with tool name) |
+| `bandit` | `SubprocessChecker` | Security | Bandit security scanner |
+| `deptry` | `SubprocessChecker` | Dependencies | Unused/missing dependencies |
+| `pip-audit` | `SubprocessChecker` | Vulnerabilities | Known CVEs in dependencies |
+| `architecture` | `ArchitectureChecker` | Code structure | Core/contrib separation |
+| `docs` | `DocsChecker` | Documentation | Examples, links, references |
+| `markdown` | `AutoFormatChecker` | Markdown format | `mdformat` (auto-fix locally, check in CI) |
+| `bun-test` | `SubprocessChecker` | JavaScript tests | `bun test --coverage` (skips if bun not installed) |
+| `test` | `SubprocessChecker` | Python tests | pytest with 100% coverage, 10s timeout per test |
 
 ## Failure Reporting
 
@@ -257,57 +228,94 @@ Or use the Makefile which handles this automatically:
 make check    # Run all checks
 make lint     # Just lint
 make test     # Just tests
+make bun-test # Just JavaScript tests
 ```
+
+## Efficient Testing with pytest-testmon
+
+`make check` and `make test` automatically detect local vs CI execution:
+
+| Environment | Behavior |
+|-------------|----------|
+| **CI** (`CI=true`) | Full test suite with 100% coverage enforcement |
+| **Local** | Only tests affected by changes (uses testmon coverage database) |
+
+The first local run builds a coverage database (`.testmondata`). Subsequent
+runs use this database to identify which tests cover changed code and skip
+the rest. This dramatically reduces iteration time when working on focused
+changes.
+
+The test checker in CI mode uses:
+
+```bash
+pytest --strict-config --strict-markers --cov-fail-under=100 \
+  --timeout=10 --timeout-method=thread --tb=short tests
+```
+
+Local mode uses:
+
+```bash
+pytest -p no:cov -o addopts= --testmon --strict-config --strict-markers \
+  --timeout=10 --timeout-method=thread --tb=short --reruns=2 tests
+```
+
+See `Makefile` for the `test` target implementation.
+
+## Pre-commit Hooks
+
+Git hooks enforce the full CI test suite before every commit, preventing
+commits that would fail in CI.
+
+**Installation:** `./install-hooks.sh` (mandatory after cloning)
+
+The pre-commit hook runs `CI=true make check`, which:
+
+1. Runs the **full** test suite (not the testmon subset)
+1. Enforces 100% coverage on all code paths
+1. Runs all linting, type checking, security scanning, etc.
+1. Exactly emulates CI verification
+
+See `hooks/pre-commit` for the hook implementation and `install-hooks.sh` for
+the installer.
+
+## Bun Test Integration
+
+JavaScript tests are integrated into the unified toolchain via the `bun-test`
+checker. The checker gracefully handles environments without bun installed by
+exiting 0 with a skip message.
+
+```bash
+make bun-test                    # Run via Makefile
+uv run python check.py bun-test # Run via toolchain
+```
+
+Coverage is enabled via `--coverage`. The `parse_bun_test` parser in
+`toolchain/parsers.py` extracts diagnostics from bun test output.
 
 ## Adding a New Checker
 
-1. **For subprocess-based checks**, add a factory function:
+1. **For subprocess-based checks**, add a factory function in
+   `toolchain/checkers/__init__.py` returning `SubprocessChecker` or
+   `AutoFormatChecker`
 
-```python
-# In toolchain/checkers/__init__.py
+1. **For custom logic**, create a checker class in `toolchain/checkers/`
+   implementing the `Checker` protocol (`name`, `description`, `run()`)
 
-def create_mycheck_checker() -> SubprocessChecker:
-    return SubprocessChecker(
-        name="mycheck",
-        description="Description of what it checks",
-        command=["uv", "run", "mytool", "--args"],
-        parser=parse_mytool,  # Optional: extract diagnostics
-    )
-```
+1. **Add a parser** in `toolchain/parsers.py` if the tool output needs
+   structured diagnostic extraction
 
-2. **For custom logic**, create a new checker class:
+1. **Register the checker** in `create_all_checkers()` in
+   `toolchain/checkers/__init__.py`
 
-```python
-# In toolchain/checkers/mycheck.py
-
-@dataclass
-class MyChecker:
-    @property
-    def name(self) -> str:
-        return "mycheck"
-
-    @property
-    def description(self) -> str:
-        return "Description of what it checks"
-
-    def run(self) -> CheckResult:
-        start = time.monotonic()
-        diagnostics = []
-
-        # Your verification logic here
-        # Append Diagnostic objects for each issue found
-
-        return CheckResult(
-            name=self.name,
-            status="passed" if not diagnostics else "failed",
-            duration_ms=int((time.monotonic() - start) * 1000),
-            diagnostics=tuple(diagnostics),
-        )
-```
-
-3. **Register the checker** in `create_all_checkers()`.
+See existing checkers for patterns:
+- `create_format_checker()` for `AutoFormatChecker` with JSON output parsing
+- `create_markdown_checker()` for `AutoFormatChecker` with text file list parsing
+- `create_bun_test_checker()` for `SubprocessChecker` with graceful skip
+- `ArchitectureChecker` for custom logic checker
 
 ## Output Formatters
+
+See `toolchain/output.py` for formatter implementations.
 
 ### ConsoleFormatter
 
@@ -464,6 +472,11 @@ Returns machine-readable results with all diagnostics.
 1. **Simple protocol** - Easy to add new checkers
 1. **Not packaged** - Development tooling stays out of releases
 
+## Related Specifications
+
+- `specs/VERIFICATION.md` - Redis mailbox formal verification
+- `specs/TESTING.md` - Testing conventions and coverage requirements
+
 ## Future Additions
 
 Potential enhancements for later:
@@ -478,7 +491,6 @@ Potential enhancements for later:
 
 - **Suggested fixes** - Add `fix: str | None` field to Diagnostic
 - **Watch mode** - Re-run on file changes
-- **Caching** - Skip unchanged files (like ruff already does)
 - **Custom checker plugins** - Load checkers from user config
 
 ### Not Planned

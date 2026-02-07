@@ -13,7 +13,18 @@ lifecycle. Core implementation in `src/weakincentives/runtime/session/session.py
 - **Publisher isolation**: Handler failures are logged and isolated
 - **Explicit dispatchers**: Callers provide a `Dispatcher`; defaults to in-process
 
-## Session State
+## Session Architecture
+
+Session is a thin facade coordinating three specialized subsystems:
+
+| Subsystem | Location | Responsibility |
+| --- | --- | --- |
+| `SliceStore` | `src/weakincentives/runtime/session/slice_store.py` | Slice storage with policy-based factories |
+| `ReducerRegistry` | `src/weakincentives/runtime/session/reducer_registry.py` | Event-to-reducer routing |
+| `SessionSnapshotter` | `src/weakincentives/runtime/session/session_snapshotter.py` | Snapshot/restore for transaction rollback |
+
+Thread safety is provided by Session's `RLock`. Subsystems are not thread-safe
+on their own and must only be accessed while holding the lock.
 
 ### Session Class
 
@@ -29,8 +40,53 @@ Core container at `src/weakincentives/runtime/session/session.py`:
 | `reset()` | Clear all slices |
 | `restore()` | Restore from snapshot |
 | `clone()` | Create new session with different dispatcher/parent |
+| `locked()` | Context manager yielding while holding Session's lock |
 
-### Reducers
+### SliceStore
+
+At `src/weakincentives/runtime/session/slice_store.py`:
+
+Manages typed slice instances, creating them on-demand using the appropriate
+factory based on slice policy. Not thread-safe on its own.
+
+| Method | Description |
+| --- | --- |
+| `get_or_create(slice_type)` | Get existing slice or create with appropriate factory |
+| `select_all(slice_type)` | Return all items in a slice |
+| `set_policy(slice_type, policy)` | Set policy for a slice type |
+| `get_policy(slice_type)` | Get policy (defaults to STATE) |
+| `snapshot_slices()` | Capture snapshot of all slice contents |
+| `clear_all(slice_types)` | Clear slices for given types |
+
+### ReducerRegistry
+
+At `src/weakincentives/runtime/session/reducer_registry.py`:
+
+Tracks which reducers should be invoked for each event type, with support for
+multiple reducers per event type targeting different slices. Not thread-safe on its own.
+
+| Method | Description |
+| --- | --- |
+| `register(event_type, reducer, target_slice=)` | Register reducer for event type |
+| `get_registrations(event_type)` | Get all registrations for event type |
+| `has_registrations(event_type)` | Check if any reducers registered |
+| `all_target_slice_types()` | All slice types targeted by reducers |
+| `snapshot()` | Snapshot registrations for cloning |
+| `copy_from(snapshot)` | Copy registrations from snapshot |
+
+### SessionSnapshotter
+
+At `src/weakincentives/runtime/session/session_snapshotter.py`:
+
+Encapsulates snapshot creation and restoration logic. Works with SliceStore
+and ReducerRegistry to gather and apply state under Session's lock.
+
+| Method | Description |
+| --- | --- |
+| `create_snapshot(parent_id=, children_ids=, tags=, policies=, include_all=)` | Capture immutable snapshot |
+| `restore(snapshot, preserve_logs=)` | Restore session slices from snapshot |
+
+## Reducers
 
 Pure functions producing new slices from events at `src/weakincentives/runtime/session/reducers.py`:
 
@@ -41,7 +97,7 @@ Pure functions producing new slices from events at `src/weakincentives/runtime/s
 | `replace_latest` | Store only most recent value |
 | `replace_latest_by(key_fn)` | Like `replace_latest` but keyed |
 
-### Query API
+## Query API
 
 Via `SliceAccessor` at `src/weakincentives/runtime/session/slice_accessor.py`:
 
@@ -49,7 +105,7 @@ Via `SliceAccessor` at `src/weakincentives/runtime/session/slice_accessor.py`:
 - `session[Plan].all()` - All items as tuple
 - `session[Plan].where(predicate)` - Filter by callable
 
-### Dispatch API
+## Dispatch API
 
 All mutations go through `session.dispatch()` for auditability:
 
@@ -58,9 +114,9 @@ All mutations go through `session.dispatch()` for auditability:
 
 Convenience methods dispatch internally:
 
-- `session[Plan].seed(value)` → `InitializeSlice`
-- `session[Plan].clear()` → `ClearSlice`
-- `session[Plan].append(value)` → dispatch to reducers
+- `session[Plan].seed(value)` -> `InitializeSlice`
+- `session[Plan].clear()` -> `ClearSlice`
+- `session[Plan].append(value)` -> dispatch to reducers
 
 ### System Mutation Events
 
@@ -105,7 +161,7 @@ At `runtime/events/__init__.py`:
 
 - `subscribe(event_type, handler)` - Register handler
 - `unsubscribe(event_type, handler)` - Remove handler, returns bool
-- `dispatch(event)` → `DispatchResult` with handler results/errors
+- `dispatch(event)` -> `DispatchResult` with handler results/errors
 
 ### Event Types
 
@@ -130,11 +186,28 @@ At `runtime/events/types.py`:
 - In-order per dispatcher instance
 - Handler exceptions logged and isolated
 
+## Snapshotable Protocol
+
+At `src/weakincentives/runtime/snapshotable.py`:
+
+Generic protocol for state containers that support snapshot and restore:
+
+```python
+@runtime_checkable
+class Snapshotable[SnapshotT](Protocol):
+    def snapshot(self, *, tag: str | None = None) -> SnapshotT: ...
+    def restore(self, snapshot: SnapshotT) -> None: ...
+```
+
+Implementations include:
+- `Session` implements `Snapshotable[Snapshot]`
+- `InMemoryFilesystem` implements `Snapshotable[FilesystemSnapshot]`
+
 ## Snapshots
 
 Capture/restore via `Session` methods; `Snapshot` class at `src/weakincentives/runtime/session/snapshots.py`:
 
-- `session.snapshot()` → `Snapshot`
+- `session.snapshot()` -> `Snapshot`
 - `snapshot.to_json()` / `Snapshot.from_json()`
 - `session.restore(snapshot)`
 
@@ -153,7 +226,7 @@ Wall-clock limits via `Deadline` at `src/weakincentives/deadlines.py`:
 - Must be timezone-aware, >1s in future
 - Checked: before provider calls, before tool execution, during response finalization
 - Propagated via `RenderedPrompt.deadline` and `ToolContext.deadline`
-- Raises `DeadlineExceededError` → converted to `PromptEvaluationError` with `phase="request"`, `phase="response"`, or `phase="tool"`
+- Raises `DeadlineExceededError` -> converted to `PromptEvaluationError` with `phase="request"`, `phase="response"`, or `phase="tool"`
 
 ## Budgets
 

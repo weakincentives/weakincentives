@@ -114,7 +114,7 @@ make pip-audit   # Vulnerability scan
 
 - Never pass unsanitized model output to shell commands
 - Validate file paths against allowed roots
-- Use VFS or sandboxes for file operations when possible
+- Use sandboxed adapters for file operations when possible
 - Avoid pickle, eval, or exec on untrusted data
 
 ## Quality Gates in Practice

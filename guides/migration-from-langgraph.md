@@ -36,8 +36,8 @@ in that tree.
 - **State management exists.** Sessions use an event-driven pattern: state is
   immutable, and changes flow through pure functions called "reducers."
 
-- **Provider abstraction exists.** Adapters swap between OpenAI, LiteLLM, and
-  Claude.
+- **Provider abstraction exists.** Adapters connect to Claude Agent SDK and
+  Codex App Server.
 
 ## What's Different
 

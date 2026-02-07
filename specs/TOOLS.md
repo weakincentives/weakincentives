@@ -90,7 +90,7 @@ At `src/weakincentives/prompt/tool.py` (`ToolExample` class):
 
 | Field | Description |
 | --- | --- |
-| `description` | ≤200 chars |
+| `description` | <=200 chars |
 | `input` | Params dataclass instance |
 | `output` | Result dataclass instance |
 
@@ -114,7 +114,7 @@ section = MarkdownSection[Params](
 
 Validates:
 
-1. Duplicate names → `PromptValidationError`
+1. Duplicate names -> `PromptValidationError`
 1. Examples against params/result dataclasses
 1. Declaration order cached
 

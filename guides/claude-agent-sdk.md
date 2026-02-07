@@ -2,11 +2,11 @@
 
 *Canonical spec: [specs/CLAUDE_AGENT_SDK.md](../specs/CLAUDE_AGENT_SDK.md)*
 
-The Claude Agent SDK adapter is WINK's recommended integration for production
-applications. Unlike OpenAI and LiteLLM adapters where WINK executes tools
-directly, the Claude Agent SDK adapter delegates to Claude Code's native tool
-execution—giving you Claude's battle-tested tooling (Read, Write, Bash, Glob,
-Grep) with WINK's prompt composition, session management, and orchestration.
+The Claude Agent SDK adapter is WINK's primary integration for production
+applications. Instead of WINK executing tools itself, the adapter delegates to
+Claude Code's native tool execution—giving you Claude's battle-tested tooling
+(Read, Write, Bash, Glob, Grep) with WINK's prompt composition, session
+management, and orchestration.
 
 ## Why Claude Agent SDK for Production
 
@@ -577,20 +577,19 @@ config = ClaudeAgentSDKClientConfig(
 )
 ```
 
-## Comparison with Other Adapters
+## Comparison with Codex App Server Adapter
 
-| Feature | Claude Agent SDK | OpenAI | LiteLLM |
-|---------|-----------------|--------|---------|
-| Tool execution | Native (Claude Code) | WINK | WINK |
-| Sandboxing | Built-in | Manual | Manual |
-| File operations | Battle-tested | Custom | Custom |
-| MCP bridging | Yes | No | No |
-| Skills | Yes | No | No |
-| Network isolation | Built-in | Manual | Manual |
+| Feature | Claude Agent SDK | Codex App Server |
+|---------|-----------------|------------------|
+| Tool execution | Native (Claude Code) | Native (Codex) |
+| Sandboxing | Built-in | Built-in |
+| File operations | Battle-tested | Built-in |
+| MCP bridging | Yes | No |
+| Skills | Yes | No |
+| Network isolation | Built-in | Built-in |
 
 For production workloads involving code, the Claude Agent SDK adapter provides
-security and reliability that would require significant custom implementation
-with other adapters.
+the most complete feature set with MCP bridging and skill mounting.
 
 ## Next Steps
 

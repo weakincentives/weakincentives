@@ -3,8 +3,8 @@
 ## Purpose
 
 Guardrails ensure agents operate within constraints while preserving reasoning
-autonomy. Three complementary mechanisms—tool policies, feedback providers, and
-task completion checking—enforce invariants, provide guidance, and verify goals.
+autonomy. Three complementary mechanisms--tool policies, feedback providers, and
+task completion checking--enforce invariants, provide guidance, and verify goals.
 
 **Philosophy:** See `POLICIES_OVER_WORKFLOWS.md` for design rationale.
 
@@ -23,7 +23,7 @@ ______________________________________________________________________
 **Implementation:** `src/weakincentives/prompt/policy.py`
 
 Policies enforce sequential dependencies between tool invocations. Declares
-that tool B requires tool A first—unconditionally or keyed by parameter.
+that tool B requires tool A first--unconditionally or keyed by parameter.
 
 ### Principles
 
@@ -77,10 +77,10 @@ before overwritten. New files can be created freely.
 
 ```python
 policy = ReadBeforeWritePolicy()
-# write_file("new.txt")      → OK (doesn't exist)
-# write_file("config.yaml")  → DENIED (exists, not read)
-# read_file("config.yaml")   → OK (records path)
-# write_file("config.yaml")  → OK (was read)
+# write_file("new.txt")      -> OK (doesn't exist)
+# write_file("config.yaml")  -> DENIED (exists, not read)
+# read_file("config.yaml")   -> OK (records path)
+# write_file("config.yaml")  -> OK (was read)
 ```
 
 ### Policy Integration
@@ -103,26 +103,8 @@ template = PromptTemplate(
 
 ### Execution Flow
 
-Policy enforcement happens in the adapter's tool execution hooks:
-
-```python nocheck
-def execute_tool(call, *, context):
-    tool, params = resolve_and_parse(call)
-    policies = [*section.policies, *prompt.policies]
-
-    for policy in policies:
-        decision = policy.check(tool, params, context=context)
-        if not decision.allowed:
-            return ToolResult.error(decision.reason)
-
-    result = tool.handler(params, context=context)
-
-    if result.success:
-        for policy in policies:
-            policy.on_result(tool, params, result, context=context)
-
-    return result
-```
+Policy enforcement happens in the adapter's tool execution hooks.
+See `TOOLS.md` (Runtime Dispatch section) for the full dispatch sequence.
 
 ### Policy State Management
 
@@ -151,23 +133,30 @@ produce contextual feedback delivered immediately after tool execution.
 ### Characteristics
 
 - **Non-blocking**: Guidance, not gates; agent decides response
-- **Trigger-based**: Run when conditions met (every N calls/seconds)
+- **Trigger-based**: Run when conditions met (every N calls/seconds/file created)
 - **Immediate delivery**: Inject via hook response, not next render
+- **Concurrent evaluation**: All matching providers run, not just first match
+- **Independent trigger state**: Each provider maintains its own trigger cadence
 
 ### FeedbackTrigger
 
+At `src/weakincentives/prompt/feedback.py`:
+
 | Field | Type | Description |
 |-------|------|-------------|
-| `every_n_calls` | `int \| None` | Run after N tool calls |
-| `every_n_seconds` | `float \| None` | Run after N seconds elapsed |
+| `every_n_calls` | `int \| None` | Run after N tool calls since last feedback from this provider |
+| `every_n_seconds` | `float \| None` | Run after N seconds since last feedback from this provider |
 | `on_file_created` | `FileCreatedTrigger \| None` | Run once when file created |
 
-Conditions are OR'd together.
+Conditions are OR'd together. Trigger state is tracked per-provider to ensure
+each provider maintains independent trigger cadences.
 
 ### FileCreatedTrigger
 
+At `src/weakincentives/prompt/feedback.py`:
+
 Triggers when a specified file is created on the filesystem. Fires exactly once
-per session—after initial detection, subsequent tool calls will not re-trigger
+per session--after initial detection, subsequent tool calls will not re-trigger
 even if the file is deleted and recreated.
 
 | Field | Type | Description |
@@ -177,11 +166,13 @@ even if the file is deleted and recreated.
 #### Behavior
 
 1. After tool execution completes, check if `filename` exists
-1. If file exists and trigger has not fired → fire, mark as fired
-1. If file does not exist or trigger already fired → skip
-1. Trigger state persists in session; reset clears it
+1. If file exists and trigger has not fired -> fire, mark as fired
+1. If file does not exist or trigger already fired -> skip
+1. Trigger state persists in session via `FileCreatedTriggerState` slice; reset clears it
 
 ### StaticFeedbackProvider
+
+At `src/weakincentives/prompt/feedback_providers.py`:
 
 A built-in provider that delivers a fixed feedback message. Useful with
 `FileCreatedTrigger` for one-time guidance when specific files are detected.
@@ -225,6 +216,8 @@ template = PromptTemplate(
 
 ### Feedback
 
+At `src/weakincentives/prompt/feedback.py`:
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `provider_name` | `str` | Source provider |
@@ -233,8 +226,26 @@ template = PromptTemplate(
 | `suggestions` | `tuple[str, ...]` | Recommendations |
 | `severity` | `Literal["info", "caution", "warning"]` | Urgency level |
 | `timestamp` | `datetime` | When produced |
+| `call_index` | `int` | Tool call count when produced |
+| `prompt_name` | `str` | Prompt that produced this feedback |
+
+### XML-Style Feedback Rendering
+
+`Feedback.render()` produces XML-tagged output for structured context injection:
+
+```xml
+<feedback provider='Deadline'>
+The work so far took 5 minutes. You have 3 minutes remaining.
+
+-> Prioritize completing critical remaining work.
+</feedback>
+```
+
+Multiple providers produce separate `<feedback>` blocks, joined by blank lines.
 
 ### FeedbackContext
+
+At `src/weakincentives/prompt/feedback.py`:
 
 | Property/Method | Description |
 |-----------------|-------------|
@@ -242,19 +253,29 @@ template = PromptTemplate(
 | `prompt` | Prompt protocol |
 | `deadline` | Optional deadline |
 | `last_feedback` | Most recent feedback for prompt |
+| `last_feedback_for_provider(name)` | Most recent feedback from specific provider |
 | `tool_call_count` | Total calls for prompt |
-| `tool_calls_since_last_feedback()` | Calls since last feedback |
+| `tool_calls_since_last_feedback()` | Calls since last feedback (any provider) |
+| `tool_calls_since_last_feedback_for_provider(name)` | Calls since last feedback from specific provider |
 | `recent_tool_calls(n)` | Last N tool calls |
 
 ### Execution Flow
 
+At `src/weakincentives/prompt/feedback.py` (`run_feedback_providers`):
+
 1. Tool call completes
 1. `ToolInvoked` dispatched
-1. Check trigger conditions
-1. Call `provider.should_run()`
-1. Call `provider.provide()`
-1. Store in session, return text
-1. First match wins
+1. For each configured provider:
+   a. Check trigger conditions (using provider-scoped state)
+   b. Call `provider.should_run()`
+1. Collect all triggered providers
+1. Call `provider.provide()` for each
+1. Store all feedback in session
+1. Mark file creation triggers as fired
+1. Render and combine all feedback blocks
+1. Return combined text
+
+**All matching providers are evaluated concurrently** (not first-match-wins).
 
 ### Adapter Integration
 
@@ -264,6 +285,8 @@ template = PromptTemplate(
 | OpenAI | Appended to tool result message |
 
 ### Built-in Provider: DeadlineFeedback
+
+At `src/weakincentives/prompt/feedback_providers.py`:
 
 Reports remaining time until deadline.
 
@@ -276,38 +299,13 @@ config = FeedbackProviderConfig(
 
 Output varies by remaining time. Below threshold adds suggestions.
 
-### Custom Provider Example
-
-```python
-@dataclass(frozen=True)
-class ToolUsageMonitor:
-    max_calls_without_progress: int = 20
-
-    @property
-    def name(self) -> str:
-        return "ToolUsageMonitor"
-
-    def should_run(self, *, context: FeedbackContext) -> bool:
-        return True
-
-    def provide(self, *, context: FeedbackContext) -> Feedback:
-        count = context.tool_call_count
-        if count > self.max_calls_without_progress:
-            return Feedback(
-                provider_name=self.name,
-                summary=f"You have made {count} tool calls.",
-                suggestions=("Review progress.",),
-                severity="caution",
-            )
-        return Feedback(provider_name=self.name, summary="OK", severity="info")
-```
-
 ### State Management
 
 | Slice | Purpose |
 |-------|---------|
 | `ToolInvoked` | Tool invocation log |
 | `Feedback` | Feedback history |
+| `FileCreatedTriggerState` | Tracks which file creation triggers have fired |
 
 Feedback stored via `session.dispatch(feedback)` with `append_all` reducer.
 
@@ -332,7 +330,6 @@ from weakincentives.prompt import (
 
 ### Limitations
 
-- **Single provider per check**: First match wins
 - **Synchronous**: Providers block tool completion briefly
 - **Text-based**: Agent interprets natural language
 
@@ -416,25 +413,6 @@ adapter = ClaudeAgentSDKAdapter(
 - **Stop Hook**: Returns `needsMoreTurns: True` if incomplete
 - **Final Verification**: Raises `PromptEvaluationError` if incomplete
 
-### Custom Checker Example
-
-```python
-class FileExistsChecker:
-    def __init__(self, required_files: tuple[str, ...]) -> None:
-        self._required = required_files
-
-    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
-        if context.filesystem is None:
-            return TaskCompletionResult.ok()
-
-        missing = [f for f in self._required if not context.filesystem.exists(f)]
-        if missing:
-            return TaskCompletionResult.incomplete(
-                f"Missing required files: {', '.join(missing)}"
-            )
-        return TaskCompletionResult.ok()
-```
-
 ### Operational Notes
 
 - **Default disabled**: Must configure checker to enable
@@ -453,9 +431,10 @@ No outer workflow; hooks inject into current turn.
 
 Need history for trigger state and debugging.
 
-### First-Match-Wins
+### All Matching Providers
 
-Simplicity; order by priority.
+All triggered providers run and their feedback is combined, ensuring no guidance
+is silently dropped when multiple conditions are met simultaneously.
 
 ### No Escalation
 
@@ -474,6 +453,6 @@ ______________________________________________________________________
 ## Related Specifications
 
 - `POLICIES_OVER_WORKFLOWS.md` - Design philosophy
-- `TOOLS.md` - Tool runtime, planning tools
+- `TOOLS.md` - Tool runtime
 - `SESSIONS.md` - Session state, snapshots
 - `CLAUDE_AGENT_SDK.md` - SDK adapter integration

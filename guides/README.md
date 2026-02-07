@@ -58,7 +58,7 @@ debug issues when they arise.
 
 | Guide | What You'll Learn |
 | --- | --- |
-| [Adapters](adapters.md) | Connect to OpenAI, LiteLLM, and Claude Agent SDK |
+| [Adapters](adapters.md) | Connect to Claude Agent SDK and Codex App Server |
 | [Claude Agent SDK](claude-agent-sdk.md) | Production integration with Claude Code's native tooling |
 | [Skills Authoring](skills-authoring.md) | Create and mount custom skills for Claude Code |
 

@@ -85,7 +85,8 @@ enforced at the adapter level, so they work consistently across providers.
 
 1. **Handles progressive disclosure**: When the model calls `open_sections`,
    AgentLoop catches `VisibilityExpansionRequired`, applies visibility overrides
-   to the session, and retries the evaluation.
+   to the session, and retries the evaluation. A maximum of 10 expansion
+   retries is enforced to prevent infinite loops.
 
 1. **Enforces deadlines**: Passes the deadline to the adapter, which will abort
    if time runs out.
@@ -94,6 +95,9 @@ enforced at the adapter level, so they work consistently across providers.
    token usage.
 
 1. **Manages resources**: Binds resources to the prompt and handles lifecycle.
+
+1. **Cleans up**: Calls `prompt.cleanup()` after evaluation to release
+   resources (temporary directories, file handles, etc.).
 
 1. **Returns results**: Returns the `PromptResponse` and the session for
    inspection.

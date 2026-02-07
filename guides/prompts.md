@@ -111,8 +111,8 @@ A `Section[ParamsT]` is a node in the prompt tree. Every section has:
 - `accepts_overrides`: whether the override system may replace its body
 
 A section must implement `render_body(...)`. The most common type is
-`MarkdownSection`, but contributed tool suites are also sections (planning, VFS,
-sandboxes, etc.).
+`MarkdownSection`, but contributed tool suites are also sections (workspace
+digest, Claude Agent SDK workspace, etc.).
 
 ## MarkdownSection: The Workhorse
 
@@ -260,6 +260,34 @@ run.
 This sounds minor, but it prevents a common bug: accidentally sharing a tool
 section (and its internal state) across multiple sessions. Each session should
 get its own tool sections.
+
+## Prompt Cleanup
+
+After evaluation completes, call `prompt.cleanup()` to release resources held
+by sections (temporary directories, file handles, etc.). `AgentLoop` does this
+automatically after debug bundle artifacts have been captured.
+
+Sections that manage external resources should override
+`Section.cleanup()`:
+
+```python nocheck
+class MyWorkspaceSection(Section):
+    def cleanup(self) -> None:
+        # Release temporary workspace directory
+        if self._temp_dir is not None:
+            self._temp_dir.cleanup()
+```
+
+If you're using `AgentLoop`, you don't need to call `cleanup()` yourself. For
+manual evaluation (calling `adapter.evaluate()` directly), call it after
+you're done with the prompt:
+
+```python nocheck
+try:
+    response = adapter.evaluate(prompt, session=session)
+finally:
+    prompt.cleanup()
+```
 
 ## Few-Shot Traces with TaskExamplesSection
 

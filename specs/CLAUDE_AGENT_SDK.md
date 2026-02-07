@@ -31,13 +31,24 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 | `task_completion_checker` | `TaskCompletionChecker \| None` | `None` | Task completion verification |
 | `isolation` | `IsolationConfig \| None` | `None` | Isolation configuration |
 | `betas` | `tuple[str, ...] \| None` | `None` | Beta features to enable |
+| `transcript_collection` | `TranscriptCollectorConfig \| None` | `TranscriptCollectorConfig()` | Transcript collection config (enabled by default) |
+
+At `src/weakincentives/adapters/claude_agent_sdk/config.py`:
+`ClaudeAgentSDKClientConfig`.
 
 ### ClaudeAgentSDKModelConfig
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `model` | `str` | `"claude-opus-4-6"` | Claude model identifier |
-| `reasoning` | `ReasoningEffort \| None` | `"high"` | Adaptive reasoning effort level (`"low"`, `"medium"`, `"high"`, `"max"`, or `None`) |
+| `reasoning` | `ReasoningEffort \| None` | `"high"` | Adaptive reasoning effort level |
+
+`ReasoningEffort = Literal["low", "medium", "high", "max"]`. Default `"high"` enables
+deep reasoning. `"max"` removes all thinking constraints (Opus 4.6 only). `None`
+disables reasoning entirely.
+
+At `src/weakincentives/adapters/claude_agent_sdk/config.py`:
+`ClaudeAgentSDKModelConfig`, `ReasoningEffort`.
 
 **Note:** `seed`, `stop`, `presence_penalty`, `frequency_penalty` not supported—raises `ValueError`.
 
@@ -107,15 +118,88 @@ When `isolation` is set:
 ## Tool Bridging (MCP)
 
 Tools attached to sections are exposed to Claude Code as MCP tools under server
-key `"wink"`. Tool calls publish `ToolInvoked` events.
+key `"wink"`. Tool calls publish `ToolInvoked` events with `call_id` correlation.
+
+### call_id Correlation
+
+The MCP protocol does not pass `tool_use_id` to tool handlers. To correlate
+`ToolInvoked` events with SDK tool calls, `MCPToolExecutionState` maintains a
+thread-safe mapping of `(tool_name, params_hash)` to `tool_use_id` queues:
+
+- **PreToolUse hook** enqueues `tool_use_id` keyed by tool name + MD5 hash of
+  parameters (via `_hash_params`)
+- **BridgedTool handler** dequeues the matching `tool_use_id` when executing
+- Different tools or same tool with different params use different keys
+- Same tool with identical params uses a bounded FIFO `deque` per key
+
+At `src/weakincentives/adapters/_shared/_bridge.py`: `MCPToolExecutionState`.
 
 ## Events
 
 | Event | When |
 |-------|------|
-| `PromptRendered` | After render |
-| `ToolInvoked` | Each tool call (native + bridged) |
+| `PromptRendered` | After render (carries `event_id` as UUID4) |
+| `RenderedTools` | Alongside `PromptRendered`, correlated via `render_event_id` |
+| `ToolInvoked` | Each tool call (native + bridged), with `call_id` |
 | `PromptExecuted` | Completion (includes `TokenUsage`) |
+
+`RenderedTools` captures tool schemas (name, description, JSON Schema parameters)
+at render time. The `render_event_id` field links back to the `PromptRendered`
+event's `event_id` (UUID4) for correlation.
+
+At `src/weakincentives/runtime/session/rendered_tools.py`: `RenderedTools`, `ToolSchema`.
+
+## Hooks
+
+The adapter registers six hook types with the SDK. All hooks use SDK-native
+input/output types for type-safe integration.
+
+At `src/weakincentives/adapters/claude_agent_sdk/_hooks.py`.
+
+### Hook Types
+
+| Hook | SDK Input Type | Purpose |
+|------|---------------|---------|
+| `PreToolUse` | `PreToolUseHookInput` | Constraint enforcement, state snapshots |
+| `PostToolUse` | `PostToolUseHookInput` | Tool result recording, state rollback |
+| `Stop` | `StopHookInput` | Execution finalization, task completion |
+| `UserPromptSubmit` | `UserPromptSubmitHookInput` | Turn boundary tracking |
+| `SubagentStop` | `SubagentStopHookInput` | Subagent completion tracking |
+| `PreCompact` | `PreCompactHookInput` | Context compaction tracking |
+
+Return type for all hooks: `SyncHookJSONOutput`. PreToolUse uses
+`PreToolUseHookSpecificOutput` for deny decisions. PostToolUse uses
+`PostToolUseHookSpecificOutput` for feedback injection.
+
+**Removed hooks:** `create_subagent_start_hook` and `create_notification_hook`
+are not available in the Python SDK.
+
+### HookConstraints
+
+Groups optional parameters passed to hooks via `HookContext`:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `deadline` | `Deadline \| None` | `None` | Deadline for constraint checking |
+| `budget_tracker` | `BudgetTracker \| None` | `None` | Token budget limits |
+| `heartbeat` | `Heartbeat \| None` | `None` | Liveness monitoring |
+| `run_context` | `RunContext \| None` | `None` | Tracing context |
+| `mcp_tool_state` | `MCPToolExecutionState \| None` | `None` | MCP tool_use_id correlation |
+
+## Error Handling
+
+SDK exceptions are normalized to `PromptEvaluationError` via `normalize_sdk_error`.
+Uses `isinstance()` checks against SDK-native exception types.
+
+At `src/weakincentives/adapters/claude_agent_sdk/_errors.py`.
+
+| SDK Exception | Normalized To | Description |
+|---------------|---------------|-------------|
+| `CLINotFoundError` | `PromptEvaluationError` | Claude Code CLI not installed |
+| `CLIConnectionError` | `ThrottleError` | Connection/timeout issues (retryable) |
+| `ProcessError` | `PromptEvaluationError` | CLI process failure (includes exit code) |
+| `CLIJSONDecodeError` | `PromptEvaluationError` | Malformed SDK response |
+| `ExceptionGroup` | `PromptEvaluationError` | TaskGroup cleanup errors |
 
 ## Usage Patterns
 
@@ -184,7 +268,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 # Inherits host auth (works with Bedrock or Anthropic API)
 # Uses AWS credential chain: env vars, ~/.aws/credentials, instance profile, etc.
 adapter = ClaudeAgentSDKAdapter(
-    model="us.anthropic.claude-sonnet-4-20250514-v1:0",  # Bedrock model ID
+    model="us.anthropic.claude-opus-4-6-v1",  # Bedrock model ID
     client_config=ClaudeAgentSDKClientConfig(
         isolation=IsolationConfig(),  # No api_key = inherit host auth
     ),
@@ -192,16 +276,24 @@ adapter = ClaudeAgentSDKAdapter(
 
 # Docker: specify where AWS config is mounted
 adapter = ClaudeAgentSDKAdapter(
-    model="us.anthropic.claude-sonnet-4-20250514-v1:0",
+    model="us.anthropic.claude-opus-4-6-v1",
     client_config=ClaudeAgentSDKClientConfig(
         isolation=IsolationConfig(aws_config_path="/mnt/aws"),
     ),
 )
 ```
 
+**Bedrock model ID format:** `us.anthropic.claude-opus-4-6-v1` (no `:0` suffix
+for Opus 4.6). Older models retain the `:0` suffix (e.g.,
+`us.anthropic.claude-sonnet-4-5-20250929-v1:0`).
+
 Environment variables passed through for Bedrock: `AWS_PROFILE`, `AWS_REGION`,
 `AWS_DEFAULT_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
 `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `CLAUDE_CODE_USE_BEDROCK`.
+
+At `src/weakincentives/adapters/claude_agent_sdk/isolation.py`:
+`IsolationConfig`, `EphemeralHome`, `get_default_model`,
+`DEFAULT_MODEL`, `DEFAULT_BEDROCK_MODEL`.
 
 ### Model ID Helpers
 
@@ -211,8 +303,8 @@ Environment variables passed through for Bedrock: `AWS_PROFILE`, `AWS_REGION`,
 | `get_supported_bedrock_models()` | Returns mapping of Anthropic names to Bedrock IDs |
 | `to_bedrock_model_id(name)` | Convert Anthropic model name to Bedrock ID |
 | `to_anthropic_model_name(id)` | Convert Bedrock ID to Anthropic model name |
-| `DEFAULT_MODEL` | Default Anthropic model (Opus 4.6) |
-| `DEFAULT_BEDROCK_MODEL` | Default Bedrock model ID (Opus 4.6) |
+| `DEFAULT_MODEL` | `"claude-opus-4-6"` |
+| `DEFAULT_BEDROCK_MODEL` | `"us.anthropic.claude-opus-4-6-v1"` |
 
 ### MCP Tool Exposure
 
@@ -223,4 +315,5 @@ Attach `Tool` to sections; they're automatically bridged as MCP tools under
 
 - Use `budget_tracker` in `evaluate()` for token usage tracking
 - `stop_on_structured_output=True` ends turn after `StructuredOutput` tool
+- Transcript collection enabled by default via `TranscriptCollectorConfig()`
 - Windows: Sandbox settings may not be enforced; HOME redirection applies

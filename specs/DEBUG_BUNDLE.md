@@ -7,7 +7,12 @@ understand, reproduce, and debug an AgentLoop execution. Bundles unify session
 state, logs, filesystem snapshots, configuration, and metrics into a single
 portable artifact.
 
-Core implementation at `src/weakincentives/debug/bundle.py`.
+**Implementation:**
+
+- Bundle core: `src/weakincentives/debug/bundle.py`
+- Environment capture: `src/weakincentives/debug/environment.py`
+- Public API: `src/weakincentives/debug/__init__.py`
+- EvalLoop integration: `src/weakincentives/evals/_loop.py`
 
 ## Principles
 
@@ -110,7 +115,8 @@ debug_bundle/
 
 ### BundleConfig
 
-Configuration for bundle creation:
+Configuration for bundle creation. See `src/weakincentives/debug/bundle.py`
+for the full dataclass definition.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -121,12 +127,14 @@ Configuration for bundle creation:
 | `retention` | `BundleRetentionPolicy \| None` | `None` | Local cleanup policy |
 | `storage_handler` | `BundleStorageHandler \| None` | `None` | External storage callback |
 
-Bundles always capture full debug information: DEBUG logs, session before+after,
-and all filesystem contents within size limits.
+The `enabled` property returns `True` when `target is not None`. Bundles always
+capture full debug information: DEBUG logs, session before+after, and all
+filesystem contents within size limits.
 
 ### BundleRetentionPolicy
 
-Policy for cleaning up old debug bundles in the target directory:
+Policy for cleaning up old debug bundles in the target directory.
+See `src/weakincentives/debug/bundle.py` for the full dataclass definition.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -136,7 +144,8 @@ Policy for cleaning up old debug bundles in the target directory:
 
 Retention is applied **after** each bundle is successfully created. If multiple
 limits are configured, all are enforced (most restrictive wins). Bundle age is
-determined from the `created_at` field in the manifest.
+determined from the `created_at` field in the manifest. Deletion uses TOCTOU
+protection via inode/device verification to prevent race conditions.
 
 ```python
 from weakincentives.debug import BundleConfig, BundleRetentionPolicy
@@ -152,32 +161,12 @@ config = BundleConfig(
 
 ### BundleStorageHandler
 
-Protocol for copying bundles to external storage after creation:
+Runtime-checkable protocol for copying bundles to external storage after creation.
+See `src/weakincentives/debug/bundle.py` for the protocol definition.
 
-```python
-@runtime_checkable
-class BundleStorageHandler(Protocol):
-    """Called after a debug bundle is successfully created."""
-
-    def store_bundle(
-        self,
-        bundle_path: Path,
-        manifest: BundleManifest,
-    ) -> None:
-        """Copy/upload the bundle to external storage.
-
-        Args:
-            bundle_path: Local path to the created bundle ZIP.
-            manifest: Bundle metadata (id, timestamp, checksums, etc.).
-
-        Errors are logged but do not propagate (non-blocking).
-        The local bundle remains regardless of storage success.
-        """
-        ...
-```
-
-The storage handler is called **after** retention policy is applied, so only
-bundles that survive cleanup are passed to the handler.
+The handler receives `(bundle_path: Path, manifest: BundleManifest)` and is called
+**after** retention policy is applied, so only bundles that survive cleanup are
+passed to the handler. Errors are logged but do not propagate (non-blocking).
 
 Example S3 handler:
 
@@ -199,7 +188,17 @@ config = BundleConfig(
 
 ### BundleWriter
 
-Context manager for streaming bundle creation:
+Context manager for streaming bundle creation. See
+`src/weakincentives/debug/bundle.py` for the full class definition.
+
+Key methods: `write_session_before()`, `write_session_after()`,
+`write_request_input()`, `write_request_output()`, `capture_logs()` (context
+manager), `write_environment()`, `write_filesystem()`, `write_config()`,
+`write_run_context()`, `write_metrics()`, `write_error()`, `write_metadata()`,
+`write_prompt_overrides()`, `set_prompt_info()`.
+
+The `write_metadata(name, data)` method provides a generic mechanism for adding
+domain-specific metadata (e.g., `eval.json`) without coupling the bundle layer.
 
 ```python
 with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
@@ -221,7 +220,15 @@ with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
 
 ### DebugBundle
 
-Load and inspect existing bundles:
+Load and inspect existing bundles. See `src/weakincentives/debug/bundle.py`
+for the full class definition.
+
+Properties: `manifest`, `path`, `request_input`, `request_output`,
+`session_before`, `session_after`, `logs`, `config`, `run_context`, `metrics`,
+`prompt_overrides`, `error`, `eval`, `environment`.
+
+Methods: `load()` (classmethod), `read_file()`, `list_files()`, `extract()`,
+`verify_integrity()`.
 
 ```python
 bundle = DebugBundle.load("./debug/bundle.zip")
@@ -292,11 +299,12 @@ bundle.
 
 ## EvalLoop Integration
 
-EvalLoop wraps AgentLoop for evaluation datasets. When `EvalLoopConfig.debug_bundle_dir`
-is set, EvalLoop uses `AgentLoop.execute_with_bundle()` to reuse the standard bundle
-creation logic with eval-specific metadata:
+EvalLoop wraps AgentLoop for evaluation datasets. When `EvalLoopConfig.debug_bundle`
+is set to a `BundleConfig` with a `target` directory, EvalLoop uses
+`AgentLoop.execute_with_bundle()` to reuse the standard bundle creation logic with
+eval-specific metadata:
 
-1. EvalLoop creates bundle target at `{debug_bundle_dir}/{request_id}/`
+1. EvalLoop creates bundle target at `{target}/{request_id}/`
 1. AgentLoop creates bundle capturing session, logs, request/response
 1. EvalLoop injects `eval.json` with score, experiment, latency
 1. Bundle path returned in `EvalResult.bundle_path`
@@ -317,6 +325,16 @@ creation logic with eval-specific metadata:
 }
 ```
 
+### EvalLoopConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `lease_extender` | `LeaseExtenderConfig \| None` | `None` | Automatic message visibility extension |
+| `debug_bundle` | `BundleConfig \| None` | `None` | Debug bundle creation per sample |
+
+See `src/weakincentives/evals/_loop.py` for the full `EvalLoopConfig` and `EvalLoop`
+implementation.
+
 ### Example
 
 ```python
@@ -325,7 +343,7 @@ eval_loop = EvalLoop(
     evaluator=exact_match,
     requests=requests_mailbox,
     config=EvalLoopConfig(
-        debug_bundle_dir=Path("./eval_bundles/"),
+        debug_bundle=BundleConfig(target=Path("./eval_bundles/")),
     ),
 )
 

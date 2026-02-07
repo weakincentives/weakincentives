@@ -247,15 +247,15 @@ When debugging evaluation failures, enable debug bundles to capture session
 state, logs, and execution artifacts:
 
 ```python nocheck
+from weakincentives.debug import BundleConfig
 from weakincentives.evals import EvalLoop, EvalLoopConfig
-from pathlib import Path
 
 eval_loop = EvalLoop(
     loop=agent_loop,
     evaluator=exact_match,
     requests=eval_requests,
     config=EvalLoopConfig(
-        debug_bundle_dir=Path("./eval_bundles/"),
+        debug_bundle=BundleConfig(target="./eval_bundles/"),
     ),
 )
 ```

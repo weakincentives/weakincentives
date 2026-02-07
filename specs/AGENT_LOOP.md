@@ -25,30 +25,71 @@ At `src/weakincentives/runtime/agent_loop.py`:
 | `prepare(request)` | Create `(Prompt, Session)` for request |
 | `finalize(prompt, session, output)` | Post-process output; returns transformed `OutputT` |
 | `execute(request)` | Full execution returning `(PromptResponse, Session)` |
+| `execute_with_bundle(request, bundle_target=)` | Execute with debug bundling |
 
 ### Request and Result Types
 
+At `src/weakincentives/runtime/agent_loop_types.py`:
+
 `AgentLoopRequest[T]`: `request`, `budget`, `deadline`, `resources`, `request_id`,
-`created_at`, `run_context`, `experiment`. Request-level fields override config.
+`created_at`, `run_context`, `experiment`, `debug_bundle`. Request-level fields
+override config.
 
 `AgentLoopResult[T]`: `request_id`, `output`, `error`, `session_id`, `run_context`,
-`completed_at`. Check `success` property for outcome.
+`completed_at`, `bundle_path`. Check `success` property for outcome.
 
 ### Configuration
 
-`AgentLoopConfig`: `deadline`, `budget`, `resources`, `lease_extender`.
+`AgentLoopConfig` at `src/weakincentives/runtime/agent_loop_types.py`:
+
+| Field | Description |
+| --- | --- |
+| `deadline` | Optional default deadline |
+| `budget` | Optional default budget |
+| `resources` | Optional default resources |
+| `lease_extender` | Lease extension configuration |
+| `debug_bundle` | `BundleConfig` for debug bundling |
+
 Request-level overrides config defaults. Fresh `BudgetTracker` per execution.
+
+### BundleConfig
+
+At `src/weakincentives/debug/bundle.py`:
+
+| Field | Description |
+| --- | --- |
+| `target` | Output directory for bundles (None disables bundling) |
+| `max_file_size` | Skip files larger than this (default 10MB) |
+| `max_total_size` | Maximum filesystem capture size (default 50MB) |
+| `compression` | Zip compression method |
+| `retention` | Policy for cleaning up old bundles |
+| `storage_handler` | Handler for external storage upload |
+
+`enabled` property returns `True` when `target` is set.
 
 ## Execution Flow
 
 1. Receive `AgentLoopRequest` or direct `execute()` call
-1. `prepare(request)` → `(Prompt, Session)`
-1. Enter `with prompt.resources:` context
+1. `prepare(request)` -> `(Prompt, Session)`
+1. Resolve effective settings (budget, deadline, resources)
 1. Evaluate with adapter
 1. On `VisibilityExpansionRequired`: apply overrides to session, retry step 4
-1. `finalize(prompt, session, output)` → `OutputT` (post-processing/transformation)
-1. Exit context (cleanup)
+1. `finalize(prompt, session, output)` -> `OutputT` (post-processing/transformation)
+1. `prompt.cleanup()` - Release section resources
 1. Return `AgentLoopResult` (with `output` on success, `error` on failure)
+
+### Visibility Expansion Retry Limit
+
+The retry loop is capped at `_MAX_VISIBILITY_RETRIES = 10`
+(at `src/weakincentives/runtime/agent_loop.py`). When exceeded, raises
+`PromptEvaluationError` with `phase="request"` to prevent infinite
+expansion loops.
+
+### Prompt Cleanup
+
+`prompt.cleanup()` is called after evaluation completes. In bundled execution,
+cleanup is deferred until after bundle artifacts are captured. A
+`prompt_cleaned_up` guard flag prevents double-cleanup in error paths.
 
 ### Resource Lifecycle
 
@@ -91,7 +132,7 @@ Use `visibility=SectionVisibility.SUMMARY` on sections with `summary` text.
 
 | Exception | Behavior |
 | --- | --- |
-| `VisibilityExpansionRequired` | Retry with updated overrides |
+| `VisibilityExpansionRequired` | Retry with updated overrides (up to 10 times) |
 | All others | Return `AgentLoopResult` with `error` set |
 
 ## Usage
@@ -115,6 +156,15 @@ loop.run()
 response, session = loop.execute(MyRequest(...))
 ```
 
+### With Debug Bundle
+
+```python
+with loop.execute_with_bundle(request, bundle_target=Path("./bundles")) as ctx:
+    score = compute_score(ctx.response.output)
+    ctx.write_metadata("eval", {"score": score})
+# Bundle is finalized on context exit
+```
+
 ## Limitations
 
 - Synchronous execution
@@ -128,3 +178,4 @@ response, session = loop.execute(MyRequest(...))
 - `specs/MAILBOX.md` - Mailbox protocol
 - `specs/LIFECYCLE.md` - LoopGroup coordination
 - `specs/EVALS.md` - EvalLoop wrapping AgentLoop
+- `specs/DEBUG_BUNDLE.md` - Bundle creation and artifacts

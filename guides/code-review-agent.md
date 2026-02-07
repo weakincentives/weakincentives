@@ -12,8 +12,8 @@ planning, and the `AgentLoop` pattern in one place.
 - **Scope**: Focused on the bundled `sunfish` repository fixture under
   `test-repositories/`. Mounts are read-only with a 600 KB payload cap.
 - **Principles**: Declarative prompt assembly, ergonomic overrides (tagged by
-  namespace/key), reusable planning/workspace tools, and full observability via
-  event subscribers.
+  namespace/key), reusable workspace tools, and full observability via event
+  subscribers.
 
 ## Transactional Tool Execution
 
@@ -26,8 +26,8 @@ transaction. If a tool fails:
 - The agent continues from a known-good state
 
 This is particularly valuable when the agent is navigating a large codebase.
-A failed `read_file` or interrupted `planning_update_step` doesn't corrupt the
-review session. The agent's plan remains consistent, and the model can retry
+A failed `read_file` doesn't corrupt the review session. The agent's state
+remains consistent, and the model can retry
 or take a different approach without debugging "what state are we actually in?"
 
 No explicit error handling code is required—the framework handles rollback
@@ -71,7 +71,8 @@ Owns user interaction:
 ### Startup Sequence
 
 1. `configure_logging()` sets up logging
-1. `build_adapter()` creates the OpenAI adapter (requires `OPENAI_API_KEY`)
+1. `build_adapter()` creates the Claude Agent SDK adapter (requires
+   `ANTHROPIC_API_KEY`)
 1. `CodeReviewApp` creates the event dispatcher and `CodeReviewLoop`
 1. `CodeReviewLoop.__init__`:
    - Creates a persistent `Session` via `build_logged_session()`
@@ -209,9 +210,8 @@ The example automatically optimizes the workspace digest on first use:
 1. `CodeReviewLoop.execute()` checks if `WorkspaceDigest` exists in session
 1. If missing, calls `_run_optimization()` before processing the request
 1. Creates a child session via `build_logged_session(parent=...)`
-1. Builds `OptimizationContext` with adapter, dispatcher, store, tag
-1. Runs `WorkspaceDigestOptimizer` with `PersistenceScope.SESSION`
-1. Digest is stored in the session for subsequent requests
+1. Runs `WorkspaceDigestOptimizer` which stores the digest in the session
+1. Digest is available for subsequent requests via `WorkspaceDigestSection`
 
 This eliminates the need for manual optimization commands.
 
@@ -270,15 +270,15 @@ Objective: <objective> (status: <status>)
 ## Running the Example
 
 ```bash
-OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
+ANTHROPIC_API_KEY=sk-ant-... uv run python code_reviewer_example.py
 ```
 
 ### Environment Variables
 
 | Variable | Required | Default | Description |
-| ------------------------ | -------- | --------- | -------------- |
-| `OPENAI_API_KEY` | Yes | - | OpenAI API key |
-| `OPENAI_MODEL` | No | `gpt-5.2` | Model to use |
+| ------------------------ | -------- | -------------- | ------------------- |
+| `ANTHROPIC_API_KEY` | Yes | - | Anthropic API key |
+| `CLAUDE_MODEL` | No | `claude-opus-4-6` | Model to use |
 | `CODE_REVIEW_PROMPT_TAG` | No | `latest` | Overrides tag |
 
 ### REPL Commands
