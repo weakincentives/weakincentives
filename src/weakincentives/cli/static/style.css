@@ -110,17 +110,6 @@ a {
   text-decoration: none;
 }
 
-/* --- Layout --- */
-
-.layout {
-  display: grid;
-  grid-template-columns: 416px 1fr;
-  gap: 24px;
-  padding: 24px;
-  width: 100%;
-  align-items: start;
-}
-
 /* --- Top Bar --- */
 
 .top-bar {
@@ -903,10 +892,6 @@ button.ghost:hover {
 /* --- Responsive --- */
 
 @media (max-width: 1024px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-
   .sidebar {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1437,16 +1422,6 @@ select:focus-visible {
   background: var(--color-primary-subtle);
   border-color: var(--color-primary);
   color: var(--color-primary);
-}
-
-/* --- Sidebar Collapsed State --- */
-
-.layout.sidebar-collapsed .sidebar {
-  display: none;
-}
-
-.layout.sidebar-collapsed {
-  grid-template-columns: 1fr;
 }
 
 /* --- Item Focus State --- */

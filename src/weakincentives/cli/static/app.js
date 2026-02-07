@@ -77,25 +77,6 @@ applyTheme(state.theme);
 themeToggle.addEventListener("click", toggleTheme);
 
 // ============================================================================
-// SIDEBAR
-// ============================================================================
-
-function applySidebarState() {
-  document.querySelectorAll(".view-container").forEach((view) => {
-    view.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
-  });
-}
-
-function toggleSidebar() {
-  state.sidebarCollapsed = !state.sidebarCollapsed;
-  localStorage.setItem("wink-sidebar-collapsed", state.sidebarCollapsed);
-  applySidebarState();
-  showToast(state.sidebarCollapsed ? "Sidebar hidden" : "Sidebar shown");
-}
-
-applySidebarState();
-
-// ============================================================================
 // VIEW SWITCHING
 // ============================================================================
 
@@ -339,7 +320,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       switchView,
       reloadBundle,
       toggleTheme,
-      toggleSidebar,
       navigateBundle,
     });
 

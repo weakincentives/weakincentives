@@ -17,7 +17,6 @@ export function createInitialState() {
     bundles: [],
     activeView: "sessions",
     theme: localStorage.getItem("wink-theme") || "light",
-    sidebarCollapsed: localStorage.getItem("wink-sidebar-collapsed") === "true",
     // Sessions (slices) state
     selectedSlice: null,
     sliceBuckets: { state: [], event: [] },

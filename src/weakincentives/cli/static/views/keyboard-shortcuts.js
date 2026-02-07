@@ -14,7 +14,6 @@
  * @param {function} deps.switchView - View switching function
  * @param {function} deps.reloadBundle - Bundle reload function
  * @param {function} deps.toggleTheme - Theme toggle function
- * @param {function} deps.toggleSidebar - Sidebar toggle function
  * @param {function} deps.navigateBundle - Bundle navigation function
  */
 export function initKeyboardShortcuts({
@@ -26,7 +25,6 @@ export function initKeyboardShortcuts({
   switchView,
   reloadBundle,
   toggleTheme,
-  toggleSidebar,
   navigateBundle,
 }) {
   const els = {
@@ -145,7 +143,6 @@ export function initKeyboardShortcuts({
     R: reloadBundle,
     d: toggleTheme,
     D: toggleTheme,
-    "[": toggleSidebar,
     "/": focusCurrentSearch,
     j: navigateNext,
     J: navigateNext,
