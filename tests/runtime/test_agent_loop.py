@@ -39,6 +39,7 @@ from weakincentives.prompt import (
     VisibilityExpansionRequired,
 )
 from weakincentives.runtime.agent_loop import (
+    _MAX_VISIBILITY_RETRIES,
     AgentLoop,
     AgentLoopConfig,
     AgentLoopRequest,
@@ -2158,3 +2159,38 @@ def test_execute_with_bundle_calls_prompt_cleanup(tmp_path: Path) -> None:
             assert mock_cleanup.call_count == 1
     finally:
         requests.close()
+
+
+def test_visibility_expansion_retry_cap() -> None:
+    """Exceeding _MAX_VISIBILITY_RETRIES raises PromptEvaluationError."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        # Create more visibility requests than the retry cap allows
+        visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+            {("section1",): SectionVisibility.FULL}
+            for _ in range(_MAX_VISIBILITY_RETRIES + 1)
+        ]
+        adapter = _MockAdapter(visibility_requests=visibility_requests)
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Should fail with error message about retry cap
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is False
+        assert msgs[0].body.error is not None
+        assert "Visibility expansion retries exceeded" in msgs[0].body.error
+        assert str(_MAX_VISIBILITY_RETRIES) in msgs[0].body.error
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()

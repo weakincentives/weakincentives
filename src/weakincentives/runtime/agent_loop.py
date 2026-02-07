@@ -87,6 +87,9 @@ _logger: StructuredLogger = get_logger(
     __name__, context={"component": "runtime.agent_loop"}
 )
 
+_MAX_VISIBILITY_RETRIES: int = 10
+"""Maximum number of visibility expansion retries before giving up."""
+
 
 class AgentLoop[UserRequestT, OutputT](
     MailboxWorker[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]]
@@ -574,6 +577,7 @@ class AgentLoop[UserRequestT, OutputT](
         Returns:
             The prompt response from successful evaluation.
         """
+        retries = 0
         while True:
             try:
                 response = self._adapter.evaluate(
@@ -585,6 +589,15 @@ class AgentLoop[UserRequestT, OutputT](
                     run_context=run_context,
                 )
             except VisibilityExpansionRequired as e:
+                retries += 1
+                if retries > _MAX_VISIBILITY_RETRIES:
+                    from ..adapters.core import PromptEvaluationError
+
+                    raise PromptEvaluationError(
+                        f"Visibility expansion retries exceeded ({_MAX_VISIBILITY_RETRIES})",
+                        prompt_name=prompt.key,
+                        phase="request",
+                    ) from e
                 for path, visibility in e.requested_overrides.items():
                     _ = session.dispatch(
                         SetVisibilityOverride(path=path, visibility=visibility)

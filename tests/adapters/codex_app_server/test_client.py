@@ -787,3 +787,40 @@ class TestReadLoopBroadException:
                 await client.stop()
 
         asyncio.run(_run())
+
+    def test_read_loop_logs_exception_context(self) -> None:
+        """The _read_loop exception handler includes exc_info for diagnostics."""
+
+        async def _run() -> None:
+            notif = _notification_line("item/completed", {})
+            proc = FakeProcess(stdout_lines=[notif])
+
+            with patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec:
+                mock_exec.return_value = proc
+                client = CodexAppServerClient()
+
+                # Patch _route_message to raise an unexpected error
+                def exploding_route(parsed: dict[str, Any]) -> None:
+                    raise RuntimeError("unexpected boom")
+
+                client._route_message = exploding_route  # type: ignore[assignment]
+
+                with patch(
+                    "weakincentives.adapters.codex_app_server.client.logger"
+                ) as mock_logger:
+                    await client.start()
+
+                    # Drain messages to let read_loop complete
+                    async for _ in client.read_messages():
+                        pass  # pragma: no cover
+
+                    # Verify warning was called with exc_info=True
+                    mock_logger.warning.assert_called_once()
+                    _, kwargs = mock_logger.warning.call_args
+                    assert kwargs.get("exc_info") is True
+
+                await client.stop()
+
+        asyncio.run(_run())

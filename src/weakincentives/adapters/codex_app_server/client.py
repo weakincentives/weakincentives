@@ -233,6 +233,7 @@ class CodexAppServerClient:
             logger.warning(
                 "codex_client.read_loop_error",
                 event="client.read_loop_error",
+                exc_info=True,
             )
         finally:
             # Signal end of messages

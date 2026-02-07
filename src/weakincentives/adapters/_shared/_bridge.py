@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import threading
@@ -543,12 +544,12 @@ def make_async_handler(
     """Create an async handler wrapper for a bridged tool.
 
     The SDK expects async handlers, but our BridgedTool is synchronous.
-    This wrapper creates an async function that calls the sync handler.
-    The async def is required by the SDK even though we don't await anything.
+    This wrapper runs the sync handler in a thread via asyncio.to_thread()
+    to avoid blocking the event loop during tool execution.
     """
 
     async def handler(args: dict[str, Any]) -> dict[str, Any]:
-        return bt(args)
+        return await asyncio.to_thread(bt, args)
 
     return handler
 
