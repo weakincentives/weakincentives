@@ -65,7 +65,6 @@ _PROMPT_NS: Final[str] = "integration/codex-evals-math"
 
 # Evaluation constants
 _NUMERIC_TOLERANCE = 0.001
-_EXPECTED_SAMPLE_COUNT = 10
 _MIN_PASS_RATE = 0.5
 
 
@@ -368,10 +367,11 @@ def test_codex_math_eval_full_dataset() -> None:
                 EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
             )
 
-        eval_loop.run(max_iterations=15)
+        sample_count = len(dataset)
+        eval_loop.run(max_iterations=sample_count)
 
         report = collect_results(
-            results, expected_count=_EXPECTED_SAMPLE_COUNT, timeout_seconds=60
+            results, expected_count=sample_count, timeout_seconds=60
         )
 
         print("\nCodex Math Eval Report:")
@@ -385,8 +385,8 @@ def test_codex_math_eval_full_dataset() -> None:
             for fail in report.failed_samples():
                 print(f"  - {fail.sample_id}: {fail.score.reason or fail.error}")
 
-        assert report.total == _EXPECTED_SAMPLE_COUNT, (
-            f"Expected {_EXPECTED_SAMPLE_COUNT} results, got {report.total}"
+        assert report.total == sample_count, (
+            f"Expected {sample_count} results, got {report.total}"
         )
         assert report.pass_rate >= _MIN_PASS_RATE, (
             f"Expected >={_MIN_PASS_RATE:.0%} pass rate, got {report.pass_rate:.2%}"
