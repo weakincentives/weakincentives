@@ -516,7 +516,6 @@ class TestAgentLoopConfigSerde:
         data = dump(config)
         restored = parse(AgentLoopConfig, data)
 
-        assert restored.deadline is None
         assert restored.budget is None
         assert restored.resources is None
         assert restored.lease_extender is None

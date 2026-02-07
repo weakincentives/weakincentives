@@ -218,19 +218,15 @@ class _TestLoop(AgentLoop[_Request, _Output]):
 def test_config_default_values() -> None:
     """AgentLoopConfig has sensible defaults."""
     config = AgentLoopConfig()
-    assert config.deadline is None
     assert config.budget is None
 
 
 def test_config_custom_values() -> None:
     """AgentLoopConfig accepts custom values."""
-    deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
     budget = Budget(max_total_tokens=1000)
     config = AgentLoopConfig(
-        deadline=deadline,
         budget=budget,
     )
-    assert config.deadline is deadline
     assert config.budget is budget
 
 

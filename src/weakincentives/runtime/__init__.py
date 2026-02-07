@@ -127,7 +127,7 @@ Exports
 
 **AgentLoop:**
     - :class:`AgentLoop` - Abstract orchestrator for request processing
-    - :class:`AgentLoopConfig` - Configuration for deadlines, budgets
+    - :class:`AgentLoopConfig` - Configuration for budgets, resources
     - :class:`AgentLoopRequest` - Wrapper for incoming requests
     - :class:`AgentLoopResult` - Response containing output and metadata
 

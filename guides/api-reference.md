@@ -87,7 +87,7 @@ session.snapshot(include_all=False)
 session.restore(snapshot, preserve_logs=True)
 
 # AgentLoop
-AgentLoopConfig(deadline=..., budget=..., resources=...)
+AgentLoopConfig(budget=..., resources=...)
 AgentLoop.execute(request, deadline=..., budget=..., resources=...)
 ```
 

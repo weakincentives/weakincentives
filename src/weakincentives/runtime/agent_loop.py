@@ -150,7 +150,7 @@ class AgentLoop[UserRequestT, OutputT](
             adapter: Provider adapter for prompt evaluation.
             requests: Mailbox to receive AgentLoopRequest messages from.
                 Response routing derives from each message's reply_to field.
-            config: Optional configuration for default deadline/budget.
+            config: Optional configuration for default budget/resources.
             worker_id: Identifier for this worker instance. If None or empty,
                 auto-generates as "{hostname}-{pid}". Recommended formats:
                 - Production: "{hostname}-{pid}" or "{k8s_pod_name}"
@@ -255,7 +255,7 @@ class AgentLoop[UserRequestT, OutputT](
         Args:
             request: The user request to process.
             budget: Optional budget override (takes precedence over config).
-            deadline: Optional deadline override (takes precedence over config).
+            deadline: Optional deadline for this execution.
             resources: Optional resources override (dict mapping types to instances).
             heartbeat: Optional heartbeat for lease extension. If provided, this
                 heartbeat is used for adapter evaluation instead of the loop's
@@ -306,7 +306,7 @@ class AgentLoop[UserRequestT, OutputT](
                 retention policy, max_file_size, and compression are used. If not
                 provided, default BundleConfig settings are used.
             budget: Optional budget override (takes precedence over config).
-            deadline: Optional deadline override (takes precedence over config).
+            deadline: Optional deadline for this execution.
             resources: Optional resources override.
             heartbeat: Optional heartbeat for lease extension.
             experiment: Optional experiment for A/B testing.
@@ -550,14 +550,13 @@ class AgentLoop[UserRequestT, OutputT](
             Tuple of (prompt_with_resources, budget_tracker, effective_deadline).
         """
         eff_budget = budget if budget is not None else self._config.budget
-        eff_deadline = deadline if deadline is not None else self._config.deadline
         eff_resources = resources if resources is not None else self._config.resources
 
         if eff_resources is not None:
             prompt = prompt.bind(resources=eff_resources)
 
         budget_tracker = BudgetTracker(budget=eff_budget) if eff_budget else None
-        return prompt, budget_tracker, eff_deadline
+        return prompt, budget_tracker, deadline
 
     def _evaluate_with_retries(  # noqa: PLR0913
         self,

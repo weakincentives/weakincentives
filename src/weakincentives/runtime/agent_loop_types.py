@@ -137,7 +137,7 @@ class BundleContext[OutputT]:
 class AgentLoopConfig:
     """Configuration for AgentLoop execution defaults.
 
-    Request-level ``budget``, ``deadline``, and ``resources`` override these defaults.
+    Request-level ``budget`` and ``resources`` override these defaults.
 
     The ``lease_extender`` field controls automatic message visibility extension
     during processing. When enabled, heartbeats from tool execution extend the
@@ -148,7 +148,6 @@ class AgentLoopConfig:
     session state, logs, and other artifacts.
     """
 
-    deadline: Deadline | None = None
     budget: Budget | None = None
     resources: Mapping[type[object], object] | None = None
     lease_extender: LeaseExtenderConfig | None = None

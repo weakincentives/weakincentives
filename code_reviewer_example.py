@@ -418,9 +418,6 @@ def run_review(
 
     adapter = create_adapter(adapter_name)
     config = AgentLoopConfig(
-        deadline=Deadline(
-            expires_at=datetime.now(UTC) + timedelta(minutes=deadline_minutes)
-        ),
         debug_bundle=BundleConfig(target=Path("debug_bundles/")),
     )
     loop = CodeReviewLoop(
@@ -434,7 +431,12 @@ def run_review(
         project_path=str(project_path),
         focus=focus,
     )
-    loop_request = AgentLoopRequest(request=review_request)
+    loop_request = AgentLoopRequest(
+        request=review_request,
+        deadline=Deadline(
+            expires_at=datetime.now(UTC) + timedelta(minutes=deadline_minutes)
+        ),
+    )
 
     _LOGGER.info("Sending review request to mailbox...")
     _ = requests.send(loop_request, reply_to=responses)
