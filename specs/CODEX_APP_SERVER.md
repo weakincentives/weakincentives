@@ -384,9 +384,9 @@ At `src/weakincentives/adapters/codex_app_server/adapter.py`:
 
 1. Extract `tool` name and `arguments` from `params` (handles string arguments
    via `json.loads`)
-2. Look up `BridgedTool` by name; respond with error if unknown
-3. Execute via `asyncio.to_thread(bridged_tool, arguments)`
-4. Convert MCP result to `DynamicToolCallResponse` format:
+1. Look up `BridgedTool` by name; respond with error if unknown
+1. Execute via `asyncio.to_thread(bridged_tool, arguments)`
+1. Convert MCP result to `DynamicToolCallResponse` format:
    `{"success": bool, "contentItems": [{"type": "inputText", "text": str}]}`
 
 ### External MCP Servers
@@ -464,8 +464,7 @@ capture loop are started as asyncio tasks.
 ### 5. Initialize Handshake
 
 At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_execute_protocol()` sends the `initialize` request with `experimentalApi:
-true` (enables dynamic tools on `thread/start`), then sends an `initialized`
+`_execute_protocol()` sends the `initialize` request with `experimentalApi: true` (enables dynamic tools on `thread/start`), then sends an `initialized`
 notification. The `startup_timeout_s` config controls the handshake timeout.
 
 The server rejects all methods before `initialize`. Repeated `initialize` calls

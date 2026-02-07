@@ -144,9 +144,9 @@ This matters because it means:
 
 1. Discovery is immediate -- no scanning directories hoping to find
    the right file
-2. The collector knows exactly which files are transcripts vs other
+1. The collector knows exactly which files are transcripts vs other
    log output
-3. Sub-agent transcripts are discovered by scanning a known
+1. Sub-agent transcripts are discovered by scanning a known
    directory derived from the main transcript path
 
 ### Background tailing
@@ -217,11 +217,11 @@ starting point.
 ### The typical investigation flow
 
 1. Start with the debug bundle (`wink debug <bundle>`)
-2. Check the error panel or error summary
-3. Look at the tool timeline to see what the agent did
-4. Check the transcript for the conversation flow
-5. Query specific log events with `wink query` for details
-6. Use `run_context.json` to find the run_id and request_id
+1. Check the error panel or error summary
+1. Look at the tool timeline to see what the agent did
+1. Check the transcript for the conversation flow
+1. Query specific log events with `wink query` for details
+1. Use `run_context.json` to find the run_id and request_id
    for cross-referencing with external systems
 
 ## OpenTelemetry Integration

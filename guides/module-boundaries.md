@@ -185,16 +185,16 @@ When adding new code, ask these questions in order:
    Foundation. Examples: a new error type, a time utility, a contract
    decorator.
 
-2. **Does it implement a core WINK abstraction?** If it works with
+1. **Does it implement a core WINK abstraction?** If it works with
    prompts, sessions, resources, or serialization, it belongs in Core.
 
-3. **Does it integrate with an external provider?** Adapter layer.
+1. **Does it integrate with an external provider?** Adapter layer.
    Keep provider-specific code isolated here.
 
-4. **Is it a user-facing feature?** CLI commands, evaluation helpers,
+1. **Is it a user-facing feature?** CLI commands, evaluation helpers,
    contributed tool suites belong in High-Level.
 
-5. **Does it need to import from Adapters or High-Level?** If a Core
+1. **Does it need to import from Adapters or High-Level?** If a Core
    module needs to, reconsider the design. Either the code belongs in a
    higher layer, or you need a protocol to invert the dependency.
 

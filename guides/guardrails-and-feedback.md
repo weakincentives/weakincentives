@@ -206,7 +206,7 @@ feedback." The adapter integrates this at two points:
 
 1. **During execution:** if the agent produces structured output while
    tasks remain, the checker injects feedback as additional context
-2. **At stop:** if the agent tries to end the turn, the checker can
+1. **At stop:** if the agent tries to end the turn, the checker can
    request more turns
 
 ### Built-in Checkers
@@ -242,11 +242,11 @@ Consider a code review agent:
    on it (ReadBeforeWritePolicy) and runs tests before approving
    changes (SequentialDependencyPolicy).
 
-2. **Feedback providers** remind the agent of the deadline every 30
+1. **Feedback providers** remind the agent of the deadline every 30
    seconds and detect when a configuration file like `AGENTS.md`
    appears in the workspace.
 
-3. **Task completion** verifies that all review tasks in the plan are
+1. **Task completion** verifies that all review tasks in the plan are
    marked done before the agent produces its final report.
 
 Policies provide hard safety rails. Feedback provides situational

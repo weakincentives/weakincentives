@@ -17,9 +17,9 @@ Maybe you just picked favorable inputs.
 The experiments system gives you a repeatable process:
 
 1. Define a baseline (the current behavior)
-2. Define a treatment (the proposed change)
-3. Run the same dataset through both
-4. Compare results with real numbers
+1. Define a treatment (the proposed change)
+1. Run the same dataset through both
+1. Compare results with real numbers
 
 This is the same baseline-vs-treatment pattern used in any controlled
 experiment. The only difference is that your "subjects" are agent runs
@@ -85,8 +85,8 @@ The most common experiment changes prompt text. The workflow is:
 
 1. Seed an override file for a new tag
    (`store.seed(prompt, tag="v2")`)
-2. Edit the override file with your proposed changes
-3. Create an experiment pointing to that tag
+1. Edit the override file with your proposed changes
+1. Create an experiment pointing to that tag
 
 The override system handles the rest: hash validation ensures the
 override applies to the right version of the prompt, and the tag
@@ -195,17 +195,17 @@ Here is a workflow that works well for iterating on prompt quality:
 1. **Establish a baseline.** Run your eval suite with `BASELINE` and
    record the pass rate. This is your current state of the world.
 
-2. **Create overrides for the treatment.** Seed a new tag, edit the
+1. **Create overrides for the treatment.** Seed a new tag, edit the
    override files with your proposed changes.
 
-3. **Run the comparison.** Submit the dataset under both experiments,
+1. **Run the comparison.** Submit the dataset under both experiments,
    collect results, check the delta.
 
-4. **Iterate or promote.** If the treatment wins, update your code to
+1. **Iterate or promote.** If the treatment wins, update your code to
    incorporate the changes (or promote the override tag to production).
    If it loses, try a different approach.
 
-5. **Repeat.** Each round, the previous winner becomes the new
+1. **Repeat.** Each round, the previous winner becomes the new
    baseline. Improvements compound.
 
 This is a tight loop: change, measure, decide. No guessing.
