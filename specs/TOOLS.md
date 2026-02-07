@@ -90,7 +90,7 @@ At `src/weakincentives/prompt/tool.py` (`ToolExample` class):
 
 | Field | Description |
 | --- | --- |
-| `description` | <=200 chars |
+| `description` | \<=200 chars |
 | `input` | Params dataclass instance |
 | `output` | Result dataclass instance |
 

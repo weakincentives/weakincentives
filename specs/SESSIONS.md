@@ -200,6 +200,7 @@ class Snapshotable[SnapshotT](Protocol):
 ```
 
 Implementations include:
+
 - `Session` implements `Snapshotable[Snapshot]`
 - `InMemoryFilesystem` implements `Snapshotable[FilesystemSnapshot]`
 

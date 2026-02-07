@@ -308,6 +308,7 @@ Coverage is enabled via `--coverage`. The `parse_bun_test` parser in
    `toolchain/checkers/__init__.py`
 
 See existing checkers for patterns:
+
 - `create_format_checker()` for `AutoFormatChecker` with JSON output parsing
 - `create_markdown_checker()` for `AutoFormatChecker` with text file list parsing
 - `create_bun_test_checker()` for `SubprocessChecker` with graceful skip

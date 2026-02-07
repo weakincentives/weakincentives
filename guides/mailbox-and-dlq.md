@@ -84,7 +84,7 @@ Two important rules:
 1. Always send your response before acknowledging. If you acknowledge
    first and then crash before replying, the message is gone and the
    caller never gets a response.
-2. Set `visibility_timeout` longer than your maximum expected
+1. Set `visibility_timeout` longer than your maximum expected
    processing time. If it is too short, messages will be redelivered
    while still being processed, causing duplicate work.
 
