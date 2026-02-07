@@ -8,12 +8,86 @@ permissions:
   contents: read
 
 jobs:
+  # Static analysis - always runs (fast and high value)
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+        with:
+          checkout: 'false'
+          sync-args: --all-extras --frozen
+      - name: Run format check
+        run: make format-check
+      - name: Run linter
+        run: make lint
+      - name: Run ty
+        run: make ty
+      - name: Run pyright
+        run: make pyright
+      - name: Run Biome (JS/CSS lint)
+        run: make biome
+      - name: Run JavaScript tests
+        run: make bun-test
+
+  # Parallel test jobs - full suite
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+        with:
+          checkout: 'false'
+          sync-args: --all-extras --frozen
+
+      - name: Run test group ${{ matrix.group }}
+        run: make test-group-${{ matrix.group }}
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.group }}
+          path: .coverage.${{ matrix.group }}
+          include-hidden-files: true
+
+  # Combine coverage from all parallel test groups
+  coverage:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      CI: true  # Ensures make test runs full coverage (vs testmon locally)
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+        with:
+          checkout: 'false'
+          sync-args: --all-extras --frozen
+
+      - name: Download all coverage data
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Combine coverage
+        run: |
+          uv run coverage combine .coverage.*
+          uv run coverage report --fail-under=100
+          uv run coverage report --format=markdown >> $GITHUB_STEP_SUMMARY
+
+  # Publish to PyPI after all checks pass
   pypi-publish:
     name: Publish to PyPI
+    needs: [static-analysis, coverage]
     runs-on: ubuntu-latest
     environment: pypi
-    env:
-      CI: true  # Ensures make check runs full test coverage
 
     permissions:
       id-token: write  # Required for trusted publishing
@@ -24,16 +98,10 @@ jobs:
       uses: ./.github/actions/setup-env
       with:
         checkout: 'false'
-        sync-args: --frozen
-
-    - name: Run checks
-      run: make check
-    
-    - name: Restore clean lockfile
-      run: git checkout -- uv.lock
+        sync-args: --all-extras --frozen
 
     - name: Build package
       run: uv build
-    
+
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@v1.13.0
