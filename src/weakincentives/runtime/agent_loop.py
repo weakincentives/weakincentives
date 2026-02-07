@@ -87,6 +87,9 @@ _logger: StructuredLogger = get_logger(
     __name__, context={"component": "runtime.agent_loop"}
 )
 
+_MAX_VISIBILITY_RETRIES: int = 10
+"""Maximum number of visibility expansion retries before giving up."""
+
 
 class AgentLoop[UserRequestT, OutputT](
     MailboxWorker[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]]
@@ -390,6 +393,8 @@ class AgentLoop[UserRequestT, OutputT](
                 budget_tracker=budget_tracker,
             )
 
+            prompt.cleanup()
+
         # BundleWriter context has exited, bundle is finalized
         # ctx.bundle_path now returns writer.path
 
@@ -518,14 +523,17 @@ class AgentLoop[UserRequestT, OutputT](
         # Use provided heartbeat or fall back to loop's internal heartbeat
         effective_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
 
-        response = self._evaluate_with_retries(
-            prompt=prompt,
-            session=session,
-            deadline=deadline,
-            budget_tracker=budget_tracker,
-            heartbeat=effective_heartbeat,
-            run_context=run_context,
-        )
+        try:
+            response = self._evaluate_with_retries(
+                prompt=prompt,
+                session=session,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=effective_heartbeat,
+                run_context=run_context,
+            )
+        finally:
+            prompt.cleanup()
         return response, session, prompt
 
     def _resolve_settings(
@@ -569,6 +577,7 @@ class AgentLoop[UserRequestT, OutputT](
         Returns:
             The prompt response from successful evaluation.
         """
+        retries = 0
         while True:
             try:
                 response = self._adapter.evaluate(
@@ -580,6 +589,15 @@ class AgentLoop[UserRequestT, OutputT](
                     run_context=run_context,
                 )
             except VisibilityExpansionRequired as e:
+                retries += 1
+                if retries > _MAX_VISIBILITY_RETRIES:
+                    from ..adapters.core import PromptEvaluationError
+
+                    raise PromptEvaluationError(
+                        f"Visibility expansion retries exceeded ({_MAX_VISIBILITY_RETRIES})",
+                        prompt_name=prompt.key,
+                        phase="request",
+                    ) from e
                 for path, visibility in e.requested_overrides.items():
                     _ = session.dispatch(
                         SetVisibilityOverride(path=path, visibility=visibility)
@@ -709,8 +727,10 @@ class AgentLoop[UserRequestT, OutputT](
         trigger = "request" if request_event.debug_bundle is not None else "config"
 
         writer: BundleWriter | None = None
+        prompt: Prompt[OutputT] | None = None
         started_at = datetime.now(UTC)
         budget_tracker: BudgetTracker | None = None
+        prompt_cleaned_up = False
         try:
             with BundleWriter(
                 bundle_config.target,
@@ -767,6 +787,9 @@ class AgentLoop[UserRequestT, OutputT](
                     run_context=run_context,
                 )
 
+                prompt_cleaned_up = True
+                prompt.cleanup()
+
             # Bundle path is set after context manager exits (in __exit__ -> _finalize)
             bundle_path = writer.path
 
@@ -780,6 +803,10 @@ class AgentLoop[UserRequestT, OutputT](
             reply_and_ack(msg, result)
 
         except Exception as exc:
+            # Clean up prompt resources if prompt was created
+            if prompt is not None and not prompt_cleaned_up:
+                prompt.cleanup()
+
             # Check if bundle was created despite the error
             bundle_path = writer.path if writer is not None else None
 
@@ -843,11 +870,17 @@ class AgentLoop[UserRequestT, OutputT](
 
     def _get_adapter_name(self) -> str:
         """Get the canonical adapter name for the current adapter."""
-        from ..adapters import CLAUDE_AGENT_SDK_ADAPTER_NAME
+        from ..adapters import (
+            CLAUDE_AGENT_SDK_ADAPTER_NAME,
+            CODEX_APP_SERVER_ADAPTER_NAME,
+        )
         from ..adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+        from ..adapters.codex_app_server import CodexAppServerAdapter
 
         if isinstance(self._adapter, ClaudeAgentSDKAdapter):
             return CLAUDE_AGENT_SDK_ADAPTER_NAME  # pragma: no cover
+        if isinstance(self._adapter, CodexAppServerAdapter):
+            return CODEX_APP_SERVER_ADAPTER_NAME
         return type(self._adapter).__name__
 
     @staticmethod

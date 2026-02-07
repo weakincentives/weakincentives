@@ -287,6 +287,43 @@ class TestClaudeAgentWorkspaceSectionCleanup:
             section.cleanup()
 
 
+class TestClaudeAgentWorkspaceSectionRefCounting:
+    """Reference counting tests for clone/cleanup."""
+
+    def test_cleanup_original_preserves_temp_dir_when_clone_alive(
+        self, session: Session
+    ) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        new_session = Session(dispatcher=InProcessDispatcher())
+        cloned = section.clone(session=new_session)
+        temp = section.temp_dir
+        assert temp.exists()
+
+        # Cleanup original — clone still alive, so temp_dir should persist
+        section.cleanup()
+        assert temp.exists()
+
+        # Cleanup clone (last ref) — temp_dir should be removed
+        cloned.cleanup()
+        assert not temp.exists()
+
+    def test_cleanup_clone_preserves_temp_dir_when_original_alive(
+        self, session: Session
+    ) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        new_session = Session(dispatcher=InProcessDispatcher())
+        cloned = section.clone(session=new_session)
+        temp = section.temp_dir
+
+        # Cleanup clone first — original still alive
+        cloned.cleanup()
+        assert temp.exists()
+
+        # Cleanup original (last ref) — temp_dir should be removed
+        section.cleanup()
+        assert not temp.exists()
+
+
 class TestClaudeAgentWorkspaceSectionTemplate:
     """Template rendering tests for ClaudeAgentWorkspaceSection."""
 

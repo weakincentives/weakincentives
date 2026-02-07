@@ -308,6 +308,17 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
         return ResourceRegistry()
 
+    def cleanup(self) -> None:
+        """Release resources held by this section.
+
+        Called by the framework after execution completes and debug bundle
+        artifacts have been captured. Override to perform cleanup such as
+        removing temporary directories.
+
+        The default implementation is a no-op. Implementations must be
+        idempotent — safe to call multiple times.
+        """
+
     def effective_visibility(
         self,
         override: SectionVisibility | None = None,

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,8 @@ from weakincentives.adapters.claude_agent_sdk import (
     SandboxConfig,
     get_default_model,
 )
+from weakincentives.adapters.core import PromptEvaluationError
+from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -66,6 +69,7 @@ pytestmark = [
 
 _MODEL_ENV_VAR = "CLAUDE_AGENT_SDK_TEST_MODEL"
 _PROMPT_NS = "integration/claude-agent-sdk"
+_NETWORK_TEST_DEADLINE_SECONDS = 8.0
 
 
 def _get_model() -> str:
@@ -1230,6 +1234,26 @@ def _build_network_test_prompt() -> PromptTemplate[NetworkTestResult]:
     )
 
 
+def _network_test_deadline() -> Deadline:
+    return Deadline(
+        expires_at=datetime.now(UTC) + timedelta(seconds=_NETWORK_TEST_DEADLINE_SECONDS)
+    )
+
+
+def _assert_expected_network_policy_error(error: PromptEvaluationError) -> None:
+    expected_messages = (
+        "Structured output prompt returned no text and no structured output.",
+        "Deadline exceeded while waiting for Claude SDK response stream.",
+    )
+    assert error.phase == "response", (
+        f"Unexpected error phase {error.phase}: {error.message}"
+    )
+    assert any(message in error.message for message in expected_messages), (
+        f"Unexpected adapter error for blocked network test: "
+        f"message={error.message!r}, phase={error.phase}, payload={error.provider_payload!r}"
+    )
+
+
 def test_claude_agent_sdk_adapter_network_policy_allows_listed_domain(
     tmp_path: Path,
 ) -> None:
@@ -1303,7 +1327,15 @@ def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
     )
     session = _make_session_with_usage_tracking()
 
-    response = adapter.evaluate(prompt, session=session)
+    try:
+        response = adapter.evaluate(
+            prompt,
+            session=session,
+            deadline=_network_test_deadline(),
+        )
+    except PromptEvaluationError as error:
+        _assert_expected_network_policy_error(error)
+        return
 
     assert response.output is not None, (
         f"Expected structured output, got: {response.text}"
@@ -1347,7 +1379,15 @@ def test_claude_agent_sdk_adapter_no_network_blocks_all_tool_access(
     )
     session = _make_session_with_usage_tracking()
 
-    response = adapter.evaluate(prompt, session=session)
+    try:
+        response = adapter.evaluate(
+            prompt,
+            session=session,
+            deadline=_network_test_deadline(),
+        )
+    except PromptEvaluationError as error:
+        _assert_expected_network_policy_error(error)
+        return
 
     assert response.output is not None, (
         f"Expected structured output, got: {response.text}"

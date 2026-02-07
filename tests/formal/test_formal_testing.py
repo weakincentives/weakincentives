@@ -54,7 +54,7 @@ class TestCounter:
     pass
 
 
-def mock_subprocess_for_tlc(monkeypatch: pytest.MonkeyPatch, run_mock: Any) -> None:  # noqa: ANN401
+def mock_subprocess_for_tlc(monkeypatch: pytest.MonkeyPatch, run_mock: Any) -> None:
     """Helper to mock both subprocess.run and Popen, and disable JAR file check.
 
     Creates a Popen mock that delegates to run_mock for compatibility.
@@ -62,7 +62,7 @@ def mock_subprocess_for_tlc(monkeypatch: pytest.MonkeyPatch, run_mock: Any) -> N
     import subprocess
     from unittest.mock import MagicMock
 
-    def popen_wrapper(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def popen_wrapper(*args: Any, **kwargs: Any) -> Any:
         # Create Popen-compatible mock
         proc = MagicMock()
         call_count = 0
@@ -186,7 +186,7 @@ def test_model_check_error_tlc_not_found(monkeypatch: pytest.MonkeyPatch) -> Non
     from weakincentives.formal.testing import model_check
 
     # Mock subprocess.run to raise FileNotFoundError
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         raise FileNotFoundError("tlc not found")
 
     mock_subprocess_for_tlc(monkeypatch, mock_run)
@@ -205,7 +205,7 @@ def test_model_check_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -242,7 +242,7 @@ def test_model_check_invariant_violation(monkeypatch: pytest.MonkeyPatch) -> Non
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -281,7 +281,7 @@ def test_extract_and_verify_with_model_check_failure(
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -319,7 +319,7 @@ def test_extract_and_verify_with_model_check_success(
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -360,7 +360,7 @@ def test_model_check_no_state_count(monkeypatch: pytest.MonkeyPatch) -> None:
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -396,7 +396,7 @@ def test_model_check_non_digit_in_state_line(monkeypatch: pytest.MonkeyPatch) ->
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -435,7 +435,7 @@ def test_model_check_timeout_no_violations(monkeypatch: pytest.MonkeyPatch) -> N
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -476,7 +476,7 @@ def test_model_check_timeout_with_violations(monkeypatch: pytest.MonkeyPatch) ->
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -516,7 +516,7 @@ def test_model_check_with_jar_file(monkeypatch: pytest.MonkeyPatch) -> None:
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -531,7 +531,7 @@ def test_model_check_with_jar_file(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "run", mock_run)
 
     # Create Popen mock
-    def popen_wrapper(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def popen_wrapper(*args: Any, **kwargs: Any) -> Any:
         proc = MagicMock()
         run_result = mock_run(*args, **kwargs)
         proc.communicate.return_value = (run_result.stdout, run_result.stderr)
@@ -558,7 +558,7 @@ def test_extract_state_count_no_digits(monkeypatch: pytest.MonkeyPatch) -> None:
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 
@@ -594,7 +594,7 @@ def test_model_check_tlc_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
     call_count = 0
 
-    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         call_count += 1
 

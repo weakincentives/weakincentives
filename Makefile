@@ -148,19 +148,19 @@ test-parallel: test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 
 
 # Run integration tests (tests skip automatically when API keys are not set)
 integration-tests:
-	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 --timeout=180 integration-tests
 
 # Run all Redis integration tests (standalone + cluster)
 redis-tests:
-	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv -m redis integration-tests
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --timeout=180 -m redis integration-tests
 
 # Run Redis standalone tests only
 redis-standalone-tests:
-	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv -m redis_standalone integration-tests
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --timeout=180 -m redis_standalone integration-tests
 
 # Run Redis cluster tests only
 redis-cluster-tests:
-	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv -m redis_cluster integration-tests
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --timeout=180 -m redis_cluster integration-tests
 
 # Run JavaScript tests with Bun (via toolchain for consistent output)
 bun-test:
@@ -264,12 +264,16 @@ clean-extracted:
 # Demos
 # =============================================================================
 
-# Launch the code reviewer demo using Claude Agent SDK
-# Usage: make demo [PROJECT=/path/to/project] [FOCUS="review focus"]
+# Code reviewer demo
+# Usage: make demo-claude [PROJECT=...] [FOCUS="..."]
+#        make demo-codex  [PROJECT=...] [FOCUS="..."]
 PROJECT ?= test-repositories/sunfish
 FOCUS ?= Review how the UCI implementation is handled via the packaging scripts
-demo:
-	@uv run --all-extras python code_reviewer_example.py "$(PROJECT)" "$(FOCUS)"
+demo-claude:
+	@uv run --all-extras python code_reviewer_example.py --adapter claude "$(PROJECT)" "$(FOCUS)"
+demo-codex:
+	@uv run --all-extras python code_reviewer_example.py --adapter codex "$(PROJECT)" "$(FOCUS)"
+demo: demo-claude
 
 # =============================================================================
 # Main Check Target

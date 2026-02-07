@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 from uuid import UUID
 
 import pytest
@@ -38,6 +39,7 @@ from weakincentives.prompt import (
     VisibilityExpansionRequired,
 )
 from weakincentives.runtime.agent_loop import (
+    _MAX_VISIBILITY_RETRIES,
     AgentLoop,
     AgentLoopConfig,
     AgentLoopRequest,
@@ -1727,6 +1729,23 @@ def test_loop_debug_bundle_includes_prompt_info(tmp_path: Path) -> None:
         results.close()
 
 
+def test_get_adapter_name_uses_codex_canonical_name() -> None:
+    """AgentLoop maps Codex adapter instances to canonical adapter name."""
+    from weakincentives.adapters.codex_app_server import (
+        CODEX_APP_SERVER_ADAPTER_NAME,
+        CodexAppServerAdapter,
+    )
+
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        loop = _TestLoop(adapter=CodexAppServerAdapter(), requests=requests)
+        assert loop._get_adapter_name() == CODEX_APP_SERVER_ADAPTER_NAME
+    finally:
+        requests.close()
+
+
 def test_loop_debug_bundle_run_context_has_session_id(tmp_path: Path) -> None:
     """AgentLoop writes run_context.json with session_id after execution."""
     from weakincentives.debug.bundle import BundleConfig, DebugBundle
@@ -1936,6 +1955,241 @@ def test_loop_with_debug_bundle_includes_environment(tmp_path: Path) -> None:
         assert any("environment/env_vars.json" in f for f in files)
         assert any("environment/command.txt" in f for f in files)
 
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+# =============================================================================
+# Prompt Cleanup Lifecycle Tests
+# =============================================================================
+
+
+def test_loop_calls_prompt_cleanup_on_success() -> None:
+    """AgentLoop calls prompt.cleanup() after successful execution."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is True
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_calls_prompt_cleanup_on_adapter_failure() -> None:
+    """AgentLoop calls prompt.cleanup() even when adapter raises."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter(error=RuntimeError("boom"))
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is False
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_calls_prompt_cleanup_with_bundle(tmp_path: Path) -> None:
+    """AgentLoop calls prompt.cleanup() after bundle artifacts are written."""
+    from weakincentives.debug.bundle import BundleConfig
+
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        bundle_config = BundleConfig(target=tmp_path)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
+
+        request = AgentLoopRequest(request=_Request(message="hello bundle cleanup"))
+        requests.send(request, reply_to=results)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is True
+        assert msgs[0].body.bundle_path is not None
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_calls_prompt_cleanup_with_bundle_on_failure(tmp_path: Path) -> None:
+    """AgentLoop calls prompt.cleanup() in bundle error path."""
+    from weakincentives.debug.bundle import BundleConfig
+
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter(error=RuntimeError("execution failed"))
+        bundle_config = BundleConfig(target=tmp_path)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
+
+        request = AgentLoopRequest(request=_Request(message="hello bundle fail"))
+        requests.send(request, reply_to=results)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is False
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_bundle_reply_failure_does_not_double_cleanup(tmp_path: Path) -> None:
+    """Bundle path failures after cleanup should not trigger cleanup twice."""
+    from weakincentives.debug.bundle import BundleConfig
+
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        bundle_config = BundleConfig(target=tmp_path)
+        config = AgentLoopConfig(debug_bundle=bundle_config)
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
+
+        request = AgentLoopRequest(request=_Request(message="hello bundle reply fail"))
+        requests.send(request, reply_to=results)
+
+        with (
+            patch(
+                "weakincentives.runtime.agent_loop.reply_and_ack"
+            ) as mock_reply_and_ack,
+            patch.object(Prompt, "cleanup") as mock_cleanup,
+        ):
+            mock_reply_and_ack.side_effect = RuntimeError("reply failed")
+            loop.run(max_iterations=1, wait_time_seconds=0)
+            assert mock_cleanup.call_count == 1
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is False
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_execute_calls_prompt_cleanup() -> None:
+    """AgentLoop.execute() calls prompt.cleanup()."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            loop.execute(_Request(message="direct"))
+            assert mock_cleanup.call_count == 1
+    finally:
+        requests.close()
+
+
+def test_execute_with_bundle_calls_prompt_cleanup(tmp_path: Path) -> None:
+    """AgentLoop.execute_with_bundle() calls prompt.cleanup()."""
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        with patch.object(Prompt, "cleanup") as mock_cleanup:
+            with loop.execute_with_bundle(
+                _Request(message="bundle direct"),
+                bundle_target=tmp_path,
+            ) as ctx:
+                assert ctx.response is not None
+            assert mock_cleanup.call_count == 1
+    finally:
+        requests.close()
+
+
+def test_visibility_expansion_retry_cap() -> None:
+    """Exceeding _MAX_VISIBILITY_RETRIES raises PromptEvaluationError."""
+    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        # Create more visibility requests than the retry cap allows
+        visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+            {("section1",): SectionVisibility.FULL}
+            for _ in range(_MAX_VISIBILITY_RETRIES + 1)
+        ]
+        adapter = _MockAdapter(visibility_requests=visibility_requests)
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        request = AgentLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Should fail with error message about retry cap
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is False
+        assert msgs[0].body.error is not None
+        assert "Visibility expansion retries exceeded" in msgs[0].body.error
+        assert str(_MAX_VISIBILITY_RETRIES) in msgs[0].body.error
         msgs[0].acknowledge()
     finally:
         requests.close()

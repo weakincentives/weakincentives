@@ -14,7 +14,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import inspect
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -181,6 +183,86 @@ def _extract_message_content(message: Any) -> dict[str, Any]:
             result["thinking_length"] = len(thinking)
 
     return result
+
+
+def _collapse_nullable_any_of(any_of: object) -> dict[str, Any] | None:
+    """Collapse ``anyOf`` nullable unions into ``type=[..., "null"]``."""
+    nullable_arity = 2
+    if not isinstance(any_of, list) or len(any_of) != nullable_arity:
+        return None
+
+    if not all(isinstance(entry, dict) for entry in any_of):
+        return None
+
+    entries = cast(list[dict[str, Any]], any_of)
+    null_index = next(
+        (
+            index
+            for index, entry in enumerate(entries)
+            if entry.get("type") == "null" and len(entry) == 1
+        ),
+        None,
+    )
+    if null_index is None:
+        return None
+
+    non_null_entry = dict(entries[1 - null_index])
+    schema_type = non_null_entry.get("type")
+    if isinstance(schema_type, str):
+        non_null_entry["type"] = [schema_type, "null"]
+        return non_null_entry
+    if isinstance(schema_type, list) and all(
+        isinstance(value, str) for value in schema_type
+    ):
+        typed_values = cast(list[str], schema_type)
+        non_null_entry["type"] = (
+            typed_values if "null" in typed_values else [*typed_values, "null"]
+        )
+        return non_null_entry
+    return None
+
+
+def _normalize_claude_output_schema(raw_schema: dict[str, Any]) -> dict[str, Any]:
+    """Normalize serde JSON schema for Claude structured output compatibility."""
+    normalized = dict(raw_schema)
+
+    if normalized.get("type") == "object":
+        properties = normalized.get("properties")
+        if isinstance(properties, dict):
+            normalized["properties"] = {
+                key: _normalize_claude_output_schema(cast(dict[str, Any], value))
+                if isinstance(value, dict)
+                else value
+                for key, value in properties.items()
+            }
+
+    if "items" in normalized and isinstance(normalized["items"], dict):
+        normalized["items"] = _normalize_claude_output_schema(
+            cast(dict[str, Any], normalized["items"])
+        )
+
+    for combinator in ("anyOf", "oneOf", "allOf"):
+        combinator_items = normalized.get(combinator)
+        if isinstance(combinator_items, list):
+            normalized[combinator] = [
+                _normalize_claude_output_schema(cast(dict[str, Any], entry))
+                if isinstance(entry, dict)
+                else entry
+                for entry in combinator_items
+            ]
+
+    for defs_key in ("$defs", "definitions"):
+        defs = normalized.get(defs_key)
+        if isinstance(defs, dict):
+            normalized[defs_key] = {
+                key: _normalize_claude_output_schema(cast(dict[str, Any], value))
+                if isinstance(value, dict)
+                else value
+                for key, value in defs.items()
+            }
+
+    collapsed_nullable = _collapse_nullable_any_of(normalized.get("anyOf"))
+    return collapsed_nullable if collapsed_nullable is not None else normalized
 
 
 class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
@@ -689,6 +771,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 context={"prompt_name": prompt_name},
             )
             raise
+        except PromptEvaluationError:
+            raise
         except Exception as error:
             # Capture stderr for debugging when SDK fails
             captured_stderr = (
@@ -717,6 +801,14 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         result_text, output, usage = self._extract_result(
             messages, rendered, budget_tracker, prompt_name
+        )
+        self._raise_if_missing_required_structured_output(
+            rendered=rendered,
+            prompt_name=prompt_name,
+            messages=messages,
+            result_text=result_text,
+            output=output,
+            stop_reason=hook_context.stop_reason,
         )
 
         # Final verification: log a warning if tasks are incomplete.
@@ -783,6 +875,68 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             )
 
         return stderr_handler
+
+    def _supported_option_names(
+        self,
+        options_type: type[Any],
+    ) -> set[str] | None:
+        """Return supported option names for ClaudeAgentOptions.
+
+        Returns None when the options type accepts arbitrary keyword arguments.
+        """
+        dataclass_fields = getattr(options_type, "__dataclass_fields__", None)
+        if isinstance(dataclass_fields, dict):
+            return set(dataclass_fields)
+
+        try:
+            signature = inspect.signature(options_type)
+        except (TypeError, ValueError):
+            return None
+
+        if any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in signature.parameters.values()
+        ):
+            return None
+
+        return {
+            name
+            for name, param in signature.parameters.items()
+            if param.kind
+            in {
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            }
+        }
+
+    def _filter_unsupported_options(
+        self,
+        options_kwargs: dict[str, Any],
+        *,
+        options_type: type[Any],
+    ) -> dict[str, Any]:
+        """Drop SDK option kwargs unsupported by the installed SDK version."""
+        supported_names = self._supported_option_names(options_type)
+        if supported_names is None:
+            return options_kwargs
+
+        unsupported = sorted(
+            key for key in options_kwargs if key not in supported_names
+        )
+        if not unsupported:
+            return options_kwargs
+
+        for key in unsupported:
+            options_kwargs.pop(key, None)
+
+        logger.info(
+            "claude_agent_sdk.sdk_query.options_filtered",
+            event="sdk_query.options_filtered",
+            context={
+                "unsupported_option_names": unsupported,
+            },
+        )
+        return options_kwargs
 
     def _add_client_config_options(
         self,
@@ -1089,6 +1243,113 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             )
             raise stored_exc
 
+    def _resolve_response_wait_timeout(
+        self,
+        *,
+        hook_context: HookContext,
+        continuation_round: int,
+        message_count: int,
+    ) -> tuple[float | None, bool]:
+        """Resolve wait timeout for the next response message.
+
+        Returns:
+            Tuple of (timeout_seconds, should_stop_stream_reading).
+        """
+        if hook_context.deadline is None:
+            return (None, False)
+
+        wait_timeout = hook_context.deadline.remaining().total_seconds()
+        if wait_timeout <= 0:
+            logger.info(
+                "claude_agent_sdk.sdk_query.deadline_exceeded_during_stream_wait",
+                event="sdk_query.deadline_exceeded_during_stream_wait",
+                context={
+                    "prompt_name": hook_context.prompt_name,
+                    "continuation_round": continuation_round,
+                    "message_count": message_count,
+                    "deadline_remaining_seconds": wait_timeout,
+                },
+            )
+            return (None, True)
+
+        return (wait_timeout, False)
+
+    async def _next_response_message(
+        self,
+        *,
+        response_stream: Any,
+        hook_context: HookContext,
+        continuation_round: int,
+        message_count: int,
+    ) -> Any | None:
+        """Read the next message from the SDK response stream."""
+        wait_timeout, should_stop = self._resolve_response_wait_timeout(
+            hook_context=hook_context,
+            continuation_round=continuation_round,
+            message_count=message_count,
+        )
+        if should_stop:
+            return None
+
+        try:
+            if wait_timeout is None:
+                return await anext(response_stream)
+            return await asyncio.wait_for(
+                anext(response_stream),
+                timeout=wait_timeout,
+            )
+        except StopAsyncIteration:
+            return None
+        except TimeoutError as error:
+            raise PromptEvaluationError(
+                message="Deadline exceeded while waiting for Claude SDK response stream.",
+                prompt_name=hook_context.prompt_name,
+                phase="response",
+                provider_payload={
+                    "continuation_round": continuation_round,
+                    "message_count": message_count,
+                    "deadline_remaining_seconds": (
+                        hook_context.deadline.remaining().total_seconds()
+                        if hook_context.deadline is not None
+                        else None
+                    ),
+                },
+            ) from error
+
+    async def _collect_round_messages(
+        self,
+        *,
+        client: Any,
+        messages: list[Any],
+        continuation_round: int,
+        hook_context: HookContext,
+    ) -> list[Any]:
+        """Collect a single response round from the SDK."""
+        round_messages: list[Any] = []
+        response_stream = client.receive_response()
+
+        while True:
+            message = await self._next_response_message(
+                response_stream=response_stream,
+                hook_context=hook_context,
+                continuation_round=continuation_round,
+                message_count=len(messages),
+            )
+            if message is None:
+                break
+
+            messages.append(message)
+            round_messages.append(message)
+
+            # Extract message content, update token stats, and log
+            content = _extract_message_content(message)
+            self._update_token_stats(hook_context, content)
+            self._log_message_received(
+                message, messages, continuation_round, hook_context, content
+            )
+
+        return round_messages
+
     async def _run_sdk_query(
         self,
         *,
@@ -1126,6 +1387,10 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         options_kwargs["hooks"] = self._build_hooks_config(
             hook_context=hook_context,
             collector=collector,
+        )
+        options_kwargs = self._filter_unsupported_options(
+            options_kwargs,
+            options_type=ClaudeAgentOptions,
         )
 
         # Log SDK options (excluding sensitive data)
@@ -1209,17 +1474,12 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 # Receive messages until ResultMessage using receive_response().
                 # This exits after ResultMessage without waiting for subprocess to exit,
                 # allowing us to send continuation messages if needed.
-                round_messages: list[Any] = []
-                async for message in client.receive_response():
-                    messages.append(message)
-                    round_messages.append(message)
-
-                    # Extract message content, update token stats, and log
-                    content = _extract_message_content(message)
-                    self._update_token_stats(hook_context, content)
-                    self._log_message_received(
-                        message, messages, continuation_round, hook_context, content
-                    )
+                round_messages = await self._collect_round_messages(
+                    client=client,
+                    messages=messages,
+                    continuation_round=continuation_round,
+                    hook_context=hook_context,
+                )
 
                 # Handle empty message stream (e.g., after continuation)
                 if not round_messages:
@@ -1305,7 +1565,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         return {
             "type": "json_schema",
-            "schema": schema(output_type),
+            "schema": _normalize_claude_output_schema(schema(output_type)),
         }
 
     def _try_parse_structured_output(
@@ -1366,6 +1626,60 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             budget_tracker.record_cumulative(prompt_name, usage)
 
         return result_text, structured_output, usage
+
+    def _raise_if_missing_required_structured_output(
+        self,
+        *,
+        rendered: RenderedPrompt[OutputT],
+        prompt_name: str,
+        messages: list[Any],
+        result_text: str | None,
+        output: OutputT | None,
+        stop_reason: str | None,
+    ) -> None:
+        """Raise when structured output is required but no response was produced."""
+        output_type = rendered.output_type
+        if output_type is None or output_type is type(None):
+            return
+        if output is not None or result_text is not None:
+            return
+
+        message_type_counts: dict[str, int] = {}
+        for message in messages:
+            message_type = type(message).__name__
+            message_type_counts[message_type] = (
+                message_type_counts.get(message_type, 0) + 1
+            )
+        stderr_tail = [line.rstrip() for line in self._stderr_buffer[-20:]]
+
+        logger.warning(
+            "claude_agent_sdk.evaluate.missing_structured_output",
+            event="sdk.evaluate.missing_structured_output",
+            context={
+                "prompt_name": prompt_name,
+                "message_count": len(messages),
+                "message_type_counts": message_type_counts,
+                "stop_reason": stop_reason,
+                "stderr_tail": stderr_tail or None,
+            },
+        )
+
+        raise PromptEvaluationError(
+            message="Structured output prompt returned no text and no structured output.",
+            prompt_name=prompt_name,
+            phase="response",
+            provider_payload={
+                "output_type": (
+                    output_type.__name__
+                    if hasattr(output_type, "__name__")
+                    else str(output_type)
+                ),
+                "message_count": len(messages),
+                "message_type_counts": message_type_counts,
+                "stop_reason": stop_reason,
+                "stderr_tail": stderr_tail or None,
+            },
+        )
 
     def _verify_task_completion(
         self,

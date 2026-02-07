@@ -10,29 +10,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Integration tests for the evals module with math operations.
+"""Integration tests for the evals module using the Codex App Server adapter.
 
-This test suite verifies the evaluation framework by using an LLM to solve
-mathematical problems via the Claude Agent SDK's native Bash tool.
-
-The workspace section provides a temporary directory and the SDK provides
-native tools (Bash, Read, Write, etc.) so the agent can run
+This test suite mirrors ``test_evals_math_integration.py`` but drives
+evaluation through ``codex app-server`` instead of the Claude Agent SDK.
+Codex provides native Bash execution so the agent can run
 ``python3 -c "..."`` to compute answers.
+
+Skipped when the ``codex`` CLI is not found on PATH.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from typing import Final, override
 
 import pytest
 
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
-    get_default_model,
+from weakincentives.adapters.codex_app_server import (
+    CodexAppServerAdapter,
+    CodexAppServerClientConfig,
+    CodexAppServerModelConfig,
+    CodexWorkspaceSection,
 )
 from weakincentives.evals import (
     BASELINE,
@@ -48,30 +49,19 @@ from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime import AgentLoop, InMemoryMailbox, Session
 from weakincentives.runtime.agent_loop import AgentLoopRequest, AgentLoopResult
 
-pytest.importorskip("claude_agent_sdk")
 
-
-def _is_bedrock_mode() -> bool:
-    """Check if running in Bedrock mode based on environment."""
-    return os.getenv("CLAUDE_CODE_USE_BEDROCK") == "1" and "AWS_REGION" in os.environ
-
-
-def _has_credentials() -> bool:
-    """Check if Bedrock or Anthropic API credentials are available."""
-    return _is_bedrock_mode() or "ANTHROPIC_API_KEY" in os.environ
+def _has_codex() -> bool:
+    return shutil.which("codex") is not None
 
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(
-        not _has_credentials(),
-        reason="Neither CLAUDE_CODE_USE_BEDROCK+AWS_REGION nor ANTHROPIC_API_KEY set.",
-    ),
-    pytest.mark.timeout(300),  # Math evals may take time (10 samples x ~30s each)
+    pytest.mark.skipif(not _has_codex(), reason="codex CLI not found on PATH"),
+    pytest.mark.timeout(300),  # Math evals may take time (10 samples x ~30s)
 ]
 
-_MODEL_ENV_VAR: Final[str] = "CLAUDE_AGENT_SDK_TEST_MODEL"
-_PROMPT_NS: Final[str] = "integration/evals-math"
+_MODEL_ENV_VAR: Final[str] = "CODEX_APP_SERVER_TEST_MODEL"
+_PROMPT_NS: Final[str] = "integration/codex-evals-math"
 
 # Evaluation constants
 _NUMERIC_TOLERANCE = 0.001
@@ -97,7 +87,7 @@ class MathAnswer:
     answer: str
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(slots=True)
 class _InstructionParams:
     """Parameters for the instruction section."""
 
@@ -109,8 +99,8 @@ class _InstructionParams:
 # =============================================================================
 
 
-class MathSolverLoop(AgentLoop[MathProblem, MathAnswer]):
-    """AgentLoop that solves math problems using the SDK's native Bash tool."""
+class CodexMathSolverLoop(AgentLoop[MathProblem, MathAnswer]):
+    """AgentLoop that solves math problems via Codex's native Bash tool."""
 
     _session: Session
     _template: PromptTemplate[MathAnswer]
@@ -118,12 +108,12 @@ class MathSolverLoop(AgentLoop[MathProblem, MathAnswer]):
     def __init__(
         self,
         *,
-        adapter: ClaudeAgentSDKAdapter[MathAnswer],
+        adapter: CodexAppServerAdapter,
         requests: InMemoryMailbox[
             AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
         ],
         session: Session,
-        workspace: ClaudeAgentWorkspaceSection,
+        workspace: CodexWorkspaceSection,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
 
@@ -236,20 +226,14 @@ def _create_math_dataset() -> Dataset[MathProblem, str]:
 
 
 def _math_evaluator(output: object, expected: object) -> Score:
-    """Evaluate if the math answer matches expected value.
-
-    Handles various numeric formats (e.g., "12.0" == "12").
-    """
-    # Type assertions - Evaluator requires (object, object) -> Score signature
+    """Evaluate if the math answer matches expected value."""
     assert isinstance(output, MathAnswer)
     assert isinstance(expected, str)
 
-    # Normalize strings first
     actual_str = output.answer.strip()
     expected_str = expected.strip()
 
     try:
-        # Try numeric comparison first
         actual_num = float(actual_str)
         expected_num = float(expected_str)
 
@@ -262,7 +246,6 @@ def _math_evaluator(output: object, expected: object) -> Score:
             reason=f"Expected {expected_str}, got {actual_str}",
         )
     except ValueError:
-        # Fall back to string comparison if not numeric
         if actual_str == expected_str:
             return Score(value=1.0, passed=True, reason="String match")
         return Score(
@@ -278,17 +261,16 @@ def _math_evaluator(output: object, expected: object) -> Score:
 
 
 def _get_model() -> str:
-    """Return the model name used for integration tests."""
-    return os.environ.get(_MODEL_ENV_VAR, get_default_model())
+    return os.environ.get(_MODEL_ENV_VAR, "gpt-5.3-codex")
 
 
-def _make_adapter(cwd: str) -> ClaudeAgentSDKAdapter[MathAnswer]:
-    """Create a Claude Agent SDK adapter for math solving."""
-    return ClaudeAgentSDKAdapter(
-        model=_get_model(),
-        client_config=ClaudeAgentSDKClientConfig(
-            permission_mode="bypassPermissions",
+def _make_adapter(cwd: str) -> CodexAppServerAdapter:
+    """Create a Codex App Server adapter for math solving."""
+    return CodexAppServerAdapter(
+        model_config=CodexAppServerModelConfig(model=_get_model()),
+        client_config=CodexAppServerClientConfig(
             cwd=cwd,
+            approval_policy="never",
         ),
     )
 
@@ -298,8 +280,8 @@ def _make_adapter(cwd: str) -> ClaudeAgentSDKAdapter[MathAnswer]:
 # =============================================================================
 
 
-def test_math_eval_single_sample() -> None:
-    """Test a single math problem evaluation."""
+def test_codex_math_eval_single_sample() -> None:
+    """Test a single math problem evaluation via Codex."""
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
     requests: InMemoryMailbox[EvalRequest[MathProblem, str], EvalResult] = (
         InMemoryMailbox(name="eval-requests")
@@ -308,12 +290,12 @@ def test_math_eval_single_sample() -> None:
         AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
     ] = InMemoryMailbox(name="dummy-requests")
 
-    session = Session(tags={"loop": "math-solver"})
-    workspace = ClaudeAgentWorkspaceSection(session=session)
+    session = Session(tags={"loop": "codex-math-solver"})
+    workspace = CodexWorkspaceSection(session=session)
 
     try:
         adapter = _make_adapter(str(workspace.temp_dir))
-        agent_loop = MathSolverLoop(
+        agent_loop = CodexMathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,
             session=session,
@@ -351,8 +333,8 @@ def test_math_eval_single_sample() -> None:
         dummy_requests.close()
 
 
-def test_math_eval_full_dataset() -> None:
-    """Test the full math dataset evaluation."""
+def test_codex_math_eval_full_dataset() -> None:
+    """Test the full math dataset evaluation via Codex."""
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
     requests: InMemoryMailbox[EvalRequest[MathProblem, str], EvalResult] = (
         InMemoryMailbox(name="eval-requests")
@@ -361,12 +343,12 @@ def test_math_eval_full_dataset() -> None:
         AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
     ] = InMemoryMailbox(name="dummy-requests")
 
-    session = Session(tags={"loop": "math-solver"})
-    workspace = ClaudeAgentWorkspaceSection(session=session)
+    session = Session(tags={"loop": "codex-math-solver"})
+    workspace = CodexWorkspaceSection(session=session)
 
     try:
         adapter = _make_adapter(str(workspace.temp_dir))
-        agent_loop = MathSolverLoop(
+        agent_loop = CodexMathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,
             session=session,
@@ -392,7 +374,7 @@ def test_math_eval_full_dataset() -> None:
             results, expected_count=sample_count, timeout_seconds=60
         )
 
-        print("\nEval Report:")
+        print("\nCodex Math Eval Report:")
         print(f"  Total: {report.total}")
         print(f"  Successful: {report.successful}")
         print(f"  Pass rate: {report.pass_rate:.2%}")

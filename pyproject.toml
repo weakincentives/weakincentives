@@ -133,7 +133,7 @@ combine-as-imports = true
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
 # C901 is ignored because test functions can legitimately have higher complexity.
-"tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "RUF038", "ANN201"]
+"tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "RUF038", "ANN201", "ANN401", "PERF401"]
 "integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
@@ -155,7 +155,11 @@ combine-as-imports = true
 "src/weakincentives/clock.py" = ["PLR6301"]
 "src/weakincentives/contrib/optimizers/workspace_digest.py" = ["PLR0914", "PLR6301"]
 "src/weakincentives/adapters/claude_agent_sdk/_bridge.py" = ["PLR0913", "TRY300", "RUF029"]
+"src/weakincentives/adapters/_shared/_bridge.py" = ["PLR0913", "TRY300", "RUF029"]
 "src/weakincentives/adapters/claude_agent_sdk/_hooks.py" = ["RUF029"]
+"src/weakincentives/adapters/codex_app_server/workspace.py" = ["TRY301"]
+"src/weakincentives/adapters/codex_app_server/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
+"src/weakincentives/adapters/codex_app_server/client.py" = ["C901", "PLR6301"]
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0904", "PLR0913"]
 "src/weakincentives/runtime/session/slices/_memory.py" = ["PLR6301"]
@@ -189,7 +193,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.pytest.ini_options]
-addopts = "--cov=src/weakincentives --cov=toolchain --cov-report=term-missing --cov-fail-under=100"
+addopts = "--cov=src/weakincentives --cov=toolchain --cov-report=term-missing --cov-fail-under=100 --timeout=10 --timeout-method=thread"
 markers = [
     "core: marks fast, high-value tests that always run in CI.",
     "integration: marks tests that exercise live provider integrations.",
@@ -200,7 +204,7 @@ markers = [
     "redis_cluster: marks tests using Redis Cluster.",
     "slow: marks tests that are slow and may be skipped in quick test runs.",
 ]
-norecursedirs = ["test-repositories", ".uv-cache", ".venv", ".hypothesis"]
+norecursedirs = ["test-repositories", ".uv-cache", ".venv", ".hypothesis", "integration-tests"]
 reruns = 2
 reruns_delay = 0.5
 
@@ -244,6 +248,7 @@ exclude = [
     ".ruff_cache",
     "dist",
     "src/weakincentives/adapters/claude_agent_sdk",
+
     "src/weakincentives/docs",
 ]
 deprecateTypingAliases = true

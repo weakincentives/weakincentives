@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator, AsyncIterable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -107,6 +108,27 @@ class MockClaudeAgentOptions:
         # Set any provided attributes
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+
+@dataclass
+class StrictClaudeAgentOptionsNoReasoning:
+    """Mock options type that rejects unsupported keyword arguments."""
+
+    model: str | None = None
+    cwd: str | None = None
+    permission_mode: str | None = None
+    max_turns: int | None = None
+    max_budget_usd: float | None = None
+    betas: list[str] | None = None
+    output_format: dict[str, object] | None = None
+    allowed_tools: list[str] | None = None
+    disallowed_tools: list[str] | None = None
+    mcp_servers: dict[str, object] | None = None
+    hooks: dict[str, list[object]] | None = None
+    can_use_tool: object | None = None
+    setting_sources: list[str] | None = None
+    env: dict[str, str] | None = None
+    stderr: object | None = None
 
 
 @dataclass
@@ -258,6 +280,11 @@ class SimpleOutput:
     message: str
 
 
+@dataclass(slots=True, frozen=True)
+class NullableOutput:
+    count: int | None
+
+
 @pytest.fixture
 def session() -> Session:
     dispatcher = InProcessDispatcher()
@@ -290,6 +317,22 @@ def untyped_prompt() -> Prompt[None]:
                 title="Task",
                 key="task",
                 template="Do something",
+            ),
+        ],
+    )
+    return Prompt(template)
+
+
+@pytest.fixture
+def nullable_prompt() -> Prompt[NullableOutput]:
+    template = PromptTemplate[NullableOutput](
+        ns="test",
+        key="nullable",
+        sections=[
+            MarkdownSection(
+                title="Task",
+                key="task",
+                template="Return optional count",
             ),
         ],
     )
@@ -674,6 +717,21 @@ class TestClaudeAgentSDKAdapterEvaluate:
 
         assert response.output is None
 
+    def test_raises_on_empty_structured_result(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Structured prompts with no text/output should fail deterministically."""
+        _setup_mock_query([MockResultMessage(result=None, usage=None)])
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with pytest.raises(
+                PromptEvaluationError,
+                match="Structured output prompt returned no text and no structured output",
+            ):
+                adapter.evaluate(simple_prompt, session=session)
+
     def test_accumulates_token_usage(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
@@ -731,6 +789,18 @@ class TestBuildOutputFormat:
         assert "schema" in result
         assert "properties" in result["schema"]
         assert "message" in result["schema"]["properties"]
+
+    def test_nullable_fields_collapse_anyof_for_claude(
+        self, nullable_prompt: Prompt[NullableOutput]
+    ) -> None:
+        adapter = ClaudeAgentSDKAdapter()
+        rendered = nullable_prompt.render()
+        result = adapter._build_output_format(rendered)
+
+        assert result is not None
+        count_schema = result["schema"]["properties"]["count"]
+        assert count_schema["type"] == ["integer", "null"]
+        assert "anyOf" not in count_schema
 
 
 class TestSDKConfigOptions:
@@ -1008,6 +1078,45 @@ class TestSDKConfigOptions:
             not hasattr(MockSDKQuery.captured_options[0], "reasoning")
             or MockSDKQuery.captured_options[0].reasoning is None
         )
+
+    def test_filters_reasoning_when_sdk_options_do_not_support_it(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            model_config=ClaudeAgentSDKModelConfig(reasoning="high"),
+        )
+
+        with (
+            patch(
+                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
+                return_value=_create_sdk_mock(),
+            ),
+            patch(
+                "claude_agent_sdk.ClaudeSDKClient",
+                MockClaudeSDKClient,
+            ),
+            patch(
+                "claude_agent_sdk.types.ClaudeAgentOptions",
+                StrictClaudeAgentOptionsNoReasoning,
+            ),
+            patch(
+                "claude_agent_sdk.types.HookMatcher",
+                MockHookMatcher,
+            ),
+            patch(
+                "claude_agent_sdk.types.ResultMessage",
+                MockResultMessage,
+            ),
+        ):
+            response = adapter.evaluate(simple_prompt, session=session)
+
+        assert response.text == "Done"
+        assert len(MockSDKQuery.captured_options) == 1
+        assert not hasattr(MockSDKQuery.captured_options[0], "reasoning")
 
 
 class TestSDKErrorHandling:
@@ -1325,7 +1434,7 @@ class TestIsolationConfig:
         assert adapter._stderr_buffer[1] == "Test stderr line 2\n"
 
     def test_message_without_result(
-        self, session: Session, simple_prompt: Prompt[None]
+        self, session: Session, untyped_prompt: Prompt[None]
     ) -> None:
         """Messages without result attribute or with falsy result are handled."""
         MockSDKQuery.reset()
@@ -1337,7 +1446,7 @@ class TestIsolationConfig:
         adapter = ClaudeAgentSDKAdapter()
 
         with sdk_patches():
-            response = adapter.evaluate(simple_prompt, session=session)
+            response = adapter.evaluate(untyped_prompt, session=session)
 
         assert response.text is None
 
@@ -2317,7 +2426,7 @@ class TestMultiturnEdgeCases:
     """Tests for edge cases in multi-turn continuation loop."""
 
     def test_deadline_exceeded_during_continuation(
-        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+        self, session: Session, untyped_prompt: Prompt[None]
     ) -> None:
         """Test that continuation stops when deadline expires mid-loop."""
         from datetime import timedelta
@@ -2333,16 +2442,18 @@ class TestMultiturnEdgeCases:
 
         # Create a mock deadline that returns positive for first few checks,
         # then negative to trigger the in-loop deadline check.
-        # Calls: 1) logging, 2) pre-loop check, 3) first loop check (pass),
-        #        4) second loop check (should fail)
+        # Calls include:
+        # 1) evaluate() logging, 2) initial expiry check,
+        # 3) first loop constraints check, 4-5) stream wait checks,
+        # 6) second loop constraints check (should fail).
         check_count = 0
 
         def mock_remaining() -> timedelta:
             nonlocal check_count
             check_count += 1
-            if check_count <= 3:
-                return timedelta(seconds=10)  # First 3 checks pass
-            return timedelta(seconds=-1)  # 4th+ check: deadline exceeded
+            if check_count <= 5:
+                return timedelta(seconds=10)  # Early checks pass
+            return timedelta(seconds=-1)  # Later checks: deadline exceeded
 
         mock_deadline = MagicMock(spec=Deadline)
         mock_deadline.remaining.side_effect = mock_remaining
@@ -2395,13 +2506,13 @@ class TestMultiturnEdgeCases:
         with sdk_patches():
             with patch("claude_agent_sdk.ClaudeSDKClient", MockClientDeadlineTest):
                 response = adapter.evaluate(
-                    simple_prompt, session=session, deadline=mock_deadline
+                    untyped_prompt, session=session, deadline=mock_deadline
                 )
 
         # Should return the last response received before deadline
         assert response.text is not None
         # Deadline was checked multiple times including inside the loop
-        assert check_count >= 4
+        assert check_count >= 6
 
     def test_budget_check_raises_exception_during_continuation(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
@@ -2488,7 +2599,7 @@ class TestMultiturnEdgeCases:
         assert check_count >= 2
 
     def test_empty_message_stream_breaks_continuation(
-        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+        self, session: Session, untyped_prompt: Prompt[None]
     ) -> None:
         """Test that continuation stops when receive_response returns no messages."""
 
@@ -2520,10 +2631,52 @@ class TestMultiturnEdgeCases:
 
         with sdk_patches():
             with patch("claude_agent_sdk.ClaudeSDKClient", MockClientEmptyStream):
-                response = adapter.evaluate(simple_prompt, session=session)
+                response = adapter.evaluate(untyped_prompt, session=session)
 
         # Should return with no text (empty stream)
         assert response.text is None
+
+    def test_deadline_timeout_while_waiting_for_response_stream(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Deadline should interrupt stalled response streams."""
+        deadline = Deadline(datetime.now(UTC) + timedelta(seconds=1.5))
+
+        class MockClientStalledStream:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                self._transport = MockTransport()
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                pass
+
+            async def disconnect(self) -> None:
+                self._transport = None
+
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                pass
+
+            async def receive_response(self) -> AsyncGenerator[object, None]:
+                await asyncio.sleep(60)
+                yield MockResultMessage(result="unreachable")
+
+        _setup_mock_query([])
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClientStalledStream):
+                with pytest.raises(
+                    PromptEvaluationError,
+                    match="Deadline exceeded while waiting for Claude SDK response stream",
+                ):
+                    adapter.evaluate(
+                        simple_prompt,
+                        session=session,
+                        deadline=deadline,
+                    )
 
     def test_cleanup_handles_none_transport(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
@@ -2721,3 +2874,183 @@ class TestCheckTaskCompletion:
         assert result == (False, None)
         # Checker should not be called when round_messages is empty
         checker.check.assert_not_called()
+
+
+class TestCollapseNullableAnyOf:
+    """Tests for _collapse_nullable_any_of edge cases."""
+
+    def test_non_dict_entries_returns_none(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of(["string", {"type": "null"}])
+        assert result is None
+
+    def test_no_null_entry_returns_none(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of([{"type": "string"}, {"type": "integer"}])
+        assert result is None
+
+    def test_list_type_collapses_with_null(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of(
+            [{"type": ["string", "integer"]}, {"type": "null"}]
+        )
+        assert result is not None
+        assert result["type"] == ["string", "integer", "null"]
+
+    def test_list_type_already_has_null(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of(
+            [{"type": ["string", "null"]}, {"type": "null"}]
+        )
+        assert result is not None
+        assert result["type"] == ["string", "null"]
+
+    def test_unknown_type_returns_none(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _collapse_nullable_any_of,
+        )
+
+        result = _collapse_nullable_any_of([{"type": 42}, {"type": "null"}])
+        assert result is None
+
+
+class TestNormalizeClaudeOutputSchema:
+    """Tests for _normalize_claude_output_schema recursive cases."""
+
+    def test_object_without_properties(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _normalize_claude_output_schema,
+        )
+
+        schema: dict[str, Any] = {"type": "object"}
+        result = _normalize_claude_output_schema(schema)
+        assert result == {"type": "object"}
+
+    def test_array_items_normalized(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _normalize_claude_output_schema,
+        )
+
+        schema: dict[str, Any] = {
+            "type": "array",
+            "items": {
+                "anyOf": [{"type": "integer"}, {"type": "null"}],
+            },
+        }
+        result = _normalize_claude_output_schema(schema)
+        assert result["items"]["type"] == ["integer", "null"]
+        assert "anyOf" not in result["items"]
+
+    def test_defs_normalized(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _normalize_claude_output_schema,
+        )
+
+        schema: dict[str, Any] = {
+            "$defs": {
+                "Inner": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                },
+            },
+        }
+        result = _normalize_claude_output_schema(schema)
+        assert result["$defs"]["Inner"]["type"] == ["string", "null"]
+
+
+class TestSupportedOptionNames:
+    """Tests for _supported_option_names and _filter_unsupported_options."""
+
+    def test_non_dataclass_with_fixed_params(self) -> None:
+        class FixedOptions:
+            def __init__(self, *, cwd: str, max_turns: int) -> None:
+                pass
+
+        adapter = ClaudeAgentSDKAdapter()
+        result = adapter._supported_option_names(FixedOptions)
+        assert result == {"cwd", "max_turns"}
+
+    def test_signature_raises_returns_none(self) -> None:
+        adapter = ClaudeAgentSDKAdapter()
+        result = adapter._supported_option_names(int)
+        assert result is None
+
+    def test_filter_with_no_unsupported_keys(self) -> None:
+        class FixedOptions:
+            def __init__(self, *, cwd: str) -> None:
+                pass
+
+        adapter = ClaudeAgentSDKAdapter()
+        kwargs = {"cwd": "/tmp"}
+        result = adapter._filter_unsupported_options(kwargs, options_type=FixedOptions)
+        assert result == {"cwd": "/tmp"}
+
+
+class TestResolveResponseWaitTimeout:
+    """Tests for deadline-exceeded path in _resolve_response_wait_timeout."""
+
+    def _make_expired_hook_context(self, session: Session) -> Any:
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+
+        mock_deadline = MagicMock(spec=Deadline)
+        mock_deadline.remaining.return_value = timedelta(seconds=-1)
+
+        template: PromptTemplate[None] = PromptTemplate(
+            ns="test", key="test", name="test"
+        )
+        prompt: Prompt[None] = Prompt(template)
+        constraints = HookConstraints(deadline=mock_deadline)
+        return HookContext(
+            prompt=prompt,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+    def test_deadline_already_expired_returns_stop(self, session: Session) -> None:
+        """When deadline remaining <= 0, should signal stop."""
+        adapter = ClaudeAgentSDKAdapter()
+        hook_context = self._make_expired_hook_context(session)
+
+        timeout_val, should_stop = adapter._resolve_response_wait_timeout(
+            hook_context=hook_context,
+            continuation_round=0,
+            message_count=0,
+        )
+        assert should_stop is True
+        assert timeout_val is None
+
+    def test_next_response_message_returns_none_on_stop(self, session: Session) -> None:
+        """_next_response_message returns None when deadline expired."""
+
+        async def _run() -> None:
+            adapter = ClaudeAgentSDKAdapter()
+            hook_context = self._make_expired_hook_context(session)
+
+            async def fake_stream() -> AsyncGenerator[object, None]:
+                yield "should not reach"
+
+            result = await adapter._next_response_message(
+                response_stream=fake_stream().__aiter__(),
+                hook_context=hook_context,
+                continuation_round=0,
+                message_count=0,
+            )
+            assert result is None
+
+        asyncio.run(_run())

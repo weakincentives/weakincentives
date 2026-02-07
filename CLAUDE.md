@@ -232,6 +232,11 @@ src/weakincentives/
 - 100% coverage required for `src/weakincentives/`
 - Run focused: `uv run pytest tests/path/to/test.py -v`
 - Always finish with `make check`
+- **10-second timeout enforced per test** (`--timeout=10 --timeout-method=thread`)
+- Every unit test MUST complete in under 10 seconds. If a test exceeds this,
+  refactor it — do not raise the timeout. Use mocks, fakes, or smaller inputs.
+- Use `@pytest.mark.timeout(N)` only for integration tests that genuinely need
+  more time. Never on unit tests.
 
 ## Documentation
 

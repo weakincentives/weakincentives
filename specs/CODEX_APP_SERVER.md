@@ -89,7 +89,6 @@ src/weakincentives/adapters/codex_app_server/
   config.py                 # CodexAppServerClientConfig, CodexAppServerModelConfig
   client.py                 # CodexAppServerClient (stdio JSON-RPC client)
   workspace.py              # CodexWorkspaceSection
-  _state.py                 # CodexAppServerSessionState slice for thread reuse
   _events.py                # Codex item/turn notifications → WINK ToolInvoked mapping
   _async.py                 # asyncio helpers for stdio NDJSON processing
 ```
@@ -111,7 +110,6 @@ Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
 | `approval_policy` | `ApprovalPolicy` | `"never"` | How to handle command/file approvals |
 | `sandbox_mode` | `SandboxMode \| None` | `None` | Sandbox mode for `thread/start` |
 | `auth_mode` | `CodexAuthMode \| None` | `None` | Authentication configuration |
-| `reuse_thread` | `bool` | `False` | Resume existing thread ID from session state |
 | `mcp_servers` | `dict[str, McpServerConfig] \| None` | `None` | Additional external MCP servers |
 | `ephemeral` | `bool` | `False` | If true, thread is not persisted to disk |
 | `client_name` | `str` | `"wink"` | Client identifier for `initialize` |
@@ -179,7 +177,7 @@ credentials from `~/.codex/`).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model` | `str` | `"gpt-5.1-codex"` | Codex model identifier |
+| `model` | `str` | `"gpt-5.3-codex"` | Codex model identifier |
 | `effort` | `ReasoningEffort \| None` | `None` | Reasoning effort |
 | `summary` | `ReasoningSummary \| None` | `None` | Summary preference |
 | `personality` | `Personality \| None` | `None` | Response personality |
@@ -229,51 +227,6 @@ Codex emits notifications in two parallel namespaces:
 - **`codex/event/*`** — legacy v1 events (ignore; same content, different shape)
 
 The adapter should only process v2 notifications.
-
-## Session State Storage
-
-WINK sessions use **typed dataclass slices**. For thread reuse:
-
-```python
-# _state.py
-from weakincentives.dataclasses import FrozenDataclass
-
-@FrozenDataclass()
-class CodexAppServerSessionState:
-    """Stores Codex thread ID and workspace fingerprint for reuse."""
-    thread_id: str
-    cwd: str
-    workspace_fingerprint: str | None
-```
-
-Usage:
-
-```python
-from pathlib import Path
-
-# Store after thread/start
-resolved_cwd = client_config.cwd or str(Path.cwd().resolve())
-session.seed(
-    CodexAppServerSessionState(
-        thread_id=result["thread"]["id"],
-        cwd=resolved_cwd,
-        workspace_fingerprint=workspace_fingerprint,
-    )
-)
-
-# Retrieve for thread/resume
-state = session[CodexAppServerSessionState].latest()
-if state is not None:
-    thread_id = state.thread_id
-    cached_cwd = state.cwd
-    cached_workspace_fingerprint = state.workspace_fingerprint
-```
-
-When `reuse_thread=True`, only reuse the thread if `cached_cwd` and
-`cached_workspace_fingerprint` match the current workspace. If they differ or
-`thread/resume` fails, fall back to `thread/start` and overwrite the stored
-state. Compute `workspace_fingerprint` from mount config and budgets (stable
-ordering) so reuse is deterministic.
 
 ## Workspace Management
 
@@ -640,14 +593,7 @@ if additional_mcp_servers:
 
 result = send_request("thread/start", thread_params)
 thread_id = result["thread"]["id"]
-
-# Resume existing thread
-result = send_request("thread/resume", {
-    "threadId": cached_thread_id,
-})
 ```
-
-Store thread ID via `session.seed(CodexAppServerSessionState(...))`.
 
 ### 8. Start Turn
 
@@ -732,6 +678,10 @@ def respond_to_approval(request_id: int, params: dict) -> None:
         case "untrusted" | "on-failure":
             send_response(request_id, {"decision": "accept"})
 ```
+
+`"on-failure"` is interpreted at the server-protocol boundary: when Codex emits
+an approval request, the non-interactive adapter handles it deterministically
+without additional local failure-state tracking.
 
 ### 11. Extract Results
 
@@ -907,7 +857,7 @@ prompt = Prompt(template)
 
 adapter = CodexAppServerAdapter(
     model_config=CodexAppServerModelConfig(
-        model="gpt-5.1-codex",
+        model="gpt-5.3-codex",
         effort="medium",
     ),
     client_config=CodexAppServerClientConfig(
@@ -1062,7 +1012,7 @@ turn/completed.
 
 ### Available Models (ChatGPT auth)
 
-`gpt-5.2-codex`, `gpt-5.3-codex`, `gpt-5.1-codex-max`, `gpt-5.2`,
+`gpt-5.3-codex` (default), `gpt-5.2-codex`, `gpt-5.1-codex-max`, `gpt-5.2`,
 `gpt-5.1-codex-mini`. Model availability depends on auth type and plan.
 
 ### MCP Server Config Formats

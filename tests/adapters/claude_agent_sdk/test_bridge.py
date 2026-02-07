@@ -24,9 +24,9 @@ import pytest
 from weakincentives.adapters.claude_agent_sdk._bridge import (
     BridgedTool,
     MCPToolExecutionState,
-    _make_async_handler,
     create_bridged_tools,
     create_mcp_server,
+    make_async_handler,
 )
 from weakincentives.adapters.claude_agent_sdk._visibility_signal import (
     VisibilityExpansionSignal,
@@ -508,7 +508,7 @@ class TestCreateBridgedTools:
 
 
 class TestMakeAsyncHandler:
-    """Tests for _make_async_handler function."""
+    """Tests for make_async_handler function."""
 
     def test_creates_async_wrapper(
         self,
@@ -516,7 +516,7 @@ class TestMakeAsyncHandler:
         prompt: Prompt[object],
         mock_adapter: MagicMock,
     ) -> None:
-        """Test that _make_async_handler creates an async wrapper."""
+        """Test that make_async_handler creates an async wrapper."""
         bridged = BridgedTool(
             name="search",
             description="Search for content",
@@ -533,7 +533,7 @@ class TestMakeAsyncHandler:
             budget_tracker=None,
         )
 
-        async_handler = _make_async_handler(bridged)
+        async_handler = make_async_handler(bridged)
 
         # Verify it's a coroutine function
         assert asyncio.iscoroutinefunction(async_handler)
@@ -561,12 +561,55 @@ class TestMakeAsyncHandler:
             budget_tracker=None,
         )
 
-        async_handler = _make_async_handler(bridged)
+        async_handler = make_async_handler(bridged)
         result = asyncio.run(async_handler({"query": "test"}))
 
         assert result["isError"] is False
         # Output uses render() from SearchResult which returns "Found 5 matches"
         assert "Found 5 matches" in result["content"][0]["text"]
+
+    def test_async_handler_uses_to_thread(
+        self,
+        session: Session,
+        prompt: Prompt[object],
+        mock_adapter: MagicMock,
+    ) -> None:
+        """make_async_handler delegates to asyncio.to_thread to avoid blocking."""
+        bridged = BridgedTool(
+            name="search",
+            description="Search for content",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=cast("PromptProtocol[object]", prompt),
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        async_handler = make_async_handler(bridged)
+        called_with: list[tuple[object, ...]] = []
+        original_to_thread = asyncio.to_thread
+
+        async def tracking_to_thread(*args: object, **kwargs: object) -> object:
+            called_with.append(args)
+            return await original_to_thread(*args, **kwargs)  # type: ignore[arg-type]
+
+        async def _run() -> dict[str, object]:
+            with patch(
+                "weakincentives.adapters._shared._bridge.asyncio.to_thread",
+                side_effect=tracking_to_thread,
+            ):
+                return await async_handler({"query": "test"})
+
+        result = asyncio.run(_run())
+        assert result["isError"] is False
+        assert len(called_with) == 1
+        assert called_with[0][0] is bridged
 
 
 class TestCreateMcpServer:
@@ -787,7 +830,7 @@ class TestVisibilityExpansionRequiredPropagation:
             visibility_signal=visibility_signal,
         )
 
-        async_handler = _make_async_handler(bridged)
+        async_handler = make_async_handler(bridged)
 
         # The async wrapper should return success response
         result = asyncio.run(async_handler({"query": "test"}))

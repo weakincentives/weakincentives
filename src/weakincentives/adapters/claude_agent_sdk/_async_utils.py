@@ -10,33 +10,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Async/sync bridging utilities for the Claude Agent SDK adapter."""
+"""Async/sync bridging — re-exports from shared module."""
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Coroutine
+from .._shared._async_utils import run_async
 
 __all__ = [
     "run_async",
 ]
-
-
-def run_async[T](coro: Coroutine[object, object, T]) -> T:
-    """Run an async coroutine from synchronous code.
-
-    Creates a new event loop, runs the coroutine to completion, and
-    cleans up the loop.
-
-    Args:
-        coro: The coroutine to execute.
-
-    Returns:
-        The result of the coroutine.
-
-    Note:
-        This creates a new event loop per call. The Claude Agent SDK
-        adapter uses this to bridge between the synchronous
-        ProviderAdapter.evaluate() interface and the async SDK client.
-    """
-    return asyncio.run(coro)

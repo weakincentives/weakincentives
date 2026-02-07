@@ -302,7 +302,7 @@ def _extract_uncovered_files(output: str) -> str | None:
         r"(\d+)\s+"  # miss
         r"(?:\d+\s+){0,2}"  # 0-2 optional branch columns (Branch, BrPart)
         r"(\d+)%"  # coverage percentage
-        r"(?:\s+([\d,\s-]+))?$",  # optional missing lines
+        r"(?:\s+([\d,\s>-]+))?$",  # optional missing lines (includes -> for branch notation)
         re.MULTILINE,
     )
 
