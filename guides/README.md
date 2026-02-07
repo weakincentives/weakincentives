@@ -26,7 +26,11 @@ debug issues when they arise.
 1. [Claude Agent SDK](claude-agent-sdk.md) - Recommended adapter for production
 1. [Skills Authoring](skills-authoring.md) - Create and mount custom skills
 1. [Orchestration](orchestration.md) - Handle requests at scale
+1. [Guardrails and Feedback](guardrails-and-feedback.md) - Policies, feedback, and task completion
+1. [Mailbox and DLQ](mailbox-and-dlq.md) - Message queuing and dead letter queues
+1. [Workspaces and Filesystem](workspaces-and-filesystem.md) - File access and sandboxing
 1. [Lifecycle](lifecycle.md) - Health checks, shutdown, watchdogs
+1. [Observability](observability.md) - Tracing, logging, and transcript collection
 1. [Debugging](debugging.md) - Inspect and troubleshoot sessions
 1. [Query](query.md) - SQL-based debug bundle analysis
 
@@ -35,11 +39,14 @@ debug issues when they arise.
 1. [Resources](resources.md) - Dependency injection and lifecycle management
 1. [Progressive Disclosure](progressive-disclosure.md) - Manage context size
 1. [Prompt Overrides](prompt-overrides.md) - A/B test prompts without deploys
+1. [Experiments](experiments.md) - A/B test agent variants systematically
+1. [Concurrency](concurrency.md) - Thread safety and concurrent access
 1. [Formal Verification](formal-verification.md) - TLA+ for critical code
 
 ### For Contributors
 
 1. [Code Quality](code-quality.md) - Standards and tooling
+1. [Module Boundaries](module-boundaries.md) - Layer architecture and dependency rules
 1. [Testing](testing.md) - How to test prompts, tools, reducers
 1. See also: `AGENTS.md` for the canonical contributor handbook
 
@@ -67,8 +74,13 @@ debug issues when they arise.
 | Guide | What You'll Learn |
 | --- | --- |
 | [Orchestration](orchestration.md) | Use AgentLoop for request handling |
+| [Guardrails and Feedback](guardrails-and-feedback.md) | Tool policies, feedback providers, and task completion |
+| [Mailbox and DLQ](mailbox-and-dlq.md) | Message queuing, dead letter queues, and lease extension |
+| [Workspaces and Filesystem](workspaces-and-filesystem.md) | Sandboxed file access, host mounts, and workspace digests |
 | [Evaluation](evaluation.md) | Test agents with datasets and evaluators |
+| [Experiments](experiments.md) | A/B test agent variants with baselines and treatments |
 | [Lifecycle](lifecycle.md) | Manage shutdown, health checks, and watchdogs |
+| [Observability](observability.md) | Run context, tracing, logging, and transcript collection |
 
 ## Advanced Topics
 
@@ -77,6 +89,7 @@ debug issues when they arise.
 | [Resources](resources.md) | Dependency injection, scopes, and lifecycle management |
 | [Progressive Disclosure](progressive-disclosure.md) | Control context size with summaries and expansion |
 | [Prompt Overrides](prompt-overrides.md) | Iterate on prompts without code changes |
+| [Concurrency](concurrency.md) | Thread safety guarantees and multi-threaded agent patterns |
 | [Debugging](debugging.md) | Inspect sessions, dump snapshots, use the debug UI |
 
 ## Code Quality
@@ -85,6 +98,7 @@ debug issues when they arise.
 | --- | --- |
 | [Testing](testing.md) | Test prompts, tools, and reducers without a model |
 | [Code Quality](code-quality.md) | Types, contracts, coverage, and security scanning |
+| [Module Boundaries](module-boundaries.md) | Layer architecture, dependency rules, and where new code goes |
 | [Formal Verification](formal-verification.md) | Embed TLA+ specifications for critical code |
 
 ## Practical Reference
