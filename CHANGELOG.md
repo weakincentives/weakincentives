@@ -4,42 +4,43 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-*Commits reviewed: 2026-01-29 (`3939fda`) through 2026-02-05 (`30c81a6`) — 47 commits*
+*Commits reviewed: 2026-01-29 (`be065a9`) through 2026-02-06 (`fd41c95`) — 51 commits*
 
 ### TL;DR
 
-WINK standardizes on the **Claude Agent SDK as its sole adapter**, removing the
-OpenAI and LiteLLM adapters (~15,600 lines deleted) along with all
-harness-provided tool sections (VFS, Podman sandbox, planning tools, Asteval,
-optimizers, examples — ~19,000 more lines removed). The project now focuses
-exclusively on **agentic harness integrations** rather than direct SDK wrappers.
+WINK adds a **Codex App Server adapter** (~10,000 lines) for running agents in
+OpenAI's Codex sandboxed environment via JSON-RPC over stdio, with shared MCP
+tool bridging extracted into a reusable `_shared` adapter module. Simultaneously,
+WINK **standardizes on agentic harness integrations** by removing the OpenAI and
+LiteLLM adapters (~15,600 lines) and all harness-provided tool sections (VFS,
+Podman, planning, Asteval, optimizers, examples — ~19,000 lines). A new
+**prompt lifecycle** adds `Section.cleanup()` and `Prompt.cleanup()` with
+automatic invocation by AgentLoop, plus a visibility expansion retry limit.
 
 The **feedback system** gains **concurrent multi-provider evaluation**,
 **file-based trigger activation** (`FileCreatedTrigger`), and **XML-style
-semantic tags** (`<feedback>`, `<blocker>`) for clearer LLM parsing. The
-**Claude adapter** adds **`call_id` correlation for MCP-bridged tools** via a
-new `MCPToolExecutionState`, **`RenderedTools` event emission** for tool schema
-observability, and **SDK-native exception types** replacing string-based error
-matching. **Transcript collection is now enabled by default.**
+semantic tags** (`<feedback>`, `<blocker>`). The **Claude adapter** adds
+**`call_id` correlation for MCP-bridged tools**, **`RenderedTools` event
+emission**, **SDK-native exception types**, and replaces `max_thinking_tokens`
+with **adaptive `reasoning` effort levels**. **Transcript collection is now
+enabled by default**, and the **transcript tab hides** when bundles lack
+transcript data.
 
-The **debug web UI** undergoes a **full modular decomposition** — the monolithic
-`app.js` is broken into a centralized state store and 7 view modules with new
-**markdown file rendering**, **infinite scroll** in the transcript zoom modal,
-and extracted reusable components (VirtualScroller, filter chips, zoom JSON
-tree). The **default model updates to Claude Opus 4.6**.
+The **debug web UI** undergoes a **full modular decomposition** — `app.js`
+broken into a state store and 7 view modules — with new **markdown rendering**,
+**infinite scroll** in the zoom modal, and extracted reusable components. The
+**default model updates to Claude Opus 4.6**.
 
-Developer experience improves with **pytest-testmon** for incremental local
-testing, **AutoFormatChecker** for auto-fixing locally while enforcing
-check-only in CI, **parallelized CI** across 6 test groups, and **pre-commit
-hooks enforcing full CI test suites**. `BundleConfig` replaces
-`debug_bundle_dir` with support for **external storage handlers**. The
-**Session** is refactored into **SliceStore**, **ReducerRegistry**, and
-**SessionSnapshotter** subsystems. New specs cover the **Codex App Server** and
-**OpenCode ACP** adapter integrations.
+Developer experience improves with **pytest-testmon**, **AutoFormatChecker**
+(auto-fix locally, check-only in CI), **parallelized CI** across 6 test groups,
+and **pre-commit hooks enforcing full CI suites**. `BundleConfig` replaces
+`debug_bundle_dir`. The **Session** is refactored into **SliceStore**,
+**ReducerRegistry**, and **SessionSnapshotter**. New specs cover **Codex App
+Server** and **OpenCode ACP** integrations.
 
 ---
 
-### Fixed Since Last Review
+### Fixed
 
 - Hardened Codex App Server workspace copying to skip symlink files when
   `follow_symlinks=False`, preventing escaped symlink artifacts from entering
@@ -49,9 +50,13 @@ hooks enforcing full CI test suites**. `BundleConfig` replaces
 - Updated `AgentLoop` debug bundle adapter labeling to emit canonical
   `"codex_app_server"` for `CodexAppServerAdapter` instances.
 - Removed duplicate `prompt.cleanup()` invocation risk in the bundled execution
-  error path.
-- Switched Codex App Server adapter default model to `"gpt-5.3-codex"` and
-  updated Codex-specific tests/spec examples to match.
+  error path via `prompt_cleaned_up` guard.
+- Added `_MAX_VISIBILITY_RETRIES = 10` guard in `AgentLoop._evaluate_with_retries()`
+  to prevent infinite visibility expansion loops.
+- Corrected Bedrock model ID for Opus 4.6 — dropped `:0` suffix
+  (`us.anthropic.claude-opus-4-6-v1:0` → `us.anthropic.claude-opus-4-6-v1`).
+- JavaScript tests now properly executed in CI test job (Bun was previously
+  only installed in static-analysis job; `45292cb1` fixes `be065a9e`).
 
 ---
 
@@ -90,31 +95,31 @@ adapter = ClaudeAgentSDKAdapter()
 
 #### Removed Harness-Provided Tool Sections
 
-All tool sections that duplicate capabilities now provided by the Claude Agent
-SDK runtime have been removed (~19,000 lines deleted):
+All tool sections that duplicate capabilities now provided by execution harness
+runtimes have been removed (~19,000 lines across 94 files):
 
 **Removed modules:**
-- `weakincentives.contrib.tools.vfs` — VFS filesystem tools (use SDK workspace)
-- `weakincentives.contrib.tools.vfs_mounts` — VFS mount configuration
-- `weakincentives.contrib.tools.vfs_types` — VFS type definitions
-- `weakincentives.contrib.tools.planning` — Planning tools (use SDK native)
-- `weakincentives.contrib.tools.podman` — Podman sandbox tools
+- `weakincentives.contrib.tools.vfs` — VFS filesystem tools (855 lines)
+- `weakincentives.contrib.tools.vfs_mounts` — VFS mount configuration (355 lines)
+- `weakincentives.contrib.tools.vfs_types` — VFS type definitions (792 lines)
+- `weakincentives.contrib.tools.planning` — Planning tools (658 lines)
+- `weakincentives.contrib.tools.podman` — Podman sandbox tools (1,336 lines)
 - `weakincentives.contrib.tools.podman_connection` — Podman connection management
 - `weakincentives.contrib.tools.podman_eval` — Podman evaluation tools
-- `weakincentives.contrib.tools.asteval` — Asteval math evaluation section
+- `weakincentives.contrib.tools.asteval` — Asteval math evaluation (1,099 lines)
 - `weakincentives.contrib.tools._context` — Tool context module
-- `weakincentives.optimizers` — Entire optimizer package (5 modules)
-- `weakincentives.examples` — Entire examples package (5 scripts)
-- `ToolSection` base class removed from prompt protocols
+- `weakincentives.optimizers` — Entire optimizer package (~652 lines)
+- `weakincentives.examples` — Entire examples package (5 scripts, ~778 lines)
 
-**Migration:** Use `ClaudeAgentWorkspaceSection` with host mounts instead of
-VFS tools. Use SDK native Bash tool instead of Asteval.
+**Migration:** Use `ClaudeAgentWorkspaceSection` or `CodexWorkspaceSection`
+with host mounts instead of VFS tools. Use SDK native Bash tool instead of
+Asteval.
 
 #### EvalLoopConfig.debug_bundle_dir → debug_bundle
 
 The `debug_bundle_dir: Path | None` field is replaced with `debug_bundle:
-BundleConfig | None`, enabling advanced bundle management features like storage
-handlers and conditional creation.
+BundleConfig | None`, adding an `enabled` flag, `storage_handler` callback,
+and `retention` policy.
 
 **Migration:**
 ```python
@@ -128,10 +133,10 @@ config = EvalLoopConfig(debug_bundle=BundleConfig(target=Path("/bundles")))
 
 #### Transcript Collection Now Enabled by Default
 
-The Claude Agent SDK adapter now enables transcript collection by default
-(`TranscriptCollectorConfig()`) for better observability. The adapter only
-instantiates `TranscriptCollector` when the config is not `None`, using
-`contextlib.nullcontext()` as a fallback. To restore the previous behavior:
+The Claude Agent SDK adapter's `transcript_collection` default changed from
+`None` (disabled) to `TranscriptCollectorConfig()` (enabled). The adapter uses
+`contextlib.nullcontext()` as a fallback when explicitly set to `None`. To
+restore the previous behavior:
 
 ```python
 config = ClaudeAgentSDKClientConfig(transcript_collection=None)
@@ -144,71 +149,106 @@ to `claude-opus-4-6`. This affects `DEFAULT_MODEL`, `DEFAULT_BEDROCK_MODEL`,
 `ClaudeAgentSDKAdapter.__init__`, and `ClaudeAgentSDKModelConfig.model`. A new
 Bedrock mapping `"claude-opus-4-6" → "us.anthropic.claude-opus-4-6-v1"` was added.
 
+#### Replaced max_thinking_tokens with Reasoning Effort Levels
+
+`ClaudeAgentSDKModelConfig.max_thinking_tokens: int | None` replaced with
+`reasoning: ReasoningEffort | None` where `ReasoningEffort = Literal["low",
+"medium", "high", "max"]`. Default changed from disabled (`None`) to `"high"`.
+
+**Migration:**
+```python
+# Old ❌
+config = ClaudeAgentSDKModelConfig(max_thinking_tokens=16000)
+
+# New ✅
+config = ClaudeAgentSDKModelConfig(reasoning="max")
+```
+
 #### Removed Unsupported SDK Hook Types
 
-The `create_subagent_start_hook` and `create_notification_hook` functions were
-removed from the Claude Agent SDK adapter hooks. Custom `PostToolUseInput`
-dataclass and `HookCallback`/`AsyncHookCallback` type aliases were replaced
-with SDK-native types (`PostToolUseHookInput`, `PreToolUseHookInput`,
-`StopHookInput`, `SyncHookJSONOutput`, etc.).
+`create_subagent_start_hook` and `create_notification_hook` removed from the
+Claude Agent SDK adapter hooks. Custom `PostToolUseInput` dataclass and
+`HookCallback`/`AsyncHookCallback` type aliases replaced with SDK-native types
+(`PostToolUseHookInput`, `PreToolUseHookInput`, `StopHookInput`,
+`SyncHookJSONOutput`, etc.). Added `HookConstraints` dataclass to group
+optional deadline/budget/heartbeat/run_context parameters.
+
+#### Feedback Providers Now Run Concurrently
+
+The feedback evaluation model changed from "first match wins" to "all matching
+providers run." Each provider maintains **independent trigger state** via
+scoped methods `last_feedback_for_provider()` and
+`tool_calls_since_last_feedback_for_provider()` on `FeedbackContext`. All
+matching feedback blocks are collected and combined with `"\n\n".join()`.
 
 ---
 
 ### New Features
 
+#### Codex App Server Adapter
+
+Full adapter implementation (`src/weakincentives/adapters/codex_app_server/`,
+~2,000 lines) for running WINK agents in OpenAI's Codex sandboxed environment:
+
+- **`CodexAppServerAdapter`**: JSON-RPC 2.0 over stdio, notification-based
+  transcript collection, structured output with OpenAI-strict schema
+  transformation, tool bridging via MCP
+- **`CodexClient`**: Async JSON-RPC client with request/response correlation,
+  notification routing, and subprocess lifecycle management
+- **`CodexWorkspaceSection`**: Host mount support with symlink-safe copying
+  and file filtering by glob/size
+- **`CodexAppServerModelConfig`/`CodexAppServerClientConfig`**: Configuration
+  with defaults (model `"gpt-5.3-codex"`, approval policy, sandbox toggles)
+- Event mapping from Codex `item/completed` notifications to WINK `ToolInvoked`
+  and `TokenUsage` events
+
+The code reviewer example now supports `--adapter codex` for Codex-based
+reviews alongside Claude.
+
+#### Shared Adapter Module
+
+MCP tool bridging logic extracted from the Claude SDK adapter into
+`src/weakincentives/adapters/_shared/` (~750 lines), shared between Claude SDK
+and Codex adapters:
+
+- `_bridge.py`: MCP tool bridging with `BridgedTool` execution
+- `_async_utils.py`: Shared async utilities
+- `_visibility_signal.py`: Visibility expansion signal handling
+
+#### Prompt Lifecycle: cleanup()
+
+New `Section.cleanup()` and `Prompt.cleanup()` methods enable sections to
+release resources (e.g., temporary directories) after execution. `AgentLoop`
+automatically calls `prompt.cleanup()` in all execution paths (normal, bundled,
+error) with a `prompt_cleaned_up` guard preventing double invocation.
+
 #### call_id Correlation for MCP-Bridged Tools
 
 New `MCPToolExecutionState` provides thread-safe correlation between SDK
-`PreToolUse` hook events and MCP-bridged tool executions. The MCP protocol
-does not pass `tool_use_id` to tool handlers, so this state bridges the gap
-using a bounded deque with MD5-based parameter matching:
-
-- PreToolUse hook pushes `(tool_name, params, tool_use_id)` entries
-- Bridged tool pops matching entries to retrieve the `call_id`
-- FIFO ordering preserves execution sequence
-- Configurable max size (default 100) prevents unbounded growth
-- Thread-safe with explicit locking
-
-`ToolInvoked` events now include `call_id` for MCP-bridged tools, enabling
-end-to-end tool execution tracing.
-
-#### Multiple Feedback Providers Run Simultaneously
-
-The feedback evaluation model changed from "first match wins" to "all matching
-providers run." Each provider now maintains **independent trigger state** via
-scoped methods `last_feedback_for_provider()` and
-`tool_calls_since_last_feedback_for_provider()` on `FeedbackContext`. All
-matching feedback blocks are collected and combined with double-newline
-separation.
+`PreToolUse` hook events and MCP-bridged tool executions using a bounded deque
+with MD5-based parameter matching. `ToolInvoked` events now include `call_id`
+for MCP-bridged tools, enabling end-to-end tool execution tracing.
 
 #### FileCreatedTrigger for File-Based Feedback Activation
 
 New `FileCreatedTrigger` fires once when a specified file appears on the
-filesystem, enabling feedback that activates when agents produce specific
-artifacts:
+filesystem. Includes `FileCreatedTriggerState` session slice tracking fired
+triggers via `frozenset[str]`. Also adds `StaticFeedbackProvider` — a simple
+provider returning a fixed message:
 
 ```python
 FeedbackProviderConfig(
-    provider=StaticFeedbackProvider(message="Plan file detected."),
-    trigger=FeedbackTrigger(on_file_created="plan.md"),
+    provider=StaticFeedbackProvider(feedback="Plan file detected."),
+    trigger=FeedbackTrigger(on_file_created=FileCreatedTrigger(filename="plan.md")),
 )
 ```
-
-Includes `FileCreatedTriggerState` session slice tracking which triggers have
-fired (via `frozenset[str]`). Also adds `StaticFeedbackProvider` — a simple
-provider returning a fixed message, designed for use with file triggers.
 
 #### Tool Schema Rendering and Event Correlation
 
 The Claude Agent SDK adapter now emits `RenderedTools` events alongside
-`PromptRendered` events, providing visibility into which tools are available
-for each prompt evaluation:
-
-- Tool schemas (name, description, JSON Schema parameters) extracted via
-  `tool_to_spec()` and included in events
-- Events correlated via shared `render_event_id` (UUID4)
-- Both events share `session_id` and `created_at` for consistency
-- Dispatch failures logged without aborting evaluation
+`PromptRendered` events, correlated via shared `render_event_id` (UUID4).
+Tool schemas (name, description, JSON Schema parameters) extracted via
+`tool_to_spec()`. Dispatch failures logged without aborting evaluation.
 
 #### XML-Style Feedback Formatting
 
@@ -224,76 +264,53 @@ You have 2 incomplete tasks. Please complete them before producing output.
 </blocker>
 ```
 
-The `PlanBasedChecker` wraps incomplete task messages in `<blocker>` tags.
-The fallback feedback for incomplete tasks simplified to
-`<blocker>Tasks are incomplete.</blocker>`.
-
-#### External Storage Handler for Bundles
-
-Upload bundles to external storage (S3, GCS, etc.) after creation:
-
-```python
-config = EvalLoopConfig(
-    debug_bundle=BundleConfig(
-        target=Path("/bundles"),
-        storage_handler=S3StorageHandler(bucket="my-bucket"),
-        enabled=True,
-    )
-)
-```
-
-Storage handler failures are logged but don't fail evaluations. Bundle creation
-now checks both `debug_bundle` existence and its `enabled` flag.
-
 #### Intelligent Test Selection with pytest-testmon
 
-Local test runs now only execute tests affected by your changes using
-coverage-based selection:
+Local test runs now only execute tests affected by your changes:
 
 - First run builds `.testmondata` coverage database
 - Subsequent runs skip unaffected tests automatically
 - CI still validates 100% coverage on all tests
-- No configuration required — automatically detected via `CI` environment variable
+- Detected via `CI` environment variable
 
 ```bash
-make test      # Local: runs only affected tests
+make test          # Local: runs only affected tests
 CI=true make test  # CI: runs full suite with 100% coverage
 ```
 
 #### AutoFormatChecker with Dual-Mode Operation
 
-New `AutoFormatChecker` class behaves differently by environment:
+New `AutoFormatChecker` class in the toolchain:
 
 - **Locally**: Runs formatters with auto-fix, reports which files were changed
-- **In CI** (detected via `GITHUB_ACTIONS`/`CI`): Runs in check-only mode, fails
-  if changes needed
+- **In CI** (detected via `GITHUB_ACTIONS`/`CI`): Runs in check-only mode
 
-Supports both JSON output parsing (ruff) and text-based `FileListParser`
-callbacks (mdformat). The markdown checker (`create_markdown_checker()`) now
-uses `AutoFormatChecker` with a regex parser extracting paths from mdformat's
-`Error: File "..." is not formatted.` messages. Info-severity diagnostics
-(cyan) display even when checks pass, so auto-fix messages appear in local
-output.
+Supports JSON output parsing (ruff) and text-based `FileListParser` callbacks
+(mdformat). The markdown checker now uses `AutoFormatChecker` with a regex
+parser. Info-severity diagnostics (cyan) display even when checks pass.
 
 #### Markdown File Support in Debug Viewer
 
 The debug app file browser and transcript viewer now render markdown files:
 
-- `.md` files detected by extension (case-insensitive), rendered via
-  `_markdown.render()` to HTML
-- Toggle buttons for "Rendered" vs "Raw" views in the filesystem tab
+- `.md` files rendered via `_markdown.render()` to HTML
+- Toggle buttons for "Rendered" vs "Raw" views
 - Transcript entries with markdown content get a `content_html` field
-- Invalid UTF-8 in `.md` files gracefully falls back to binary display
+- Invalid UTF-8 falls back to binary display
 
 #### Infinite Scroll in Transcript Zoom Modal
 
-Navigating past the last loaded entry in the zoom modal now automatically
-fetches more transcript entries:
+Navigating past the last loaded entry automatically fetches more entries:
 
 - `zoomNext()` converted to async with `zoomNextWithLoad()` helper
-- `transcriptLoadRetries` counter with `MAX_TRANSCRIPT_LOAD_RETRIES` (3) limit
+- Retry counter (`MAX_TRANSCRIPT_LOAD_RETRIES = 3`) prevents infinite loops
 - Key events suppressed while a load is pending
-- "Next" button stays enabled when `transcriptHasMore` is true
+
+#### Transcript Tab Visibility Toggle
+
+The transcript tab in the debug viewer automatically hides when the bundle
+contains no transcript data. Keyboard shortcut numbers renumber dynamically
+to skip hidden tabs.
 
 ---
 
@@ -301,82 +318,55 @@ fetches more transcript entries:
 
 #### SDK-Native Exception Types for Error Handling
 
-Refactored the Claude Agent SDK adapter's error handling to use `isinstance()`
-checks against SDK types (`CLINotFoundError`, `CLIConnectionError`,
-`ProcessError`, `CLIJSONDecodeError`) instead of string-based `error_type`
-comparisons. Decomposed monolithic `normalize_sdk_error()` into focused handler
-functions. Added `HookConstraints` dataclass to group optional
-deadline/budget/heartbeat/run_context parameters, simplifying `HookContext`.
-Test error mocks now inherit from actual SDK exception types.
+Refactored Claude Agent SDK adapter error handling to use `isinstance()` checks
+against SDK types (`CLINotFoundError`, `CLIConnectionError`, `ProcessError`,
+`CLIJSONDecodeError`) instead of string-based comparisons. Decomposed monolithic
+`normalize_sdk_error()` into focused handler functions. Test error mocks now
+inherit from actual SDK exception types.
 
 #### Generic Snapshotable Protocol
 
-The `Snapshotable` protocol now accepts a type parameter for better type safety:
-
-```python
-# Before
-class MyResource(Snapshotable):
-    def snapshot(self, *, tag: str | None = None) -> Any: ...
-    def restore(self, snapshot: Any) -> None: ...
-
-# After
-class MyResource(Snapshotable[MySnapshot]):
-    def snapshot(self, *, tag: str | None = None) -> MySnapshot: ...
-    def restore(self, snapshot: MySnapshot) -> None: ...
-```
+`Snapshotable` now accepts a type parameter (`Snapshotable[SnapshotT]`),
+replacing `Any` annotations on `snapshot()` and `restore()`.
 
 #### TypedDict Definitions for LLM API Payloads
 
 New `_api_types.py` module (269 lines) provides type-safe definitions for all
-LLM provider payloads, replacing generic `dict[str, Any]` annotations across
-seven adapter modules:
-
-- `MessageDict`, `AssistantMessageDict`, `ToolMessageDict` for messages
-- `ToolSpecDict`, `FunctionSpecDict`, `ResponsesToolSpecDict` for tool specs
-- `LLMRequestParams`, `ClientKwargs` for configuration
-- `ProviderPayload`, `ToolArguments` type aliases
+LLM provider payloads, replacing `dict[str, Any]` across seven adapter modules.
 
 #### Session Refactored into Specialized Subsystems
 
-Session's internal state management extracted into three focused components:
+Session internals extracted into three focused components:
 
-- **SliceStore** (212 lines): Thread-safe typed slice instances with
-  policy-based factory selection
-- **ReducerRegistry** (191 lines): Event-type-to-reducer mapping with support
-  for multiple reducers per event
-- **SessionSnapshotter** (203 lines): Snapshot creation and restoration with
-  validation and `preserve_logs` flag
+- **SliceStore**: Thread-safe typed slice instances with policy-based factories
+- **ReducerRegistry**: Event-type-to-reducer mapping with multi-reducer support
+- **SessionSnapshotter**: Snapshot creation/restoration with validation
 
-Session becomes a thin facade with backward-compatibility properties for
-`session_cloning.py`. The `_locked_method` decorator was removed in favor of
-explicit lock management.
+Session becomes a thin facade. The `_locked_method` decorator removed in favor
+of explicit lock management.
 
 #### Type Safety in Serialization
 
 Replaced blanket pyright suppression in `serde/dump.py` (7 disabled rules) with
-three targeted `cast()` calls in `_serialize()` and `_extract_extras()`.
+three targeted `cast()` calls.
 
 #### Bun Test Integration into Unified Toolchain
 
-Moved JavaScript test execution from a standalone Makefile target into the
-project's Python toolchain infrastructure. New `parse_bun_test()` parser
-extracts test failures, stack traces, import/syntax errors, and pass/fail counts
-into standardized `Diagnostic` objects. `create_bun_test_checker()` registered
-in `create_all_checkers()` with 2-minute timeout and graceful Bun-not-installed
-handling.
+JavaScript test execution moved into the Python toolchain. New
+`parse_bun_test()` parser extracts failures, stack traces, and pass/fail counts
+into `Diagnostic` objects. Graceful Bun-not-installed handling.
 
 #### Pre-Commit Hooks Enforce Full CI Test Suite
 
-The pre-commit hook now runs `CI=true make check` instead of plain `make check`,
-forcing the full test suite (bypassing testmon) before every commit. This
-ensures local commits will not fail in CI due to testmon skipping tests.
+The pre-commit hook now runs `CI=true make check`, forcing the full test suite
+before every commit to prevent CI failures from testmon-skipped tests.
 
 #### Suppressed Build Output Noise
 
-- `--quiet` flag added to all `uv run` commands in Makefile (15 occurrences)
+- `--quiet` flag added to all `uv run` commands in Makefile
 - `--no-header` added to local pytest runs
-- Biome linter check now suppresses stdout on success
-- Bandit AST patching warnings suppressed via `warnings.catch_warnings()`
+- Biome check suppresses stdout on success
+- Bandit AST patching warnings suppressed
 - Removed `--preview` flag from ruff format JSON check
 
 ---
@@ -387,30 +377,21 @@ ensures local commits will not fail in CI due to testmon skipping tests.
 
 The quickstart guide now leads with cloning a
 [starter project](https://github.com/weakincentives/starter), running a
-"secret trivia game" agent immediately, then explaining WINK concepts through
-that concrete example. Installation via pip deferred to the end.
+"secret trivia game" agent immediately, then explaining concepts through that
+concrete example.
 
 #### CLAUDE.md Enhanced with Architectural Guidance
 
-Added "Core Philosophy" and "Guiding Principles" sections:
-
-- **The prompt is the agent**: Prompts bundle instructions and tools together
-- **Event-driven state**: Immutable state via pure reducers
-- **Definition vs Harness**: Clear boundary between agent definition and runtime
-- **Policies over Workflows**: Declarative constraints over prescriptive steps
-- **Transactional Tools**: Atomic tool calls with automatic rollback
-- Added Key Specs reference table and mandatory Git hooks documentation
-- `AGENTS.md`, `GEMINI.md`, `WARP.md` converted from redirect files to symlinks
+Added "Core Philosophy" and "Guiding Principles" sections (prompt-is-agent,
+event-driven state, definition-vs-harness, policies-over-workflows,
+transactional tools). Added Key Specs reference table and mandatory Git hooks
+documentation. `AGENTS.md`/`GEMINI.md`/`WARP.md` converted to symlinks.
 
 #### Guardrails Specification Consolidated
 
 Three separate specs (`FEEDBACK_PROVIDERS.md`, `TASK_COMPLETION.md`, tool
-policies from `TOOLS.md`) merged into unified `specs/GUARDRAILS.md` (439 lines):
-
-- Tool policies: Gate tool invocations (hard block)
-- Feedback providers: Soft guidance over time (advisory)
-- Task completion: Verify goals before stopping
-- Overview table showing how all three mechanisms complement each other
+policies from `TOOLS.md`) merged into unified `specs/GUARDRAILS.md` (439 lines)
+with an overview table showing how all three mechanisms complement each other.
 
 #### OpenCode ACP Adapter Specification
 
@@ -420,22 +401,21 @@ New specification (`specs/OPENCODE_ACP_ADAPTER.md`, 549 lines) documents
 #### Codex App Server Specification
 
 New specification (`specs/CODEX_APP_SERVER.md`) documents the Codex App Server
-adapter for running WINK agents in OpenAI's Codex sandboxed environment via
-JSON-RPC 2.0 over stdio. The spec was rewritten after 20 protocol probes
-against `codex-cli 0.98.0`, fixing 18+ discrepancies:
+adapter for running WINK agents via JSON-RPC 2.0 over stdio. The spec was
+rewritten after 20 protocol probes against `codex-cli 0.98.0`, fixing 18+
+discrepancies:
 
 - Replaced MCP tool bridging with Codex **native dynamic tools** protocol
 - Corrected `ApprovalPolicy` values, `SandboxMode` enum, `ReasoningEffort`
   values, and `agentMessage/delta` field path
-- Structured output now uses native `outputSchema` on `turn/start`
+- Structured output uses native `outputSchema` on `turn/start`
 - Documents dual notification system (v2 `item/*` vs v1 `codex/event/*`)
-- Removed `claude-agent-sdk` as a runtime dependency
 
 #### ROADMAP Refocused on Integrations
 
-Replaced three roadmap initiatives: "Tracing & Observability" → "ACP
-Integration", added "Codex App Server Integration", "Session Durability" →
-"Checkpointer Mechanism", "Named Entities" → "Basic Metrics".
+Replaced "Tracing & Observability" → "ACP Integration", added "Codex App Server
+Integration", "Session Durability" → "Checkpointer Mechanism", "Named Entities"
+→ "Basic Metrics".
 
 ---
 
@@ -443,8 +423,8 @@ Integration", added "Codex App Server Integration", "Session Durability" →
 
 #### Parallelized Test Execution
 
-Tests now run in 6 parallel matrix groups with coverage artifacts combined in
-a dedicated `coverage` job enforcing the 100% threshold:
+Tests now run in 6 parallel matrix groups with coverage combined in a dedicated
+`coverage` job enforcing the 100% threshold:
 
 - `test-group-1`: Adapters
 - `test-group-2`: CLI + Contrib
@@ -457,29 +437,27 @@ New `make test-parallel` and `make test-group-N` targets for local use.
 
 #### Simplified Change Detection
 
-Removed 12 module-specific change detection outputs. Heavy tests (formal
-verification, property tests) now gated by single `run_heavy_tests` flag
-triggered when `formal/`, `mailbox/`, or `runtime/` code changes.
+Removed 12 module-specific change detection outputs. Heavy tests gated by
+single `run_heavy_tests` flag.
 
 #### JavaScript Testing Infrastructure
 
-Added Bun test runner for debug web UI with 77+ unit tests:
-
-- Pure utility functions extracted to `lib.js` for testability
-- `splitQualifiedName` utility added with tests
-- Biome cognitive complexity threshold lowered from 25 to 8
-- Integrated into `make test` and `make check` via toolchain
+Bun test runner for debug web UI with 77+ unit tests. Pure utility functions
+extracted to `lib.js`. Biome cognitive complexity threshold lowered from 25 to
+8. Integrated into `make test` and `make check`.
 
 #### Shared CI Setup Action
 
-New `.github/actions/setup-env` composite action replaces duplicated setup
-steps across 3 workflow files (ci, integration-tests, release), reducing
-total workflow YAML by ~48 lines.
+New `.github/actions/setup-env` composite action centralizes Python/uv/Bun
+setup across 4 workflow files (ci, integration-tests, release).
 
 #### Skip CI for Docs-Only Changes
 
-Static analysis and test jobs now skip for documentation-only PRs via
-`needs: detect-changes` guards.
+Static analysis and test jobs skip for documentation-only PRs.
+
+#### Claude Code Review Configuration
+
+PR code review workflow updated to use Claude Opus 4.6 at maximum effort level.
 
 ---
 
@@ -487,19 +465,16 @@ Static analysis and test jobs now skip for documentation-only PRs via
 
 #### Full Modular Decomposition
 
-The monolithic `app.js` (~2,700 lines) was decomposed into a modular
-architecture:
+The monolithic `app.js` (~2,700 lines) decomposed into modular architecture:
 
 - **`store.js`**: Centralized mutable state via `createInitialState()`
-- **`environment-view.js`**: System/Python/Git/container info with
-  copy-to-clipboard
-- **`filesystem-view.js`**: File browser with image preview and markdown
-  rendering
-- **`keyboard-shortcuts.js`**: Global keyboard handler with vim-style j/k
-- **`logs-view.js`**: Log display with faceted search and virtual scrolling
-- **`sessions-view.js`**: Slice browser with expandable tree
-- **`transcript-view.js`**: Transcript with source/type chip filtering
-- **`zoom-modal.js`**: Detail zoom with JSON tree rendering
+- **`views/environment-view.js`**: System/Python/Git/container info
+- **`views/filesystem-view.js`**: File browser with image preview and markdown
+- **`views/keyboard-shortcuts.js`**: Global keyboard handler with vim-style j/k
+- **`views/logs-view.js`**: Log display with faceted search and virtual scrolling
+- **`views/sessions-view.js`**: Slice browser with expandable tree
+- **`views/transcript-view.js`**: Transcript with source/type chip filtering
+- **`views/zoom-modal.js`**: Detail zoom with JSON tree rendering
 
 `app.js` reduced to ~163 lines of bootstrap/wiring code.
 
@@ -524,16 +499,13 @@ architecture:
 | ruff | 0.14.5 | 0.15.0 | Major dev tool bump |
 | ty | 0.0.1a35 | 0.0.14 | Alpha → stable |
 | hypothesis | 6.100.0 | 6.151.4 | 51 minor versions |
+| hatchling | 1.27.0 | 1.28.0 | Minor bump |
 
 #### Other Updates
 
-- litellm: 1.79.3 → 1.81.7
-- hatchling: 1.27.0 → 1.28.0
 - pyjwt: 2.10.1 → 2.11.0
 - tqdm: 4.67.1 → 4.67.2
 - pyyaml: 6.0.0 → 6.0.3
-- asteval: 1.0.7 → 1.0.8
-- podman: 5.6.0 → 5.7.0
 - pytest-testmon: Added (≥2.1.0)
 - pyright: 1.1.407 → 1.1.408
 - bandit: 1.8.6 → 1.9.3
@@ -544,6 +516,9 @@ architecture:
 
 - `openai` — No longer needed (adapter removed)
 - `litellm` — No longer needed (adapter removed)
+- `asteval` — No longer needed (tool section removed)
+- `podman` — No longer needed (tool section removed)
+- `aiohttp` — No longer needed (removed with adapters)
 
 ---
 
@@ -552,37 +527,29 @@ architecture:
 #### Test Infrastructure Improvements
 
 - Consolidated mock SDK exception classes into centralized
-  `tests/adapters/claude_agent_sdk/error_mocks.py` (now inheriting from real
-  SDK types)
+  `tests/adapters/claude_agent_sdk/error_mocks.py` (inheriting from real SDK types)
 - Centralized CLI test helpers (`FakeLogger`, `FakeContextManager`) into
   `tests/cli/helpers.py`
-- Refactored `wink query` tests into 4 focused modules: `_query_fixtures.py`,
-  `test_wink_query_helpers.py`, `test_wink_query_cli.py`,
-  `test_wink_query_database.py`
-- Split monolithic `test_dataclass_serde.py` (2,115 lines) into 4 modules:
-  `test_parse_and_dump.py`, `test_constraints_and_literals.py`,
-  `test_container_types.py`, `test_validators_and_hooks.py` with shared
-  `_fixtures.py`
-- Added multi-turn continuation edge case tests for SDK adapter (deadline
-  expiry, budget exceeded, empty streams, structured output checking)
+- Refactored `wink query` tests into 4 focused modules with shared fixtures
+- Split monolithic `test_dataclass_serde.py` (2,115 lines) into 4 modules
+  with shared `_fixtures.py`
+- Added comprehensive Codex App Server adapter tests (~3,600 lines) and
+  integration tests (~2,400 lines)
 - Enhanced `tests/helpers/__init__.py` with comprehensive usage guide
-
-#### Bug Fixes
-
-- JavaScript tests now properly executed in CI test job (Bun was previously
-  only installed in static-analysis job)
-- Improved test coverage for git remote credential redaction
-- Corrected Bedrock model ID for Opus 4.6 (dropped `:0` suffix)
 
 #### Other
 
 - `code_reviewer_example.py` rewritten around `AgentLoop` + `InMemoryMailbox` +
-  `InProcessDispatcher` using `ClaudeAgentWorkspaceSection` with host mounts
+  `InProcessDispatcher` with `--adapter {claude,codex}` flag
 - Adapter derives `cwd` from workspace section's `HostFilesystem.root` when
   not explicitly set
+- `CODEX_APP_SERVER_ADAPTER_NAME` constant added to public API
 - `scratch/` added to `.gitignore`
 - `.claude/settings.json` added for project configuration
-- Simplified Makefile demo targets (removed `demo-podman`, `demo-claude-agent`)
+- Simplified Makefile demo targets (`make demo-claude`, `make demo-codex`)
+- Older changelog entries (v0.19.0 and earlier) pruned from CHANGELOG.md
+- `pyproject.toml`: Added `--timeout=10 --timeout-method=thread` to default
+  pytest addopts; `integration-tests` added to `norecursedirs`
 
 ---
 
