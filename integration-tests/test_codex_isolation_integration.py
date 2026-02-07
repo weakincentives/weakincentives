@@ -199,8 +199,8 @@ def test_codex_custom_env_passed_to_subprocess(tmp_path: Path) -> None:
     section = MarkdownSection(
         title="Task",
         template=(
-            "Print the value of the environment variable WINK_TEST_VAR using "
-            "echo $WINK_TEST_VAR and reply with just that value."
+            "Print the value of the environment variable WINK_TEST_VAR "
+            "and reply with just that value."
         ),
         key="task",
     )
