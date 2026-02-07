@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator, AsyncIterable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -279,6 +280,11 @@ class SimpleOutput:
     message: str
 
 
+@dataclass(slots=True, frozen=True)
+class NullableOutput:
+    count: int | None
+
+
 @pytest.fixture
 def session() -> Session:
     dispatcher = InProcessDispatcher()
@@ -311,6 +317,22 @@ def untyped_prompt() -> Prompt[None]:
                 title="Task",
                 key="task",
                 template="Do something",
+            ),
+        ],
+    )
+    return Prompt(template)
+
+
+@pytest.fixture
+def nullable_prompt() -> Prompt[NullableOutput]:
+    template = PromptTemplate[NullableOutput](
+        ns="test",
+        key="nullable",
+        sections=[
+            MarkdownSection(
+                title="Task",
+                key="task",
+                template="Return optional count",
             ),
         ],
     )
@@ -695,6 +717,21 @@ class TestClaudeAgentSDKAdapterEvaluate:
 
         assert response.output is None
 
+    def test_raises_on_empty_structured_result(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Structured prompts with no text/output should fail deterministically."""
+        _setup_mock_query([MockResultMessage(result=None, usage=None)])
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with pytest.raises(
+                PromptEvaluationError,
+                match="Structured output prompt returned no text and no structured output",
+            ):
+                adapter.evaluate(simple_prompt, session=session)
+
     def test_accumulates_token_usage(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
@@ -752,6 +789,18 @@ class TestBuildOutputFormat:
         assert "schema" in result
         assert "properties" in result["schema"]
         assert "message" in result["schema"]["properties"]
+
+    def test_nullable_fields_collapse_anyof_for_claude(
+        self, nullable_prompt: Prompt[NullableOutput]
+    ) -> None:
+        adapter = ClaudeAgentSDKAdapter()
+        rendered = nullable_prompt.render()
+        result = adapter._build_output_format(rendered)
+
+        assert result is not None
+        count_schema = result["schema"]["properties"]["count"]
+        assert count_schema["type"] == ["integer", "null"]
+        assert "anyOf" not in count_schema
 
 
 class TestSDKConfigOptions:
@@ -1385,7 +1434,7 @@ class TestIsolationConfig:
         assert adapter._stderr_buffer[1] == "Test stderr line 2\n"
 
     def test_message_without_result(
-        self, session: Session, simple_prompt: Prompt[None]
+        self, session: Session, untyped_prompt: Prompt[None]
     ) -> None:
         """Messages without result attribute or with falsy result are handled."""
         MockSDKQuery.reset()
@@ -1397,7 +1446,7 @@ class TestIsolationConfig:
         adapter = ClaudeAgentSDKAdapter()
 
         with sdk_patches():
-            response = adapter.evaluate(simple_prompt, session=session)
+            response = adapter.evaluate(untyped_prompt, session=session)
 
         assert response.text is None
 
@@ -2377,7 +2426,7 @@ class TestMultiturnEdgeCases:
     """Tests for edge cases in multi-turn continuation loop."""
 
     def test_deadline_exceeded_during_continuation(
-        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+        self, session: Session, untyped_prompt: Prompt[None]
     ) -> None:
         """Test that continuation stops when deadline expires mid-loop."""
         from datetime import timedelta
@@ -2393,16 +2442,18 @@ class TestMultiturnEdgeCases:
 
         # Create a mock deadline that returns positive for first few checks,
         # then negative to trigger the in-loop deadline check.
-        # Calls: 1) logging, 2) pre-loop check, 3) first loop check (pass),
-        #        4) second loop check (should fail)
+        # Calls include:
+        # 1) evaluate() logging, 2) initial expiry check,
+        # 3) first loop constraints check, 4-5) stream wait checks,
+        # 6) second loop constraints check (should fail).
         check_count = 0
 
         def mock_remaining() -> timedelta:
             nonlocal check_count
             check_count += 1
-            if check_count <= 3:
-                return timedelta(seconds=10)  # First 3 checks pass
-            return timedelta(seconds=-1)  # 4th+ check: deadline exceeded
+            if check_count <= 5:
+                return timedelta(seconds=10)  # Early checks pass
+            return timedelta(seconds=-1)  # Later checks: deadline exceeded
 
         mock_deadline = MagicMock(spec=Deadline)
         mock_deadline.remaining.side_effect = mock_remaining
@@ -2455,13 +2506,13 @@ class TestMultiturnEdgeCases:
         with sdk_patches():
             with patch("claude_agent_sdk.ClaudeSDKClient", MockClientDeadlineTest):
                 response = adapter.evaluate(
-                    simple_prompt, session=session, deadline=mock_deadline
+                    untyped_prompt, session=session, deadline=mock_deadline
                 )
 
         # Should return the last response received before deadline
         assert response.text is not None
         # Deadline was checked multiple times including inside the loop
-        assert check_count >= 4
+        assert check_count >= 6
 
     def test_budget_check_raises_exception_during_continuation(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
@@ -2548,7 +2599,7 @@ class TestMultiturnEdgeCases:
         assert check_count >= 2
 
     def test_empty_message_stream_breaks_continuation(
-        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+        self, session: Session, untyped_prompt: Prompt[None]
     ) -> None:
         """Test that continuation stops when receive_response returns no messages."""
 
@@ -2580,10 +2631,52 @@ class TestMultiturnEdgeCases:
 
         with sdk_patches():
             with patch("claude_agent_sdk.ClaudeSDKClient", MockClientEmptyStream):
-                response = adapter.evaluate(simple_prompt, session=session)
+                response = adapter.evaluate(untyped_prompt, session=session)
 
         # Should return with no text (empty stream)
         assert response.text is None
+
+    def test_deadline_timeout_while_waiting_for_response_stream(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Deadline should interrupt stalled response streams."""
+        deadline = Deadline(datetime.now(UTC) + timedelta(seconds=1.5))
+
+        class MockClientStalledStream:
+            def __init__(
+                self, options: object | None = None, transport: object | None = None
+            ) -> None:
+                self.options = options
+                self._transport = MockTransport()
+                MockSDKQuery.captured_options.append(options)
+
+            async def connect(self, prompt: object | None = None) -> None:
+                pass
+
+            async def disconnect(self) -> None:
+                self._transport = None
+
+            async def query(self, prompt: str, session_id: str = "default") -> None:
+                pass
+
+            async def receive_response(self) -> AsyncGenerator[object, None]:
+                await asyncio.sleep(60)
+                yield MockResultMessage(result="unreachable")
+
+        _setup_mock_query([])
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with patch("claude_agent_sdk.ClaudeSDKClient", MockClientStalledStream):
+                with pytest.raises(
+                    PromptEvaluationError,
+                    match="Deadline exceeded while waiting for Claude SDK response stream",
+                ):
+                    adapter.evaluate(
+                        simple_prompt,
+                        session=session,
+                        deadline=deadline,
+                    )
 
     def test_cleanup_handles_none_transport(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
