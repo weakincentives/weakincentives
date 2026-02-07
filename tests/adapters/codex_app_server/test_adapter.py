@@ -28,7 +28,6 @@ from weakincentives.adapters.codex_app_server.adapter import (
     CodexAppServerAdapter,
     _bridged_tools_to_dynamic_specs,
     _openai_strict_schema,
-    _ThreadState,
 )
 from weakincentives.adapters.codex_app_server.client import (
     CodexAppServerClient,
@@ -450,9 +449,6 @@ class TestCreateThread:
             assert params["approvalPolicy"] == "never"
             assert "dynamicTools" not in params
 
-            assert adapter._last_thread is not None
-            assert adapter._last_thread.thread_id == "t-abc"
-
         asyncio.run(_run())
 
     def test_thread_with_sandbox_and_tools(self) -> None:
@@ -473,131 +469,6 @@ class TestCreateThread:
             assert params["sandbox"] == "read-only"
             assert params["dynamicTools"] == tools
             assert "config" in params
-
-        asyncio.run(_run())
-
-
-class TestTryResumeThread:
-    def test_no_state_returns_none(self) -> None:
-        async def _run() -> None:
-            adapter = CodexAppServerAdapter()
-            client = _make_mock_client()
-            result = await adapter._try_resume_thread(client, "/tmp", [])
-            assert result is None
-
-        asyncio.run(_run())
-
-    def test_mismatched_cwd_returns_none(self) -> None:
-        async def _run() -> None:
-            adapter = CodexAppServerAdapter()
-            adapter._last_thread = _ThreadState(
-                thread_id="old-thread",
-                cwd="/other",
-                dynamic_tool_names=(),
-            )
-            client = _make_mock_client()
-            result = await adapter._try_resume_thread(client, "/tmp", [])
-            assert result is None
-
-        asyncio.run(_run())
-
-    def test_successful_resume(self) -> None:
-        async def _run() -> None:
-            adapter = CodexAppServerAdapter()
-            adapter._last_thread = _ThreadState(
-                thread_id="old-thread",
-                cwd="/tmp",
-                dynamic_tool_names=(),
-            )
-            client = _make_mock_client()
-            client.send_request.return_value = {"thread": {"id": "old-thread"}}
-            result = await adapter._try_resume_thread(client, "/tmp", [])
-            assert result == "old-thread"
-
-        asyncio.run(_run())
-
-    def test_resume_failure_returns_none(self) -> None:
-        async def _run() -> None:
-            adapter = CodexAppServerAdapter()
-            adapter._last_thread = _ThreadState(
-                thread_id="old-thread",
-                cwd="/tmp",
-                dynamic_tool_names=(),
-            )
-            client = _make_mock_client()
-            client.send_request.side_effect = CodexClientError("resume failed")
-            result = await adapter._try_resume_thread(client, "/tmp", [])
-            assert result is None
-
-        asyncio.run(_run())
-
-    def test_mismatched_tools_returns_none(self) -> None:
-        async def _run() -> None:
-            adapter = CodexAppServerAdapter()
-            adapter._last_thread = _ThreadState(
-                thread_id="old-thread",
-                cwd="/tmp",
-                dynamic_tool_names=("alpha", "beta"),
-            )
-            client = _make_mock_client()
-            result = await adapter._try_resume_thread(
-                client,
-                "/tmp",
-                [{"name": "gamma", "description": "g", "inputSchema": {}}],
-            )
-            assert result is None
-
-        asyncio.run(_run())
-
-
-class TestStartThread:
-    def test_creates_new_when_reuse_disabled(self) -> None:
-        async def _run() -> None:
-            adapter = CodexAppServerAdapter()
-            client = _make_mock_client()
-            client.send_request.return_value = {"thread": {"id": "new-t"}}
-            result = await adapter._start_thread(client, "/tmp", [])
-            assert result == "new-t"
-
-        asyncio.run(_run())
-
-    def test_creates_new_when_tools_diverge(self) -> None:
-        async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                client_config=CodexAppServerClientConfig(reuse_thread=True)
-            )
-            # Seed state with old tool names
-            adapter._last_thread = _ThreadState(
-                thread_id="existing",
-                cwd="/tmp",
-                dynamic_tool_names=("old_tool",),
-            )
-            client = _make_mock_client()
-            client.send_request.return_value = {"thread": {"id": "new-t"}}
-            # Pass different tools — should skip resume and create new
-            new_specs = [{"name": "new_tool", "description": "d", "inputSchema": {}}]
-            result = await adapter._start_thread(client, "/tmp", new_specs)
-            assert result == "new-t"
-            # Verify state was updated with new tool names
-            assert adapter._last_thread is not None
-            assert adapter._last_thread.dynamic_tool_names == ("new_tool",)
-
-        asyncio.run(_run())
-
-    def test_resumes_when_enabled(self) -> None:
-        async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                client_config=CodexAppServerClientConfig(reuse_thread=True)
-            )
-            adapter._last_thread = _ThreadState(
-                thread_id="existing",
-                cwd="/tmp",
-                dynamic_tool_names=(),
-            )
-            client = _make_mock_client()
-            client.send_request.return_value = {"thread": {"id": "existing"}}
-            result = await adapter._start_thread(client, "/tmp", [])
-            assert result == "existing"
 
         asyncio.run(_run())
 

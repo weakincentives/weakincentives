@@ -87,7 +87,6 @@ class CodexAppServerClientConfig:
         approval_policy: How to handle command/file approvals.
         sandbox_mode: Sandbox mode for thread/start.
         auth_mode: Authentication configuration. None inherits host credentials.
-        reuse_thread: Resume existing thread from session state.
         mcp_servers: Additional external MCP server configurations.
         ephemeral: If true, thread is not persisted to disk.
         client_name: Client identifier for initialize.
@@ -102,7 +101,6 @@ class CodexAppServerClientConfig:
     approval_policy: ApprovalPolicy = "never"
     sandbox_mode: SandboxMode | None = None
     auth_mode: CodexAuthMode | None = None
-    reuse_thread: bool = False
     mcp_servers: dict[str, McpServerConfig] | None = None
     ephemeral: bool = False
     client_name: str = "wink"

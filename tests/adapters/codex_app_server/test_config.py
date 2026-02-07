@@ -61,7 +61,6 @@ class TestCodexAppServerClientConfig:
         assert cfg.approval_policy == "never"
         assert cfg.sandbox_mode is None
         assert cfg.auth_mode is None
-        assert cfg.reuse_thread is False
         assert cfg.mcp_servers is None
         assert cfg.ephemeral is False
         assert cfg.client_name == "wink"
@@ -78,7 +77,6 @@ class TestCodexAppServerClientConfig:
             approval_policy="on-request",
             sandbox_mode="read-only",
             auth_mode=auth,
-            reuse_thread=True,
             mcp_servers={"server1": {"command": "npx", "args": ["mcp"]}},
             ephemeral=True,
             client_name="my-agent",
@@ -89,7 +87,6 @@ class TestCodexAppServerClientConfig:
         assert cfg.approval_policy == "on-request"
         assert cfg.sandbox_mode == "read-only"
         assert cfg.auth_mode is auth
-        assert cfg.reuse_thread is True
         assert cfg.mcp_servers is not None
         assert "server1" in cfg.mcp_servers
         assert cfg.ephemeral is True

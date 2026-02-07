@@ -78,7 +78,6 @@ def _get_model() -> str:
 def _make_adapter(
     tmp_path: Path,
     *,
-    reuse_thread: bool = False,
     approval_policy: str = "never",
 ) -> CodexAppServerAdapter:
     """Create an adapter configured for testing with cwd in tmp_path."""
@@ -87,7 +86,6 @@ def _make_adapter(
         client_config=CodexAppServerClientConfig(
             cwd=str(tmp_path),
             approval_policy=approval_policy,
-            reuse_thread=reuse_thread,
         ),
     )
 
@@ -346,31 +344,6 @@ def test_codex_adapter_publishes_tool_invoked_for_native_tools(
         f"Got: {tool_events!r}"
     )
     _assert_prompt_usage(session)
-
-
-def test_codex_adapter_thread_resume(tmp_path: Path) -> None:
-    """Verify thread resume: a second evaluate reuses the existing thread."""
-    adapter = _make_adapter(tmp_path, reuse_thread=True)
-
-    prompt = Prompt(_build_greeting_prompt()).bind(
-        GreetingParams(audience="thread resume test (turn 1)")
-    )
-
-    session = _make_session()
-    response1 = adapter.evaluate(prompt, session=session)
-    assert response1.text is not None
-
-    # Check that a thread ID was stored in adapter state
-    assert adapter._last_thread is not None
-    first_thread_id = adapter._last_thread.thread_id
-    assert first_thread_id is not None
-
-    # Second evaluation with the same adapter should resume the thread
-    prompt2 = Prompt(_build_greeting_prompt()).bind(
-        GreetingParams(audience="thread resume test (turn 2)")
-    )
-    response2 = adapter.evaluate(prompt2, session=session)
-    assert response2.text is not None
 
 
 def test_codex_adapter_with_workspace_section(tmp_path: Path) -> None:

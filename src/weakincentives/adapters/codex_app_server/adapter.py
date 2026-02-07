@@ -21,7 +21,7 @@ import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple, cast, override
+from typing import Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
@@ -153,14 +153,6 @@ def _build_output_schema(rendered: RenderedPrompt[Any]) -> dict[str, Any] | None
     return element_schema
 
 
-class _ThreadState(NamedTuple):
-    """Adapter-internal state for Codex thread reuse."""
-
-    thread_id: str
-    cwd: str
-    dynamic_tool_names: tuple[str, ...]
-
-
 class CodexAppServerAdapter(ProviderAdapter[Any]):
     """Adapter using the Codex App Server for agentic prompt evaluation.
 
@@ -178,7 +170,6 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         super().__init__()
         self._model_config = model_config or CodexAppServerModelConfig()
         self._client_config = client_config or CodexAppServerClientConfig()
-        self._last_thread: _ThreadState | None = None
 
         logger.debug(
             "codex_app_server.adapter.init",
@@ -497,7 +488,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
 
             # 3. Thread
             timeout = self._deadline_remaining_s(deadline, prompt_name)
-            thread_id = await self._start_thread(
+            thread_id = await self._create_thread(
                 client, effective_cwd, dynamic_tool_specs, timeout=timeout
             )
 
@@ -562,54 +553,6 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 timeout=timeout,
             )
 
-    async def _start_thread(
-        self,
-        client: CodexAppServerClient,
-        effective_cwd: str,
-        dynamic_tool_specs: list[dict[str, Any]],
-        *,
-        timeout: float | None = None,
-    ) -> str:
-        """Start or resume a Codex thread. Returns the thread ID."""
-        if self._client_config.reuse_thread:
-            thread_id = await self._try_resume_thread(
-                client, effective_cwd, dynamic_tool_specs, timeout=timeout
-            )
-            if thread_id is not None:
-                return thread_id
-
-        return await self._create_thread(
-            client, effective_cwd, dynamic_tool_specs, timeout=timeout
-        )
-
-    async def _try_resume_thread(
-        self,
-        client: CodexAppServerClient,
-        effective_cwd: str,
-        dynamic_tool_specs: list[dict[str, Any]],
-        *,
-        timeout: float | None = None,
-    ) -> str | None:
-        """Try to resume an existing thread. Returns thread ID or None."""
-        state = self._last_thread
-        if state is None or state.cwd != effective_cwd:
-            return None
-        current_names = tuple(sorted(spec["name"] for spec in dynamic_tool_specs))
-        if state.dynamic_tool_names != current_names:
-            return None
-        try:
-            result = await client.send_request(
-                "thread/resume", {"threadId": state.thread_id}, timeout=timeout
-            )
-            return result["thread"]["id"]
-        except CodexClientError:
-            logger.debug(
-                "codex_app_server.thread_resume_failed",
-                event="thread_resume_failed",
-                context={"thread_id": state.thread_id},
-            )
-            return None
-
     async def _create_thread(
         self,
         client: CodexAppServerClient,
@@ -618,7 +561,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         *,
         timeout: float | None = None,
     ) -> str:
-        """Create a new thread and store state for reuse."""
+        """Create a new Codex thread. Returns the thread ID."""
         thread_params: dict[str, Any] = {
             "model": self._model_config.model,
             "cwd": effective_cwd,
@@ -635,15 +578,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         result = await client.send_request(
             "thread/start", thread_params, timeout=timeout
         )
-        thread_id: str = result["thread"]["id"]
-
-        dynamic_tool_names = tuple(sorted(spec["name"] for spec in dynamic_tool_specs))
-        self._last_thread = _ThreadState(
-            thread_id=thread_id,
-            cwd=effective_cwd,
-            dynamic_tool_names=dynamic_tool_names,
-        )
-        return thread_id
+        return result["thread"]["id"]
 
     async def _start_turn(
         self,

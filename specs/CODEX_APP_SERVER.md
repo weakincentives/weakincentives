@@ -110,7 +110,6 @@ Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
 | `approval_policy` | `ApprovalPolicy` | `"never"` | How to handle command/file approvals |
 | `sandbox_mode` | `SandboxMode \| None` | `None` | Sandbox mode for `thread/start` |
 | `auth_mode` | `CodexAuthMode \| None` | `None` | Authentication configuration |
-| `reuse_thread` | `bool` | `False` | Resume existing thread ID from session state |
 | `mcp_servers` | `dict[str, McpServerConfig] \| None` | `None` | Additional external MCP servers |
 | `ephemeral` | `bool` | `False` | If true, thread is not persisted to disk |
 | `client_name` | `str` | `"wink"` | Client identifier for `initialize` |
@@ -228,24 +227,6 @@ Codex emits notifications in two parallel namespaces:
 - **`codex/event/*`** — legacy v1 events (ignore; same content, different shape)
 
 The adapter should only process v2 notifications.
-
-## Thread Reuse State
-
-Thread reuse state is stored as an **adapter-internal instance variable**
-(`_last_thread`) rather than in the WINK session. This keeps adapter
-implementation details out of the session's event log.
-
-```python
-class _ThreadState(NamedTuple):
-    thread_id: str
-    cwd: str
-    dynamic_tool_names: tuple[str, ...]
-```
-
-When `reuse_thread=True`, only reuse the thread if `cwd` and
-`dynamic_tool_names` match the current invocation. If they differ or
-`thread/resume` fails, fall back to `thread/start` and overwrite the stored
-state.
 
 ## Workspace Management
 
@@ -612,14 +593,7 @@ if additional_mcp_servers:
 
 result = send_request("thread/start", thread_params)
 thread_id = result["thread"]["id"]
-
-# Resume existing thread
-result = send_request("thread/resume", {
-    "threadId": cached_thread_id,
-})
 ```
-
-Store thread ID in `adapter._last_thread` for potential reuse.
 
 ### 8. Start Turn
 
