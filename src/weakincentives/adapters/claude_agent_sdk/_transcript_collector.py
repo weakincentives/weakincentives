@@ -112,6 +112,9 @@ class TranscriptCollector:
     _tailers: dict[str, _TailerState] = field(default_factory=dict, init=False)
     """Active tailers by source."""
 
+    _pending_tailers: dict[str, Path] = field(default_factory=dict, init=False)
+    """Sources awaiting file creation (path not yet on disk)."""
+
     _running: bool = field(default=False, init=False)
     """Whether the collector is running."""
 
@@ -332,6 +335,7 @@ class TranscriptCollector:
                 inode=stat.st_ino,
             )
             self._tailers[source] = tailer
+            self._pending_tailers.pop(source, None)
 
             if source.startswith("subagent:"):
                 logger.debug(
@@ -344,16 +348,19 @@ class TranscriptCollector:
                     },
                 )
         except OSError as e:
-            logger.warning(
-                "transcript.collector.error",
-                event="transcript.collector.error",
-                context={
-                    "prompt_name": self.prompt_name,
-                    "source": source,
-                    "path": str(path),
-                    "error": str(e),
-                },
-            )
+            already_pending = source in self._pending_tailers
+            self._pending_tailers[source] = path
+            if not already_pending:
+                logger.warning(
+                    "transcript.collector.error",
+                    event="transcript.collector.error",
+                    context={
+                        "prompt_name": self.prompt_name,
+                        "source": source,
+                        "path": str(path),
+                        "error": str(e),
+                    },
+                )
 
     async def _poll_loop(self) -> None:
         """Background polling loop for transcript content."""
@@ -369,6 +376,9 @@ class TranscriptCollector:
 
     async def _poll_once(self) -> None:
         """Poll all active tailers for new content."""
+        # Retry any pending tailers whose files may now exist on disk.
+        for source, path in list(self._pending_tailers.items()):
+            await self._start_tailer(path, source)
         for tailer in list(self._tailers.values()):
             await self._read_transcript_content(tailer)
 
