@@ -96,7 +96,7 @@ jobs:
         run: make test-group-${{ matrix.group }}
 
       - name: Upload coverage data
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-${{ matrix.group }}
           path: .coverage.${{ matrix.group }}
@@ -172,7 +172,7 @@ jobs:
 
       - name: Upload extracted specs (on failure)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: extracted-tla-specs
           path: specs/tla/extracted/
