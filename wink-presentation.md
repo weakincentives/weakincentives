@@ -26,87 +26,98 @@ style: |
     padding-left: 1rem;
     font-style: italic;
   }
+  table {
+    font-size: 0.9em;
+  }
 ---
 
 # WINK
 ## The Agent Definition Layer
 
-Portable agents with soft feedback and hard guardrails
+Portable agents across sophisticated execution harnesses
+
+---
+
+# The Landscape
+
+Two production-grade agentic harnesses exist today:
+
+| Harness | Provider | Runtime |
+|---------|----------|---------|
+| **Claude Code** | Anthropic | Claude Agent SDK |
+| **OpenAI Codex** | OpenAI | Codex App Server |
+
+Both provide planning loops, native tools, sandboxing, and orchestration.
+
+**Your agent definition shouldn't be locked to either.**
+
+---
+
+# What These Harnesses Provide
+
+Both Claude Code and Codex are **full agentic runtimes**:
+
+- Planning and reasoning loops
+- Native file and shell tools
+- OS-level or policy-based sandboxing
+- Approval flows and permissions
+- Crash recovery and retries
+- Token budgets and deadlines
+
+This is sophisticated machinery. You don't want to rebuild it.
 
 ---
 
 # The Problem
 
-You build an agent. It works with one provider's runtime.
+You build an agent on Claude Code. It works.
 
-Then:
-- You want to switch providers
-- The runtime upgrades its planning loop
-- You move from dev to production sandboxing
+Now you need to:
+- Run on Codex for a different customer
+- Support both for redundancy
+- Migrate when pricing changes
 
 **How much do you rewrite?**
 
 ---
 
-# The Insight
-
-High-quality agents have two distinct parts:
-
-1. **Definition** — prompt, tools, policies, feedback
-2. **Harness** — planning loop, sandboxing, retries, scheduling
-
-These change at different rates, for different reasons, by different teams.
-
----
-
 # The Agent Definition Layer
 
-WINK makes your agent definition a **portable artifact**:
+WINK separates what you own from what the harness provides:
 
-- Same definition runs on OpenAI, Claude Agent SDK, or other harnesses
-- Version it, review it, test it independently of runtime
-- Swap harnesses without touching agent logic
+<div class="columns">
 
-**Own the definition. Rent the harness.**
+**Definition (yours)**
+- Prompt structure
+- Custom tools
+- Policies & feedback
+- Completion criteria
 
----
+**Harness (theirs)**
+- Planning loop
+- Native tools
+- Sandboxing
+- Orchestration
 
-# What Lives in the Definition?
+</div>
 
-| Component | Purpose |
-|-----------|---------|
-| **Prompt structure** | Context engineering, co-located tools |
-| **Tool contracts** | Typed inputs/outputs, side effect boundary |
-| **Hard guardrails** | Policies that gate tool calls |
-| **Soft feedback** | Guidance that nudges behavior |
-| **Completion criteria** | "Done" means what you say it means |
-
----
-
-# What Lives in the Harness?
-
-| Component | Purpose |
-|-----------|---------|
-| Planning loop | Decides what to do next |
-| Sandboxing | OS-level isolation |
-| Retries & throttling | Error recovery |
-| Budgets & deadlines | Resource limits |
-| Native tools | File, shell, network |
-
-You don't own this. You rent it.
+Your definition is **portable**. The harness is **rented**.
 
 ---
 
-# Portability in Practice
+# Two Harnesses, One Definition
 
 ```python
-# Development: run everything in WINK
-adapter = OpenAIAdapter(model="gpt-4o")
-
-# Production: rent Claude's native harness
+# Run on Claude Code
 adapter = ClaudeAgentSDKAdapter(
-    model="claude-opus-4-6",
+    model="claude-sonnet-4-5-20250929",
     sandbox=SandboxConfig(enabled=True),
+)
+
+# Run on OpenAI Codex
+adapter = CodexAppServerAdapter(
+    model="gpt-5.3-codex",
+    sandbox_mode="workspace-write",
 )
 
 # Same prompt, same tools, same policies
@@ -115,32 +126,77 @@ response = adapter.evaluate(prompt, session=session)
 
 ---
 
+# Claude Code: What It Provides
+
+| Capability | Implementation |
+|------------|----------------|
+| Native tools | File read/write, shell, network |
+| Sandboxing | bubblewrap (Linux), seatbelt (macOS) |
+| Isolation | Ephemeral home directory |
+| Custom tools | MCP bridging |
+| Permissions | Configurable approval modes |
+
+WINK bridges your tools via MCP. Claude handles everything else.
+
+---
+
+# Codex: What It Provides
+
+| Capability | Implementation |
+|------------|----------------|
+| Native tools | Command execution, file changes, web search |
+| Sandboxing | read-only, workspace-write, full-access policies |
+| Threads | Persistent conversation state with fork/resume |
+| Custom tools | Dynamic tools (in-process) |
+| Approvals | Configurable policy per action type |
+
+WINK bridges your tools via dynamic tools. Codex handles everything else.
+
+---
+
+# What Lives in Your Definition?
+
+| Component | Purpose | Portable? |
+|-----------|---------|-----------|
+| **Prompt structure** | Context engineering | Yes |
+| **Custom tools** | Domain-specific capabilities | Yes |
+| **Hard guardrails** | Policies that gate tool calls | Yes |
+| **Soft feedback** | Guidance that nudges behavior | Yes |
+| **Completion criteria** | "Done" verification | Yes |
+
+All of this travels with your agent. None of it is harness-specific.
+
+---
+
 # The Three Control Layers
 
-Agents need control at different strengths:
+Your definition includes control at three strengths:
 
-| Layer | Enforcement | When it fires |
-|-------|-------------|---------------|
-| **Hard guardrails** | Fail-closed block | Before tool executes |
-| **Soft feedback** | Advisory guidance | After tool executes |
-| **Completion check** | Block termination | When agent says "done" |
+| Layer | Enforcement | Purpose |
+|-------|-------------|---------|
+| **Hard guardrails** | Fail-closed block | Gate tool calls |
+| **Soft feedback** | Advisory guidance | Nudge behavior |
+| **Completion check** | Block termination | Verify goals |
+
+These work identically on both harnesses.
 
 ---
 
 # Hard Guardrails: Tool Policies
 
-Policies **gate tool invocations**. If a policy denies, the tool doesn't run.
+Policies **gate tool invocations**. If denied, the tool doesn't run.
 
 ```python
-@policy
-def must_read_before_write(ctx: PolicyContext) -> bool:
-    """Don't overwrite a file you haven't read."""
-    if ctx.tool_name == "write_file":
-        path = ctx.params["path"]
-        if ctx.filesystem.exists(path):
-            return ctx.session[ReadFiles].contains(path)
-    return True
+ReadBeforeWritePolicy()
+# → Blocks write_file if the file exists but wasn't read
+
+SequentialDependencyPolicy(
+    dependencies={"deploy": frozenset({"test", "build"})}
+)
+# → Blocks deploy until test and build have succeeded
 ```
+
+Works on Claude Code. Works on Codex. Same policy definition.
 
 ---
 
@@ -149,45 +205,15 @@ def must_read_before_write(ctx: PolicyContext) -> bool:
 - **Fail-closed** — when uncertain, deny
 - **Composable** — multiple policies combine; all must allow
 - **Observable** — denials logged with reason
-- **Agent learns** — denial message helps self-correction
+- **Educational** — denial message helps agent self-correct
 
-The agent sees: *"Policy denied write_file: file exists but was not read first."*
-
----
-
-# Built-in Policies
-
-**ReadBeforeWritePolicy** — existing files must be read before overwritten
-
-**SequentialDependencyPolicy** — tool B requires tool A first
-
-```python
-SequentialDependencyPolicy(
-    dependencies={
-        "deploy": frozenset({"test", "build"}),
-        "build": frozenset({"lint"}),
-    }
-)
-```
-
----
-
-# Why Policies Over Workflows?
-
-| Aspect | Workflow | Policy |
-|--------|----------|--------|
-| Specifies | Steps to execute | Constraints to satisfy |
-| On unexpected | Fails or branches | Agent reasons |
-| Composability | Sequential coupling | Independent conjunction |
-| Agent role | Executor | Reasoner |
-
-Policies say *what* must hold. The agent finds *how*.
+The agent sees: *"Policy denied: file exists but was not read first."*
 
 ---
 
 # Soft Feedback: Guidance Without Blocking
 
-Feedback providers **observe and advise**. They don't block—the agent decides.
+Feedback providers **observe and advise**. The agent decides how to respond.
 
 ```python
 FeedbackProviderConfig(
@@ -198,55 +224,7 @@ FeedbackProviderConfig(
 
 Every 30 seconds: *"2 minutes remaining. Consider wrapping up."*
 
----
-
-# Feedback vs Policies
-
-| Aspect | Feedback | Policy |
-|--------|----------|--------|
-| Enforcement | Advisory | Mandatory |
-| Timing | After tool completes | Before tool executes |
-| Response | Agent interprets | Hard block |
-| Purpose | Course correction | Invariant protection |
-
-Use feedback for soft nudges. Use policies for hard limits.
-
----
-
-# Feedback Triggers
-
-| Trigger | Use case |
-|---------|----------|
-| `every_n_calls` | After N tool invocations |
-| `every_n_seconds` | Periodic time-based |
-| `on_file_created` | When specific file appears |
-
-```python
-FeedbackTrigger(
-    on_file_created=FileCreatedTrigger(filename="AGENTS.md"),
-)
-# → "AGENTS.md detected. Follow conventions defined within."
-```
-
----
-
-# Custom Feedback Provider
-
-```python
-@dataclass(frozen=True)
-class ToolUsageMonitor:
-    max_calls: int = 20
-
-    def provide(self, *, context: FeedbackContext) -> Feedback:
-        count = context.tool_call_count
-        if count > self.max_calls:
-            return Feedback(
-                summary=f"{count} tool calls without progress marker.",
-                suggestions=("Review your approach.",),
-                severity="caution",
-            )
-        return Feedback(summary="On track.", severity="info")
-```
+Same feedback, both harnesses.
 
 ---
 
@@ -257,57 +235,49 @@ Agents sometimes declare victory prematurely.
 **Task completion checkers** verify goals before allowing termination.
 
 ```python
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(plan_type=Plan),
-    ),
+PlanBasedChecker(plan_type=Plan)
+# → Blocks termination if plan steps remain incomplete
+
+CompositeChecker(
+    checkers=(PlanBasedChecker(), FileExistsChecker(("output.txt",))),
+    all_must_pass=True,
 )
 ```
 
 ---
 
-# How Completion Checking Works
+# Custom Tools: Bridged Automatically
 
-1. Agent signals completion
-2. Checker inspects session state
-3. If incomplete: inject feedback, request more turns
-4. If complete: allow termination
+Define tools once. WINK bridges them to each harness:
 
 ```python
-class PlanBasedChecker:
-    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
-        plan = context.session[Plan].latest()
-        incomplete = [s for s in plan.steps if s.status != "done"]
-        if incomplete:
-            return TaskCompletionResult.incomplete(
-                f"Incomplete: {', '.join(s.title for s in incomplete[:3])}"
-            )
-        return TaskCompletionResult.ok()
+@tool(name="search_docs", description="Search documentation")
+def search_docs(params: SearchParams, *, context: ToolContext) -> ToolResult:
+    results = my_search_engine.query(params.query)
+    return ToolResult.ok(results)
 ```
+
+- **Claude Code**: Bridged via MCP server
+- **Codex**: Bridged via dynamic tools
+
+Same tool definition. Automatic bridging.
 
 ---
 
-# The Three Layers Together
+# Tool Bridging Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
-│              Agent Definition               │
-│                                             │
-│  ┌─────────────────────────────────────┐   │
-│  │ Completion Checking                  │   │
-│  │ "Block termination until done"       │   │
-│  └─────────────────────────────────────┘   │
-│                                             │
-│  ┌─────────────────────────────────────┐   │
-│  │ Soft Feedback                        │   │
-│  │ "Nudge toward better behavior"       │   │
-│  └─────────────────────────────────────┘   │
-│                                             │
-│  ┌─────────────────────────────────────┐   │
-│  │ Hard Guardrails                      │   │
-│  │ "Block unsafe operations"            │   │
-│  └─────────────────────────────────────┘   │
-└─────────────────────────────────────────────┘
+│            Your Tool Definition              │
+│  @tool(name="search_docs", ...)             │
+└─────────────────┬───────────────────────────┘
+                  │
+       ┌──────────┴──────────┐
+       ▼                     ▼
+┌──────────────┐     ┌──────────────┐
+│  Claude Code │     │    Codex     │
+│  (MCP Bridge)│     │(Dynamic Tool)│
+└──────────────┘     └──────────────┘
 ```
 
 ---
@@ -319,23 +289,24 @@ The prompt is a **typed, hierarchical document** where sections bundle instructi
 ```
 PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
-├── PlanningToolsSection       ← contributes tools + policies
-├── VfsToolsSection            ← contributes tools + policies
+├── WorkspaceDigestSection     ← auto-generated codebase summary
+├── CustomToolsSection         ← your domain tools + policies
 └── MarkdownSection (request)
 ```
 
-Disable a section → its tools and policies vanish.
+Sections travel with the prompt. Switch harnesses, keep everything.
 
 ---
 
 # Co-location Enables Portability
 
-The section that explains filesystem operations:
-- Provides the `read_file` tool
-- Declares `ReadBeforeWritePolicy`
-- Includes usage documentation
+A section bundles:
+- Instructions (markdown)
+- Tools (your custom capabilities)
+- Policies (constraints on those tools)
+- Documentation (for the model)
 
-All travel together. Switch harnesses, keep the section.
+All travel together. Nothing to synchronize across harness boundaries.
 
 ---
 
@@ -350,12 +321,12 @@ def track_read(state: ReadFiles, event: FileRead) -> SliceOp[ReadFiles]:
 ```
 
 - State is **immutable and inspectable**
-- Snapshot at any point, restore later
-- Policies and feedback query session state
+- Policies and feedback query this state
+- Same state model on both harnesses
 
 ---
 
-# Testing the Definition
+# Testing Without a Harness
 
 Because the definition is portable and deterministic:
 
@@ -364,7 +335,6 @@ def test_policy_blocks_unread_write():
     session = Session()
     policy = ReadBeforeWritePolicy()
 
-    # File exists but wasn't read
     decision = policy.check("write_file", {"path": "config.yaml"},
                             context=ctx)
 
@@ -372,64 +342,80 @@ def test_policy_blocks_unread_write():
     assert "not read" in decision.reason
 ```
 
-No mocking the runtime. Test the definition directly.
+Test your definition. No harness mocking required.
 
 ---
 
-# Adapter Integration
+# When to Use Each Harness
 
-| Adapter | Harness | Your definition |
-|---------|---------|-----------------|
-| Claude Agent SDK | Claude's native loop, sandboxing | Portable |
-| OpenAI | WINK-managed loop | Portable |
-| LiteLLM | WINK loop, multiple providers | Portable |
+| Scenario | Recommendation |
+|----------|----------------|
+| Claude-native features needed | Claude Code |
+| OpenAI models required | Codex |
+| Maximum sandboxing | Claude Code (OS-level) |
+| Thread persistence | Codex |
+| Redundancy/failover | Both |
 
-Custom tools bridge via MCP where needed.
+Your definition works on either. Choose based on requirements.
 
 ---
 
 # What You Get
 
-- **Portability** — same definition, different runtimes
-- **Hard guardrails** — fail-closed policies protect invariants
-- **Soft feedback** — advisory guidance for course correction
-- **Completion checking** — agents finish what they start
-- **Testability** — validate the definition independently
+- **Portability** — same definition on Claude Code and Codex
+- **Hard guardrails** — fail-closed policies on both harnesses
+- **Soft feedback** — advisory guidance on both harnesses
+- **Completion checking** — goal verification on both harnesses
+- **Custom tools** — automatic bridging to each harness
+- **Testability** — validate definition without harness
 
 ---
 
 # What WINK Is
 
 - A Python library for **portable agent definitions**
+- Adapters for **Claude Code** and **OpenAI Codex**
 - **Three-tier control**: policies, feedback, completion checking
-- **Adapters** that run definitions on different harnesses
 - A philosophy: **own the definition, rent the harness**
 
 ---
 
 # What WINK Is Not
 
-- Not a workflow engine
-- Not a multi-agent coordinator
-- Not trying to own the planning loop
+- Not a planning loop (the harness provides that)
+- Not a sandboxing system (the harness provides that)
+- Not trying to replace Claude Code or Codex
 
-WINK is the **definition layer** that makes your agent portable.
+WINK is the **definition layer** that makes your agent portable across these sophisticated harnesses.
+
+---
+
+# The Bet
+
+Agentic harnesses will keep improving. Planning loops will get smarter. Sandboxing will get tighter. Native tools will expand.
+
+**You don't want to own that machinery.**
+
+You want to own the definition: your prompts, your tools, your policies, your completion criteria.
+
+WINK lets you own what matters and rent the rest.
 
 ---
 
 # Key Takeaways
 
-1. **Agent definitions should be portable** across harnesses
-2. **Hard guardrails** (policies) fail-closed to protect invariants
-3. **Soft feedback** nudges without blocking
-4. **Completion checking** ensures agents finish the job
-5. **The prompt is the agent** — co-located tools, policies, docs
+1. **Two production harnesses exist**: Claude Code and Codex
+2. **Agent definitions should be portable** across both
+3. **Hard guardrails** (policies) fail-closed on both harnesses
+4. **Soft feedback** nudges on both harnesses
+5. **Custom tools** bridge automatically to each harness
+6. **Own the definition, rent the harness**
 
 ---
 
 # WINK
 ## Weak Incentives (Is All You Need)
 
-*Portable agents with soft feedback and hard guardrails*
+*Portable agents across sophisticated execution harnesses*
 
 **github.com/weakincentives** | Apache 2.0 | Alpha
