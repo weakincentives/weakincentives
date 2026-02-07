@@ -87,4 +87,11 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "migration-from-dspy": "Coming from DSPy",
     "formal-verification": "TLA+ specs for critical code",
     "code-review-agent": "End-to-end walkthrough of the code reviewer",
+    "concurrency": "Thread safety guarantees and multi-threaded agent patterns",
+    "experiments": "A/B test agent variants with baselines and treatments",
+    "guardrails-and-feedback": "Tool policies, feedback providers, and task completion",
+    "mailbox-and-dlq": "Message queuing, dead letter queues, and lease extension",
+    "module-boundaries": "Layer architecture, dependency rules, and where new code goes",
+    "observability": "Run context, tracing, logging, and transcript collection",
+    "workspaces-and-filesystem": "Sandboxed file access, host mounts, and workspace digests",
 }
