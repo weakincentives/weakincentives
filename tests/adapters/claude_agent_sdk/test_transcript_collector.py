@@ -726,6 +726,92 @@ class TestTranscriptCollector:
 
         asyncio.run(run_test())
 
+    def test_late_file_creation_retried(
+        self, collector: TranscriptCollector, temp_dir: Path
+    ) -> None:
+        """File that doesn't exist at hook time is tailed once it appears."""
+        transcript_path = temp_dir / "session123.jsonl"
+
+        # Hook fires before the CLI creates the file on disk.
+        asyncio.run(collector._remember_transcript_path(str(transcript_path)))
+
+        # No active tailer, but the path is pending for retry.
+        assert "main" not in collector._tailers
+        assert "main" in collector._pending_tailers
+
+        # CLI creates the file a moment later.
+        transcript_path.write_text('{"type": "user", "message": "hello"}\n')
+
+        # Next poll cycle retries the pending tailer and reads content.
+        asyncio.run(collector._poll_once())
+
+        assert "main" in collector._tailers
+        assert "main" not in collector._pending_tailers
+        assert collector.main_entry_count == 1
+
+    def test_pending_tailer_stays_pending_until_file_exists(
+        self, collector: TranscriptCollector, temp_dir: Path
+    ) -> None:
+        """Pending tailer remains pending while file is still absent."""
+        transcript_path = temp_dir / "session123.jsonl"
+
+        asyncio.run(collector._remember_transcript_path(str(transcript_path)))
+        assert "main" in collector._pending_tailers
+
+        # Poll several times — file still missing.
+        asyncio.run(collector._poll_once())
+        asyncio.run(collector._poll_once())
+
+        assert "main" not in collector._tailers
+        assert "main" in collector._pending_tailers
+
+    def test_pending_warning_logged_once(
+        self, collector: TranscriptCollector, temp_dir: Path
+    ) -> None:
+        """Warning is logged on first failure only, not on every retry."""
+        transcript_path = temp_dir / "session123.jsonl"
+
+        with patch(
+            "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
+        ) as mock_logger:
+            # First call logs warning.
+            asyncio.run(collector._remember_transcript_path(str(transcript_path)))
+            assert mock_logger.warning.call_count == 1
+
+            # Retries via _poll_once do NOT log additional warnings.
+            asyncio.run(collector._poll_once())
+            asyncio.run(collector._poll_once())
+            assert mock_logger.warning.call_count == 1
+
+    def test_late_file_creation_with_context_manager(self, tmp_path: Path) -> None:
+        """End-to-end: file appears after collector.run() starts."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="late_file_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            transcript_path = tmp_path / "session123.jsonl"
+
+            async with collector.run():
+                # Hook fires — file does not exist yet.
+                await collector._remember_transcript_path(str(transcript_path))
+                assert "main" not in collector._tailers
+
+                # Wait one poll cycle.
+                await asyncio.sleep(0.02)
+
+                # File appears.
+                transcript_path.write_text('{"type": "user", "message": "late"}\n')
+
+                # Wait for another poll cycle to pick it up.
+                await asyncio.sleep(0.05)
+
+            assert collector.main_entry_count == 1
+
+        asyncio.run(run_test())
+
     def test_inode_change_triggers_position_reset(
         self, collector: TranscriptCollector, temp_dir: Path
     ) -> None:
