@@ -129,7 +129,16 @@ export function initKeyboardShortcuts({
     return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
   }
 
-  const TAB_VIEWS = ["sessions", "transcript", "logs", "filesystem", "environment"];
+  const ALL_TAB_VIEWS = ["sessions", "transcript", "logs", "filesystem", "environment"];
+
+  function getVisibleTabs() {
+    return ALL_TAB_VIEWS.filter((view) => {
+      if (view === "transcript") {
+        return state.hasTranscript;
+      }
+      return true;
+    });
+  }
 
   const KEYBOARD_SHORTCUTS = {
     r: reloadBundle,
@@ -145,9 +154,11 @@ export function initKeyboardShortcuts({
   };
 
   function handleTabShortcut(e, key) {
-    if (key >= "1" && key <= "5") {
+    const visibleTabs = getVisibleTabs();
+    const idx = Number.parseInt(key, 10) - 1;
+    if (key >= "1" && idx < visibleTabs.length) {
       e.preventDefault();
-      switchView(TAB_VIEWS[Number.parseInt(key, 10) - 1]);
+      switchView(visibleTabs[idx]);
       return true;
     }
     return false;

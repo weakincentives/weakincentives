@@ -29,6 +29,7 @@ export function createInitialState() {
     searchQuery: "",
     focusedItemIndex: -1,
     // Transcript state
+    hasTranscript: true,
     transcriptRawEntries: [],
     transcriptEntries: [],
     transcriptFacets: { sources: [], entry_types: [] },

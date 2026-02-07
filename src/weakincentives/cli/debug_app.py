@@ -331,9 +331,14 @@ class BundleStore:
                 }
             )
 
+        # Check whether the bundle has any transcript entries.
+        transcript_count_rows = self._db.execute("SELECT COUNT(*) FROM transcript")
+        has_transcript = transcript_count_rows[0][0] > 0
+
         return {
             "bundle_id": manifest.get("bundle_id", ""),
             "created_at": manifest.get("created_at", ""),
+            "has_transcript": has_transcript,
             "path": str(self._path),
             "request_id": manifest.get("request_id", ""),
             "session_id": manifest.get("session_id"),
