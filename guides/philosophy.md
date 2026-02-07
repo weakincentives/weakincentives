@@ -157,10 +157,9 @@ validates that you're overriding the version you think you're overriding.
 
 - A Python library (`weakincentives`) for building prompts-as-agents
 - A small runtime for state (`Session`) and orchestration (`AgentLoop`)
-- Adapters (`OpenAI`, `LiteLLM`, `Claude Agent SDK`) that execute tools and
+- Adapters (`Claude Agent SDK`, `Codex App Server`) that execute tools and
   parse outputs consistently
-- Contributed tool suites for background agents (planning, virtual FS,
-  sandboxes, workspace digests)
+- Contributed tool suites (workspace digests) and workspace sections
 
 **WINK is not:**
 

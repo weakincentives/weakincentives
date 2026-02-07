@@ -106,7 +106,6 @@ with prompt.resources:
 - `Scope.PROTOTYPE`: Fresh instance on every access
 
 For workspace agents, the most common resource is a `Filesystem` implementation.
-Many contributed tool suites install one automatically (VFS, Podman).
 
 ## ToolResult Semantics
 

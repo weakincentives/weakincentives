@@ -88,7 +88,7 @@ config = AgentLoopConfig(
 from weakincentives.evals import EvalLoopConfig
 
 eval_config = EvalLoopConfig(
-    debug_bundle_dir=Path("./eval_bundles/"),
+    debug_bundle=BundleConfig(target="./eval_bundles/"),
 )
 ```
 

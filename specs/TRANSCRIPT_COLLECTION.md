@@ -73,6 +73,9 @@ tool invocations, thinking blocks, and system events. The SDK exposes the
 
 ### TranscriptCollectorConfig
 
+See `src/weakincentives/adapters/claude_agent_sdk/_transcript_collector.py` for
+the full dataclass definition.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `poll_interval` | `float` | `0.25` | Seconds between file polls |
@@ -80,6 +83,14 @@ tool invocations, thinking blocks, and system events. The SDK exposes the
 | `max_read_bytes` | `int` | `65536` | Maximum bytes per read cycle |
 | `emit_raw_json` | `bool` | `True` | Include raw JSON in log context |
 | `parse_entries` | `bool` | `True` | Parse and type transcript entries |
+
+### Enabled by Default
+
+Transcript collection is **enabled by default** in `ClaudeAgentSDKClientConfig`.
+The `transcript_collection` field defaults to `TranscriptCollectorConfig()` (with
+default settings). Set to `None` to disable collection entirely.
+
+See `src/weakincentives/adapters/claude_agent_sdk/config.py` for the client config.
 
 ## Transcript Entry Types
 
@@ -98,126 +109,50 @@ Claude Agent SDK transcripts contain JSONL entries with a `type` field:
 
 ### TranscriptCollector
 
-```python
-@dataclass(slots=True)
-class TranscriptCollector:
-    """Collects transcripts from Claude Agent SDK execution.
+See `src/weakincentives/adapters/claude_agent_sdk/_transcript_collector.py` for the
+full class definition.
 
-    Monitors the main transcript and sub-agent transcripts, emitting
-    each entry as a DEBUG-level structured log message.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `prompt_name` | `str` | (required) | Name of the prompt being evaluated (for log context) |
+| `config` | `TranscriptCollectorConfig` | `TranscriptCollectorConfig()` | Collector configuration |
 
-    Example:
-        collector = TranscriptCollector(
-            prompt_name="code-review",
-            config=TranscriptCollectorConfig(),
-        )
-
-        async with collector.run():
-            async for message in sdk.query(prompt=prompt, options=options):
-                # SDK query executes here
-                # Transcripts are collected in background
-                process_message(message)
-    """
-
-    prompt_name: str
-    """Name of the prompt being evaluated (for log context)."""
-
-    config: TranscriptCollectorConfig = field(
-        default_factory=TranscriptCollectorConfig
-    )
-    """Collector configuration."""
-```
+Properties: `main_entry_count`, `subagent_count`, `total_entries`, `transcript_paths`.
 
 ### Hook Callback
 
-The collector provides a hook callback for SDK integration:
-
-```python
-async def hook_callback(
-    self,
-    input_data: dict[str, Any],
-    tool_use_id: str | None,
-    context: HookContext,
-) -> dict[str, Any]:
-    """SDK hook callback that captures transcript_path.
-
-    Register this callback for supported hook events to discover
-    the transcript path as early as possible.
-
-    Args:
-        input_data: Hook input containing transcript_path.
-        tool_use_id: Tool use ID (for tool hooks).
-        context: Hook execution context.
-
-    Returns:
-        Empty dict (no modifications to hook behavior).
-    """
-```
+The collector provides `hook_callback()` for SDK integration. It extracts
+`transcript_path` from hook input data and starts tailing when discovered.
+Returns an empty dict (no modifications to hook behavior).
 
 ### Hook Registration
 
-```python
-def hooks_config(self) -> dict[str, list[HookMatcher]]:
-    """Returns hook configuration for SDK integration.
+`hooks_config()` returns a hook configuration dict registering the collector's
+callback for all supported SDK events:
 
-    Registers the collector's hook callback for all supported events:
-    - UserPromptSubmit (earliest discovery)
-    - PreToolUse, PostToolUse
-    - SubagentStop
-    - Stop
-    - PreCompact
+- `UserPromptSubmit` (earliest discovery)
+- `PreToolUse`, `PostToolUse`
+- `SubagentStop`
+- `Stop`
+- `PreCompact`
 
-    Returns:
-        Hook configuration dict for ClaudeAgentOptions.hooks.
-    """
-```
+Note: The SDK does not support `SubagentStart` or `Notification` hooks.
 
 ## Adapter Integration
 
 ### ClaudeAgentSDKAdapter Changes
 
-The adapter replaces `ClaudeLogAggregator` with `TranscriptCollector`:
+The adapter integrates `TranscriptCollector` during SDK query execution.
+See `src/weakincentives/adapters/claude_agent_sdk/adapter.py` for the full
+adapter implementation.
 
-```python
-async def _run_sdk_query(
-    self,
-    prompt_text: str,
-    options: ClaudeAgentOptions,
-    hook_context: HookContext,
-) -> list[Message]:
-    """Execute SDK query with transcript collection."""
+The integration flow:
 
-    collector = TranscriptCollector(
-        prompt_name=hook_context.prompt_name,
-        config=self._transcript_config,
-    )
-
-    # Inject collector hooks into SDK options
-    options = self._merge_hooks(options, collector.hooks_config())
-
-    async with collector.run():
-        messages = []
-        async for message in sdk.query(prompt=stream_prompt(), options=options):
-            messages.append(message)
-        return messages
-```
-
-### Options Merging
-
-Hook callbacks are merged, not replaced:
-
-```python
-def _merge_hooks(
-    self,
-    options: ClaudeAgentOptions,
-    collector_hooks: dict[str, list[HookMatcher]],
-) -> ClaudeAgentOptions:
-    """Merge collector hooks with existing option hooks.
-
-    Both the adapter's hooks (for tool bridging) and the collector's
-    hooks (for transcript discovery) must receive callbacks.
-    """
-```
+1. Adapter creates a `TranscriptCollector` with the prompt name and config
+1. Collector hooks are merged with existing adapter hooks (not replaced)
+1. Collector runs as an async context manager during SDK query execution
+1. Both adapter hooks (for tool bridging) and collector hooks (for transcript
+   discovery) receive callbacks concurrently
 
 ## Log Events
 
@@ -272,20 +207,9 @@ Each `transcript.collector.entry` event includes:
 
 ## Sub-agent Discovery
 
-Sub-agent transcripts are discovered by scanning the session directory:
-
-```python
-async def _discover_subagents(self) -> None:
-    """Scan session directory for new sub-agent transcripts.
-
-    Session directory is derived from main transcript path:
-    - Main transcript: /path/to/{sessionId}.jsonl
-    - Session dir: /path/to/{sessionId}/
-    - Sub-agents: /path/to/{sessionId}/subagents/agent-{id}.jsonl
-
-    New sub-agent transcripts start tailing immediately.
-    """
-```
+Sub-agent transcripts are discovered by scanning the session directory.
+See `_discover_subagents()` in
+`src/weakincentives/adapters/claude_agent_sdk/_transcript_collector.py`.
 
 ### Discovery Pattern
 
@@ -305,29 +229,17 @@ subagent_pattern = {session_dir}/subagents/agent-*.jsonl
 
 ### Tailer State
 
-```python
-@dataclass(slots=True)
-class _TailerState:
-    """State for a single file tailer."""
+The `_TailerState` dataclass tracks per-file tailing state. See
+`src/weakincentives/adapters/claude_agent_sdk/_transcript_collector.py`.
 
-    path: Path
-    """Absolute path to transcript file."""
-
-    source: str
-    """Source identifier: 'main' or 'subagent:{id}'."""
-
-    position: int = 0
-    """Current read position in bytes."""
-
-    inode: int = 0
-    """Inode for rotation detection."""
-
-    partial_line: str = ""
-    """Incomplete line buffer."""
-
-    entry_count: int = 0
-    """Entries emitted from this file."""
-```
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | `Path` | (required) | Absolute path to transcript file |
+| `source` | `str` | (required) | Source identifier: `'main'` or `'subagent:{id}'` |
+| `position` | `int` | `0` | Current read position in bytes |
+| `inode` | `int` | `0` | Inode for rotation detection |
+| `partial_line` | `str` | `""` | Incomplete line buffer |
+| `entry_count` | `int` | `0` | Entries emitted from this file |
 
 ### Rotation Handling
 
@@ -348,7 +260,28 @@ Claude Code compacts long conversations. The collector handles this:
 
 ## Usage Example
 
-### Basic Usage with query()
+### Basic Usage (Enabled by Default)
+
+Transcript collection is enabled by default. No configuration needed:
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+)
+
+# Default: transcript_collection=TranscriptCollectorConfig()
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(),
+)
+
+# Transcripts automatically collected during evaluate()
+response = adapter.evaluate(prompt, session=session)
+
+# All transcript entries emitted as DEBUG logs during execution
+```
+
+### Custom Configuration
 
 ```python
 from weakincentives.adapters.claude_agent_sdk import (
@@ -360,16 +293,21 @@ from weakincentives.adapters.claude_agent_sdk import (
 adapter = ClaudeAgentSDKAdapter(
     client_config=ClaudeAgentSDKClientConfig(
         transcript_collection=TranscriptCollectorConfig(
-            poll_interval=0.25,
-            emit_raw_json=True,
+            poll_interval=0.5,         # Slower polling
+            emit_raw_json=False,       # Skip raw JSON in logs
         ),
     ),
 )
+```
 
-# Transcripts automatically collected during evaluate()
-response = adapter.evaluate(prompt, session=session)
+### Disabling Collection
 
-# All transcript entries emitted as DEBUG logs during execution
+```python
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        transcript_collection=None,  # Disable collection
+    ),
+)
 ```
 
 ### Manual Integration
@@ -455,26 +393,14 @@ print(f"Transcripts discovered: {list(collector.transcript_paths)}")
 
 ## Testing
 
-```python
-class TestTranscriptCollector:
-    async def test_main_transcript_discovery(self):
-        """Collector discovers main transcript from hook."""
+Tests verify:
 
-    async def test_subagent_discovery(self):
-        """Collector discovers sub-agent transcripts."""
-
-    async def test_entry_emission(self):
-        """Entries emitted as DEBUG logs with correct context."""
-
-    async def test_rotation_handling(self):
-        """Tailer handles file rotation correctly."""
-
-    async def test_compaction_handling(self):
-        """PreCompact hook triggers snapshot."""
-
-    async def test_graceful_error_handling(self):
-        """File errors logged, not raised."""
-```
+- Main transcript discovery from hook callback
+- Sub-agent discovery via directory scanning
+- Entry emission as DEBUG logs with correct context
+- File rotation handling (inode change, truncation)
+- Compaction handling (PreCompact hook)
+- Graceful error handling (file errors logged, not raised)
 
 ## Related Specifications
 

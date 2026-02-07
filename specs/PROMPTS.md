@@ -26,6 +26,8 @@ At `src/weakincentives/prompt/prompt.py` (`PromptTemplate` class):
 | `key` | Identifier (required, non-empty) |
 | `name` | Optional display name |
 | `sections` | Ordered section tree |
+| `policies` | Prompt-level tool policies |
+| `feedback_providers` | Feedback provider configurations |
 | `resources` | `ResourceRegistry` for dependencies |
 
 Section keys must match: `^[a-z0-9][a-z0-9._-]{0,63}$`
@@ -38,6 +40,7 @@ At `src/weakincentives/prompt/prompt.py` (`Prompt` class):
 | --- | --- |
 | `bind(*params, resources=)` | Bind dataclass parameters |
 | `render()` | Produce `RenderedPrompt` |
+| `cleanup()` | Release resources held by sections |
 | `resources` property | Access `PromptResources` for lifecycle |
 
 **Note:** `bind()` maintains one instance per dataclass type. Rebinding same type
@@ -59,6 +62,11 @@ Abstract base at `src/weakincentives/prompt/section.py`:
 
 Sections must be specialized: `MarkdownSection[MyParams]`
 
+| Method | Description |
+| --- | --- |
+| `cleanup()` | Release resources held by this section (idempotent no-op by default) |
+| `resources()` | Return `ResourceRegistry` contributed by this section |
+
 ### MarkdownSection
 
 At `src/weakincentives/prompt/markdown.py`: Dedents, strips, runs `Template.substitute`.
@@ -72,9 +80,9 @@ At `src/weakincentives/prompt/markdown.py`: Dedents, strips, runs `Template.subs
 
 Provides filesystem access, contributes to prompt resources via `resources()` method.
 
-## Resource Lifecycle
+## Prompt Lifecycle
 
-### Collection
+### Resource Context
 
 Resources collected from (lowest to highest precedence):
 
@@ -95,6 +103,16 @@ with prompt.resources:
 
 **Key:** `prompt.resources` serves as both context manager and resource accessor.
 Accessing outside context raises `RuntimeError`.
+
+### Cleanup
+
+`Prompt.cleanup()` at `src/weakincentives/prompt/prompt.py` calls `cleanup()` on
+each section in the prompt. The template's registry snapshot contains all sections
+(including children) in a flat list, so no recursion is needed.
+
+Called by `AgentLoop` after execution completes and debug bundle artifacts have
+been captured. Section implementations override `cleanup()` for resource release
+(e.g., removing temporary directories). Implementations must be idempotent.
 
 ### Transactional Tool Execution
 

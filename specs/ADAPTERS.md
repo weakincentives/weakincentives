@@ -40,6 +40,8 @@ All adapters implement `ProviderAdapter` at `src/weakincentives/adapters/core.py
 | `deadline` | Optional wall-clock deadline |
 | `budget` | Optional token/time budget |
 | `budget_tracker` | Optional shared budget tracker |
+| `heartbeat` | Optional heartbeat for liveness monitoring |
+| `run_context` | Optional execution context with correlation identifiers |
 
 Returns `PromptResponse[OutputT]` at `src/weakincentives/adapters/core.py`.
 
@@ -56,7 +58,7 @@ Provider-specific configs extend this.
 1. **Format** - Convert to provider wire format
 1. **Call** - Issue request with throttle protection and deadline checks
 1. **Parse** - Extract content, dispatch tool calls
-1. **Emit** - Publish `PromptRendered`, `PromptExecuted` to `session.dispatcher`
+1. **Emit** - Publish `PromptRendered`, `RenderedTools`, `PromptExecuted` to `session.dispatcher`
 
 ## Provider Implementations
 
@@ -68,8 +70,45 @@ At `src/weakincentives/adapters/claude_agent_sdk/adapter.py`:
 - Skill mounting support
 - Hermetic isolation and sandboxing
 - Native Claude Code tooling (Read, Write, Bash, Glob, Grep)
+- Adaptive reasoning effort levels (`ReasoningEffort`)
+- Transcript collection (enabled by default)
+- `call_id` correlation via `MCPToolExecutionState`
+- SDK-native exception types for error normalization
 
 See [CLAUDE_AGENT_SDK.md](CLAUDE_AGENT_SDK.md) for complete documentation.
+
+### Codex App Server Adapter
+
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+
+- Delegates execution to Codex via the app-server protocol (stdio NDJSON)
+- WINK tools bridged as Codex dynamic tools
+- No additional Python dependencies beyond WINK and `codex` CLI on PATH
+- Native Codex tools (commands, file changes, web search)
+- Structured output via native `outputSchema`
+
+See [CODEX_APP_SERVER.md](CODEX_APP_SERVER.md) for complete documentation.
+
+## Shared Adapter Module
+
+At `src/weakincentives/adapters/_shared/`:
+
+Code shared across multiple adapter implementations lives in the `_shared`
+package. Individual adapters import from `_shared` rather than from each
+other's private modules.
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `BridgedTool` | `_shared/_bridge.py` | Transactional tool wrapper for MCP/SDK consumption |
+| `MCPToolExecutionState` | `_shared/_bridge.py` | Thread-safe `call_id` correlation between hooks and bridge |
+| `create_bridged_tools()` | `_shared/_bridge.py` | Factory for `BridgedTool` instances |
+| `create_mcp_server()` | `_shared/_bridge.py` | In-process MCP server for Claude Agent SDK |
+| `VisibilityExpansionSignal` | `_shared/_visibility_signal.py` | Thread-safe signal for progressive disclosure |
+| `run_async()` | `_shared/_async_utils.py` | Async/sync bridging via `asyncio.run()` |
+
+Both the Claude Agent SDK adapter and Codex App Server adapter re-export from
+`_shared` via thin compatibility modules (`claude_agent_sdk/_bridge.py`,
+`codex_app_server/_async.py`, etc.).
 
 ## Rate Limiting and Throttling
 
@@ -102,27 +141,20 @@ At `src/weakincentives/adapters/throttle.py`:
 - `attempts`: Retry count
 - `retry_safe`: Whether retry is safe
 
-## Inner Loop Architecture
+## Tool Bridging
 
-Shared `InnerLoop` at `adapters/inner_loop.py` drives request/response:
+Both adapters use the shared `BridgedTool` abstraction at
+`src/weakincentives/adapters/_shared/_bridge.py` for transactional tool
+execution. Each `BridgedTool` invocation:
 
-1. **Render** → RenderedPrompt
-1. **Publish PromptRendered**
-1. **Prepare tools** via `tool_to_spec`
-1. **Call provider** (failures → `PromptEvaluationError` with `phase="request"`)
-1. **Handle tool calls** via `ToolExecutor` at `adapters/tool_executor.py`
-1. **Loop** until message without tool calls
-1. **Parse output** from `.parsed` or text
-1. **Publish PromptExecuted**
+1. **Snapshot** — Capture session and resource state
+1. **Execute** — Call handler with parsed parameters via `serde.parse`
+1. **Dispatch** — Emit `ToolInvoked` event with `call_id` for correlation
+1. **Rollback** — Restore snapshot on failure
 
-### Tool Execution
-
-`ToolExecutor` at `adapters/tool_executor.py`:
-
-- Arguments decoded via `parse_tool_arguments`
-- Dataclass parsing via `serde.parse`
-- Tool handlers access resources via `context.prompt.resources`
-- Exceptions logged and converted to failed results
+Tool arguments are decoded via `serde.parse()` with `extra="forbid"`. Resources
+are accessed through `prompt.resources`. Exceptions are caught and converted to
+error results (never abort).
 
 ### Transactional Tool Execution
 
@@ -168,8 +200,9 @@ Events via `session.dispatcher`:
 | Event | When | Payload |
 | --- | --- | --- |
 | `PromptRendered` | After render | Text, tools, metadata |
+| `RenderedTools` | After render | Tool schemas, correlated with `PromptRendered` via `render_event_id` |
 | `PromptExecuted` | After parse | Response, tokens, timing |
-| `ToolInvoked` | After dispatch | Name, params, result |
+| `ToolInvoked` | After dispatch | Name, params, result, `call_id` |
 
 Logs: `prompt.render.start`, `prompt.render.complete`, `prompt.call.start`,
 `prompt.call.complete`, `prompt.throttled`, `prompt.error`.
@@ -180,8 +213,9 @@ Logs: `prompt.render.start`, `prompt.render.complete`, `prompt.call.start`,
 1. Accept concrete client or config for test injection
 1. Call `prompt.render` once
 1. Access resources via `prompt.resources`
-1. Delegate to `run_inner_loop`
+1. Use `create_bridged_tools()` from `_shared/_bridge.py` for tool bridging
 1. Wrap SDK failures as `PromptEvaluationError`
+1. Dispatch `PromptRendered`, `RenderedTools`, `ToolInvoked`, and `PromptExecuted` events
 
 ## Testing
 

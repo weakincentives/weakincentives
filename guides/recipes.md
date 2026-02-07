@@ -10,9 +10,8 @@ See `code_reviewer_example.py` in the repo and the
 that demonstrates:
 
 - Workspace digest + progressive disclosure
-- Planning tools
-- VFS or Podman sandbox
 - Prompt overrides and optimizer hooks
+- Claude Agent SDK workspace tools
 - Structured output review responses
 
 This is the canonical "put it all together" example. Read it after you

@@ -1,5 +1,11 @@
 # OpenCode ACP Adapter Specification
 
+> **Status:** Design specification — not yet implemented.
+> The adapter package `src/weakincentives/adapters/opencode_acp/` does not exist
+> yet. This document specifies the planned design. All code snippets are
+> illustrative; they will be replaced with source file references once
+> implementation lands.
+
 > **Adapter name:** `opencode_acp`
 > **OpenCode entrypoint:** `opencode acp`
 > **ACP protocol:** v1 (JSON-RPC 2.0 over newline-delimited JSON on stdio)
@@ -18,7 +24,7 @@ via its **ACP** (Agent Client Protocol) server. The architecture mirrors the
 WINK receives streamed progress via ACP `session/update` notifications and emits
 canonical events: `PromptRendered`, `ToolInvoked`, `PromptExecuted`.
 
-**Implementation:** `src/weakincentives/adapters/opencode_acp/`
+**Planned implementation:** `src/weakincentives/adapters/opencode_acp/`
 
 ## Requirements
 
@@ -26,7 +32,7 @@ canonical events: `PromptRendered`, `ToolInvoked`, `PromptExecuted`.
 
 1. **OpenCode CLI** installed and available on `PATH` as `opencode`
 1. **ACP Python SDK**: `agent-client-protocol>=0.7.1`
-1. **Claude Agent SDK**: `claude-agent-sdk>=0.1.15` (for MCP server infrastructure)
+1. **Claude Agent SDK**: `claude-agent-sdk>=0.1.27` (for shared MCP server infrastructure)
 1. WINK (`weakincentives`) runtime
 
 ### WINK Packaging
@@ -35,9 +41,12 @@ canonical events: `PromptRendered`, `ToolInvoked`, `PromptExecuted`.
 [project.optional-dependencies]
 acp = [
   "agent-client-protocol>=0.7.1",
-  "claude-agent-sdk>=0.1.15",
+  "claude-agent-sdk>=0.1.27",
 ]
 ```
+
+> **Note:** The `acp` extra does not exist in `pyproject.toml` yet — it will be
+> added when implementation begins.
 
 The adapter takes a dependency on `claude-agent-sdk` to reuse its MCP server
 infrastructure. This coupling is acceptable because both adapters share the same
@@ -80,8 +89,9 @@ src/weakincentives/adapters/opencode_acp/
   _async.py             # asyncio helpers
 ```
 
-MCP tool bridging reuses `create_mcp_server()` from
-`src/weakincentives/adapters/claude_agent_sdk/_bridge.py`.
+MCP tool bridging reuses `create_mcp_server()` from the shared adapter module
+`src/weakincentives/adapters/_shared/_bridge.py` (re-exported by
+`src/weakincentives/adapters/claude_agent_sdk/_bridge.py`).
 
 ## Configuration
 
@@ -182,21 +192,32 @@ so reuse is deterministic.
 
 ### OpenCodeWorkspaceSection
 
-Create by **extracting** generic mount/copy logic from
-`src/weakincentives/adapters/claude_agent_sdk/workspace.py`:
+Create by **extracting** generic mount/copy logic from the existing workspace
+implementations:
 
-- Accepts `HostMount` tuples, `allowed_host_roots`, max-bytes budgets
-- Materializes temporary directory with copied files
-- Exposes `temp_dir` for `OpenCodeACPClientConfig.cwd`
-- Renders a provider-agnostic summary of mounts and budgets
-- Exposes cleanup via `.cleanup()` or a context manager
-- Provides `workspace_fingerprint` for session reuse validation
+- `src/weakincentives/adapters/claude_agent_sdk/workspace.py`
+- `src/weakincentives/adapters/codex_app_server/workspace.py`
+
+Both define the same set of types (`HostMount`, `HostMountPreview`,
+`WorkspaceBudgetExceededError`, `WorkspaceSecurityError`) independently. As part
+of this adapter's implementation, consider consolidating them into
+`adapters/_shared/workspace.py`.
+
+The workspace section should:
+
+- Accept `HostMount` tuples, `allowed_host_roots`, max-bytes budgets
+- Materialize a temporary directory with copied files
+- Expose `temp_dir` for `OpenCodeACPClientConfig.cwd`
+- Render a provider-agnostic summary of mounts and budgets
+- Expose cleanup via `.cleanup()` or a context manager
+- Provide `workspace_fingerprint` for session reuse validation
 
 > **Do not** reuse `ClaudeAgentWorkspaceSection` directly—its template contains
 > Claude-specific wording. Extract the machinery and create a new section with
 > neutral text.
 
-**Shared types:**
+**Shared types** (currently duplicated across claude_agent_sdk and
+codex_app_server workspace modules):
 
 | Type | Description |
 |------|-------------|
@@ -259,17 +280,11 @@ def structured_output_handler(
 
 ### Schema Generation
 
-Use WINK's existing logic for compatibility:
-
-```python
-from weakincentives.adapters.response_parser import build_json_schema_response_format
-
-schema_format = build_json_schema_response_format(rendered, prompt_name)
-json_schema = schema_format["json_schema"]["schema"]
-```
-
-This handles array containers (`rendered.container == "array"`) and extra keys
-policy (`rendered.allow_extra_keys`).
+Use WINK's schema generation via `weakincentives.serde.schema()` to produce the
+JSON Schema from the output type. This handles array containers
+(`rendered.container == "array"`) and extra keys policy
+(`rendered.allow_extra_keys`). The exact helper may be extracted into
+`weakincentives.adapters._shared` as part of implementation.
 
 ### Tool Description
 
@@ -291,32 +306,37 @@ After `conn.prompt()` returns:
 
 ## MCP Tool Bridging
 
-### Reusing Claude Agent SDK Infrastructure
+### Reusing Shared Adapter Infrastructure
 
-The adapter reuses the **exact same MCP server** from the Claude Agent SDK:
+The adapter reuses the **shared MCP bridge** extracted into
+`src/weakincentives/adapters/_shared/` (see `_shared/__init__.py` for exports):
 
 ```python
-from weakincentives.adapters.claude_agent_sdk._bridge import (
+from weakincentives.adapters._shared import (
     BridgedTool,
+    VisibilityExpansionSignal,
     create_bridged_tools,
     create_mcp_server,
 )
 ```
 
+This is the same infrastructure used by both the Claude Agent SDK adapter and
+the Codex App Server adapter.
+
 Benefits:
 
 - Direct access to WINK session state and resources
 - Full transactional semantics without IPC
-- Proven, tested implementation
+- Proven, tested implementation shared across adapters
 
 ### Reused Components
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `BridgedTool` | `claude_agent_sdk/_bridge.py` | Transactional tool wrapper |
-| `create_bridged_tools()` | `claude_agent_sdk/_bridge.py` | Factory for BridgedTool |
-| `create_mcp_server()` | `claude_agent_sdk/_bridge.py` | In-process MCP server |
-| `VisibilityExpansionSignal` | `claude_agent_sdk/_visibility_signal.py` | Exception propagation |
+| Component | Source | Purpose |
+|-----------|--------|---------|
+| `BridgedTool` | `adapters/_shared/_bridge.py` | Transactional tool wrapper |
+| `create_bridged_tools()` | `adapters/_shared/_bridge.py` | Factory for BridgedTool |
+| `create_mcp_server()` | `adapters/_shared/_bridge.py` | In-process MCP server |
+| `VisibilityExpansionSignal` | `adapters/_shared/_visibility_signal.py` | Exception propagation |
 | `tool_transaction()` | `runtime/transactions.py` | Snapshot/restore |
 
 > **Important:** Pass `adapter_name="opencode_acp"` to `create_bridged_tools()`
@@ -369,7 +389,7 @@ When a tool raises `VisibilityExpansionRequired`:
 
 ### 2. Render Prompt
 
-1. `prepare_adapter_conversation(...)` → `AdapterRenderContext`
+1. `prompt.render(session=session)` → `RenderedPrompt`
 1. Emit `PromptRendered`
 
 ### 3. Start MCP Server
@@ -543,7 +563,8 @@ print(resp.text)
 ## Related Specifications
 
 - `specs/ADAPTERS.md` — Provider adapter protocol
-- `specs/CLAUDE_AGENT_SDK.md` — Reference adapter architecture
+- `specs/CLAUDE_AGENT_SDK.md` — Reference adapter architecture (shared bridge)
+- `specs/CODEX_APP_SERVER.md` — Sibling adapter using shared bridge
 - `specs/PROMPTS.md` — Prompt system
 - `specs/SESSIONS.md` — Session state and events
 - `specs/TOOLS.md` — Tool registration and policies

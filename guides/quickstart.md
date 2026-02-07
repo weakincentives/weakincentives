@@ -195,8 +195,6 @@ pip install weakincentives
 Extras for specific adapters and tools:
 
 ```bash
-pip install "weakincentives[openai]"           # OpenAI adapter
-pip install "weakincentives[litellm]"          # LiteLLM adapter
 pip install "weakincentives[claude-agent-sdk]" # Claude Agent SDK adapter
 pip install "weakincentives[wink]"             # Debug UI (wink CLI)
 ```

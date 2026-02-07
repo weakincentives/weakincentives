@@ -94,3 +94,4 @@ make property-tests      # Property tests only
 
 - `specs/FORMAL_VERIFICATION.md` - @formal_spec decorator
 - `specs/MAILBOX.md` - Mailbox protocol
+- `specs/VERIFICATION_TOOLBOX.md` - General verification toolchain

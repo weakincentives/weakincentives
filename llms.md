@@ -163,10 +163,13 @@ weakincentives.runtime.events     # Dispatcher, event types
 weakincentives.runtime.mailbox    # Message queues
 weakincentives.adapters           # Provider base, config, throttling
 weakincentives.adapters.claude_agent_sdk  # ClaudeAgentSDKAdapter
+weakincentives.adapters.codex_app_server  # CodexAppServerAdapter
+weakincentives.adapters._shared   # Shared adapter utilities (MCP bridge)
 weakincentives.contrib.tools      # Workspace digest tools
 weakincentives.contrib.optimizers # WorkspaceDigestOptimizer
 weakincentives.contrib.mailbox    # RedisMailbox
 weakincentives.resources          # Dependency injection
+weakincentives.debug              # Debug bundles, environment capture
 weakincentives.filesystem         # Filesystem protocol
 weakincentives.evals              # Evaluation framework
 weakincentives.serde              # Dataclass serialization
@@ -221,6 +224,7 @@ from weakincentives.runtime import (
 
 # Adapters
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+from weakincentives.adapters.codex_app_server import CodexAppServerAdapter
 from weakincentives.adapters import PromptResponse
 
 # Contrib tools
@@ -251,10 +255,26 @@ from weakincentives.prompt import (
 # Feedback providers
 from weakincentives.prompt import (
     DeadlineFeedback,
+    StaticFeedbackProvider,
     Feedback,
     FeedbackProvider,
     FeedbackProviderConfig,
     FeedbackTrigger,
+    FileCreatedTrigger,
+    collect_feedback,
+)
+
+# Debug bundles
+from weakincentives.debug import BundleConfig, BundleWriter, DebugBundle
+
+# Session internals
+from weakincentives.runtime.session import (
+    RenderedTools,
+    ToolSchema,
+    SessionView,
+    SlicePolicy,
+    reducer,
+    install_state_slice,
 )
 ```
 
@@ -264,17 +284,37 @@ from weakincentives.prompt import (
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
+    ClaudeAgentSDKModelConfig,
     ClaudeAgentWorkspaceSection,
     HostMount,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
+    ReasoningEffort,
     # Task completion
     TaskCompletionChecker,
     TaskCompletionContext,
     TaskCompletionResult,
     PlanBasedChecker,
     CompositeChecker,
+    # Transcript collection
+    TranscriptCollector,
+    TranscriptCollectorConfig,
+)
+```
+
+### Codex App Server
+
+```python
+from weakincentives.adapters.codex_app_server import (
+    CodexAppServerAdapter,
+    CodexAppServerClientConfig,
+    CodexAppServerModelConfig,
+    CodexWorkspaceSection,
+    HostMount,
+    ReasoningEffort,
+    SandboxMode,
+    ApprovalPolicy,
 )
 ```
 
@@ -537,15 +577,22 @@ session.restore(snapshot)
 
 ### 6. Adapters
 
-Provider-agnostic evaluation interface.
+Provider-agnostic evaluation interface. Two adapters are available:
+
+- **ClaudeAgentSDKAdapter** - Claude Code capabilities via claude-code-sdk (recommended)
+- **CodexAppServerAdapter** - Codex via its app-server stdio protocol
 
 ```python nocheck
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+from weakincentives.adapters.codex_app_server import CodexAppServerAdapter
 from weakincentives.adapters import PromptResponse
 from weakincentives.errors import DeadlineExceededError
 
 # Claude Agent SDK (recommended)
 adapter = ClaudeAgentSDKAdapter()
+
+# Codex App Server
+# adapter = CodexAppServerAdapter()
 
 # Evaluate
 response = adapter.evaluate(
@@ -564,7 +611,9 @@ response.prompt_name  # Prompt identifier
 
 ### 7. Claude Agent SDK Adapter
 
-Native Claude Code capabilities with hermetic isolation.
+Native Claude Code capabilities with hermetic isolation. Default model is
+`claude-opus-4-6`. Reasoning uses adaptive effort levels via `ReasoningEffort`
+(`"low"`, `"medium"`, `"high"`, `"max"`), defaulting to `"high"`.
 
 ```python
 import os
@@ -572,11 +621,13 @@ import os
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
+    ClaudeAgentSDKModelConfig,
     ClaudeAgentWorkspaceSection,
     HostMount,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
+    TranscriptCollectorConfig,
 )
 from weakincentives.runtime import Session
 
@@ -597,9 +648,12 @@ workspace = ClaudeAgentWorkspaceSection(
     allowed_host_roots=("/path/to",),
 )
 
-# Configure isolation
+# Configure isolation and model
 adapter = ClaudeAgentSDKAdapter(
     model="claude-opus-4-6",
+    model_config=ClaudeAgentSDKModelConfig(
+        reasoning="high",  # "low" | "medium" | "high" | "max"
+    ),
     client_config=ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",  # Auto-approve tools
         cwd=str(workspace.temp_dir),
@@ -608,6 +662,8 @@ adapter = ClaudeAgentSDKAdapter(
             network_policy=NetworkPolicy.no_network(),  # API only
             sandbox=SandboxConfig(enabled=True),
         ),
+        # Transcript collection enabled by default
+        transcript_collection=TranscriptCollectorConfig(),
     ),
 )
 
@@ -621,6 +677,13 @@ workspace.cleanup()
 - `NetworkPolicy.no_network()` - API access only
 - `NetworkPolicy(allowed_domains=("docs.python.org",))` - Specific domains
 - `SandboxConfig(enabled=True)` - OS-level sandboxing
+
+**Reasoning effort** (replaces `max_thinking_tokens`):
+
+- `"low"` - Minimal thinking, skips for simple tasks
+- `"medium"` - Moderate thinking
+- `"high"` - Deep reasoning (default)
+- `"max"` - Unconstrained thinking depth (Opus 4.6 only)
 
 ### 8. Tool Policies
 
@@ -657,13 +720,18 @@ seq_policy = SequentialDependencyPolicy(
 
 ### 9. Feedback Providers
 
-Deliver ongoing progress feedback during unattended execution.
+Deliver ongoing progress feedback during unattended execution. Feedback is
+rendered using XML-style `<feedback>` tags for structured context injection.
+Multiple providers run concurrently when triggered.
 
 ```python
 from weakincentives.prompt import (
     DeadlineFeedback,
+    StaticFeedbackProvider,
     FeedbackProviderConfig,
     FeedbackTrigger,
+    FileCreatedTrigger,
+    collect_feedback,
 )
 
 # Built-in: deadline feedback (warns about remaining time)
@@ -671,12 +739,31 @@ deadline_config = FeedbackProviderConfig(
     provider=DeadlineFeedback(warning_threshold_seconds=120),
     trigger=FeedbackTrigger(every_n_seconds=30),  # Check every 30 seconds
 )
+
+# Static feedback triggered by file creation (fires once)
+agents_config = FeedbackProviderConfig(
+    provider=StaticFeedbackProvider(
+        feedback="AGENTS.md detected. Follow the conventions within.",
+    ),
+    trigger=FeedbackTrigger(
+        on_file_created=FileCreatedTrigger(filename="AGENTS.md"),
+    ),
+)
+
+# Collect feedback from prompt's configured providers
+# feedback_text = collect_feedback(prompt=prompt, session=session, deadline=deadline)
 ```
+
+**Built-in providers**:
+
+- `DeadlineFeedback` - Reports remaining time, escalates severity as deadline nears
+- `StaticFeedbackProvider` - Delivers a fixed message (useful with file triggers)
 
 **Trigger conditions** (OR'd together):
 
 - `every_n_calls` - Run after N tool calls since last feedback
 - `every_n_seconds` - Run after N seconds elapsed
+- `on_file_created` - Run once when a specified file is created
 
 ### 10. Task Completion Checkers
 
@@ -885,18 +972,20 @@ ______________________________________________________________________
 ### Which Adapter?
 
 ```text
-Need agentic harness?          → ClaudeAgentSDKAdapter (recommended)
+Claude Code SDK available?     → ClaudeAgentSDKAdapter (recommended)
+Codex CLI on PATH?             → CodexAppServerAdapter
 ```
 
 ### Which Workspace Tool?
 
 ```text
 Claude Agent SDK mode?         → ClaudeAgentWorkspaceSection
+Codex App Server mode?         → CodexWorkspaceSection
 Testing/evaluation?            → InMemoryFilesystem
 ```
 
 **Note:** Filesystem and shell execution tools are provided by the execution
-harness (e.g., Claude Agent SDK) rather than defined in WINK prompts.
+harness (e.g., Claude Agent SDK, Codex) rather than defined in WINK prompts.
 
 ### Which Reducer?
 
@@ -955,8 +1044,10 @@ WinkError                       # Base for all WINK errors
 │   ├── PromptRenderError       # Render failures
 │   ├── OutputParseError        # Structured output invalid
 │   └── VisibilityExpansionRequired  # Progressive disclosure request
-├── SnapshotRestoreError        # Snapshot restore failed
+├── SnapshotError               # Snapshot-related errors
+│   └── SnapshotRestoreError    # Snapshot restore failed
 └── TransactionError            # Transaction failed
+    └── RestoreFailedError      # Rollback during transaction failed
 ```
 
 ______________________________________________________________________
@@ -983,8 +1074,10 @@ ______________________________________________________________________
 
 ```text
 src/weakincentives/
-├── adapters/           # Claude Agent SDK
-│   └── claude_agent_sdk/
+├── adapters/           # Provider adapters
+│   ├── _shared/        # Shared adapter utilities (MCP bridge)
+│   ├── claude_agent_sdk/  # ClaudeAgentSDKAdapter
+│   └── codex_app_server/  # CodexAppServerAdapter
 ├── cli/                # wink CLI
 ├── contrib/
 │   ├── tools/          # Workspace digest tools
@@ -992,7 +1085,7 @@ src/weakincentives/
 │   └── mailbox/        # RedisMailbox
 ├── dataclasses/        # FrozenDataclass utilities
 ├── dbc/                # @require, @ensure, @invariant, @pure
-├── debug/              # Log collector, session inspection
+├── debug/              # Debug bundles, environment capture
 ├── evals/              # Evaluation framework
 ├── filesystem/         # Filesystem protocol
 ├── formal/             # TLA+ embedding
@@ -1016,18 +1109,22 @@ ______________________________________________________________________
 Read before modifying related code:
 
 | Spec | Topic |
-| --------------------------- | ---------------------------------------- |
+| --------------------------------- | ---------------------------------------- |
 | `specs/PROMPTS.md` | Prompt system, composition, overrides |
 | `specs/SESSIONS.md` | Session lifecycle, events, budgets |
 | `specs/TOOLS.md` | Tool registration, failure semantics |
 | `specs/GUARDRAILS.md` | Tool policies, feedback providers, task completion |
 | `specs/ADAPTERS.md` | Provider adapters, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
-| `specs/WORKSPACE.md` | Claude Agent SDK workspace, host mounts |
+| `specs/CODEX_APP_SERVER.md` | Codex App Server adapter, stdio JSON-RPC |
+| `specs/WORKSPACE.md` | Workspace sections, host mounts |
+| `specs/TRANSCRIPT_COLLECTION.md` | SDK transcript collection and logging |
+| `specs/DEBUG_BUNDLE.md` | Debug bundle format, BundleConfig |
 | `specs/DBC.md` | Design-by-contract patterns |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection |
 | `specs/AGENT_LOOP.md` | AgentLoop orchestration |
 | `specs/MAILBOX.md` | Message queue abstraction |
+| `specs/LIFECYCLE.md` | LoopGroup, ShutdownCoordinator |
 
 ______________________________________________________________________
 
@@ -1103,6 +1200,18 @@ session[T].register(E, reducer)  # Register reducer
 session.dispatch(event)   # Broadcast dispatch
 session.snapshot()        # Snapshot
 session.restore(snap)     # Restore from snapshot
+session.install(StateType)  # Install @reducer-decorated dataclass
+```
+
+### ClaudeAgentSDKModelConfig
+
+```text
+ClaudeAgentSDKModelConfig(
+    model: str = "claude-opus-4-6",
+    reasoning: ReasoningEffort | None = "high",  # "low"|"medium"|"high"|"max"
+    temperature: float | None,
+    max_tokens: int | None,
+)
 ```
 
 ### Budget
@@ -1118,6 +1227,20 @@ Budget(
 tracker = BudgetTracker(budget)
 tracker.record_cumulative(eval_id, usage)
 tracker.check()  # Raises BudgetExceededError
+```
+
+### BundleConfig
+
+```text
+BundleConfig(
+    target: str | Path,             # Output directory for bundles
+    max_file_size: int,             # Skip files > N bytes
+    max_total_size: int,            # Cap total capture
+    compression: str = "deflate",   # ZIP compression method
+)
+
+# Used in AgentLoopConfig
+config = AgentLoopConfig(debug_bundle=BundleConfig(target="./bundles/"))
 ```
 
 ______________________________________________________________________

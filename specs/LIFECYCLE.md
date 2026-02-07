@@ -23,6 +23,7 @@ Both `AgentLoop` and `EvalLoop` implement:
 | `run(max_iterations, visibility_timeout, wait_time_seconds)` | Process messages until stopped |
 | `shutdown(timeout)` | Request graceful shutdown, wait for completion |
 | `running` property | True if processing messages |
+| `heartbeat` property | Heartbeat tracker for watchdog monitoring (or None) |
 | Context manager | Exit triggers shutdown |
 
 ### ShutdownCoordinator
@@ -33,6 +34,7 @@ Singleton managing signal handlers at `src/weakincentives/runtime/lifecycle.py`:
 | --- | --- |
 | `install(signals)` | Install handlers, return singleton |
 | `get()` | Return installed coordinator or None |
+| `reset()` | Reset singleton (for testing) |
 | `register(callback)` | Add shutdown callback |
 | `unregister(callback)` | Remove callback |
 | `trigger()` | Manually trigger shutdown |
@@ -51,13 +53,23 @@ Coordinates multiple loops at `src/weakincentives/runtime/lifecycle.py`:
 
 Each loop runs in dedicated thread via `ThreadPoolExecutor`.
 
-## AgentLoop Changes
+| Feature | Description |
+| --- | --- |
+| Health endpoints | Optional HTTP `/health/live` and `/health/ready` for Kubernetes probes |
+| Watchdog | Detect stuck workers via heartbeat monitoring |
+| Coordinated shutdown | Signal-driven termination of all loops |
 
-### Lifecycle Attributes
+## Prompt Cleanup Phase
 
-- `_shutdown_event: threading.Event`
-- `_running: bool`
-- `_lock: threading.Lock`
+After execution completes, `AgentLoop` calls `prompt.cleanup()` to release
+resources held by sections (e.g., temporary directories). In bundled execution,
+cleanup is deferred until after bundle artifacts are captured. A
+`prompt_cleaned_up` guard flag prevents double-cleanup in error paths.
+
+See `PROMPTS.md` (Cleanup section) and `AGENT_LOOP.md` (Prompt Cleanup section)
+for details.
+
+## AgentLoop Lifecycle
 
 ### Run Loop
 
@@ -89,12 +101,22 @@ group = LoopGroup(loops=[agent_loop, eval_loop])
 group.run()  # Blocks until SIGTERM/SIGINT
 ```
 
+### With Health and Watchdog
+
+```python
+group = LoopGroup(
+    loops=[agent_loop],
+    health_port=8080,
+    watchdog_threshold=720.0,
+)
+group.run()
+```
+
 ### Context Manager
 
 ```python
 with LoopGroup(loops=[agent_loop, eval_loop]) as group:
-    thread = threading.Thread(target=group.run)
-    thread.start()
+    group.run()
 # Shutdown triggered on exit
 ```
 
@@ -114,6 +136,8 @@ with LoopGroup(loops=[agent_loop, eval_loop]) as group:
 | `shutdown_timeout` | 30s | Max wait for in-flight work |
 | `visibility_timeout` | 300s | Mailbox invisibility period |
 | `wait_time_seconds` | 20s | Long poll duration |
+| `health_port` | None | Port for health endpoints |
+| `watchdog_threshold` | 720s | Seconds without heartbeat before termination |
 
 **Relationship:** `visibility_timeout` > `shutdown_timeout` + max processing time.
 
@@ -128,10 +152,3 @@ with LoopGroup(loops=[agent_loop, eval_loop]) as group:
 - **No mid-message cancellation**: Use deadlines for time bounds
 - **Python GIL**: Thread-based parallelism limited
 - **Signal handler restrictions**: Handlers kept minimal
-
-## Future Considerations
-
-- Checkpoint support for long evaluations
-- Health probes for Kubernetes
-- Drain mode (stop accepting, complete in-flight)
-- Priority shutdown (critical loops wait longer)

@@ -50,12 +50,10 @@ Key Codex capabilities surfaced through the app-server:
 1. WINK (`weakincentives`) runtime
 
 No additional Python dependencies beyond WINK. The adapter reuses `BridgedTool`
-and `create_bridged_tools()` from the Claude Agent SDK adapter module (already
-in the WINK codebase), but does not require the `claude-agent-sdk` package at
-runtime — tool bridging uses Codex's native dynamic tools protocol.
-
-The adapter uses lazy imports and raises a helpful error if `codex` is not
-found on PATH.
+and `create_bridged_tools()` from the shared adapter module at
+`src/weakincentives/adapters/_shared/_bridge.py` — it does not require the
+`claude-agent-sdk` package at runtime. Tool bridging uses Codex's native
+dynamic tools protocol.
 
 ## Architecture
 
@@ -94,7 +92,7 @@ src/weakincentives/adapters/codex_app_server/
 ```
 
 Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
-`src/weakincentives/adapters/claude_agent_sdk/_bridge.py`.
+`src/weakincentives/adapters/_shared/_bridge.py`.
 
 ## Configuration
 
@@ -189,7 +187,7 @@ Personality = Literal["none", "friendly", "pragmatic"]
 ```
 
 **Note:** `seed`, `stop`, `presence_penalty`, `frequency_penalty` are not
-supported by the Codex app-server — raises `ValueError` if provided.
+supported by the Codex app-server and are not fields on this config.
 
 ## Protocol Mapping
 
@@ -208,15 +206,18 @@ supported by the Codex app-server — raises `ValueError` if provided.
 
 ### Codex Item Types → WINK Events
 
-| Codex Item Type | WINK Event | Notes |
-|-----------------|------------|-------|
-| `commandExecution` (completed) | `ToolInvoked` | `success` from exit code |
-| `fileChange` (completed) | `ToolInvoked` | `success` from status |
-| `mcpToolCall` (completed) | `ToolInvoked` | External MCP servers only |
-| `item/tool/call` (server request) | `ToolInvoked` | WINK bridged tools via dynamic tools |
+At `src/weakincentives/adapters/codex_app_server/_events.py`:
+`dispatch_item_tool_invoked()` maps completed Codex items to `ToolInvoked`:
+
+| Codex Item Type | WINK Event | Tool Name |
+|-----------------|------------|-----------|
+| `commandExecution` (completed) | `ToolInvoked` | `codex:command` |
+| `fileChange` (completed) | `ToolInvoked` | `codex:file_change` |
+| `mcpToolCall` (completed) | `ToolInvoked` | `codex:mcp:{tool}` |
+| `webSearch` (completed) | `ToolInvoked` | `codex:web_search` |
+| `item/tool/call` (server request) | `ToolInvoked` | (via BridgedTool) |
 | `agentMessage` | Text accumulation | Concatenated for `PromptResponse.text` |
 | `reasoning` | (informational) | Logged if configured |
-| `webSearch` | `ToolInvoked` | Optional native tool tracking |
 | `contextCompaction` | (informational) | Logged |
 
 ### Dual Notification System
@@ -232,25 +233,22 @@ The adapter should only process v2 notifications.
 
 ### CodexWorkspaceSection
 
-Create by **extracting** generic mount/copy logic from
-`src/weakincentives/adapters/claude_agent_sdk/workspace.py`:
+At `src/weakincentives/adapters/codex_app_server/workspace.py`:
 
 - Accepts `HostMount` tuples, `allowed_host_roots`, max-bytes budgets
-- Materializes temporary directory with copied files
+- Materializes temporary directory with copied files (with glob filtering,
+  symlink safety, and byte budget enforcement)
 - Exposes `temp_dir` for `CodexAppServerClientConfig.cwd`
 - Renders a provider-agnostic summary of mounts and budgets
-- Exposes cleanup via `.cleanup()` or a context manager
+- Exposes cleanup via `.cleanup()` with reference counting for cloned sections
 - Provides `workspace_fingerprint` for session reuse validation
-
-> **Do not** reuse `ClaudeAgentWorkspaceSection` directly — its template
-> contains Claude-specific wording. Extract the machinery and create a new
-> section with neutral text.
+- Binds a `HostFilesystem` resource scoped to the temp directory
 
 **Shared types:**
 
 | Type | Description |
 |------|-------------|
-| `HostMount` | Mount configuration (host_path, mount_path, globs, max_bytes) |
+| `HostMount` | Mount configuration (host_path, mount_path, include_glob, exclude_glob, max_bytes, follow_symlinks) |
 | `HostMountPreview` | Summary of materialized mount |
 | `WorkspaceBudgetExceededError` | Mount exceeds byte budget |
 | `WorkspaceSecurityError` | Mount violates security constraints |
@@ -262,37 +260,19 @@ Create by **extracting** generic mount/copy logic from
 The client manages the `codex app-server` subprocess and provides a typed
 interface over the NDJSON stdio protocol.
 
-```python
-class CodexAppServerClient:
-    """Bidirectional JSON-RPC client for the Codex app-server."""
+At `src/weakincentives/adapters/codex_app_server/client.py`:
 
-    def __init__(
-        self,
-        codex_bin: str = "codex",
-        env: Mapping[str, str] | None = None,
-        suppress_stderr: bool = True,
-    ) -> None: ...
-
-    async def start(self) -> None:
-        """Spawn codex app-server subprocess."""
-
-    async def stop(self) -> None:
-        """Terminate subprocess gracefully."""
-
-    async def send_request(
-        self, method: str, params: dict[str, Any], timeout: float | None = None
-    ) -> Any:
-        """Send JSON-RPC request and await response by matching id."""
-
-    async def send_notification(self, method: str, params: dict[str, Any]) -> None:
-        """Send JSON-RPC notification (no id, no response expected)."""
-
-    async def send_response(self, request_id: int, result: dict[str, Any]) -> None:
-        """Send response to a server-initiated request."""
-
-    async def read_messages(self) -> AsyncIterator[dict[str, Any]]:
-        """Yield all messages from stdout (responses, notifications, server requests)."""
-```
+- `start()` — spawn `codex app-server` via `asyncio.create_subprocess_exec`
+- `stop()` — terminate subprocess gracefully (close stdin, wait, kill if needed)
+- `send_request(method, params, timeout)` — send JSON-RPC request and await
+  response by matching `id`; returns the `result` field
+- `send_notification(method, params=None)` — send JSON-RPC notification (no
+  `id`, no response expected); `params` is optional
+- `send_response(request_id, result)` — send response to a server-initiated
+  request
+- `read_messages()` — async iterator yielding notifications and server requests
+  (responses are consumed internally by `send_request`)
+- `stderr_output` — property returning captured stderr lines
 
 **Wire format:** Each message is a single JSON object terminated by `\n`. The
 client assigns incrementing integer `id` fields to requests and correlates
@@ -321,31 +301,24 @@ message to valid JSON conforming to the schema.
 
 ### Schema Generation
 
-Use WINK's existing `serde.schema()`:
-
-```python
-from weakincentives.serde import schema
-
-json_schema = schema(rendered.output_type)
-```
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+`_build_output_schema()` generates the JSON schema via `serde.schema()` and
+then applies `_openai_strict_schema()` to make it compatible with OpenAI/Codex
+structured output requirements: adds `additionalProperties: false` on all
+object types and lists all properties in `required`. For `container="array"`
+prompts, wraps in an `{"items": [...]}` envelope.
 
 ### Passing the Schema
 
-```python
-result = send_request("turn/start", {
-    "threadId": thread_id,
-    "input": [{"type": "text", "text": rendered_text}],
-    "outputSchema": json_schema,
-    ...
-})
-```
+The schema is passed as the `outputSchema` field on `turn/start`.
 
 ### Retrieval
 
 After `turn/completed`:
 
-1. Parse the accumulated `agentMessage` delta text as JSON
-1. Deserialize via `serde.parse(output_type, parsed_json)`
+1. Parse the accumulated `agentMessage` delta text
+1. Deserialize via `parse_structured_output(text, rendered)` from
+   `weakincentives.prompt.structured_output`
 1. If parsing fails: raise `PromptEvaluationError(phase="response")`
 
 No MCP tool is needed — the model produces valid JSON directly in its response
@@ -374,9 +347,9 @@ The entire integration is:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| `BridgedTool` | `claude_agent_sdk/_bridge.py` | Transactional tool wrapper |
-| `create_bridged_tools()` | `claude_agent_sdk/_bridge.py` | Factory for BridgedTool |
-| `VisibilityExpansionSignal` | `claude_agent_sdk/_visibility_signal.py` | Exception propagation |
+| `BridgedTool` | `adapters/_shared/_bridge.py` | Transactional tool wrapper |
+| `create_bridged_tools()` | `adapters/_shared/_bridge.py` | Factory for BridgedTool |
+| `VisibilityExpansionSignal` | `adapters/_shared/_visibility_signal.py` | Exception propagation |
 | `tool_transaction()` | `runtime/transactions.py` | Snapshot/restore |
 
 > **Important:** Pass `adapter_name="codex_app_server"` to
@@ -384,20 +357,9 @@ The entire integration is:
 
 ### DynamicToolSpec Conversion
 
-```python
-def bridged_tools_to_dynamic_specs(
-    tools: tuple[BridgedTool, ...],
-) -> list[dict[str, Any]]:
-    """Convert BridgedTool list to Codex DynamicToolSpec format."""
-    return [
-        {
-            "name": tool.name,
-            "description": tool.description,
-            "inputSchema": tool.input_schema,
-        }
-        for tool in tools
-    ]
-```
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+`_bridged_tools_to_dynamic_specs()` converts each `BridgedTool` to a dict
+with `name`, `description`, and `inputSchema` keys.
 
 ### Tool Bridging Flow
 
@@ -417,40 +379,15 @@ def bridged_tools_to_dynamic_specs(
 
 ### item/tool/call Handling
 
-When the adapter receives an `item/tool/call` server request:
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+`_handle_tool_call()` processes `item/tool/call` server requests:
 
-```python
-# Server request: {"id": 42, "method": "item/tool/call", "params": {...}}
-tool_name = params["tool"]
-arguments = params["arguments"]
-call_id = params["callId"]
-
-bridged_tool = tool_lookup[tool_name]
-mcp_result = bridged_tool(arguments)
-# mcp_result: {"content": [{"type": "text", "text": "..."}], "isError": bool}
-
-# Convert to DynamicToolCallResponse format
-send_response(request_id, {
-    "success": not mcp_result.get("isError", False),
-    "contentItems": [
-        {"type": "inputText", "text": item["text"]}
-        for item in mcp_result.get("content", [])
-        if item.get("type") == "text"
-    ],
-})
-```
-
-The `DynamicToolCallResponse` format (validated against the JSON schema):
-
-```python
-{
-    "success": bool,
-    "contentItems": [
-        {"type": "inputText", "text": str}    # text content
-        | {"type": "inputImage", "imageUrl": str}  # image content
-    ],
-}
-```
+1. Extract `tool` name and `arguments` from `params` (handles string arguments
+   via `json.loads`)
+2. Look up `BridgedTool` by name; respond with error if unknown
+3. Execute via `asyncio.to_thread(bridged_tool, arguments)`
+4. Convert MCP result to `DynamicToolCallResponse` format:
+   `{"success": bool, "contentItems": [{"type": "inputText", "text": str}]}`
 
 ### External MCP Servers
 
@@ -506,7 +443,8 @@ When a tool raises `VisibilityExpansionRequired`:
 
 ### 2. Render Prompt
 
-1. `prepare_adapter_conversation(...)` → `AdapterRenderContext`
+1. `prompt.render(session=session)` → `RenderedPrompt` (text + tools + output_type)
+1. Resolve CWD and bind `HostFilesystem` resource if prompt has no filesystem
 1. Emit `PromptRendered`
 
 ### 3. Build Dynamic Tool Specs
@@ -516,149 +454,71 @@ When a tool raises `VisibilityExpansionRequired`:
 
 ### 4. Spawn Codex App Server
 
-```python
-proc = subprocess.Popen(
-    [codex_bin, "app-server"],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE if suppress_stderr else None,
-    cwd=resolved_cwd,
-    env=merged_env,
-)
-```
+At `src/weakincentives/adapters/codex_app_server/client.py`:
+`CodexAppServerClient.start()` spawns the subprocess via
+`asyncio.create_subprocess_exec(codex_bin, "app-server", ...)` with stdin,
+stdout, and stderr pipes. Environment variables are merged from `os.environ`
+and any extra env provided in the config. A background read loop and stderr
+capture loop are started as asyncio tasks.
 
 ### 5. Initialize Handshake
 
-```python
-# experimentalApi enables dynamicTools on thread/start
-send_request("initialize", {
-    "clientInfo": {
-        "name": client_name,    # "wink"
-        "title": "WINK Agent",
-        "version": client_version,
-    },
-    "capabilities": {
-        "experimentalApi": True,
-    },
-})
-# Response: {"result": {"userAgent": "wink/0.98.0 (...)"}}
-
-# Notification (no response expected)
-send_notification("initialized")
-```
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+`_execute_protocol()` sends the `initialize` request with `experimentalApi:
+true` (enables dynamic tools on `thread/start`), then sends an `initialized`
+notification. The `startup_timeout_s` config controls the handshake timeout.
 
 The server rejects all methods before `initialize`. Repeated `initialize` calls
 return `Already initialized`.
 
 ### 6. Authenticate (Optional)
 
-If `auth_mode` is provided:
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+`_authenticate()` sends `account/login/start` if `auth_mode` is configured:
 
-```python
-# API key auth
-send_request("account/login/start", {
-    "type": "apiKey",
-    "apiKey": auth_mode.api_key,
-})
-
-# External token auth
-send_request("account/login/start", {
-    "type": "chatgptAuthTokens",
-    "idToken": auth_mode.id_token,
-    "accessToken": auth_mode.access_token,
-})
-```
+- `ApiKeyAuth` — `{"type": "apiKey", "apiKey": ...}`
+- `ExternalTokenAuth` — `{"type": "chatgptAuthTokens", "idToken": ..., "accessToken": ...}`
 
 The login is synchronous — `account/login/start` returns its result directly.
 On error, raise `PromptEvaluationError(phase="request")`.
 
-For `ExternalTokenAuth`, the adapter must handle
-`account/chatgptAuthTokens/refresh` server requests — respond with refreshed
-tokens or raise an error.
+### 7. Start Thread
 
-### 7. Start or Resume Thread
-
-```python
-# New thread
-thread_params = {
-    "model": model_config.model,
-    "cwd": resolved_cwd,
-    "approvalPolicy": approval_policy,
-    "sandbox": sandbox_mode,
-    "ephemeral": ephemeral,
-    "dynamicTools": dynamic_tool_specs,  # WINK bridged tools
-}
-if additional_mcp_servers:
-    thread_params["config"] = {"mcp_servers": additional_mcp_servers}
-
-result = send_request("thread/start", thread_params)
-thread_id = result["thread"]["id"]
-```
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+`_create_thread()` sends `thread/start` with `model`, `cwd`,
+`approvalPolicy`, and `ephemeral`. Optional fields `sandbox`,
+`dynamicTools`, and `config.mcp_servers` are included only when configured.
+Returns `result["thread"]["id"]`.
 
 ### 8. Start Turn
 
-```python
-turn_params = {
-    "threadId": thread_id,
-    "input": [{"type": "text", "text": rendered_text}],
-    "effort": model_config.effort,
-    "summary": model_config.summary,
-    "personality": model_config.personality,
-}
-if output_schema is not None:
-    turn_params["outputSchema"] = output_schema
-
-result = send_request("turn/start", turn_params)
-turn_id = result["turn"]["id"]
-```
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+`_start_turn()` sends `turn/start` with `threadId` and `input` (text).
+Optional fields `effort`, `summary`, `personality`, and `outputSchema` are
+included only when set. Returns `result["turn"]["id"]`.
 
 ### 9. Stream Notifications
 
-After `turn/start`, keep reading stdout for all messages:
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+`_stream_turn()` reads messages via `client.read_messages()` until
+`turn/completed`. A deadline watchdog task sends `turn/interrupt` if the
+deadline expires.
 
-```python
-async for message in client.read_messages():
-    # Server requests have both "id" and "method"
-    if "id" in message and "method" in message:
-        match message["method"]:
-            case "item/tool/call":
-                # Dynamic tool call — execute BridgedTool in-process
-                execute_dynamic_tool_call(message)
-            case "item/commandExecution/requestApproval":
-                respond_to_approval(message["id"], message["params"])
-            case "item/fileChange/requestApproval":
-                respond_to_approval(message["id"], message["params"])
-            case "account/chatgptAuthTokens/refresh":
-                handle_token_refresh(message["id"], message["params"])
-        continue
+**Server requests** (both `id` and `method`) are dispatched by
+`_handle_server_request()`:
 
-    # Notifications have "method" but no "id"
-    method = message["method"]
-    params = message["params"]
+- `item/tool/call` — execute `BridgedTool` in-process via `_handle_tool_call()`
+- `item/commandExecution/requestApproval` / `item/fileChange/requestApproval` —
+  auto-respond per approval policy
+- Unknown methods — respond with empty result
 
-    match method:
-        case "item/agentMessage/delta":
-            accumulated_text += params.get("delta", "")
+**Notifications** (method only) are processed by `_process_notification()`:
 
-        case "item/completed":
-            item = params["item"]
-            match item["type"]:
-                case "commandExecution":
-                    dispatch_tool_invoked(item)
-                case "fileChange":
-                    dispatch_tool_invoked(item)
-                case "mcpToolCall":
-                    dispatch_tool_invoked(item)  # external MCP only
-                case "agentMessage":
-                    accumulated_text = item.get("text", accumulated_text)
-
-        case "thread/tokenUsage/updated":
-            record_token_usage(params)
-
-        case "turn/completed":
-            final_turn = params["turn"]
-            break
-```
+- `item/agentMessage/delta` — accumulate assistant text
+- `item/completed` — dispatch `ToolInvoked` for `commandExecution`,
+  `fileChange`, `mcpToolCall`, `webSearch`; capture final `agentMessage` text
+- `thread/tokenUsage/updated` — extract `TokenUsage`
+- `turn/completed` — check status for errors/interruption, signal done
 
 **Note:** WINK bridged tools arrive as `item/tool/call` server requests (same
 as approval requests). External MCP tools arrive as `mcpToolCall` notification
@@ -666,22 +526,19 @@ items. The two paths are distinct — no deduplication needed.
 
 ### 10. Handle Approvals
 
-When the server sends an approval request (a JSON-RPC request with `id`):
+At `src/weakincentives/adapters/codex_app_server/adapter.py`:
+`_handle_server_request()` auto-responds to approval requests:
 
-```python
-def respond_to_approval(request_id: int, params: dict) -> None:
-    match approval_policy:
-        case "never":
-            send_response(request_id, {"decision": "accept"})
-        case "on-request":
-            send_response(request_id, {"decision": "decline"})
-        case "untrusted" | "on-failure":
-            send_response(request_id, {"decision": "accept"})
-```
+| Policy | Decision |
+|--------|----------|
+| `"never"` | `"accept"` |
+| `"on-failure"` | `"accept"` |
+| `"untrusted"` | `"decline"` |
+| `"on-request"` | `"decline"` |
 
-`"on-failure"` is interpreted at the server-protocol boundary: when Codex emits
-an approval request, the non-interactive adapter handles it deterministically
-without additional local failure-state tracking.
+For non-interactive WINK execution, `"never"` and `"on-failure"` accept all
+approvals. `"untrusted"` and `"on-request"` decline, since there is no human
+to prompt for approval.
 
 ### 11. Extract Results
 
@@ -700,7 +557,8 @@ accumulated delta text.
 
 If `outputSchema` was set on `turn/start`, the accumulated delta text contains
 valid JSON conforming to the schema. Parse and deserialize via
-`serde.parse(output_type, json.loads(text))`.
+`parse_structured_output(text, rendered)` from
+`weakincentives.prompt.structured_output`.
 Raise `PromptEvaluationError(phase="response")` if parsing fails.
 
 ### 13. PromptExecuted
@@ -729,8 +587,9 @@ If deadline expires during a turn:
 
 ### Turn Failure Mapping
 
-When `turn/completed` has `status: "failed"`, map `codexErrorInfo` to WINK
-error handling:
+At `src/weakincentives/adapters/codex_app_server/_events.py`:
+`map_codex_error_phase()` maps `codexErrorInfo` to WINK error phases.
+When `turn/completed` has `status: "failed"`:
 
 | Codex Error | WINK Action |
 |-------------|-------------|
@@ -786,18 +645,17 @@ The `thread/tokenUsage/updated` notification provides detailed usage data:
 }
 ```
 
-Map to WINK's `TokenUsage`:
+At `src/weakincentives/adapters/codex_app_server/_events.py`:
+`extract_token_usage()` maps the `last` breakdown to WINK's `TokenUsage`:
 
-```python
-@FrozenDataclass()
-class TokenUsage:
-    prompt_tokens: int        # from inputTokens
-    completion_tokens: int    # from outputTokens
-    total_tokens: int         # from totalTokens
-```
+| Codex field | WINK `TokenUsage` field |
+|-------------|------------------------|
+| `inputTokens` | `input_tokens` |
+| `outputTokens` | `output_tokens` |
+| `cachedInputTokens` | `cached_tokens` |
 
-Use the `last` breakdown for per-turn usage and `total` for cumulative thread
-usage.
+`TokenUsage.total_tokens` is a computed property (not stored).
+The adapter uses the `last` breakdown for per-turn usage.
 
 ## Testing
 
@@ -894,7 +752,7 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerClientConfig,
     CodexWorkspaceSection,
 )
-from weakincentives.adapters.claude_agent_sdk.workspace import HostMount
+from weakincentives.adapters.codex_app_server import HostMount
 
 workspace = CodexWorkspaceSection(
     session=session,
