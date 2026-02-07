@@ -29,13 +29,14 @@ from ...deadlines import Deadline
 from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
+from ...prompt.structured_output import OutputParseError, parse_structured_output
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.watchdog import Heartbeat
-from ...serde import parse, schema
+from ...serde import schema
 from ...types import AdapterName
 from .._shared._bridge import BridgedTool, create_bridged_tools
 from .._shared._visibility_signal import VisibilityExpansionSignal
@@ -134,6 +135,22 @@ def _openai_strict_schema(s: dict[str, Any]) -> dict[str, Any]:
             }
 
     return out
+
+
+def _build_output_schema(rendered: RenderedPrompt[Any]) -> dict[str, Any] | None:
+    """Build the output schema for the Codex API from a rendered prompt."""
+    if rendered.output_type is None:
+        return None
+    element_schema = _openai_strict_schema(schema(rendered.output_type))
+    if rendered.container == "array":
+        return _openai_strict_schema(
+            {
+                "type": "object",
+                "properties": {"items": {"type": "array", "items": element_schema}},
+                "required": ["items"],
+            }
+        )
+    return element_schema
 
 
 class _ThreadState(NamedTuple):
@@ -329,9 +346,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         dynamic_tool_specs = _bridged_tools_to_dynamic_specs(bridged_tools)
         tool_lookup: dict[str, BridgedTool] = {t.name: t for t in bridged_tools}
 
-        output_schema: dict[str, Any] | None = None
-        if rendered.output_type is not None:
-            output_schema = _openai_strict_schema(schema(rendered.output_type))
+        output_schema = _build_output_schema(rendered)
 
         client = CodexAppServerClient(
             codex_bin=self._client_config.codex_bin,
@@ -420,6 +435,24 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
 
         return response
 
+    def _deadline_remaining_s(
+        self, deadline: Deadline | None, prompt_name: str
+    ) -> float | None:
+        """Return remaining seconds from deadline, or None if no deadline.
+
+        Raises PromptEvaluationError if the deadline has already expired.
+        """
+        if deadline is None:
+            return None
+        remaining = deadline.remaining().total_seconds()
+        if remaining <= 0:
+            raise PromptEvaluationError(
+                message="Deadline expired during setup",
+                prompt_name=prompt_name,
+                phase="request",
+            )
+        return remaining
+
     async def _execute_protocol(
         self,
         *,
@@ -458,15 +491,27 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         await client.send_notification("initialized")
 
         # 2. Authenticate
-        await self._authenticate(client)
+        try:
+            timeout = self._deadline_remaining_s(deadline, prompt_name)
+            await self._authenticate(client, timeout=timeout)
 
-        # 3. Thread
-        thread_id = await self._start_thread(client, effective_cwd, dynamic_tool_specs)
+            # 3. Thread
+            timeout = self._deadline_remaining_s(deadline, prompt_name)
+            thread_id = await self._start_thread(
+                client, effective_cwd, dynamic_tool_specs, timeout=timeout
+            )
 
-        # 4. Turn
-        turn_result = await self._start_turn(
-            client, thread_id, prompt_text, output_schema
-        )
+            # 4. Turn
+            timeout = self._deadline_remaining_s(deadline, prompt_name)
+            turn_result = await self._start_turn(
+                client, thread_id, prompt_text, output_schema, timeout=timeout
+            )
+        except CodexClientError as error:
+            raise PromptEvaluationError(
+                message=str(error),
+                prompt_name=prompt_name,
+                phase="request",
+            ) from error
         turn_id: int = turn_result["turn"]["id"]
 
         # 5. Stream
@@ -488,7 +533,12 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
 
         return accumulated_text, usage
 
-    async def _authenticate(self, client: CodexAppServerClient) -> None:
+    async def _authenticate(
+        self,
+        client: CodexAppServerClient,
+        *,
+        timeout: float | None = None,
+    ) -> None:
         """Perform authentication if auth_mode is configured."""
         auth = self._client_config.auth_mode
         if auth is None:
@@ -498,6 +548,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             _ = await client.send_request(
                 "account/login/start",
                 {"type": "apiKey", "apiKey": auth.api_key},
+                timeout=timeout,
             )
         else:
             # ExternalTokenAuth
@@ -508,6 +559,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                     "idToken": auth.id_token,
                     "accessToken": auth.access_token,
                 },
+                timeout=timeout,
             )
 
     async def _start_thread(
@@ -515,22 +567,28 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         client: CodexAppServerClient,
         effective_cwd: str,
         dynamic_tool_specs: list[dict[str, Any]],
+        *,
+        timeout: float | None = None,
     ) -> str:
         """Start or resume a Codex thread. Returns the thread ID."""
         if self._client_config.reuse_thread:
             thread_id = await self._try_resume_thread(
-                client, effective_cwd, dynamic_tool_specs
+                client, effective_cwd, dynamic_tool_specs, timeout=timeout
             )
             if thread_id is not None:
                 return thread_id
 
-        return await self._create_thread(client, effective_cwd, dynamic_tool_specs)
+        return await self._create_thread(
+            client, effective_cwd, dynamic_tool_specs, timeout=timeout
+        )
 
     async def _try_resume_thread(
         self,
         client: CodexAppServerClient,
         effective_cwd: str,
         dynamic_tool_specs: list[dict[str, Any]],
+        *,
+        timeout: float | None = None,
     ) -> str | None:
         """Try to resume an existing thread. Returns thread ID or None."""
         state = self._last_thread
@@ -541,7 +599,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             return None
         try:
             result = await client.send_request(
-                "thread/resume", {"threadId": state.thread_id}
+                "thread/resume", {"threadId": state.thread_id}, timeout=timeout
             )
             return result["thread"]["id"]
         except CodexClientError:
@@ -557,6 +615,8 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         client: CodexAppServerClient,
         effective_cwd: str,
         dynamic_tool_specs: list[dict[str, Any]],
+        *,
+        timeout: float | None = None,
     ) -> str:
         """Create a new thread and store state for reuse."""
         thread_params: dict[str, Any] = {
@@ -572,7 +632,9 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         if self._client_config.mcp_servers:
             thread_params["config"] = {"mcp_servers": self._client_config.mcp_servers}
 
-        result = await client.send_request("thread/start", thread_params)
+        result = await client.send_request(
+            "thread/start", thread_params, timeout=timeout
+        )
         thread_id: str = result["thread"]["id"]
 
         dynamic_tool_names = tuple(sorted(spec["name"] for spec in dynamic_tool_specs))
@@ -589,6 +651,8 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         thread_id: str,
         prompt_text: str,
         output_schema: dict[str, Any] | None,
+        *,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Start a turn and return the response."""
         turn_params: dict[str, Any] = {
@@ -604,7 +668,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         if output_schema is not None:
             turn_params["outputSchema"] = output_schema
 
-        return await client.send_request("turn/start", turn_params)
+        return await client.send_request("turn/start", turn_params, timeout=timeout)
 
     async def _stream_turn(
         self,
@@ -929,9 +993,8 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             return None  # pragma: no cover
 
         try:
-            raw = json.loads(text)
-            return cast(OutputT, parse(rendered.output_type, raw))
-        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            return cast(OutputT, parse_structured_output(text, rendered))
+        except (OutputParseError, TypeError, ValueError) as error:
             raise PromptEvaluationError(
                 message=f"Failed to parse structured output: {error}",
                 prompt_name=prompt_name,

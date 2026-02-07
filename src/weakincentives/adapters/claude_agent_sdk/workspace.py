@@ -18,6 +18,7 @@ import fnmatch
 import os
 import shutil
 import tempfile
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -338,6 +339,8 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         _mount_previews: tuple[HostMountPreview, ...] | None = None,
         _created_at: datetime | None = None,
         _filesystem: Filesystem | None = None,
+        _ref_lock: threading.Lock | None = None,
+        _ref_count: list[int] | None = None,
     ) -> None:
         """Initialize the workspace section.
 
@@ -350,6 +353,8 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
             _mount_previews: Internal - pre-existing mount previews (for cloning).
             _created_at: Internal - pre-existing creation timestamp (for cloning).
             _filesystem: Internal - pre-existing filesystem (for cloning).
+            _ref_lock: Internal - shared lock for reference counting (for cloning).
+            _ref_count: Internal - shared reference count (for cloning).
         """
         self._session = session
         self._mounts = tuple(mounts)
@@ -381,6 +386,9 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
             self._mount_previews = ()
             self._created_at = _utcnow()
             self._filesystem = HostFilesystem(_root=str(self._temp_dir))
+
+        self._ref_lock = _ref_lock if _ref_lock is not None else threading.Lock()
+        self._ref_count = _ref_count if _ref_count is not None else [1]
 
         template = _render_workspace_template(self._mount_previews)
 
@@ -425,6 +433,10 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
     @override
     def cleanup(self) -> None:
         """Remove the temporary workspace directory and associated resources."""
+        with self._ref_lock:
+            self._ref_count[0] -= 1
+            if self._ref_count[0] > 0:
+                return
         if self._temp_dir.exists():
             shutil.rmtree(self._temp_dir, ignore_errors=True)
         # HostFilesystem.cleanup() removes external git directories used for snapshots
@@ -464,6 +476,8 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         ):
             msg = "Provided dispatcher must match the target session's dispatcher."
             raise TypeError(msg)
+        with self._ref_lock:
+            self._ref_count[0] += 1
         return ClaudeAgentWorkspaceSection(
             session=session_obj,
             mounts=self._mounts,
@@ -473,4 +487,6 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
             _mount_previews=self._mount_previews,
             _created_at=self._created_at,
             _filesystem=self._filesystem,
+            _ref_lock=self._ref_lock,
+            _ref_count=self._ref_count,
         )

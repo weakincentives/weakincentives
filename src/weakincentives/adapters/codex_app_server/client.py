@@ -95,7 +95,8 @@ class CodexAppServerClient:
 
         if self._proc is not None:
             if self._proc.stdin is not None:  # pragma: no branch
-                self._proc.stdin.close()
+                with contextlib.suppress(OSError):
+                    self._proc.stdin.close()
             try:
                 _ = await asyncio.wait_for(self._proc.wait(), timeout=5.0)
             except TimeoutError:

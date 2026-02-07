@@ -456,6 +456,88 @@ class TestSymlinkEscape:
         assert not (tgt / "escape_link").exists()
 
 
+class TestSingleFileSymlinkEscape:
+    def test_single_file_symlink_rejected_when_not_following(
+        self, temp_dir: Path
+    ) -> None:
+        """Single-file symlink mount is rejected when follow_symlinks=False."""
+        target_file = temp_dir / "real.txt"
+        target_file.write_text("content")
+        link = temp_dir / "link.txt"
+        link.symlink_to(target_file)
+
+        tgt = temp_dir / "workspace" / "link.txt"
+        mount = HostMount(host_path=str(link), follow_symlinks=False)
+
+        with pytest.raises(WorkspaceSecurityError, match="follow_symlinks=False"):
+            _copy_mount_to_temp(link, tgt, mount)
+
+    def test_single_file_symlink_escaping_parent_rejected(self, temp_dir: Path) -> None:
+        """Single-file symlink escaping parent dir is rejected with follow_symlinks."""
+        outside = temp_dir / "outside.txt"
+        outside.write_text("secret")
+
+        subdir = temp_dir / "subdir"
+        subdir.mkdir()
+        link = subdir / "escape.txt"
+        link.symlink_to(outside)
+
+        tgt = temp_dir / "workspace" / "escape.txt"
+        mount = HostMount(host_path=str(link), follow_symlinks=True)
+
+        with pytest.raises(WorkspaceSecurityError, match="escapes parent"):
+            _copy_mount_to_temp(link, tgt, mount)
+
+    def test_single_file_symlink_within_parent_allowed(self, temp_dir: Path) -> None:
+        """Single-file symlink within parent dir is allowed with follow_symlinks."""
+        real_file = temp_dir / "real.txt"
+        real_file.write_text("allowed")
+        link = temp_dir / "link.txt"
+        link.symlink_to(real_file)
+
+        tgt = temp_dir / "workspace" / "link.txt"
+        mount = HostMount(host_path=str(link), follow_symlinks=True)
+
+        preview = _copy_mount_to_temp(link, tgt, mount)
+        assert tgt.exists()
+        assert preview.bytes_copied == len("allowed")
+
+
+class TestCloneRefCounting:
+    def test_cleanup_original_preserves_temp_dir_when_clone_alive(
+        self, session: Session
+    ) -> None:
+        section = CodexWorkspaceSection(session=session)
+        new_session = Session(dispatcher=InProcessDispatcher(), tags={"suite": "tests"})
+        cloned = section.clone(session=new_session)
+        temp = section.temp_dir
+        assert temp.exists()
+
+        # Cleanup original — clone still alive, so temp_dir should persist
+        section.cleanup()
+        assert temp.exists()
+
+        # Cleanup clone (last ref) — temp_dir should be removed
+        cloned.cleanup()
+        assert not temp.exists()
+
+    def test_cleanup_clone_preserves_temp_dir_when_original_alive(
+        self, session: Session
+    ) -> None:
+        section = CodexWorkspaceSection(session=session)
+        new_session = Session(dispatcher=InProcessDispatcher(), tags={"suite": "tests"})
+        cloned = section.clone(session=new_session)
+        temp = section.temp_dir
+
+        # Cleanup clone first — original still alive
+        cloned.cleanup()
+        assert temp.exists()
+
+        # Cleanup original (last ref) — temp_dir should be removed
+        section.cleanup()
+        assert not temp.exists()
+
+
 class TestMaxBytesZero:
     def test_max_bytes_zero_rejects_files(self, temp_dir: Path) -> None:
         """max_bytes=0 should reject any file."""

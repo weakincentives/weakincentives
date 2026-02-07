@@ -1292,26 +1292,151 @@ class TestResolveCwd:
 
 class TestParseStructuredOutput:
     def test_valid_json(self) -> None:
+        from weakincentives.prompt.rendering import RenderedPrompt as RP
+        from weakincentives.prompt.structured_output import StructuredOutputConfig
+
         adapter = CodexAppServerAdapter()
 
         @dataclass(slots=True, frozen=True)
         class Result:
             answer: int
 
-        rendered = MagicMock()
-        rendered.output_type = Result
+        rendered = RP(
+            text="",
+            structured_output=StructuredOutputConfig(
+                dataclass_type=Result,
+                container="object",
+                allow_extra_keys=False,
+            ),
+        )
 
         result = adapter._parse_structured_output('{"answer": 42}', rendered, "test")
         assert result is not None
         assert result.answer == 42
 
     def test_invalid_json_raises(self) -> None:
+        from weakincentives.prompt.rendering import RenderedPrompt as RP
+        from weakincentives.prompt.structured_output import StructuredOutputConfig
+
         adapter = CodexAppServerAdapter()
-        rendered = MagicMock()
-        rendered.output_type = dict
+
+        @dataclass(slots=True, frozen=True)
+        class Dummy:
+            x: int
+
+        rendered = RP(
+            text="",
+            structured_output=StructuredOutputConfig(
+                dataclass_type=Dummy,
+                container="object",
+                allow_extra_keys=False,
+            ),
+        )
 
         with pytest.raises(PromptEvaluationError, match="parse structured"):
             adapter._parse_structured_output("not json", rendered, "test")
+
+    def test_array_container_parsed(self) -> None:
+        from weakincentives.prompt.rendering import RenderedPrompt as RP
+        from weakincentives.prompt.structured_output import StructuredOutputConfig
+
+        adapter = CodexAppServerAdapter()
+
+        @dataclass(slots=True, frozen=True)
+        class Item:
+            value: int
+
+        rendered = RP(
+            text="",
+            structured_output=StructuredOutputConfig(
+                dataclass_type=Item,
+                container="array",
+                allow_extra_keys=False,
+            ),
+        )
+
+        # Array wrapper format: {"items": [...]}
+        text = '{"items": [{"value": 1}, {"value": 2}]}'
+        result = adapter._parse_structured_output(text, rendered, "test")
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0].value == 1
+        assert result[1].value == 2
+
+
+class TestArraySchemaWrapping:
+    def test_array_container_wraps_schema(self) -> None:
+        """When container='array', the output schema wraps element in items."""
+        from weakincentives.prompt.rendering import RenderedPrompt as RP
+        from weakincentives.prompt.structured_output import StructuredOutputConfig
+
+        @dataclass(slots=True, frozen=True)
+        class Item:
+            value: int
+
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        messages = [
+            {
+                "method": "item/completed",
+                "params": {
+                    "item": {
+                        "type": "agentMessage",
+                        "text": '{"items": [{"value": 1}]}',
+                    }
+                },
+            },
+            {
+                "method": "turn/completed",
+                "params": {"turn": {"status": "completed"}},
+            },
+        ]
+
+        original_render = prompt.render
+
+        def patched_render(**kwargs: Any) -> RP[Any]:
+            rendered = original_render(**kwargs)
+            return RP(
+                text=rendered.text,
+                structured_output=StructuredOutputConfig(
+                    dataclass_type=Item,
+                    container="array",
+                    allow_extra_keys=False,
+                ),
+                _tools=rendered.tools,
+            )
+
+        with (
+            patch(
+                "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+            ) as MockClient,
+            patch.object(prompt, "render", side_effect=patched_render),
+        ):
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+            mock_client.read_messages.return_value = _messages_iterator(messages)
+            MockClient.return_value = mock_client
+
+            result = adapter.evaluate(prompt, session=session)
+
+        assert result.output is not None
+        assert isinstance(result.output, list)
+        assert result.output[0].value == 1
+
+        # Verify outputSchema was wrapped with items array
+        turn_call = mock_client.send_request.call_args_list[2]
+        output_schema = turn_call[0][1]["outputSchema"]
+        assert output_schema["type"] == "object"
+        assert "items" in output_schema["properties"]
+        assert output_schema["properties"]["items"]["type"] == "array"
 
 
 class TestEvaluateWithOutputSchema:
@@ -1675,6 +1800,104 @@ class TestToolCallRunsInThread:
                     client, 20, {"tool": "calc", "arguments": {"x": 1}}, tool_lookup
                 )
                 mock_to_thread.assert_called_once_with(mock_tool, {"x": 1})
+
+        asyncio.run(_run())
+
+
+class TestDeadlineRemainingS:
+    def test_no_deadline_returns_none(self) -> None:
+        adapter = CodexAppServerAdapter()
+        assert adapter._deadline_remaining_s(None, "p") is None
+
+    def test_expired_deadline_raises(self) -> None:
+        adapter = CodexAppServerAdapter()
+        clock = FakeClock()
+        anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+        clock.set_wall(anchor)
+        deadline = Deadline(expires_at=anchor + timedelta(seconds=5), clock=clock)
+        clock.advance(10)
+
+        with pytest.raises(PromptEvaluationError, match="Deadline expired during"):
+            adapter._deadline_remaining_s(deadline, "test-prompt")
+
+    def test_active_deadline_returns_seconds(self) -> None:
+        adapter = CodexAppServerAdapter()
+        clock = FakeClock()
+        anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+        clock.set_wall(anchor)
+        deadline = Deadline(expires_at=anchor + timedelta(seconds=30), clock=clock)
+
+        remaining = adapter._deadline_remaining_s(deadline, "test-prompt")
+        assert remaining is not None
+        assert remaining > 0
+
+
+class TestSetupRPCDeadlineBounding:
+    def test_setup_timeout_wraps_client_error(self) -> None:
+        """When thread/start times out, PromptEvaluationError has phase='request'."""
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+        clock = FakeClock()
+        anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+        clock.set_wall(anchor)
+        deadline = Deadline(expires_at=anchor + timedelta(seconds=30), clock=clock)
+
+        with patch(
+            "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+        ) as MockClient:
+            mock_client = _make_mock_client()
+            # initialize succeeds, thread/start raises client timeout
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},  # initialize
+                CodexClientError("Timeout waiting for response to thread/start"),
+            ]
+            MockClient.return_value = mock_client
+
+            with pytest.raises(PromptEvaluationError) as exc_info:
+                adapter.evaluate(prompt, session=session, deadline=deadline)
+            assert exc_info.value.phase == "request"
+
+    def test_setup_passes_timeout_to_send_request(self) -> None:
+        """Verify timeout is forwarded to send_request for setup RPCs."""
+
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter()
+            client = _make_mock_client()
+            client.send_request.return_value = {"thread": {"id": "t-1"}}
+
+            await adapter._create_thread(client, "/tmp", [], timeout=5.0)
+            call_args = client.send_request.call_args
+            assert call_args[1].get("timeout") == 5.0 or call_args[0][2] == 5.0
+
+        asyncio.run(_run())
+
+    def test_authenticate_passes_timeout(self) -> None:
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter(
+                client_config=CodexAppServerClientConfig(
+                    auth_mode=ApiKeyAuth(api_key="sk-test")
+                )
+            )
+            client = _make_mock_client()
+
+            await adapter._authenticate(client, timeout=3.0)
+            call_args = client.send_request.call_args
+            assert call_args[1].get("timeout") == 3.0
+
+        asyncio.run(_run())
+
+    def test_start_turn_passes_timeout(self) -> None:
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter()
+            client = _make_mock_client()
+            client.send_request.return_value = {"turn": {"id": 1}}
+
+            await adapter._start_turn(client, "thread-1", "Hello", None, timeout=7.0)
+            call_args = client.send_request.call_args
+            assert call_args[1].get("timeout") == 7.0
 
         asyncio.run(_run())
 

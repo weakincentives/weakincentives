@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -152,6 +153,19 @@ def _should_copy_mount_file(
     return not follow_symlinks or file_path.resolve().is_relative_to(resolved_source)
 
 
+def _check_single_file_symlink(source: Path, follow_symlinks: bool) -> None:
+    """Validate a single-file symlink mount."""
+    if not source.is_symlink():
+        return
+    if not follow_symlinks:
+        msg = f"Symlink mount rejected (follow_symlinks=False): {source}"
+        raise WorkspaceSecurityError(msg)
+    resolved = source.resolve()
+    if not resolved.is_relative_to(source.parent.resolve()):
+        msg = f"Symlink escapes parent directory: {source} -> {resolved}"
+        raise WorkspaceSecurityError(msg)
+
+
 def _copy_mount_to_temp(
     source: Path, target: Path, mount: HostMount
 ) -> HostMountPreview:
@@ -160,6 +174,8 @@ def _copy_mount_to_temp(
     bytes_copied = 0
 
     if source.is_file():
+        _check_single_file_symlink(source, mount.follow_symlinks)
+
         _ = target.parent.mkdir(parents=True, exist_ok=True)
         file_bytes = source.stat().st_size
 
@@ -314,6 +330,8 @@ class CodexWorkspaceSection(MarkdownSection[_CodexWorkspaceSectionParams]):
         _mount_previews: tuple[HostMountPreview, ...] | None = None,
         _created_at: datetime | None = None,
         _filesystem: Filesystem | None = None,
+        _ref_lock: threading.Lock | None = None,
+        _ref_count: list[int] | None = None,
     ) -> None:
         self._session = session
         self._mounts = tuple(mounts)
@@ -340,6 +358,9 @@ class CodexWorkspaceSection(MarkdownSection[_CodexWorkspaceSectionParams]):
             self._mount_previews = ()
             self._created_at = _utcnow()
             self._filesystem = HostFilesystem(_root=str(self._temp_dir))
+
+        self._ref_lock = _ref_lock if _ref_lock is not None else threading.Lock()
+        self._ref_count = _ref_count if _ref_count is not None else [1]
 
         template = _render_workspace_template(self._mount_previews)
 
@@ -385,6 +406,10 @@ class CodexWorkspaceSection(MarkdownSection[_CodexWorkspaceSectionParams]):
     @override
     def cleanup(self) -> None:
         """Remove the temporary workspace directory and associated resources."""
+        with self._ref_lock:
+            self._ref_count[0] -= 1
+            if self._ref_count[0] > 0:
+                return
         if self._temp_dir.exists():
             shutil.rmtree(self._temp_dir, ignore_errors=True)
         if isinstance(self._filesystem, HostFilesystem):  # pragma: no branch
@@ -409,6 +434,8 @@ class CodexWorkspaceSection(MarkdownSection[_CodexWorkspaceSectionParams]):
         ):
             msg = "Provided dispatcher must match the target session's dispatcher."
             raise TypeError(msg)
+        with self._ref_lock:
+            self._ref_count[0] += 1
         return CodexWorkspaceSection(
             session=session_obj,
             mounts=self._mounts,
@@ -418,4 +445,6 @@ class CodexWorkspaceSection(MarkdownSection[_CodexWorkspaceSectionParams]):
             _mount_previews=self._mount_previews,
             _created_at=self._created_at,
             _filesystem=self._filesystem,
+            _ref_lock=self._ref_lock,
+            _ref_count=self._ref_count,
         )

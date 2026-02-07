@@ -549,6 +549,34 @@ class TestStopWithTimeout:
         asyncio.run(_run())
 
 
+class TestStopBrokenPipe:
+    def test_stop_completes_when_stdin_close_raises_broken_pipe(self) -> None:
+        """stop() still completes when stdin.close() raises BrokenPipeError."""
+
+        async def _run() -> None:
+            proc = FakeProcess(stdout_lines=[])
+
+            with patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec:
+                mock_exec.return_value = proc
+                client = CodexAppServerClient()
+                await client.start()
+
+                def _raise_broken_pipe() -> None:
+                    raise BrokenPipeError("broken pipe")
+
+                proc.stdin.close = _raise_broken_pipe  # type: ignore[assignment,method-assign]
+
+                await client.stop()
+
+                # Process should still be cleaned up
+                assert client._proc is None
+                assert proc._waited
+
+        asyncio.run(_run())
+
+
 class TestReadLoopEdgeCases:
     def test_empty_lines_skipped(self) -> None:
         async def _run() -> None:
