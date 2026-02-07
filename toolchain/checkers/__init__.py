@@ -128,7 +128,7 @@ def create_test_checker() -> SubprocessChecker:
             "--timeout-method=thread",
             "--tb=short",  # Short traceback format - shows enough context without being verbose
             "--no-header",
-            "--cov-report=",
+            "--cov-report=term-missing",
             "tests",
         ],
         parser=parse_pytest,

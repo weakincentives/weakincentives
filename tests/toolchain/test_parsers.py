@@ -197,6 +197,21 @@ FAIL Required test coverage of 100% not reached. Total coverage: 90%"""
         assert len(diagnostics) == 1
         assert "lines 1-5, 10, 20-30" in diagnostics[0].message
 
+    def test_parses_coverage_failure_with_branch_arrow_notation(self) -> None:
+        """Test coverage report with -> branch notation in missing lines."""
+        output = """Name                                                                    Stmts   Miss Branch BrPart  Cover   Missing
+-------------------------------------------------------------------------------------------------------------------
+src/weakincentives/adapters/claude_agent_sdk/adapter.py                   490     16    166     10    96%   195, 207, 214-222, 231->239, 240, 257
+-------------------------------------------------------------------------------------------------------------------
+TOTAL                                                                   16772     16   4462     10    99%
+FAIL Required test coverage of 100% not reached. Total coverage: 99.87%"""
+        diagnostics = parse_pytest(output, 1)
+        assert len(diagnostics) == 1
+        assert "99.87%" in diagnostics[0].message
+        assert "Uncovered" in diagnostics[0].message
+        assert "adapter.py" in diagnostics[0].message
+        assert "231->239" in diagnostics[0].message
+
     def test_generic_failure_message(self) -> None:
         output = "some random failure output"
         diagnostics = parse_pytest(output, 1)
@@ -370,6 +385,19 @@ TOTAL                                        164    100     36      0    35%"""
         assert "lines 54-56, 65-66" in result
         assert "other.py" in result
         assert "29%" in result
+
+    def test_extracts_files_with_branch_arrow_notation(self) -> None:
+        """Test parsing coverage output with -> branch notation in missing lines."""
+        output = """Name                                                                    Stmts   Miss Branch BrPart  Cover   Missing
+-------------------------------------------------------------------------------------------------------------------
+src/weakincentives/adapters/claude_agent_sdk/adapter.py                   490     16    166     10    96%   195, 207, 214-222, 231->239, 240, 257, 893-894, 902, 927, 1263-1273, 1292
+-------------------------------------------------------------------------------------------------------------------
+TOTAL                                                                   16772     16   4462     10    99%"""
+        result = _extract_uncovered_files(output)
+        assert result is not None
+        assert "adapter.py" in result
+        assert "96%" in result
+        assert "lines 195, 207, 214-222, 231->239" in result
 
 
 class TestExtractTestFiles:
