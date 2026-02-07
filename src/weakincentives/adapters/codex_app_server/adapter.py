@@ -35,6 +35,7 @@ from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
+from ...runtime.transcript import TranscriptEmitter
 from ...runtime.watchdog import Heartbeat
 from ...serde import schema
 from ...types import AdapterName
@@ -47,6 +48,7 @@ from ._events import (
     extract_token_usage,
     map_codex_error_phase,
 )
+from ._transcript import CodexTranscriptBridge
 from .client import CodexAppServerClient, CodexClientError
 from .config import (
     ApiKeyAuth,
@@ -466,6 +468,19 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         """
         await client.start()
 
+        # Create transcript bridge if enabled.
+        bridge: CodexTranscriptBridge | None = None
+        if self._client_config.transcript:
+            session_id = getattr(session, "session_id", None)
+            emitter = TranscriptEmitter(
+                prompt_name=prompt_name,
+                adapter="codex_app_server",
+                session_id=str(session_id) if session_id else None,
+                emit_raw=self._client_config.transcript_emit_raw,
+            )
+            bridge = CodexTranscriptBridge(emitter)
+            emitter.start()
+
         # 1. Initialize
         _ = await client.send_request(
             "initialize",
@@ -492,7 +507,10 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 client, effective_cwd, dynamic_tool_specs, timeout=timeout
             )
 
-            # 4. Turn
+            # 4. Turn — emit user_message before starting the turn.
+            if bridge is not None:
+                bridge.on_user_message(prompt_text)
+
             timeout = self._deadline_remaining_s(deadline, prompt_name)
             turn_result = await self._start_turn(
                 client, thread_id, prompt_text, output_schema, timeout=timeout
@@ -515,9 +533,14 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             tool_lookup=tool_lookup,
             deadline=deadline,
             run_context=run_context,
+            bridge=bridge,
         )
 
-        # 6. Visibility signal
+        # 6. Stop transcript emitter.
+        if bridge is not None:
+            bridge.emitter.stop()
+
+        # 7. Visibility signal
         stored_exc = visibility_signal.get_and_clear()
         if stored_exc is not None:
             raise stored_exc
@@ -616,6 +639,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         tool_lookup: dict[str, BridgedTool],
         deadline: Deadline | None,
         run_context: RunContext | None,
+        bridge: CodexTranscriptBridge | None = None,
     ) -> tuple[str | None, TokenUsage | None]:
         """Stream turn notifications until turn/completed.
 
@@ -637,6 +661,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 run_context=run_context,
                 accumulated_text=accumulated_text,
                 usage=usage,
+                bridge=bridge,
             )
         finally:
             if watchdog_task is not None:
@@ -680,13 +705,22 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         run_context: RunContext | None,
         accumulated_text: str,
         usage: TokenUsage | None,
+        bridge: CodexTranscriptBridge | None = None,
     ) -> tuple[str, TokenUsage | None]:
         """Consume messages from the client until turn/completed."""
         turn_completed = False
         async for message in client.read_messages():
             if "id" in message and "method" in message:
-                await self._handle_server_request(client, message, tool_lookup)
+                await self._handle_server_request(
+                    client, message, tool_lookup, bridge=bridge
+                )
                 continue
+
+            # Emit transcript entry for this notification.
+            if bridge is not None:
+                method = message.get("method", "")
+                params: dict[str, Any] = message.get("params", {})
+                bridge.on_notification(method, params)
 
             result = self._process_notification(
                 message, session, prompt_name, run_context
@@ -834,6 +868,8 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         client: CodexAppServerClient,
         message: dict[str, Any],
         tool_lookup: dict[str, BridgedTool],
+        *,
+        bridge: CodexTranscriptBridge | None = None,
     ) -> None:
         """Handle a server-initiated request (tool call or approval)."""
         method: str = message["method"]
@@ -841,7 +877,9 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         request_id: int = message["id"]
 
         if method == "item/tool/call":
-            await self._handle_tool_call(client, request_id, params, tool_lookup)
+            await self._handle_tool_call(
+                client, request_id, params, tool_lookup, bridge=bridge
+            )
         elif method in {
             "item/commandExecution/requestApproval",
             "item/fileChange/requestApproval",
@@ -863,6 +901,8 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         request_id: int,
         params: dict[str, Any],
         tool_lookup: dict[str, BridgedTool],
+        *,
+        bridge: CodexTranscriptBridge | None = None,
     ) -> None:
         """Handle an item/tool/call server request."""
         tool_name: str = params.get("tool", "")
@@ -873,17 +913,21 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             except json.JSONDecodeError:
                 arguments = {}
 
+        # Emit tool_use transcript entry before execution.
+        if bridge is not None:
+            bridge.on_tool_call(params)
+
         bridged_tool = tool_lookup.get(tool_name)
         if bridged_tool is None:
-            await client.send_response(
-                request_id,
-                {
-                    "success": False,
-                    "contentItems": [
-                        {"type": "inputText", "text": f"Unknown tool: {tool_name}"}
-                    ],
-                },
-            )
+            error_response: dict[str, Any] = {
+                "success": False,
+                "contentItems": [
+                    {"type": "inputText", "text": f"Unknown tool: {tool_name}"}
+                ],
+            }
+            if bridge is not None:
+                bridge.on_tool_result(params, error_response)
+            await client.send_response(request_id, error_response)
             return
 
         mcp_result: dict[str, Any] = await asyncio.to_thread(
@@ -896,10 +940,16 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             for c in mcp_content
             if c.get("type") == "text"
         ]
-        await client.send_response(
-            request_id,
-            {"success": not is_error, "contentItems": content_items},
-        )
+        response: dict[str, Any] = {
+            "success": not is_error,
+            "contentItems": content_items,
+        }
+
+        # Emit tool_result transcript entry after execution.
+        if bridge is not None:
+            bridge.on_tool_result(params, response)
+
+        await client.send_response(request_id, response)
 
     async def _deadline_watchdog(
         self,

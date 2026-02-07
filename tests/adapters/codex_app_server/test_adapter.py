@@ -1773,6 +1773,98 @@ class TestSetupRPCDeadlineBounding:
         asyncio.run(_run())
 
 
+class TestTranscriptBridgeIntegration:
+    """Tests for transcript bridge integration in the adapter."""
+
+    def test_evaluate_with_transcript_disabled(self) -> None:
+        """When transcript=False, bridge is not created."""
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test", transcript=False),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        messages = [
+            {
+                "method": "item/completed",
+                "params": {"item": {"type": "agentMessage", "text": "ok"}},
+            },
+            {
+                "method": "turn/completed",
+                "params": {"turn": {"status": "completed"}},
+            },
+        ]
+
+        with patch(
+            "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+        ) as MockClient:
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+            mock_client.read_messages.return_value = _messages_iterator(messages)
+            MockClient.return_value = mock_client
+
+            result = adapter.evaluate(prompt, session=session)
+
+        assert result.text == "ok"
+
+    def test_handle_tool_call_with_bridge(self) -> None:
+        """Tool call emits transcript entries via bridge."""
+
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter()
+            client = _make_mock_client()
+            mock_tool = MagicMock()
+            mock_tool.return_value = {
+                "content": [{"type": "text", "text": "result: 42"}],
+                "isError": False,
+            }
+            tool_lookup = {"calc": mock_tool}
+
+            bridge = MagicMock()
+            await adapter._handle_tool_call(
+                client,
+                10,
+                {"tool": "calc", "arguments": {"x": 1}},
+                tool_lookup,
+                bridge=bridge,
+            )
+            bridge.on_tool_call.assert_called_once_with(
+                {"tool": "calc", "arguments": {"x": 1}}
+            )
+            bridge.on_tool_result.assert_called_once()
+            resp = bridge.on_tool_result.call_args[0][1]
+            assert resp["success"] is True
+
+        asyncio.run(_run())
+
+    def test_handle_tool_call_unknown_tool_with_bridge(self) -> None:
+        """Unknown tool call still emits tool_result via bridge."""
+
+        async def _run() -> None:
+            adapter = CodexAppServerAdapter()
+            client = _make_mock_client()
+            tool_lookup: dict[str, Any] = {}
+
+            bridge = MagicMock()
+            await adapter._handle_tool_call(
+                client,
+                10,
+                {"tool": "missing", "arguments": {}},
+                tool_lookup,
+                bridge=bridge,
+            )
+            bridge.on_tool_call.assert_called_once()
+            bridge.on_tool_result.assert_called_once()
+            resp = bridge.on_tool_result.call_args[0][1]
+            assert resp["success"] is False
+
+        asyncio.run(_run())
+
+
 class TestApprovalPolicyUntrusted:
     def test_approval_untrusted_declines(self) -> None:
         async def _run() -> None:

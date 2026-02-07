@@ -49,12 +49,12 @@ class TestClaudeAgentSDKClientConfig:
     def test_transcript_collection_custom_config(self) -> None:
         custom_config = TranscriptCollectorConfig(
             poll_interval=0.5,
-            emit_raw_json=False,
+            emit_raw=False,
         )
         config = ClaudeAgentSDKClientConfig(transcript_collection=custom_config)
         assert config.transcript_collection is custom_config
         assert config.transcript_collection.poll_interval == 0.5
-        assert config.transcript_collection.emit_raw_json is False
+        assert config.transcript_collection.emit_raw is False
 
     def test_with_all_values(self) -> None:
         isolation = IsolationConfig(network_policy=NetworkPolicy.no_network())

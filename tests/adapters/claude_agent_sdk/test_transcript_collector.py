@@ -45,8 +45,7 @@ class TestTranscriptCollector:
             poll_interval=0.01,  # Fast polling for tests
             subagent_discovery_interval=0.02,
             max_read_bytes=1024,
-            emit_raw_json=True,
-            parse_entries=True,
+            emit_raw=True,
         )
 
     @pytest.fixture
@@ -111,7 +110,7 @@ class TestTranscriptCollector:
     def test_entry_emission(
         self, collector: TranscriptCollector, temp_dir: Path
     ) -> None:
-        """Entries emitted as DEBUG logs with correct context."""
+        """Entries emitted via TranscriptEmitter with correct canonical types."""
         # Create transcript with test entry
         transcript_path = temp_dir / "session123.jsonl"
         entry = {
@@ -123,25 +122,25 @@ class TestTranscriptCollector:
         # Set up collector with the transcript
         asyncio.run(collector._remember_transcript_path(str(transcript_path)))
 
-        # Mock logger to capture emissions
-        with patch(
-            "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
-        ) as mock_logger:
+        # Mock the emitter's logger to capture emissions
+        with patch("weakincentives.runtime.transcript._logger") as mock_logger:
             # Poll for content
             asyncio.run(collector._poll_once())
 
-            # Should have emitted the entry
-            mock_logger.debug.assert_called()
-            call_args = mock_logger.debug.call_args
-
-            # Check log event and context
-            assert call_args[0][0] == "transcript.collector.entry"
-            context = call_args[1]["context"]
+            # Should have emitted the entry via TranscriptEmitter
+            entry_calls = [
+                call
+                for call in mock_logger.debug.call_args_list
+                if call[1].get("event") == "transcript.entry"
+            ]
+            assert len(entry_calls) == 1
+            context = entry_calls[0][1]["context"]
             assert context["prompt_name"] == "test-prompt"
-            assert context["transcript_source"] == "main"
-            assert context["entry_type"] == "user"
+            assert context["adapter"] == "claude_agent_sdk"
+            assert context["source"] == "main"
+            assert context["entry_type"] == "user_message"
             assert context["sequence_number"] == 1
-            assert context["parsed"]["type"] == "user"
+            assert context["detail"]["sdk_entry"]["type"] == "user"
 
     def test_rotation_handling(
         self, collector: TranscriptCollector, temp_dir: Path
@@ -262,13 +261,9 @@ class TestTranscriptCollector:
             f.write('"message": "complete"}\n')
 
         # Poll again - should emit complete entry
-        with patch(
-            "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
-        ) as mock_logger:
-            asyncio.run(collector._poll_once())
-            assert tailer.entry_count == 1
-            assert tailer.partial_line == ""
-            mock_logger.debug.assert_called()
+        asyncio.run(collector._poll_once())
+        assert tailer.entry_count == 1
+        assert tailer.partial_line == ""
 
     def test_context_manager_lifecycle(
         self, collector: TranscriptCollector, temp_dir: Path
@@ -281,9 +276,7 @@ class TestTranscriptCollector:
         asyncio.run(collector._remember_transcript_path(str(transcript_path)))
 
         async def run_test() -> None:
-            with patch(
-                "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
-            ) as mock_logger:
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     # Should be running
                     assert collector._running
@@ -300,12 +293,12 @@ class TestTranscriptCollector:
                 start_calls = [
                     call
                     for call in mock_logger.debug.call_args_list
-                    if call[0][0] == "transcript.collector.start"
+                    if call[1].get("event") == "transcript.start"
                 ]
                 stop_calls = [
                     call
                     for call in mock_logger.debug.call_args_list
-                    if call[0][0] == "transcript.collector.stop"
+                    if call[1].get("event") == "transcript.stop"
                 ]
                 assert len(start_calls) == 1
                 assert len(stop_calls) == 1
@@ -350,7 +343,6 @@ class TestTranscriptCollector:
                 prompt_name="json_error_test",
                 config=TranscriptCollectorConfig(
                     poll_interval=0.01,
-                    parse_entries=True,
                 ),
             )
 
@@ -576,7 +568,7 @@ class TestTranscriptCollector:
         async def run_test() -> None:
             collector = TranscriptCollector(
                 prompt_name="empty_lines_test",
-                config=TranscriptCollectorConfig(parse_entries=True),
+                config=TranscriptCollectorConfig(),
             )
 
             # Create transcript with empty lines
@@ -592,38 +584,47 @@ class TestTranscriptCollector:
 
         asyncio.run(run_test())
 
-    def test_unparsed_entries(self, tmp_path: Path) -> None:
-        """Test handling when parse_entries is False."""
+    def test_sdk_type_mapping(self, tmp_path: Path) -> None:
+        """Verify SDK transcript types map to canonical entry types."""
 
         async def run_test() -> None:
             collector = TranscriptCollector(
-                prompt_name="unparsed_test",
-                config=TranscriptCollectorConfig(
-                    poll_interval=0.01,
-                    parse_entries=False,  # Disable parsing
-                ),
+                prompt_name="type_map_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
             )
 
-            # Create transcript
+            entries = [
+                '{"type": "user", "message": {"role": "user"}}',
+                '{"type": "assistant", "message": {"role": "assistant"}}',
+                '{"type": "tool_result", "tool_use_id": "123"}',
+                '{"type": "thinking", "thinking": "hmm"}',
+                '{"type": "summary", "dropped_count": 5}',
+                '{"type": "system", "event": "lifecycle"}',
+                '{"type": "never_seen_before"}',
+            ]
             transcript = tmp_path / "test.jsonl"
-            transcript.write_text('{"type": "test"}\n')
+            transcript.write_text("\n".join(entries) + "\n")
 
-            with patch(
-                "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
-            ) as mock_logger:
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
                     await asyncio.sleep(0.05)
 
-                # Should have emitted entry with "unparsed" type
-                entry_calls = [
-                    call
-                    for call in mock_logger.debug.call_args_list
-                    if call[0][0] == "transcript.collector.entry"
-                ]
-                assert len(entry_calls) > 0
-                context = entry_calls[0][1]["context"]
-                assert context["entry_type"] == "unparsed"
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == [
+                "user_message",
+                "assistant_message",
+                "tool_result",
+                "thinking",
+                "system_event",
+                "system_event",
+                "unknown",
+            ]
 
         asyncio.run(run_test())
 
@@ -698,31 +699,32 @@ class TestTranscriptCollector:
 
         asyncio.run(run_test())
 
-    def test_emit_entry_without_raw_json(self, tmp_path: Path) -> None:
-        """Emit path omits raw_json when disabled."""
+    def test_emit_entry_without_raw(self, tmp_path: Path) -> None:
+        """Emit path omits raw when emit_raw is disabled."""
 
         async def run_test() -> None:
             collector = TranscriptCollector(
-                prompt_name="emit_raw_json_false_test",
-                config=TranscriptCollectorConfig(
-                    emit_raw_json=False, parse_entries=False
-                ),
+                prompt_name="emit_raw_false_test",
+                config=TranscriptCollectorConfig(emit_raw=False),
             )
 
             transcript_path = tmp_path / "session123.jsonl"
             transcript_path.write_text('{"type": "user"}\n')
             await collector._remember_transcript_path(str(transcript_path))
             tailer = collector._tailers["main"]
-            tailer.entry_count = 1
+            tailer.entry_count = 0
 
-            with patch(
-                "weakincentives.adapters.claude_agent_sdk._transcript_collector.logger"
-            ) as mock_logger:
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 await collector._emit_entry(tailer, '{"type": "user"}')
-                mock_logger.debug.assert_called()
-                context = mock_logger.debug.call_args[1]["context"]
-                assert "raw_json" not in context
-                assert context["entry_type"] == "unparsed"
+                entry_calls = [
+                    call
+                    for call in mock_logger.debug.call_args_list
+                    if call[1].get("event") == "transcript.entry"
+                ]
+                assert len(entry_calls) == 1
+                context = entry_calls[0][1]["context"]
+                assert "raw" not in context
+                assert context["entry_type"] == "user_message"
 
         asyncio.run(run_test())
 
@@ -830,7 +832,6 @@ class TestTranscriptCollector:
         assert tailer.entry_count == 1
 
         # Simulate inode change by modifying the tailer's stored inode
-        # This exercises the inode mismatch branch (lines 404-406)
         tailer.inode = original_inode + 12345
         tailer.partial_line = "incomplete"
 

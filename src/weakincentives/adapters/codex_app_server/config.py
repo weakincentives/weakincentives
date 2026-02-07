@@ -105,6 +105,10 @@ class CodexAppServerClientConfig:
     ephemeral: bool = False
     client_name: str = "wink"
     client_version: str = "0.1.0"
+    transcript: bool = True
+    """Emit transcript entries during evaluation."""
+    transcript_emit_raw: bool = True
+    """Include raw notification JSON in ``raw`` field."""
 
 
 @FrozenDataclass()
