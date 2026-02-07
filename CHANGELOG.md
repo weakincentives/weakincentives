@@ -60,6 +60,29 @@ Server** and **OpenCode ACP** integrations.
 
 ### Breaking Changes
 
+#### Removed `deadline` from `AgentLoopConfig`
+
+A deadline is a specific point in time. Setting one at config-construction time
+means it can expire before execution even starts. Deadlines belong on
+per-request objects (`AgentLoopRequest`, `Budget`, or `execute(deadline=...)`).
+
+**Migration:**
+```python
+# Old ❌
+config = AgentLoopConfig(
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
+)
+
+# New ✅ — pass deadline per-request
+request = AgentLoopRequest(
+    request=my_request,
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
+)
+
+# Or via execute()
+loop.execute(my_request, deadline=Deadline(...))
+```
+
 #### Removed OpenAI and LiteLLM Adapters
 
 WINK now focuses exclusively on agentic harness integrations. The `OpenAIAdapter`

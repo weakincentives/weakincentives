@@ -44,7 +44,6 @@ override config.
 
 | Field | Description |
 | --- | --- |
-| `deadline` | Optional default deadline |
 | `budget` | Optional default budget |
 | `resources` | Optional default resources |
 | `lease_extender` | Lease extension configuration |
