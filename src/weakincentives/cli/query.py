@@ -43,7 +43,14 @@ class QueryError(WinkError, RuntimeError):
 _MAX_COLUMN_WIDTH = 50
 
 # Schema version for cache invalidation - increment when schema changes
-_SCHEMA_VERSION = 5  # v5: environment tables for system/python/git/container info
+_SCHEMA_VERSION = 6  # v6: unified transcript (transcript.entry + source/raw/detail)
+
+_TRANSCRIPT_INSERT_SQL = """
+    INSERT INTO transcript (
+        timestamp, prompt_name, transcript_source, sequence_number,
+        entry_type, role, content, tool_name, tool_use_id, raw_json, parsed
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
 
 
 @FrozenDataclass()
@@ -351,9 +358,16 @@ def _extract_transcript_parsed_obj(
     context: Mapping[str, object],
     raw_json: str | None,
 ) -> Mapping[str, object] | None:
-    parsed_raw = context.get("parsed")
-    if isinstance(parsed_raw, Mapping):
-        return cast("Mapping[str, object]", parsed_raw)
+    # Unified format: context.detail (may contain sdk_entry or notification)
+    detail_raw = context.get("detail")
+    if isinstance(detail_raw, Mapping):
+        detail = cast("Mapping[str, object]", detail_raw)
+        # Claude SDK wraps in sdk_entry; unwrap so downstream sees message/type
+        sdk_entry = detail.get("sdk_entry")
+        if isinstance(sdk_entry, Mapping):
+            return cast("Mapping[str, object]", sdk_entry)
+        return detail
+
     if raw_json is None:
         return None
     try:
@@ -405,7 +419,7 @@ def _extract_transcript_row(
     | None
 ):
     """Extract a row for the transcript table from a log entry."""
-    if entry.get("event") != "transcript.collector.entry":
+    if entry.get("event") != "transcript.entry":
         return None
 
     ctx_raw = entry.get("context")
@@ -414,11 +428,11 @@ def _extract_transcript_row(
     ctx = cast("Mapping[str, object]", ctx_raw)
 
     prompt_name = str(ctx.get("prompt_name") or "")
-    transcript_source = str(ctx.get("transcript_source") or "")
+    transcript_source = str(ctx.get("source") or "")
     entry_type = str(ctx.get("entry_type") or "unknown")
 
     sequence_number = _coerce_int(ctx.get("sequence_number"))
-    raw_json = _coerce_str(ctx.get("raw_json"))
+    raw_json = _coerce_str(ctx.get("raw"))
     parsed_obj = _extract_transcript_parsed_obj(ctx, raw_json)
 
     resolved_entry_type, role, content, tool_name, tool_use_id, parsed_json = (
@@ -900,7 +914,12 @@ class QueryDatabase(Closeable):
             )
 
     def _build_transcript_table(self, conn: sqlite3.Connection) -> None:
-        """Build transcript table from TranscriptCollector structured logs."""
+        """Build transcript table from transcript entries.
+
+        Sources (in priority order):
+        1. ``transcript.jsonl`` artifact (new unified format)
+        2. Fall back to scanning ``logs/app.jsonl`` for transcript events
+        """
         _ = conn.execute("""
             CREATE TABLE IF NOT EXISTS transcript (
                 rowid INTEGER PRIMARY KEY,
@@ -918,6 +937,33 @@ class QueryDatabase(Closeable):
             )
         """)
 
+        inserted = self._insert_transcript_from_artifact(conn)
+        if not inserted:
+            self._insert_transcript_from_logs(conn)
+
+    def _insert_transcript_from_artifact(self, conn: sqlite3.Connection) -> bool:
+        """Try loading transcript entries from transcript.jsonl artifact.
+
+        Returns True if any rows were inserted.
+        """
+        transcript_entries = self._bundle.transcript
+        if not transcript_entries:
+            return False
+
+        count = 0
+        for entry in transcript_entries:
+            row = _extract_transcript_row(entry)
+            if row is None:
+                continue
+            _ = conn.execute(
+                _TRANSCRIPT_INSERT_SQL,
+                row,
+            )
+            count += 1
+        return count > 0
+
+    def _insert_transcript_from_logs(self, conn: sqlite3.Connection) -> None:
+        """Fall back to scanning logs/app.jsonl for transcript entries."""
         logs_content = self._bundle.logs
         if not logs_content:
             return
@@ -939,22 +985,7 @@ class QueryDatabase(Closeable):
                 continue
 
             _ = conn.execute(
-                """
-                INSERT INTO transcript (
-                    timestamp,
-                    prompt_name,
-                    transcript_source,
-                    sequence_number,
-                    entry_type,
-                    role,
-                    content,
-                    tool_name,
-                    tool_use_id,
-                    raw_json,
-                    parsed
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+                _TRANSCRIPT_INSERT_SQL,
                 row,
             )
 

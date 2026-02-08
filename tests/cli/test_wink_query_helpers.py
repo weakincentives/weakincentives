@@ -623,14 +623,35 @@ class TestTranscriptHelperCoverage:
         assert _extract_transcript_parsed_obj({}, "{") is None
         assert _extract_transcript_parsed_obj({}, '{"a": 1}') == {"a": 1}
         assert _extract_transcript_parsed_obj({}, '["x"]') is None
-        assert _extract_transcript_parsed_obj({"parsed": {"k": "v"}}, None) == {
-            "k": "v"
-        }
+
+    def test_extract_transcript_parsed_obj_unwraps_detail_sdk_entry(self) -> None:
+        """Unified format: detail.sdk_entry is unwrapped."""
+        sdk = {"type": "user", "message": {"role": "user", "content": "Hi"}}
+        ctx: dict[str, object] = {"detail": {"sdk_entry": sdk}}
+        assert _extract_transcript_parsed_obj(ctx, None) == sdk
+
+    def test_extract_transcript_parsed_obj_uses_detail_directly(self) -> None:
+        """detail without sdk_entry is returned as-is (e.g. Codex)."""
+        detail: dict[str, object] = {"text": "hello"}
+        ctx: dict[str, object] = {"detail": detail}
+        assert _extract_transcript_parsed_obj(ctx, None) == detail
 
     def test_extract_transcript_row_ignores_bad_context(self) -> None:
         assert (
             _extract_transcript_row(
-                {"event": "transcript.collector.entry", "context": "not-a-mapping"}
+                {"event": "transcript.entry", "context": "not-a-mapping"}
+            )
+            is None
+        )
+
+    def test_extract_transcript_row_rejects_legacy_event(self) -> None:
+        """Old event name is no longer supported."""
+        assert (
+            _extract_transcript_row(
+                {
+                    "event": "transcript.collector.entry",
+                    "context": {"source": "main", "entry_type": "user"},
+                }
             )
             is None
         )

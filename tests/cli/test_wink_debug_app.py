@@ -428,19 +428,19 @@ def test_api_transcript_endpoint(tmp_path: Path) -> None:
             transcript_logger.debug(
                 "Transcript entry",
                 extra={
-                    "event": "transcript.collector.entry",
+                    "event": "transcript.entry",
                     "context": {
                         "prompt_name": "test",
-                        "transcript_source": "main",
+                        "source": "main",
                         "entry_type": "user",
                         "sequence_number": 1,
-                        "raw_json": json.dumps(
+                        "raw": json.dumps(
                             {
                                 "type": "user",
                                 "message": {"role": "user", "content": "Hi"},
                             }
                         ),
-                        "parsed": {
+                        "detail": {
                             "type": "user",
                             "message": {"role": "user", "content": "Hi"},
                         },
@@ -488,13 +488,13 @@ def test_api_transcript_markdown_rendering(tmp_path: Path) -> None:
             transcript_logger.debug(
                 "Transcript entry",
                 extra={
-                    "event": "transcript.collector.entry",
+                    "event": "transcript.entry",
                     "context": {
                         "prompt_name": "test",
-                        "transcript_source": "main",
+                        "source": "main",
                         "entry_type": "assistant",
                         "sequence_number": 1,
-                        "raw_json": json.dumps(
+                        "raw": json.dumps(
                             {
                                 "type": "assistant",
                                 "message": {
@@ -503,7 +503,7 @@ def test_api_transcript_markdown_rendering(tmp_path: Path) -> None:
                                 },
                             }
                         ),
-                        "parsed": {
+                        "detail": {
                             "type": "assistant",
                             "message": {
                                 "role": "assistant",
@@ -547,19 +547,19 @@ def test_api_transcript_no_markdown_for_short_content(tmp_path: Path) -> None:
             transcript_logger.debug(
                 "Transcript entry",
                 extra={
-                    "event": "transcript.collector.entry",
+                    "event": "transcript.entry",
                     "context": {
                         "prompt_name": "test",
-                        "transcript_source": "main",
+                        "source": "main",
                         "entry_type": "user",
                         "sequence_number": 1,
-                        "raw_json": json.dumps(
+                        "raw": json.dumps(
                             {
                                 "type": "user",
                                 "message": {"role": "user", "content": "Hi"},
                             }
                         ),
-                        "parsed": {
+                        "detail": {
                             "type": "user",
                             "message": {"role": "user", "content": "Hi"},
                         },
@@ -919,19 +919,19 @@ def test_transcript_endpoints_and_filters(tmp_path: Path) -> None:
             transcript_logger.debug(
                 "Transcript entry: user",
                 extra={
-                    "event": "transcript.collector.entry",
+                    "event": "transcript.entry",
                     "context": {
                         "prompt_name": "test-prompt",
-                        "transcript_source": "main",
+                        "source": "main",
                         "entry_type": "user",
                         "sequence_number": 1,
-                        "raw_json": json.dumps(
+                        "raw": json.dumps(
                             {
                                 "type": "user",
                                 "message": {"role": "user", "content": "Hello"},
                             }
                         ),
-                        "parsed": {
+                        "detail": {
                             "type": "user",
                             "message": {"role": "user", "content": "Hello"},
                         },
@@ -942,14 +942,14 @@ def test_transcript_endpoints_and_filters(tmp_path: Path) -> None:
             transcript_logger.debug(
                 "Transcript entry: assistant",
                 extra={
-                    "event": "transcript.collector.entry",
+                    "event": "transcript.entry",
                     "context": {
                         "prompt_name": "test-prompt",
-                        "transcript_source": "main",
+                        "source": "main",
                         "entry_type": "assistant",
                         "sequence_number": 2,
-                        "raw_json": None,
-                        "parsed": {
+                        "raw": None,
+                        "detail": {
                             "type": "assistant",
                             "message": {"role": "assistant", "content": "Hi"},
                         },

@@ -304,15 +304,15 @@ class TestTranscriptTable:
                 "timestamp": "2024-01-01T00:00:00Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "Transcript entry",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "main",
+                    "source": "main",
                     "sequence_number": 7,
                     "entry_type": "assistant",
-                    "raw_json": json.dumps(parsed_entry),
-                    "parsed": parsed_entry,
+                    "raw": json.dumps(parsed_entry),
+                    "detail": parsed_entry,
                 },
             }
         ]
@@ -372,14 +372,14 @@ class TestTranscriptTable:
                 "timestamp": "2024-01-01T00:00:00Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "User message",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "main",
+                    "source": "main",
                     "sequence_number": 1,
                     "entry_type": "user",
-                    "parsed": {
+                    "detail": {
                         "type": "user",
                         "message": {"role": "user", "content": "Hello, assistant!"},
                     },
@@ -389,14 +389,14 @@ class TestTranscriptTable:
                 "timestamp": "2024-01-01T00:00:01Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "Assistant response",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "main",
+                    "source": "main",
                     "sequence_number": 2,
                     "entry_type": "assistant",
-                    "parsed": {
+                    "detail": {
                         "type": "assistant",
                         "message": {
                             "role": "assistant",
@@ -409,14 +409,14 @@ class TestTranscriptTable:
                 "timestamp": "2024-01-01T00:00:02Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "Thinking",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "main",
+                    "source": "main",
                     "sequence_number": 3,
                     "entry_type": "thinking",
-                    "parsed": {
+                    "detail": {
                         "type": "thinking",
                         "thinking": "The user is greeting me. I should respond politely.",
                     },
@@ -488,14 +488,14 @@ class TestTranscriptTable:
                 "timestamp": "2024-01-01T00:00:00Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "Tool call",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "main",
+                    "source": "main",
                     "sequence_number": 1,
                     "entry_type": "assistant",
-                    "parsed": {
+                    "detail": {
                         "type": "assistant",
                         "message": {
                             "role": "assistant",
@@ -516,14 +516,14 @@ class TestTranscriptTable:
                 "timestamp": "2024-01-01T00:00:01Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "Tool result",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "main",
+                    "source": "main",
                     "sequence_number": 2,
                     "entry_type": "tool_result",
-                    "parsed": {
+                    "detail": {
                         "type": "tool_result",
                         "tool_use_id": "tool-123",
                         "content": [{"type": "text", "text": "hello"}],
@@ -588,14 +588,14 @@ class TestTranscriptTable:
                 "timestamp": "2024-01-01T00:00:00Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "User",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "main",
+                    "source": "main",
                     "sequence_number": 1,
                     "entry_type": "user",
-                    "parsed": {
+                    "detail": {
                         "type": "user",
                         "message": {"role": "user", "content": "Hi"},
                     },
@@ -605,14 +605,14 @@ class TestTranscriptTable:
                 "timestamp": "2024-01-01T00:00:01Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "Assistant",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "main",
+                    "source": "main",
                     "sequence_number": 2,
                     "entry_type": "assistant",
-                    "parsed": {
+                    "detail": {
                         "type": "assistant",
                         "message": {"role": "assistant", "content": "Hello"},
                     },
@@ -623,28 +623,28 @@ class TestTranscriptTable:
                 "timestamp": "2024-01-01T00:00:02Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "Subagent thinking",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "subagent:001",
+                    "source": "subagent:001",
                     "sequence_number": 1,
                     "entry_type": "thinking",
-                    "parsed": {"type": "thinking", "thinking": "Processing..."},
+                    "detail": {"type": "thinking", "thinking": "Processing..."},
                 },
             },
             {
                 "timestamp": "2024-01-01T00:00:03Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "Subagent assistant",
                 "context": {
                     "prompt_name": "test",
-                    "transcript_source": "subagent:001",
+                    "source": "subagent:001",
                     "sequence_number": 2,
                     "entry_type": "assistant",
-                    "parsed": {
+                    "detail": {
                         "type": "assistant",
                         "message": {
                             "role": "assistant",
@@ -701,6 +701,74 @@ class TestTranscriptTable:
             assert subagent["assistant_messages"] == 1
             assert subagent["unique_tools"] == 1
             assert subagent["total_tool_calls"] == 1
+        finally:
+            db.close()
+
+    def test_transcript_artifact_with_non_matching_entries(
+        self, tmp_path: Path
+    ) -> None:
+        """transcript.jsonl with non-transcript entries skips them gracefully."""
+        import zipfile
+
+        manifest = {
+            "format_version": "1.0.0",
+            "bundle_id": "test-artifact",
+            "created_at": "2024-01-01T00:00:00Z",
+            "request": {
+                "request_id": "req-1",
+                "session_id": "sess-1",
+                "status": "success",
+                "started_at": "2024-01-01T00:00:00Z",
+                "ended_at": "2024-01-01T00:00:01Z",
+            },
+            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+            "files": [],
+            "integrity": {"algorithm": "sha256", "checksums": {}},
+            "build": {"version": "1.0.0", "commit": "abc123"},
+        }
+
+        # transcript.jsonl with one valid and one non-matching entry
+        valid_entry = json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "logger": "transcript",
+                "event": "transcript.entry",
+                "message": "transcript entry: user_message",
+                "context": {
+                    "prompt_name": "test",
+                    "source": "main",
+                    "entry_type": "user_message",
+                    "sequence_number": 1,
+                    "detail": {"text": "hello"},
+                },
+            }
+        )
+        non_matching = json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "DEBUG",
+                "event": "transcript.start",
+                "message": "start",
+                "context": {},
+            }
+        )
+        transcript_content = f"{valid_entry}\n{non_matching}\n"
+
+        bundle_path = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(bundle_path, "w") as zf:
+            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+            zf.writestr("debug_bundle/transcript.jsonl", transcript_content)
+            zf.writestr("debug_bundle/session/after.jsonl", "")
+            zf.writestr("debug_bundle/request/input.json", "{}")
+            zf.writestr("debug_bundle/request/output.json", "{}")
+
+        db = open_query_database(bundle_path)
+        try:
+            rows = db.execute_query("SELECT entry_type FROM transcript")
+            assert len(rows) == 1
+            assert rows[0]["entry_type"] == "user_message"
         finally:
             db.close()
 
@@ -1614,12 +1682,12 @@ class TestSeqColumn:
                 "timestamp": "2024-01-01T00:00:01.500Z",
                 "level": "DEBUG",
                 "logger": "collector",
-                "event": "transcript.collector.entry",
+                "event": "transcript.entry",
                 "message": "Transcript entry",
                 "context": {
                     "sequence_number": 44,
                     "entry_type": "assistant",
-                    "transcript_source": "main",
+                    "source": "main",
                 },
             },
             {

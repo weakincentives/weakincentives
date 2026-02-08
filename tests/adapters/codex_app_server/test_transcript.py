@@ -48,17 +48,25 @@ class TestCodexTranscriptBridge:
             assert ctx["entry_type"] == "user_message"
             assert ctx["detail"]["text"] == "Hello, world"
 
-    def test_on_notification_agent_message_delta_ignored(self) -> None:
-        """item/agentMessage/delta notifications are not emitted."""
+    def test_on_notification_streaming_deltas_suppressed(self) -> None:
+        """Streaming delta notifications are not emitted."""
         bridge = self._make_bridge()
-        with patch("weakincentives.runtime.transcript._logger") as mock_logger:
-            bridge.on_notification("item/agentMessage/delta", {"delta": "hi"})
-            entry_calls = [
-                c
-                for c in mock_logger.debug.call_args_list
-                if c[1].get("event") == "transcript.entry"
-            ]
-            assert len(entry_calls) == 0
+        delta_methods = [
+            "item/agentMessage/delta",
+            "item/reasoning/summaryTextDelta",
+            "item/reasoning/summaryPartAdded",
+            "item/commandExecution/outputDelta",
+            "item/commandExecution/terminalInteraction",
+        ]
+        for method in delta_methods:
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                bridge.on_notification(method, {"delta": "chunk"})
+                entry_calls = [
+                    c
+                    for c in mock_logger.debug.call_args_list
+                    if c[1].get("event") == "transcript.entry"
+                ]
+                assert len(entry_calls) == 0, f"Delta {method} should be suppressed"
 
     def test_on_notification_item_completed_agent_message(self) -> None:
         """item/completed with agentMessage emits assistant_message."""
@@ -193,6 +201,24 @@ class TestCodexTranscriptBridge:
             assert len(entry_calls) == 1
             ctx = entry_calls[0][1]["context"]
             assert ctx["entry_type"] == "token_usage"
+
+    def test_on_notification_turn_started(self) -> None:
+        """turn/started emits system_event with turn_started subtype."""
+        bridge = self._make_bridge()
+        with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+            bridge.on_notification(
+                "turn/started",
+                {"turn": {"id": "0", "status": "inProgress"}},
+            )
+            entry_calls = [
+                c
+                for c in mock_logger.debug.call_args_list
+                if c[1].get("event") == "transcript.entry"
+            ]
+            assert len(entry_calls) == 1
+            ctx = entry_calls[0][1]["context"]
+            assert ctx["entry_type"] == "system_event"
+            assert ctx["detail"]["subtype"] == "turn_started"
 
     def test_on_notification_turn_completed_failed(self) -> None:
         """turn/completed with failed status emits error entry."""

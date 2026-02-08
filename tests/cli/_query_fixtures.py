@@ -130,25 +130,36 @@ def create_bundle_with_logs(target_dir: Path) -> Path:
                     },
                 },
             )
+            # New unified transcript format (transcript.entry)
             logger.debug(
-                "Transcript entry: user",
+                "transcript entry: user_message",
                 extra={
-                    "event": "transcript.collector.entry",
+                    "event": "transcript.entry",
                     "context": {
+                        "component": "transcript",
                         "prompt_name": "test-prompt",
-                        "transcript_source": "main",
-                        "entry_type": "user",
+                        "adapter": "claude_agent_sdk",
+                        "source": "main",
+                        "entry_type": "user_message",
                         "sequence_number": 1,
-                        "raw_json": json.dumps(
+                        "detail": {
+                            "sdk_entry": {
+                                "type": "user",
+                                "message": {
+                                    "role": "user",
+                                    "content": "Hello",
+                                },
+                            },
+                        },
+                        "raw": json.dumps(
                             {
                                 "type": "user",
-                                "message": {"role": "user", "content": "Hello"},
+                                "message": {
+                                    "role": "user",
+                                    "content": "Hello",
+                                },
                             }
                         ),
-                        "parsed": {
-                            "type": "user",
-                            "message": {"role": "user", "content": "Hello"},
-                        },
                     },
                 },
             )
