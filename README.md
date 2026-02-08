@@ -121,9 +121,9 @@ capabilities once, in one place, and the definition ports across runtimes.
   process published events. State is immutable and inspectable—you can snapshot
   at any point. See [Session State](specs/SESSIONS.md).
 - **Harness-swappable adapters.** Keep the agent definition stable while
-  switching runtimes. WINK integrates with agentic harnesses like Claude Agent
-  SDK—native tools + OS-level sandboxing, while WINK supplies the definition.
-  See [Adapters](specs/ADAPTERS.md).
+  switching runtimes. WINK integrates with agentic harnesses—Claude Agent SDK
+  and Codex App Server—that provide native tools and sandboxing while WINK
+  supplies the definition. See [Adapters](specs/ADAPTERS.md).
 
 ## Getting Started
 
@@ -237,19 +237,27 @@ prompt = Prompt(
 Overrides live in `.weakincentives/prompts/overrides/` and match by namespace,
 key, and tag.
 
-## Renting the Harness: Claude Agent SDK
+## Execution Harnesses
 
-This is the "rent the harness" path: Claude's runtime drives the agent loop and
-native tools; WINK provides the portable agent definition and bridges custom
-tools where needed.
+WINK integrates with agentic execution harnesses—vendor runtimes that own the
+planning loop, sandboxing, and tool execution. Your agent definition stays the
+same; the adapter bridges it to the harness. Two harnesses are supported today.
 
-Key differences:
+### Claude Agent SDK
 
-- **Native tools**: Uses Claude Code's built-in file and shell tools
+The Claude Agent SDK harness delegates execution to Claude Code's runtime.
+Claude drives the agent loop and provides native file/shell tools; WINK
+supplies the portable agent definition and bridges custom tools via MCP.
+
+- **Native tools**: Claude Code's built-in Read, Write, Edit, Glob, Grep, Bash
 - **Hermetic isolation**: Ephemeral home directory prevents access to host config
-- **Network policy**: Restricted to specific documentation domains
-- **MCP bridging**: Custom WINK tools bridged via MCP
+- **Network policy**: Restrict tool network access to specific domains
+- **MCP bridging**: Custom WINK tools bridged to Claude via MCP server
 - **Sandbox**: OS-level sandboxing (bubblewrap on Linux, seatbelt on macOS)
+
+```bash
+uv add "weakincentives[claude-agent-sdk]"  # requires claude-code-sdk
+```
 
 ```python
 from weakincentives.adapters.claude_agent_sdk import (
@@ -285,6 +293,51 @@ workspace.cleanup()
 ```
 
 See [Claude Agent SDK Adapter](specs/CLAUDE_AGENT_SDK.md) for full configuration.
+
+### Codex App Server
+
+The Codex App Server harness delegates execution to OpenAI's Codex runtime via
+its app-server protocol (stdio JSON-RPC). Codex drives the agent loop and
+provides native command execution, file editing, and web search; WINK bridges
+custom tools as Codex dynamic tools.
+
+- **Native tools**: Codex's built-in command execution, file changes, web search
+- **Dynamic tools**: WINK tools bridged as Codex dynamic tools over stdio
+- **Structured output**: Native `outputSchema` support via OpenAI strict mode
+- **No extra Python deps**: Only requires the `codex` CLI on PATH
+
+```bash
+uv add weakincentives  # no extra needed; just have `codex` CLI on PATH
+```
+
+```python
+from weakincentives.adapters.codex_app_server import (
+    CodexAppServerAdapter,
+    CodexAppServerClientConfig,
+    CodexAppServerModelConfig,
+    CodexWorkspaceSection,
+    HostMount,
+)
+
+workspace = CodexWorkspaceSection(
+    session=session,
+    mounts=(HostMount(host_path="src", mount_path="src"),),
+    allowed_host_roots=("/path/to/project",),
+)
+
+adapter = CodexAppServerAdapter(
+    model_config=CodexAppServerModelConfig(model="gpt-5.3-codex"),
+    client_config=CodexAppServerClientConfig(
+        cwd=str(workspace.temp_dir),
+        approval_policy="never",
+    ),
+)
+
+response = adapter.evaluate(prompt, session=session)
+workspace.cleanup()
+```
+
+See [Codex App Server Adapter](specs/CODEX_APP_SERVER.md) for full configuration.
 
 ## Development
 
