@@ -481,64 +481,65 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             bridge = CodexTranscriptBridge(emitter)
             emitter.start()
 
-        # 1. Initialize
-        _ = await client.send_request(
-            "initialize",
-            {
-                "clientInfo": {
-                    "name": self._client_config.client_name,
-                    "title": "WINK Agent",
-                    "version": self._client_config.client_version,
-                },
-                "capabilities": {"experimentalApi": True},
-            },
-            timeout=self._client_config.startup_timeout_s,
-        )
-        await client.send_notification("initialized")
-
-        # 2. Authenticate
         try:
-            timeout = self._deadline_remaining_s(deadline, prompt_name)
-            await self._authenticate(client, timeout=timeout)
-
-            # 3. Thread
-            timeout = self._deadline_remaining_s(deadline, prompt_name)
-            thread_id = await self._create_thread(
-                client, effective_cwd, dynamic_tool_specs, timeout=timeout
+            # 1. Initialize
+            _ = await client.send_request(
+                "initialize",
+                {
+                    "clientInfo": {
+                        "name": self._client_config.client_name,
+                        "title": "WINK Agent",
+                        "version": self._client_config.client_version,
+                    },
+                    "capabilities": {"experimentalApi": True},
+                },
+                timeout=self._client_config.startup_timeout_s,
             )
+            await client.send_notification("initialized")
 
-            # 4. Turn — emit user_message before starting the turn.
-            if bridge is not None:
-                bridge.on_user_message(prompt_text)
+            # 2. Authenticate
+            try:
+                timeout = self._deadline_remaining_s(deadline, prompt_name)
+                await self._authenticate(client, timeout=timeout)
 
-            timeout = self._deadline_remaining_s(deadline, prompt_name)
-            turn_result = await self._start_turn(
-                client, thread_id, prompt_text, output_schema, timeout=timeout
-            )
-        except CodexClientError as error:
-            raise PromptEvaluationError(
-                message=str(error),
+                # 3. Thread
+                timeout = self._deadline_remaining_s(deadline, prompt_name)
+                thread_id = await self._create_thread(
+                    client, effective_cwd, dynamic_tool_specs, timeout=timeout
+                )
+
+                # 4. Turn — emit user_message before starting the turn.
+                if bridge is not None:
+                    bridge.on_user_message(prompt_text)
+
+                timeout = self._deadline_remaining_s(deadline, prompt_name)
+                turn_result = await self._start_turn(
+                    client, thread_id, prompt_text, output_schema, timeout=timeout
+                )
+            except CodexClientError as error:
+                raise PromptEvaluationError(
+                    message=str(error),
+                    prompt_name=prompt_name,
+                    phase="request",
+                ) from error
+            turn_id: int = turn_result["turn"]["id"]
+
+            # 5. Stream
+            accumulated_text, usage = await self._stream_turn(
+                client=client,
+                session=session,
                 prompt_name=prompt_name,
-                phase="request",
-            ) from error
-        turn_id: int = turn_result["turn"]["id"]
-
-        # 5. Stream
-        accumulated_text, usage = await self._stream_turn(
-            client=client,
-            session=session,
-            prompt_name=prompt_name,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            tool_lookup=tool_lookup,
-            deadline=deadline,
-            run_context=run_context,
-            bridge=bridge,
-        )
-
-        # 6. Stop transcript emitter.
-        if bridge is not None:
-            bridge.emitter.stop()
+                thread_id=thread_id,
+                turn_id=turn_id,
+                tool_lookup=tool_lookup,
+                deadline=deadline,
+                run_context=run_context,
+                bridge=bridge,
+            )
+        finally:
+            # 6. Stop transcript emitter — must run even on exception.
+            if bridge is not None:
+                bridge.emitter.stop()
 
         # 7. Visibility signal
         stored_exc = visibility_signal.get_and_clear()
