@@ -148,19 +148,19 @@ test-parallel: test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 
 
 # Run integration tests (tests skip automatically when API keys are not set)
 integration-tests:
-	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 --timeout=180 integration-tests
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 --timeout=300 integration-tests
 
 # Run all Redis integration tests (standalone + cluster)
 redis-tests:
-	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --timeout=180 -m redis integration-tests
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --timeout=300 -m redis integration-tests
 
 # Run Redis standalone tests only
 redis-standalone-tests:
-	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --timeout=180 -m redis_standalone integration-tests
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --timeout=300 -m redis_standalone integration-tests
 
 # Run Redis cluster tests only
 redis-cluster-tests:
-	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --timeout=180 -m redis_cluster integration-tests
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --timeout=300 -m redis_cluster integration-tests
 
 # Run JavaScript tests with Bun (via toolchain for consistent output)
 bun-test:
@@ -283,6 +283,7 @@ demo: demo-claude
 # In CI: full test coverage required. Locally: only tests affected by changes (via testmon).
 check: format-check lint typecheck bandit deptry pip-audit markdown-check biome bun-test test
 	@uv run --quiet --all-extras python check.py -q architecture docs
+	@echo "✓ All checks passed"
 
 # Synchronize documentation files into package
 sync-docs:

@@ -129,15 +129,15 @@ notification is processed — no file tailing required.
 ### Entry Emission Points (Codex)
 
 1. **Before `turn/start`:** Emit `user_message` with the rendered prompt text.
-2. **On `item/started`:** Emit `tool_use` with tool name and parameters.
-3. **On `item/completed` for tool items:** Emit `tool_result` with outcome.
-4. **On `item/completed` for `agentMessage`:** Emit `assistant_message` with
+1. **On `item/started`:** Emit `tool_use` with tool name and parameters.
+1. **On `item/completed` for tool items:** Emit `tool_result` with outcome.
+1. **On `item/completed` for `agentMessage`:** Emit `assistant_message` with
    accumulated text.
-5. **On `item/tool/call`:** Emit `tool_use` for WINK bridged tool.
-6. **After bridged tool execution:** Emit `tool_result` for WINK bridged tool.
-7. **On `item/reasoning/completed`:** Emit `thinking` with summary text.
-8. **On `thread/tokenUsage/updated`:** Emit `token_usage`.
-9. **On `turn/completed` with failure:** Emit `error`.
+1. **On `item/tool/call`:** Emit `tool_use` for WINK bridged tool.
+1. **After bridged tool execution:** Emit `tool_result` for WINK bridged tool.
+1. **On `item/reasoning/completed`:** Emit `thinking` with summary text.
+1. **On `thread/tokenUsage/updated`:** Emit `token_usage`.
+1. **On `turn/completed` with failure:** Emit `error`.
 
 ## Log Event Taxonomy
 
@@ -260,8 +260,8 @@ The emitter:
 `TranscriptCollector` uses `TranscriptEmitter` internally:
 
 1. On entry parsed from JSONL, maps SDK `type` to canonical `entry_type`
-2. Calls `emitter.emit()` with the mapped type and `detail.sdk_entry`
-3. Collector still owns file tailing, rotation detection, and subagent
+1. Calls `emitter.emit()` with the mapped type and `detail.sdk_entry`
+1. Collector still owns file tailing, rotation detection, and subagent
    discovery — emitter only handles entry formatting and logging
 
 ### Codex Adapter Integration
@@ -272,11 +272,11 @@ mapping logic. Called from `_process_notification()` and
 
 1. `bridge.on_notification(method, params)` — maps notification to entry type,
    emits via `TranscriptEmitter`
-2. `bridge.on_tool_call(params)` — emits `tool_use` before bridged tool
+1. `bridge.on_tool_call(params)` — emits `tool_use` before bridged tool
    execution
-3. `bridge.on_tool_result(params, result)` — emits `tool_result` after bridged
+1. `bridge.on_tool_result(params, result)` — emits `tool_result` after bridged
    tool execution
-4. `bridge.on_user_message(text)` — emits `user_message` before turn start
+1. `bridge.on_user_message(text)` — emits `user_message` before turn start
 
 ## Configuration
 
@@ -442,22 +442,22 @@ keys stop existing.
    required envelope keys (`prompt_name`, `adapter`, `entry_type`,
    `sequence_number`, `source`, `timestamp`).
 
-2. **Sequence monotonicity**: Within a `(prompt_name, source)` pair,
+1. **Sequence monotonicity**: Within a `(prompt_name, source)` pair,
    `sequence_number` is strictly increasing with no gaps.
 
-3. **Type vocabulary**: `entry_type` is always one of the canonical types
+1. **Type vocabulary**: `entry_type` is always one of the canonical types
    listed above. Unrecognized source entries map to `"unknown"`.
 
-4. **Non-blocking emission**: Transcript emission never raises exceptions to
+1. **Non-blocking emission**: Transcript emission never raises exceptions to
    the adapter's evaluation path. Errors are logged and the entry is skipped.
 
-5. **Adapter labeling**: `adapter` field always matches the adapter's
+1. **Adapter labeling**: `adapter` field always matches the adapter's
    registered name.
 
-6. **Source consistency**: Claude adapter may produce multiple sources (main +
+1. **Source consistency**: Claude adapter may produce multiple sources (main +
    subagents). Codex adapter produces `"main"` only.
 
-7. **Timestamp ordering**: Within a source, entries are emitted in
+1. **Timestamp ordering**: Within a source, entries are emitted in
    chronological order. Across sources, timestamps reflect wall-clock capture
    time (not causal ordering).
 

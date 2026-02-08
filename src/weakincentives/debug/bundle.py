@@ -46,7 +46,16 @@ from contextlib import contextmanager
 from dataclasses import field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Protocol, Self, override, runtime_checkable
+from typing import (
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Protocol,
+    Self,
+    cast,
+    override,
+    runtime_checkable,
+)
 from uuid import UUID, uuid4
 
 from ..dataclasses import FrozenDataclass
@@ -1139,6 +1148,29 @@ class BundleWriter:
                 exc_info=True,
             )
 
+    def _extract_transcript(self, log_content: bytes) -> None:
+        """Extract transcript entries from captured logs into transcript.jsonl.
+
+        Scans the app.jsonl content for records with ``event == "transcript.entry"``
+        and writes them to a separate ``transcript.jsonl`` artifact.
+
+        Args:
+            log_content: Raw bytes of the app.jsonl log file.
+        """
+        transcript_lines: list[str] = []
+        for raw_line in log_content.decode("utf-8", errors="replace").splitlines():
+            if not raw_line.strip():
+                continue
+            try:
+                record = json.loads(raw_line)
+                if record.get("event") == "transcript.entry":
+                    transcript_lines.append(raw_line)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if transcript_lines:
+            transcript_text = "\n".join(transcript_lines) + "\n"
+            self._write_artifact("transcript.jsonl", transcript_text)
+
     def _finalize(self) -> None:
         """Finalize bundle: generate README, compute manifest, create zip."""
         if self._finalized or self._temp_dir is None:
@@ -1153,6 +1185,9 @@ class BundleWriter:
                 content = self._log_collector_path.read_bytes()
                 self._files.append(rel_path)
                 self._checksums[rel_path] = _compute_checksum(content)
+
+                # Extract transcript entries into a separate transcript.jsonl
+                self._extract_transcript(content)
 
         # Build manifest
         manifest = BundleManifest(
@@ -1246,7 +1281,7 @@ class BundleWriter:
         self._invoke_storage_handler(manifest)
 
 
-class DebugBundle:
+class DebugBundle:  # noqa: PLR0904 - read-only property accessors, not complex logic
     """Load and inspect existing debug bundles.
 
     Example::
@@ -1419,6 +1454,31 @@ class DebugBundle:
             return self._read_json("eval.json")
         except BundleValidationError:
             return None
+
+    @property
+    def transcript(self) -> list[dict[str, Any]]:
+        """Return transcript entries, or empty list if not present.
+
+        Each entry is a log record dict with ``event == "transcript.entry"``
+        and a ``context`` dict containing the common transcript envelope.
+        """
+        try:
+            content = self._read_artifact("transcript.jsonl")
+        except BundleValidationError:
+            return []
+        text = content.decode("utf-8")
+        entries: list[dict[str, Any]] = []
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                parsed: object = json.loads(line)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            else:
+                if isinstance(parsed, dict):
+                    entries.append(cast("dict[str, Any]", parsed))
+        return entries
 
     @property
     def environment(self) -> dict[str, JSONValue | str | None] | None:

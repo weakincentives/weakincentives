@@ -175,6 +175,7 @@ from . import (
     mailbox,
     message_handlers,
     session,
+    transcript,
     watchdog,
 )
 from .agent_loop import (
@@ -254,6 +255,12 @@ from .transactions import (
     restore_snapshot,
     tool_transaction,
 )
+from .transcript import (
+    TranscriptEmitter,
+    TranscriptEntry,
+    TranscriptSummary,
+    reconstruct_transcript,
+)
 from .watchdog import (
     HealthServer,
     Heartbeat,
@@ -316,6 +323,9 @@ __all__ = [
     "TelemetryDispatcher",
     "TokenUsage",
     "ToolInvoked",
+    "TranscriptEmitter",
+    "TranscriptEntry",
+    "TranscriptSummary",
     "TypedReducer",
     "Watchdog",
     "agent_loop",
@@ -332,11 +342,13 @@ __all__ = [
     "lifecycle",
     "mailbox",
     "message_handlers",
+    "reconstruct_transcript",
     "replace_latest",
     "replace_latest_by",
     "restore_snapshot",
     "session",
     "tool_transaction",
+    "transcript",
     "upsert_by",
     "wait_until",
     "watchdog",

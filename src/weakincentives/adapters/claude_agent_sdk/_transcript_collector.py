@@ -14,7 +14,8 @@
 
 This module provides real-time collection and logging of Claude Agent SDK
 transcripts from the main session and all sub-agent sessions. Transcript
-entries are parsed and emitted as DEBUG-level structured log messages.
+entries are parsed and emitted as DEBUG-level structured log messages via
+:class:`~weakincentives.runtime.transcript.TranscriptEmitter`.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.transcript import TranscriptEmitter
 
 __all__ = [
     "TranscriptCollector",
@@ -38,6 +40,21 @@ __all__ = [
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "transcript_collector"}
 )
+
+# Mapping from Claude SDK transcript entry ``type`` to canonical entry type.
+_SDK_TYPE_MAP: dict[str, str] = {
+    "user": "user_message",
+    "assistant": "assistant_message",
+    "tool_result": "tool_result",
+    "thinking": "thinking",
+    "summary": "system_event",
+    "system": "system_event",
+}
+
+
+def _has_block_type(content: list[Any], block_type: str) -> bool:
+    """Check if a content block list contains any blocks of the given type."""
+    return any(isinstance(b, dict) and b.get("type") == block_type for b in content)
 
 
 @dataclass(slots=True, frozen=True)
@@ -53,11 +70,8 @@ class TranscriptCollectorConfig:
     max_read_bytes: int = 65536
     """Maximum bytes per read cycle."""
 
-    emit_raw_json: bool = True
-    """Include raw JSON in log context."""
-
-    parse_entries: bool = True
-    """Parse and type transcript entries."""
+    emit_raw: bool = True
+    """Include raw JSONL in ``raw`` field."""
 
 
 @dataclass(slots=True)
@@ -88,7 +102,8 @@ class TranscriptCollector:
     """Collects transcripts from Claude Agent SDK execution.
 
     Monitors the main transcript and sub-agent transcripts, emitting
-    each entry as a DEBUG-level structured log message.
+    each entry as a DEBUG-level structured log message via
+    :class:`~weakincentives.runtime.transcript.TranscriptEmitter`.
 
     Example:
         collector = TranscriptCollector(
@@ -108,6 +123,9 @@ class TranscriptCollector:
 
     config: TranscriptCollectorConfig = field(default_factory=TranscriptCollectorConfig)
     """Collector configuration."""
+
+    session_id: str | None = None
+    """Optional session UUID."""
 
     _tailers: dict[str, _TailerState] = field(default_factory=dict, init=False)
     """Active tailers by source."""
@@ -130,6 +148,9 @@ class TranscriptCollector:
     _discovery_task: asyncio.Task[None] | None = field(default=None, init=False)
     """Subagent discovery task."""
 
+    _emitter: TranscriptEmitter | None = field(default=None, init=False)
+    """Shared emitter instance (created at run() time)."""
+
     @property
     def main_entry_count(self) -> int:
         """Number of entries from main transcript."""
@@ -150,6 +171,17 @@ class TranscriptCollector:
     def transcript_paths(self) -> list[Path]:
         """List of transcript paths being monitored."""
         return [tailer.path for tailer in self._tailers.values()]
+
+    def _get_emitter(self) -> TranscriptEmitter:
+        """Return the emitter, creating lazily if needed."""
+        if self._emitter is None:
+            self._emitter = TranscriptEmitter(
+                prompt_name=self.prompt_name,
+                adapter="claude_agent_sdk",
+                session_id=self.session_id,
+                emit_raw=self.config.emit_raw,
+            )
+        return self._emitter
 
     async def hook_callback(
         self,
@@ -236,16 +268,8 @@ class TranscriptCollector:
             None - control is yielded to allow SDK execution.
         """
         self._running = True
-
-        logger.debug(
-            "transcript.collector.start",
-            event="transcript.collector.start",
-            context={
-                "prompt_name": self.prompt_name,
-                "poll_interval": self.config.poll_interval,
-                "subagent_discovery_interval": self.config.subagent_discovery_interval,
-            },
-        )
+        emitter = self._get_emitter()
+        emitter.start()
 
         try:
             # Start background polling task
@@ -274,16 +298,7 @@ class TranscriptCollector:
             # Final poll to capture remaining content
             await self._poll_once()
 
-            logger.debug(
-                "transcript.collector.stop",
-                event="transcript.collector.stop",
-                context={
-                    "prompt_name": self.prompt_name,
-                    "main_entry_count": self.main_entry_count,
-                    "subagent_count": self.subagent_count,
-                    "total_entries": self.total_entries,
-                },
-            )
+            emitter.stop()
 
     async def _remember_transcript_path(self, transcript_path: str) -> None:
         """Remember the main transcript path and derive session directory.
@@ -304,8 +319,8 @@ class TranscriptCollector:
         self._session_dir = path.parent / session_id
 
         logger.debug(
-            "transcript.collector.path_discovered",
-            event="transcript.collector.path_discovered",
+            "transcript path discovered",
+            event="transcript.path_discovered",
             context={
                 "prompt_name": self.prompt_name,
                 "transcript_path": str(path),
@@ -339,8 +354,8 @@ class TranscriptCollector:
 
             if source.startswith("subagent:"):
                 logger.debug(
-                    "transcript.collector.subagent_discovered",
-                    event="transcript.collector.subagent_discovered",
+                    "subagent transcript discovered",
+                    event="transcript.subagent_discovered",
                     context={
                         "prompt_name": self.prompt_name,
                         "source": source,
@@ -352,8 +367,8 @@ class TranscriptCollector:
             self._pending_tailers[source] = path
             if not already_pending:
                 logger.warning(
-                    "transcript.collector.error",
-                    event="transcript.collector.error",
+                    "transcript file not accessible",
+                    event="transcript.error",
                     context={
                         "prompt_name": self.prompt_name,
                         "source": source,
@@ -457,8 +472,8 @@ class TranscriptCollector:
 
         except OSError as e:
             logger.warning(
-                "transcript.collector.error",
-                event="transcript.collector.error",
+                "transcript read error",
+                event="transcript.error",
                 context={
                     "prompt_name": self.prompt_name,
                     "source": tailer.source,
@@ -512,41 +527,188 @@ class TranscriptCollector:
             if not line:
                 continue
 
-            tailer.entry_count += 1
             await self._emit_entry(tailer, line)
 
     async def _emit_entry(self, tailer: _TailerState, line: str) -> None:
-        """Emit a single transcript entry as a log message.
+        """Emit a single transcript entry via the TranscriptEmitter.
+
+        For assistant messages containing tool_use content blocks, splits into
+        separate entries: one assistant_message (text-only blocks) plus one
+        tool_use entry per tool_use block.  Similarly, user messages with
+        tool_result content blocks are split into separate tool_result entries.
+        This makes the Claude SDK adapter structurally isomorphic with the
+        Codex adapter for tool analysis.
 
         Args:
             tailer: Tailer state.
             line: Raw JSONL line.
         """
-        context: dict[str, Any] = {
-            "prompt_name": self.prompt_name,
-            "transcript_source": tailer.source,
-            "sequence_number": tailer.entry_count,
-        }
+        emitter = self._get_emitter()
 
-        # Include raw JSON if configured
-        if self.config.emit_raw_json:
-            context["raw_json"] = line
+        # Always parse to determine canonical entry type
+        try:
+            entry = json.loads(line)
+            sdk_type = entry.get("type", "unknown")
+            entry_type = _SDK_TYPE_MAP.get(sdk_type, "unknown")
+            detail: dict[str, Any] = {"sdk_entry": entry}
 
-        # Parse entry if configured
-        if self.config.parse_entries:
-            try:
-                entry = json.loads(line)
-                entry_type = entry.get("type", "unknown")
-                context["entry_type"] = entry_type
-                context["parsed"] = entry
-            except json.JSONDecodeError:
-                context["entry_type"] = "invalid"
-                context["parse_error"] = "Invalid JSON"
-        else:
-            context["entry_type"] = "unparsed"
+            # Add compaction subtype for summary entries
+            if sdk_type == "summary":
+                detail["subtype"] = "compaction"
+        except json.JSONDecodeError:
+            entry_type = "unknown"
+            detail = {"parse_error": "Invalid JSON"}
+            tailer.entry_count += 1
+            emitter.emit(
+                entry_type,
+                source=tailer.source,
+                detail=detail,
+                raw=line,
+            )
+            return
 
-        logger.debug(
-            "transcript.collector.entry",
-            event="transcript.collector.entry",
-            context=context,
+        # Split messages that mix content with tool blocks
+        if self._try_emit_split(emitter, tailer, entry, entry_type, line):
+            return
+
+        tailer.entry_count += 1
+        emitter.emit(
+            entry_type,
+            source=tailer.source,
+            detail=detail,
+            raw=line,
         )
+
+    def _try_emit_split(
+        self,
+        emitter: TranscriptEmitter,
+        tailer: _TailerState,
+        entry: dict[str, Any],
+        entry_type: str,
+        line: str,
+    ) -> bool:
+        """Try to split an entry with mixed content blocks. Returns True if split."""
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            return False
+        content = message.get("content")
+        if not isinstance(content, list):
+            return False
+
+        if entry_type == "assistant_message" and _has_block_type(content, "tool_use"):
+            self._emit_assistant_split(emitter, tailer, entry, line)
+            return True
+
+        if entry_type == "user_message" and _has_block_type(content, "tool_result"):
+            self._emit_user_tool_result_split(emitter, tailer, entry, line)
+            return True
+
+        return False
+
+    @staticmethod
+    def _emit_assistant_split(
+        emitter: TranscriptEmitter,
+        tailer: _TailerState,
+        entry: dict[str, Any],
+        line: str,
+    ) -> None:
+        """Split an assistant message into text and tool_use entries.
+
+        Args:
+            emitter: Transcript emitter.
+            tailer: Tailer state for entry counting.
+            entry: Parsed SDK entry dict.
+            line: Raw JSONL line (attached only to the assistant_message).
+        """
+        content = entry["message"]["content"]
+
+        # Partition content blocks
+        text_blocks = [
+            b
+            for b in content
+            if not (isinstance(b, dict) and b.get("type") == "tool_use")
+        ]
+        tool_blocks = [
+            b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"
+        ]
+
+        # Emit assistant_message with text-only blocks (if any)
+        if text_blocks:
+            text_entry = {
+                **entry,
+                "message": {**entry["message"], "content": text_blocks},
+            }
+            tailer.entry_count += 1
+            emitter.emit(
+                "assistant_message",
+                source=tailer.source,
+                detail={"sdk_entry": text_entry},
+                raw=line,
+            )
+
+        # Emit one tool_use entry per tool_use block
+        for block in tool_blocks:
+            tailer.entry_count += 1
+            emitter.emit(
+                "tool_use",
+                source=tailer.source,
+                detail={"sdk_entry": block},
+                raw=None,
+            )
+
+    @staticmethod
+    def _emit_user_tool_result_split(
+        emitter: TranscriptEmitter,
+        tailer: _TailerState,
+        entry: dict[str, Any],
+        line: str,
+    ) -> None:
+        """Split a user message into non-tool_result user_message + tool_result entries.
+
+        The Claude SDK wraps tool results as user messages with ``tool_result``
+        content blocks.  Splitting these out as ``tool_result`` entries enables
+        the ``transcript_tools`` view to correlate calls with results via
+        ``tool_use_id``.
+
+        Args:
+            emitter: Transcript emitter.
+            tailer: Tailer state for entry counting.
+            entry: Parsed SDK entry dict.
+            line: Raw JSONL line (attached only to the user_message if any
+                  non-tool_result blocks remain).
+        """
+        content = entry["message"]["content"]
+
+        # Partition content blocks
+        other_blocks = [
+            b
+            for b in content
+            if not (isinstance(b, dict) and b.get("type") == "tool_result")
+        ]
+        result_blocks = [
+            b for b in content if isinstance(b, dict) and b.get("type") == "tool_result"
+        ]
+
+        # Emit user_message with non-tool_result blocks (if any)
+        if other_blocks:
+            other_entry = {
+                **entry,
+                "message": {**entry["message"], "content": other_blocks},
+            }
+            tailer.entry_count += 1
+            emitter.emit(
+                "user_message",
+                source=tailer.source,
+                detail={"sdk_entry": other_entry},
+                raw=line,
+            )
+
+        # Emit one tool_result entry per tool_result block
+        for block in result_blocks:
+            tailer.entry_count += 1
+            emitter.emit(
+                "tool_result",
+                source=tailer.source,
+                detail={"sdk_entry": block},
+                raw=None if other_blocks else line,
+            )

@@ -43,7 +43,16 @@ class QueryError(WinkError, RuntimeError):
 _MAX_COLUMN_WIDTH = 50
 
 # Schema version for cache invalidation - increment when schema changes
-_SCHEMA_VERSION = 5  # v5: environment tables for system/python/git/container info
+_SCHEMA_VERSION = (
+    9  # v9: fix Codex agentMessage contaminating tool metrics, bridged tool events
+)
+
+_TRANSCRIPT_INSERT_SQL = """
+    INSERT INTO transcript (
+        timestamp, prompt_name, transcript_source, sequence_number,
+        entry_type, role, content, tool_name, tool_use_id, raw_json, parsed
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
 
 
 @FrozenDataclass()
@@ -257,6 +266,43 @@ def _extract_tool_use_from_content(content: object) -> tuple[str, str]:
 
 
 @pure
+def _apply_split_block_details(
+    parsed: Mapping[str, object],
+    entry_type: str,
+    *,
+    content: str,
+    tool_name: str,
+    tool_use_id: str,
+) -> tuple[str, str, str]:
+    """Extract details from split tool_use/tool_result blocks.
+
+    When the collector splits assistant/user messages into separate entries,
+    ``parsed`` is the content block itself (e.g. ``{"type": "tool_use", ...}``).
+    """
+    # Split tool_use entries: parsed is the tool_use block itself
+    if entry_type == "tool_use" and not tool_name and parsed.get("type") == "tool_use":
+        name_val = parsed.get("name")
+        if isinstance(name_val, str):
+            tool_name = name_val
+        id_val = parsed.get("id") or parsed.get("tool_use_id")
+        if isinstance(id_val, str):
+            tool_use_id = id_val
+    # Split tool_result entries: parsed is the tool_result block itself
+    if (
+        entry_type == "tool_result"
+        and not tool_use_id
+        and parsed.get("type") == "tool_result"
+    ):
+        id_val = parsed.get("tool_use_id")
+        if isinstance(id_val, str):
+            tool_use_id = id_val
+        content_val = parsed.get("content")
+        if not content and isinstance(content_val, str):
+            content = content_val
+    return content, tool_name, tool_use_id
+
+
+@pure
 def _extract_transcript_details(
     parsed: Mapping[str, object],
     entry_type: str,
@@ -270,6 +316,22 @@ def _extract_transcript_details(
             tool_name=tool_name,
             tool_use_id=tool_use_id,
         )
+    # Codex: extract from notification.item (commandExecution, fileChange, etc.)
+    # Only apply to tool entries — agentMessage entries are assistant_message, not tools.
+    if not tool_use_id and entry_type in {"tool_use", "tool_result"}:
+        tool_use_id, tool_name, content = _apply_notification_item_details(
+            parsed,
+            tool_use_id=tool_use_id,
+            tool_name=tool_name,
+            content=content,
+        )
+    content, tool_name, tool_use_id = _apply_split_block_details(
+        parsed,
+        entry_type,
+        content=content,
+        tool_name=tool_name,
+        tool_use_id=tool_use_id,
+    )
     content = _apply_transcript_content_fallbacks(parsed, entry_type, content)
     return role, content, tool_name, tool_use_id
 
@@ -321,6 +383,105 @@ def _apply_tool_result_details(
     return resolved_content, resolved_tool_name, resolved_tool_use_id
 
 
+def _get_notification_item(
+    parsed: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Return ``notification.item`` if both are mappings, else None."""
+    notif_raw = parsed.get("notification")
+    if not isinstance(notif_raw, Mapping):
+        return None
+    item_raw = cast("Mapping[str, object]", notif_raw).get("item")
+    if not isinstance(item_raw, Mapping):
+        return None
+    return cast("Mapping[str, object]", item_raw)
+
+
+@pure
+def _apply_bridged_tool_details(
+    parsed: Mapping[str, object],
+    notification: Mapping[str, object],
+    *,
+    tool_use_id: str,
+    tool_name: str,
+    content: str,
+) -> tuple[str, str, str]:
+    """Extract tool metadata from bridged WINK tool events (no ``.item`` key).
+
+    Bridged events emit ``detail={"notification": {"tool": ..., "callId": ...}, ...}``.
+    """
+    resolved_id = tool_use_id
+    call_id = notification.get("callId")
+    if isinstance(call_id, str) and not resolved_id:
+        resolved_id = call_id
+
+    resolved_name = tool_name
+    tool_val = notification.get("tool")
+    if isinstance(tool_val, str) and not resolved_name:
+        resolved_name = tool_val
+
+    resolved_content = content
+    if not resolved_content:
+        result_val = parsed.get("result")
+        if isinstance(result_val, str) and result_val:
+            resolved_content = result_val
+        elif result_val is not None:
+            resolved_content = _safe_json_dumps(result_val)
+
+    return resolved_id, resolved_name, resolved_content
+
+
+@pure
+def _apply_notification_item_details(
+    parsed: Mapping[str, object],
+    *,
+    tool_use_id: str,
+    tool_name: str,
+    content: str,
+) -> tuple[str, str, str]:
+    """Extract tool_use_id, tool_name, content from Codex notification.item."""
+    item = _get_notification_item(parsed)
+    if item is None:
+        # Try bridged WINK tool events (notification without .item)
+        notif_raw = parsed.get("notification")
+        if isinstance(notif_raw, Mapping):
+            return _apply_bridged_tool_details(
+                parsed,
+                cast("Mapping[str, object]", notif_raw),
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                content=content,
+            )
+        return tool_use_id, tool_name, content
+
+    resolved_id = tool_use_id
+    item_id = item.get("id")
+    if isinstance(item_id, str) and not resolved_id:
+        resolved_id = item_id
+
+    resolved_name = tool_name
+    if not resolved_name:
+        cmd = item.get("command")
+        resolved_name = cmd if isinstance(cmd, str) else str(item.get("type", ""))
+
+    resolved_content = content
+    if not resolved_content:
+        output = item.get("aggregatedOutput")
+        if isinstance(output, str) and output:
+            resolved_content = output
+
+    return resolved_id, resolved_name, resolved_content
+
+
+@pure
+def _get_notification_item_text(parsed: Mapping[str, object]) -> str:
+    """Return ``notification.item.text`` if present, else empty string."""
+    item = _get_notification_item(parsed)
+    if item is None:
+        return ""
+    text_val = item.get("text")
+    return text_val if isinstance(text_val, str) else ""
+
+
 @pure
 def _apply_transcript_content_fallbacks(
     parsed: Mapping[str, object],
@@ -341,6 +502,10 @@ def _apply_transcript_content_fallbacks(
     else:
         content = _stringify_transcript_content(parsed.get("content"))
 
+    # Codex agentMessage: assistant text lives in notification.item.text
+    if not content:
+        content = _get_notification_item_text(parsed)
+
     if not content:
         content = _stringify_transcript_content(parsed)
     return content
@@ -351,9 +516,16 @@ def _extract_transcript_parsed_obj(
     context: Mapping[str, object],
     raw_json: str | None,
 ) -> Mapping[str, object] | None:
-    parsed_raw = context.get("parsed")
-    if isinstance(parsed_raw, Mapping):
-        return cast("Mapping[str, object]", parsed_raw)
+    # Unified format: context.detail (may contain sdk_entry or notification)
+    detail_raw = context.get("detail")
+    if isinstance(detail_raw, Mapping):
+        detail = cast("Mapping[str, object]", detail_raw)
+        # Claude SDK wraps in sdk_entry; unwrap so downstream sees message/type
+        sdk_entry = detail.get("sdk_entry")
+        if isinstance(sdk_entry, Mapping):
+            return cast("Mapping[str, object]", sdk_entry)
+        return detail
+
     if raw_json is None:
         return None
     try:
@@ -382,13 +554,12 @@ def _extract_transcript_details_tuple(
 ) -> tuple[str, str, str, str, str, str | None]:
     if parsed is None:
         return entry_type, "", "", "", "", None
-    resolved_entry_type = str(parsed.get("type") or entry_type)
     role, content, tool_name, tool_use_id = _extract_transcript_details(
         parsed,
-        resolved_entry_type,
+        entry_type,
     )
     return (
-        resolved_entry_type,
+        entry_type,
         role,
         content,
         tool_name,
@@ -405,7 +576,7 @@ def _extract_transcript_row(
     | None
 ):
     """Extract a row for the transcript table from a log entry."""
-    if entry.get("event") != "transcript.collector.entry":
+    if entry.get("event") != "transcript.entry":
         return None
 
     ctx_raw = entry.get("context")
@@ -414,11 +585,11 @@ def _extract_transcript_row(
     ctx = cast("Mapping[str, object]", ctx_raw)
 
     prompt_name = str(ctx.get("prompt_name") or "")
-    transcript_source = str(ctx.get("transcript_source") or "")
+    transcript_source = str(ctx.get("source") or "")
     entry_type = str(ctx.get("entry_type") or "unknown")
 
     sequence_number = _coerce_int(ctx.get("sequence_number"))
-    raw_json = _coerce_str(ctx.get("raw_json"))
+    raw_json = _coerce_str(ctx.get("raw"))
     parsed_obj = _extract_transcript_parsed_obj(ctx, raw_json)
 
     resolved_entry_type, role, content, tool_name, tool_use_id, parsed_json = (
@@ -900,7 +1071,12 @@ class QueryDatabase(Closeable):
             )
 
     def _build_transcript_table(self, conn: sqlite3.Connection) -> None:
-        """Build transcript table from TranscriptCollector structured logs."""
+        """Build transcript table from transcript entries.
+
+        Sources (in priority order):
+        1. ``transcript.jsonl`` artifact (new unified format)
+        2. Fall back to scanning ``logs/app.jsonl`` for transcript events
+        """
         _ = conn.execute("""
             CREATE TABLE IF NOT EXISTS transcript (
                 rowid INTEGER PRIMARY KEY,
@@ -918,6 +1094,33 @@ class QueryDatabase(Closeable):
             )
         """)
 
+        inserted = self._insert_transcript_from_artifact(conn)
+        if not inserted:
+            self._insert_transcript_from_logs(conn)
+
+    def _insert_transcript_from_artifact(self, conn: sqlite3.Connection) -> bool:
+        """Try loading transcript entries from transcript.jsonl artifact.
+
+        Returns True if any rows were inserted.
+        """
+        transcript_entries = self._bundle.transcript
+        if not transcript_entries:
+            return False
+
+        count = 0
+        for entry in transcript_entries:
+            row = _extract_transcript_row(entry)
+            if row is None:
+                continue
+            _ = conn.execute(
+                _TRANSCRIPT_INSERT_SQL,
+                row,
+            )
+            count += 1
+        return count > 0
+
+    def _insert_transcript_from_logs(self, conn: sqlite3.Connection) -> None:
+        """Fall back to scanning logs/app.jsonl for transcript entries."""
         logs_content = self._bundle.logs
         if not logs_content:
             return
@@ -939,22 +1142,7 @@ class QueryDatabase(Closeable):
                 continue
 
             _ = conn.execute(
-                """
-                INSERT INTO transcript (
-                    timestamp,
-                    prompt_name,
-                    transcript_source,
-                    sequence_number,
-                    entry_type,
-                    role,
-                    content,
-                    tool_name,
-                    tool_use_id,
-                    raw_json,
-                    parsed
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+                _TRANSCRIPT_INSERT_SQL,
                 row,
             )
 
@@ -1633,7 +1821,7 @@ class QueryDatabase(Closeable):
                 entry_type,
                 role,
                 CASE
-                    WHEN entry_type IN ('user', 'assistant') THEN
+                    WHEN entry_type IN ('user_message', 'assistant_message') THEN
                         CASE
                             WHEN LENGTH(content) > 100 THEN SUBSTR(content, 1, 97) || '...'
                             ELSE content
@@ -1667,7 +1855,7 @@ class QueryDatabase(Closeable):
                 ON t1.tool_use_id = t2.tool_use_id
                 AND t2.entry_type = 'tool_result'
                 AND t1.transcript_source = t2.transcript_source
-            WHERE t1.entry_type = 'assistant'
+            WHERE t1.entry_type IN ('assistant_message', 'tool_use')
                 AND t1.tool_name IS NOT NULL
                 AND t1.tool_name != ''
             ORDER BY t1.sequence_number
@@ -1705,8 +1893,8 @@ class QueryDatabase(Closeable):
                 MIN(sequence_number) as first_entry,
                 MAX(sequence_number) as last_entry,
                 COUNT(*) as total_entries,
-                COUNT(CASE WHEN entry_type = 'user' THEN 1 END) as user_messages,
-                COUNT(CASE WHEN entry_type = 'assistant' THEN 1 END) as assistant_messages,
+                COUNT(CASE WHEN entry_type = 'user_message' THEN 1 END) as user_messages,
+                COUNT(CASE WHEN entry_type = 'assistant_message' THEN 1 END) as assistant_messages,
                 COUNT(CASE WHEN entry_type = 'thinking' THEN 1 END) as thinking_blocks,
                 COUNT(DISTINCT CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN tool_name END) as unique_tools,
                 COUNT(CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN 1 END) as total_tool_calls

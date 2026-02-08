@@ -2334,15 +2334,14 @@ def test_claude_agent_sdk_adapter_transcript_collection_enabled(
     # Enable DEBUG logging to capture transcript entries
     caplog.set_level(
         logging.DEBUG,
-        logger="weakincentives.adapters.claude_agent_sdk._transcript_collector",
+        logger="weakincentives.runtime.transcript",
     )
 
     # Configure transcript collection with fast polling for tests
     transcript_config = TranscriptCollectorConfig(
         poll_interval=0.01,  # Very fast polling for tests
         subagent_discovery_interval=0.02,
-        emit_raw_json=True,
-        parse_entries=True,
+        emit_raw=True,
     )
 
     config = _make_config(
@@ -2370,7 +2369,7 @@ def test_claude_agent_sdk_adapter_transcript_collection_enabled(
 
     # Check for transcript collector log events
     collector_logs = [
-        record for record in caplog.records if "_transcript_collector" in record.name
+        record for record in caplog.records if "transcript" in record.name
     ]
 
     # Extract event types from logs
@@ -2386,22 +2385,18 @@ def test_claude_agent_sdk_adapter_transcript_collection_enabled(
     print(f"  Event types seen: {sorted(event_types)}")
 
     # Should have at least start/stop events
-    assert "transcript.collector.start" in event_types, (
-        "Expected transcript collector to start"
-    )
-    assert "transcript.collector.stop" in event_types, (
+    assert "transcript.start" in event_types, "Expected transcript collector to start"
+    assert "transcript.stop" in event_types, (
         "Expected transcript collector to stop after execution"
     )
 
     # Check for path discovery (should happen via hooks)
-    if "transcript.collector.path_discovered" in event_types:
+    if "transcript.path_discovered" in event_types:
         print("  Path discovery: SUCCESS (transcript path discovered via hooks)")
 
     # Check for transcript entries
     entry_logs = [
-        log
-        for log in collector_logs
-        if getattr(log, "event", "") == "transcript.collector.entry"
+        log for log in collector_logs if getattr(log, "event", "") == "transcript.entry"
     ]
 
     if entry_logs:
@@ -2414,23 +2409,24 @@ def test_claude_agent_sdk_adapter_transcript_collection_enabled(
         assert context.get("prompt_name") == "greeting", (
             f"Expected prompt_name='greeting', got {context.get('prompt_name')}"
         )
-        assert "transcript_source" in context, "Expected transcript_source in context"
+        assert "source" in context, "Expected transcript_source in context"
         assert "entry_type" in context, "Expected entry_type in context"
         assert "sequence_number" in context, "Expected sequence_number in context"
 
-        # If raw JSON was emitted, verify it's present
-        if transcript_config.emit_raw_json:
-            assert "raw_json" in context, "Expected raw_json when emit_raw_json=True"
-            # Verify it looks like valid JSONL
-            raw_json = context["raw_json"]
-            assert raw_json.startswith("{"), "Expected raw_json to be JSON object"
+        # If raw was emitted, verify it's present
+        if transcript_config.emit_raw:
+            assert "raw" in context, "Expected raw when emit_raw=True"
+            raw = context["raw"]
+            assert raw.startswith("{"), "Expected raw to be JSON object"
 
-        # If entries were parsed, verify parsed data
-        if transcript_config.parse_entries and context.get("entry_type") != "invalid":
-            assert "parsed" in context, "Expected parsed data when parse_entries=True"
-            parsed = context["parsed"]
-            assert isinstance(parsed, dict), "Expected parsed to be a dict"
-            assert "type" in parsed, "Expected 'type' field in parsed transcript entry"
+        # Verify detail contains sdk_entry with type field
+        if "detail" in context and context.get("entry_type") != "unknown":
+            detail = context["detail"]
+            assert isinstance(detail, dict), "Expected detail to be a dict"
+            if "sdk_entry" in detail:
+                assert "type" in detail["sdk_entry"], (
+                    "Expected 'type' field in detail.sdk_entry"
+                )
     else:
         print("  Transcript entries logged: 0 (may be timing-dependent)")
 
@@ -2450,12 +2446,11 @@ def test_claude_agent_sdk_adapter_transcript_collection_with_tools(
     # Enable DEBUG logging
     caplog.set_level(
         logging.DEBUG,
-        logger="weakincentives.adapters.claude_agent_sdk._transcript_collector",
+        logger="weakincentives.runtime.transcript",
     )
 
     transcript_config = TranscriptCollectorConfig(
         poll_interval=0.01,
-        parse_entries=True,
     )
 
     config = _make_config(
@@ -2486,8 +2481,7 @@ def test_claude_agent_sdk_adapter_transcript_collection_with_tools(
     entry_logs = [
         log
         for log in caplog.records
-        if "_transcript_collector" in log.name
-        and getattr(log, "event", "") == "transcript.collector.entry"
+        if "transcript" in log.name and getattr(log, "event", "") == "transcript.entry"
     ]
 
     # With tool usage, we should see more transcript entries
@@ -2529,14 +2523,13 @@ def test_claude_agent_sdk_adapter_transcript_collection_with_subagents(  # noqa:
     # Enable DEBUG logging
     caplog.set_level(
         logging.DEBUG,
-        logger="weakincentives.adapters.claude_agent_sdk._transcript_collector",
+        logger="weakincentives.runtime.transcript",
     )
 
     # Configure with fast subagent discovery
     transcript_config = TranscriptCollectorConfig(
         poll_interval=0.01,
         subagent_discovery_interval=0.02,  # Fast discovery for tests
-        parse_entries=True,
     )
 
     config = _make_config(
@@ -2594,7 +2587,7 @@ If possible, break this down into smaller components and handle them systematica
 
     # Check for transcript collector logs
     collector_logs = [
-        record for record in caplog.records if "_transcript_collector" in record.name
+        record for record in caplog.records if "transcript" in record.name
     ]
 
     # Extract event types
@@ -2612,7 +2605,7 @@ If possible, break this down into smaller components and handle them systematica
     subagent_logs = [
         log
         for log in collector_logs
-        if getattr(log, "event", "") == "transcript.collector.subagent_discovered"
+        if getattr(log, "event", "") == "transcript.subagent_discovered"
     ]
 
     if subagent_logs:
@@ -2631,9 +2624,7 @@ If possible, break this down into smaller components and handle them systematica
 
     # Check for entries from different sources
     entry_logs = [
-        log
-        for log in collector_logs
-        if getattr(log, "event", "") == "transcript.collector.entry"
+        log for log in collector_logs if getattr(log, "event", "") == "transcript.entry"
     ]
 
     if entry_logs:
@@ -2643,7 +2634,7 @@ If possible, break this down into smaller components and handle them systematica
 
         for log in entry_logs:
             context = getattr(log, "context", {})
-            source = context.get("transcript_source", "unknown")
+            source = context.get("source", "unknown")
             sources.add(source)
             source_counts[source] = source_counts.get(source, 0) + 1
 
@@ -2661,9 +2652,7 @@ If possible, break this down into smaller components and handle them systematica
         subagent_entries = [
             log
             for log in entry_logs
-            if getattr(log, "context", {})
-            .get("transcript_source", "")
-            .startswith("subagent:")
+            if getattr(log, "context", {}).get("source", "").startswith("subagent:")
         ]
 
         if subagent_entries:
@@ -2684,7 +2673,7 @@ If possible, break this down into smaller components and handle them systematica
             assert "entry_type" in context, "Expected entry_type in sub-agent entry"
 
             # The source should indicate it's from a sub-agent
-            source = context.get("transcript_source", "")
+            source = context.get("source", "")
             assert source.startswith("subagent:"), (
                 f"Expected sub-agent source to start with 'subagent:', got {source}"
             )
@@ -2715,14 +2704,13 @@ def test_claude_agent_sdk_adapter_transcript_collection_mock_subagents(  # noqa:
     # Enable DEBUG logging
     caplog.set_level(
         logging.DEBUG,
-        logger="weakincentives.adapters.claude_agent_sdk._transcript_collector",
+        logger="weakincentives.runtime.transcript",
     )
 
     # Create a collector with fast discovery
     config = TranscriptCollectorConfig(
         poll_interval=0.01,
         subagent_discovery_interval=0.01,
-        parse_entries=True,
     )
 
     collector = TranscriptCollector(
@@ -2816,14 +2804,14 @@ def test_claude_agent_sdk_adapter_transcript_collection_mock_subagents(  # noqa:
 
     # Verify log events
     collector_logs = [
-        record for record in caplog.records if "_transcript_collector" in record.name
+        record for record in caplog.records if "transcript" in record.name
     ]
 
     # Check for subagent discovery logs
     discovery_logs = [
         log
         for log in collector_logs
-        if getattr(log, "event", "") == "transcript.collector.subagent_discovered"
+        if getattr(log, "event", "") == "transcript.subagent_discovered"
     ]
 
     assert len(discovery_logs) >= 2, (
@@ -2832,16 +2820,14 @@ def test_claude_agent_sdk_adapter_transcript_collection_mock_subagents(  # noqa:
 
     # Verify entries were logged with correct sources
     entry_logs = [
-        log
-        for log in collector_logs
-        if getattr(log, "event", "") == "transcript.collector.entry"
+        log for log in collector_logs if getattr(log, "event", "") == "transcript.entry"
     ]
 
     # Collect sources
     sources = set()
     for log in entry_logs:
         context = getattr(log, "context", {})
-        source = context.get("transcript_source")
+        source = context.get("source")
         if source:
             sources.add(source)
 
