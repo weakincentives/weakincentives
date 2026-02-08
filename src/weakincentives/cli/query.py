@@ -43,7 +43,9 @@ class QueryError(WinkError, RuntimeError):
 _MAX_COLUMN_WIDTH = 50
 
 # Schema version for cache invalidation - increment when schema changes
-_SCHEMA_VERSION = 7  # v7: split assistant_message tool_use blocks into separate entries
+_SCHEMA_VERSION = (
+    8  # v8: split tool_use and tool_result blocks from assistant/user messages
+)
 
 _TRANSCRIPT_INSERT_SQL = """
     INSERT INTO transcript (
@@ -264,6 +266,43 @@ def _extract_tool_use_from_content(content: object) -> tuple[str, str]:
 
 
 @pure
+def _apply_split_block_details(
+    parsed: Mapping[str, object],
+    entry_type: str,
+    *,
+    content: str,
+    tool_name: str,
+    tool_use_id: str,
+) -> tuple[str, str, str]:
+    """Extract details from split tool_use/tool_result blocks.
+
+    When the collector splits assistant/user messages into separate entries,
+    ``parsed`` is the content block itself (e.g. ``{"type": "tool_use", ...}``).
+    """
+    # Split tool_use entries: parsed is the tool_use block itself
+    if entry_type == "tool_use" and not tool_name and parsed.get("type") == "tool_use":
+        name_val = parsed.get("name")
+        if isinstance(name_val, str):
+            tool_name = name_val
+        id_val = parsed.get("id") or parsed.get("tool_use_id")
+        if isinstance(id_val, str):
+            tool_use_id = id_val
+    # Split tool_result entries: parsed is the tool_result block itself
+    if (
+        entry_type == "tool_result"
+        and not tool_use_id
+        and parsed.get("type") == "tool_result"
+    ):
+        id_val = parsed.get("tool_use_id")
+        if isinstance(id_val, str):
+            tool_use_id = id_val
+        content_val = parsed.get("content")
+        if not content and isinstance(content_val, str):
+            content = content_val
+    return content, tool_name, tool_use_id
+
+
+@pure
 def _extract_transcript_details(
     parsed: Mapping[str, object],
     entry_type: str,
@@ -285,14 +324,13 @@ def _extract_transcript_details(
             tool_name=tool_name,
             content=content,
         )
-    # Split tool_use entries: parsed is the tool_use block itself
-    if entry_type == "tool_use" and not tool_name and parsed.get("type") == "tool_use":
-        name_val = parsed.get("name")
-        if isinstance(name_val, str):
-            tool_name = name_val
-        id_val = parsed.get("id") or parsed.get("tool_use_id")
-        if isinstance(id_val, str):
-            tool_use_id = id_val
+    content, tool_name, tool_use_id = _apply_split_block_details(
+        parsed,
+        entry_type,
+        content=content,
+        tool_name=tool_name,
+        tool_use_id=tool_use_id,
+    )
     content = _apply_transcript_content_fallbacks(parsed, entry_type, content)
     return role, content, tool_name, tool_use_id
 

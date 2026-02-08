@@ -52,6 +52,11 @@ _SDK_TYPE_MAP: dict[str, str] = {
 }
 
 
+def _has_block_type(content: list[Any], block_type: str) -> bool:
+    """Check if a content block list contains any blocks of the given type."""
+    return any(isinstance(b, dict) and b.get("type") == block_type for b in content)
+
+
 @dataclass(slots=True, frozen=True)
 class TranscriptCollectorConfig:
     """Configuration for TranscriptCollector."""
@@ -529,8 +534,10 @@ class TranscriptCollector:
 
         For assistant messages containing tool_use content blocks, splits into
         separate entries: one assistant_message (text-only blocks) plus one
-        tool_use entry per tool_use block.  This makes the Claude SDK adapter
-        structurally isomorphic with the Codex adapter for tool analysis.
+        tool_use entry per tool_use block.  Similarly, user messages with
+        tool_result content blocks are split into separate tool_result entries.
+        This makes the Claude SDK adapter structurally isomorphic with the
+        Codex adapter for tool analysis.
 
         Args:
             tailer: Tailer state.
@@ -560,16 +567,9 @@ class TranscriptCollector:
             )
             return
 
-        # Split assistant messages that contain tool_use blocks
-        if entry_type == "assistant_message":
-            message = entry.get("message")
-            if isinstance(message, dict):
-                content = message.get("content")
-                if isinstance(content, list) and any(
-                    isinstance(b, dict) and b.get("type") == "tool_use" for b in content
-                ):
-                    self._emit_assistant_split(emitter, tailer, entry, line)
-                    return
+        # Split messages that mix content with tool blocks
+        if self._try_emit_split(emitter, tailer, entry, entry_type, line):
+            return
 
         tailer.entry_count += 1
         emitter.emit(
@@ -578,6 +578,32 @@ class TranscriptCollector:
             detail=detail,
             raw=line,
         )
+
+    def _try_emit_split(
+        self,
+        emitter: TranscriptEmitter,
+        tailer: _TailerState,
+        entry: dict[str, Any],
+        entry_type: str,
+        line: str,
+    ) -> bool:
+        """Try to split an entry with mixed content blocks. Returns True if split."""
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            return False
+        content = message.get("content")
+        if not isinstance(content, list):
+            return False
+
+        if entry_type == "assistant_message" and _has_block_type(content, "tool_use"):
+            self._emit_assistant_split(emitter, tailer, entry, line)
+            return True
+
+        if entry_type == "user_message" and _has_block_type(content, "tool_result"):
+            self._emit_user_tool_result_split(emitter, tailer, entry, line)
+            return True
+
+        return False
 
     @staticmethod
     def _emit_assistant_split(
@@ -628,4 +654,61 @@ class TranscriptCollector:
                 source=tailer.source,
                 detail={"sdk_entry": block},
                 raw=None,
+            )
+
+    @staticmethod
+    def _emit_user_tool_result_split(
+        emitter: TranscriptEmitter,
+        tailer: _TailerState,
+        entry: dict[str, Any],
+        line: str,
+    ) -> None:
+        """Split a user message into non-tool_result user_message + tool_result entries.
+
+        The Claude SDK wraps tool results as user messages with ``tool_result``
+        content blocks.  Splitting these out as ``tool_result`` entries enables
+        the ``transcript_tools`` view to correlate calls with results via
+        ``tool_use_id``.
+
+        Args:
+            emitter: Transcript emitter.
+            tailer: Tailer state for entry counting.
+            entry: Parsed SDK entry dict.
+            line: Raw JSONL line (attached only to the user_message if any
+                  non-tool_result blocks remain).
+        """
+        content = entry["message"]["content"]
+
+        # Partition content blocks
+        other_blocks = [
+            b
+            for b in content
+            if not (isinstance(b, dict) and b.get("type") == "tool_result")
+        ]
+        result_blocks = [
+            b for b in content if isinstance(b, dict) and b.get("type") == "tool_result"
+        ]
+
+        # Emit user_message with non-tool_result blocks (if any)
+        if other_blocks:
+            other_entry = {
+                **entry,
+                "message": {**entry["message"], "content": other_blocks},
+            }
+            tailer.entry_count += 1
+            emitter.emit(
+                "user_message",
+                source=tailer.source,
+                detail={"sdk_entry": other_entry},
+                raw=line,
+            )
+
+        # Emit one tool_result entry per tool_result block
+        for block in result_blocks:
+            tailer.entry_count += 1
+            emitter.emit(
+                "tool_result",
+                source=tailer.source,
+                detail={"sdk_entry": block},
+                raw=None if other_blocks else line,
             )

@@ -1060,3 +1060,150 @@ class TestTranscriptCollector:
             assert collector.main_entry_count == 5
 
         asyncio.run(run_test())
+
+    def test_user_message_split_tool_results(self, tmp_path: Path) -> None:
+        """User message with tool_result blocks emits tool_result entries."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="user_split_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            entry = {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": "file contents here",
+                        },
+                    ],
+                },
+            }
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == ["tool_result"]
+
+            # tool_result entry has the block as sdk_entry
+            assert collected[0]["detail"]["sdk_entry"]["tool_use_id"] == "toolu_1"
+            assert (
+                collected[0]["detail"]["sdk_entry"]["content"] == "file contents here"
+            )
+
+            # raw is attached since no other blocks remain
+            assert collected[0].get("raw") is not None
+
+            assert collector.main_entry_count == 1
+
+        asyncio.run(run_test())
+
+    def test_user_message_split_mixed_content(self, tmp_path: Path) -> None:
+        """User message with text + tool_result → user_message + tool_result."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="user_mixed_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            entry = {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Here are the results:"},
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": "result A",
+                        },
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_2",
+                            "content": "result B",
+                        },
+                    ],
+                },
+            }
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == ["user_message", "tool_result", "tool_result"]
+
+            # user_message has text only
+            um = collected[0]["detail"]["sdk_entry"]
+            assert len(um["message"]["content"]) == 1
+            assert um["message"]["content"][0]["type"] == "text"
+            assert collected[0].get("raw") is not None
+
+            # tool_results have no raw (user_message got it)
+            assert "raw" not in collected[1]
+            assert "raw" not in collected[2]
+
+            assert collected[1]["detail"]["sdk_entry"]["tool_use_id"] == "toolu_1"
+            assert collected[2]["detail"]["sdk_entry"]["tool_use_id"] == "toolu_2"
+
+            assert collector.main_entry_count == 3
+
+        asyncio.run(run_test())
+
+    def test_user_message_no_split_without_tool_result(self, tmp_path: Path) -> None:
+        """User message without tool_result is not split."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="user_no_split_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            entry = {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Hello"}],
+                },
+            }
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == ["user_message"]
+            assert collector.main_entry_count == 1
+
+        asyncio.run(run_test())

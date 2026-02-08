@@ -21,6 +21,7 @@ from typing import Any
 
 from weakincentives.cli.query import (
     _apply_notification_item_details,
+    _apply_split_block_details,
     _apply_tool_result_details,
     _apply_transcript_content_fallbacks,
     _create_dynamic_slice_table,
@@ -878,6 +879,104 @@ class TestExtractTranscriptDetailsSplitToolUse:
         assert tool_use_id == ""
 
 
+class TestApplySplitBlockDetails:
+    """Direct tests for _apply_split_block_details."""
+
+    def test_tool_result_extracts_id_and_content(self) -> None:
+        """Exercises the tool_result branch directly."""
+        parsed: dict[str, object] = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_split",
+            "content": "result text",
+        }
+        content, tool_name, tool_use_id = _apply_split_block_details(
+            parsed,
+            "tool_result",
+            content="",
+            tool_name="",
+            tool_use_id="",
+        )
+        assert tool_use_id == "toolu_split"
+        assert content == "result text"
+        assert tool_name == ""
+
+    def test_tool_result_skips_when_id_already_set(self) -> None:
+        """Skips tool_result extraction when tool_use_id already populated."""
+        parsed: dict[str, object] = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_new",
+            "content": "new",
+        }
+        content, _tool_name, tool_use_id = _apply_split_block_details(
+            parsed,
+            "tool_result",
+            content="existing",
+            tool_name="",
+            tool_use_id="toolu_existing",
+        )
+        assert tool_use_id == "toolu_existing"
+        assert content == "existing"
+
+    def test_tool_result_non_string_content_skipped(self) -> None:
+        """Non-string content in tool_result block is not extracted."""
+        parsed: dict[str, object] = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_1",
+            "content": ["complex", "content"],
+        }
+        content, _tool_name, tool_use_id = _apply_split_block_details(
+            parsed,
+            "tool_result",
+            content="",
+            tool_name="",
+            tool_use_id="",
+        )
+        assert tool_use_id == "toolu_1"
+        assert content == ""
+
+
+class TestExtractTranscriptDetailsSplitToolResult:
+    """Tests for top-level tool_result block extraction."""
+
+    def test_top_level_tool_result_extracts_id_and_content(self) -> None:
+        """Split tool_result entries have parsed as the block itself."""
+        parsed: dict[str, object] = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_abc",
+            "content": "file contents",
+        }
+        _role, content, _tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_result"
+        )
+        assert tool_use_id == "toolu_abc"
+        assert content == "file contents"
+
+    def test_non_string_id_ignored(self) -> None:
+        """Non-string tool_use_id is not extracted."""
+        parsed: dict[str, object] = {
+            "type": "tool_result",
+            "tool_use_id": 12345,
+            "content": "result",
+        }
+        _role, _content, _tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_result"
+        )
+        assert tool_use_id == ""
+
+    def test_skipped_when_already_found(self) -> None:
+        """If _apply_tool_result_details already found tool_use_id, skip."""
+        parsed: dict[str, object] = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_new",
+            "content": "new_content",
+        }
+        _role, _content, _tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_result"
+        )
+        # _apply_tool_result_details runs first and picks up tool_use_id
+        assert tool_use_id == "toolu_new"
+
+
 class TestExtractTranscriptParsedObjSplitToolUse:
     """Tests for _extract_transcript_parsed_obj with split tool_use sdk_entry."""
 
@@ -894,3 +993,16 @@ class TestExtractTranscriptParsedObjSplitToolUse:
         assert result == block
         assert result is not None
         assert result.get("name") == "read_file"
+
+    def test_unwraps_tool_result_block_from_sdk_entry(self) -> None:
+        """Split tool_result entry has sdk_entry as the tool_result block."""
+        block: dict[str, object] = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_1",
+            "content": "result text",
+        }
+        ctx: dict[str, object] = {"detail": {"sdk_entry": block}}
+        result = _extract_transcript_parsed_obj(ctx, None)
+        assert result == block
+        assert result is not None
+        assert result.get("tool_use_id") == "toolu_1"
