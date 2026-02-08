@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from weakincentives.cli.query import (
+    _apply_bridged_tool_details,
     _apply_notification_item_details,
     _apply_split_block_details,
     _apply_tool_result_details,
@@ -1006,3 +1007,225 @@ class TestExtractTranscriptParsedObjSplitToolUse:
         assert result == block
         assert result is not None
         assert result.get("tool_use_id") == "toolu_1"
+
+
+class TestP1AgentMessageNotTreatedAsToolCall:
+    """P1: assistant_message entries from Codex agentMessage must NOT extract tool fields."""
+
+    def test_assistant_message_with_agent_notification_no_tool_fields(self) -> None:
+        """agentMessage notification should not contaminate tool_name/tool_use_id."""
+        parsed: dict[str, object] = {
+            "notification": {
+                "item": {
+                    "type": "agentMessage",
+                    "id": "msg_abc123",
+                    "text": "Hello from assistant",
+                }
+            }
+        }
+        _role, content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "assistant_message"
+        )
+        # Must NOT extract tool fields from agentMessage
+        assert tool_name == ""
+        assert tool_use_id == ""
+        # Content should come from notification.item.text via fallback
+        assert "Hello from assistant" in content
+
+    def test_tool_use_with_notification_still_extracts(self) -> None:
+        """tool_use entries with notification.item should still extract tool fields."""
+        parsed: dict[str, object] = {
+            "notification": {
+                "item": {
+                    "type": "commandExecution",
+                    "id": "call_xyz",
+                    "command": "ls -la",
+                    "aggregatedOutput": "file1\nfile2",
+                }
+            }
+        }
+        _role, content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_use"
+        )
+        assert tool_use_id == "call_xyz"
+        assert tool_name == "ls -la"
+        assert content == "file1\nfile2"
+
+    def test_tool_result_with_notification_still_extracts(self) -> None:
+        """tool_result entries with notification.item should still extract tool fields."""
+        parsed: dict[str, object] = {
+            "notification": {
+                "item": {
+                    "type": "commandExecution",
+                    "id": "call_xyz",
+                    "command": "ls -la",
+                    "aggregatedOutput": "file1\nfile2",
+                }
+            }
+        }
+        _role, content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_result"
+        )
+        assert tool_use_id == "call_xyz"
+        assert tool_name == "ls -la"
+        assert content == "file1\nfile2"
+
+
+class TestP2aNotificationItemTextFallback:
+    """P2a: assistant_message content extracted from notification.item.text."""
+
+    def test_content_fallback_reads_notification_item_text(self) -> None:
+        """_apply_transcript_content_fallbacks extracts notification.item.text."""
+        parsed: dict[str, object] = {
+            "notification": {
+                "item": {
+                    "type": "agentMessage",
+                    "id": "msg_1",
+                    "text": "The assistant said something",
+                }
+            }
+        }
+        result = _apply_transcript_content_fallbacks(parsed, "assistant_message", "")
+        assert result == "The assistant said something"
+
+    def test_content_fallback_skips_empty_text(self) -> None:
+        """Empty text in notification.item falls through to stringify."""
+        parsed: dict[str, object] = {
+            "notification": {
+                "item": {
+                    "type": "agentMessage",
+                    "id": "msg_2",
+                    "text": "",
+                }
+            }
+        }
+        result = _apply_transcript_content_fallbacks(parsed, "assistant_message", "")
+        # Falls through to _stringify_transcript_content(parsed)
+        assert result  # Some stringified representation
+
+
+class TestP2bBridgedToolDetails:
+    """P2b: bridged WINK tool events (no .item key) should extract tool metadata."""
+
+    def test_apply_bridged_tool_details_extracts_tool_and_call_id(self) -> None:
+        """Bridged notification with tool/callId is extracted."""
+        notification: dict[str, object] = {
+            "tool": "read_file",
+            "callId": "call_bridge_1",
+            "arguments": {"path": "/tmp/a.txt"},
+        }
+        parsed: dict[str, object] = {"notification": notification}
+        tool_use_id, tool_name, _content = _apply_bridged_tool_details(
+            parsed,
+            notification,
+            tool_use_id="",
+            tool_name="",
+            content="",
+        )
+        assert tool_use_id == "call_bridge_1"
+        assert tool_name == "read_file"
+
+    def test_apply_bridged_tool_details_extracts_result_string(self) -> None:
+        """Bridged tool_result with string result in parsed.result."""
+        notification: dict[str, object] = {
+            "tool": "read_file",
+            "callId": "call_bridge_2",
+        }
+        parsed: dict[str, object] = {
+            "notification": notification,
+            "result": "file contents here",
+        }
+        _tool_use_id, _tool_name, content = _apply_bridged_tool_details(
+            parsed,
+            notification,
+            tool_use_id="",
+            tool_name="",
+            content="",
+        )
+        assert content == "file contents here"
+
+    def test_apply_bridged_tool_details_extracts_result_dict(self) -> None:
+        """Bridged tool_result with dict result is JSON-dumped."""
+        notification: dict[str, object] = {
+            "tool": "search",
+            "callId": "call_bridge_3",
+        }
+        parsed: dict[str, object] = {
+            "notification": notification,
+            "result": {"matches": 5},
+        }
+        _tool_use_id, _tool_name, content = _apply_bridged_tool_details(
+            parsed,
+            notification,
+            tool_use_id="",
+            tool_name="",
+            content="",
+        )
+        assert '"matches"' in content
+
+    def test_apply_bridged_tool_details_preserves_existing(self) -> None:
+        """Existing values are not overwritten."""
+        notification: dict[str, object] = {
+            "tool": "new_tool",
+            "callId": "new_id",
+        }
+        parsed: dict[str, object] = {
+            "notification": notification,
+            "result": "new_result",
+        }
+        tool_use_id, tool_name, content = _apply_bridged_tool_details(
+            parsed,
+            notification,
+            tool_use_id="existing_id",
+            tool_name="existing_tool",
+            content="existing_content",
+        )
+        assert tool_use_id == "existing_id"
+        assert tool_name == "existing_tool"
+        assert content == "existing_content"
+
+    def test_notification_item_details_delegates_to_bridged(self) -> None:
+        """_apply_notification_item_details delegates to bridged when no .item."""
+        parsed: dict[str, object] = {
+            "notification": {
+                "tool": "write_file",
+                "callId": "call_bridge_4",
+                "arguments": {"path": "/tmp/b.txt"},
+            }
+        }
+        tool_use_id, tool_name, _content = _apply_notification_item_details(
+            parsed, tool_use_id="", tool_name="", content=""
+        )
+        assert tool_use_id == "call_bridge_4"
+        assert tool_name == "write_file"
+
+    def test_end_to_end_bridged_tool_use(self) -> None:
+        """End-to-end: _extract_transcript_details with bridged tool_use entry."""
+        parsed: dict[str, object] = {
+            "notification": {
+                "tool": "bash",
+                "callId": "call_bridge_5",
+                "arguments": {"command": "echo hello"},
+            }
+        }
+        _role, _content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_use"
+        )
+        assert tool_name == "bash"
+        assert tool_use_id == "call_bridge_5"
+
+    def test_end_to_end_bridged_tool_result(self) -> None:
+        """End-to-end: _extract_transcript_details with bridged tool_result entry."""
+        parsed: dict[str, object] = {
+            "notification": {
+                "tool": "bash",
+                "callId": "call_bridge_6",
+            },
+            "result": "hello\n",
+        }
+        _role, content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_result"
+        )
+        assert tool_name == "bash"
+        assert tool_use_id == "call_bridge_6"
+        assert content == "hello\n"

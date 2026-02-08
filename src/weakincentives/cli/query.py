@@ -44,7 +44,7 @@ _MAX_COLUMN_WIDTH = 50
 
 # Schema version for cache invalidation - increment when schema changes
 _SCHEMA_VERSION = (
-    8  # v8: split tool_use and tool_result blocks from assistant/user messages
+    9  # v9: fix Codex agentMessage contaminating tool metrics, bridged tool events
 )
 
 _TRANSCRIPT_INSERT_SQL = """
@@ -317,7 +317,8 @@ def _extract_transcript_details(
             tool_use_id=tool_use_id,
         )
     # Codex: extract from notification.item (commandExecution, fileChange, etc.)
-    if not tool_use_id:
+    # Only apply to tool entries — agentMessage entries are assistant_message, not tools.
+    if not tool_use_id and entry_type in {"tool_use", "tool_result"}:
         tool_use_id, tool_name, content = _apply_notification_item_details(
             parsed,
             tool_use_id=tool_use_id,
@@ -396,6 +397,40 @@ def _get_notification_item(
 
 
 @pure
+def _apply_bridged_tool_details(
+    parsed: Mapping[str, object],
+    notification: Mapping[str, object],
+    *,
+    tool_use_id: str,
+    tool_name: str,
+    content: str,
+) -> tuple[str, str, str]:
+    """Extract tool metadata from bridged WINK tool events (no ``.item`` key).
+
+    Bridged events emit ``detail={"notification": {"tool": ..., "callId": ...}, ...}``.
+    """
+    resolved_id = tool_use_id
+    call_id = notification.get("callId")
+    if isinstance(call_id, str) and not resolved_id:
+        resolved_id = call_id
+
+    resolved_name = tool_name
+    tool_val = notification.get("tool")
+    if isinstance(tool_val, str) and not resolved_name:
+        resolved_name = tool_val
+
+    resolved_content = content
+    if not resolved_content:
+        result_val = parsed.get("result")
+        if isinstance(result_val, str) and result_val:
+            resolved_content = result_val
+        elif result_val is not None:
+            resolved_content = _safe_json_dumps(result_val)
+
+    return resolved_id, resolved_name, resolved_content
+
+
+@pure
 def _apply_notification_item_details(
     parsed: Mapping[str, object],
     *,
@@ -406,6 +441,16 @@ def _apply_notification_item_details(
     """Extract tool_use_id, tool_name, content from Codex notification.item."""
     item = _get_notification_item(parsed)
     if item is None:
+        # Try bridged WINK tool events (notification without .item)
+        notif_raw = parsed.get("notification")
+        if isinstance(notif_raw, Mapping):
+            return _apply_bridged_tool_details(
+                parsed,
+                cast("Mapping[str, object]", notif_raw),
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                content=content,
+            )
         return tool_use_id, tool_name, content
 
     resolved_id = tool_use_id
@@ -428,6 +473,16 @@ def _apply_notification_item_details(
 
 
 @pure
+def _get_notification_item_text(parsed: Mapping[str, object]) -> str:
+    """Return ``notification.item.text`` if present, else empty string."""
+    item = _get_notification_item(parsed)
+    if item is None:
+        return ""
+    text_val = item.get("text")
+    return text_val if isinstance(text_val, str) else ""
+
+
+@pure
 def _apply_transcript_content_fallbacks(
     parsed: Mapping[str, object],
     entry_type: str,
@@ -446,6 +501,10 @@ def _apply_transcript_content_fallbacks(
         )
     else:
         content = _stringify_transcript_content(parsed.get("content"))
+
+    # Codex agentMessage: assistant text lives in notification.item.text
+    if not content:
+        content = _get_notification_item_text(parsed)
 
     if not content:
         content = _stringify_transcript_content(parsed)
