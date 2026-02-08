@@ -522,11 +522,15 @@ class TranscriptCollector:
             if not line:
                 continue
 
-            tailer.entry_count += 1
             await self._emit_entry(tailer, line)
 
     async def _emit_entry(self, tailer: _TailerState, line: str) -> None:
         """Emit a single transcript entry via the TranscriptEmitter.
+
+        For assistant messages containing tool_use content blocks, splits into
+        separate entries: one assistant_message (text-only blocks) plus one
+        tool_use entry per tool_use block.  This makes the Claude SDK adapter
+        structurally isomorphic with the Codex adapter for tool analysis.
 
         Args:
             tailer: Tailer state.
@@ -547,10 +551,81 @@ class TranscriptCollector:
         except json.JSONDecodeError:
             entry_type = "unknown"
             detail = {"parse_error": "Invalid JSON"}
+            tailer.entry_count += 1
+            emitter.emit(
+                entry_type,
+                source=tailer.source,
+                detail=detail,
+                raw=line,
+            )
+            return
 
+        # Split assistant messages that contain tool_use blocks
+        if entry_type == "assistant_message":
+            message = entry.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, list) and any(
+                    isinstance(b, dict) and b.get("type") == "tool_use" for b in content
+                ):
+                    self._emit_assistant_split(emitter, tailer, entry, line)
+                    return
+
+        tailer.entry_count += 1
         emitter.emit(
             entry_type,
             source=tailer.source,
             detail=detail,
             raw=line,
         )
+
+    @staticmethod
+    def _emit_assistant_split(
+        emitter: TranscriptEmitter,
+        tailer: _TailerState,
+        entry: dict[str, Any],
+        line: str,
+    ) -> None:
+        """Split an assistant message into text and tool_use entries.
+
+        Args:
+            emitter: Transcript emitter.
+            tailer: Tailer state for entry counting.
+            entry: Parsed SDK entry dict.
+            line: Raw JSONL line (attached only to the assistant_message).
+        """
+        content = entry["message"]["content"]
+
+        # Partition content blocks
+        text_blocks = [
+            b
+            for b in content
+            if not (isinstance(b, dict) and b.get("type") == "tool_use")
+        ]
+        tool_blocks = [
+            b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"
+        ]
+
+        # Emit assistant_message with text-only blocks (if any)
+        if text_blocks:
+            text_entry = {
+                **entry,
+                "message": {**entry["message"], "content": text_blocks},
+            }
+            tailer.entry_count += 1
+            emitter.emit(
+                "assistant_message",
+                source=tailer.source,
+                detail={"sdk_entry": text_entry},
+                raw=line,
+            )
+
+        # Emit one tool_use entry per tool_use block
+        for block in tool_blocks:
+            tailer.entry_count += 1
+            emitter.emit(
+                "tool_use",
+                source=tailer.source,
+                detail={"sdk_entry": block},
+                raw=None,
+            )

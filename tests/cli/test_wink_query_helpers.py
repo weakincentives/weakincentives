@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from weakincentives.cli.query import (
+    _apply_notification_item_details,
     _apply_tool_result_details,
     _apply_transcript_content_fallbacks,
     _create_dynamic_slice_table,
@@ -618,6 +619,67 @@ class TestTranscriptHelperCoverage:
             == "ok"
         )
 
+    def test_apply_notification_item_details_extracts_codex_fields(self) -> None:
+        """Codex notification.item fields are extracted."""
+        parsed: dict[str, object] = {
+            "notification": {
+                "item": {
+                    "type": "commandExecution",
+                    "id": "call_abc123",
+                    "command": "/bin/zsh -lc 'ls'",
+                    "aggregatedOutput": "file1.py\nfile2.py",
+                }
+            }
+        }
+        tool_use_id, tool_name, content = _apply_notification_item_details(
+            parsed, tool_use_id="", tool_name="", content=""
+        )
+        assert tool_use_id == "call_abc123"
+        assert tool_name == "/bin/zsh -lc 'ls'"
+        assert content == "file1.py\nfile2.py"
+
+    def test_apply_notification_item_details_uses_type_when_no_command(self) -> None:
+        """Falls back to item type when no command field."""
+        parsed: dict[str, object] = {
+            "notification": {"item": {"type": "fileChange", "id": "call_xyz"}}
+        }
+        tool_use_id, tool_name, _content = _apply_notification_item_details(
+            parsed, tool_use_id="", tool_name="", content=""
+        )
+        assert tool_use_id == "call_xyz"
+        assert tool_name == "fileChange"
+
+    def test_apply_notification_item_details_preserves_existing(self) -> None:
+        """Existing values are not overwritten."""
+        parsed: dict[str, object] = {
+            "notification": {"item": {"id": "new_id", "command": "new_cmd"}}
+        }
+        tool_use_id, tool_name, content = _apply_notification_item_details(
+            parsed, tool_use_id="existing", tool_name="existing", content="existing"
+        )
+        assert tool_use_id == "existing"
+        assert tool_name == "existing"
+        assert content == "existing"
+
+    def test_apply_notification_item_details_no_notification(self) -> None:
+        """Returns defaults when no notification key."""
+        tool_use_id, tool_name, content = _apply_notification_item_details(
+            {}, tool_use_id="", tool_name="", content=""
+        )
+        assert tool_use_id == ""
+        assert tool_name == ""
+        assert content == ""
+
+    def test_apply_notification_item_details_non_mapping_item(self) -> None:
+        """Returns defaults when notification.item is not a mapping."""
+        parsed: dict[str, object] = {"notification": {"item": "not-a-dict"}}
+        tool_use_id, tool_name, content = _apply_notification_item_details(
+            parsed, tool_use_id="", tool_name="", content=""
+        )
+        assert tool_use_id == ""
+        assert tool_name == ""
+        assert content == ""
+
     def test_extract_transcript_parsed_obj_parses_raw_json(self) -> None:
         assert _extract_transcript_parsed_obj({}, None) is None
         assert _extract_transcript_parsed_obj({}, "{") is None
@@ -650,7 +712,7 @@ class TestTranscriptHelperCoverage:
             _extract_transcript_row(
                 {
                     "event": "transcript.collector.entry",
-                    "context": {"source": "main", "entry_type": "user"},
+                    "context": {"source": "main", "entry_type": "user_message"},
                 }
             )
             is None
@@ -736,3 +798,99 @@ class TestIsCacheValid:
         time.sleep(0.01)  # Ensure different mtime
         bundle.touch()
         assert _is_cache_valid(bundle, cache) is False
+
+
+class TestExtractTranscriptDetailsSplitToolUse:
+    """Tests for top-level tool_use block extraction in _extract_transcript_details."""
+
+    def test_top_level_tool_use_extracts_name_and_id(self) -> None:
+        """Split tool_use entries have parsed as the block itself."""
+        parsed: dict[str, object] = {
+            "type": "tool_use",
+            "id": "toolu_abc",
+            "name": "read_file",
+            "input": {"path": "/tmp/a.txt"},
+        }
+        _role, _content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_use"
+        )
+        assert tool_name == "read_file"
+        assert tool_use_id == "toolu_abc"
+
+    def test_top_level_tool_use_with_tool_use_id_key(self) -> None:
+        """tool_use_id key is also accepted (alternative to id)."""
+        parsed: dict[str, object] = {
+            "type": "tool_use",
+            "tool_use_id": "toolu_xyz",
+            "name": "search",
+            "input": {},
+        }
+        _role, _content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_use"
+        )
+        assert tool_name == "search"
+        assert tool_use_id == "toolu_xyz"
+
+    def test_skipped_when_tool_name_already_found(self) -> None:
+        """If message-based extraction already found tool info, skip top-level."""
+        parsed: dict[str, object] = {
+            "type": "tool_use",
+            "id": "toolu_new",
+            "name": "new_tool",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "name": "existing_tool", "id": "toolu_old"}
+                ],
+            },
+        }
+        _role, _content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_use"
+        )
+        # Message-based extraction found the tool, so top-level is skipped
+        assert tool_name == "existing_tool"
+        assert tool_use_id == "toolu_old"
+
+    def test_non_tool_use_type_not_extracted(self) -> None:
+        """Non tool_use entry_type does not trigger extraction."""
+        parsed: dict[str, object] = {
+            "type": "tool_use",
+            "id": "toolu_1",
+            "name": "read_file",
+        }
+        _role, _content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "assistant_message"
+        )
+        assert tool_name == ""
+        assert tool_use_id == ""
+
+    def test_non_string_name_and_id_ignored(self) -> None:
+        """Non-string name/id values are not extracted."""
+        parsed: dict[str, object] = {
+            "type": "tool_use",
+            "id": 12345,
+            "name": None,
+        }
+        _role, _content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_use"
+        )
+        assert tool_name == ""
+        assert tool_use_id == ""
+
+
+class TestExtractTranscriptParsedObjSplitToolUse:
+    """Tests for _extract_transcript_parsed_obj with split tool_use sdk_entry."""
+
+    def test_unwraps_tool_use_block_from_sdk_entry(self) -> None:
+        """Split tool_use entry has sdk_entry as the tool_use block."""
+        block: dict[str, object] = {
+            "type": "tool_use",
+            "id": "toolu_1",
+            "name": "read_file",
+            "input": {"path": "/a.txt"},
+        }
+        ctx: dict[str, object] = {"detail": {"sdk_entry": block}}
+        result = _extract_transcript_parsed_obj(ctx, None)
+        assert result == block
+        assert result is not None
+        assert result.get("name") == "read_file"

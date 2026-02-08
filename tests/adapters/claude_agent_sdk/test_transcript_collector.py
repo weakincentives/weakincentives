@@ -845,3 +845,218 @@ class TestTranscriptCollector:
         # Verify position and partial_line were reset, inode updated
         assert tailer.inode == original_inode
         assert tailer.partial_line == ""
+
+    def test_assistant_split_text_and_tool_use(self, tmp_path: Path) -> None:
+        """Assistant message with text + 2 tool_use blocks emits 1 + 2 entries."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="split_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            entry = {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Let me help."},
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "read_file",
+                            "input": {},
+                        },
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_2",
+                            "name": "write_file",
+                            "input": {},
+                        },
+                    ],
+                },
+            }
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == ["assistant_message", "tool_use", "tool_use"]
+
+            # assistant_message has text-only content
+            am_detail = collected[0]["detail"]["sdk_entry"]
+            assert len(am_detail["message"]["content"]) == 1
+            assert am_detail["message"]["content"][0]["type"] == "text"
+
+            # tool_use entries have the block directly
+            assert collected[1]["detail"]["sdk_entry"]["name"] == "read_file"
+            assert collected[2]["detail"]["sdk_entry"]["name"] == "write_file"
+
+            # raw is only on the assistant_message
+            assert collected[0].get("raw") is not None
+            assert "raw" not in collected[1]
+            assert "raw" not in collected[2]
+
+            # entry_count = 3
+            assert collector.main_entry_count == 3
+
+        asyncio.run(run_test())
+
+    def test_assistant_split_only_tool_use(self, tmp_path: Path) -> None:
+        """Assistant message with only tool_use blocks emits no assistant_message."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="split_only_tools_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            entry = {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "search",
+                            "input": {},
+                        },
+                    ],
+                },
+            }
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == ["tool_use"]
+            assert collector.main_entry_count == 1
+
+        asyncio.run(run_test())
+
+    def test_assistant_no_split_text_only(self, tmp_path: Path) -> None:
+        """Assistant message with only text emits single assistant_message."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="no_split_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            entry = {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Just text."}],
+                },
+            }
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == ["assistant_message"]
+            assert collector.main_entry_count == 1
+
+        asyncio.run(run_test())
+
+    def test_assistant_no_split_string_content(self, tmp_path: Path) -> None:
+        """Assistant message with string content (not list) is not split."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="string_content_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            entry = {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": "Simple string content",
+                },
+            }
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == ["assistant_message"]
+            assert collector.main_entry_count == 1
+
+        asyncio.run(run_test())
+
+    def test_assistant_split_entry_count(self, tmp_path: Path) -> None:
+        """Entry count reflects total emitted entries including splits."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="count_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            entries = [
+                # user message: 1 entry
+                {"type": "user", "message": {"role": "user", "content": "Hi"}},
+                # assistant with text + 2 tools: 3 entries
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "Ok"},
+                            {"type": "tool_use", "id": "t1", "name": "a", "input": {}},
+                            {"type": "tool_use", "id": "t2", "name": "b", "input": {}},
+                        ],
+                    },
+                },
+                # tool result: 1 entry
+                {"type": "tool_result", "tool_use_id": "t1", "content": "done"},
+            ]
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+
+            async with collector.run():
+                await collector._remember_transcript_path(str(transcript))
+                await asyncio.sleep(0.05)
+
+            assert collector.main_entry_count == 5
+
+        asyncio.run(run_test())

@@ -432,7 +432,7 @@ def test_api_transcript_endpoint(tmp_path: Path) -> None:
                     "context": {
                         "prompt_name": "test",
                         "source": "main",
-                        "entry_type": "user",
+                        "entry_type": "user_message",
                         "sequence_number": 1,
                         "raw": json.dumps(
                             {
@@ -461,7 +461,7 @@ def test_api_transcript_endpoint(tmp_path: Path) -> None:
     assert transcript_response.status_code == 200
     transcript = transcript_response.json()
     assert transcript["total"] >= 1
-    assert transcript["entries"][0]["entry_type"] == "user"
+    assert transcript["entries"][0]["entry_type"] == "user_message"
 
     facets_response = client.get("/api/transcript/facets")
     assert facets_response.status_code == 200
@@ -492,7 +492,7 @@ def test_api_transcript_markdown_rendering(tmp_path: Path) -> None:
                     "context": {
                         "prompt_name": "test",
                         "source": "main",
-                        "entry_type": "assistant",
+                        "entry_type": "assistant_message",
                         "sequence_number": 1,
                         "raw": json.dumps(
                             {
@@ -551,7 +551,7 @@ def test_api_transcript_no_markdown_for_short_content(tmp_path: Path) -> None:
                     "context": {
                         "prompt_name": "test",
                         "source": "main",
-                        "entry_type": "user",
+                        "entry_type": "user_message",
                         "sequence_number": 1,
                         "raw": json.dumps(
                             {
@@ -923,7 +923,7 @@ def test_transcript_endpoints_and_filters(tmp_path: Path) -> None:
                     "context": {
                         "prompt_name": "test-prompt",
                         "source": "main",
-                        "entry_type": "user",
+                        "entry_type": "user_message",
                         "sequence_number": 1,
                         "raw": json.dumps(
                             {
@@ -946,7 +946,7 @@ def test_transcript_endpoints_and_filters(tmp_path: Path) -> None:
                     "context": {
                         "prompt_name": "test-prompt",
                         "source": "main",
-                        "entry_type": "assistant",
+                        "entry_type": "assistant_message",
                         "sequence_number": 2,
                         "raw": None,
                         "detail": {
@@ -970,27 +970,28 @@ def test_transcript_endpoints_and_filters(tmp_path: Path) -> None:
 
     facets = client.get("/api/transcript/facets").json()
     assert any(item["name"] == "main" for item in facets["sources"])
-    assert any(item["name"] == "user" for item in facets["entry_types"])
-    assert any(item["name"] == "assistant" for item in facets["entry_types"])
+    assert any(item["name"] == "user_message" for item in facets["entry_types"])
+    assert any(item["name"] == "assistant_message" for item in facets["entry_types"])
 
     # Search (server-side)
     searched = client.get("/api/transcript", params={"search": "Hello"}).json()
     assert searched["total"] == 1
-    assert searched["entries"][0]["entry_type"] == "user"
+    assert searched["entries"][0]["entry_type"] == "user_message"
 
     # Include filters
     filtered = client.get(
-        "/api/transcript", params={"source": "main", "entry_type": "assistant"}
+        "/api/transcript",
+        params={"source": "main", "entry_type": "assistant_message"},
     ).json()
     assert filtered["total"] == 1
-    assert filtered["entries"][0]["entry_type"] == "assistant"
+    assert filtered["entries"][0]["entry_type"] == "assistant_message"
 
     # Exclude filters
     excluded = client.get(
-        "/api/transcript", params={"exclude_entry_type": "assistant"}
+        "/api/transcript", params={"exclude_entry_type": "assistant_message"}
     ).json()
     assert excluded["total"] == 1
-    assert excluded["entries"][0]["entry_type"] == "user"
+    assert excluded["entries"][0]["entry_type"] == "user_message"
 
     # Pagination branches
     limited = client.get("/api/transcript", params={"limit": 1}).json()

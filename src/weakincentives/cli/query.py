@@ -43,7 +43,7 @@ class QueryError(WinkError, RuntimeError):
 _MAX_COLUMN_WIDTH = 50
 
 # Schema version for cache invalidation - increment when schema changes
-_SCHEMA_VERSION = 6  # v6: unified transcript (transcript.entry + source/raw/detail)
+_SCHEMA_VERSION = 7  # v7: split assistant_message tool_use blocks into separate entries
 
 _TRANSCRIPT_INSERT_SQL = """
     INSERT INTO transcript (
@@ -277,6 +277,22 @@ def _extract_transcript_details(
             tool_name=tool_name,
             tool_use_id=tool_use_id,
         )
+    # Codex: extract from notification.item (commandExecution, fileChange, etc.)
+    if not tool_use_id:
+        tool_use_id, tool_name, content = _apply_notification_item_details(
+            parsed,
+            tool_use_id=tool_use_id,
+            tool_name=tool_name,
+            content=content,
+        )
+    # Split tool_use entries: parsed is the tool_use block itself
+    if entry_type == "tool_use" and not tool_name and parsed.get("type") == "tool_use":
+        name_val = parsed.get("name")
+        if isinstance(name_val, str):
+            tool_name = name_val
+        id_val = parsed.get("id") or parsed.get("tool_use_id")
+        if isinstance(id_val, str):
+            tool_use_id = id_val
     content = _apply_transcript_content_fallbacks(parsed, entry_type, content)
     return role, content, tool_name, tool_use_id
 
@@ -326,6 +342,51 @@ def _apply_tool_result_details(
         resolved_content = _stringify_transcript_content(parsed.get("content"))
 
     return resolved_content, resolved_tool_name, resolved_tool_use_id
+
+
+def _get_notification_item(
+    parsed: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Return ``notification.item`` if both are mappings, else None."""
+    notif_raw = parsed.get("notification")
+    if not isinstance(notif_raw, Mapping):
+        return None
+    item_raw = cast("Mapping[str, object]", notif_raw).get("item")
+    if not isinstance(item_raw, Mapping):
+        return None
+    return cast("Mapping[str, object]", item_raw)
+
+
+@pure
+def _apply_notification_item_details(
+    parsed: Mapping[str, object],
+    *,
+    tool_use_id: str,
+    tool_name: str,
+    content: str,
+) -> tuple[str, str, str]:
+    """Extract tool_use_id, tool_name, content from Codex notification.item."""
+    item = _get_notification_item(parsed)
+    if item is None:
+        return tool_use_id, tool_name, content
+
+    resolved_id = tool_use_id
+    item_id = item.get("id")
+    if isinstance(item_id, str) and not resolved_id:
+        resolved_id = item_id
+
+    resolved_name = tool_name
+    if not resolved_name:
+        cmd = item.get("command")
+        resolved_name = cmd if isinstance(cmd, str) else str(item.get("type", ""))
+
+    resolved_content = content
+    if not resolved_content:
+        output = item.get("aggregatedOutput")
+        if isinstance(output, str) and output:
+            resolved_content = output
+
+    return resolved_id, resolved_name, resolved_content
 
 
 @pure
@@ -396,13 +457,12 @@ def _extract_transcript_details_tuple(
 ) -> tuple[str, str, str, str, str, str | None]:
     if parsed is None:
         return entry_type, "", "", "", "", None
-    resolved_entry_type = str(parsed.get("type") or entry_type)
     role, content, tool_name, tool_use_id = _extract_transcript_details(
         parsed,
-        resolved_entry_type,
+        entry_type,
     )
     return (
-        resolved_entry_type,
+        entry_type,
         role,
         content,
         tool_name,
@@ -1664,7 +1724,7 @@ class QueryDatabase(Closeable):
                 entry_type,
                 role,
                 CASE
-                    WHEN entry_type IN ('user', 'assistant') THEN
+                    WHEN entry_type IN ('user_message', 'assistant_message') THEN
                         CASE
                             WHEN LENGTH(content) > 100 THEN SUBSTR(content, 1, 97) || '...'
                             ELSE content
@@ -1698,7 +1758,7 @@ class QueryDatabase(Closeable):
                 ON t1.tool_use_id = t2.tool_use_id
                 AND t2.entry_type = 'tool_result'
                 AND t1.transcript_source = t2.transcript_source
-            WHERE t1.entry_type = 'assistant'
+            WHERE t1.entry_type IN ('assistant_message', 'tool_use')
                 AND t1.tool_name IS NOT NULL
                 AND t1.tool_name != ''
             ORDER BY t1.sequence_number
@@ -1736,8 +1796,8 @@ class QueryDatabase(Closeable):
                 MIN(sequence_number) as first_entry,
                 MAX(sequence_number) as last_entry,
                 COUNT(*) as total_entries,
-                COUNT(CASE WHEN entry_type = 'user' THEN 1 END) as user_messages,
-                COUNT(CASE WHEN entry_type = 'assistant' THEN 1 END) as assistant_messages,
+                COUNT(CASE WHEN entry_type = 'user_message' THEN 1 END) as user_messages,
+                COUNT(CASE WHEN entry_type = 'assistant_message' THEN 1 END) as assistant_messages,
                 COUNT(CASE WHEN entry_type = 'thinking' THEN 1 END) as thinking_blocks,
                 COUNT(DISTINCT CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN tool_name END) as unique_tools,
                 COUNT(CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN 1 END) as total_tool_calls

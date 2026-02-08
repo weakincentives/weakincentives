@@ -310,7 +310,7 @@ class TestTranscriptTable:
                     "prompt_name": "test",
                     "source": "main",
                     "sequence_number": 7,
-                    "entry_type": "assistant",
+                    "entry_type": "assistant_message",
                     "raw": json.dumps(parsed_entry),
                     "detail": parsed_entry,
                 },
@@ -336,7 +336,7 @@ class TestTranscriptTable:
             assert len(rows) == 1
             row = rows[0]
             assert row["transcript_source"] == "main"
-            assert row["entry_type"] == "assistant"
+            assert row["entry_type"] == "assistant_message"
             assert row["role"] == "assistant"
             assert "Running tool" in row["content"]
             assert "bash" in row["content"]
@@ -378,7 +378,7 @@ class TestTranscriptTable:
                     "prompt_name": "test",
                     "source": "main",
                     "sequence_number": 1,
-                    "entry_type": "user",
+                    "entry_type": "user_message",
                     "detail": {
                         "type": "user",
                         "message": {"role": "user", "content": "Hello, assistant!"},
@@ -395,7 +395,7 @@ class TestTranscriptTable:
                     "prompt_name": "test",
                     "source": "main",
                     "sequence_number": 2,
-                    "entry_type": "assistant",
+                    "entry_type": "assistant_message",
                     "detail": {
                         "type": "assistant",
                         "message": {
@@ -446,12 +446,12 @@ class TestTranscriptTable:
 
             # Check user message
             assert rows[0]["sequence_number"] == 1
-            assert rows[0]["entry_type"] == "user"
+            assert rows[0]["entry_type"] == "user_message"
             assert rows[0]["message_preview"] == "Hello, assistant!"
 
             # Check assistant message
             assert rows[1]["sequence_number"] == 2
-            assert rows[1]["entry_type"] == "assistant"
+            assert rows[1]["entry_type"] == "assistant_message"
             assert rows[1]["message_preview"] == "Hello! How can I help?"
 
             # Check thinking block
@@ -494,7 +494,7 @@ class TestTranscriptTable:
                     "prompt_name": "test",
                     "source": "main",
                     "sequence_number": 1,
-                    "entry_type": "assistant",
+                    "entry_type": "assistant_message",
                     "detail": {
                         "type": "assistant",
                         "message": {
@@ -594,7 +594,7 @@ class TestTranscriptTable:
                     "prompt_name": "test",
                     "source": "main",
                     "sequence_number": 1,
-                    "entry_type": "user",
+                    "entry_type": "user_message",
                     "detail": {
                         "type": "user",
                         "message": {"role": "user", "content": "Hi"},
@@ -611,7 +611,7 @@ class TestTranscriptTable:
                     "prompt_name": "test",
                     "source": "main",
                     "sequence_number": 2,
-                    "entry_type": "assistant",
+                    "entry_type": "assistant_message",
                     "detail": {
                         "type": "assistant",
                         "message": {"role": "assistant", "content": "Hello"},
@@ -643,7 +643,7 @@ class TestTranscriptTable:
                     "prompt_name": "test",
                     "source": "subagent:001",
                     "sequence_number": 2,
-                    "entry_type": "assistant",
+                    "entry_type": "assistant_message",
                     "detail": {
                         "type": "assistant",
                         "message": {
@@ -1686,7 +1686,7 @@ class TestSeqColumn:
                 "message": "Transcript entry",
                 "context": {
                     "sequence_number": 44,
-                    "entry_type": "assistant",
+                    "entry_type": "assistant_message",
                     "source": "main",
                 },
             },
@@ -1818,7 +1818,7 @@ class TestQueryViews:
             assert results[0]["prompt_name"] == "test-prompt"
             assert results[0]["transcript_source"] == "main"
             assert results[0]["sequence_number"] == 1
-            assert results[0]["entry_type"] == "user"
+            assert results[0]["entry_type"] == "user_message"
             assert results[0]["role"] == "user"
             assert results[0]["content"] == "Hello"
         finally:
@@ -1878,7 +1878,7 @@ class TestOpenQueryDatabaseLogSkipping:
             assert len(results) == 1
             assert results[0]["transcript_source"] == "main"
             assert results[0]["sequence_number"] == 1
-            assert results[0]["entry_type"] == "user"
+            assert results[0]["entry_type"] == "user_message"
             assert results[0]["role"] == "user"
             assert results[0]["content"] == "Hello"
         finally:
