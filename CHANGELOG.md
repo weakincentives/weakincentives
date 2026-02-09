@@ -2,6 +2,310 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+*Commits reviewed: 2026-02-07 (b47a2736) through 2026-02-07 (0431d828)*
+
+### TL;DR
+
+WINK introduces a **unified transcript system** across adapters — a shared
+`TranscriptEmitter` in the runtime layer and a `CodexTranscriptBridge` enable
+both the Claude Agent SDK and Codex App Server adapters to emit structurally
+identical transcript entries using 9 canonical entry types. The Claude adapter
+now **splits mixed content blocks** (e.g., an assistant message containing
+tool_use blocks becomes separate `assistant_message` + `tool_use` entries),
+making cross-adapter transcript analysis uniform. Debug bundles gain a dedicated
+`transcript.jsonl` artifact, and the `wink query` schema is upgraded to v9
+with corrected tool metrics and bridged-tool event tracking.
+
+**Skills move from adapter config to prompt sections** — `SkillConfig` is
+deleted, `IsolationConfig.skills` is removed, and `SkillMount` instances are
+now attached directly to sections via `Section(skills=(...))`. Skills follow
+the same rendering, visibility, and progressive disclosure rules as tools.
+
+The `deadline` field is **removed from `AgentLoopConfig`** — deadlines are now
+exclusively per-request via `AgentLoopRequest` or `execute(deadline=...)`.
+A **bug fix** in the transcript collector prevents permanent loss of transcripts
+when the `.jsonl` file doesn't exist at hook time, using a retry-on-poll
+mechanism. Documentation receives substantial updates: the debugging guide gains
+complete `wink query` reference material and AI agent integration instructions,
+the README documents both execution harnesses side-by-side, and a new unified
+`TRANSCRIPT.md` spec replaces the Claude-specific `TRANSCRIPT_COLLECTION.md`.
+
+---
+
+### Fixed
+
+- **Transcript collector no longer loses transcripts when files appear late.**
+  When the Claude Agent SDK fires a hook before the `.jsonl` file exists on
+  disk, `TranscriptCollector` now records the source in a `_pending_tailers`
+  dict and retries on each poll cycle (`_poll_once()`). Once the file appears,
+  the tailer activates and tailing proceeds normally. The initial warning is
+  logged only once per source to prevent log spam.
+  (`_transcript_collector.py`: `_start_tailer()`, `_poll_once()`)
+
+- **Codex `agentMessage` no longer contaminates tool metrics in `wink query`.**
+  The `transcript_tools` SQL view previously matched `entry_type = 'assistant'`,
+  catching all assistant messages. Now it matches
+  `entry_type IN ('assistant_message', 'tool_use')` with proper `tool_name`
+  filtering. (`query.py`: schema v9)
+
+- **Bridged WINK tool events now appear in Codex transcripts.** The Codex
+  adapter's `_handle_tool_call()` now emits `tool_use` and `tool_result`
+  transcript entries via `CodexTranscriptBridge` for WINK-bridged tools, which
+  were previously invisible. (`codex_app_server/adapter.py`)
+
+- **Entry type override bug in query database.** `_extract_transcript_details_tuple()`
+  previously overrode the canonical entry type with `parsed.get("type")`,
+  leaking SDK-native types into the query database. Now uses the canonical
+  `entry_type` directly. (`query.py`)
+
+---
+
+### Breaking Changes
+
+#### Removed `deadline` from `AgentLoopConfig`
+
+A deadline is a specific point in time. Setting one at config-construction time
+means it can expire before execution even starts — a long-lived `AgentLoop`
+reusing the same config would eventually have every request fail with a stale
+deadline. Deadlines belong on per-request objects.
+
+**Migration:**
+```python
+# Old ❌
+config = AgentLoopConfig(
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
+)
+
+# New ✅ — pass deadline per-request
+request = AgentLoopRequest(
+    request=my_request,
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
+)
+
+# Or via execute()
+loop.execute(my_request, deadline=Deadline(...))
+```
+
+#### Skills Attached at Section Level Instead of Adapter Config
+
+`SkillConfig` is deleted. `IsolationConfig.skills` is removed along with the
+`skills` parameter on all `IsolationConfig` factory methods
+(`inherit_host_auth`, `with_api_key`, `with_anthropic_api_key`, `with_bedrock`).
+`SkillMount.enabled` is removed — use section visibility instead.
+
+Skills are now attached to sections and collected during prompt rendering,
+following the same rules as tools: skills on `SUMMARY`-visibility sections are
+not collected; sections with skills participate in progressive disclosure via
+`open_sections`.
+
+**Migration:**
+```python
+# Old ❌
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            skills=SkillConfig(
+                skills=(SkillMount(Path("./skills/review")),)
+            ),
+        ),
+    ),
+)
+
+# New ✅ — attach skills to sections
+section = MarkdownSection(
+    title="Review",
+    key="review",
+    template="Review the code.",
+    skills=(SkillMount(Path("./skills/review")),),
+)
+# Skills are automatically collected during rendering and mounted by the adapter
+```
+
+**New section-level infrastructure:**
+- `Section.__init__` accepts `skills: Sequence[object] | None`
+- `MarkdownSection.clone()` preserves skills
+- `RenderedPrompt.skills` exposes collected skills
+- `PromptRegistry` tracks skill names, detects duplicates, and computes
+  `subtree_has_skills` index
+- `EphemeralHome.mount_skills()` is now public with single-call enforcement
+
+#### Unified Transcript Format Across Adapters
+
+The transcript system switches from adapter-specific formats to a canonical
+schema. All log events, context field names, and entry types change:
+
+**Log events renamed** (`transcript.collector.*` → `transcript.*`):
+- `transcript.collector.entry` → `transcript.entry`
+- `transcript.collector.start` → `transcript.start`
+- `transcript.collector.stop` → `transcript.stop`
+- `transcript.collector.path_discovered` → `transcript.path_discovered`
+- `transcript.collector.subagent_discovered` → `transcript.subagent_discovered`
+- `transcript.collector.error` → `transcript.error`
+
+**Log context fields renamed:**
+- `transcript_source` → `source`
+- `raw_json` → `raw`
+- `parsed` → `detail` (Claude SDK entries wrapped under `detail.sdk_entry`)
+
+**Entry types canonicalized:**
+- `user` → `user_message`
+- `assistant` → `assistant_message`
+- `summary` → `system_event`
+- `system` → `system_event`
+- `unparsed` → removed (entries are always parsed now)
+- `invalid` → `unknown`
+
+**Config field renamed:** `TranscriptCollectorConfig.emit_raw_json` →
+`TranscriptCollectorConfig.emit_raw`. `TranscriptCollectorConfig.parse_entries`
+removed entirely.
+
+**Message splitting:** Claude SDK assistant messages containing `tool_use`
+blocks are now split into separate `assistant_message` + `tool_use` entries.
+User messages containing `tool_result` blocks are similarly split. Entry counts
+will differ from previous behavior.
+
+**Query database:** Schema bumped to v9. Existing cached databases will be
+rebuilt automatically.
+
+---
+
+### New Features
+
+#### Unified Transcript System (`TranscriptEmitter` + `CodexTranscriptBridge`)
+
+A shared transcript runtime (`src/weakincentives/runtime/transcript.py`, 283
+lines) provides adapter-agnostic transcript emission with 9 canonical entry
+types: `user_message`, `assistant_message`, `tool_use`, `tool_result`,
+`thinking`, `system_event`, `token_usage`, `error`, `unknown`.
+
+- **`TranscriptEmitter`**: Thread-safe emitter with sequence numbering,
+  timestamp capture, per-source counters, and exception suppression. Emits
+  `transcript.entry` DEBUG logs with a full envelope (`prompt_name`, `adapter`,
+  `entry_type`, `sequence_number`, `source`, `timestamp`, `session_id`,
+  `detail`, `raw`). `start()`/`stop()` methods emit summary statistics.
+- **`TranscriptEntry`**: Frozen dataclass representing a single canonical
+  transcript entry.
+- **`TranscriptSummary`**: Aggregate statistics (total entries, entries by
+  type/source, timestamps).
+- **`reconstruct_transcript()`**: Converts log records back to typed
+  `TranscriptEntry` objects for post-hoc analysis.
+
+**Codex App Server integration** via `CodexTranscriptBridge`
+(`adapters/codex_app_server/_transcript.py`, 186 lines):
+- Maps Codex JSON-RPC notifications to canonical types
+- Suppresses streaming deltas (`item/agentMessage/delta`, etc.)
+- Handles `turn/started`, `item/started`, `item/completed`,
+  `item/reasoning/completed`, `thread/tokenUsage/updated`, `turn/completed`
+- Emits `tool_use`/`tool_result` for WINK-bridged tool calls
+
+**Claude SDK message splitting** — mixed content blocks are split into
+separate transcript entries for structural consistency with Codex:
+- `_emit_assistant_split()`: text blocks → `assistant_message`, each tool_use
+  block → `tool_use`
+- `_emit_user_tool_result_split()`: non-tool blocks → `user_message`, each
+  tool_result block → `tool_result`
+
+**New configuration fields:**
+- `CodexAppServerClientConfig.transcript: bool = True`
+- `CodexAppServerClientConfig.transcript_emit_raw: bool = True`
+
+#### Debug Bundle Transcript Artifact
+
+`BundleWriter._extract_transcript()` scans `app.jsonl` for
+`event == "transcript.entry"` records and writes them to a separate
+`transcript.jsonl` artifact in the bundle. `DebugBundle.transcript` property
+provides typed access. The `wink query` CLI loads transcripts from this artifact
+first, falling back to log scanning.
+
+---
+
+### Improvements
+
+#### Section-Level Skill Registration with Duplicate Detection
+
+`PromptRegistry` now tracks skill names across sections with duplicate
+detection. A `PromptValidationError` is raised if two sections declare skills
+with the same name. The registry precomputes a `subtree_has_skills` index for
+O(1) lookups during rendering, and skills participate in progressive disclosure
+alongside tools.
+
+#### Expanded `wink query` Extraction Pipeline
+
+New extraction functions handle the unified transcript format:
+- `_apply_split_block_details()` — extracts `tool_name`/`tool_use_id` from
+  split content blocks
+- `_apply_notification_item_details()` — extracts tool metadata from Codex
+  notification items
+- `_apply_bridged_tool_details()` — extracts tool metadata from WINK bridged
+  tool events
+- Two-phase transcript loading: artifact-first, log-fallback
+
+#### Integration Test Timeout Increase
+
+Integration test timeout bumped from 180s to 300s for `integration-tests`,
+`redis-tests`, `redis-standalone-tests`, and `redis-cluster-tests` in the
+Makefile.
+
+---
+
+### Documentation
+
+#### Unified Transcript Specification
+
+New `specs/TRANSCRIPT.md` (486 lines) replaces the Claude-specific
+`specs/TRANSCRIPT_COLLECTION.md` (409 lines, deleted). The new spec covers:
+
+- Common envelope schema with 9 canonical entry types
+- Adapter mapping tables for both Claude Agent SDK and Codex App Server
+- `TranscriptEmitter`, `TranscriptEntry`, `TranscriptSummary` class specs
+- `CodexTranscriptBridge` specification with all notification handlers
+- `reconstruct_transcript()` function spec
+- Debug bundle `transcript.jsonl` integration
+- Seven formal invariants (envelope completeness, sequence monotonicity, type
+  vocabulary, non-blocking emission, adapter labeling, source consistency,
+  timestamp ordering)
+- Configuration changes and migration guide
+
+#### Debugging Guide Expansion
+
+`guides/debugging.md` expanded from 237 to 407 lines (+170 lines):
+
+- Debug UI examples updated from `.jsonl` to `.zip` bundle format
+- Capability list expanded from 4 to 8 categories (session state, logs,
+  transcripts, tool calls, files, environment, metrics, errors)
+- New bundle management subsection (auto-detection, listing, reloading)
+- Complete `wink query` inline reference: CLI usage, 7 core tables, 5
+  environment tables, 7 pre-built views, 7 example SQL queries
+- New "Instructing Coding Agents to Use wink query" section with prompt
+  templates, key views, investigation queries, and a 5-step agent workflow
+
+#### Query Guide Updates
+
+`guides/query.md` expanded with:
+- New "Environment Tables" section documenting 6 `env_*` tables with 5 example
+  queries
+- Four new transcript views added to the views reference table
+  (`transcript_flow`, `transcript_tools`, `transcript_thinking`,
+  `transcript_agents`)
+
+#### README: Execution Harnesses Documentation
+
+`README.md` restructured from a Claude-SDK-only section to a multi-harness
+layout:
+
+- New `## Execution Harnesses` parent section with introductory paragraph
+- `### Claude Agent SDK` subsection with specific native tool names (Read,
+  Write, Edit, Glob, Grep, Bash) and install command
+- New `### Codex App Server` subsection with feature list (native tools,
+  dynamic tools, structured output, no extra deps), install command, and
+  complete Python usage example showing `CodexAppServerAdapter`,
+  `CodexAppServerClientConfig`, `CodexAppServerModelConfig`,
+  `CodexWorkspaceSection`, and `HostMount`
+
+---
+
 ## v0.25.0 — 2026-02-06
 
 ### TL;DR
