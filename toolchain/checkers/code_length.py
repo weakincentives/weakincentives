@@ -15,8 +15,12 @@
 Enforces maximum file and function/method lengths to encourage
 well-encapsulated abstractions:
 
-- File length: max 620 lines (warning)
-- Function/method length: max 120 lines (error)
+- File length: max 620 lines
+- Function/method length: max 120 lines
+
+Known violations listed in a baseline file are reported as warnings.
+Any NEW violation not in the baseline is reported as an error,
+failing the check.
 """
 
 from __future__ import annotations
@@ -31,22 +35,39 @@ from ..result import CheckResult, Diagnostic, Location
 
 _DEFAULT_MAX_FILE_LINES = 620
 _DEFAULT_MAX_FUNCTION_LINES = 120
+_DEFAULT_BASELINE = Path(__file__).parent / "code_length_baseline.txt"
+
+
+def load_baseline(path: Path) -> frozenset[str]:
+    """Load the set of known violation keys from a baseline file.
+
+    Lines starting with ``#`` and blank lines are ignored.
+    """
+    if not path.is_file():
+        return frozenset()
+    entries: list[str] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        entries.append(line)
+    return frozenset(entries)
 
 
 @dataclass
 class CodeLengthChecker:
     """Checker for file and function/method length limits.
 
-    Both file and function violations are reported as warnings by default,
-    allowing incremental enforcement without blocking the build.
+    Violations present in the baseline file are reported as warnings.
+    New violations (not in the baseline) are reported as errors that
+    fail the check.
     """
 
     src_dir: Path | None = None
     test_dir: Path | None = None
     max_file_lines: int = _DEFAULT_MAX_FILE_LINES
     max_function_lines: int = _DEFAULT_MAX_FUNCTION_LINES
-    file_length_severity: str = "warning"
-    function_length_severity: str = "warning"
+    baseline_path: Path = _DEFAULT_BASELINE
     exclude_patterns: tuple[str, ...] = field(
         default_factory=lambda: ("__pycache__",)
     )
@@ -64,6 +85,7 @@ class CodeLengthChecker:
         root = Path(".")
         src = self.src_dir or root / "src"
         tests = self.test_dir or root / "tests"
+        baseline = load_baseline(self.baseline_path)
 
         diagnostics: list[Diagnostic] = []
         has_errors = False
@@ -74,7 +96,7 @@ class CodeLengthChecker:
             for py_file in sorted(directory.rglob("*.py")):
                 if any(pat in str(py_file) for pat in self.exclude_patterns):
                     continue
-                file_diags = self._check_file(py_file)
+                file_diags = self._check_file(py_file, baseline)
                 for d in file_diags:
                     if d.severity == "error":
                         has_errors = True
@@ -87,7 +109,9 @@ class CodeLengthChecker:
             diagnostics=tuple(diagnostics),
         )
 
-    def _check_file(self, py_file: Path) -> list[Diagnostic]:
+    def _check_file(
+        self, py_file: Path, baseline: frozenset[str]
+    ) -> list[Diagnostic]:
         """Check a single Python file for length violations."""
         diagnostics: list[Diagnostic] = []
 
@@ -101,6 +125,8 @@ class CodeLengthChecker:
 
         # Check file length
         if total_lines > self.max_file_lines:
+            key = str(py_file)
+            severity = "warning" if key in baseline else "error"
             msg = (
                 f"File has {total_lines} lines (max {self.max_file_lines})\n"
                 f"Fix: Split into smaller, focused modules"
@@ -109,7 +135,7 @@ class CodeLengthChecker:
                 Diagnostic(
                     message=msg,
                     location=Location(file=str(py_file)),
-                    severity=self.file_length_severity,  # type: ignore[arg-type]
+                    severity=severity,  # type: ignore[arg-type]
                 )
             )
 
@@ -119,11 +145,14 @@ class CodeLengthChecker:
         except SyntaxError:
             return diagnostics
 
-        diagnostics.extend(self._check_functions(tree, py_file))
+        diagnostics.extend(self._check_functions(tree, py_file, baseline))
         return diagnostics
 
     def _check_functions(
-        self, tree: ast.Module, py_file: Path
+        self,
+        tree: ast.Module,
+        py_file: Path,
+        baseline: frozenset[str],
     ) -> list[Diagnostic]:
         """Walk AST to find functions/methods exceeding the length limit."""
         diagnostics: list[Diagnostic] = []
@@ -141,11 +170,12 @@ class CodeLengthChecker:
             if length <= self.max_function_lines:
                 continue
 
-            # Determine qualified name (Class.method or function)
-            qualified_name = _qualified_name(tree, node)
+            qualified = _qualified_name(tree, node)
+            key = f"{py_file}:{qualified}"
+            severity = "warning" if key in baseline else "error"
 
             msg = (
-                f"{qualified_name} has {length} lines "
+                f"{qualified} has {length} lines "
                 f"(max {self.max_function_lines})\n"
                 f"Fix: Extract helper functions for better encapsulation"
             )
@@ -157,7 +187,7 @@ class CodeLengthChecker:
                         line=start_line,
                         end_line=end_line,
                     ),
-                    severity=self.function_length_severity,  # type: ignore[arg-type]
+                    severity=severity,  # type: ignore[arg-type]
                 )
             )
 
