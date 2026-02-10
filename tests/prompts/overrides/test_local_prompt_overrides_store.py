@@ -408,152 +408,130 @@ def test_upsert_rejects_mismatched_metadata(tmp_path: Path) -> None:
         store.upsert(descriptor, override)
 
 
+def _make_section_override(
+    section: object,
+    *,
+    path: tuple[str, ...] | None = None,
+    expected_hash: str | None = None,
+    body: object = "Body",
+) -> dict[tuple[str, ...], SectionOverride]:
+    """Build a single-entry sections dict for testing overrides."""
+    return {
+        path or section.path: SectionOverride(  # type: ignore[union-attr]
+            path=path or section.path,  # type: ignore[union-attr]
+            expected_hash=expected_hash or section.content_hash,  # type: ignore[union-attr]
+            body=body,  # type: ignore[arg-type]
+        )
+    }
+
+
+def _make_override(
+    descriptor: PromptDescriptor,
+    sections: dict[tuple[str, ...], SectionOverride],
+    tool_overrides: dict[str, ToolOverride] | None = None,
+) -> PromptOverride:
+    """Build a PromptOverride for validation testing."""
+    kwargs: dict[str, object] = {
+        "ns": descriptor.ns,
+        "prompt_key": descriptor.key,
+        "tag": "latest",
+        "sections": sections,
+    }
+    if tool_overrides is not None:
+        kwargs["tool_overrides"] = tool_overrides
+    return PromptOverride(**kwargs)  # type: ignore[arg-type]
+
+
 def test_upsert_validation_errors(tmp_path: Path) -> None:
     prompt = _build_prompt_with_tool()
     descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
     section = descriptor.sections[0]
     tool = descriptor.tools[0]
+    valid_sections = _make_section_override(section)
 
-    override = PromptOverride(
-        ns=descriptor.ns,
-        prompt_key=descriptor.key,
-        tag="latest",
-        sections={
-            ("unknown",): SectionOverride(
-                path=("unknown",),
-                expected_hash=section.content_hash,
-                body="Body",
-            )
-        },
+    # Unknown section path
+    override = _make_override(
+        descriptor, _make_section_override(section, path=("unknown",))
     )
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)
 
-    override = PromptOverride(
-        ns=descriptor.ns,
-        prompt_key=descriptor.key,
-        tag="latest",
-        sections={
-            section.path: SectionOverride(
-                path=section.path,
-                expected_hash=OTHER_DIGEST,
-                body="Body",
-            )
-        },
+    # Wrong section hash
+    override = _make_override(
+        descriptor, _make_section_override(section, expected_hash=OTHER_DIGEST)
     )
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)
 
-    override = PromptOverride(
-        ns=descriptor.ns,
-        prompt_key=descriptor.key,
-        tag="latest",
-        sections={
-            section.path: SectionOverride(
-                path=section.path,
-                expected_hash=section.content_hash,
-                body=123,  # type: ignore[arg-type]
-            )
-        },
-    )
+    # Non-string body
+    override = _make_override(descriptor, _make_section_override(section, body=123))
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)
 
-    override = PromptOverride(
-        ns=descriptor.ns,
-        prompt_key=descriptor.key,
-        tag="latest",
-        sections={
-            section.path: SectionOverride(
-                path=section.path, expected_hash=section.content_hash, body="Body"
-            )
-        },
-        tool_overrides={
+    # Missing tool name
+    override = _make_override(
+        descriptor,
+        valid_sections,
+        {
             "missing": ToolOverride(
-                name="missing",
-                expected_contract_hash=tool.contract_hash,
+                name="missing", expected_contract_hash=tool.contract_hash
             )
         },
     )
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)
 
-    override = PromptOverride(
-        ns=descriptor.ns,
-        prompt_key=descriptor.key,
-        tag="latest",
-        sections={
-            section.path: SectionOverride(
-                path=section.path, expected_hash=section.content_hash, body="Body"
-            )
-        },
-        tool_overrides={
-            tool.name: ToolOverride(
-                name=tool.name,
-                expected_contract_hash=OTHER_DIGEST,
-            )
-        },
+    # Wrong tool contract hash
+    override = _make_override(
+        descriptor,
+        valid_sections,
+        {tool.name: ToolOverride(name=tool.name, expected_contract_hash=OTHER_DIGEST)},
     )
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)
 
-    override = PromptOverride(
-        ns=descriptor.ns,
-        prompt_key=descriptor.key,
-        tag="latest",
-        sections={
-            section.path: SectionOverride(
-                path=section.path, expected_hash=section.content_hash, body="Body"
-            )
-        },
-        tool_overrides={
+    # Non-string tool description
+    override = _make_override(
+        descriptor,
+        valid_sections,
+        {
             tool.name: ToolOverride(
                 name=tool.name,
                 expected_contract_hash=tool.contract_hash,
-                description=123,  # type: ignore[arg-type]
+                description=123,
             )
-        },
+        },  # type: ignore[arg-type]
     )
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)
 
-    override = PromptOverride(
-        ns=descriptor.ns,
-        prompt_key=descriptor.key,
-        tag="latest",
-        sections={
-            section.path: SectionOverride(
-                path=section.path, expected_hash=section.content_hash, body="Body"
-            )
-        },
-        tool_overrides={
+    # Non-string param_descriptions values
+    override = _make_override(
+        descriptor,
+        valid_sections,
+        {
             tool.name: ToolOverride(
                 name=tool.name,
                 expected_contract_hash=tool.contract_hash,
-                param_descriptions={"field": 1},  # type: ignore[arg-type]
+                param_descriptions={"field": 1},
             )
-        },
+        },  # type: ignore[arg-type]
     )
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)
 
-    override = PromptOverride(
-        ns=descriptor.ns,
-        prompt_key=descriptor.key,
-        tag="latest",
-        sections={
-            section.path: SectionOverride(
-                path=section.path, expected_hash=section.content_hash, body="Body"
-            )
-        },
-        tool_overrides={
+    # Non-dict param_descriptions
+    override = _make_override(
+        descriptor,
+        valid_sections,
+        {
             tool.name: ToolOverride(
                 name=tool.name,
                 expected_contract_hash=tool.contract_hash,
-                param_descriptions=123,  # type: ignore[arg-type]
+                param_descriptions=123,
             )
-        },
+        },  # type: ignore[arg-type]
     )
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)

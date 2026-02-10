@@ -357,6 +357,33 @@ class Invariant:
     description: str = ""
 
 
+_TLA_SEPARATOR = (
+    "-----------------------------------------------------------------------------"
+)
+
+
+def _tla_section_header(lines: list[str], title: str) -> None:
+    """Append a TLA+ section separator and title comment."""
+    lines.append(_TLA_SEPARATOR)
+    lines.append(f"(* {title} *)")
+    lines.append("")
+
+
+def _infer_default(var: StateVar) -> str:
+    """Infer a default initial value for a TLA+ state variable."""
+    if var.initial_value is not None:
+        return var.initial_value
+    if "Seq" in var.type:
+        return "<<>>"
+    if "Set" in var.type:
+        return "{}"
+    if "Function" in var.type:
+        return "[x \\in {} |-> 0]"
+    if "Nat" in var.type or "Int" in var.type:
+        return "0"
+    return "NULL"
+
+
 @dataclass(frozen=True, slots=True)
 class FormalSpec:
     """Complete formal specification metadata.
@@ -389,198 +416,157 @@ class FormalSpec:
         Returns:
             Complete TLA+ module as a string
         """
-        # Generate header line with consistent width (77 chars total)
-        # Format: "---- MODULE ModuleName ----" with padding to 77 chars
-        module_line = f"MODULE {self.module}"
-        dashes_needed = 77 - len(module_line) - 2  # -2 for spaces
-        left_dashes = dashes_needed // 2
-        right_dashes = dashes_needed - left_dashes
-        header = f"{'-' * left_dashes} {module_line} {'-' * right_dashes}"
-
+        header = self._tla_header()
         lines = [
             header,
             "(* Generated from Python formal specification metadata *)",
             "",
         ]
 
-        # EXTENDS clause
+        self._emit_extends(lines)
+        self._emit_constants(lines)
+        self._emit_state_vars(lines)
+        self._emit_helpers(lines)
+        self._emit_init(lines)
+        self._emit_actions(lines)
+        self._emit_next(lines)
+        self._emit_spec(lines)
+        self._emit_invariants(lines)
+        self._emit_constraint(lines)
+
+        lines.append("=" * len(header))
+        return "\n".join(lines)
+
+    def _tla_header(self) -> str:
+        module_line = f"MODULE {self.module}"
+        dashes_needed = 77 - len(module_line) - 2
+        left_dashes = dashes_needed // 2
+        right_dashes = dashes_needed - left_dashes
+        return f"{'-' * left_dashes} {module_line} {'-' * right_dashes}"
+
+    def _emit_extends(self, lines: list[str]) -> None:
         if self.extends:
             lines.append(f"EXTENDS {', '.join(self.extends)}")
             lines.append("")
 
-        # Constants
-        if self.constants:
-            const_names = list(self.constants.keys())
-            lines.append("CONSTANTS")
-            for i, name in enumerate(const_names):
-                comma = "," if i < len(const_names) - 1 else ""
-                lines.append(f"    {name}{comma}")
+    def _emit_constants(self, lines: list[str]) -> None:
+        if not self.constants:
+            return
+        const_names = list(self.constants.keys())
+        lines.append("CONSTANTS")
+        for i, name in enumerate(const_names):
+            comma = "," if i < len(const_names) - 1 else ""
+            lines.append(f"    {name}{comma}")
+        lines.append("")
+
+    def _emit_state_vars(self, lines: list[str]) -> None:
+        if not self.state_vars:
+            return
+        lines.append("VARIABLES")
+        for i, var in enumerate(self.state_vars):
+            comma = "," if i < len(self.state_vars) - 1 else ""
+            comment = f"  \\* {var.description}" if var.description else ""
+            lines.append(f"    {var.name}{comma}{comment}")
+        lines.append("")
+        var_names = [var.name for var in self.state_vars]
+        lines.append(f"vars == <<{', '.join(var_names)}>>")
+        lines.append("")
+
+    def _emit_helpers(self, lines: list[str]) -> None:
+        if not self.helpers:
+            return
+        _tla_section_header(lines, "Helper Operators")
+        for name, definition in self.helpers.items():
+            lines.append(f"{name} ==")
+            for line in definition.split("\n"):
+                lines.append(f"    {line}" if line.strip() else "")
             lines.append("")
 
-        # State variables
-        if self.state_vars:
-            lines.append("VARIABLES")
-            for i, var in enumerate(self.state_vars):
-                comma = "," if i < len(self.state_vars) - 1 else ""
-                comment = f"  \\* {var.description}" if var.description else ""
-                lines.append(f"    {var.name}{comma}{comment}")
-            lines.append("")
+    def _emit_init(self, lines: list[str]) -> None:
+        if not self.state_vars:
+            return
+        _tla_section_header(lines, "Initial State")
+        lines.append("Init ==")
+        for i, var in enumerate(self.state_vars):
+            prefix = "    /\\" if i > 0 else "   "
+            default = _infer_default(var)
+            lines.append(f"{prefix} {var.name} = {default}")
+        lines.append("")
 
-            # vars tuple
-            var_names = [var.name for var in self.state_vars]
-            lines.append(f"vars == <<{', '.join(var_names)}>>")
-            lines.append("")
+    def _emit_actions(self, lines: list[str]) -> None:
+        if not self.actions:
+            return
+        _tla_section_header(lines, "Actions")
+        for action in self.actions:
+            self._emit_single_action(lines, action)
 
-        # Helper operators
-        if self.helpers:
-            lines.append(
-                "-----------------------------------------------------------------------------"
-            )
-            lines.append("(* Helper Operators *)")
-            lines.append("")
-            for name, definition in self.helpers.items():
-                lines.append(f"{name} ==")
-                for line in definition.split("\n"):
-                    lines.append(f"    {line}" if line.strip() else "")
-                lines.append("")
+    def _emit_single_action(self, lines: list[str], action: Action) -> None:
+        if action.description:
+            lines.append(f"(* {action.description} *)")
+        if action.parameters:
+            param_names = ", ".join(p.name for p in action.parameters)
+            sig = f"{action.name}({param_names})"
+        else:
+            sig = action.name
+        lines.append(f"{sig} ==")
+        for precond in action.preconditions:
+            lines.append(f"    /\\ {precond}")
+        for var, expr in action.updates.items():
+            lines.append(f"    /\\ {var}' = {expr}")
+        unchanged_vars = [
+            v.name for v in self.state_vars if v.name not in action.updates
+        ]
+        if unchanged_vars:
+            lines.append(f"    /\\ UNCHANGED <<{', '.join(unchanged_vars)}>>")
+        lines.append("")
 
-        # Init formula (default: all variables at default values)
-        if self.state_vars:
-            lines.append(
-                "-----------------------------------------------------------------------------"
-            )
-            lines.append("(* Initial State *)")
-            lines.append("")
-            lines.append("Init ==")
-            for i, var in enumerate(self.state_vars):
-                prefix = "    /\\" if i > 0 else "   "
-                # Use custom initial value if provided, otherwise infer from type
-                if var.initial_value is not None:
-                    default = var.initial_value
-                elif "Seq" in var.type:
-                    default = "<<>>"
-                elif "Set" in var.type:
-                    default = "{}"
-                elif "Function" in var.type:
-                    default = "[x \\in {} |-> 0]"
-                elif "Nat" in var.type or "Int" in var.type:
-                    default = "0"
-                else:
-                    default = "NULL"  # fallback
-                lines.append(f"{prefix} {var.name} = {default}")
-            lines.append("")
+    def _emit_next(self, lines: list[str]) -> None:
+        if not self.actions:
+            return
+        _tla_section_header(lines, "Next State")
+        lines.append("Next ==")
+        for action in self.actions:
+            if action.parameters:
+                param_bindings = ", ".join(
+                    f"{p.name} \\in {p.domain}" for p in action.parameters
+                )
+                param_names = ", ".join(p.name for p in action.parameters)
+                action_call = f"\\E {param_bindings} : {action.name}({param_names})"
+            else:
+                action_call = action.name
+            lines.append(f"    \\/ {action_call}")
+        lines.append("")
 
-        # Actions
-        if self.actions:
-            lines.append(
-                "-----------------------------------------------------------------------------"
-            )
-            lines.append("(* Actions *)")
-            lines.append("")
-            for action in self.actions:
-                if action.description:
-                    lines.append(f"(* {action.description} *)")
-
-                # Action signature
-                if action.parameters:
-                    param_names = ", ".join(p.name for p in action.parameters)
-                    sig = f"{action.name}({param_names})"
-                else:
-                    sig = action.name
-                lines.append(f"{sig} ==")
-
-                # Preconditions
-                if action.preconditions:
-                    for precond in action.preconditions:
-                        lines.append(f"    /\\ {precond}")
-
-                # Updates
-                if action.updates:
-                    for var, expr in action.updates.items():
-                        lines.append(f"    /\\ {var}' = {expr}")
-
-                # UNCHANGED
-                unchanged_vars = [
-                    var.name
-                    for var in self.state_vars
-                    if var.name not in action.updates
-                ]
-                if unchanged_vars:
-                    lines.append(f"    /\\ UNCHANGED <<{', '.join(unchanged_vars)}>>")
-
-                lines.append("")
-
-        # Next formula (disjunction of all actions)
-        if self.actions:
-            lines.append(
-                "-----------------------------------------------------------------------------"
-            )
-            lines.append("(* Next State *)")
-            lines.append("")
-            lines.append("Next ==")
-            for _i, action in enumerate(self.actions):
-                # For parameterized actions, existentially quantify over parameters with domains
-                if action.parameters:
-                    # Build bounded quantifier: \E param1 \in domain1, param2 \in domain2 : Action(param1, param2)
-                    param_bindings = ", ".join(
-                        f"{p.name} \\in {p.domain}" for p in action.parameters
-                    )
-                    param_names = ", ".join(p.name for p in action.parameters)
-                    action_call = f"\\E {param_bindings} : {action.name}({param_names})"
-                else:
-                    action_call = action.name
-                # All disjuncts start with \/ to avoid precedence issues with \E quantifiers
-                prefix = "    \\/"
-                lines.append(f"{prefix} {action_call}")
-            lines.append("")
-
-        # Spec formula (Init /\ [][Next]_vars)
+    def _emit_spec(self, lines: list[str]) -> None:
         if self.state_vars and self.actions:
-            lines.append(
-                "-----------------------------------------------------------------------------"
-            )
-            lines.append("(* Specification *)")
-            lines.append("")
+            _tla_section_header(lines, "Specification")
             lines.append("Spec == Init /\\ [][Next]_vars")
             lines.append("")
 
-        # Invariants
-        if self.invariants:
-            lines.append(
-                "-----------------------------------------------------------------------------"
-            )
-            lines.append("(* Invariants *)")
-            lines.append("")
-            for inv in self.invariants:
-                if inv.description:
-                    lines.append(f"(* {inv.id}: {inv.description} *)")
-                else:
-                    lines.append(f"(* {inv.id} *)")
-                lines.append(f"{inv.name} ==")
-
-                # Handle multi-line predicates
-                pred_lines = inv.predicate.split("\n")
-                if len(pred_lines) == 1:
-                    lines.append(f"    {inv.predicate}")
-                else:
-                    for pline in pred_lines:
-                        lines.append(f"    {pline}" if pline.strip() else "")
-
-                lines.append("")
-
-        # State constraint (for limiting TLC exploration)
-        if self.constraint:
-            lines.append(
-                "-----------------------------------------------------------------------------"
-            )
-            lines.append("(* State Constraint *)")
-            lines.append("")
-            lines.append(f"StateConstraint == {self.constraint}")
+    def _emit_invariants(self, lines: list[str]) -> None:
+        if not self.invariants:
+            return
+        _tla_section_header(lines, "Invariants")
+        for inv in self.invariants:
+            if inv.description:
+                lines.append(f"(* {inv.id}: {inv.description} *)")
+            else:
+                lines.append(f"(* {inv.id} *)")
+            lines.append(f"{inv.name} ==")
+            pred_lines = inv.predicate.split("\n")
+            if len(pred_lines) == 1:
+                lines.append(f"    {inv.predicate}")
+            else:
+                for pline in pred_lines:
+                    lines.append(f"    {pline}" if pline.strip() else "")
             lines.append("")
 
-        # Footer line must match header width
-        lines.append("=" * len(header))
-        return "\n".join(lines)
+    def _emit_constraint(self, lines: list[str]) -> None:
+        if not self.constraint:
+            return
+        _tla_section_header(lines, "State Constraint")
+        lines.append(f"StateConstraint == {self.constraint}")
+        lines.append("")
 
     def to_tla_config(
         self,

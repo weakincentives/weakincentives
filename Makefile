@@ -282,7 +282,7 @@ demo: demo-claude
 # Run all checks (format, lint, typecheck, security, dependencies, architecture, docs, tests)
 # In CI: full test coverage required. Locally: only tests affected by changes (via testmon).
 check: format-check lint typecheck bandit deptry pip-audit markdown-check biome bun-test test
-	@uv run --quiet --all-extras python check.py -q architecture docs
+	@uv run --quiet --all-extras python check.py -q architecture code-length docs
 	@echo "✓ All checks passed"
 
 # Synchronize documentation files into package
