@@ -277,6 +277,23 @@ def test_token_usage_total_tokens_sums_counts() -> None:
     assert usage.total_tokens == 12
 
 
+def test_token_usage_thinking_tokens_field() -> None:
+    """TokenUsage should track thinking tokens from extended thinking."""
+    usage = TokenUsage(input_tokens=100, output_tokens=200, thinking_tokens=50)
+
+    assert usage.thinking_tokens == 50
+    # thinking_tokens is NOT added to total_tokens because the Claude API
+    # includes thinking tokens in output_tokens for billing purposes
+    assert usage.total_tokens == 300  # 100 + 200 (thinking_tokens excluded)
+
+
+def test_token_usage_thinking_tokens_defaults_none() -> None:
+    """TokenUsage thinking_tokens should default to None."""
+    usage = TokenUsage(input_tokens=100, output_tokens=200)
+
+    assert usage.thinking_tokens is None
+
+
 def test_unsubscribe_removes_handler_and_returns_true() -> None:
     dispatcher = InProcessDispatcher()
     delivered: list[PromptExecuted] = []
