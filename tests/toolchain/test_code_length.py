@@ -197,3 +197,71 @@ class TestCodeLengthChecker:
         result = checker.run()
         assert result.status == "failed"
         assert any(d.severity == "error" for d in result.diagnostics)
+
+    def test_unreadable_file_skipped(self, tmp_path: Path) -> None:
+        """Files that can't be read are silently skipped."""
+        src = tmp_path / "src"
+        src.mkdir()
+        bad = src / "unreadable.py"
+        bad.write_bytes(b"\x80\x81\x82" * 100)
+        checker = CodeLengthChecker(src_dir=src, test_dir=tmp_path / "tests")
+        result = checker.run()
+        assert result.status == "passed"
+        assert len(result.diagnostics) == 0
+
+    def test_standalone_function_with_class_present(self, tmp_path: Path) -> None:
+        """A long module-level function in a file that also has a class."""
+        src = tmp_path / "src"
+        src.mkdir()
+        code = (
+            "class Foo:\n"
+            "    def short(self):\n"
+            "        pass\n"
+            "\n"
+            "def standalone():\n"
+        ) + "    x = 1\n" * 130
+        (src / "mixed.py").write_text(code)
+        checker = CodeLengthChecker(
+            src_dir=src, test_dir=tmp_path / "tests", max_function_lines=120
+        )
+        result = checker.run()
+        func_diags = [d for d in result.diagnostics if "standalone" in d.message]
+        assert len(func_diags) == 1
+        # Reported as plain function name, not Class.method
+        assert "Foo." not in func_diags[0].message
+
+    def test_function_without_end_lineno(self, tmp_path: Path) -> None:
+        """Functions where end_lineno is None are skipped gracefully."""
+        import ast
+
+        src = tmp_path / "src"
+        src.mkdir()
+        code = "def f():\n    pass\n"
+        (src / "mod.py").write_text(code)
+
+        checker = CodeLengthChecker(
+            src_dir=src,
+            test_dir=tmp_path / "tests",
+            max_function_lines=1,
+        )
+
+        # Patch ast.parse to return a tree with end_lineno=None
+        orig_parse = ast.parse
+
+        def patched_parse(source: str, filename: str = "") -> ast.Module:
+            tree = orig_parse(source, filename=filename)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    node.end_lineno = None  # type: ignore[assignment]
+            return tree
+
+        import unittest.mock
+
+        with unittest.mock.patch("ast.parse", side_effect=patched_parse):
+            result = checker.run()
+
+        # No function diagnostics since end_lineno was None
+        func_diags = [
+            d for d in result.diagnostics if "lines" in d.message and "max" in d.message
+        ]
+        assert len(func_diags) == 0
