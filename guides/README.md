@@ -37,6 +37,7 @@ debug issues when they arise.
 ### For Advanced Users
 
 1. [Resources](resources.md) - Dependency injection and lifecycle management
+1. [Custom Sections](custom-sections.md) - Create custom section types
 1. [Progressive Disclosure](progressive-disclosure.md) - Manage context size
 1. [Prompt Overrides](prompt-overrides.md) - A/B test prompts without deploys
 1. [Experiments](experiments.md) - A/B test agent variants systematically
@@ -87,6 +88,7 @@ debug issues when they arise.
 | Guide | What You'll Learn |
 | --- | --- |
 | [Resources](resources.md) | Dependency injection, scopes, and lifecycle management |
+| [Custom Sections](custom-sections.md) | Create tool suites, resource-contributing, and dynamic sections |
 | [Progressive Disclosure](progressive-disclosure.md) | Control context size with summaries and expansion |
 | [Prompt Overrides](prompt-overrides.md) | Iterate on prompts without code changes |
 | [Concurrency](concurrency.md) | Thread safety guarantees and multi-threaded agent patterns |
