@@ -1599,15 +1599,13 @@ class TestIsolationConfig:
 
     def test_derives_cwd_from_workspace_section(self, session: Session) -> None:
         """When prompt has a workspace section, cwd is derived from its root."""
-        from weakincentives.adapters.claude_agent_sdk.workspace import (
-            ClaudeAgentWorkspaceSection,
-        )
+        from weakincentives.prompt import WorkspaceSection
 
         MockSDKQuery.reset()
         MockSDKQuery.set_results([MockResultMessage(result="Done")])
 
         # Create a prompt with a workspace section
-        workspace = ClaudeAgentWorkspaceSection(session=session)
+        workspace = WorkspaceSection(session=session)
         try:
             template = PromptTemplate[SimpleOutput](
                 ns="test",
@@ -1643,14 +1641,12 @@ class TestIsolationConfig:
         self, session: Session, tmp_path: Path
     ) -> None:
         """Explicit cwd in client config takes precedence over workspace root."""
-        from weakincentives.adapters.claude_agent_sdk.workspace import (
-            ClaudeAgentWorkspaceSection,
-        )
+        from weakincentives.prompt import WorkspaceSection
 
         MockSDKQuery.reset()
         MockSDKQuery.set_results([MockResultMessage(result="Done")])
 
-        workspace = ClaudeAgentWorkspaceSection(session=session)
+        workspace = WorkspaceSection(session=session)
         try:
             template = PromptTemplate[SimpleOutput](
                 ns="test",
@@ -1687,10 +1683,8 @@ class TestIsolationConfig:
         self, session: Session, tmp_path: Path
     ) -> None:
         """When workspace filesystem is not HostFilesystem, cwd stays None."""
-        from weakincentives.adapters.claude_agent_sdk.workspace import (
-            ClaudeAgentWorkspaceSection,
-        )
         from weakincentives.contrib.tools import InMemoryFilesystem
+        from weakincentives.prompt import WorkspaceSection
 
         MockSDKQuery.reset()
         MockSDKQuery.set_results([MockResultMessage(result="Done")])
@@ -1698,7 +1692,7 @@ class TestIsolationConfig:
         # Create a workspace section with an InMemoryFilesystem via the
         # cloning constructor path (_temp_dir + _mount_previews + _filesystem).
         mem_fs = InMemoryFilesystem()
-        workspace = ClaudeAgentWorkspaceSection(
+        workspace = WorkspaceSection(
             session=session,
             _temp_dir=tmp_path,
             _mount_previews=(),

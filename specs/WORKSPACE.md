@@ -12,8 +12,7 @@ are provided by the execution harness (e.g., Claude Agent SDK, Codex App Server)
 - Workspace digests: `src/weakincentives/contrib/tools/digests.py`
 - In-memory filesystem: `src/weakincentives/contrib/tools/filesystem_memory.py`
 - Public API: `src/weakincentives/contrib/tools/__init__.py`
-- Claude Agent SDK workspace: `src/weakincentives/adapters/claude_agent_sdk/workspace.py`
-- Codex App Server workspace: `src/weakincentives/adapters/codex_app_server/workspace.py`
+- Workspace section: `src/weakincentives/prompt/workspace.py`
 
 ## Guiding Principles
 
@@ -23,21 +22,20 @@ are provided by the execution harness (e.g., Claude Agent SDK, Codex App Server)
 
 ## Workspace Sections
 
-Two adapter-specific workspace sections manage temporary directories with host
+A single generic workspace section manages temporary directories with host
 file mounts:
 
-| Section | Adapter | Key | Source |
-|---------|---------|-----|--------|
-| `ClaudeAgentWorkspaceSection` | Claude Agent SDK | `claude-agent-workspace` | `src/weakincentives/adapters/claude_agent_sdk/workspace.py` |
-| `CodexWorkspaceSection` | Codex App Server | `codex-workspace` | `src/weakincentives/adapters/codex_app_server/workspace.py` |
+| Section | Key | Source |
+|---------|-----|--------|
+| `WorkspaceSection` | `workspace` | `src/weakincentives/prompt/workspace.py` |
 
-Both sections share the same host mount model and workspace lifecycle but render
-provider-specific section descriptions.
+`WorkspaceSection` works with all adapters and renders a provider-agnostic
+section description.
 
 ### Host Mounts
 
 Host mounts copy files from the host filesystem into the workspace temp directory.
-See `HostMount` and `HostMountPreview` dataclasses in the workspace modules.
+See `HostMount` and `HostMountPreview` dataclasses in `weakincentives.prompt.workspace`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

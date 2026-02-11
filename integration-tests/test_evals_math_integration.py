@@ -31,7 +31,6 @@ import pytest
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
     get_default_model,
 )
 from weakincentives.evals import (
@@ -44,7 +43,12 @@ from weakincentives.evals import (
     Score,
     collect_results,
 )
-from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    WorkspaceSection,
+)
 from weakincentives.runtime import AgentLoop, InMemoryMailbox, Session
 from weakincentives.runtime.agent_loop import AgentLoopRequest, AgentLoopResult
 
@@ -123,7 +127,7 @@ class MathSolverLoop(AgentLoop[MathProblem, MathAnswer]):
             AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
         ],
         session: Session,
-        workspace: ClaudeAgentWorkspaceSection,
+        workspace: WorkspaceSection,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
 
@@ -309,7 +313,7 @@ def test_math_eval_single_sample() -> None:
     ] = InMemoryMailbox(name="dummy-requests")
 
     session = Session(tags={"loop": "math-solver"})
-    workspace = ClaudeAgentWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
 
     try:
         adapter = _make_adapter(str(workspace.temp_dir))
@@ -362,7 +366,7 @@ def test_math_eval_full_dataset() -> None:
     ] = InMemoryMailbox(name="dummy-requests")
 
     session = Session(tags={"loop": "math-solver"})
-    workspace = ClaudeAgentWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
 
     try:
         adapter = _make_adapter(str(workspace.temp_dir))

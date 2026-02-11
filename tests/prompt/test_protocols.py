@@ -98,17 +98,6 @@ class TestWorkspaceSectionProtocol:
         finally:
             section.cleanup()
 
-    def test_claude_agent_alias_conforms(self, session: Session) -> None:
-        """ClaudeAgentWorkspaceSection alias implements WorkspaceSectionProtocol."""
-        from weakincentives.adapters.claude_agent_sdk import ClaudeAgentWorkspaceSection
-
-        section = ClaudeAgentWorkspaceSection(session=session)
-
-        try:
-            assert isinstance(section, WorkspaceSectionProtocol)
-        finally:
-            section.cleanup()
-
 
 class TestProtocolExports:
     """Tests for protocol module exports."""

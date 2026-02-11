@@ -60,7 +60,7 @@ protocol rejects them.
 A `HostMount` defines what gets copied from the host into the workspace:
 
 ```python nocheck
-from weakincentives.adapters.claude_agent_sdk import HostMount
+from weakincentives.prompt import HostMount
 
 mount = HostMount(
     host_path="/repos/project",
@@ -84,7 +84,7 @@ This prevents path traversal attacks, especially important when mount
 paths come from user input.
 
 ```python nocheck
-workspace = ClaudeAgentWorkspaceSection(
+workspace = WorkspaceSection(
     session=session,
     mounts=(mount,),
     allowed_host_roots=("/repos",),  # Only /repos/** allowed

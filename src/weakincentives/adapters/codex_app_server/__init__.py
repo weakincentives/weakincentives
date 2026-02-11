@@ -36,14 +36,6 @@ from .config import (
     ReasoningSummary,
     SandboxMode,
 )
-from .workspace import (
-    CodexWorkspaceSection,
-    HostMount,
-    HostMountPreview,
-    WorkspaceBudgetExceededError,
-    WorkspaceSection,
-    WorkspaceSecurityError,
-)
 
 __all__ = [
     "CODEX_APP_SERVER_ADAPTER_NAME",
@@ -55,16 +47,10 @@ __all__ = [
     "CodexAppServerModelConfig",
     "CodexAuthMode",
     "CodexClientError",
-    "CodexWorkspaceSection",
     "ExternalTokenAuth",
-    "HostMount",
-    "HostMountPreview",
     "McpServerConfig",
     "Personality",
     "ReasoningEffort",
     "ReasoningSummary",
     "SandboxMode",
-    "WorkspaceBudgetExceededError",
-    "WorkspaceSection",
-    "WorkspaceSecurityError",
 ]

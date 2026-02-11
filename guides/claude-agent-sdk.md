@@ -22,7 +22,7 @@ is critical for multi-tenant deployments.
 MCP tools. You keep side effects and validation in Python while Claude uses
 tools natively.
 
-**Workspace management**: `ClaudeAgentWorkspaceSection` provides structured
+**Workspace management**: `WorkspaceSection` provides structured
 access to host files with security boundaries, size limits, and exclude
 patterns.
 
@@ -34,19 +34,16 @@ patterns.
 
 The adapter requires claude-agent-sdk version 0.1.15 or later.
 
-## ClaudeAgentWorkspaceSection
+## WorkspaceSection
 
-`ClaudeAgentWorkspaceSection` is the core abstraction for giving Claude Code
+`WorkspaceSection` is the core abstraction for giving Claude Code
 access to host files. It creates an isolated workspace directory with mounted
 content and enforces security boundaries.
 
 ```python nocheck
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentWorkspaceSection,
-    HostMount,
-)
+from weakincentives.prompt import WorkspaceSection, HostMount
 
-workspace = ClaudeAgentWorkspaceSection(
+workspace = WorkspaceSection(
     session=session,
     mounts=(
         HostMount(
@@ -77,7 +74,7 @@ restricts which host paths can be mounted:
 
 ```python nocheck
 # Only allows mounting from /home/app/repos
-workspace = ClaudeAgentWorkspaceSection(
+workspace = WorkspaceSection(
     session=session,
     mounts=(HostMount(host_path="/home/app/repos/myproject", mount_path="code"),),
     allowed_host_roots=("/home/app/repos",),
@@ -489,15 +486,14 @@ The most common production pattern—reviewing code without network access:
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
-    HostMount,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
 )
+from weakincentives.prompt import WorkspaceSection, HostMount
 
 # Create isolated workspace
-workspace = ClaudeAgentWorkspaceSection(
+workspace = WorkspaceSection(
     session=session,
     mounts=(
         HostMount(

@@ -87,7 +87,7 @@ class WorkspaceDigestOptimizer:
     Example::
 
         from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
-        from weakincentives.adapters.claude_agent_sdk import HostMount
+        from weakincentives.prompt import HostMount
         from weakincentives.runtime import Session
 
         session = Session()

@@ -13,7 +13,7 @@
 """Integration tests for Codex App Server workspace isolation and environment.
 
 These tests verify that:
-- CodexWorkspaceSection correctly mounts host files via HostMount
+- WorkspaceSection correctly mounts host files via HostMount
 - The adapter uses the workspace temp_dir as the effective cwd
 - Custom environment variables are forwarded to the Codex subprocess
 """
@@ -33,13 +33,13 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter,
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
-    CodexWorkspaceSection,
-    HostMount,
 )
 from weakincentives.prompt import (
+    HostMount,
     MarkdownSection,
     Prompt,
     PromptTemplate,
+    WorkspaceSection,
 )
 from weakincentives.runtime.events import PromptExecuted
 from weakincentives.runtime.session import Session
@@ -79,7 +79,7 @@ def _make_session() -> Session:
 
 
 def test_codex_workspace_with_host_mounts(tmp_path: Path) -> None:
-    """Verify that CodexWorkspaceSection mounts host files into the workspace.
+    """Verify that WorkspaceSection mounts host files into the workspace.
 
     Creates a file on the host, mounts it via HostMount, and asks the model
     to read and report its contents.
@@ -91,7 +91,7 @@ def test_codex_workspace_with_host_mounts(tmp_path: Path) -> None:
     source_file.write_text("mounted content from host")
 
     session = _make_session()
-    workspace = CodexWorkspaceSection(
+    workspace = WorkspaceSection(
         session=session,
         mounts=[
             HostMount(host_path=str(source_dir), mount_path="data"),
@@ -138,11 +138,11 @@ def test_codex_workspace_with_host_mounts(tmp_path: Path) -> None:
 def test_codex_workspace_isolation_cwd_constraint(tmp_path: Path) -> None:
     """Verify that the adapter uses workspace temp_dir as cwd.
 
-    When a CodexWorkspaceSection is provided without explicit cwd, the adapter
+    When a WorkspaceSection is provided without explicit cwd, the adapter
     should resolve the filesystem root as the working directory.
     """
     session = _make_session()
-    workspace = CodexWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
 
     try:
         # No explicit cwd - adapter should derive it from the workspace filesystem

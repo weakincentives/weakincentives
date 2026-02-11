@@ -223,7 +223,7 @@ every time. You can safely store those in a module-level `PromptTemplate`.
 Other sections are **session-bound**: they capture runtime resources (a session,
 workspace connection, etc.). Examples:
 
-- `ClaudeAgentWorkspaceSection(session=..., mounts=...)`
+- `WorkspaceSection(session=..., mounts=...)`
 - `WorkspaceDigestSection(session=...)`
 
 For those, prefer one of these patterns:
@@ -232,7 +232,7 @@ For those, prefer one of these patterns:
 
 ```python nocheck
 from typing import Any
-from weakincentives.adapters.claude_agent_sdk import ClaudeAgentWorkspaceSection, HostMount
+from weakincentives.prompt import WorkspaceSection, HostMount
 from weakincentives.contrib.tools import WorkspaceDigestSection
 from weakincentives.prompt import PromptTemplate, MarkdownSection
 from weakincentives.runtime import Session
@@ -246,7 +246,7 @@ def build_prompt_template(*, session: Session) -> PromptTemplate[Any]:
         sections=(
             MarkdownSection(title="Instructions", key="instructions"),
             WorkspaceDigestSection(session=session),
-            ClaudeAgentWorkspaceSection(session=session, mounts=mounts),
+            WorkspaceSection(session=session, mounts=mounts),
         ),
     )
 ```

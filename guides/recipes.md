@@ -24,7 +24,7 @@ understand the individual pieces.
 **Pattern**:
 
 ```python nocheck
-from weakincentives.adapters.claude_agent_sdk import ClaudeAgentWorkspaceSection, HostMount
+from weakincentives.prompt import WorkspaceSection, HostMount
 from weakincentives.contrib.tools import WorkspaceDigestSection
 from weakincentives.prompt import PromptTemplate, MarkdownSection
 
@@ -45,7 +45,7 @@ def build_qa_template(*, session):
                 ),
             ),
             WorkspaceDigestSection(session=session),
-            ClaudeAgentWorkspaceSection(session=session, mounts=mounts),
+            WorkspaceSection(session=session, mounts=mounts),
             MarkdownSection(
                 title="Question",
                 key="question",
@@ -91,7 +91,7 @@ def build_patch_template(*, session):
                     "be applied with `patch -p1`."
                 ),
             ),
-            ClaudeAgentWorkspaceSection(session=session, mounts=mounts),
+            WorkspaceSection(session=session, mounts=mounts),
             MarkdownSection(
                 title="Change Request",
                 key="request",

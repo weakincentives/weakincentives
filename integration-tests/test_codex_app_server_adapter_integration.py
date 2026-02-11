@@ -33,7 +33,6 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter,
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
-    CodexWorkspaceSection,
 )
 from weakincentives.prompt import (
     MarkdownSection,
@@ -42,6 +41,7 @@ from weakincentives.prompt import (
     Tool,
     ToolContext,
     ToolResult,
+    WorkspaceSection,
 )
 from weakincentives.runtime.events import (
     PromptExecuted,
@@ -347,9 +347,9 @@ def test_codex_adapter_publishes_tool_invoked_for_native_tools(
 
 
 def test_codex_adapter_with_workspace_section(tmp_path: Path) -> None:
-    """Verify adapter works with a CodexWorkspaceSection."""
+    """Verify adapter works with a WorkspaceSection."""
     session = _make_session()
-    workspace = CodexWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
 
     try:
         adapter = CodexAppServerAdapter(

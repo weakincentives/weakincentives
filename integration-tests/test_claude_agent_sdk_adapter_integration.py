@@ -1949,19 +1949,19 @@ def test_claude_agent_sdk_adapter_sandbox_excluded_commands(tmp_path: Path) -> N
 
 
 # =============================================================================
-# ClaudeAgentWorkspaceSection Integration Tests
+# WorkspaceSection Integration Tests
 # =============================================================================
 
 
 def test_claude_agent_sdk_adapter_with_workspace_section(tmp_path: Path) -> None:
-    """Verify ClaudeAgentWorkspaceSection works with the adapter.
+    """Verify WorkspaceSection works with the adapter.
 
     This test validates that host files can be mounted into a workspace
     and the SDK can read them through native tools.
     """
-    from weakincentives.adapters.claude_agent_sdk import (
-        ClaudeAgentWorkspaceSection,
+    from weakincentives.prompt import (
         HostMount,
+        WorkspaceSection,
     )
 
     # Create a README.md file for the workspace to mount
@@ -1974,7 +1974,7 @@ def test_claude_agent_sdk_adapter_with_workspace_section(tmp_path: Path) -> None
     session = Session()
 
     # Mount the README.md (avoids touching actual repo)
-    workspace = ClaudeAgentWorkspaceSection(
+    workspace = WorkspaceSection(
         session=session,
         mounts=(
             HostMount(
@@ -2051,10 +2051,10 @@ def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(tmp_path: Path) 
     This test validates that the workspace section correctly rejects
     mounts that exceed their byte budget.
     """
-    from weakincentives.adapters.claude_agent_sdk import (
-        ClaudeAgentWorkspaceSection,
+    from weakincentives.prompt import (
         HostMount,
         WorkspaceBudgetExceededError,
+        WorkspaceSection,
     )
 
     # Create a README.md file for the workspace to mount
@@ -2067,7 +2067,7 @@ def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(tmp_path: Path) 
 
     # Try to mount README.md with a very small byte limit
     with pytest.raises(WorkspaceBudgetExceededError):
-        ClaudeAgentWorkspaceSection(
+        WorkspaceSection(
             session=session,
             mounts=(
                 HostMount(
@@ -2086,9 +2086,9 @@ def test_claude_agent_sdk_adapter_workspace_security_check(tmp_path: Path) -> No
     This test validates that attempting to mount files outside
     the allowed_host_roots raises a security error.
     """
-    from weakincentives.adapters.claude_agent_sdk import (
-        ClaudeAgentWorkspaceSection,
+    from weakincentives.prompt import (
         HostMount,
+        WorkspaceSection,
         WorkspaceSecurityError,
     )
 
@@ -2096,7 +2096,7 @@ def test_claude_agent_sdk_adapter_workspace_security_check(tmp_path: Path) -> No
 
     # Try to mount /etc/hosts which is outside allowed_host_roots
     with pytest.raises(WorkspaceSecurityError):
-        ClaudeAgentWorkspaceSection(
+        WorkspaceSection(
             session=session,
             mounts=(
                 HostMount(

@@ -47,9 +47,10 @@ Key Components
     Client-level settings (permission mode, max turns, budget) and model-level
     settings (adaptive reasoning effort).
 
-**Workspace** (:class:`ClaudeAgentWorkspaceSection`, :class:`HostMount`)
-    Prompt section that manages a temporary workspace directory with host file
-    mounts. Provides secure file access with glob filtering and byte limits.
+**Workspace** (see :mod:`weakincentives.prompt.workspace`)
+    The generic :class:`~weakincentives.prompt.workspace.WorkspaceSection` and
+    :class:`~weakincentives.prompt.workspace.HostMount` live in the core prompt
+    package and work with any adapter.
 
 **Isolation** (:class:`IsolationConfig`, :class:`EphemeralHome`, :class:`NetworkPolicy`)
     Hermetic isolation configuration that creates ephemeral environments with
@@ -133,12 +134,12 @@ Workspace Example
 -----------------
 Using workspace sections to mount host files::
 
-    from weakincentives import Prompt, PromptTemplate, MarkdownSection
+    from weakincentives.prompt import (
+        HostMount, MarkdownSection, Prompt, PromptTemplate, WorkspaceSection,
+    )
     from weakincentives.adapters.claude_agent_sdk import (
         ClaudeAgentSDKAdapter,
         ClaudeAgentSDKClientConfig,
-        ClaudeAgentWorkspaceSection,
-        HostMount,
     )
     from weakincentives.runtime import Session, InProcessDispatcher
     from dataclasses import dataclass
@@ -151,7 +152,7 @@ Using workspace sections to mount host files::
     session = Session(dispatcher=InProcessDispatcher())
 
     # Create workspace with host file mounts
-    workspace = ClaudeAgentWorkspaceSection(
+    workspace = WorkspaceSection(
         session=session,
         mounts=[
             HostMount(
@@ -225,12 +226,10 @@ Configuration:
     - :data:`PermissionMode`: Literal type for permission handling modes
     - :data:`ReasoningEffort`: Literal type for adaptive reasoning effort levels
 
-Workspace:
-    - :class:`ClaudeAgentWorkspaceSection`: Prompt section for workspace management
-    - :class:`HostMount`: Configuration for mounting host files
-    - :class:`HostMountPreview`: Summary of materialized mount
-    - :class:`WorkspaceBudgetExceededError`: Raised when byte budget exceeded
-    - :class:`WorkspaceSecurityError`: Raised when security constraints violated
+Workspace (in :mod:`weakincentives.prompt.workspace`):
+    - :class:`~weakincentives.prompt.WorkspaceSection`: Generic workspace section
+    - :class:`~weakincentives.prompt.HostMount`: Configuration for mounting host files
+    - :class:`~weakincentives.prompt.HostMountPreview`: Summary of materialized mount
 
 Isolation:
     - :class:`IsolationConfig`: Hermetic isolation configuration
@@ -303,14 +302,6 @@ from .isolation import (
     to_anthropic_model_name,
     to_bedrock_model_id,
 )
-from .workspace import (
-    ClaudeAgentWorkspaceSection,
-    HostMount,
-    HostMountPreview,
-    WorkspaceBudgetExceededError,
-    WorkspaceSection,
-    WorkspaceSecurityError,
-)
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
@@ -322,11 +313,8 @@ __all__ = [
     "ClaudeAgentSDKAdapter",
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
-    "ClaudeAgentWorkspaceSection",
     "CompositeChecker",
     "EphemeralHome",
-    "HostMount",
-    "HostMountPreview",
     "IsolationAuthError",
     "IsolationConfig",
     "NetworkPolicy",
@@ -339,9 +327,6 @@ __all__ = [
     "TaskCompletionResult",
     "TranscriptCollector",
     "TranscriptCollectorConfig",
-    "WorkspaceBudgetExceededError",
-    "WorkspaceSection",
-    "WorkspaceSecurityError",
     "create_task_completion_stop_hook",
     "get_default_model",
     "get_supported_bedrock_models",

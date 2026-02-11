@@ -285,8 +285,6 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
-    ClaudeAgentWorkspaceSection,
-    HostMount,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
@@ -301,6 +299,10 @@ from weakincentives.adapters.claude_agent_sdk import (
     TranscriptCollector,
     TranscriptCollectorConfig,
 )
+from weakincentives.prompt import (
+    WorkspaceSection,
+    HostMount,
+)
 ```
 
 ### Codex App Server
@@ -310,11 +312,13 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter,
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
-    CodexWorkspaceSection,
-    HostMount,
     ReasoningEffort,
     SandboxMode,
     ApprovalPolicy,
+)
+from weakincentives.prompt import (
+    WorkspaceSection,
+    HostMount,
 )
 ```
 
@@ -622,19 +626,18 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
-    ClaudeAgentWorkspaceSection,
-    HostMount,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
     TranscriptCollectorConfig,
 )
+from weakincentives.prompt import WorkspaceSection, HostMount
 from weakincentives.runtime import Session
 
 session = Session()
 
 # Create workspace (materializes files to temp dir)
-workspace = ClaudeAgentWorkspaceSection(
+workspace = WorkspaceSection(
     session=session,
     mounts=(
         HostMount(
@@ -976,8 +979,7 @@ Codex CLI on PATH?             → CodexAppServerAdapter
 ### Which Workspace Tool?
 
 ```text
-Claude Agent SDK mode?         → ClaudeAgentWorkspaceSection
-Codex App Server mode?         → CodexWorkspaceSection
+Any adapter (Claude/Codex)?    → WorkspaceSection
 Testing/evaluation?            → InMemoryFilesystem
 ```
 

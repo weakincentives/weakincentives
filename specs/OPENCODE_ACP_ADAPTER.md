@@ -192,16 +192,9 @@ so reuse is deterministic.
 
 ### OpenCodeWorkspaceSection
 
-Create by **extracting** generic mount/copy logic from the existing workspace
-implementations:
-
-- `src/weakincentives/adapters/claude_agent_sdk/workspace.py`
-- `src/weakincentives/adapters/codex_app_server/workspace.py`
-
-Both define the same set of types (`HostMount`, `HostMountPreview`,
-`WorkspaceBudgetExceededError`, `WorkspaceSecurityError`) independently. As part
-of this adapter's implementation, consider consolidating them into
-`adapters/_shared/workspace.py`.
+Reuse the generic `WorkspaceSection` from `weakincentives.prompt.workspace`,
+which consolidates the workspace types that were previously duplicated across
+adapter modules.
 
 The workspace section should:
 
@@ -212,15 +205,11 @@ The workspace section should:
 - Expose cleanup via `.cleanup()` or a context manager
 - Provide `workspace_fingerprint` for session reuse validation
 
-> **Do not** reuse `ClaudeAgentWorkspaceSection` directly—its template contains
-> Claude-specific wording. Extract the machinery and create a new section with
-> neutral text.
-
-**Shared types** (currently duplicated across claude_agent_sdk and
-codex_app_server workspace modules):
+**Workspace types** (from `weakincentives.prompt`):
 
 | Type | Description |
 |------|-------------|
+| `WorkspaceSection` | Generic workspace section for all adapters |
 | `HostMount` | Mount configuration (host_path, mount_path, globs, max_bytes) |
 | `HostMountPreview` | Summary of materialized mount |
 | `WorkspaceBudgetExceededError` | Mount exceeds byte budget |

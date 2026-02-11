@@ -14,7 +14,7 @@
 
 These tests verify that the shared transaction system correctly rolls back both
 filesystem and session state when tools fail, using the Codex adapter and
-CodexWorkspaceSection for workspace management.
+WorkspaceSection for workspace management.
 
 Tools are called programmatically via ``create_bridged_tools`` with
 ``adapter_name="codex_app_server"`` to ensure we test the actual transactional
@@ -40,7 +40,6 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter,
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
-    CodexWorkspaceSection,
 )
 from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.debug import BundleConfig, BundleWriter, DebugBundle
@@ -51,6 +50,7 @@ from weakincentives.prompt import (
     Tool,
     ToolContext,
     ToolResult,
+    WorkspaceSection,
 )
 from weakincentives.runtime.session import Replace, Session, SliceOp, reducer
 
@@ -265,7 +265,7 @@ class TransactionTestParams:
 def _build_transaction_test_prompt(
     write_succeed_tool: Tool[WriteAndSucceedParams, WriteAndSucceedResult],
     write_fail_tool: Tool[WriteAndFailParams, WriteAndFailResult],
-    workspace_section: CodexWorkspaceSection,
+    workspace_section: WorkspaceSection,
 ) -> PromptTemplate[object]:
     """Build a prompt that tests transactional rollback behavior."""
     task_section = MarkdownSection[TransactionTestParams](
@@ -405,7 +405,7 @@ def test_codex_transactional_tool_rollback_on_failure(tmp_path: Path) -> None:
     session = Session()
     session.install(ToolOperationLog, initial=ToolOperationLog)
 
-    workspace = CodexWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
     bundle_dir = tmp_path / "bundles"
     bundle_dir.mkdir()
 
@@ -511,7 +511,7 @@ def test_codex_transactional_tool_sequential_operations(tmp_path: Path) -> None:
 
     session = Session()
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    workspace = CodexWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
     bundle_dir = tmp_path / "bundles"
     bundle_dir.mkdir()
 
