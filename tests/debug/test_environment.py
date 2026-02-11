@@ -25,19 +25,24 @@ from unittest.mock import patch
 
 import pytest
 
+from weakincentives.debug._git import (
+    GitInfo,
+    _is_sensitive_file,
+    _redact_url_credentials,
+    _run_git_command,
+    capture_git_diff,
+    capture_git_info,
+)
 from weakincentives.debug.bundle import BundleWriter, DebugBundle
 from weakincentives.debug.environment import (
     CommandInfo,
     ContainerInfo,
     EnvironmentCapture,
-    GitInfo,
     PythonInfo,
     SystemInfo,
     _capture_command_info,
     _capture_container_info,
     _capture_env_vars,
-    _capture_git_diff,
-    _capture_git_info,
     _capture_memory_bytes,
     _capture_packages,
     _capture_python_info,
@@ -45,10 +50,7 @@ from weakincentives.debug.environment import (
     _extract_container_id_from_cgroup,
     _get_darwin_memory_bytes,
     _get_linux_memory_bytes,
-    _is_sensitive_file,
     _is_valid_container_id,
-    _redact_url_credentials,
-    _run_git_command,
     _should_capture_env_var,
     _should_redact_value,
     capture_environment,
@@ -277,7 +279,7 @@ class TestGitInfo:
             check=True,
             capture_output=True,
         )
-        info = _capture_git_info(git_repo)
+        info = capture_git_info(git_repo)
 
         assert info is not None
         assert info.repo_root == str(git_repo)
@@ -296,7 +298,7 @@ class TestGitInfo:
             capture_output=True,
         )
 
-        info = _capture_git_info(git_repo)
+        info = capture_git_info(git_repo)
 
         assert info is not None
         assert info.branch is None  # Detached HEAD has no branch
@@ -306,7 +308,7 @@ class TestGitInfo:
         # Make uncommitted change
         (git_repo / "test.txt").write_text("modified")
 
-        info = _capture_git_info(git_repo)
+        info = capture_git_info(git_repo)
 
         assert info is not None
         assert info.is_dirty is True
@@ -321,7 +323,7 @@ class TestGitInfo:
             capture_output=True,
         )
 
-        info = _capture_git_info(git_repo)
+        info = capture_git_info(git_repo)
 
         assert info is not None
         assert "v1.0.0" in info.tags
@@ -341,14 +343,14 @@ class TestGitInfo:
             capture_output=True,
         )
 
-        info = _capture_git_info(git_repo)
+        info = capture_git_info(git_repo)
 
         assert info is not None
         assert info.remotes["origin"] == "https://[REDACTED]@github.com/test/repo.git"
 
     def test_capture_git_info_not_in_repo(self, tmp_path: Path) -> None:
         """Test _capture_git_info outside a git repo."""
-        info = _capture_git_info(tmp_path)
+        info = capture_git_info(tmp_path)
         assert info is None
 
     def test_run_git_command_failure(self, tmp_path: Path) -> None:
@@ -454,14 +456,14 @@ class TestGitDiff:
 
     def test_capture_git_diff_clean_repo(self, git_repo: Path) -> None:
         """Test _capture_git_diff with no changes."""
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
         assert diff is None  # No changes, no diff
 
     def test_capture_git_diff_with_changes(self, git_repo: Path) -> None:
         """Test _capture_git_diff with uncommitted changes."""
         (git_repo / "test.txt").write_text("modified content")
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
         assert diff is not None
         assert "modified content" in diff
 
@@ -471,14 +473,14 @@ class TestGitDiff:
         large_content = "x" * 200_000
         (git_repo / "test.txt").write_text(large_content)
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
         assert diff is not None
         assert "[TRUNCATED:" in diff
         assert len(diff) <= 100_000
 
     def test_capture_git_diff_not_in_repo(self, tmp_path: Path) -> None:
         """Test _capture_git_diff outside a git repo."""
-        diff = _capture_git_diff(tmp_path)
+        diff = capture_git_diff(tmp_path)
         assert diff is None
 
     def test_capture_git_diff_with_untracked_files(self, git_repo: Path) -> None:
@@ -486,7 +488,7 @@ class TestGitDiff:
         # Create an untracked file
         (git_repo / "new_file.txt").write_text("new file content")
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         assert "Untracked files:" in diff
@@ -502,7 +504,7 @@ class TestGitDiff:
         # Create untracked file
         (git_repo / "untracked.py").write_text("print('hello')")
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         # Should contain tracked file change
@@ -515,7 +517,7 @@ class TestGitDiff:
         """Test untracked files are formatted as unified diff."""
         (git_repo / "config.json").write_text('{"key": "value"}')
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         # Should have unified diff format
@@ -530,7 +532,7 @@ class TestGitDiff:
         content = "line1\nline2\nline3"
         (git_repo / "multi.txt").write_text(content)
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         assert "@@ -0,0 +1,3 @@" in diff
@@ -541,7 +543,7 @@ class TestGitDiff:
         subdir.mkdir()
         (subdir / "nested.txt").write_text("nested content")
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         assert "subdir/nested.txt" in diff
@@ -555,7 +557,7 @@ class TestGitDiff:
         unreadable.chmod(0o000)
 
         try:
-            diff = _capture_git_diff(git_repo)
+            diff = capture_git_diff(git_repo)
             # Should still return something (possibly just the header)
             # and not crash
             assert diff is None or isinstance(diff, str)
@@ -570,7 +572,7 @@ class TestGitDiff:
         # Create large untracked file
         (git_repo / "large.txt").write_text("y" * 60_000)
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         assert "[TRUNCATED:" in diff
@@ -587,7 +589,7 @@ class TestGitDiff:
         # Also create a regular untracked file
         (git_repo / "regular.txt").write_text("content")
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         # Should include the regular file but skip the symlink to directory
         assert diff is not None
@@ -600,7 +602,7 @@ class TestGitDiff:
         binary_file = git_repo / "binary.bin"
         binary_file.write_bytes(b"\xff\xfe\x00\x01invalid\x80utf8")
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         assert "binary.bin" in diff
@@ -619,7 +621,7 @@ class TestGitDiff:
             return original_read_text(self, *args, **kwargs)
 
         with patch.object(Path, "read_text", mock_read_text):
-            diff = _capture_git_diff(git_repo)
+            diff = capture_git_diff(git_repo)
 
         assert diff is not None
         assert "error.txt: [unable to read]" in diff
@@ -635,10 +637,10 @@ class TestGitDiff:
             return original_run_git(*args, cwd=cwd)
 
         with patch(
-            "weakincentives.debug.environment._run_git_command",
+            "weakincentives.debug._git._run_git_command",
             side_effect=mock_run_git,
         ):
-            diff = _capture_git_diff(git_repo)
+            diff = capture_git_diff(git_repo)
 
         # Should return None since no tracked or untracked changes
         assert diff is None
@@ -648,7 +650,7 @@ class TestGitDiff:
         # Create an empty untracked file
         (git_repo / "empty.txt").write_text("")
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         assert "empty.txt" in diff
@@ -663,7 +665,7 @@ class TestGitDiff:
         # Create a safe file too
         (git_repo / "config.txt").write_text("safe content")
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         # Sensitive files should be excluded with a message
@@ -682,7 +684,7 @@ class TestGitDiff:
         large_content = "x" * 15_000
         (git_repo / "large.txt").write_text(large_content)
 
-        diff = _capture_git_diff(git_repo)
+        diff = capture_git_diff(git_repo)
 
         assert diff is not None
         assert "large.txt" in diff
