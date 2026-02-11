@@ -27,6 +27,7 @@ from weakincentives.adapters.claude_agent_sdk._transcript_collector import (
     TranscriptCollector,
     TranscriptCollectorConfig,
 )
+from weakincentives.adapters.claude_agent_sdk._transcript_parser import emit_entry
 
 
 class TestTranscriptCollector:
@@ -715,7 +716,7 @@ class TestTranscriptCollector:
             tailer.entry_count = 0
 
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
-                await collector._emit_entry(tailer, '{"type": "user"}')
+                emit_entry(collector._get_emitter(), tailer, '{"type": "user"}')
                 entry_calls = [
                     call
                     for call in mock_logger.debug.call_args_list
