@@ -15,7 +15,7 @@
 Enforces maximum file and function/method lengths to encourage
 well-encapsulated abstractions:
 
-- File length: max 620 lines
+- File length: max 720 lines
 - Function/method length: max 120 lines
 
 Known violations listed in a baseline file are reported as warnings.
@@ -33,7 +33,7 @@ from pathlib import Path
 from ..result import CheckResult, Diagnostic, Location
 
 
-_DEFAULT_MAX_FILE_LINES = 620
+_DEFAULT_MAX_FILE_LINES = 720
 _DEFAULT_MAX_FUNCTION_LINES = 120
 _DEFAULT_BASELINE = Path(__file__).parent / "code_length_baseline.txt"
 

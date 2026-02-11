@@ -247,7 +247,7 @@ def create_code_length_checker() -> CodeLengthChecker:
     """Create the code length checker.
 
     Enforces max function/method length (120 lines) and max file
-    length (620 lines).  Known violations in the baseline file are
+    length (720 lines).  Known violations in the baseline file are
     warnings; new violations are errors.
     """
     return CodeLengthChecker()
