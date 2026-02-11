@@ -166,7 +166,8 @@ combine-as-imports = true
 "src/weakincentives/runtime/transactions.py" = ["PLR0914"]
 "src/weakincentives/runtime/watchdog.py" = ["PLR6301"]
 "src/weakincentives/contrib/mailbox/_redis.py" = ["PLR0914", "PLR6301", "C901", "TRY300", "TRY301", "SIM108"]
-"src/weakincentives/formal/__init__.py" = ["C901", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "A002", "B010", "PERF401"]
+"src/weakincentives/formal/__init__.py" = ["PLR0913", "B010"]
+"src/weakincentives/formal/_codegen.py" = ["C901", "PLR0912", "PLR0914", "PLR0915", "A002", "PERF401"]
 "src/weakincentives/formal/testing.py" = ["PLR0914"]
 "formal-tests/**" = ["PLR2004"]
 
