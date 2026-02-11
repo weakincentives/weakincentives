@@ -25,7 +25,7 @@ class MemorySliceView[T: SupportsDataclass]:
     """Immutable readonly view of a MemorySlice.
 
     Provides a snapshot of slice data at view creation time.
-    Used for @pure reducer contract compliance.
+    Used for reducer contract compliance.
     """
 
     _data: tuple[T, ...]

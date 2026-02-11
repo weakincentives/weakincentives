@@ -57,7 +57,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, is_dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from ...dbc import pure
 from ...types.dataclass import SupportsDataclass
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .slices import Replace, SliceOp, SliceView
@@ -168,7 +167,6 @@ def _create_reducer_for_method[S: SupportsDataclass, E: SupportsDataclass](
         A reducer function compatible with the session reducer protocol.
     """
 
-    @pure
     def method_reducer(
         view: SliceView[S],
         event: ReducerEvent,

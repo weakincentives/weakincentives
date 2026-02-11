@@ -17,7 +17,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
-from ...dbc import pure
 from ...types.dataclass import SupportsDataclass
 from ._types import (
     ReducerContextProtocol,
@@ -27,7 +26,6 @@ from ._types import (
 from .slices import Append, Replace, SliceView
 
 
-@pure
 def append_all[T: SupportsDataclass](
     view: SliceView[T],
     event: ReducerEvent,
@@ -44,7 +42,6 @@ def append_all[T: SupportsDataclass](
     return Append(cast(T, event))
 
 
-@pure
 def replace_latest[T: SupportsDataclass](
     view: SliceView[T],
     event: ReducerEvent,
@@ -67,7 +64,6 @@ def upsert_by[T: SupportsDataclass, K](
     Must access view to find existing item - O(n) for any backend.
     """
 
-    @pure
     def reducer(
         view: SliceView[T],
         event: ReducerEvent,
@@ -92,7 +88,6 @@ def replace_latest_by[T: SupportsDataclass, K](
     Must access view to filter by key - O(n) for any backend.
     """
 
-    @pure
     def reducer(
         view: SliceView[T],
         event: ReducerEvent,

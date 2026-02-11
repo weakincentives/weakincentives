@@ -25,7 +25,7 @@ Design by Contract treats software components as having "contracts" that define:
 - **Preconditions**: What must be true before a function executes (caller's obligation)
 - **Postconditions**: What must be true after a function executes (callee's guarantee)
 - **Invariants**: What must always be true for an object (class-level consistency)
-- **Purity**: Guarantees that a function has no side effects
+- **Purity**: Guarantees that a function has no side effects (removed from production)
 
 When a contract is violated, an ``AssertionError`` is raised with a descriptive
 message indicating which contract failed and the relevant context.
@@ -203,7 +203,7 @@ Contract Checking
 By default, all contracts are checked at runtime. When a contract fails,
 an ``AssertionError`` is raised with details about:
 
-- Which contract type failed (require/ensure/invariant/pure)
+- Which contract type failed (require/ensure/invariant)
 - The function/method involved
 - The predicate that failed
 - The arguments that were passed
@@ -265,7 +265,6 @@ Decorators:
     - :func:`require` - Precondition decorator
     - :func:`ensure` - Postcondition decorator
     - :func:`invariant` - Class invariant decorator
-    - :func:`pure` - Purity decorator
     - :func:`skip_invariant` - Exclude method from invariant checks
 
 Functions:

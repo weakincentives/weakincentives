@@ -170,7 +170,7 @@ src/weakincentives/
 
 ### Design-by-Contract
 
-- Public APIs: `@require`, `@ensure`, `@invariant`, `@pure` from `weakincentives.dbc`
+- Public APIs: `@require`, `@ensure`, `@invariant` from `weakincentives.dbc`
 - Preconditions validate input; postconditions validate `result`
 - Messages: return `(bool, message)` tuple for custom diagnostics
 
