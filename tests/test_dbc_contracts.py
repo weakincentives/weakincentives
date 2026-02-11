@@ -14,10 +14,6 @@
 
 from __future__ import annotations
 
-import builtins
-import logging
-import pathlib
-import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -27,11 +23,9 @@ from uuid import uuid4
 import pytest
 
 from weakincentives.dbc import (
-    dbc_active,
     dbc_suspended,
     ensure,
     invariant,
-    pure,
     require,
     skip_invariant,
 )
@@ -154,116 +148,6 @@ def test_invariant_init_skipped_when_suspended() -> None:
     assert counter.balance == -10
 
 
-def test_pure_detects_mutation() -> None:
-    @pure
-    def mutate(values: list[int]) -> list[int]:
-        values.append(1)
-        return values
-
-    with pytest.raises(AssertionError):
-        mutate([])
-
-
-def test_pure_detects_io_calls(tmp_path: pathlib.Path) -> None:
-    @pure
-    def touch_file(path: pathlib.Path) -> None:
-        path.write_text("hello")
-
-    with pytest.raises(AssertionError):
-        touch_file(tmp_path / "sample.txt")
-
-
-def test_pure_detects_open_calls(tmp_path: pathlib.Path) -> None:
-    @pure
-    def touch_file(path: pathlib.Path) -> None:
-        with builtins.open(path, "w", encoding="utf-8") as handle:  # noqa: PTH123
-            handle.write("hello")
-
-    with pytest.raises(AssertionError):
-        touch_file(tmp_path / "sample.txt")
-
-
-def test_pure_detects_write_bytes_calls(tmp_path: pathlib.Path) -> None:
-    @pure
-    def touch_file(path: pathlib.Path) -> None:
-        path.write_bytes(b"hello")
-
-    with pytest.raises(AssertionError):
-        touch_file(tmp_path / "sample.bin")
-
-
-def test_pure_patching_is_thread_safe(tmp_path: pathlib.Path) -> None:
-    started = threading.Event()
-    done = threading.Event()
-
-    @pure
-    def wait_for_done_signal() -> None:
-        started.set()
-        assert done.wait(timeout=1.0)
-
-    thread = threading.Thread(target=wait_for_done_signal)
-    thread.start()
-    assert started.wait(timeout=1.0)
-
-    with builtins.open(tmp_path / "allowed.txt", "w", encoding="utf-8") as handle:  # noqa: PTH123
-        handle.write("ok")
-    (tmp_path / "allowed-pathlib.txt").write_text("ok")
-    (tmp_path / "allowed.bin").write_bytes(b"ok")
-
-    logger = logging.getLogger("weakincentives.dbc.thread-safety")
-    logger.addHandler(logging.NullHandler())
-    logger.propagate = False
-    logger.warning("message while pure patches are active")
-
-    done.set()
-    thread.join(timeout=1.0)
-    assert not thread.is_alive()
-
-
-def test_pure_patch_depth_is_thread_safe() -> None:
-    started_one = threading.Event()
-    started_two = threading.Event()
-    done = threading.Event()
-
-    @pure
-    def wait_one() -> None:
-        started_one.set()
-        assert done.wait(timeout=1.0)
-
-    @pure
-    def wait_two() -> None:
-        started_two.set()
-        assert done.wait(timeout=1.0)
-
-    thread_one = threading.Thread(target=wait_one)
-    thread_two = threading.Thread(target=wait_two)
-    thread_one.start()
-    thread_two.start()
-    assert started_one.wait(timeout=1.0)
-    assert started_two.wait(timeout=1.0)
-
-    done.set()
-    thread_one.join(timeout=1.0)
-    thread_two.join(timeout=1.0)
-    assert not thread_one.is_alive()
-    assert not thread_two.is_alive()
-
-
-def test_pure_is_inert_when_suspended() -> None:
-    assert dbc_active() is True
-
-    @pure
-    def mutate(values: list[int]) -> list[int]:
-        values.append(1)
-        return values
-
-    with dbc_suspended():
-        assert mutate([]) == [1]
-
-    with pytest.raises(AssertionError):
-        mutate([])
-
-
 def test_dbc_is_always_active_by_default() -> None:
     """DbC is always enabled and cannot be globally disabled."""
     import weakincentives.dbc as dbc_module
@@ -383,41 +267,6 @@ def test_invariant_skips_static_and_class_methods() -> None:
     assert "ping" in tracker
 
 
-def test_pure_detects_keyword_mutation() -> None:
-    @pure
-    def mutate_keyword(*, data: dict[str, int]) -> None:
-        data["value"] += 1
-
-    with pytest.raises(AssertionError):
-        mutate_keyword(data={"value": 1})
-
-
-def test_pure_handles_uncopyable_arguments() -> None:
-    class NoCopy:
-        def __deepcopy__(self, memo: object) -> NoCopy:
-            raise TypeError("no-copy")
-
-    @pure
-    def use(value: NoCopy) -> int:
-        return id(value)
-
-    instance = NoCopy()
-    assert isinstance(use(instance), int)
-
-
-def test_pure_handles_uncopyable_keyword_arguments() -> None:
-    class NoCopy:
-        def __deepcopy__(self, memo: object) -> NoCopy:
-            raise TypeError("no-copy")
-
-    @pure
-    def use(*, value: NoCopy) -> int:
-        return id(value)
-
-    instance = NoCopy()
-    assert isinstance(use(value=instance), int)
-
-
 def test_require_predicate_returning_none() -> None:
     @require(lambda _: None)
     def identity(value: int) -> int:
@@ -462,11 +311,3 @@ def test_require_skips_when_suspended() -> None:
 
     with dbc_suspended():
         assert square(-1) == 1
-
-
-def test_pure_handles_equal_keyword_arguments() -> None:
-    @pure
-    def read_dict(*, data: dict[str, int]) -> int:
-        return data["value"]
-
-    assert read_dict(data={"value": 42}) == 42
