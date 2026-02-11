@@ -62,21 +62,23 @@ from typing import TYPE_CHECKING, override
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
-    HostMount as ClaudeHostMount,
     IsolationConfig,
 )
 from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter,
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
-    CodexWorkspaceSection,
-    HostMount as CodexHostMount,
 )
 from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import BundleConfig
-from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.prompt import (
+    HostMount,
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    WorkspaceSection,
+)
 from weakincentives.prompt.section import Section
 from weakincentives.runtime import (
     AgentLoop,
@@ -199,23 +201,12 @@ def _create_workspace_section(
     session: Session,
     project_path: str,
 ) -> Section:
-    """Create the appropriate workspace section for the chosen adapter."""
-    if adapter_name == ADAPTER_CODEX:
-        return CodexWorkspaceSection(
-            session=session,
-            mounts=[
-                CodexHostMount(
-                    host_path=project_path,
-                    include_glob=DEFAULT_INCLUDE_GLOBS,
-                    exclude_glob=DEFAULT_EXCLUDE_GLOBS,
-                    max_bytes=DEFAULT_MAX_BYTES,
-                )
-            ],
-        )
-    return ClaudeAgentWorkspaceSection(
+    """Create the workspace section (adapter-agnostic)."""
+    _ = adapter_name  # Same section works with any adapter.
+    return WorkspaceSection(
         session=session,
         mounts=[
-            ClaudeHostMount(
+            HostMount(
                 host_path=project_path,
                 include_glob=DEFAULT_INCLUDE_GLOBS,
                 exclude_glob=DEFAULT_EXCLUDE_GLOBS,

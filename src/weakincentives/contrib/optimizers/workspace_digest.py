@@ -26,10 +26,9 @@ from typing import TYPE_CHECKING
 from ...adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
 )
 from ...dataclasses import FrozenDataclass
-from ...prompt import MarkdownSection, Prompt, PromptTemplate
+from ...prompt import MarkdownSection, Prompt, PromptTemplate, WorkspaceSection
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
 from ..tools.digests import set_workspace_digest
@@ -37,7 +36,7 @@ from ..tools.digests import set_workspace_digest
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from ...adapters.claude_agent_sdk.workspace import HostMount
+    from ...prompt.workspace import HostMount
 
 __all__ = [
     "WorkspaceDigestOptimizer",
@@ -120,7 +119,7 @@ class WorkspaceDigestOptimizer:
 
     def _build_optimization_prompt(self, session: Session) -> Prompt[_DigestResponse]:
         """Build the prompt for workspace exploration and digest generation."""
-        workspace = ClaudeAgentWorkspaceSection(
+        workspace = WorkspaceSection(
             session=session,
             mounts=self.mounts,
         )

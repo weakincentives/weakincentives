@@ -308,6 +308,7 @@ from .workspace import (
     HostMount,
     HostMountPreview,
     WorkspaceBudgetExceededError,
+    WorkspaceSection,
     WorkspaceSecurityError,
 )
 
@@ -339,6 +340,7 @@ __all__ = [
     "TranscriptCollector",
     "TranscriptCollectorConfig",
     "WorkspaceBudgetExceededError",
+    "WorkspaceSection",
     "WorkspaceSecurityError",
     "create_task_completion_stop_hook",
     "get_default_model",

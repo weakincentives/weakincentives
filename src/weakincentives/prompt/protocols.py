@@ -19,7 +19,7 @@ This module provides protocols for prompt-related types:
 - **ProviderAdapterProtocol**: Interface for adapters
 - **RenderedPromptProtocol**: Interface for rendered prompt snapshots
 - **ToolSuiteSection**: Protocol for sections exposing tool suites
-- **WorkspaceSection**: Protocol for workspace sections managing a filesystem
+- **WorkspaceSectionProtocol**: Protocol for workspace sections managing a filesystem
 """
 
 from __future__ import annotations
@@ -222,13 +222,15 @@ class ToolSuiteSection(Protocol):
 
 
 @runtime_checkable
-class WorkspaceSection(ToolSuiteSection, Protocol):
+class WorkspaceSectionProtocol(ToolSuiteSection, Protocol):
     """Protocol for workspace sections that manage a filesystem.
 
-    Extends ToolSuiteSection with a filesystem property. Workspace sections
-    (e.g., ClaudeAgentWorkspaceSection) should implement this protocol.
-    This enables tools and optimizers to identify valid workspace sections
-    without importing adapter-specific code.
+    Extends ToolSuiteSection with a filesystem property.  Any section
+    implementing this protocol can be discovered by ``Prompt.filesystem()``
+    without importing a concrete class.
+
+    The core library provides :class:`~weakincentives.prompt.workspace.WorkspaceSection`
+    as the standard concrete implementation.
 
     Additional requirement beyond ToolSuiteSection:
 
@@ -241,7 +243,7 @@ class WorkspaceSection(ToolSuiteSection, Protocol):
         ...
 
     @override
-    def clone(self, **kwargs: object) -> WorkspaceSection:
+    def clone(self, **kwargs: object) -> WorkspaceSectionProtocol:
         """Clone the section with new session/dispatcher."""
         ...
 
@@ -253,5 +255,5 @@ __all__ = [
     "ProviderAdapterProtocol",
     "RenderedPromptProtocol",
     "ToolSuiteSection",
-    "WorkspaceSection",
+    "WorkspaceSectionProtocol",
 ]

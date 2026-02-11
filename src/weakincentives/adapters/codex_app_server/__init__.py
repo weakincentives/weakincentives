@@ -41,6 +41,7 @@ from .workspace import (
     HostMount,
     HostMountPreview,
     WorkspaceBudgetExceededError,
+    WorkspaceSection,
     WorkspaceSecurityError,
 )
 
@@ -64,5 +65,6 @@ __all__ = [
     "ReasoningSummary",
     "SandboxMode",
     "WorkspaceBudgetExceededError",
+    "WorkspaceSection",
     "WorkspaceSecurityError",
 ]
