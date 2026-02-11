@@ -35,7 +35,6 @@ from tests.serde._fixtures import (
     WithInitFalse,
     as_dict,
     as_list,
-    camel,
     user_payload,
 )
 from weakincentives.serde import parse, schema
@@ -94,28 +93,16 @@ def test_parse_membership_constraints() -> None:
 
 def test_parse_age_metadata_bounds() -> None:
     with pytest.raises(ValueError) as exc:
-        parse(
-            User,
-            user_payload(AGE="-1"),
-            aliases={"user_id": "USER"},
-            alias_generator=camel,
-            case_insensitive=True,
-        )
+        parse(User, user_payload(age="-1"))
     assert "age: must be >= 0" in str(exc.value)
 
     with pytest.raises(ValueError) as exc2:
-        parse(
-            User,
-            user_payload(AGE="150"),
-            aliases={"user_id": "USER"},
-            alias_generator=camel,
-            case_insensitive=True,
-        )
+        parse(User, user_payload(age="150"))
     assert "age: must be <= 130" in str(exc2.value)
 
 
 def test_schema_reflects_types_constraints_and_aliases() -> None:
-    schema_dict = schema(User, alias_generator=camel, extra="forbid")
+    schema_dict = schema(User, extra="forbid")
     assert schema_dict["title"] == "User"
     assert schema_dict["additionalProperties"] is False
     required = cast(list[str], schema_dict["required"])
@@ -126,7 +113,7 @@ def test_schema_reflects_types_constraints_and_aliases() -> None:
     assert as_dict(properties["name"])["minLength"] == 1
     email_pattern = cast(str, as_dict(properties["email"])["pattern"])
     assert email_pattern.startswith("^[^")
-    assert as_dict(properties["createdAt"])["format"] == "date-time"
+    assert as_dict(properties["created_at"])["format"] == "date-time"
 
     favorite_anyof = as_list(as_dict(properties["favorite"])["anyOf"])
     assert any(
@@ -172,9 +159,9 @@ def test_schema_reflects_types_constraints_and_aliases() -> None:
 def test_schema_collection_and_literal_models() -> None:
     from tests.serde._fixtures import CollectionModel
 
-    collection_schema = schema(CollectionModel, alias_generator=camel)
+    collection_schema = schema(CollectionModel)
     props = as_dict(collection_schema["properties"])
-    assert as_dict(props["uniqueTags"])["uniqueItems"] is True
+    assert as_dict(props["unique_tags"])["uniqueItems"] is True
     assert as_dict(props["history"])["items"] == {"type": "integer"}
 
     literal_schema = schema(LiteralModel)
@@ -314,9 +301,6 @@ def test_none_branch_and_literal_coercion() -> None:
     config = _ParseConfig(
         extra="ignore",
         coerce=True,
-        case_insensitive=False,
-        alias_generator=None,
-        aliases=None,
     )
 
     with pytest.raises(TypeError):

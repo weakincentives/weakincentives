@@ -31,6 +31,9 @@ mechanism. Documentation receives substantial updates: the debugging guide gains
 complete `wink query` reference material and AI agent integration instructions,
 the README documents both execution harnesses side-by-side, and a new unified
 `TRANSCRIPT.md` spec replaces the Claude-specific `TRANSCRIPT_COLLECTION.md`.
+The **serde API is simplified** by removing `case_insensitive`, `alias_generator`,
+`aliases` parameters, `extra="allow"` mode, and AST-based type resolution;
+field-level aliases via `field(metadata={"alias": "..."})` remain supported.
 
 ---
 
@@ -130,6 +133,48 @@ section = MarkdownSection(
 - `PromptRegistry` tracks skill names, detects duplicates, and computes
   `subtree_has_skills` index
 - `EphemeralHome.mount_skills()` is now public with single-call enforcement
+
+#### Serde API Simplification
+
+Removed rarely-used parameters from `parse()`, `dump()`, and `schema()` to
+reduce API surface and simplify the implementation. Field-level aliases via
+`field(metadata={"alias": "..."})` remain supported.
+
+**Removed from `parse()`:**
+- `case_insensitive` — case-insensitive key matching
+- `alias_generator` — callable to transform field names
+- `aliases` — dict of field-to-alias mappings
+
+**Removed from `dump()`:**
+- `alias_generator` — callable to transform field names
+
+**Removed from `schema()`:**
+- `alias_generator` — callable to transform property names
+
+**Removed `extra="allow"` mode** — only `"ignore"` (default) and `"forbid"`
+remain. The `"allow"` mode attached extra fields as instance attributes, which
+conflicted with slotted dataclasses and was rarely used.
+
+**Removed AST-based type resolution** — the AST resolver for complex generic
+type annotations is removed in favor of the simpler generic alias approach
+(`parse(Wrapper[Data], data)`).
+
+**Migration:**
+```python
+# Field-level aliases still work ✅
+@dataclass
+class User:
+    user_id: str = field(metadata={"alias": "id"})
+
+user = parse(User, {"id": "abc123"})
+
+# Removed ❌
+parse(User, data, case_insensitive=True)
+parse(User, data, alias_generator=camel_case)
+parse(User, data, aliases={"user_id": "uid"})
+parse(User, data, extra="allow")
+dump(user, alias_generator=camel_case)
+```
 
 #### Unified Transcript Format Across Adapters
 
@@ -303,6 +348,17 @@ layout:
   complete Python usage example showing `CodexAppServerAdapter`,
   `CodexAppServerClientConfig`, `CodexAppServerModelConfig`,
   `WorkspaceSection`, and `HostMount`
+
+#### Serde Documentation Updated for API Simplification
+
+- `specs/DATACLASSES.md` — Removed `case_insensitive`, `alias_generator`,
+  `aliases` parameters from `parse()` table; removed `alias_generator` from
+  `dump()` table; updated `extra` to document only `"ignore"` and `"forbid"`
+  modes; added `alias` to constraints table for field-level alias support
+- `guides/serialization.md` — Removed "Alias Generator", "Explicit Aliases
+  Mapping", and "Case-Insensitive Parsing" sections; removed `extra="allow"`
+  mode and examples; removed `alias_generator` from `dump()` and `schema()`
+  option tables
 
 ---
 

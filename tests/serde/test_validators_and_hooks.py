@@ -27,7 +27,6 @@ from tests.serde._fixtures import (
     TransformModel,
     User,
     ValueErrorConvertModel,
-    camel,
     user_payload,
 )
 from weakincentives.serde import clone, parse
@@ -80,13 +79,7 @@ def test_parse_annotation_precedence_and_transform() -> None:
 
 def test_parse_model_validator_runs() -> None:
     with pytest.raises(ValueError) as exc:
-        parse(
-            User,
-            user_payload(AGE="12"),
-            aliases={"user_id": "USER"},
-            alias_generator=camel,
-            case_insensitive=True,
-        )
+        parse(User, user_payload(age="12"))
     assert str(exc.value) == "age must be >= 13"
 
 
