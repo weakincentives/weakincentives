@@ -108,21 +108,37 @@ Your definition is **portable**. The harness is **rented**.
 # Two Harnesses, One Definition
 
 ```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter, ClaudeAgentSDKClientConfig,
+)
+from weakincentives.adapters.codex_app_server import (
+    CodexAppServerAdapter, CodexAppServerModelConfig,
+    CodexAppServerClientConfig,
+)
+
 # Run on Claude Code
 adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-5-20250929",
-    sandbox=SandboxConfig(enabled=True),
+    model="claude-opus-4-6",
+    client_config=ClaudeAgentSDKClientConfig(permission_mode="bypassPermissions"),
 )
 
 # Run on OpenAI Codex
 adapter = CodexAppServerAdapter(
-    model="gpt-5.3-codex",
-    sandbox_mode="workspace-write",
+    model_config=CodexAppServerModelConfig(model="gpt-5.3-codex"),
+    client_config=CodexAppServerClientConfig(sandbox_mode="workspace-write"),
 )
+```
 
-# Same prompt, same tools, same policies
+---
+
+# Same Evaluation Call
+
+```python
+# Same prompt, same tools, same policies — either adapter
 response = adapter.evaluate(prompt, session=session)
 ```
+
+Your definition doesn't change. Only the adapter does.
 
 ---
 
@@ -187,13 +203,15 @@ These work identically on both harnesses.
 Policies **gate tool invocations**. If denied, the tool doesn't run.
 
 ```python
+from weakincentives.prompt import ReadBeforeWritePolicy, SequentialDependencyPolicy
+
 ReadBeforeWritePolicy()
-# → Blocks write_file if the file exists but wasn't read
+# -> Blocks write_file if the file exists but wasn't read
 
 SequentialDependencyPolicy(
     dependencies={"deploy": frozenset({"test", "build"})}
 )
-# → Blocks deploy until test and build have succeeded
+# -> Blocks deploy until test and build have succeeded
 ```
 
 Works on Claude Code. Works on Codex. Same policy definition.
@@ -216,6 +234,10 @@ The agent sees: *"Policy denied: file exists but was not read first."*
 Feedback providers **observe and advise**. The agent decides how to respond.
 
 ```python
+from weakincentives.prompt import (
+    FeedbackProviderConfig, FeedbackTrigger, DeadlineFeedback,
+)
+
 FeedbackProviderConfig(
     provider=DeadlineFeedback(warning_threshold_seconds=120),
     trigger=FeedbackTrigger(every_n_seconds=30),
@@ -235,11 +257,15 @@ Agents sometimes declare victory prematurely.
 **Task completion checkers** verify goals before allowing termination.
 
 ```python
-PlanBasedChecker(plan_type=Plan)
-# → Blocks termination if plan steps remain incomplete
+from weakincentives.adapters.claude_agent_sdk import (
+    PlanBasedChecker, CompositeChecker,
+)
+
+PlanBasedChecker(plan_type=MyPlan)
+# -> Blocks termination if plan steps remain incomplete
 
 CompositeChecker(
-    checkers=(PlanBasedChecker(), FileExistsChecker(("output.txt",))),
+    checkers=(PlanBasedChecker(plan_type=MyPlan), FileExistsChecker(...)),
     all_must_pass=True,
 )
 ```
@@ -251,25 +277,33 @@ CompositeChecker(
 Define tools once. WINK bridges them to each harness:
 
 ```python
-@tool(name="search_docs", description="Search documentation")
-def search_docs(params: SearchParams, *, context: ToolContext) -> ToolResult:
+from weakincentives.prompt import Tool, ToolContext, ToolResult
+
+def search_docs_handler(
+    params: SearchParams, *, context: ToolContext
+) -> ToolResult[SearchResult]:
     results = my_search_engine.query(params.query)
-    return ToolResult.ok(results)
+    return ToolResult.ok(SearchResult(matches=results))
+
+search_docs = Tool[SearchParams, SearchResult](
+    name="search_docs",
+    description="Search documentation for relevant content",
+    handler=search_docs_handler,
+)
 ```
+
+---
+
+# Tool Bridging
 
 - **Claude Code**: Bridged via MCP server
 - **Codex**: Bridged via dynamic tools
 
-Same tool definition. Automatic bridging.
-
----
-
-# Tool Bridging Architecture
+Same tool definition. Automatic bridging to each harness.
 
 ```
 ┌─────────────────────────────────────────────┐
-│            Your Tool Definition              │
-│  @tool(name="search_docs", ...)             │
+│         Tool[SearchParams, SearchResult]     │
 └─────────────────┬───────────────────────────┘
                   │
        ┌──────────┴──────────┐
@@ -289,8 +323,8 @@ The prompt is a **typed, hierarchical document** where sections bundle instructi
 ```
 PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
-├── WorkspaceDigestSection     ← auto-generated codebase summary
-├── CustomToolsSection         ← your domain tools + policies
+├── WorkspaceDigestSection     <- cached codebase summary
+├── CustomToolsSection         <- your domain tools + policies
 └── MarkdownSection (request)
 ```
 
@@ -312,12 +346,16 @@ All travel together. Nothing to synchronize across harness boundaries.
 
 # Event-Driven State
 
-Every mutation flows through pure reducers:
+Every mutation flows through pure reducers on frozen dataclasses:
 
 ```python
-@reducer(on=FileRead)
-def track_read(state: ReadFiles, event: FileRead) -> SliceOp[ReadFiles]:
-    return Append(ReadFiles(path=event.path))
+@dataclass(frozen=True)
+class ReadFiles:
+    paths: tuple[str, ...] = ()
+
+    @reducer(on=FileRead)
+    def track_read(self, event: FileRead) -> ReadFiles:
+        return replace(self, paths=(*self.paths, event.path))
 ```
 
 - State is **immutable and inspectable**
@@ -332,11 +370,14 @@ Because the definition is portable and deterministic:
 
 ```python
 def test_policy_blocks_unread_write():
-    session = Session()
+    session = Session(dispatcher=InProcessDispatcher())
     policy = ReadBeforeWritePolicy()
 
-    decision = policy.check("write_file", {"path": "config.yaml"},
-                            context=ctx)
+    decision = policy.check(
+        tool_name="write_file",
+        params={"path": "config.yaml"},
+        context=policy_context,
+    )
 
     assert not decision.allowed
     assert "not read" in decision.reason
