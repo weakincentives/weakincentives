@@ -61,17 +61,6 @@ Implementation details:
 - `_wrap_init_with_invariants()` at `src/weakincentives/dbc/__init__.py`
 - `_wrap_methods_with_invariants()` at `src/weakincentives/dbc/__init__.py`
 
-### @pure
-
-At `src/weakincentives/dbc/__init__.py`. Documents side-effect-free functions.
-
-Enforcement (best-effort via `deepcopy` + equality):
-
-- No mutation of arguments
-- No calls to `builtins.open`, `Path.write_text/bytes`, `logging`
-
-Patching at `_activate_pure_patches()` (`src/weakincentives/dbc/__init__.py`).
-
 ## Runtime Behavior
 
 | Context | Behavior |
@@ -110,7 +99,7 @@ to toggle state since DbC is always enabled.
 | --- | --- |
 | Prompt builders | `@require(lambda ctx: "user" in ctx)` |
 | Session reducers | `@invariant` for monotonic state |
-| Serialization | `@pure` to catch accidental writes |
+| Serialization | `@ensure` to validate output format |
 | Budget counters | `@require` for non-negative, `@invariant` for non-negative balance |
 
 ## Exhaustiveness Checking

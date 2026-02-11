@@ -46,7 +46,7 @@ dbc
     - ``@require``: Validate preconditions before function execution
     - ``@ensure``: Validate postconditions after function returns
     - ``@invariant``: Enforce class invariants on public methods
-    - ``@pure``: Assert function has no side effects
+
 
 debug
     Debug bundle utilities for capturing and inspecting execution state.

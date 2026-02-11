@@ -41,15 +41,11 @@ def handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
 Public APIs use decorators from `weakincentives.dbc`:
 
 ```python nocheck
-from weakincentives.dbc import require, ensure, invariant, pure
+from weakincentives.dbc import require, ensure, invariant
 
 @require(lambda x: x > 0)  # x must be positive
 @ensure(lambda result: result >= 0)  # result must be non-negative
 def compute(x: int) -> int:
-    ...
-
-@pure  # Marks function as having no side effects
-def render_template(template: str, params: dict[str, object]) -> str:
     ...
 ```
 
@@ -58,15 +54,12 @@ def render_template(template: str, params: dict[str, object]) -> str:
 - `@require`: precondition checked on entry
 - `@ensure`: postcondition checked on exit
 - `@invariant`: class invariant checked after each method
-- `@pure`: documents (and can verify) side-effect-free functions
 
 **Why this matters for agents:**
 
 - Contracts document expectations that types can't express ("non-empty list",
   "valid path", "positive budget")
 - Violations fail fast with clear messages, not silently corrupted state
-- The `@pure` marker identifies deterministic functions—important for
-  understanding what can be snapshotted/replayed
 
 **When to use contracts:**
 

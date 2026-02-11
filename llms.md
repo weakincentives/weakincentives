@@ -908,7 +908,7 @@ copy = clone(data)
 ### 14. Design-by-Contract
 
 ```python
-from weakincentives.dbc import require, ensure, invariant, pure
+from weakincentives.dbc import require, ensure, invariant
 
 
 @require(lambda x: x > 0)
@@ -922,9 +922,6 @@ class Counter:
     count: int = 0
 
 
-@pure  # Validates no side effects
-def hash_value(x: str) -> int:
-    return hash(x)
 ```
 
 ______________________________________________________________________
@@ -1084,7 +1081,7 @@ src/weakincentives/
 │   ├── optimizers/     # WorkspaceDigestOptimizer
 │   └── mailbox/        # RedisMailbox
 ├── dataclasses/        # FrozenDataclass utilities
-├── dbc/                # @require, @ensure, @invariant, @pure
+├── dbc/                # @require, @ensure, @invariant
 ├── debug/              # Debug bundles, environment capture
 ├── evals/              # Evaluation framework
 ├── filesystem/         # Filesystem protocol

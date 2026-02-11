@@ -25,8 +25,6 @@ Design by Contract treats software components as having "contracts" that define:
 - **Preconditions**: What must be true before a function executes (caller's obligation)
 - **Postconditions**: What must be true after a function executes (callee's guarantee)
 - **Invariants**: What must always be true for an object (class-level consistency)
-- **Purity**: Guarantees that a function has no side effects
-
 When a contract is violated, an ``AssertionError`` is raised with a descriptive
 message indicating which contract failed and the relevant context.
 
@@ -153,47 +151,6 @@ Example::
             self._items.append(item)
             self._count += 1
 
-@pure
-^^^^^
-
-Validates that the wrapped callable behaves like a pure function with no
-observable side effects. This decorator:
-
-1. Takes snapshots of all arguments before execution
-2. Blocks I/O operations during execution (file operations, logging)
-3. Verifies arguments weren't mutated after execution
-
-A pure function must:
-
-- Not modify its input arguments
-- Not perform file I/O (``open()``, ``Path.write_text()``, ``Path.write_bytes()``)
-- Not write to logs
-- Return the same output for the same inputs (not enforced, but implied)
-
-Example::
-
-    from weakincentives.dbc import pure
-
-    @pure
-    def add(a: int, b: int) -> int:
-        return a + b  # OK: no side effects
-
-    @pure
-    def transform(items: list[int]) -> list[int]:
-        # OK: creates a new list, doesn't modify input
-        return [x * 2 for x in items]
-
-    @pure
-    def bad_transform(items: list[int]) -> list[int]:
-        items.append(0)  # FAILS: mutates input argument
-        return items
-
-    @pure
-    def bad_logging(x: int) -> int:
-        import logging
-        logging.info("Computing...")  # FAILS: performs I/O
-        return x * 2
-
 Runtime Behavior
 ----------------
 
@@ -203,7 +160,7 @@ Contract Checking
 By default, all contracts are checked at runtime. When a contract fails,
 an ``AssertionError`` is raised with details about:
 
-- Which contract type failed (require/ensure/invariant/pure)
+- Which contract type failed (require/ensure/invariant)
 - The function/method involved
 - The predicate that failed
 - The arguments that were passed
@@ -265,7 +222,6 @@ Decorators:
     - :func:`require` - Precondition decorator
     - :func:`ensure` - Postcondition decorator
     - :func:`invariant` - Class invariant decorator
-    - :func:`pure` - Purity decorator
     - :func:`skip_invariant` - Exclude method from invariant checks
 
 Functions:
@@ -275,15 +231,10 @@ Functions:
 
 from __future__ import annotations
 
-import builtins
-import copy
-import logging
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
-from pathlib import Path
-from threading import RLock
 from typing import ParamSpec, Protocol, TypeVar, cast
 
 from ..types import ContractResult
@@ -584,179 +535,11 @@ def invariant(*predicates: ContractCallable) -> Callable[[type[T]], type[T]]:
     return decorator
 
 
-_SNAPSHOT_SENTINEL = object()
-_PURE_STACK_EMPTY: tuple[Callable[..., object], ...] = ()
-_PURE_STACK: ContextVar[tuple[Callable[..., object], ...]] = ContextVar[
-    tuple[Callable[..., object], ...]
-]("weakincentives_pure_stack", default=_PURE_STACK_EMPTY)
-_PURE_PATCH_LOCK = RLock()
-_pure_patch_depth = 0
-_pure_patch_original_open: object | None = None
-_pure_patch_original_write_text: object | None = None
-_pure_patch_original_write_bytes: object | None = None
-_pure_patch_original_log: object | None = None
-
-
-def _pure_guard(target: str) -> None:
-    stack = _PURE_STACK.get()
-    func = stack[-1] if stack else None
-    msg = f"pure contract for {_qualname(func)} forbids calling {target}"
-    raise AssertionError(msg)
-
-
-def _pure_open_guard(*args: object, **kwargs: object) -> object:
-    if _PURE_STACK.get():
-        _pure_guard("builtins.open")
-    if _pure_patch_original_open is None:  # pragma: no cover
-        raise RuntimeError("Pure patch state invalid: builtins.open is missing.")
-    return cast(Callable[..., object], _pure_patch_original_open)(*args, **kwargs)
-
-
-def _pure_write_text_guard(*args: object, **kwargs: object) -> object:
-    if _PURE_STACK.get():
-        _pure_guard("Path.write_text")
-    if _pure_patch_original_write_text is None:  # pragma: no cover
-        raise RuntimeError("Pure patch state invalid: Path.write_text is missing.")
-    return cast(Callable[..., object], _pure_patch_original_write_text)(*args, **kwargs)
-
-
-def _pure_write_bytes_guard(*args: object, **kwargs: object) -> object:
-    if _PURE_STACK.get():
-        _pure_guard("Path.write_bytes")
-    if _pure_patch_original_write_bytes is None:  # pragma: no cover
-        raise RuntimeError("Pure patch state invalid: Path.write_bytes is missing.")
-    return cast(Callable[..., object], _pure_patch_original_write_bytes)(
-        *args, **kwargs
-    )
-
-
-def _pure_log_guard(*args: object, **kwargs: object) -> object:
-    if _PURE_STACK.get():
-        _pure_guard("logging")
-    if _pure_patch_original_log is None:  # pragma: no cover
-        raise RuntimeError("Pure patch state invalid: logging.Logger._log is missing.")
-    return cast(Callable[..., object], _pure_patch_original_log)(*args, **kwargs)
-
-
-def _activate_pure_patches() -> None:
-    global _pure_patch_depth
-    global _pure_patch_original_log
-    global _pure_patch_original_open
-    global _pure_patch_original_write_bytes
-    global _pure_patch_original_write_text
-
-    with _PURE_PATCH_LOCK:
-        if _pure_patch_depth == 0:
-            _pure_patch_original_open = getattr(builtins, "open")  # noqa: B009
-            _pure_patch_original_write_text = getattr(Path, "write_text")  # noqa: B009
-            _pure_patch_original_write_bytes = getattr(Path, "write_bytes")  # noqa: B009
-            _pure_patch_original_log = getattr(logging.Logger, "_log")  # noqa: B009
-
-            setattr(builtins, "open", _pure_open_guard)  # noqa: B010
-            setattr(Path, "write_text", _pure_write_text_guard)  # noqa: B010
-            setattr(Path, "write_bytes", _pure_write_bytes_guard)  # noqa: B010
-            setattr(logging.Logger, "_log", _pure_log_guard)  # noqa: B010
-
-        _pure_patch_depth += 1
-
-
-def _deactivate_pure_patches() -> None:
-    global _pure_patch_depth
-
-    with _PURE_PATCH_LOCK:
-        if _pure_patch_depth <= 0:  # pragma: no cover
-            raise RuntimeError("pure patch depth underflow")
-        _pure_patch_depth -= 1
-        if _pure_patch_depth != 0:
-            return
-
-        setattr(builtins, "open", _pure_patch_original_open)  # noqa: B010
-        setattr(Path, "write_text", _pure_patch_original_write_text)  # noqa: B010
-        setattr(Path, "write_bytes", _pure_patch_original_write_bytes)  # noqa: B010
-        setattr(logging.Logger, "_log", _pure_patch_original_log)  # noqa: B010
-
-
-def _snapshot(value: object) -> object:
-    try:
-        return copy.deepcopy(value)
-    except Exception:
-        return _SNAPSHOT_SENTINEL
-
-
-def _compare_snapshots(
-    *,
-    func: Callable[..., object],
-    args: tuple[object, ...],
-    kwargs: Mapping[str, object],
-    snap_args: tuple[object, ...],
-    snap_kwargs: Mapping[str, object],
-) -> None:
-    for index, (original, snapshot) in enumerate(zip(args, snap_args, strict=False)):
-        if snapshot is _SNAPSHOT_SENTINEL:
-            continue
-        if original != snapshot:
-            msg = (
-                f"pure contract for {_qualname(func)} detected mutation of "
-                f"positional argument {index}"
-            )
-            raise AssertionError(msg)
-
-    for key, snapshot in snap_kwargs.items():
-        if snapshot is _SNAPSHOT_SENTINEL:
-            continue
-        if kwargs[key] != snapshot:
-            msg = (
-                f"pure contract for {_qualname(func)} detected mutation of "
-                f"keyword argument '{key}'"
-            )
-            raise AssertionError(msg)
-
-
-@contextmanager
-def _pure_environment(func: Callable[..., object]) -> Iterator[None]:
-    token = _PURE_STACK.set((*_PURE_STACK.get(), func))
-    _activate_pure_patches()
-    try:
-        yield
-    finally:
-        _PURE_STACK.reset(token)
-        _deactivate_pure_patches()
-
-
-def pure(func: Callable[P, R]) -> Callable[P, R]:  # noqa: UP047
-    """Validate that the wrapped callable behaves like a pure function."""
-
-    @wraps(func)
-    def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
-        if not dbc_active():
-            return func(*args, **kwargs)
-
-        snapshot_args = tuple(_snapshot(arg) for arg in args)
-        snapshot_kwargs: dict[str, object] = {
-            key: _snapshot(value) for key, value in kwargs.items()
-        }
-
-        with _pure_environment(func):
-            result = func(*args, **kwargs)
-
-        _compare_snapshots(
-            func=func,
-            args=tuple(args),
-            kwargs=dict(kwargs),
-            snap_args=snapshot_args,
-            snap_kwargs=snapshot_kwargs,
-        )
-        return result
-
-    return wrapped
-
-
 __all__ = [
     "dbc_active",
     "dbc_suspended",
     "ensure",
     "invariant",
-    "pure",
     "require",
     "skip_invariant",
 ]

@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Any, cast, override
 
 from ..dataclasses import FrozenDataclass
-from ..dbc import pure
 from ..debug.bundle import BundleValidationError, DebugBundle
 from ..errors import WinkError
 from ..resources.protocols import Closeable
@@ -99,7 +98,6 @@ class SchemaOutput:
         return json.dumps(dump(self), indent=2)
 
 
-@pure
 def _normalize_slice_type(type_name: str) -> str:
     """Normalize a slice type name to a valid table name.
 
@@ -115,7 +113,6 @@ def _normalize_slice_type(type_name: str) -> str:
     return f"slice_{type_name.lower()}"
 
 
-@pure
 def _flatten_json(
     obj: JSONValue, prefix: str = "", sep: str = "_"
 ) -> dict[str, JSONValue]:
@@ -143,7 +140,6 @@ def _flatten_json(
     return result
 
 
-@pure
 def _infer_sqlite_type(value: object) -> str:
     """Infer SQLite type from Python value."""
     if value is None:
@@ -157,7 +153,6 @@ def _infer_sqlite_type(value: object) -> str:
     return "TEXT"
 
 
-@pure
 def _json_to_sql_value(value: JSONValue) -> object:
     """Convert JSON value to SQL-compatible value."""
     if value is None:
@@ -170,7 +165,6 @@ def _json_to_sql_value(value: JSONValue) -> object:
     return json.dumps(value)
 
 
-@pure
 def _is_tool_event(event: str) -> bool:
     """Check if an event string represents a tool call event.
 
@@ -186,7 +180,6 @@ def _is_tool_event(event: str) -> bool:
     )
 
 
-@pure
 def _safe_json_dumps(value: object) -> str:
     """Serialize value to JSON, falling back to str on failure."""
     try:
@@ -195,7 +188,6 @@ def _safe_json_dumps(value: object) -> str:
         return str(value)
 
 
-@pure
 def _stringify_transcript_tool_use(mapping: Mapping[str, object]) -> str:
     name = mapping.get("name")
     tool_id = mapping.get("id") or mapping.get("tool_use_id")
@@ -211,7 +203,6 @@ def _stringify_transcript_tool_use(mapping: Mapping[str, object]) -> str:
     return f"[tool_use] {detail}".strip()
 
 
-@pure
 def _stringify_transcript_mapping(mapping: Mapping[str, object]) -> str:
     for key in ("text", "content", "thinking", "summary"):
         if key not in mapping:
@@ -224,7 +215,6 @@ def _stringify_transcript_mapping(mapping: Mapping[str, object]) -> str:
     return _safe_json_dumps(mapping)
 
 
-@pure
 def _stringify_transcript_content(value: object) -> str:
     """Extract a readable string from transcript content blocks."""
     if value is None:
@@ -240,7 +230,6 @@ def _stringify_transcript_content(value: object) -> str:
     return str(value)
 
 
-@pure
 def _extract_tool_use_from_content(content: object) -> tuple[str, str]:
     """Extract tool name and ID from a message content block."""
     candidates: list[Mapping[str, object]] = []
@@ -265,7 +254,6 @@ def _extract_tool_use_from_content(content: object) -> tuple[str, str]:
     return "", ""
 
 
-@pure
 def _apply_split_block_details(
     parsed: Mapping[str, object],
     entry_type: str,
@@ -302,7 +290,6 @@ def _apply_split_block_details(
     return content, tool_name, tool_use_id
 
 
-@pure
 def _extract_transcript_details(
     parsed: Mapping[str, object],
     entry_type: str,
@@ -336,7 +323,6 @@ def _extract_transcript_details(
     return role, content, tool_name, tool_use_id
 
 
-@pure
 def _extract_transcript_message_details(
     parsed: Mapping[str, object],
 ) -> tuple[str, str, str, str]:
@@ -358,7 +344,6 @@ def _extract_transcript_message_details(
     return role, content, tool_name, tool_use_id
 
 
-@pure
 def _apply_tool_result_details(
     parsed: Mapping[str, object],
     *,
@@ -396,7 +381,6 @@ def _get_notification_item(
     return cast("Mapping[str, object]", item_raw)
 
 
-@pure
 def _apply_bridged_tool_details(
     parsed: Mapping[str, object],
     notification: Mapping[str, object],
@@ -430,7 +414,6 @@ def _apply_bridged_tool_details(
     return resolved_id, resolved_name, resolved_content
 
 
-@pure
 def _apply_notification_item_details(
     parsed: Mapping[str, object],
     *,
@@ -472,7 +455,6 @@ def _apply_notification_item_details(
     return resolved_id, resolved_name, resolved_content
 
 
-@pure
 def _get_notification_item_text(parsed: Mapping[str, object]) -> str:
     """Return ``notification.item.text`` if present, else empty string."""
     item = _get_notification_item(parsed)
@@ -482,7 +464,6 @@ def _get_notification_item_text(parsed: Mapping[str, object]) -> str:
     return text_val if isinstance(text_val, str) else ""
 
 
-@pure
 def _apply_transcript_content_fallbacks(
     parsed: Mapping[str, object],
     entry_type: str,
@@ -511,7 +492,6 @@ def _apply_transcript_content_fallbacks(
     return content
 
 
-@pure
 def _extract_transcript_parsed_obj(
     context: Mapping[str, object],
     raw_json: str | None,
@@ -537,17 +517,14 @@ def _extract_transcript_parsed_obj(
     return None
 
 
-@pure
 def _coerce_int(value: object) -> int | None:
     return value if isinstance(value, int) else None
 
 
-@pure
 def _coerce_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-@pure
 def _extract_transcript_details_tuple(
     parsed: Mapping[str, object] | None,
     entry_type: str,
@@ -568,7 +545,6 @@ def _extract_transcript_details_tuple(
     )
 
 
-@pure
 def _extract_transcript_row(
     entry: Mapping[str, object],
 ) -> (
@@ -2015,7 +1991,6 @@ class QueryDatabase(Closeable):
             raise QueryError(f"SQL error: {e}") from e
 
 
-@pure
 def _get_table_description(table_name: str, *, is_view: bool = False) -> str:
     """Get description for a table or view by name."""
     descriptions = {
@@ -2145,7 +2120,6 @@ def open_query_database(bundle_path: Path) -> QueryDatabase:
     return db
 
 
-@pure
 def format_as_table(rows: Sequence[Mapping[str, Any]], *, truncate: bool = True) -> str:
     """Format query results as ASCII table.
 
@@ -2190,7 +2164,6 @@ def format_as_table(rows: Sequence[Mapping[str, Any]], *, truncate: bool = True)
     return "\n".join(lines)
 
 
-@pure
 def format_as_json(rows: Sequence[Mapping[str, Any]]) -> str:
     """Format query results as JSON."""
     # Convert to list of plain dicts for JSON serialization

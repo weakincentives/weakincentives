@@ -20,7 +20,6 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from ...dbc import pure
 from ...types.dataclass import SupportsDataclass
 from .slice_mutations import ClearSlice, InitializeSlice
 from .slice_policy import SlicePolicy
@@ -98,12 +97,10 @@ class SliceAccessor[T: SupportsDataclass]:
     # Query Operations
     # ──────────────────────────────────────────────────────────────────────
 
-    @pure
     def all(self) -> tuple[T, ...]:
         """Return the entire slice for the provided type."""
         return self._provider._select_all(self._slice_type)
 
-    @pure
     def latest(self) -> T | None:
         """Return the most recent item in the slice, if any."""
         values = self._provider._select_all(self._slice_type)
@@ -111,7 +108,6 @@ class SliceAccessor[T: SupportsDataclass]:
             return None
         return values[-1]
 
-    @pure
     def where(self, predicate: Callable[[T], bool]) -> tuple[T, ...]:
         """Return items that satisfy the predicate."""
         return tuple(
@@ -246,12 +242,10 @@ class ReadOnlySliceAccessor[T: SupportsDataclass]:
     # Query Operations
     # ──────────────────────────────────────────────────────────────────────
 
-    @pure
     def all(self) -> tuple[T, ...]:
         """Return the entire slice for the provided type."""
         return self._provider._select_all(self._slice_type)
 
-    @pure
     def latest(self) -> T | None:
         """Return the most recent item in the slice, if any."""
         values = self._provider._select_all(self._slice_type)
@@ -259,7 +253,6 @@ class ReadOnlySliceAccessor[T: SupportsDataclass]:
             return None
         return values[-1]
 
-    @pure
     def where(self, predicate: Callable[[T], bool]) -> tuple[T, ...]:
         """Return items that satisfy the predicate."""
         return tuple(

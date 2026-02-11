@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 import pytest
@@ -120,24 +119,6 @@ def test_query_respects_dbc_purity(session_factory: SessionFactory) -> None:
     assert session[ExampleOutput].where(lambda x: x.text.startswith("f")) == (
         ExampleOutput(text="first"),
     )
-
-
-def test_query_where_logs_violate_purity_contract(
-    session_factory: SessionFactory,
-) -> None:
-    session, dispatcher = session_factory()
-
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-
-    logger = logging.getLogger(__name__)
-
-    def predicate(value: ExampleOutput) -> bool:
-        logger.warning("Saw %s", value)
-        return True
-
-    # DbC is always enabled by default
-    with pytest.raises(AssertionError):
-        session[ExampleOutput].where(predicate)
 
 
 def test_seed_single_value(session_factory: SessionFactory) -> None:
