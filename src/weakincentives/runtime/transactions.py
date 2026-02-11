@@ -167,7 +167,7 @@ class CompositeSnapshot:
             raise SnapshotSerializationError(msg) from error
 
     @classmethod
-    def from_json(cls, raw: str) -> CompositeSnapshot:  # noqa: C901, PLR0912, PLR0915
+    def from_json(cls, raw: str) -> CompositeSnapshot:
         """Deserialize a composite snapshot from its JSON representation.
 
         Args:
@@ -189,7 +189,6 @@ class CompositeSnapshot:
 
         payload = cast(Mapping[str, JSONValue], payload_obj)
 
-        # Validate version
         version = payload.get("version")
         if version != COMPOSITE_SNAPSHOT_SCHEMA_VERSION:
             msg = (
@@ -198,113 +197,11 @@ class CompositeSnapshot:
             )
             raise SnapshotRestoreError(msg)
 
-        # Parse snapshot_id
-        snapshot_id_str = payload.get("snapshot_id")
-        if not isinstance(snapshot_id_str, str):  # pragma: no cover - defensive
-            raise SnapshotRestoreError(
-                "Composite snapshot snapshot_id must be a string"
-            )
-        try:
-            snapshot_id = UUID(snapshot_id_str)
-        except ValueError as error:
-            raise SnapshotRestoreError("Invalid snapshot_id") from error
-
-        # Parse created_at
-        created_at_str = payload.get("created_at")
-        if not isinstance(created_at_str, str):  # pragma: no cover - defensive
-            raise SnapshotRestoreError("Composite snapshot created_at must be a string")
-        try:
-            created_at = datetime.fromisoformat(created_at_str)
-        except ValueError as error:
-            raise SnapshotRestoreError("Invalid created_at timestamp") from error
-
-        # Parse session snapshot
-        session_payload = payload.get("session")
-        if not isinstance(session_payload, Mapping):
-            raise SnapshotRestoreError("Session snapshot must be an object")
-        try:
-            session_snapshot = Snapshot.from_json(json.dumps(session_payload))
-        except Exception as error:  # pragma: no cover - defensive
-            raise SnapshotRestoreError("Failed to parse session snapshot") from error
-
-        # Parse resource snapshots
-        resources_payload = payload.get("resources", [])
-        if not isinstance(resources_payload, list):
-            raise SnapshotRestoreError("Resources must be a list")
-
-        resources: dict[type[object], object] = {}
-        for entry in resources_payload:
-            if not isinstance(entry, Mapping):
-                raise SnapshotRestoreError("Resource entry must be an object")
-
-            resource_type_str = entry.get("resource_type")  # ty: ignore[invalid-argument-type]
-            if not isinstance(resource_type_str, str):  # pragma: no cover - defensive
-                raise SnapshotRestoreError("Resource type must be a string")
-
-            try:
-                resource_type = resolve_type_identifier(resource_type_str)
-            except (TypeError, ValueError, ImportError) as error:  # pragma: no cover
-                raise SnapshotRestoreError(
-                    f"Unknown resource type: {resource_type_str}"
-                ) from error
-
-            snapshot_data = entry.get("snapshot")  # ty: ignore[invalid-argument-type]
-            if not isinstance(snapshot_data, Mapping):  # pragma: no cover - defensive
-                raise SnapshotRestoreError("Resource snapshot must be an object")
-
-            # Determine snapshot type from entry field
-            snapshot_type_str = entry.get("snapshot_type")  # ty: ignore[invalid-argument-type]
-            if not isinstance(snapshot_type_str, str):  # pragma: no cover - defensive
-                raise SnapshotRestoreError("Resource entry must include snapshot_type")
-
-            try:
-                snapshot_type = resolve_type_identifier(snapshot_type_str)
-            except (TypeError, ValueError, ImportError) as error:  # pragma: no cover
-                raise SnapshotRestoreError(
-                    f"Unknown snapshot type: {snapshot_type_str}"
-                ) from error
-
-            try:
-                resource_snapshot = parse(snapshot_type, snapshot_data)
-            except Exception as error:  # pragma: no cover - defensive
-                raise SnapshotRestoreError(
-                    f"Failed to parse resource snapshot for {resource_type_str}"
-                ) from error
-
-            resources[resource_type] = resource_snapshot
-
-        # Parse metadata
-        metadata_payload = payload.get("metadata")
-        metadata: SnapshotMetadata | None = None
-        if metadata_payload is not None:  # pragma: no branch - tested separately
-            if not isinstance(metadata_payload, Mapping):
-                raise SnapshotRestoreError("Metadata must be an object")
-
-            metadata_dict = cast(Mapping[str, JSONValue], metadata_payload)
-            tag = metadata_dict.get("tag")
-            tool_call_id = metadata_dict.get("tool_call_id")
-            tool_name = metadata_dict.get("tool_name")
-            phase = metadata_dict.get("phase", "manual")
-
-            if tag is not None and not isinstance(tag, str):  # pragma: no cover
-                raise SnapshotRestoreError("Metadata tag must be a string")
-            if tool_call_id is not None and not isinstance(
-                tool_call_id, str
-            ):  # pragma: no cover
-                raise SnapshotRestoreError("Metadata tool_call_id must be a string")
-            if tool_name is not None and not isinstance(
-                tool_name, str
-            ):  # pragma: no cover
-                raise SnapshotRestoreError("Metadata tool_name must be a string")
-            if phase not in {"pre_tool", "post_tool", "manual"}:
-                raise SnapshotRestoreError("Metadata phase must be valid")
-
-            metadata = SnapshotMetadata(
-                tag=tag,
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                phase=cast(Literal["pre_tool", "post_tool", "manual"], phase),
-            )
+        snapshot_id = _parse_snapshot_id(payload)
+        created_at = _parse_created_at(payload)
+        session_snapshot = _parse_session_snapshot(payload)
+        resources = _parse_resource_snapshots(payload)
+        metadata = _parse_snapshot_metadata(payload)
 
         return cls(
             snapshot_id=snapshot_id,
@@ -313,6 +210,127 @@ class CompositeSnapshot:
             resources=types.MappingProxyType(resources),
             metadata=metadata,
         )
+
+
+def _parse_snapshot_id(payload: Mapping[str, JSONValue]) -> UUID:
+    snapshot_id_str = payload.get("snapshot_id")
+    if not isinstance(snapshot_id_str, str):  # pragma: no cover - defensive
+        raise SnapshotRestoreError("Composite snapshot snapshot_id must be a string")
+    try:
+        return UUID(snapshot_id_str)
+    except ValueError as error:
+        raise SnapshotRestoreError("Invalid snapshot_id") from error
+
+
+def _parse_created_at(payload: Mapping[str, JSONValue]) -> datetime:
+    created_at_str = payload.get("created_at")
+    if not isinstance(created_at_str, str):  # pragma: no cover - defensive
+        raise SnapshotRestoreError("Composite snapshot created_at must be a string")
+    try:
+        return datetime.fromisoformat(created_at_str)
+    except ValueError as error:
+        raise SnapshotRestoreError("Invalid created_at timestamp") from error
+
+
+def _parse_session_snapshot(payload: Mapping[str, JSONValue]) -> Snapshot:
+    session_payload = payload.get("session")
+    if not isinstance(session_payload, Mapping):
+        raise SnapshotRestoreError("Session snapshot must be an object")
+    try:
+        return Snapshot.from_json(json.dumps(session_payload))
+    except Exception as error:  # pragma: no cover - defensive
+        raise SnapshotRestoreError("Failed to parse session snapshot") from error
+
+
+def _parse_resource_snapshots(
+    payload: Mapping[str, JSONValue],
+) -> dict[type[object], object]:
+    resources_payload = payload.get("resources", [])
+    if not isinstance(resources_payload, list):
+        raise SnapshotRestoreError("Resources must be a list")
+
+    resources: dict[type[object], object] = {}
+    for entry in resources_payload:
+        if not isinstance(entry, Mapping):
+            raise SnapshotRestoreError("Resource entry must be an object")
+        resource_type, snapshot = _parse_single_resource(
+            cast(Mapping[str, JSONValue], entry)
+        )
+        resources[resource_type] = snapshot
+    return resources
+
+
+def _parse_single_resource(
+    entry: Mapping[str, JSONValue],
+) -> tuple[type[object], object]:
+    resource_type_str = entry.get("resource_type")
+    if not isinstance(resource_type_str, str):  # pragma: no cover - defensive
+        raise SnapshotRestoreError("Resource type must be a string")
+
+    try:
+        resource_type = resolve_type_identifier(resource_type_str)
+    except (TypeError, ValueError, ImportError) as error:  # pragma: no cover
+        raise SnapshotRestoreError(
+            f"Unknown resource type: {resource_type_str}"
+        ) from error
+
+    snapshot_data = entry.get("snapshot")
+    if not isinstance(snapshot_data, Mapping):  # pragma: no cover - defensive
+        raise SnapshotRestoreError("Resource snapshot must be an object")
+
+    snapshot_type_str = entry.get("snapshot_type")
+    if not isinstance(snapshot_type_str, str):  # pragma: no cover - defensive
+        raise SnapshotRestoreError("Resource entry must include snapshot_type")
+
+    try:
+        snapshot_type = resolve_type_identifier(snapshot_type_str)
+    except (TypeError, ValueError, ImportError) as error:  # pragma: no cover
+        raise SnapshotRestoreError(
+            f"Unknown snapshot type: {snapshot_type_str}"
+        ) from error
+
+    try:
+        resource_snapshot = parse(snapshot_type, snapshot_data)
+    except Exception as error:  # pragma: no cover - defensive
+        raise SnapshotRestoreError(
+            f"Failed to parse resource snapshot for {resource_type_str}"
+        ) from error
+
+    return resource_type, resource_snapshot
+
+
+def _parse_snapshot_metadata(
+    payload: Mapping[str, JSONValue],
+) -> SnapshotMetadata | None:
+    metadata_payload = payload.get("metadata")
+    if metadata_payload is None:
+        return None
+    if not isinstance(metadata_payload, Mapping):
+        raise SnapshotRestoreError("Metadata must be an object")
+
+    metadata_dict = cast(Mapping[str, JSONValue], metadata_payload)
+    tag = metadata_dict.get("tag")
+    tool_call_id = metadata_dict.get("tool_call_id")
+    tool_name = metadata_dict.get("tool_name")
+    phase = metadata_dict.get("phase", "manual")
+
+    if tag is not None and not isinstance(tag, str):  # pragma: no cover
+        raise SnapshotRestoreError("Metadata tag must be a string")
+    if tool_call_id is not None and not isinstance(
+        tool_call_id, str
+    ):  # pragma: no cover
+        raise SnapshotRestoreError("Metadata tool_call_id must be a string")
+    if tool_name is not None and not isinstance(tool_name, str):  # pragma: no cover
+        raise SnapshotRestoreError("Metadata tool_name must be a string")
+    if phase not in {"pre_tool", "post_tool", "manual"}:
+        raise SnapshotRestoreError("Metadata phase must be valid")
+
+    return SnapshotMetadata(
+        tag=tag,
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        phase=cast(Literal["pre_tool", "post_tool", "manual"], phase),
+    )
 
 
 @dataclass(slots=True, frozen=True)

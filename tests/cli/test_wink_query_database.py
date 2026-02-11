@@ -259,6 +259,120 @@ class TestQueryDatabaseWithLogs:
             db.close()
 
 
+def _create_agents_view_bundle(tmp_path: Path) -> Path:
+    """Create a debug bundle zip with main + subagent transcript entries."""
+    import zipfile
+
+    manifest = {
+        "format_version": "1.0.0",
+        "bundle_id": "test-agents",
+        "created_at": "2024-01-01T00:00:00Z",
+        "request": {
+            "request_id": "req-1",
+            "session_id": "sess-1",
+            "status": "success",
+            "started_at": "2024-01-01T00:00:00Z",
+            "ended_at": "2024-01-01T00:00:01Z",
+        },
+        "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
+        "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
+        "files": [],
+        "integrity": {"algorithm": "sha256", "checksums": {}},
+        "build": {"version": "1.0.0", "commit": "abc123"},
+    }
+
+    logs = [
+        {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "level": "DEBUG",
+            "logger": "collector",
+            "event": "transcript.entry",
+            "message": "User",
+            "context": {
+                "prompt_name": "test",
+                "source": "main",
+                "sequence_number": 1,
+                "entry_type": "user_message",
+                "detail": {
+                    "type": "user",
+                    "message": {"role": "user", "content": "Hi"},
+                },
+            },
+        },
+        {
+            "timestamp": "2024-01-01T00:00:01Z",
+            "level": "DEBUG",
+            "logger": "collector",
+            "event": "transcript.entry",
+            "message": "Assistant",
+            "context": {
+                "prompt_name": "test",
+                "source": "main",
+                "sequence_number": 2,
+                "entry_type": "assistant_message",
+                "detail": {
+                    "type": "assistant",
+                    "message": {"role": "assistant", "content": "Hello"},
+                },
+            },
+        },
+        {
+            "timestamp": "2024-01-01T00:00:02Z",
+            "level": "DEBUG",
+            "logger": "collector",
+            "event": "transcript.entry",
+            "message": "Subagent thinking",
+            "context": {
+                "prompt_name": "test",
+                "source": "subagent:001",
+                "sequence_number": 1,
+                "entry_type": "thinking",
+                "detail": {"type": "thinking", "thinking": "Processing..."},
+            },
+        },
+        {
+            "timestamp": "2024-01-01T00:00:03Z",
+            "level": "DEBUG",
+            "logger": "collector",
+            "event": "transcript.entry",
+            "message": "Subagent assistant",
+            "context": {
+                "prompt_name": "test",
+                "source": "subagent:001",
+                "sequence_number": 2,
+                "entry_type": "assistant_message",
+                "detail": {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "Running tool"},
+                            {
+                                "type": "tool_use",
+                                "id": "t1",
+                                "name": "read",
+                                "input": {},
+                            },
+                        ],
+                    },
+                },
+            },
+        },
+    ]
+
+    bundle_path = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(bundle_path, "w") as zf:
+        zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
+        zf.writestr(
+            "debug_bundle/logs/app.jsonl",
+            "\n".join(json.dumps(log) for log in logs),
+        )
+        zf.writestr("debug_bundle/session/after.jsonl", "")
+        zf.writestr("debug_bundle/request/input.json", "{}")
+        zf.writestr("debug_bundle/request/output.json", "{}")
+    return bundle_path
+
+
 class TestTranscriptTable:
     """Tests for transcript table extraction."""
 
@@ -562,121 +676,10 @@ class TestTranscriptTable:
 
     def test_transcript_agents_view(self, tmp_path: Path) -> None:
         """Test transcript_agents view aggregates agent metrics."""
-        import zipfile
-
-        manifest = {
-            "format_version": "1.0.0",
-            "bundle_id": "test-agents",
-            "created_at": "2024-01-01T00:00:00Z",
-            "request": {
-                "request_id": "req-1",
-                "session_id": "sess-1",
-                "status": "success",
-                "started_at": "2024-01-01T00:00:00Z",
-                "ended_at": "2024-01-01T00:00:01Z",
-            },
-            "capture": {"mode": "standard", "trigger": "config", "limits_applied": {}},
-            "prompt": {"ns": "test", "key": "prompt", "adapter": "test"},
-            "files": [],
-            "integrity": {"algorithm": "sha256", "checksums": {}},
-            "build": {"version": "1.0.0", "commit": "abc123"},
-        }
-
-        logs = [
-            # Main agent entries
-            {
-                "timestamp": "2024-01-01T00:00:00Z",
-                "level": "DEBUG",
-                "logger": "collector",
-                "event": "transcript.entry",
-                "message": "User",
-                "context": {
-                    "prompt_name": "test",
-                    "source": "main",
-                    "sequence_number": 1,
-                    "entry_type": "user_message",
-                    "detail": {
-                        "type": "user",
-                        "message": {"role": "user", "content": "Hi"},
-                    },
-                },
-            },
-            {
-                "timestamp": "2024-01-01T00:00:01Z",
-                "level": "DEBUG",
-                "logger": "collector",
-                "event": "transcript.entry",
-                "message": "Assistant",
-                "context": {
-                    "prompt_name": "test",
-                    "source": "main",
-                    "sequence_number": 2,
-                    "entry_type": "assistant_message",
-                    "detail": {
-                        "type": "assistant",
-                        "message": {"role": "assistant", "content": "Hello"},
-                    },
-                },
-            },
-            # Subagent entries
-            {
-                "timestamp": "2024-01-01T00:00:02Z",
-                "level": "DEBUG",
-                "logger": "collector",
-                "event": "transcript.entry",
-                "message": "Subagent thinking",
-                "context": {
-                    "prompt_name": "test",
-                    "source": "subagent:001",
-                    "sequence_number": 1,
-                    "entry_type": "thinking",
-                    "detail": {"type": "thinking", "thinking": "Processing..."},
-                },
-            },
-            {
-                "timestamp": "2024-01-01T00:00:03Z",
-                "level": "DEBUG",
-                "logger": "collector",
-                "event": "transcript.entry",
-                "message": "Subagent assistant",
-                "context": {
-                    "prompt_name": "test",
-                    "source": "subagent:001",
-                    "sequence_number": 2,
-                    "entry_type": "assistant_message",
-                    "detail": {
-                        "type": "assistant",
-                        "message": {
-                            "role": "assistant",
-                            "content": [
-                                {"type": "text", "text": "Running tool"},
-                                {
-                                    "type": "tool_use",
-                                    "id": "t1",
-                                    "name": "read",
-                                    "input": {},
-                                },
-                            ],
-                        },
-                    },
-                },
-            },
-        ]
-
-        bundle_path = tmp_path / "bundle.zip"
-        with zipfile.ZipFile(bundle_path, "w") as zf:
-            zf.writestr("debug_bundle/manifest.json", json.dumps(manifest))
-            zf.writestr(
-                "debug_bundle/logs/app.jsonl",
-                "\n".join(json.dumps(log) for log in logs),
-            )
-            zf.writestr("debug_bundle/session/after.jsonl", "")
-            zf.writestr("debug_bundle/request/input.json", "{}")
-            zf.writestr("debug_bundle/request/output.json", "{}")
+        bundle_path = _create_agents_view_bundle(tmp_path)
 
         db = open_query_database(bundle_path)
         try:
-            # Query the transcript_agents view
             rows = db.execute_query(
                 "SELECT * FROM transcript_agents ORDER BY transcript_source"
             )

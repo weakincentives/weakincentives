@@ -31,6 +31,7 @@ from ..parsers import (
     parse_ty,
 )
 from .architecture import ArchitectureChecker
+from .code_length import CodeLengthChecker
 from .docs import DocsChecker
 
 
@@ -242,6 +243,16 @@ def create_architecture_checker() -> ArchitectureChecker:
     return ArchitectureChecker()
 
 
+def create_code_length_checker() -> CodeLengthChecker:
+    """Create the code length checker.
+
+    Enforces max function/method length (120 lines) and max file
+    length (620 lines).  Known violations in the baseline file are
+    warnings; new violations are errors.
+    """
+    return CodeLengthChecker()
+
+
 def create_docs_checker() -> DocsChecker:
     """Create the documentation checker."""
     return DocsChecker()
@@ -257,6 +268,7 @@ def create_all_checkers() -> list[Checker]:
         create_deptry_checker(),
         create_pip_audit_checker(),
         create_architecture_checker(),
+        create_code_length_checker(),
         create_docs_checker(),
         create_markdown_checker(),
         create_bun_test_checker(),
@@ -276,5 +288,6 @@ __all__ = [
     "create_pip_audit_checker",
     "create_markdown_checker",
     "create_architecture_checker",
+    "create_code_length_checker",
     "create_docs_checker",
 ]

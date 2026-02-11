@@ -837,6 +837,168 @@ def _insert_session_slice(
     slices_by_type[slice_type].append(item)
 
 
+# SQL view definitions extracted for readability.
+_VIEW_DEFINITIONS: tuple[str, ...] = (
+    # Tool execution timeline
+    """
+    CREATE VIEW IF NOT EXISTS tool_timeline AS
+    SELECT
+        rowid,
+        timestamp,
+        tool_name,
+        json_extract(params, '$.command') as command,
+        success,
+        duration_ms,
+        CASE WHEN success = 0 THEN error_code ELSE NULL END as error
+    FROM tool_calls
+    ORDER BY timestamp
+    """,
+    # Native tool calls from transcripts (and legacy log_aggregator events)
+    """
+    CREATE VIEW IF NOT EXISTS native_tool_calls AS
+    SELECT
+        seq as sequence_number,
+        timestamp,
+        'log_aggregator' as source,
+        NULL as tool_name,
+        NULL as tool_use_id,
+        json_extract(context, '$.file') as source_file,
+        json_extract(context, '$.content') as content,
+        json_extract(context, '$.content') as raw_json
+    FROM logs
+    WHERE event = 'log_aggregator.log_line'
+      AND json_extract(context, '$.content') LIKE '%"type":"tool_%'
+    UNION ALL
+    SELECT
+        sequence_number,
+        timestamp,
+        transcript_source as source,
+        tool_name,
+        tool_use_id,
+        NULL as source_file,
+        content,
+        raw_json
+    FROM transcript
+    WHERE tool_name IS NOT NULL AND tool_name != ''
+    """,
+    # Transcript entries derived from TranscriptCollector structured logs
+    """
+    CREATE VIEW IF NOT EXISTS transcript_entries AS
+    SELECT
+        rowid,
+        timestamp,
+        prompt_name,
+        transcript_source,
+        sequence_number,
+        entry_type,
+        role,
+        content,
+        tool_name,
+        tool_use_id,
+        raw_json,
+        parsed
+    FROM transcript
+    """,
+    # Transcript conversation flow view
+    """
+    CREATE VIEW IF NOT EXISTS transcript_flow AS
+    SELECT
+        sequence_number,
+        transcript_source,
+        entry_type,
+        role,
+        CASE
+            WHEN entry_type IN ('user_message', 'assistant_message') THEN
+                CASE
+                    WHEN LENGTH(content) > 100 THEN SUBSTR(content, 1, 97) || '...'
+                    ELSE content
+                END
+            WHEN entry_type = 'thinking' THEN '[THINKING]'
+            WHEN entry_type = 'tool_result' AND tool_name IS NOT NULL THEN
+                '[TOOL RESULT: ' || tool_name || ']'
+            WHEN entry_type = 'tool_result' THEN '[TOOL RESULT]'
+            ELSE '[' || entry_type || ']'
+        END as message_preview,
+        timestamp
+    FROM transcript
+    ORDER BY transcript_source, sequence_number
+    """,
+    # Transcript tool usage analysis view
+    """
+    CREATE VIEW IF NOT EXISTS transcript_tools AS
+    SELECT
+        t1.sequence_number as call_seq,
+        t2.sequence_number as result_seq,
+        t1.transcript_source,
+        t1.tool_name,
+        t1.tool_use_id,
+        t1.content as tool_params,
+        t2.content as tool_result,
+        t1.timestamp as call_time,
+        t2.timestamp as result_time
+    FROM transcript t1
+    LEFT JOIN transcript t2
+        ON t1.tool_use_id = t2.tool_use_id
+        AND t2.entry_type = 'tool_result'
+        AND t1.transcript_source = t2.transcript_source
+    WHERE t1.entry_type IN ('assistant_message', 'tool_use')
+        AND t1.tool_name IS NOT NULL
+        AND t1.tool_name != ''
+    ORDER BY t1.sequence_number
+    """,
+    # Transcript thinking blocks view
+    """
+    CREATE VIEW IF NOT EXISTS transcript_thinking AS
+    SELECT
+        sequence_number,
+        transcript_source,
+        CASE
+            WHEN LENGTH(content) > 200 THEN SUBSTR(content, 1, 197) || '...'
+            ELSE content
+        END as thinking_preview,
+        LENGTH(content) as thinking_length,
+        timestamp
+    FROM transcript
+    WHERE entry_type = 'thinking'
+        AND content IS NOT NULL
+        AND content != ''
+    ORDER BY sequence_number
+    """,
+    # Transcript agents hierarchy and metrics view
+    """
+    CREATE VIEW IF NOT EXISTS transcript_agents AS
+    SELECT
+        transcript_source,
+        CASE
+            WHEN transcript_source LIKE 'subagent:%' THEN
+                SUBSTR(transcript_source, 10)
+            ELSE NULL
+        END as agent_id,
+        MIN(sequence_number) as first_entry,
+        MAX(sequence_number) as last_entry,
+        COUNT(*) as total_entries,
+        COUNT(CASE WHEN entry_type = 'user_message' THEN 1 END) as user_messages,
+        COUNT(CASE WHEN entry_type = 'assistant_message' THEN 1 END) as assistant_messages,
+        COUNT(CASE WHEN entry_type = 'thinking' THEN 1 END) as thinking_blocks,
+        COUNT(DISTINCT CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN tool_name END) as unique_tools,
+        COUNT(CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN 1 END) as total_tool_calls
+    FROM transcript
+    GROUP BY transcript_source
+    ORDER BY MIN(sequence_number)
+    """,
+    # Error summary with truncated traceback
+    """
+    CREATE VIEW IF NOT EXISTS error_summary AS
+    SELECT
+        source,
+        error_type,
+        message,
+        SUBSTR(traceback, 1, 200) as traceback_head
+    FROM errors
+    """,
+)
+
+
 class QueryDatabase(Closeable):
     """Builds and manages SQLite database from a debug bundle.
 
@@ -1749,170 +1911,8 @@ class QueryDatabase(Closeable):
     @staticmethod
     def _build_views(conn: sqlite3.Connection) -> None:
         """Create SQL views for common query patterns."""
-        # Tool execution timeline
-        _ = conn.execute("""
-            CREATE VIEW IF NOT EXISTS tool_timeline AS
-            SELECT
-                rowid,
-                timestamp,
-                tool_name,
-                json_extract(params, '$.command') as command,
-                success,
-                duration_ms,
-                CASE WHEN success = 0 THEN error_code ELSE NULL END as error
-            FROM tool_calls
-            ORDER BY timestamp
-        """)
-
-        # Native tool calls from transcripts (and legacy log_aggregator events)
-        _ = conn.execute("""
-            CREATE VIEW IF NOT EXISTS native_tool_calls AS
-            SELECT
-                seq as sequence_number,
-                timestamp,
-                'log_aggregator' as source,
-                NULL as tool_name,
-                NULL as tool_use_id,
-                json_extract(context, '$.file') as source_file,
-                json_extract(context, '$.content') as content,
-                json_extract(context, '$.content') as raw_json
-            FROM logs
-            WHERE event = 'log_aggregator.log_line'
-              AND json_extract(context, '$.content') LIKE '%"type":"tool_%'
-            UNION ALL
-            SELECT
-                sequence_number,
-                timestamp,
-                transcript_source as source,
-                tool_name,
-                tool_use_id,
-                NULL as source_file,
-                content,
-                raw_json
-            FROM transcript
-            WHERE tool_name IS NOT NULL AND tool_name != ''
-        """)
-
-        # Transcript entries derived from TranscriptCollector structured logs
-        _ = conn.execute("""
-            CREATE VIEW IF NOT EXISTS transcript_entries AS
-            SELECT
-                rowid,
-                timestamp,
-                prompt_name,
-                transcript_source,
-                sequence_number,
-                entry_type,
-                role,
-                content,
-                tool_name,
-                tool_use_id,
-                raw_json,
-                parsed
-            FROM transcript
-        """)
-
-        # Transcript conversation flow view
-        _ = conn.execute("""
-            CREATE VIEW IF NOT EXISTS transcript_flow AS
-            SELECT
-                sequence_number,
-                transcript_source,
-                entry_type,
-                role,
-                CASE
-                    WHEN entry_type IN ('user_message', 'assistant_message') THEN
-                        CASE
-                            WHEN LENGTH(content) > 100 THEN SUBSTR(content, 1, 97) || '...'
-                            ELSE content
-                        END
-                    WHEN entry_type = 'thinking' THEN '[THINKING]'
-                    WHEN entry_type = 'tool_result' AND tool_name IS NOT NULL THEN
-                        '[TOOL RESULT: ' || tool_name || ']'
-                    WHEN entry_type = 'tool_result' THEN '[TOOL RESULT]'
-                    ELSE '[' || entry_type || ']'
-                END as message_preview,
-                timestamp
-            FROM transcript
-            ORDER BY transcript_source, sequence_number
-        """)
-
-        # Transcript tool usage analysis view
-        _ = conn.execute("""
-            CREATE VIEW IF NOT EXISTS transcript_tools AS
-            SELECT
-                t1.sequence_number as call_seq,
-                t2.sequence_number as result_seq,
-                t1.transcript_source,
-                t1.tool_name,
-                t1.tool_use_id,
-                t1.content as tool_params,
-                t2.content as tool_result,
-                t1.timestamp as call_time,
-                t2.timestamp as result_time
-            FROM transcript t1
-            LEFT JOIN transcript t2
-                ON t1.tool_use_id = t2.tool_use_id
-                AND t2.entry_type = 'tool_result'
-                AND t1.transcript_source = t2.transcript_source
-            WHERE t1.entry_type IN ('assistant_message', 'tool_use')
-                AND t1.tool_name IS NOT NULL
-                AND t1.tool_name != ''
-            ORDER BY t1.sequence_number
-        """)
-
-        # Transcript thinking blocks view
-        _ = conn.execute("""
-            CREATE VIEW IF NOT EXISTS transcript_thinking AS
-            SELECT
-                sequence_number,
-                transcript_source,
-                CASE
-                    WHEN LENGTH(content) > 200 THEN SUBSTR(content, 1, 197) || '...'
-                    ELSE content
-                END as thinking_preview,
-                LENGTH(content) as thinking_length,
-                timestamp
-            FROM transcript
-            WHERE entry_type = 'thinking'
-                AND content IS NOT NULL
-                AND content != ''
-            ORDER BY sequence_number
-        """)
-
-        # Transcript agents hierarchy and metrics view
-        _ = conn.execute("""
-            CREATE VIEW IF NOT EXISTS transcript_agents AS
-            SELECT
-                transcript_source,
-                CASE
-                    WHEN transcript_source LIKE 'subagent:%' THEN
-                        SUBSTR(transcript_source, 10)
-                    ELSE NULL
-                END as agent_id,
-                MIN(sequence_number) as first_entry,
-                MAX(sequence_number) as last_entry,
-                COUNT(*) as total_entries,
-                COUNT(CASE WHEN entry_type = 'user_message' THEN 1 END) as user_messages,
-                COUNT(CASE WHEN entry_type = 'assistant_message' THEN 1 END) as assistant_messages,
-                COUNT(CASE WHEN entry_type = 'thinking' THEN 1 END) as thinking_blocks,
-                COUNT(DISTINCT CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN tool_name END) as unique_tools,
-                COUNT(CASE WHEN tool_name IS NOT NULL AND tool_name != '' THEN 1 END) as total_tool_calls
-            FROM transcript
-            GROUP BY transcript_source
-            ORDER BY MIN(sequence_number)
-        """)
-
-        # Error summary with truncated traceback
-        _ = conn.execute("""
-            CREATE VIEW IF NOT EXISTS error_summary AS
-            SELECT
-                source,
-                error_type,
-                message,
-                SUBSTR(traceback, 1, 200) as traceback_head
-            FROM errors
-        """)
+        for sql in _VIEW_DEFINITIONS:
+            _ = conn.execute(sql)
 
     def get_schema(self) -> SchemaOutput:
         """Get schema information for all tables and views."""

@@ -265,6 +265,76 @@ class TestConsoleFormatter:
         assert "\033[36m" in output  # Cyan color code
 
 
+    def test_passed_result_shows_warnings(self) -> None:
+        report = Report(
+            results=(
+                CheckResult(
+                    name="code-length",
+                    status="passed",
+                    duration_ms=50,
+                    diagnostics=(
+                        Diagnostic(
+                            message="File has 700 lines (max 620)",
+                            location=Location(file="src/big.py"),
+                            severity="warning",
+                        ),
+                    ),
+                ),
+            ),
+            total_duration_ms=50,
+        )
+        formatter = ConsoleFormatter(color=False)
+        output = formatter.format(report)
+        assert "700 lines" in output
+        assert "src/big.py" in output
+
+    def test_passed_result_shows_warnings_with_color(self) -> None:
+        report = Report(
+            results=(
+                CheckResult(
+                    name="code-length",
+                    status="passed",
+                    duration_ms=50,
+                    diagnostics=(
+                        Diagnostic(
+                            message="File has 700 lines (max 620)",
+                            location=Location(file="src/big.py"),
+                            severity="warning",
+                        ),
+                    ),
+                ),
+            ),
+            total_duration_ms=50,
+        )
+        formatter = ConsoleFormatter(color=True)
+        output = formatter.format(report)
+        assert "\033[33m" in output  # Yellow color code
+        assert "700 lines" in output
+
+    def test_passed_result_truncates_many_warnings(self) -> None:
+        diagnostics = tuple(
+            Diagnostic(
+                message=f"File has {700 + i} lines",
+                severity="warning",
+            )
+            for i in range(5)
+        )
+        report = Report(
+            results=(
+                CheckResult(
+                    name="code-length",
+                    status="passed",
+                    duration_ms=50,
+                    diagnostics=diagnostics,
+                ),
+            ),
+            total_duration_ms=50,
+        )
+        formatter = ConsoleFormatter(color=False, max_diagnostics=3)
+        output = formatter.format(report)
+        assert "... and 2 more warnings" in output
+
+
 class TestJSONFormatter:
     """Tests for JSONFormatter."""
 
@@ -435,3 +505,72 @@ class TestQuietFormatter:
         formatter = QuietFormatter(color=True)
         output = formatter.format(report)
         assert "\033[36m" in output  # Cyan color code
+
+    def test_warning_diagnostics_shown_for_passed_checks(self) -> None:
+        """Warning diagnostics should be shown in quiet mode for passed checks."""
+        report = Report(
+            results=(
+                CheckResult(
+                    name="code-length",
+                    status="passed",
+                    duration_ms=50,
+                    diagnostics=(
+                        Diagnostic(
+                            message="File has 700 lines (max 620)",
+                            location=Location(file="src/big.py"),
+                            severity="warning",
+                        ),
+                    ),
+                ),
+            ),
+            total_duration_ms=50,
+        )
+        formatter = QuietFormatter(color=False)
+        output = formatter.format(report)
+        assert "700 lines" in output
+
+    def test_warning_diagnostics_with_color(self) -> None:
+        """Warning diagnostics should use yellow color in quiet mode."""
+        report = Report(
+            results=(
+                CheckResult(
+                    name="code-length",
+                    status="passed",
+                    duration_ms=50,
+                    diagnostics=(
+                        Diagnostic(
+                            message="File has 700 lines (max 620)",
+                            location=Location(file="src/big.py"),
+                            severity="warning",
+                        ),
+                    ),
+                ),
+            ),
+            total_duration_ms=50,
+        )
+        formatter = QuietFormatter(color=True)
+        output = formatter.format(report)
+        assert "\033[33m" in output  # Yellow color code
+
+    def test_mixed_severity_diagnostics_in_passed_check(self) -> None:
+        """Only info and warning diagnostics are shown for passed checks."""
+        report = Report(
+            results=(
+                CheckResult(
+                    name="code-length",
+                    status="passed",
+                    duration_ms=50,
+                    diagnostics=(
+                        Diagnostic(message="Info msg", severity="info"),
+                        Diagnostic(message="Warn msg", severity="warning"),
+                        Diagnostic(message="Err msg", severity="error"),
+                    ),
+                ),
+            ),
+            total_duration_ms=50,
+        )
+        formatter = QuietFormatter(color=False)
+        output = formatter.format(report)
+        assert "Info msg" in output
+        assert "Warn msg" in output
+        assert "Err msg" not in output

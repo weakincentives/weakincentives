@@ -132,108 +132,103 @@ def model_check(
         >>> result = model_check(spec, tlc_config={"workers": "auto"})
         >>> assert result.passed
     """
-    # Write spec to temporary location for checking
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
         tla_file, cfg_file = write_spec(spec, tmp_path)
-
-        # Configure TLC
         config = tlc_config or {}
-        workers = config.get("workers", "auto")
-        cleanup = config.get("cleanup", True)
+        cmd = _build_tlc_command(tla_file, cfg_file, config)
+        return _run_tlc(cmd)
 
-        # Check if TLC JAR is available
-        tlc_jar = Path("/usr/local/lib/tla2tools.jar")
-        if not tlc_jar.exists():
-            # Fall back to tlc command (e.g., on macOS with brew install)
-            try:
-                _ = subprocess.run(  # nosec B603 B607
-                    ["tlc", "-h"], capture_output=True, check=False, timeout=5
-                )
-                use_jar = False
-            except FileNotFoundError:
-                raise ModelCheckError(
-                    "TLC not found. Install with: brew install tlaplus (macOS) or download from https://github.com/tlaplus/tlaplus/releases"
-                ) from None
-        else:
-            use_jar = True
 
-        # Build TLC command - use Java directly to avoid wrapper script issues
-        if use_jar:
-            cmd = [
-                "java",
-                "-XX:+UseParallelGC",
-                "-jar",
-                str(tlc_jar),
-                str(tla_file),
-                "-config",
-                str(cfg_file),
-                "-workers",
-                str(workers),
-            ]
-        else:
-            cmd = [
-                "tlc",
-                str(tla_file),
-                "-config",
-                str(cfg_file),
-                "-workers",
-                str(workers),
-            ]
-        if cleanup:
-            cmd.append("-cleanup")
+def _build_tlc_command(
+    tla_file: Path,
+    cfg_file: Path,
+    config: dict[str, Any],
+) -> list[str]:
+    """Build the TLC command line, resolving JAR vs CLI availability."""
+    workers = config.get("workers", "auto")
+    cleanup = config.get("cleanup", True)
 
-        # Run TLC with 3-minute timeout using Popen for reliable timeout enforcement
-        process = subprocess.Popen(  # nosec B603 B607
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
+    tlc_jar = Path("/usr/local/lib/tla2tools.jar")
+    if tlc_jar.exists():
+        cmd = [
+            "java",
+            "-XX:+UseParallelGC",
+            "-jar",
+            str(tlc_jar),
+            str(tla_file),
+            "-config",
+            str(cfg_file),
+            "-workers",
+            str(workers),
+        ]
+    else:
         try:
-            stdout, stderr = process.communicate(timeout=180)
-            returncode = process.returncode
-        except subprocess.TimeoutExpired:
-            # Timeout: kill process and extract partial output
-            process.kill()
-            stdout, stderr = process.communicate()
-            returncode = -1  # Indicate timeout
-
-            # If no violations found before timeout, treat as passed (bounded verification)
-            if "violated" not in stdout.lower():
-                return ModelCheckResult(
-                    passed=True,
-                    states_generated=_extract_state_count(stdout),
-                    stdout=stdout + "\n[Timeout: No violations found in 3 minutes]",
-                    stderr=stderr,
-                    returncode=returncode,
-                )
-            # If violations found, fall through to normal error handling
-
-        # Extract state count and check for violations
-        states = _extract_state_count(stdout)
-
-        # Check for TLC configuration errors (e.g., missing JAR file)
-        if "jarfile" in stderr.lower() or "unable to access" in stderr.lower():
-            msg = (
-                f"TLC configuration error. {stderr.strip()}\n"
-                f"Install TLC: brew install tlaplus (macOS) or download from "
-                f"https://github.com/tlaplus/tlaplus/releases"
+            _ = subprocess.run(  # nosec B603 B607
+                ["tlc", "-h"], capture_output=True, check=False, timeout=5
             )
-            raise ModelCheckError(msg)
+        except FileNotFoundError:
+            msg = (
+                "TLC not found. Install with: brew install tlaplus (macOS) "
+                "or download from https://github.com/tlaplus/tlaplus/releases"
+            )
+            raise ModelCheckError(msg) from None
+        cmd = [
+            "tlc",
+            str(tla_file),
+            "-config",
+            str(cfg_file),
+            "-workers",
+            str(workers),
+        ]
+    if cleanup:
+        cmd.append("-cleanup")
+    return cmd
 
-        passed = returncode == 0 and "violated" not in stdout.lower()
 
-        return ModelCheckResult(
-            passed=passed,
-            states_generated=states,
-            stdout=stdout,
-            stderr=stderr,
-            returncode=returncode,
+def _run_tlc(cmd: list[str]) -> ModelCheckResult:
+    """Execute TLC with a 3-minute timeout and interpret results."""
+    process = subprocess.Popen(  # nosec B603 B607
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        stdout, stderr = process.communicate(timeout=180)
+        returncode = process.returncode
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
+        returncode = -1
+        if "violated" not in stdout.lower():
+            return ModelCheckResult(
+                passed=True,
+                states_generated=_extract_state_count(stdout),
+                stdout=stdout + "\n[Timeout: No violations found in 3 minutes]",
+                stderr=stderr,
+                returncode=returncode,
+            )
+
+    if "jarfile" in stderr.lower() or "unable to access" in stderr.lower():
+        msg = (
+            f"TLC configuration error. {stderr.strip()}\n"
+            f"Install TLC: brew install tlaplus (macOS) or download from "
+            f"https://github.com/tlaplus/tlaplus/releases"
         )
+        raise ModelCheckError(msg)
+
+    passed = returncode == 0 and "violated" not in stdout.lower()
+    return ModelCheckResult(
+        passed=passed,
+        states_generated=_extract_state_count(stdout),
+        stdout=stdout,
+        stderr=stderr,
+        returncode=returncode,
+    )
 
 
 def _extract_state_count(output: str) -> int:

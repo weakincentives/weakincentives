@@ -115,6 +115,19 @@ class ConsoleFormatter:
                     lines.append(f"  \033[36m{diag.message}\033[0m")
                 else:
                     lines.append(f"  {diag.message}")
+
+            # Show warning diagnostics (e.g., code length warnings)
+            warn_diags = [d for d in result.diagnostics if d.severity == "warning"]
+            if warn_diags:
+                shown = warn_diags[: self.max_diagnostics]
+                for diag in shown:
+                    if use_color:
+                        lines.append(f"  \033[33m{diag}\033[0m")
+                    else:
+                        lines.append(f"  {diag}")
+                remaining = len(warn_diags) - len(shown)
+                if remaining > 0:
+                    lines.append(f"  ... and {remaining} more warnings")
         elif result.status == "skipped":
             mark = "\033[33m○\033[0m" if use_color else "○"
             lines.append(f"{mark} {result.name:<20} (skipped)")
@@ -224,15 +237,20 @@ class QuietFormatter:
         lines = []
         use_color = self._use_color()
 
-        # Show info diagnostics even for passed checks (e.g., auto-format messages)
+        # Show info and warning diagnostics for passed checks
         for result in report.results:
             if result.passed:
-                info_diags = [d for d in result.diagnostics if d.severity == "info"]
-                for diag in info_diags:
-                    if use_color:
-                        lines.append(f"\033[36m{diag.message}\033[0m")
-                    else:
-                        lines.append(diag.message)
+                for diag in result.diagnostics:
+                    if diag.severity == "info":
+                        if use_color:
+                            lines.append(f"\033[36m{diag.message}\033[0m")
+                        else:
+                            lines.append(diag.message)
+                    elif diag.severity == "warning":
+                        if use_color:
+                            lines.append(f"\033[33m{diag}\033[0m")
+                        else:
+                            lines.append(str(diag))
 
         if report.passed:
             return "\n".join(lines) if lines else ""

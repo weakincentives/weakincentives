@@ -206,6 +206,22 @@ class TestCompositeSnapshotSerialization:
         ):
             CompositeSnapshot.from_json(json.dumps(payload))
 
+    def test_from_json_no_metadata(self) -> None:
+        """Test deserializing a snapshot with no metadata key."""
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
+        session_snapshot = session.snapshot()
+
+        payload = {
+            "version": "1",
+            "snapshot_id": "12345678-1234-5678-1234-567812345678",
+            "created_at": "2024-01-01T00:00:00+00:00",
+            "session": json.loads(session_snapshot.to_json()),
+            "resources": [],
+        }
+        restored = CompositeSnapshot.from_json(json.dumps(payload))
+        assert restored.metadata is None
+
     def test_from_json_invalid_metadata_not_object(self) -> None:
         """Test that invalid metadata raises SnapshotRestoreError."""
         dispatcher = InProcessDispatcher()
