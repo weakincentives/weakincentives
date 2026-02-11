@@ -197,12 +197,10 @@ class ReviewParams:
 
 
 def _create_workspace_section(
-    adapter_name: str,
     session: Session,
     project_path: str,
 ) -> Section:
-    """Create the workspace section (adapter-agnostic)."""
-    _ = adapter_name  # Same section works with any adapter.
+    """Create the workspace section."""
     return WorkspaceSection(
         session=session,
         mounts=[
@@ -231,7 +229,6 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
         requests: InMemoryMailbox[
             AgentLoopRequest[ReviewRequest], AgentLoopResult[ReviewResponse]
         ],
-        adapter_name: str = ADAPTER_CLAUDE,
         config: AgentLoopConfig | None = None,
         worker_id: str = "code-reviewer",
     ) -> None:
@@ -241,7 +238,6 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
             config=config,
             worker_id=worker_id,
         )
-        self._adapter_name = adapter_name
         self._last_session: Session | None = None
 
     @property
@@ -265,9 +261,7 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
         )
         self._last_session = session
 
-        workspace = _create_workspace_section(
-            self._adapter_name, session, request.project_path
-        )
+        workspace = _create_workspace_section(session, request.project_path)
 
         template = PromptTemplate[ReviewResponse](
             ns="code-review",
@@ -414,7 +408,6 @@ def run_review(
     loop = CodeReviewLoop(
         adapter=adapter,
         requests=requests,
-        adapter_name=adapter_name,
         config=config,
     )
 
