@@ -52,7 +52,7 @@ def mailbox(
     """Fresh RedisMailbox for each test."""
     from weakincentives.contrib.mailbox import RedisMailbox
 
-    mb: RedisMailbox[Any] = RedisMailbox(
+    mb = RedisMailbox[Any](
         name=f"test-{uuid4().hex[:8]}",
         client=redis_client,
         reaper_interval=0.1,  # Fast reaper for testing

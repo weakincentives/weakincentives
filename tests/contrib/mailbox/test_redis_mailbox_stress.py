@@ -48,7 +48,7 @@ class TestConcurrentStress:
         """
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mailbox: RedisMailbox[Any] = RedisMailbox(
+        mailbox = RedisMailbox[Any](
             name=f"stress-{uuid4().hex[:8]}",
             client=redis_client,
             reaper_interval=0.1,
@@ -142,7 +142,7 @@ class TestConcurrentStress:
         """
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mailbox: RedisMailbox[Any] = RedisMailbox(
+        mailbox = RedisMailbox[Any](
             name=f"reaper-stress-{uuid4().hex[:8]}",
             client=redis_client,
             reaper_interval=0.1,
@@ -191,7 +191,7 @@ class TestConcurrentStress:
         """
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mailbox: RedisMailbox[Any] = RedisMailbox(
+        mailbox = RedisMailbox[Any](
             name=f"ack-race-{uuid4().hex[:8]}",
             client=redis_client,
             reaper_interval=0.05,

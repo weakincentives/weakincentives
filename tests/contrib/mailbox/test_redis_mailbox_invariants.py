@@ -113,7 +113,7 @@ class TestReceiptHandleFreshness:
         """Handles are unique across N deliveries of the same message."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mailbox: RedisMailbox[Any] = RedisMailbox(
+        mailbox = RedisMailbox[Any](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             reaper_interval=0.05,
@@ -234,7 +234,7 @@ class TestNoMessageLoss:
         """Every sent message is acked or remains in queue."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mailbox: RedisMailbox[Any] = RedisMailbox(
+        mailbox = RedisMailbox[Any](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             reaper_interval=0.1,
@@ -269,13 +269,13 @@ class TestNoMessageLoss:
         name = f"test-{uuid4().hex[:8]}"
 
         # First mailbox instance sends messages
-        mb1: RedisMailbox[Any] = RedisMailbox(name=name, client=redis_client)
+        mb1 = RedisMailbox[Any](name=name, client=redis_client)
         for i in range(10):
             mb1.send(f"msg-{i}")
         mb1.close()
 
         # Second instance sees all messages
-        mb2: RedisMailbox[Any] = RedisMailbox(name=name, client=redis_client)
+        mb2 = RedisMailbox[Any](name=name, client=redis_client)
         try:
             assert mb2.approximate_count() == 10
         finally:
@@ -435,7 +435,7 @@ class TestEventualRequeue:
         """All expired messages eventually return to pending."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mailbox: RedisMailbox[Any] = RedisMailbox(
+        mailbox = RedisMailbox[Any](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             reaper_interval=0.1,  # Fast reaper for testing
@@ -504,7 +504,7 @@ class TestDecodeResponsesCompatibility:
         except Exception:
             pytest.skip("Redis not available")
 
-        mailbox: RedisMailbox[str] = RedisMailbox(
+        mailbox = RedisMailbox[str](
             name=f"test-decode-responses-{uuid4().hex[:8]}",
             client=str_client,  # type: ignore[arg-type]
             reaper_interval=0.1,
@@ -546,10 +546,9 @@ class TestDecodeResponsesCompatibility:
         except Exception:
             pytest.skip("Redis not available")
 
-        mailbox: RedisMailbox[_TestEvent] = RedisMailbox(
+        mailbox = RedisMailbox[_TestEvent, None](
             name=f"test-decode-dataclass-{uuid4().hex[:8]}",
             client=str_client,  # type: ignore[arg-type]
-            body_type=_TestEvent,
             reaper_interval=0.1,
         )
 
