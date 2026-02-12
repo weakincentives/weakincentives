@@ -24,7 +24,10 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
+
+if TYPE_CHECKING:
+    from .isolation import IsolationConfig
 
 from ...skills import (
     MAX_SKILL_TOTAL_BYTES,
@@ -177,7 +180,7 @@ class EphemeralHome:
 
     def __init__(
         self,
-        isolation: Any,  # noqa: ANN401
+        isolation: IsolationConfig,
         *,
         workspace_path: str | None = None,
         temp_dir_prefix: str = "claude-agent-",
@@ -543,10 +546,12 @@ class EphemeralHome:
 
     def _apply_explicit_api_key_env(self, env: dict[str, str]) -> None:
         """Apply environment for explicit API key mode (Bedrock disabled)."""
+        api_key = self._isolation.api_key
+        assert api_key is not None  # Caller checks api_key is truthy
         env["CLAUDE_CODE_USE_BEDROCK"] = "0"
         env["CLAUDE_USE_BEDROCK"] = "0"
         env["DISABLE_AUTOUPDATER"] = "1"
-        env["ANTHROPIC_API_KEY"] = self._isolation.api_key
+        env["ANTHROPIC_API_KEY"] = api_key
         _logger.debug(
             "isolation.get_env.explicit_api_key",
             extra={"auth_mode": "explicit_api_key", "bedrock_disabled": True},

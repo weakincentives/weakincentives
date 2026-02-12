@@ -644,7 +644,7 @@ class TestExtractTranscript:
 class TestHelperFunctions:
     """Tests for helper functions."""
 
-    def testcompute_checksum(self) -> None:
+    def test_compute_checksum(self) -> None:
         """Test SHA-256 checksum computation."""
         content = b"test content"
         checksum = compute_checksum(content)
@@ -652,7 +652,7 @@ class TestHelperFunctions:
         # Verify deterministic
         assert compute_checksum(content) == checksum
 
-    def testgenerate_readme(self) -> None:
+    def test_generate_readme(self) -> None:
         """Test README generation."""
         manifest = BundleManifest(
             bundle_id="test-123",
