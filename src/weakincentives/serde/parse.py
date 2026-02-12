@@ -556,23 +556,48 @@ def _is_type_checking_guard(test: object) -> bool:
 def _find_import_in_block(
     body: Sequence[object], name: str, module_name: str
 ) -> object | None:
-    """Search a TYPE_CHECKING block for an import of *name*."""
+    """Search a TYPE_CHECKING block for an import of *name*.
+
+    Handles both ``from foo import Bar`` (module is set) and bare relative
+    imports like ``from . import foo`` (module is None, level > 0).
+    """
     import ast
-    import importlib
 
     for stmt in body:
-        if not isinstance(stmt, ast.ImportFrom) or not stmt.module:
+        if not isinstance(stmt, ast.ImportFrom):
             continue
         for alias in stmt.names:
             if (alias.asname or alias.name) != name:
                 continue
-            target = _resolve_import_module(stmt.module, stmt.level, module_name)
-            try:
-                mod = importlib.import_module(target)
-                return getattr(mod, alias.name, None)
-            except (ImportError, AttributeError):  # pragma: no cover - defensive
-                return None
+            return _import_from_stmt(stmt, alias, module_name)
     return None
+
+
+def _import_from_stmt(stmt: object, alias: object, module_name: str) -> object | None:
+    """Resolve a single import alias from an ``ast.ImportFrom`` node."""
+    import ast
+    import importlib
+
+    if not isinstance(stmt, ast.ImportFrom) or not isinstance(alias, ast.alias):
+        return None  # pragma: no cover - defensive
+
+    if stmt.module is not None:
+        target = _resolve_import_module(stmt.module, stmt.level, module_name)
+        try:
+            mod = importlib.import_module(target)
+            return getattr(mod, alias.name, None)
+        except (ImportError, AttributeError):  # pragma: no cover - defensive
+            return None
+
+    # Bare relative import: ``from . import foo`` — resolve the package
+    # and import the sub-module directly.
+    if stmt.level > 0:
+        target = _resolve_import_module(alias.name, stmt.level, module_name)
+        try:
+            return importlib.import_module(target)
+        except ImportError:  # pragma: no cover - defensive
+            return None
+    return None  # pragma: no cover - defensive
 
 
 def _resolve_import_module(module: str, level: int, current_module: str) -> str:

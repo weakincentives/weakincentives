@@ -254,6 +254,32 @@ def test_dump_computed_none_excluded() -> None:
     assert "maybe" not in payload
 
 
+def test_dump_computed_respects_by_alias() -> None:
+    """Computed fields must honour the caller's by_alias setting."""
+
+    @dataclass
+    class Inner:
+        value: int = field(metadata={"alias": "v"})
+
+    @dataclass
+    class Outer:
+        __computed__ = ("nested",)
+
+        x: int
+
+        @property
+        def nested(self) -> Inner:
+            return Inner(value=self.x)
+
+    obj = Outer(x=42)
+
+    aliased = dump(obj, by_alias=True, computed=True)
+    assert aliased["nested"] == {"v": 42}
+
+    plain = dump(obj, by_alias=False, computed=True)
+    assert plain["nested"] == {"value": 42}
+
+
 def test_parse_generic_alias_resolves_typevar() -> None:
     data = {"payload": {"message": "hello", "priority": 5}, "metadata": "test"}
 
@@ -419,6 +445,34 @@ def test_find_import_in_block_skips_non_import() -> None:
     # A block containing a pass statement (not an import)
     tree = ast.parse("pass")
     result = _find_import_in_block(tree.body, "SomeType", "test.module")
+    assert result is None
+
+
+def test_find_import_in_block_bare_relative() -> None:
+    """Bare relative imports like ``from . import _utils`` resolve correctly."""
+    import ast
+
+    from weakincentives.serde.parse import _find_import_in_block
+
+    # ``from . import _utils`` inside weakincentives.serde.parse
+    source = "from . import _utils"
+    tree = ast.parse(source)
+    result = _find_import_in_block(tree.body, "_utils", "weakincentives.serde.parse")
+    # Should resolve to the weakincentives.serde._utils module
+    import weakincentives.serde._utils as expected_mod
+
+    assert result is expected_mod
+
+
+def test_find_import_in_block_bare_relative_no_match() -> None:
+    """Bare relative import that doesn't match the target name returns None."""
+    import ast
+
+    from weakincentives.serde.parse import _find_import_in_block
+
+    source = "from . import other"
+    tree = ast.parse(source)
+    result = _find_import_in_block(tree.body, "serde", "weakincentives.serde.parse")
     assert result is None
 
 

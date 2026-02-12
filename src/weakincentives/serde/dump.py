@@ -154,7 +154,7 @@ def dump(
     dataclass_obj = cast(SupportsDataclass, obj)
     _serialize_fields(dataclass_obj, result, by_alias, exclude_none)
     if computed and hasattr(obj.__class__, "__computed__"):
-        _serialize_computed_fields(dataclass_obj, result, exclude_none)
+        _serialize_computed_fields(dataclass_obj, result, by_alias, exclude_none)
 
     return result
 
@@ -179,12 +179,13 @@ def _serialize_fields(
 def _serialize_computed_fields(
     obj: SupportsDataclass,
     result: dict[str, JSONValue],
+    by_alias: bool,
     exclude_none: bool,
 ) -> None:
     computed_fields = cast(Sequence[str], getattr(obj.__class__, "__computed__", ()))
     for name in computed_fields:
         serialized = _serialize(
-            getattr(obj, name), by_alias=True, exclude_none=exclude_none
+            getattr(obj, name), by_alias=by_alias, exclude_none=exclude_none
         )
         if serialized is MISSING_SENTINEL:
             continue
