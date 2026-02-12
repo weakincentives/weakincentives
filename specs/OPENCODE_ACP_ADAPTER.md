@@ -254,7 +254,9 @@ At `src/weakincentives/adapters/opencode_acp/_events.py`:
 **ToolCallStart `status` values:** `"pending"` | `"in_progress"` | `"completed"` | `"failed"`
 
 **ToolCallStart `title` field:** Contains the tool name (e.g. `"bash"`,
-`"edit_file"`). Note: the field is `title`, not `name`.
+`"edit_file"`). Note: the field is `title`, not `name`. For MCP tools, OpenCode
+prefixes the tool name with the server name: `"{server_name}_{tool_name}"`
+(e.g. `"wink-tools_get_secret_number"`).
 
 **Deduplication:** Skip `ToolInvoked` for bridged WINK tools using explicit MCP
 server metadata when available; fall back to the `mcp__wink__` prefix if needed.
@@ -1135,10 +1137,14 @@ from acp.schema import HttpMcpServer
 HttpMcpServer(
     url="http://127.0.0.1:{port}/mcp",
     name="wink-tools",
+    headers=[],
+    type="http",
 )
 ```
 
-Fields: `url` (str, required), `name` (str | None).
+Fields: `url` (str, required), `name` (str, required), `headers`
+(list[HttpHeader], required — pass `[]` when no auth needed), `type`
+(Literal["http"], required).
 
 OpenCode also supports `McpServerStdio` and `SseMcpServer` per its
 `McpCapabilities`, but `HttpMcpServer` is used here because the MCP server
