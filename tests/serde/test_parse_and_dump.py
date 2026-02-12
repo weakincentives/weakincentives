@@ -18,7 +18,7 @@ import importlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -35,21 +35,16 @@ from tests.serde._fixtures import (
     _InnerPayload,
     _NestedGenericWrapper,
     _OuterGeneric,
-    camel,
     user_payload,
 )
 from weakincentives.serde import clone, dump, parse, schema
 from weakincentives.serde._utils import (
-    _SLOTTED_EXTRAS,
-    _get_or_create_extras_descriptor,
     _merge_annotated_meta,
     _ordered_values,
     _ParseConfig,
-    _set_extras,
 )
 from weakincentives.serde.parse import (
     _bool_from_str,
-    _build_lowered_key_map,
     _coerce_to_type,
 )
 
@@ -69,74 +64,9 @@ def test_module_exports_align_with_public_api() -> None:
     assert schema is module_schema
 
 
-def test_build_lowered_key_map_skips_non_string_keys() -> None:
-    """Test branch 503->502: non-string keys are skipped in _build_lowered_key_map."""
-    data: Mapping[Any, Any] = {
-        "ValidKey": "value1",
-        "AnotherKey": "value2",
-        123: "non-string-key-value",
-        ("tuple", "key"): "another-non-string",
-    }
-
-    result = _build_lowered_key_map(data)
-
-    assert "validkey" in result
-    assert "anotherkey" in result
-    assert result["validkey"] == "ValidKey"
-    assert result["anotherkey"] == "AnotherKey"
-    assert len(result) == 2
-
-
-def test_get_or_create_extras_descriptor_caches_result() -> None:
-    """Test line 70: when descriptor exists in cache, return it directly."""
-
-    @dataclass(slots=True, frozen=True)
-    class CachedSlottedData:
-        value: str
-
-    _SLOTTED_EXTRAS.pop(CachedSlottedData, None)
-
-    descriptor1 = _get_or_create_extras_descriptor(CachedSlottedData)
-    assert CachedSlottedData in _SLOTTED_EXTRAS
-
-    descriptor2 = _get_or_create_extras_descriptor(CachedSlottedData)
-    assert descriptor1 is descriptor2
-
-
-def test_set_extras_reuses_descriptor() -> None:
-    """Test that _set_extras reuses cached descriptor for slotted classes."""
-
-    @dataclass(slots=True, frozen=True)
-    class SlottedData:
-        value: str
-
-    _SLOTTED_EXTRAS.pop(SlottedData, None)
-
-    instance1 = SlottedData(value="first")
-    _set_extras(instance1, {"key1": "value1"})
-
-    assert SlottedData in _SLOTTED_EXTRAS
-    descriptor1 = _SLOTTED_EXTRAS[SlottedData]
-
-    instance2 = SlottedData(value="second")
-    _set_extras(instance2, {"key2": "value2"})
-
-    descriptor2 = _SLOTTED_EXTRAS[SlottedData]
-    assert descriptor1 is descriptor2
-
-    assert instance1.__extras__ == {"key1": "value1"}  # type: ignore[attr-defined]
-    assert instance2.__extras__ == {"key2": "value2"}  # type: ignore[attr-defined]
-
-
-def test_parse_handles_coercion_aliases_and_normalization() -> None:
+def test_parse_handles_coercion_and_normalization() -> None:
     payload = user_payload()
-    user = parse(
-        User,
-        payload,
-        aliases={"user_id": "USER"},
-        alias_generator=camel,
-        case_insensitive=True,
-    )
+    user = parse(User, payload)
 
     assert user.user_id == USER_UUID
     assert user.name == "Ada Lovelace"
@@ -179,15 +109,9 @@ def test_parse_optional_blank_strings_become_none() -> None:
         price="",
         favorite="",
         avatar=" ",
-        HOME=None,
+        home=None,
     )
-    user = parse(
-        User,
-        payload,
-        aliases={"user_id": "USER"},
-        alias_generator=camel,
-        case_insensitive=True,
-    )
+    user = parse(User, payload)
     assert user.birthday is None
     assert user.wakeup is None
     assert user.price is None
@@ -197,26 +121,14 @@ def test_parse_optional_blank_strings_become_none() -> None:
 
 
 def test_parse_nested_dataclass_error_paths() -> None:
-    bad_zip = user_payload(HOME={"street": "Main", "city": "Town", "zip": "bad"})
+    bad_zip = user_payload(home={"street": "Main", "city": "Town", "zip": "bad"})
     with pytest.raises(ValueError) as exc:
-        parse(
-            User,
-            bad_zip,
-            aliases={"user_id": "USER"},
-            alias_generator=camel,
-            case_insensitive=True,
-        )
+        parse(User, bad_zip)
     assert "home.zip: does not match pattern" in str(exc.value)
 
-    missing_field = user_payload(HOME={"city": "Town", "zip": "12345"})
+    missing_field = user_payload(home={"city": "Town", "zip": "12345"})
     with pytest.raises(ValueError) as exc2:
-        parse(
-            User,
-            missing_field,
-            aliases={"user_id": "USER"},
-            alias_generator=camel,
-            case_insensitive=True,
-        )
+        parse(User, missing_field)
     assert str(exc2.value) == "home: Missing required field: 'street'"
 
 
@@ -238,15 +150,6 @@ def test_parse_invalid_extra_policy_value() -> None:
         parse(User, {}, extra="boom")  # type: ignore[arg-type]
 
 
-def test_parse_case_insensitive_lookup() -> None:
-    @dataclass
-    class CaseModel:
-        token: str
-
-    parsed_model = parse(CaseModel, {"TOKEN": "value"}, case_insensitive=True)
-    assert parsed_model.token == "value"
-
-
 def test_parse_skips_non_init_fields() -> None:
     instance = parse(WithInitFalse, {"name": "Ada"})
     assert instance.computed == "constant"
@@ -254,39 +157,12 @@ def test_parse_skips_non_init_fields() -> None:
 
 def test_parse_extra_policies() -> None:
     payload = user_payload(nickname="Ada")
-    allowed = parse(
-        User,
-        payload,
-        aliases={"user_id": "USER"},
-        alias_generator=camel,
-        case_insensitive=True,
-        extra="allow",
-    )
-    assert allowed.nickname == "Ada"
-
-    ignored = parse(
-        User,
-        user_payload(nickname="Ada"),
-        aliases={"user_id": "USER"},
-        alias_generator=camel,
-        case_insensitive=True,
-        extra="ignore",
-    )
+    ignored = parse(User, payload, extra="ignore")
     assert not hasattr(ignored, "nickname")
 
     with pytest.raises(ValueError) as exc:
-        parse(
-            User,
-            user_payload(nickname="Ada"),
-            aliases={"user_id": "USER"},
-            alias_generator=camel,
-            case_insensitive=True,
-            extra="forbid",
-        )
+        parse(User, user_payload(nickname="Ada"), extra="forbid")
     assert str(exc.value) == "Extra keys not permitted: ['nickname']"
-
-    slotted = parse(Slotted, {"name": "Ada", "nickname": "Ace"}, extra="allow")
-    assert getattr(slotted, "__extras__", None) == {"nickname": "Ace"}
 
 
 def test_parse_accepts_nested_dataclass_instance() -> None:
@@ -315,27 +191,15 @@ def test_parse_rejects_none_for_non_optional() -> None:
     assert "name: value cannot be None" in str(exc.value)
 
 
-def test_clone_preserves_extras_and_revalidates() -> None:
-    payload = user_payload(nickname="Ada")
-    user = parse(
-        User,
-        payload,
-        aliases={"user_id": "USER"},
-        alias_generator=camel,
-        case_insensitive=True,
-        extra="allow",
-    )
+def test_clone_and_revalidates() -> None:
+    payload = user_payload()
+    user = parse(User, payload)
     updated = clone(user, age=40)
     assert updated.age == 40
-    assert updated.nickname == "Ada"
 
-    slotted = parse(Slotted, {"name": "Ada", "nickname": "Ace"}, extra="allow")
+    slotted = parse(Slotted, {"name": "Ada"})
     cloned_slotted = clone(slotted)
-    assert getattr(cloned_slotted, "__extras__", None) == {"nickname": "Ace"}
-
-    slotted_no_extras = parse(Slotted, {"name": "Bob"})
-    cloned_no_extras = clone(slotted_no_extras)
-    assert cloned_no_extras.name == "Bob"
+    assert cloned_slotted.name == "Ada"
 
     with pytest.raises(ValueError):
         clone(user, age=10)
@@ -345,22 +209,14 @@ def test_clone_preserves_extras_and_revalidates() -> None:
 
 
 def test_dump_serializes_with_aliases_and_computed() -> None:
-    user = parse(
-        User,
-        user_payload(),
-        aliases={"user_id": "USER"},
-        alias_generator=camel,
-        case_insensitive=True,
-    )
-    payload = dump(
-        user, by_alias=True, computed=True, exclude_none=True, alias_generator=camel
-    )
+    user = parse(User, user_payload())
+    payload = dump(user, by_alias=True, computed=True, exclude_none=True)
     assert payload["id"] == str(USER_UUID)
     assert payload["name"] == "Ada Lovelace"
     assert payload["email"] == "ada@example.com"
     assert payload["age"] == 39
     assert payload["favorite"] == "green"
-    assert payload["createdAt"] == "2024-01-01T10:00:00"
+    assert payload["created_at"] == "2024-01-01T10:00:00"
     assert payload["birthday"] == "1985-12-10"
     assert payload["wakeup"] == "07:30:00"
     assert payload["price"] == "99.95"
@@ -373,7 +229,7 @@ def test_dump_serializes_with_aliases_and_computed() -> None:
     assert payload["tags"] == ["prolific"]
     assert payload["points"] == [1, 2]
     assert payload["attributes"] == {"level": 10, "99": "bonus"}
-    assert payload["emailDomain"] == "example.com"
+    assert payload["email_domain"] == "example.com"
 
     plain = dump(user, by_alias=False, exclude_none=True)
     assert "user_id" in plain
@@ -394,10 +250,34 @@ def test_dump_computed_none_excluded() -> None:
         def maybe(self) -> None:
             return None
 
-    payload = dump(
-        ComputedNone(1), computed=True, exclude_none=True, alias_generator=camel
-    )
+    payload = dump(ComputedNone(1), computed=True, exclude_none=True)
     assert "maybe" not in payload
+
+
+def test_dump_computed_respects_by_alias() -> None:
+    """Computed fields must honour the caller's by_alias setting."""
+
+    @dataclass
+    class Inner:
+        value: int = field(metadata={"alias": "v"})
+
+    @dataclass
+    class Outer:
+        __computed__ = ("nested",)
+
+        x: int
+
+        @property
+        def nested(self) -> Inner:
+            return Inner(value=self.x)
+
+    obj = Outer(x=42)
+
+    aliased = dump(obj, by_alias=True, computed=True)
+    assert aliased["nested"] == {"v": 42}
+
+    plain = dump(obj, by_alias=False, computed=True)
+    assert plain["nested"] == {"value": 42}
 
 
 def test_parse_generic_alias_resolves_typevar() -> None:
@@ -499,6 +379,120 @@ def test_get_field_types_with_generic_class() -> None:
     assert result["payload"] in {object, GenericClass.__type_params__[0]}
 
 
+def test_get_field_types_with_type_checking_imports() -> None:
+    """Resolves forward references from TYPE_CHECKING imports."""
+    # AgentLoopConfig has BundleConfig under TYPE_CHECKING
+    from weakincentives.runtime.agent_loop_types import AgentLoopConfig
+    from weakincentives.serde.parse import _get_field_types
+
+    result = _get_field_types(AgentLoopConfig)
+    assert "debug_bundle" in result
+
+
+def test_resolve_type_checking_imports_relative() -> None:
+    """Resolves a relative TYPE_CHECKING import."""
+    from weakincentives.runtime.agent_loop_types import AgentLoopConfig
+    from weakincentives.serde.parse import _resolve_type_checking_imports
+
+    resolved = _resolve_type_checking_imports(AgentLoopConfig, "BundleConfig")
+    assert resolved is not None
+    assert resolved.__name__ == "BundleConfig"  # type: ignore[union-attr]
+
+
+def test_resolve_type_checking_imports_not_found() -> None:
+    """Returns None for a name that doesn't exist in TYPE_CHECKING."""
+    from weakincentives.runtime.agent_loop_types import AgentLoopConfig
+    from weakincentives.serde.parse import _resolve_type_checking_imports
+
+    resolved = _resolve_type_checking_imports(AgentLoopConfig, "NoSuchType")
+    assert resolved is None
+
+
+def test_is_type_checking_guard_attribute() -> None:
+    """Handles typing.TYPE_CHECKING as an Attribute node."""
+    import ast
+
+    from weakincentives.serde.parse import _is_type_checking_guard
+
+    # typing.TYPE_CHECKING
+    node = ast.parse("typing.TYPE_CHECKING").body[0]
+    assert isinstance(node, ast.Expr)
+    assert _is_type_checking_guard(node.value) is True
+
+    # something_else.TYPE_CHECKING
+    node2 = ast.parse("x.TYPE_CHECKING").body[0]
+    assert isinstance(node2, ast.Expr)
+    assert _is_type_checking_guard(node2.value) is True
+
+
+def test_is_type_checking_guard_non_match() -> None:
+    """Returns False for non-TYPE_CHECKING guards."""
+    import ast
+
+    from weakincentives.serde.parse import _is_type_checking_guard
+
+    node = ast.parse("42").body[0]
+    assert isinstance(node, ast.Expr)
+    assert _is_type_checking_guard(node.value) is False
+
+
+def test_find_import_in_block_skips_non_import() -> None:
+    """Skips non-ImportFrom statements in TYPE_CHECKING blocks."""
+    import ast
+
+    from weakincentives.serde.parse import _find_import_in_block
+
+    # A block containing a pass statement (not an import)
+    tree = ast.parse("pass")
+    result = _find_import_in_block(tree.body, "SomeType", "test.module")
+    assert result is None
+
+
+def test_find_import_in_block_bare_relative() -> None:
+    """Bare relative imports like ``from . import _utils`` resolve correctly."""
+    import ast
+
+    from weakincentives.serde.parse import _find_import_in_block
+
+    # ``from . import _utils`` inside weakincentives.serde.parse
+    source = "from . import _utils"
+    tree = ast.parse(source)
+    result = _find_import_in_block(tree.body, "_utils", "weakincentives.serde.parse")
+    # Should resolve to the weakincentives.serde._utils module
+    import weakincentives.serde._utils as expected_mod
+
+    assert result is expected_mod
+
+
+def test_find_import_in_block_bare_relative_no_match() -> None:
+    """Bare relative import that doesn't match the target name returns None."""
+    import ast
+
+    from weakincentives.serde.parse import _find_import_in_block
+
+    source = "from . import other"
+    tree = ast.parse(source)
+    result = _find_import_in_block(tree.body, "serde", "weakincentives.serde.parse")
+    assert result is None
+
+
+def test_resolve_import_module_absolute() -> None:
+    """Absolute imports return the module path unchanged."""
+    from weakincentives.serde.parse import _resolve_import_module
+
+    assert _resolve_import_module("foo.bar", 0, "any.module") == "foo.bar"
+
+
+def test_resolve_import_module_relative() -> None:
+    """Relative imports are resolved against the current module."""
+    from weakincentives.serde.parse import _resolve_import_module
+
+    result = _resolve_import_module(
+        "debug.bundle", 2, "weakincentives.runtime.agent_loop_types"
+    )
+    assert result == "weakincentives.debug.bundle"
+
+
 def test_build_typevar_map_unresolved_typevar() -> None:
     from typing import TypeVar
 
@@ -548,15 +542,7 @@ def test_parse_nested_dataclass_with_extra_forbid() -> None:
     assert restored.nested.message == "test"
 
 
-def test_internal_helpers_and_extras_descriptor() -> None:
-    slotted = parse(Slotted, {"name": "Ada", "nickname": "Ace"}, extra="allow")
-    assert getattr(Slotted, "__extras__", None) is None
-    assert getattr(slotted, "__extras__", None) == {"nickname": "Ace"}
-
-    descriptor = _SLOTTED_EXTRAS[Slotted]
-    descriptor.__set__(slotted, None)
-    assert getattr(slotted, "__extras__", None) is None
-
+def test_internal_helpers() -> None:
     unordered = {"a", 1}
     assert _ordered_values(unordered) == sorted(unordered, key=repr)
     assert _ordered_values(["x", "y"]) == ["x", "y"]
@@ -637,9 +623,6 @@ def test_object_type_and_union_handling() -> None:
     config = _ParseConfig(
         extra="ignore",
         coerce=True,
-        case_insensitive=False,
-        alias_generator=None,
-        aliases=None,
     )
 
     with pytest.raises(ValueError) as fail_exc:
@@ -662,9 +645,6 @@ def test_union_without_matching_type_reports_error(
     config = _ParseConfig(
         extra="ignore",
         coerce=True,
-        case_insensitive=False,
-        alias_generator=None,
-        aliases=None,
     )
 
     original_get_args = parse_module.get_args
@@ -736,36 +716,6 @@ def test_bool_coercion_and_errors() -> None:
         parse(BoolModel, {"flag": "true"}, coerce=False)
 
 
-def test_set_extras_creates_new_descriptor_when_none_exists() -> None:
-    @dataclass(slots=True)
-    class NewSlotted:
-        name: str
-
-    _SLOTTED_EXTRAS.pop(NewSlotted, None)
-
-    instance = parse(NewSlotted, {"name": "Test", "extra": "value"}, extra="allow")
-    assert getattr(instance, "__extras__", None) == {"extra": "value"}
-    assert NewSlotted in _SLOTTED_EXTRAS
-
-
-def test_set_extras_reuses_existing_descriptor() -> None:
-    """Test branch 75->79: descriptor already exists for the class."""
-
-    @dataclass(slots=True)
-    class ReusedSlotted:
-        name: str
-
-    _SLOTTED_EXTRAS.pop(ReusedSlotted, None)
-
-    first = parse(ReusedSlotted, {"name": "First", "extra1": "value1"}, extra="allow")
-    assert getattr(first, "__extras__", None) == {"extra1": "value1"}
-    assert ReusedSlotted in _SLOTTED_EXTRAS
-
-    second = parse(ReusedSlotted, {"name": "Second", "extra2": "value2"}, extra="allow")
-    assert getattr(second, "__extras__", None) == {"extra2": "value2"}
-    assert getattr(first, "__extras__", None) == {"extra1": "value1"}
-
-
 def test_merge_annotated_meta_handles_non_mapping_args() -> None:
     from typing import Annotated
 
@@ -775,261 +725,22 @@ def test_merge_annotated_meta_handles_non_mapping_args() -> None:
     assert meta == {"key": "value"}
 
 
-def test_resolve_generic_string_type_simple_name() -> None:
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {}
-
-    assert _resolve_generic_string_type("str", localns, module_ns) is str
-    assert _resolve_generic_string_type("int", localns, module_ns) is int
-    assert _resolve_generic_string_type("list", localns, module_ns) is list
-
-
-def test_resolve_generic_string_type_with_localns() -> None:
-    from typing import TypeVar
-
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    T = TypeVar("T")
-    localns: dict[str, object] = {"T": T}
-    module_ns: dict[str, object] = {}
-
-    assert _resolve_generic_string_type("T", localns, module_ns) is T
-
-
-def test_resolve_generic_string_type_with_module_ns() -> None:
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    @dataclass(slots=True, frozen=True)
-    class MyClass:
-        value: str
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {"MyClass": MyClass}
-
-    assert _resolve_generic_string_type("MyClass", localns, module_ns) is MyClass
-
-
-def test_resolve_generic_string_type_subscript() -> None:
-    from typing import TypeVar, get_args, get_origin
-
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    @dataclass(slots=True, frozen=True)
-    class Container[T]:
-        value: T
-
-    T = TypeVar("T")
-    localns: dict[str, object] = {"T": T}
-    module_ns: dict[str, object] = {"Container": Container}
-
-    result = _resolve_generic_string_type("Container[T]", localns, module_ns)
-
-    assert get_origin(result) is Container
-    args = get_args(result)
-    assert len(args) == 1
-    assert args[0] is T
-
-
-def test_resolve_generic_string_type_multiple_args() -> None:
-    from typing import TypeVar, get_args, get_origin
-
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    @dataclass(slots=True, frozen=True)
-    class Pair[K, V]:
-        key: K
-        value: V
-
-    K = TypeVar("K")
-    V = TypeVar("V")
-    localns: dict[str, object] = {"K": K, "V": V}
-    module_ns: dict[str, object] = {"Pair": Pair}
-
-    result = _resolve_generic_string_type("Pair[K, V]", localns, module_ns)
-
-    assert get_origin(result) is Pair
-    args = get_args(result)
-    assert len(args) == 2
-    assert args[0] is K
-    assert args[1] is V
-
-
-def test_resolve_generic_string_type_nested_generic() -> None:
-    from typing import TypeVar, get_args, get_origin
-
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    @dataclass(slots=True, frozen=True)
-    class Wrapper[T]:
-        inner: T
-
-    @dataclass(slots=True, frozen=True)
-    class Inner[T]:
-        value: T
-
-    T = TypeVar("T")
-    localns: dict[str, object] = {"T": T}
-    module_ns: dict[str, object] = {"Wrapper": Wrapper, "Inner": Inner}
-
-    result = _resolve_generic_string_type("Wrapper[Inner[T]]", localns, module_ns)
-
-    assert get_origin(result) is Wrapper
-    outer_args = get_args(result)
-    assert len(outer_args) == 1
-    inner = outer_args[0]
-    assert get_origin(inner) is Inner
-    inner_args = get_args(inner)
-    assert len(inner_args) == 1
-    assert inner_args[0] is T
-
-
-def test_resolve_generic_string_type_builtin_generic() -> None:
-    from typing import Union, get_args, get_origin
-
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {}
-
-    result = _resolve_generic_string_type("list[str]", localns, module_ns)
-    assert get_origin(result) is list
-    assert get_args(result) == (str,)
-
-    result = _resolve_generic_string_type("dict[str, int]", localns, module_ns)
-    assert get_origin(result) is dict
-    assert get_args(result) == (str, int)
-
-    result = _resolve_generic_string_type("Optional[str]", localns, module_ns)
-    assert get_origin(result) is Union
-    assert get_args(result) == (str, type(None))
-
-    result = _resolve_generic_string_type("tuple[int, ...]", localns, module_ns)
-    assert get_origin(result) is tuple
-    assert get_args(result) == (int, ...)
-
-
-def test_resolve_generic_string_type_union() -> None:
-    from types import UnionType
-    from typing import get_args, get_origin
-
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {}
-
-    result = _resolve_generic_string_type("str | int", localns, module_ns)
-    assert get_origin(result) is UnionType
-    assert set(get_args(result)) == {str, int}
-
-    result = _resolve_generic_string_type("str | None", localns, module_ns)
-    assert get_origin(result) is UnionType
-    assert set(get_args(result)) == {str, type(None)}
-
-
-def test_resolve_generic_string_type_syntax_error() -> None:
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {}
-
-    assert _resolve_generic_string_type("[invalid", localns, module_ns) is object
-
-
-def test_resolve_generic_string_type_unresolvable() -> None:
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {}
-
-    assert _resolve_generic_string_type("UnknownType", localns, module_ns) is object
-
-
-def test_resolve_simple_type_returns_none() -> None:
-    from weakincentives.serde.parse import _resolve_simple_type
-
-    assert _resolve_simple_type("str") is str
-    assert _resolve_simple_type("int") is int
-
-    assert _resolve_simple_type("UnknownType") is None
-    assert _resolve_simple_type("T") is None
-
-
-def test_resolve_subscript_with_object_base() -> None:
-    from weakincentives.serde.parse import _resolve_subscript
-
-    result = _resolve_subscript(object, (str,))
-    assert result is object
-
-
-def test_resolve_subscript_with_non_subscriptable_type() -> None:
-    from weakincentives.serde.parse import _resolve_subscript
-
-    result = _resolve_subscript(int, (str,))
-    assert result is int
-
-
-def test_resolve_generic_string_type_unknown_node() -> None:
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {}
-
-    result = _resolve_generic_string_type("typing.Optional", localns, module_ns)
-    assert result is object
-
-
-def test_resolve_generic_string_type_constants_outside_literal() -> None:
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {}
-
-    result = _resolve_generic_string_type("'foo'", localns, module_ns)
-    assert result is object
-
-    result = _resolve_generic_string_type("42", localns, module_ns)
-    assert result is object
-
-    result = _resolve_generic_string_type("True", localns, module_ns)
-    assert result is object
-
-
-def test_resolve_generic_string_type_literal() -> None:
-    from typing import Literal, get_args, get_origin
-
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {}
-
-    result = _resolve_generic_string_type('Literal["foo"]', localns, module_ns)
-    assert get_origin(result) is Literal
-    assert get_args(result) == ("foo",)
-
-    result = _resolve_generic_string_type("Literal[1, 2, 3]", localns, module_ns)
-    assert get_origin(result) is Literal
-    assert get_args(result) == (1, 2, 3)
-
-    result = _resolve_generic_string_type("Literal[True, False]", localns, module_ns)
-    assert get_origin(result) is Literal
-    assert get_args(result) == (True, False)
-
-    result = _resolve_generic_string_type("Literal[-1]", localns, module_ns)
-    assert get_origin(result) is Literal
-    assert get_args(result) == (-1,)
-
-    result = _resolve_generic_string_type("Literal[-1, 0, +1]", localns, module_ns)
-    assert get_origin(result) is Literal
-    assert get_args(result) == (-1, 0, 1)
-
-
-def test_resolve_generic_string_type_unresolvable_subscript() -> None:
-    from weakincentives.serde.parse import _resolve_generic_string_type
-
-    localns: dict[str, object] = {}
-    module_ns: dict[str, object] = {}
-
-    result = _resolve_generic_string_type("Unknown[str]", localns, module_ns)
-    assert result is object
+def test_parse_field_alias_from_metadata() -> None:
+    """Field-level aliases still work through field metadata."""
+
+    @dataclass
+    class AliasModel:
+        api_key: str = field(metadata={"alias": "apiKey"})
+        max_retries: int = field(metadata={"alias": "maxRetries"})
+
+    parsed = parse(AliasModel, {"apiKey": "secret", "maxRetries": "3"})
+    assert parsed.api_key == "secret"
+    assert parsed.max_retries == 3
+
+    # Dump uses aliases by default
+    data = dump(parsed)
+    assert data == {"apiKey": "secret", "maxRetries": 3}
+
+    # Dump without aliases
+    plain = dump(parsed, by_alias=False)
+    assert plain == {"api_key": "secret", "max_retries": 3}

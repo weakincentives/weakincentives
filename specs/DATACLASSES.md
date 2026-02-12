@@ -19,11 +19,8 @@ from weakincentives.serde import parse, dump, clone, schema
 |-----------|---------|-------------|
 | `cls` | - | Target dataclass type (supports generic aliases) |
 | `data` | - | Dict to parse |
-| `extra` | `"ignore"` | `"ignore"`, `"forbid"`, `"allow"` |
+| `extra` | `"ignore"` | `"ignore"` or `"forbid"` |
 | `coerce` | `True` | Type coercion |
-| `case_insensitive` | `False` | Case-insensitive keys |
-| `aliases` | `None` | Field aliases |
-| `alias_generator` | `None` | Function to transform field names |
 
 For generic dataclasses, use generic alias syntax: `parse(Wrapper[Data], data)`.
 
@@ -35,7 +32,6 @@ For generic dataclasses, use generic alias syntax: `parse(Wrapper[Data], data)`.
 | `by_alias` | `True` | Use alias names |
 | `exclude_none` | `False` | Exclude None values |
 | `computed` | `False` | Include `__computed__` props |
-| `alias_generator` | `None` | Function to transform field names |
 
 ### clone
 
@@ -63,6 +59,7 @@ Via `Annotated[..., {...}]` or `field(metadata=...)`:
 | `in`, `not_in` | Membership validation |
 | `validate`, `validators` | Custom validation |
 | `convert`, `transform` | Value transformation |
+| `alias` | Field-level alias for parsing/dumping |
 
 ## FrozenDataclass Decorator
 

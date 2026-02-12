@@ -141,13 +141,6 @@ Map JSON keys to different field names using field metadata or alias generators:
     data = dump(config)
     assert data == {"apiKey": "secret", "maxRetries": 3}
 
-    # Or use an alias generator for consistent casing
-    def to_camel(name: str) -> str:
-        parts = name.split("_")
-        return parts[0] + "".join(p.title() for p in parts[1:])
-
-    data = dump(config, alias_generator=to_camel)
-
 Extra Fields Handling
 ---------------------
 Control how unrecognized fields in input data are handled:
@@ -163,10 +156,6 @@ Control how unrecognized fields in input data are handled:
 
     # "forbid": Raise ValueError if extra fields present
     user = parse(User, data, extra="forbid")  # Raises ValueError
-
-    # "allow": Attach extra fields to the instance
-    user = parse(User, data, extra="allow")
-    assert user.unknown_field == "value"  # Extra field accessible
 
 Generic Dataclasses
 -------------------

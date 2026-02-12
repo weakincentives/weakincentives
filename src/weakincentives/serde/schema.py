@@ -40,8 +40,7 @@ NULL_JSON_TYPE = "null"
 ELLIPSIS_SENTINEL = Ellipsis
 IGNORE_EXTRA = "ignore"
 FORBID_EXTRA = "forbid"
-ALLOW_EXTRA = "allow"
-EXTRA_MODES = {IGNORE_EXTRA, FORBID_EXTRA, ALLOW_EXTRA}
+EXTRA_MODES = {IGNORE_EXTRA, FORBID_EXTRA}
 NULL_TYPE_SCHEMA: dict[str, JSONValue] = {"type": NULL_JSON_TYPE}
 
 PRIMITIVE_FORMATS: dict[type[object], dict[str, JSONValue]] = {
@@ -98,7 +97,6 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
 def _resolve_schema(
     base_type: object,
     origin: object,
-    alias_generator: Callable[[str], str] | None,
 ) -> dict[str, JSONValue] | None:
     for builder in (
         _schema_for_dataclass,
@@ -108,7 +106,7 @@ def _resolve_schema(
         _schema_for_enum,
         _schema_for_primitive,
     ):
-        schema_data = builder(base_type, alias_generator, origin)
+        schema_data = builder(base_type, origin)
         if schema_data is not None:
             return schema_data
     return None
@@ -117,30 +115,29 @@ def _resolve_schema(
 def _schema_for_type(
     typ: object,
     meta: Mapping[str, object] | None,
-    alias_generator: Callable[[str], str] | None,
 ) -> dict[str, JSONValue]:
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
     origin = get_origin(base_type)
 
-    schema_data = _resolve_schema(base_type, origin, alias_generator) or {}
+    schema_data = _resolve_schema(base_type, origin) or {}
 
     schema_data.update(_schema_constraints(merged_meta))
     return schema_data
 
 
 def _schema_for_dataclass(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+    base_type: object, origin: object
 ) -> dict[str, JSONValue] | None:
     if base_type is object or base_type is _AnyType:
         return {}
     if not dataclasses.is_dataclass(base_type):
         return None
     dataclass_type = base_type if isinstance(base_type, type) else type(base_type)
-    return schema(dataclass_type, alias_generator=alias_generator)
+    return schema(dataclass_type)
 
 
 def _schema_for_literal(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+    base_type: object, origin: object
 ) -> dict[str, JSONValue] | None:
     if base_type is NULL_TYPE:
         return dict(NULL_TYPE_SCHEMA)
@@ -171,7 +168,7 @@ def _is_object_schema(schema_data: Mapping[str, JSONValue]) -> bool:
 
 
 def _collect_union_subschemas(
-    base_type: object, alias_generator: Callable[[str], str] | None
+    base_type: object,
 ) -> tuple[bool, list[dict[str, JSONValue]], Mapping[str, JSONValue] | None]:
     includes_null = False
     subschemas: list[dict[str, JSONValue]] = []
@@ -180,7 +177,7 @@ def _collect_union_subschemas(
         if arg is NULL_TYPE:
             includes_null = True
             continue
-        subschema = _schema_for_type(arg, None, alias_generator)
+        subschema = _schema_for_type(arg, None)
         subschemas.append(subschema)
         if base_schema_ref is None and _is_object_schema(subschema):
             base_schema_ref = subschema
@@ -226,15 +223,11 @@ def _apply_union_metadata(
             _ = schema_data.setdefault("required", list(required))
 
 
-def _schema_for_union(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
-) -> dict[str, JSONValue] | None:
+def _schema_for_union(base_type: object, origin: object) -> dict[str, JSONValue] | None:
     if origin is not _UNION_TYPE:
         return None
 
-    includes_null, subschemas, base_schema_ref = _collect_union_subschemas(
-        base_type, alias_generator
-    )
+    includes_null, subschemas, base_schema_ref = _collect_union_subschemas(base_type)
     schema_data = _merge_union_schema(subschemas, base_schema_ref, includes_null)
     _apply_union_metadata(schema_data, subschemas, base_schema_ref)
     return schema_data
@@ -245,54 +238,46 @@ def _collection_item_type(base_type: object, index: int = 0) -> object:
     return args[index] if len(args) > index else object
 
 
-def _list_schema(
-    base_type: object, alias_generator: Callable[[str], str] | None
-) -> dict[str, JSONValue]:
+def _list_schema(base_type: object) -> dict[str, JSONValue]:
     item_type = _collection_item_type(base_type)
     return {
         "type": "array",
-        "items": _schema_for_type(item_type, None, alias_generator),
+        "items": _schema_for_type(item_type, None),
     }
 
 
-def _set_schema(
-    base_type: object, alias_generator: Callable[[str], str] | None
-) -> dict[str, JSONValue]:
-    schema_data = _list_schema(base_type, alias_generator)
+def _set_schema(base_type: object) -> dict[str, JSONValue]:
+    schema_data = _list_schema(base_type)
     schema_data["uniqueItems"] = True
     return schema_data
 
 
-def _tuple_schema(
-    base_type: object, alias_generator: Callable[[str], str] | None
-) -> dict[str, JSONValue]:
+def _tuple_schema(base_type: object) -> dict[str, JSONValue]:
     args = get_args(base_type)
     if args and args[-1] is ELLIPSIS_SENTINEL:
         return {
             "type": "array",
-            "items": _schema_for_type(args[0], None, alias_generator),
+            "items": _schema_for_type(args[0], None),
         }
     return {
         "type": "array",
-        "prefixItems": [_schema_for_type(arg, None, alias_generator) for arg in args],
+        "prefixItems": [_schema_for_type(arg, None) for arg in args],
         "minItems": len(args),
         "maxItems": len(args),
     }
 
 
-def _mapping_schema(
-    base_type: object, alias_generator: Callable[[str], str] | None
-) -> dict[str, JSONValue]:
+def _mapping_schema(base_type: object) -> dict[str, JSONValue]:
     value_type = _collection_item_type(base_type, index=1)
     return {
         "type": "object",
-        "additionalProperties": _schema_for_type(value_type, None, alias_generator),
+        "additionalProperties": _schema_for_type(value_type, None),
     }
 
 
-_COLLECTION_BUILDERS: Mapping[
-    object, Callable[[object, Callable[[str], str] | None], dict[str, JSONValue]]
-] = {
+type _CollectionBuilder = Callable[[object], dict[str, JSONValue]]
+
+_COLLECTION_BUILDERS: dict[object, _CollectionBuilder] = {
     list: _list_schema,
     Sequence: _list_schema,
     set: _set_schema,
@@ -304,18 +289,15 @@ _COLLECTION_BUILDERS: Mapping[
 
 def _schema_for_collection(
     base_type: object,
-    alias_generator: Callable[[str], str] | None,
     origin: object,
 ) -> dict[str, JSONValue] | None:
     builder = _COLLECTION_BUILDERS.get(origin)
     if builder is None:
         return None
-    return builder(base_type, alias_generator)
+    return builder(base_type)
 
 
-def _schema_for_enum(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
-) -> dict[str, JSONValue] | None:
+def _schema_for_enum(base_type: object, origin: object) -> dict[str, JSONValue] | None:
     if not isinstance(base_type, type) or not issubclass(base_type, Enum):
         return None
 
@@ -338,7 +320,7 @@ def _schema_for_enum(
 
 
 def _schema_for_primitive(
-    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+    base_type: object, origin: object
 ) -> dict[str, JSONValue] | None:
     for primitive, schema_data in PRIMITIVE_FORMATS.items():
         if base_type is primitive:
@@ -348,29 +330,23 @@ def _schema_for_primitive(
 
 def _resolve_field_property_name(
     field: dataclasses.Field[object],
-    alias_generator: Callable[[str], str] | None,
 ) -> str:
     """Resolve the property name for a field, using alias if available."""
-    field_meta = dict(field.metadata)
-    alias = field_meta.get("alias")
-    if alias_generator is not None and not alias:
-        alias = alias_generator(field.name)
+    alias = dict(field.metadata).get("alias")
     return alias or field.name
 
 
 def schema(
     cls: type[object],
     *,
-    alias_generator: Callable[[str], str] | None = None,
-    extra: Literal["ignore", "forbid", "allow"] = IGNORE_EXTRA,
+    extra: Literal["ignore", "forbid"] = IGNORE_EXTRA,
     scope: SerdeScope = SerdeScope.DEFAULT,
 ) -> dict[str, JSONValue]:
     """Produce a minimal JSON Schema description for a dataclass.
 
     Args:
         cls: The dataclass type to generate schema for.
-        alias_generator: Optional function to transform field names to aliases.
-        extra: How to handle extra fields: "ignore", "forbid", or "allow".
+        extra: How to handle extra fields: "ignore" or "forbid".
         scope: The serialization scope. Fields marked with
             ``HiddenInStructuredOutput`` are excluded when
             ``scope=SerdeScope.STRUCTURED_OUTPUT``.
@@ -381,7 +357,7 @@ def schema(
     if not dataclasses.is_dataclass(cls):
         raise TypeError("schema() requires a dataclass type")
     if extra not in EXTRA_MODES:
-        raise ValueError("extra must be one of 'ignore', 'forbid', or 'allow'")
+        raise ValueError("extra must be one of 'ignore' or 'forbid'")
 
     properties: dict[str, dict[str, JSONValue]] = {}
     required: list[str] = []
@@ -393,10 +369,8 @@ def schema(
         field_type = type_hints.get(field.name, field.type)
         if is_hidden_in_scope(field_type, scope):
             continue
-        property_name = _resolve_field_property_name(field, alias_generator)
-        properties[property_name] = _schema_for_type(
-            field_type, dict(field.metadata), alias_generator
-        )
+        property_name = _resolve_field_property_name(field)
+        properties[property_name] = _schema_for_type(field_type, dict(field.metadata))
         if field.default is MISSING and field.default_factory is MISSING:
             required.append(property_name)
 

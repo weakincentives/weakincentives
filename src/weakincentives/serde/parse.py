@@ -10,24 +10,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dataclass parsing helpers.
+"""Dataclass parsing helpers."""
 
-Security Note
--------------
-The type resolution logic in this module (particularly _resolve_generic_string_type
-and _get_field_types) should only be used with trusted code and trusted type
-references that are static at implementation time. The AST-based type resolution
-looks up types from module namespaces and could potentially resolve to unintended
-types if untrusted type annotation strings are processed. Do not use parse() with
-dynamically generated or user-provided type annotations.
-"""
-
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPossiblyUnboundVariable=false, reportPrivateUsage=false
+# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPrivateUsage=false
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import MISSING
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -51,7 +41,6 @@ from ._utils import (
     _apply_constraints,
     _merge_annotated_meta,
     _ParseConfig,
-    _set_extras,
 )
 
 # typing.Union origin (for Optional[X] and Union[X, Y] constructs from type aliases)
@@ -98,8 +87,8 @@ def _time_from_any(value: object) -> object:
     return time.fromisoformat(str(value))
 
 
-_PRIMITIVE_COERCERS: dict[type[object], Callable[[object], object]] = cast(
-    dict[type[object], Callable[[object], object]],
+_PRIMITIVE_COERCERS: dict[type[object], object] = cast(
+    dict[type[object], object],
     {
         int: int,
         float: float,
@@ -252,11 +241,7 @@ def _coerce_primitive(
 
 
 def _build_nested_config(base_type: object, config: _ParseConfig) -> _ParseConfig:
-    """Build config with typevar_map for nested generic type parsing.
-
-    Resolves TypeVar arguments through the parent's typevar_map to support
-    nested generics like Outer[int] containing Inner[T] where T is Outer's param.
-    """
+    """Build config with typevar_map for nested generic type parsing."""
     origin = get_origin(base_type)
     if origin is None:
         return config
@@ -268,9 +253,6 @@ def _build_nested_config(base_type: object, config: _ParseConfig) -> _ParseConfi
     return _ParseConfig(
         extra=config.extra,
         coerce=config.coerce,
-        case_insensitive=config.case_insensitive,
-        alias_generator=config.alias_generator,
-        aliases=config.aliases,
         typevar_map=nested_typevar_map,
     )
 
@@ -492,242 +474,139 @@ def _is_typevar(typ: object) -> bool:
     return isinstance(typ, TypeVar)
 
 
-def _resolve_simple_type(type_str: str) -> object | None:
-    """Resolve a simple type name to an actual type.
-
-    Looks up type names in builtins and typing module only.
-    Returns None if not found (does not fall back to object).
-    """
-    import builtins
-    import typing
-    from typing import TypeVar
-
-    # Try builtins first (str, int, float, bool, list, dict, etc.)
-    builtin_type = getattr(builtins, type_str, None)
-    if builtin_type is not None and isinstance(builtin_type, type):
-        return builtin_type
-
-    # Try typing module (Any, Optional, etc.) but exclude TypeVars
-    # (typing module has common TypeVar names like T, K, V which we shouldn't use)
-    typing_type = getattr(typing, type_str, None)
-    if typing_type is not None and not isinstance(typing_type, TypeVar):
-        return typing_type
-
-    return None
-
-
-def _resolve_name(
-    name: str,
-    localns: dict[str, object],
-    module_ns: dict[str, object],
-) -> object:
-    """Resolve a simple type name from namespaces."""
-    # Check localns first (TypeVars)
-    if name in localns:
-        return localns[name]
-    # Check module namespace (for class definitions like Sample)
-    if name in module_ns:
-        return module_ns[name]
-    # Try builtins/typing
-    simple = _resolve_simple_type(name)
-    return simple if simple is not None else object
-
-
-def _resolve_subscript(
-    base_type: object,
-    type_args: tuple[object, ...],
-) -> object:
-    """Resolve a subscripted generic type like Container[T].
-
-    For single type arguments, passes the type directly (not as a tuple)
-    since typing special forms like Optional expect a single type.
-    For multiple arguments, passes them as a tuple.
-    """
-    if base_type is object:
-        return object
-    # Single arg: pass directly (e.g., Optional[str] not Optional[(str,)])
-    # Multiple args: pass as tuple (e.g., Dict[str, int])
-    subscript_arg = type_args[0] if len(type_args) == 1 else type_args
-    try:
-        return base_type[subscript_arg]  # pyright: ignore[reportIndexIssue] # ty: ignore[not-subscriptable]
-    except TypeError:
-        return base_type
-
-
-def _make_union(left: object, right: object) -> object:
-    """Create a Union type at runtime from two types using the | operator."""
-    # For type objects, | creates a union at runtime (Python 3.10+)
-    # This works because types support the __or__ operator for creating unions
-    return left | right  # pyright: ignore[reportOperatorIssue]  # ty: ignore[unsupported-operator]
-
-
-class _ASTResolver:
-    """Helper class to resolve AST nodes to types with namespace context."""
-
-    __slots__ = ("localns", "module_ns")
-
-    def __init__(  # pyright: ignore[reportMissingSuperCall]
-        self, localns: dict[str, object], module_ns: dict[str, object]
-    ) -> None:
-        self.localns = localns
-        self.module_ns = module_ns
-
-    @staticmethod
-    def _is_literal_type(base: object) -> bool:
-        """Check if base type is typing.Literal."""
-        from typing import Literal, get_origin
-
-        return base is Literal or get_origin(base) is Literal
-
-    def _resolve_subscript_node(self, node: object, *, in_literal: bool) -> object:
-        """Resolve ast.Subscript nodes like Container[T] or dict[str, int]."""
-        import ast
-
-        if not isinstance(node, ast.Subscript):  # pragma: no cover - type guard
-            return object
-        base = self._resolve(node.value, in_literal=False)
-        # Arguments to Literal should be preserved as values, not resolved as types
-        args_in_literal = self._is_literal_type(base)
-        if isinstance(node.slice, ast.Tuple):
-            args = tuple(
-                self._resolve(elt, in_literal=args_in_literal)
-                for elt in node.slice.elts
-            )
-        else:
-            args = (self._resolve(node.slice, in_literal=args_in_literal),)
-        return _resolve_subscript(base, args)
-
-    @staticmethod
-    def _resolve_unary_node(node: object) -> object | None:
-        """Resolve ast.UnaryOp for signed literals like -1 or +1."""
-        import ast
-
-        if not isinstance(node, ast.UnaryOp) or not isinstance(
-            node.operand, ast.Constant
-        ):
-            return None
-        value = node.operand.value
-        if isinstance(node.op, ast.USub):
-            return -value  # pyright: ignore[reportOperatorIssue,reportOptionalOperand]  # ty: ignore[unsupported-operator]
-        if isinstance(node.op, ast.UAdd):
-            return +value  # pyright: ignore[reportOperatorIssue,reportOptionalOperand]  # ty: ignore[unsupported-operator]
-        return None  # pragma: no cover - only USub/UAdd are used in type annotations
-
-    def _resolve(self, node: object, *, in_literal: bool) -> object:
-        """Recursively resolve an AST node to a type."""
-        import ast
-
-        if isinstance(node, ast.Name):
-            # Inside Literal, names like True/False are resolved normally
-            return _resolve_name(node.id, self.localns, self.module_ns)
-        if isinstance(node, ast.Subscript):
-            return self._resolve_subscript_node(node, in_literal=in_literal)
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-            return _make_union(
-                self._resolve(node.left, in_literal=False),
-                self._resolve(node.right, in_literal=False),
-            )
-        if isinstance(node, ast.Constant):
-            # Inside Literal[...], preserve constant values as-is
-            if in_literal:
-                return node.value
-            # None constant in type context (e.g., T | None) should be NoneType
-            if node.value is None:
-                return type(None)
-            # Ellipsis in type context (e.g., tuple[int, ...]) must be preserved
-            if node.value is ...:
-                return ...
-            # Outside Literal, other constants are unresolvable - fall back to object
-            return object
-        # Handle signed literals (always preserve value, used in Literal[-1])
-        signed = self._resolve_unary_node(node)
-        return signed if signed is not None else object
-
-    def resolve(self, node: object) -> object:
-        """Public entry point - resolve starting outside Literal context."""
-        return self._resolve(node, in_literal=False)
-
-
-def _resolve_generic_string_type(
-    type_str: str,
-    localns: dict[str, object],
-    module_ns: dict[str, object],
-) -> object:
-    """Resolve a string type annotation using AST parsing.
-
-    Handles complex generic type expressions like 'Sample[InputT, ExpectedT]'
-    by parsing the string into an AST and resolving each component.
-
-    Security Warning:
-        This function looks up types from module namespaces based on string
-        names. Only use with trusted type annotation strings that are static
-        at implementation time. Do not pass user-provided or dynamically
-        generated type strings.
-
-    Args:
-        type_str: The string type annotation to resolve.
-        localns: Local namespace containing TypeVars from __type_params__.
-        module_ns: Module namespace for looking up class definitions.
-
-    Returns:
-        The resolved type, or object if unresolvable.
-    """
-    import ast
-
-    try:
-        tree = ast.parse(type_str, mode="eval")
-        return _ASTResolver(localns, module_ns).resolve(tree.body)
-    except SyntaxError:
-        simple = _resolve_simple_type(type_str)
-        return simple if simple is not None else object
-
-
 def _get_field_types(cls: type[object]) -> dict[str, object]:
     """Get field types for a dataclass, handling generic classes safely.
 
-    Tries get_type_hints() first with TypeVars from __type_params__ in localns.
-    If that fails (NameError on generic classes with postponed annotations),
-    falls back to resolving field types from dataclasses.fields() using AST
-    parsing to handle complex generic type annotations.
+    Passes TypeVars from __type_params__ in localns so that
+    get_type_hints() can resolve PEP 695 generic annotations.
 
-    For TypeVar string annotations (like 'T'), preserves the TypeVar object
-    from __type_params__ so that TypeVar error handling still works.
+    When forward references fail (e.g. TYPE_CHECKING imports), retries
+    by resolving missing names from the class module's TYPE_CHECKING
+    imports via ``_resolve_type_checking_imports``.
     """
-    import sys
-
-    # Build mapping of TypeVar names for PEP 695 generic classes
-    # This allows get_type_hints() to resolve annotations like Inner[T]
     type_params = getattr(cls, "__type_params__", ())
     localns: dict[str, object] = {tp.__name__: tp for tp in type_params}
 
+    max_retries = 10
+    for _ in range(max_retries):
+        try:
+            return get_type_hints(cls, localns=localns, include_extras=True)
+        except NameError as exc:
+            missing = _extract_missing_name(exc)
+            if missing is None or missing in localns:
+                raise  # pragma: no cover - defensive
+            resolved = _resolve_type_checking_imports(cls, missing)
+            if resolved is None:
+                raise  # pragma: no cover - defensive
+            localns[missing] = resolved
+
+    return get_type_hints(cls, localns=localns, include_extras=True)  # pragma: no cover
+
+
+def _extract_missing_name(exc: NameError) -> str | None:
+    """Extract the missing name from a NameError."""
+    msg = str(exc)
+    if msg.startswith("name '") and msg.endswith("' is not defined"):
+        return msg[6:-16]
+    return None  # pragma: no cover - defensive
+
+
+def _resolve_type_checking_imports(cls: type[object], name: str) -> object | None:
+    """Resolve a name from the TYPE_CHECKING imports of a module.
+
+    Scans the module source for ``if TYPE_CHECKING:`` blocks and imports
+    the missing name at runtime. Handles both absolute and relative imports.
+    """
+    import ast
+    import inspect
+    import sys
+
+    module_name = getattr(cls, "__module__", None)
+    if not module_name or module_name not in sys.modules:
+        return None  # pragma: no cover - defensive
+
+    module = sys.modules[module_name]
     try:
-        return get_type_hints(cls, localns=localns, include_extras=True)
-    except NameError:  # pragma: no cover - defensive fallback for edge cases
-        # Generic class with unresolved type parameters (and future annotations)
-        # Fall back to AST-based resolution from dataclass fields.
-        # Note: When get_type_hints fails with NameError, it's because
-        # from __future__ import annotations is used, so all field.type
-        # values are strings.
+        source = inspect.getsource(module)
+        tree = ast.parse(source)
+    except (OSError, TypeError, SyntaxError):  # pragma: no cover - defensive
+        return None
 
-        # Get the module namespace for resolving types defined in the same module
-        module_ns: dict[str, object] = {}
-        module_name = getattr(cls, "__module__", None)
-        if module_name and module_name in sys.modules:
-            module = sys.modules[module_name]
-            module_ns = vars(module)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If) or not _is_type_checking_guard(node.test):
+            continue
+        result = _find_import_in_block(node.body, name, module_name)
+        if result is not None:
+            return result
 
-        result: dict[str, object] = {}
-        for field in dataclasses.fields(cls):
-            type_str = field.type if isinstance(field.type, str) else str(field.type)
-            # Check if this is a TypeVar name - preserve the TypeVar
-            if type_str in localns:
-                result[field.name] = localns[type_str]
-            else:
-                # Use AST-based resolution for complex generic types
-                result[field.name] = _resolve_generic_string_type(
-                    type_str, localns, module_ns
-                )
-        return result
+    return None  # pragma: no cover - defensive
+
+
+def _is_type_checking_guard(test: object) -> bool:
+    """Check whether an AST test node is ``TYPE_CHECKING``."""
+    import ast
+
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    if isinstance(test, ast.Attribute) and isinstance(test.value, ast.Name):
+        return test.attr == "TYPE_CHECKING"
+    return False
+
+
+def _find_import_in_block(
+    body: Sequence[object], name: str, module_name: str
+) -> object | None:
+    """Search a TYPE_CHECKING block for an import of *name*.
+
+    Handles both ``from foo import Bar`` (module is set) and bare relative
+    imports like ``from . import foo`` (module is None, level > 0).
+    """
+    import ast
+
+    for stmt in body:
+        if not isinstance(stmt, ast.ImportFrom):
+            continue
+        for alias in stmt.names:
+            if (alias.asname or alias.name) != name:
+                continue
+            return _import_from_stmt(stmt, alias, module_name)
+    return None
+
+
+def _import_from_stmt(stmt: object, alias: object, module_name: str) -> object | None:
+    """Resolve a single import alias from an ``ast.ImportFrom`` node."""
+    import ast
+    import importlib
+
+    if not isinstance(stmt, ast.ImportFrom) or not isinstance(alias, ast.alias):
+        return None  # pragma: no cover - defensive
+
+    if stmt.module is not None:
+        target = _resolve_import_module(stmt.module, stmt.level, module_name)
+        try:
+            mod = importlib.import_module(target)
+            return getattr(mod, alias.name, None)
+        except (ImportError, AttributeError):  # pragma: no cover - defensive
+            return None
+
+    # Bare relative import: ``from . import foo`` — resolve the package
+    # and import the sub-module directly.
+    if stmt.level > 0:
+        target = _resolve_import_module(alias.name, stmt.level, module_name)
+        try:
+            return importlib.import_module(target)
+        except ImportError:  # pragma: no cover - defensive
+            return None
+    return None  # pragma: no cover - defensive
+
+
+def _resolve_import_module(module: str, level: int, current_module: str) -> str:
+    """Resolve a possibly-relative import module path."""
+    if level == 0:
+        return module
+    parts = current_module.split(".")
+    base = ".".join(parts[:-level])
+    return f"{base}.{module}" if module else base
 
 
 def _coerce_to_type(
@@ -778,55 +657,23 @@ def _coerce_to_type(
     return _apply_constraints(coerced, merged_meta, path)
 
 
-def _find_key_exact(
-    data: Mapping[str, object], candidates: list[str | None]
-) -> str | None:
-    """Find exact match for any candidate key."""
-    for candidate in candidates:
-        if candidate is not None and candidate in data:
-            return candidate
-    return None
-
-
-def _build_lowered_key_map(data: Mapping[str, object]) -> dict[str, str]:
-    """Build a case-insensitive key lookup map."""
-    lowered_map: dict[str, str] = {}
-    for key in data:
-        if isinstance(key, str):
-            _ = lowered_map.setdefault(key.lower(), key)
-    return lowered_map
-
-
-def _find_key(
-    data: Mapping[str, object], name: str, alias: str | None, case_insensitive: bool
-) -> str | None:
-    candidates = [alias, name]
-    exact = _find_key_exact(data, candidates)
-    if exact is not None or not case_insensitive:
-        return exact
-    lowered_map = _build_lowered_key_map(data)
-    for candidate in candidates:
-        if candidate is None:
-            continue
-        lowered = candidate.lower()
-        if lowered in lowered_map:
-            return lowered_map[lowered]
+def _find_key(data: Mapping[str, object], name: str, alias: str | None) -> str | None:
+    """Find a matching key in data by alias or field name (exact match only)."""
+    if alias is not None and alias in data:
+        return alias
+    if name in data:
+        return name
     return None
 
 
 def _resolve_field_alias(
     field: dataclasses.Field[object],
-    aliases: Mapping[str, str] | None,
-    alias_generator: Callable[[str], str] | None,
     field_meta: dict[str, object],
 ) -> str | None:
-    if aliases and field.name in aliases:
-        return aliases[field.name]
+    """Resolve field alias from field metadata only."""
     alias_value = field_meta.get("alias")
     if alias_value is not None:
         return cast(str, alias_value)
-    if alias_generator is not None:
-        return alias_generator(field.name)
     return None
 
 
@@ -848,9 +695,6 @@ def _collect_field_kwargs(
     mapping_data: Mapping[str, object],
     type_hints: Mapping[str, object],
     config: _ParseConfig,
-    *,
-    aliases: Mapping[str, str] | None,
-    alias_generator: Callable[[str], str] | None,
 ) -> tuple[dict[str, object], set[str]]:
     kwargs: dict[str, object] = {}
     used_keys: set[str] = set()
@@ -872,9 +716,9 @@ def _collect_field_kwargs(
             continue
 
         field_meta = dict(field.metadata)
-        field_alias = _resolve_field_alias(field, aliases, alias_generator, field_meta)
+        field_alias = _resolve_field_alias(field, field_meta)
 
-        key = _find_key(mapping_data, field.name, field_alias, config.case_insensitive)
+        key = _find_key(mapping_data, field.name, field_alias)
         if key is None:
             if field.default is MISSING and field.default_factory is MISSING:
                 raise ValueError(f"Missing required field: '{field.name}'")
@@ -889,22 +733,15 @@ def _collect_field_kwargs(
 
 
 def _apply_extra_fields(
-    instance: object,
     mapping_data: Mapping[str, object],
     used_keys: set[str],
-    extra: Literal["ignore", "forbid", "allow"],
+    extra: Literal["ignore", "forbid"],
 ) -> None:
-    extras = {key: mapping_data[key] for key in mapping_data if key not in used_keys}
-    if not extras:
+    if extra == "ignore":
         return
-    if extra == "forbid":
+    extras = {key: mapping_data[key] for key in mapping_data if key not in used_keys}
+    if extras:
         raise ValueError(f"Extra keys not permitted: {list(extras.keys())}")
-    if extra == "allow":
-        if hasattr(instance, "__dict__"):
-            for key, value in extras.items():
-                object.__setattr__(instance, key, value)
-        else:
-            _set_extras(instance, extras)
 
 
 def _run_validation_hooks(instance: object) -> None:
@@ -977,13 +814,11 @@ def _parse_dataclass[T](
         mapping_data,
         type_hints,
         config,
-        aliases=config.aliases,
-        alias_generator=config.alias_generator,
     )
 
     instance = target_cls(**kwargs)
 
-    _apply_extra_fields(instance, mapping_data, used_keys, config.extra)
+    _apply_extra_fields(mapping_data, used_keys, config.extra)
     _run_validation_hooks(instance)
 
     return instance
@@ -993,11 +828,8 @@ def parse[T](
     cls: type[T],
     data: Mapping[str, object] | object,
     *,
-    extra: Literal["ignore", "forbid", "allow"] = "ignore",
+    extra: Literal["ignore", "forbid"] = "ignore",
     coerce: bool = True,
-    case_insensitive: bool = False,
-    alias_generator: Callable[[str], str] | None = None,
-    aliases: Mapping[str, str] | None = None,
     scope: SerdeScope = SerdeScope.DEFAULT,
 ) -> T:
     """Parse a mapping into a dataclass instance.
@@ -1010,11 +842,8 @@ def parse[T](
     Args:
         cls: The dataclass type to parse into.
         data: A mapping (dict) containing the field values.
-        extra: How to handle extra fields: "ignore", "forbid", or "allow".
+        extra: How to handle extra fields: "ignore" or "forbid".
         coerce: Whether to coerce values to match declared types.
-        case_insensitive: Whether to match field names case-insensitively.
-        alias_generator: Optional function to transform field names to aliases.
-        aliases: Optional mapping of field names to aliases.
         scope: The serialization scope. Fields marked with
             ``HiddenInStructuredOutput`` are skipped (use defaults) when
             ``scope=SerdeScope.STRUCTURED_OUTPUT``.
@@ -1024,8 +853,8 @@ def parse[T](
     """
     if not isinstance(data, Mapping):
         raise TypeError("parse() requires a mapping input")
-    if extra not in {"ignore", "forbid", "allow"}:
-        raise ValueError("extra must be one of 'ignore', 'forbid', or 'allow'")
+    if extra not in {"ignore", "forbid"}:
+        raise ValueError("extra must be one of 'ignore' or 'forbid'")
 
     # Resolve generic alias to concrete class
     origin = get_origin(cls)
@@ -1041,9 +870,6 @@ def parse[T](
     config = _ParseConfig(
         extra=extra,
         coerce=coerce,
-        case_insensitive=case_insensitive,
-        alias_generator=alias_generator,
-        aliases=aliases,
         typevar_map=typevar_map,
         scope=scope,
     )

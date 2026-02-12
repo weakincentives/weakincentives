@@ -44,24 +44,19 @@ def as_list(value: object) -> list[object]:
     return cast(list[object], value)
 
 
-def camel(name: str) -> str:
-    parts = name.split("_")
-    return parts[0] + "".join(part.title() for part in parts[1:])
-
-
 def user_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "USER": str(USER_UUID),
-        "NAME": "  Ada Lovelace  ",
-        "EMAIL": "Ada@Example.COM",
-        "AGE": "39",
+        "id": str(USER_UUID),
+        "name": "  Ada Lovelace  ",
+        "email": "Ada@Example.COM",
+        "age": "39",
         "favorite": "GREEN",
-        "createdAt": TIMESTAMP,
+        "created_at": TIMESTAMP,
         "birthday": "1985-12-10",
         "wakeup": "07:30:00",
         "price": "99.95",
         "avatar": "/tmp/avatar.png",
-        "HOME": {"street": "1 Example Way", "city": "London", "zip": "12345-6789"},
+        "home": {"street": "1 Example Way", "city": "London", "zip": "12345-6789"},
         "tags": "prolific",
         "points": ["1", "2"],
         "attributes": {"level": "10", 99: "bonus"},

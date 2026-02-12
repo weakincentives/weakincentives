@@ -253,8 +253,6 @@ Both hooks run after field parsing. Use `__validate__` for basic validation and
 
 ## Field Aliases
 
-### Per-Field Aliases
-
 Use field metadata to define an alias:
 
 ```python nocheck
@@ -269,42 +267,6 @@ user = parse(User, {"id": "abc123"})
 assert user.user_id == "abc123"
 ```
 
-### Alias Generator
-
-Apply a function to all field names:
-
-```python nocheck
-from dataclasses import dataclass
-from weakincentives.serde import parse
-
-def camel_case(name: str) -> str:
-    parts = name.split("_")
-    return parts[0] + "".join(p.title() for p in parts[1:])
-
-@dataclass
-class User:
-    first_name: str
-    last_name: str
-
-user = parse(User, {"firstName": "Ada", "lastName": "Lovelace"}, alias_generator=camel_case)
-```
-
-### Explicit Aliases Mapping
-
-Pass a dict to override specific fields:
-
-```python nocheck
-user = parse(User, {"uid": "abc"}, aliases={"user_id": "uid"})
-```
-
-### Case-Insensitive Parsing
-
-Enable case-insensitive key matching:
-
-```python nocheck
-user = parse(User, {"USER_ID": "abc"}, case_insensitive=True)
-```
-
 ## Extra Fields
 
 Control how extra fields (not in the dataclass) are handled:
@@ -313,7 +275,6 @@ Control how extra fields (not in the dataclass) are handled:
 | --- | --- |
 | `"ignore"` (default) | Extra fields are silently ignored |
 | `"forbid"` | Extra fields raise `ValueError` |
-| `"allow"` | Extra fields are attached to the instance |
 
 ```python nocheck
 from dataclasses import dataclass
@@ -323,16 +284,10 @@ from weakincentives.serde import parse
 class User:
     name: str
 
-# Extra fields attached as attributes
-user = parse(User, {"name": "Ada", "nickname": "Ace"}, extra="allow")
-assert user.nickname == "Ace"
-
 # Extra fields forbidden
 parse(User, {"name": "Ada", "extra": "value"}, extra="forbid")
 # Raises: ValueError("Extra keys not permitted: ['extra']")
 ```
-
-For slotted dataclasses, extras are stored in a `__extras__` attribute.
 
 ## Serialization with dump()
 
@@ -360,7 +315,6 @@ assert payload == {"name": "login", "timestamp": "2024-01-01T10:00:00"}
 | `by_alias` | `True` | Use field aliases in output |
 | `exclude_none` | `False` | Omit fields with `None` values |
 | `computed` | `False` | Include computed properties |
-| `alias_generator` | `None` | Function to transform field names |
 
 ### Computed Properties
 
@@ -545,7 +499,6 @@ user_schema = schema(User)
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `alias_generator` | `None` | Function to transform property names |
 | `extra` | `"ignore"` | Controls `additionalProperties` in schema |
 
 ## Error Handling

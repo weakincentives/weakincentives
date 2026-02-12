@@ -33,31 +33,6 @@ _UNION_TYPE = type(int | str)
 TYPE_REF_KEY: Final[str] = "__type__"
 
 
-class _ExtrasDescriptor:
-    """Descriptor storing extras for slotted dataclasses."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._store: dict[int, dict[str, object]] = {}
-
-    def __get__(
-        self, instance: object | None, owner: type[object]
-    ) -> dict[str, object] | None:
-        if instance is None:
-            return None
-        return self._store.get(id(instance))
-
-    def __set__(self, instance: object, value: dict[str, object] | None) -> None:
-        key = id(instance)
-        if value is None:
-            _ = self._store.pop(key, None)
-        else:
-            self._store[key] = dict(value)
-
-
-_SLOTTED_EXTRAS: Final[dict[type[object], _ExtrasDescriptor]] = {}
-
-
 def _ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
     """Return a deterministic list of metadata values."""
 
@@ -67,35 +42,10 @@ def _ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
     return items
 
 
-def _get_or_create_extras_descriptor(cls: type[object]) -> _ExtrasDescriptor:
-    """Get or create an extras descriptor for a slotted class."""
-    descriptor = _SLOTTED_EXTRAS.get(cls)
-    if descriptor is not None:
-        return descriptor
-    descriptor = _ExtrasDescriptor()
-    _SLOTTED_EXTRAS[cls] = descriptor
-    cls.__extras__ = descriptor  # type: ignore[attr-defined]
-    return descriptor
-
-
-def _set_extras(instance: object, extras: Mapping[str, object]) -> None:
-    """Attach extras to an instance, handling slotted dataclasses."""
-
-    extras_dict = dict(extras)
-    try:
-        object.__setattr__(instance, "__extras__", extras_dict)
-    except AttributeError:
-        descriptor = _get_or_create_extras_descriptor(instance.__class__)
-        descriptor.__set__(instance, extras_dict)
-
-
 @FrozenDataclass()
 class _ParseConfig:
-    extra: Literal["ignore", "forbid", "allow"]
+    extra: Literal["ignore", "forbid"]
     coerce: bool
-    case_insensitive: bool
-    alias_generator: Callable[[str], str] | None
-    aliases: Mapping[str, str] | None
     typevar_map: Mapping[object, type] = field(
         default_factory=lambda: dict[object, type]()
     )
@@ -269,11 +219,11 @@ def _run_validators(candidate: object, meta: Mapping[str, object], path: str) ->
     if not validators:
         return candidate
 
-    callables: Iterable[Callable[[object], object]]
+    callables: Iterable[object]
     if isinstance(validators, Iterable) and not isinstance(validators, (str, bytes)):
-        callables = cast(Iterable[Callable[[object], object]], validators)
+        callables = cast("Iterable[object]", validators)
     else:
-        callables = (cast(Callable[[object], object], validators),)
+        callables = (validators,)
 
     current = candidate
     for validator in callables:
@@ -281,11 +231,12 @@ def _run_validators(candidate: object, meta: Mapping[str, object], path: str) ->
     return current
 
 
-def _run_validator(
-    validator: Callable[[object], object], candidate: object, path: str
-) -> object:
+def _run_validator(validator: object, candidate: object, path: str) -> object:
+    if not callable(validator):
+        return candidate  # pragma: no cover - defensive
+    fn = cast("Callable[[object], object]", validator)
     try:
-        return validator(candidate)
+        return fn(candidate)
     except (TypeError, ValueError) as error:
         raise type(error)(f"{path}: {error}") from error
     except Exception as error:  # pragma: no cover - defensive
@@ -299,9 +250,10 @@ def _apply_converter(
     if not converter:
         return candidate
 
-    converter_fn = cast(Callable[[object], object], converter)
+    if not callable(converter):
+        return candidate  # pragma: no cover - defensive
     try:
-        return converter_fn(candidate)
+        return converter(candidate)
     except (TypeError, ValueError) as error:
         raise type(error)(f"{path}: {error}") from error
     except Exception as error:  # pragma: no cover - defensive
@@ -344,15 +296,12 @@ __all__ = [  # noqa: RUF022
     "MISSING_SENTINEL",
     "TYPE_REF_KEY",
     "_AnyType",
-    "_ExtrasDescriptor",
     "_ParseConfig",
-    "_SLOTTED_EXTRAS",
     "_UNION_TYPE",
     "_apply_constraints",
     "_merge_annotated_meta",
     "_ordered_values",
     "_resolve_type_identifier",
-    "_set_extras",
     "_type_identifier",
     "resolve_type_identifier",
     "type_identifier",

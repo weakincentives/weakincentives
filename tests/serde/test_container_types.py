@@ -213,5 +213,5 @@ def test_serialize_set_sorting_and_extra_policy_noop() -> None:
     class Simple:
         name: str
 
-    parsed = parse(Simple, {"name": "Ada"}, extra="allow")
+    parsed = parse(Simple, {"name": "Ada"})
     assert parsed.name == "Ada"
