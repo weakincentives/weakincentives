@@ -25,6 +25,7 @@ from uuid import uuid4
 
 import pytest
 
+from weakincentives.debug._bundle_writer import _get_compression_type
 from weakincentives.debug.bundle import (
     BUNDLE_FORMAT_VERSION,
     BundleConfig,
@@ -33,9 +34,8 @@ from weakincentives.debug.bundle import (
     BundleValidationError,
     BundleWriter,
     DebugBundle,
-    _compute_checksum,
-    _generate_readme,
-    _get_compression_type,
+    compute_checksum,
+    generate_readme,
 )
 from weakincentives.runtime.run_context import RunContext
 from weakincentives.runtime.session import Session
@@ -645,21 +645,21 @@ class TestExtractTranscript:
 class TestHelperFunctions:
     """Tests for helper functions."""
 
-    def test_compute_checksum(self) -> None:
+    def testcompute_checksum(self) -> None:
         """Test SHA-256 checksum computation."""
         content = b"test content"
-        checksum = _compute_checksum(content)
+        checksum = compute_checksum(content)
         assert len(checksum) == 64  # SHA-256 hex digest length
         # Verify deterministic
-        assert _compute_checksum(content) == checksum
+        assert compute_checksum(content) == checksum
 
-    def test_generate_readme(self) -> None:
+    def testgenerate_readme(self) -> None:
         """Test README generation."""
         manifest = BundleManifest(
             bundle_id="test-123",
             created_at="2024-01-15T10:30:00+00:00",
         )
-        readme = _generate_readme(manifest)
+        readme = generate_readme(manifest)
         assert "test-123" in readme
         assert "Debug Bundle" in readme
         assert "manifest.json" in readme
@@ -994,7 +994,8 @@ class TestWriteExceptionHandling:
         with pytest.raises(RuntimeError, match="Log collection failed"):
             with BundleWriter(tmp_path) as writer:
                 with patch(
-                    "weakincentives.debug.bundle.collect_all_logs", failing_collector
+                    "weakincentives.debug._bundle_writer.collect_all_logs",
+                    failing_collector,
                 ):
                     with writer.capture_logs():
                         pass
@@ -1536,9 +1537,16 @@ class TestRetentionPolicyIntegration:
         retention = BundleRetentionPolicy(max_age_seconds=86400)  # 24 hours
         config = BundleConfig(target=tmp_path, retention=retention)
 
-        with patch("weakincentives.debug.bundle.datetime") as mock_datetime:
+        with (
+            patch("weakincentives.debug.bundle.datetime") as mock_datetime,
+            patch(
+                "weakincentives.debug._bundle_retention.datetime"
+            ) as mock_retention_dt,
+        ):
             mock_datetime.now = future_now
             mock_datetime.fromisoformat = datetime.fromisoformat
+            mock_retention_dt.now = future_now
+            mock_retention_dt.fromisoformat = datetime.fromisoformat
             # Need to patch at the class level for the retention check
             with BundleWriter(tmp_path, config=config) as new_writer:
                 new_writer.write_request_input({"new": True})
@@ -1607,10 +1615,13 @@ class TestRetentionPolicyIntegration:
         config = BundleConfig(target=tmp_path, retention=retention)
 
         # Mock _enforce_retention to raise
-        def failing_enforce(self: object, policy: object, exclude_path: object) -> None:
+        def failing_enforce(**kwargs: object) -> None:
             raise RuntimeError("Simulated retention failure")
 
-        with patch.object(BundleWriter, "_enforce_retention", failing_enforce):
+        with patch(
+            "weakincentives.debug._bundle_retention._enforce_retention",
+            failing_enforce,
+        ):
             with BundleWriter(tmp_path, config=config) as writer:
                 writer.write_request_input({"test": True})
 
@@ -1859,7 +1870,9 @@ class TestRetentionPolicyIntegration:
             pytest.skip("Filesystem reuses inodes immediately; cannot test TOCTOU")
 
         # Call _delete_marked_bundles with stale identity
-        BundleWriter._delete_marked_bundles({paths[0]}, stale_identity)
+        from weakincentives.debug._bundle_retention import _delete_marked_bundles
+
+        _delete_marked_bundles({paths[0]}, stale_identity)
 
         # File should NOT be deleted due to inode mismatch
         assert paths[0].exists()
@@ -1881,8 +1894,10 @@ class TestRetentionPolicyIntegration:
         assert bundle_path.exists()
 
         # Call _delete_marked_bundles with empty identity dict (no tracking)
+        from weakincentives.debug._bundle_retention import _delete_marked_bundles
+
         empty_identity: dict[Path, tuple[int, int]] = {}
-        BundleWriter._delete_marked_bundles({bundle_path}, empty_identity)
+        _delete_marked_bundles({bundle_path}, empty_identity)
 
         # File should be deleted (no identity to verify against)
         assert not bundle_path.exists()
