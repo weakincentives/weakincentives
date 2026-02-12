@@ -16,7 +16,7 @@ These tests verify that the transaction system correctly rolls back both
 filesystem and session state when tools fail, ensuring atomic tool execution
 semantics.
 
-The tests use ClaudeAgentWorkspaceSection which provides a HostFilesystem backed
+The tests use WorkspaceSection which provides a HostFilesystem backed
 by a temporary directory. The HostFilesystem supports snapshotting via git commits
 for transactional rollback.
 
@@ -36,7 +36,6 @@ import pytest
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
 )
 from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.debug import BundleConfig, BundleWriter, DebugBundle
@@ -47,6 +46,7 @@ from weakincentives.prompt import (
     Tool,
     ToolContext,
     ToolResult,
+    WorkspaceSection,
 )
 from weakincentives.runtime.session import Replace, Session, SliceOp, reducer
 
@@ -386,7 +386,7 @@ def _build_transaction_test_prompt(
     write_succeed_tool: Tool[WriteAndSucceedParams, WriteAndSucceedResult],
     write_fail_tool: Tool[WriteAndFailParams, WriteAndFailResult],
     list_files_tool: Tool[ListFilesParams, ListFilesResult],
-    workspace_section: ClaudeAgentWorkspaceSection,
+    workspace_section: WorkspaceSection,
 ) -> PromptTemplate[TransactionTestResult]:
     """Build a prompt that tests transactional rollback behavior."""
     task_section = MarkdownSection[TransactionTestParams](
@@ -557,7 +557,7 @@ def test_transactional_tool_rollback_on_failure(tmp_path: Path) -> None:
     # Provide initial factory so reducers have state to work with on first dispatch
     session.install(ToolOperationLog, initial=ToolOperationLog)
 
-    workspace = ClaudeAgentWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
     bundle_dir = tmp_path / "bundles"
     bundle_dir.mkdir()
 
@@ -681,7 +681,7 @@ def _build_sequential_ops_prompt(
     write_succeed_tool: Tool[WriteAndSucceedParams, WriteAndSucceedResult],
     write_fail_tool: Tool[WriteAndFailParams, WriteAndFailResult],
     list_files_tool: Tool[ListFilesParams, ListFilesResult],
-    workspace_section: ClaudeAgentWorkspaceSection,
+    workspace_section: WorkspaceSection,
 ) -> PromptTemplate[SequentialOpsResult]:
     """Build a prompt for sequential operations with mixed success/failure."""
     task_section = MarkdownSection[SequentialOpsParams](
@@ -736,7 +736,7 @@ def test_transactional_tool_sequential_operations(tmp_path: Path) -> None:
     session = Session()
     # Provide initial factory so reducers have state to work with on first dispatch
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    workspace = ClaudeAgentWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
     bundle_dir = tmp_path / "bundles"
     bundle_dir.mkdir()
 

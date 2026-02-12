@@ -86,7 +86,7 @@ src/weakincentives/adapters/codex_app_server/
   adapter.py                # CodexAppServerAdapter
   config.py                 # CodexAppServerClientConfig, CodexAppServerModelConfig
   client.py                 # CodexAppServerClient (stdio JSON-RPC client)
-  workspace.py              # CodexWorkspaceSection
+  workspace.py              # (removed — use WorkspaceSection from weakincentives.prompt)
   _events.py                # Codex item/turn notifications → WINK ToolInvoked mapping
   _async.py                 # asyncio helpers for stdio NDJSON processing
 ```
@@ -231,9 +231,9 @@ The adapter should only process v2 notifications.
 
 ## Workspace Management
 
-### CodexWorkspaceSection
+### WorkspaceSection
 
-At `src/weakincentives/adapters/codex_app_server/workspace.py`:
+At `src/weakincentives/prompt/workspace.py` (exported from `weakincentives.prompt`):
 
 - Accepts `HostMount` tuples, `allowed_host_roots`, max-bytes budgets
 - Materializes temporary directory with copied files (with glob filtering,
@@ -244,10 +244,11 @@ At `src/weakincentives/adapters/codex_app_server/workspace.py`:
 - Provides `workspace_fingerprint` for session reuse validation
 - Binds a `HostFilesystem` resource scoped to the temp directory
 
-**Shared types:**
+**Workspace types** (from `weakincentives.prompt`):
 
 | Type | Description |
 |------|-------------|
+| `WorkspaceSection` | Generic workspace section for all adapters |
 | `HostMount` | Mount configuration (host_path, mount_path, include_glob, exclude_glob, max_bytes, follow_symlinks) |
 | `HostMountPreview` | Summary of materialized mount |
 | `WorkspaceBudgetExceededError` | Mount exceeds byte budget |
@@ -749,11 +750,10 @@ adapter = CodexAppServerAdapter(
 from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter,
     CodexAppServerClientConfig,
-    CodexWorkspaceSection,
 )
-from weakincentives.adapters.codex_app_server import HostMount
+from weakincentives.prompt import WorkspaceSection, HostMount
 
-workspace = CodexWorkspaceSection(
+workspace = WorkspaceSection(
     session=session,
     mounts=(HostMount(host_path="/abs/path/to/repo", mount_path="repo"),),
     allowed_host_roots=("/abs/path/to",),

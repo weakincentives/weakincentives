@@ -302,7 +302,7 @@ layout:
   dynamic tools, structured output, no extra deps), install command, and
   complete Python usage example showing `CodexAppServerAdapter`,
   `CodexAppServerClientConfig`, `CodexAppServerModelConfig`,
-  `CodexWorkspaceSection`, and `HostMount`
+  `WorkspaceSection`, and `HostMount`
 
 ---
 
@@ -436,7 +436,7 @@ runtimes have been removed (~19,000 lines across 94 files):
 - `weakincentives.optimizers` — Entire optimizer package (~652 lines)
 - `weakincentives.examples` — Entire examples package (5 scripts, ~778 lines)
 
-**Migration:** Use `ClaudeAgentWorkspaceSection` or `CodexWorkspaceSection`
+**Migration:** Use `WorkspaceSection` (from `weakincentives.prompt`)
 with host mounts instead of VFS tools. Use SDK native Bash tool instead of
 Asteval.
 
@@ -520,8 +520,8 @@ Full adapter implementation (`src/weakincentives/adapters/codex_app_server/`,
   transformation, tool bridging via MCP
 - **`CodexClient`**: Async JSON-RPC client with request/response correlation,
   notification routing, and subprocess lifecycle management
-- **`CodexWorkspaceSection`**: Host mount support with symlink-safe copying
-  and file filtering by glob/size
+- **`WorkspaceSection`**: Host mount support with symlink-safe copying
+  and file filtering by glob/size (now in `weakincentives.prompt`)
 - **`CodexAppServerModelConfig`/`CodexAppServerClientConfig`**: Configuration
   with defaults (model `"gpt-5.3-codex"`, approval policy, sandbox toggles)
 - Event mapping from Codex `item/completed` notifications to WINK `ToolInvoked`

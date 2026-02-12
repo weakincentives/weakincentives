@@ -227,7 +227,7 @@ response = ClaudeAgentSDKAdapter().evaluate(Prompt(template), session=session)
 ### Secure Code Review (No Tool Network)
 
 ```python
-workspace = ClaudeAgentWorkspaceSection(
+workspace = WorkspaceSection(
     session=session,
     mounts=(HostMount(host_path="/abs/path/to/repo", mount_path="repo"),),
     allowed_host_roots=("/abs/path/to",),

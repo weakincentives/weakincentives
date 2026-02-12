@@ -48,7 +48,7 @@ PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
 ├── WorkspaceDigestSection     ← auto-generated codebase summary
 ├── MarkdownSection (reference docs, progressive disclosure)
-├── ClaudeAgentWorkspaceSection ← contributes file tools via SDK
+├── WorkspaceSection            ← contributes file tools via SDK
 │   └── (nested workspace docs)
 └── MarkdownSection (user request)
 ```
@@ -263,14 +263,13 @@ uv add "weakincentives[claude-agent-sdk]"  # requires claude-code-sdk
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
-    HostMount,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
 )
+from weakincentives.prompt import WorkspaceSection, HostMount
 
-workspace = ClaudeAgentWorkspaceSection(
+workspace = WorkspaceSection(
     session=session,
     mounts=(HostMount(host_path="src", mount_path="src"),),
     allowed_host_roots=("/path/to/project",),
@@ -315,11 +314,10 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter,
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
-    CodexWorkspaceSection,
-    HostMount,
 )
+from weakincentives.prompt import WorkspaceSection, HostMount
 
-workspace = CodexWorkspaceSection(
+workspace = WorkspaceSection(
     session=session,
     mounts=(HostMount(host_path="src", mount_path="src"),),
     allowed_host_roots=("/path/to/project",),

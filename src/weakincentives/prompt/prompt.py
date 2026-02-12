@@ -485,11 +485,11 @@ class Prompt[OutputT]:
         """Return the filesystem from the workspace section, if present.
 
         Searches the template's section tree for a section implementing
-        WorkspaceSection and returns its filesystem property.
+        WorkspaceSectionProtocol and returns its filesystem property.
 
         Returns None if no workspace section exists in the template.
         """
-        from .protocols import WorkspaceSection
+        from .protocols import WorkspaceSectionProtocol
 
         snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
         if snapshot is None:  # pragma: no cover
@@ -497,7 +497,7 @@ class Prompt[OutputT]:
 
         for node in snapshot.sections:
             section = node.section
-            if isinstance(section, WorkspaceSection):
+            if isinstance(section, WorkspaceSectionProtocol):
                 return section.filesystem  # pragma: no cover
         return None
 

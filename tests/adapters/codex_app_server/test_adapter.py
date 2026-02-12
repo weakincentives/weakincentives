@@ -1096,14 +1096,12 @@ class TestResolveCwd:
 
     def test_workspace_section_extracts_root(self) -> None:
         """When prompt has a workspace section with HostFilesystem and no cwd."""
-        from weakincentives.adapters.codex_app_server.workspace import (
-            CodexWorkspaceSection,
-        )
+        from weakincentives.prompt import WorkspaceSection
 
         adapter = CodexAppServerAdapter()
         session, _ = _make_session()
 
-        workspace = CodexWorkspaceSection(session=session)
+        workspace = WorkspaceSection(session=session)
         workspace_root = str(workspace.temp_dir)
         try:
             template: PromptTemplate[object] = PromptTemplate(
@@ -1134,16 +1132,14 @@ class TestResolveCwd:
 
     def test_workspace_with_configured_cwd(self) -> None:
         """When prompt has workspace section AND cwd is configured, cwd wins."""
-        from weakincentives.adapters.codex_app_server.workspace import (
-            CodexWorkspaceSection,
-        )
+        from weakincentives.prompt import WorkspaceSection
 
         adapter = CodexAppServerAdapter(
             client_config=CodexAppServerClientConfig(cwd="/tmp/configured")
         )
         session, _ = _make_session()
 
-        workspace = CodexWorkspaceSection(session=session)
+        workspace = WorkspaceSection(session=session)
         try:
             template: PromptTemplate[object] = PromptTemplate(
                 ns="test",

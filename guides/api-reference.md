@@ -133,11 +133,11 @@ PromptResponse(prompt_name, text, output)
 - `WorkspaceDigestSection(session)` — Renders cached workspace summary
 - `set_workspace_digest(session, digest)` — Store digest in session state
 
-## weakincentives.adapters.claude_agent_sdk (Workspace)
+## weakincentives.prompt (Workspace)
 
 **Workspace sections:**
 
-- `ClaudeAgentWorkspaceSection(session, mounts)` — Workspace with file access
+- `WorkspaceSection(session, mounts)` — Workspace with file access
 - `HostMount(host_path, include_glob=(), exclude_glob=(), max_bytes=None)`
 
 ## weakincentives.evals

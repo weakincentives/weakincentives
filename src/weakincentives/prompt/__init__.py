@@ -310,7 +310,7 @@ from .protocols import (
     ProviderAdapterProtocol,
     RenderedPromptProtocol,
     ToolSuiteSection,
-    WorkspaceSection,
+    WorkspaceSectionProtocol,
 )
 from .rendering import RenderedPrompt
 from .section import Section, SectionVisibility
@@ -322,6 +322,14 @@ from .structured_output import (
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
+from .workspace import (
+    HostMount,
+    HostMountPreview,
+    WorkspaceBudgetExceededError,
+    WorkspaceSection,
+    WorkspaceSecurityError,
+    compute_workspace_fingerprint,
+)
 
 __all__ = [
     "DeadlineFeedback",
@@ -332,6 +340,8 @@ __all__ = [
     "FeedbackTrigger",
     "FileCreatedTrigger",
     "FileCreatedTriggerState",
+    "HostMount",
+    "HostMountPreview",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "Observation",
@@ -381,8 +391,12 @@ __all__ = [
     "ToolResult",
     "ToolSuiteSection",
     "VisibilityExpansionRequired",
+    "WorkspaceBudgetExceededError",
     "WorkspaceSection",
+    "WorkspaceSectionProtocol",
+    "WorkspaceSecurityError",
     "collect_feedback",
+    "compute_workspace_fingerprint",
     "hash_json",
     "hash_text",
     "parse_structured_output",

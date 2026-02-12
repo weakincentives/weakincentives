@@ -19,15 +19,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    HostMount,
-)
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 from weakincentives.contrib.optimizers import (
     WorkspaceDigestOptimizer,
     WorkspaceDigestResult,
 )
 from weakincentives.contrib.tools.digests import latest_workspace_digest
+from weakincentives.prompt import HostMount
 from weakincentives.runtime import InProcessDispatcher, Session
 
 

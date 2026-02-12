@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for Codex App Server workspace management."""
+"""Tests for workspace helper functions and data types."""
 
 from __future__ import annotations
 
@@ -21,8 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from weakincentives.adapters.codex_app_server.workspace import (
-    CodexWorkspaceSection,
+from weakincentives.prompt.workspace import (
     HostMount,
     HostMountPreview,
     WorkspaceBudgetExceededError,
@@ -34,22 +33,13 @@ from weakincentives.adapters.codex_app_server.workspace import (
     _resolve_mount_path,
     compute_workspace_fingerprint,
 )
-from weakincentives.filesystem import HostFilesystem
-from weakincentives.runtime.events import InProcessDispatcher
-from weakincentives.runtime.session import Session
-
-
-@pytest.fixture
-def session() -> Session:
-    dispatcher = InProcessDispatcher()
-    return Session(dispatcher=dispatcher, tags={"suite": "tests"})
 
 
 @pytest.fixture
 def temp_dir() -> Path:
     """Create a temporary directory for test fixtures."""
     d = Path(tempfile.mkdtemp(prefix="wink-test-"))
-    yield d
+    yield d  # type: ignore[misc]
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -64,6 +54,61 @@ def sample_source(temp_dir: Path) -> Path:
     sub.mkdir()
     (sub / "nested.py").write_text("# nested")
     return src
+
+
+# ---------------------------------------------------------------------------
+# HostMount / HostMountPreview
+# ---------------------------------------------------------------------------
+
+
+class TestHostMount:
+    def test_defaults(self) -> None:
+        mount = HostMount(host_path="/home/user/src")
+        assert mount.host_path == "/home/user/src"
+        assert mount.mount_path is None
+        assert mount.include_glob == ()
+        assert mount.exclude_glob == ()
+        assert mount.max_bytes is None
+        assert mount.follow_symlinks is False
+
+    def test_with_all_options(self) -> None:
+        mount = HostMount(
+            host_path="/home/user/src",
+            mount_path="project/src",
+            include_glob=("*.py", "*.txt"),
+            exclude_glob=("__pycache__/*",),
+            max_bytes=1000000,
+            follow_symlinks=True,
+        )
+        assert mount.host_path == "/home/user/src"
+        assert mount.mount_path == "project/src"
+        assert mount.include_glob == ("*.py", "*.txt")
+        assert mount.exclude_glob == ("__pycache__/*",)
+        assert mount.max_bytes == 1000000
+        assert mount.follow_symlinks is True
+
+
+class TestHostMountPreview:
+    def test_construction(self) -> None:
+        preview = HostMountPreview(
+            host_path="src",
+            resolved_host=Path("/home/user/project/src"),
+            mount_path="src",
+            entries=("main.py", "utils.py"),
+            is_directory=True,
+            bytes_copied=5000,
+        )
+        assert preview.host_path == "src"
+        assert preview.resolved_host == Path("/home/user/project/src")
+        assert preview.mount_path == "src"
+        assert preview.entries == ("main.py", "utils.py")
+        assert preview.is_directory is True
+        assert preview.bytes_copied == 5000
+
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
 
 
 class TestMatchesGlobs:
@@ -141,7 +186,6 @@ class TestCopyMountToTemp:
 
         preview = _copy_mount_to_temp(sample_source, tgt, mount)
 
-        # Only .py files
         assert all(e.endswith(".py") for e in preview.entries)
 
     def test_exclude_glob_filter(self, sample_source: Path, temp_dir: Path) -> None:
@@ -203,7 +247,6 @@ class TestCreateWorkspace:
             shutil.rmtree(path, ignore_errors=True)
 
     def test_cleanup_on_error(self) -> None:
-        """Workspace is cleaned up if mount resolution fails."""
         mount = HostMount(host_path="/nonexistent/path/abc/xyz")
         with pytest.raises(FileNotFoundError):
             _create_workspace([mount], allowed_host_roots=[])
@@ -274,126 +317,9 @@ class TestComputeWorkspaceFingerprint:
         assert len(fp) == 16
 
 
-class TestCodexWorkspaceSection:
-    def test_no_mounts(self, session: Session) -> None:
-        section = CodexWorkspaceSection(session=session)
-        try:
-            assert section.temp_dir.exists()
-            assert section.mount_previews == ()
-            assert isinstance(section.filesystem, HostFilesystem)
-        finally:
-            section.cleanup()
-
-    def test_with_mounts(self, session: Session, sample_source: Path) -> None:
-        mount = HostMount(host_path=str(sample_source))
-        section = CodexWorkspaceSection(
-            session=session,
-            mounts=[mount],
-            allowed_host_roots=[sample_source.parent],
-        )
-        try:
-            assert section.temp_dir.exists()
-            assert len(section.mount_previews) == 1
-        finally:
-            section.cleanup()
-
-    def test_session_property(self, session: Session) -> None:
-        section = CodexWorkspaceSection(session=session)
-        try:
-            assert section.session is session
-        finally:
-            section.cleanup()
-
-    def test_fingerprint(self, session: Session) -> None:
-        section = CodexWorkspaceSection(session=session)
-        try:
-            fp = section.workspace_fingerprint
-            assert isinstance(fp, str)
-            assert len(fp) == 16
-        finally:
-            section.cleanup()
-
-    def test_resources_provides_filesystem(self, session: Session) -> None:
-        section = CodexWorkspaceSection(session=session)
-        try:
-            registry = section.resources()
-            assert registry is not None
-        finally:
-            section.cleanup()
-
-    def test_cleanup(self, session: Session) -> None:
-        section = CodexWorkspaceSection(session=session)
-        temp = section.temp_dir
-        assert temp.exists()
-        section.cleanup()
-        assert not temp.exists()
-
-    def test_clone(self, session: Session) -> None:
-        section = CodexWorkspaceSection(session=session)
-        try:
-            new_dispatcher = InProcessDispatcher()
-            new_session = Session(dispatcher=new_dispatcher, tags={"suite": "tests"})
-            cloned = section.clone(session=new_session)
-            assert cloned.session is new_session
-            assert cloned.temp_dir == section.temp_dir
-        finally:
-            section.cleanup()
-
-    def test_clone_requires_session(self, session: Session) -> None:
-        section = CodexWorkspaceSection(session=session)
-        try:
-            with pytest.raises(TypeError, match="session is required"):
-                section.clone(session="not a session")
-        finally:
-            section.cleanup()
-
-    def test_clone_dispatcher_mismatch(self, session: Session) -> None:
-        section = CodexWorkspaceSection(session=session)
-        try:
-            other_dispatcher = InProcessDispatcher()
-            new_session = Session(
-                dispatcher=InProcessDispatcher(), tags={"suite": "tests"}
-            )
-            with pytest.raises(TypeError, match="dispatcher must match"):
-                section.clone(session=new_session, dispatcher=other_dispatcher)
-        finally:
-            section.cleanup()
-
-    def test_pre_created_workspace(self, session: Session, temp_dir: Path) -> None:
-        """Section can be created with pre-existing workspace data."""
-        workspace = temp_dir / "prebuilt"
-        workspace.mkdir()
-        previews = (
-            HostMountPreview(
-                host_path="/src",
-                resolved_host=Path("/src"),
-                mount_path="src",
-                entries=(),
-                is_directory=True,
-                bytes_copied=0,
-            ),
-        )
-        section = CodexWorkspaceSection(
-            session=session,
-            _temp_dir=workspace,
-            _mount_previews=previews,
-        )
-        assert section.temp_dir == workspace
-        assert section.mount_previews == previews
-
-    def test_created_at_timestamp(self, session: Session) -> None:
-        section = CodexWorkspaceSection(session=session)
-        try:
-            assert section.created_at is not None
-        finally:
-            section.cleanup()
-
-    def test_cleanup_already_cleaned(self, session: Session) -> None:
-        """Calling cleanup twice should not raise."""
-        section = CodexWorkspaceSection(session=session)
-        section.cleanup()
-        # Second cleanup should be safe
-        section.cleanup()
+# ---------------------------------------------------------------------------
+# Path traversal / symlink security
+# ---------------------------------------------------------------------------
 
 
 class TestPathTraversal:
@@ -405,7 +331,6 @@ class TestPathTraversal:
 
 class TestSymlinkEscape:
     def test_symlink_escape_skipped(self, temp_dir: Path) -> None:
-        """Symlinks pointing outside source are skipped when follow_symlinks=True."""
         src = temp_dir / "source"
         src.mkdir()
         (src / "legit.txt").write_text("ok")
@@ -424,7 +349,6 @@ class TestSymlinkEscape:
         assert "escape_link" not in preview.entries
 
     def test_copy_preserves_follow_symlinks_false(self, temp_dir: Path) -> None:
-        """shutil.copy2 called with follow_symlinks=False for single file."""
         src = temp_dir / "src.txt"
         src.write_text("content")
         tgt = temp_dir / "workspace" / "src.txt"
@@ -436,7 +360,6 @@ class TestSymlinkEscape:
             assert mock_copy.call_args[1].get("follow_symlinks") is False
 
     def test_symlink_file_skipped_when_not_following(self, temp_dir: Path) -> None:
-        """Symlink files are skipped for directory mounts when follow_symlinks=False."""
         src = temp_dir / "source"
         src.mkdir()
         (src / "kept.txt").write_text("ok")
@@ -460,7 +383,6 @@ class TestSingleFileSymlinkEscape:
     def test_single_file_symlink_rejected_when_not_following(
         self, temp_dir: Path
     ) -> None:
-        """Single-file symlink mount is rejected when follow_symlinks=False."""
         target_file = temp_dir / "real.txt"
         target_file.write_text("content")
         link = temp_dir / "link.txt"
@@ -473,7 +395,6 @@ class TestSingleFileSymlinkEscape:
             _copy_mount_to_temp(link, tgt, mount)
 
     def test_single_file_symlink_escaping_parent_rejected(self, temp_dir: Path) -> None:
-        """Single-file symlink escaping parent dir is rejected with follow_symlinks."""
         outside = temp_dir / "outside.txt"
         outside.write_text("secret")
 
@@ -489,7 +410,6 @@ class TestSingleFileSymlinkEscape:
             _copy_mount_to_temp(link, tgt, mount)
 
     def test_single_file_symlink_within_parent_allowed(self, temp_dir: Path) -> None:
-        """Single-file symlink within parent dir is allowed with follow_symlinks."""
         real_file = temp_dir / "real.txt"
         real_file.write_text("allowed")
         link = temp_dir / "link.txt"
@@ -503,44 +423,8 @@ class TestSingleFileSymlinkEscape:
         assert preview.bytes_copied == len("allowed")
 
 
-class TestCloneRefCounting:
-    def test_cleanup_original_preserves_temp_dir_when_clone_alive(
-        self, session: Session
-    ) -> None:
-        section = CodexWorkspaceSection(session=session)
-        new_session = Session(dispatcher=InProcessDispatcher(), tags={"suite": "tests"})
-        cloned = section.clone(session=new_session)
-        temp = section.temp_dir
-        assert temp.exists()
-
-        # Cleanup original — clone still alive, so temp_dir should persist
-        section.cleanup()
-        assert temp.exists()
-
-        # Cleanup clone (last ref) — temp_dir should be removed
-        cloned.cleanup()
-        assert not temp.exists()
-
-    def test_cleanup_clone_preserves_temp_dir_when_original_alive(
-        self, session: Session
-    ) -> None:
-        section = CodexWorkspaceSection(session=session)
-        new_session = Session(dispatcher=InProcessDispatcher(), tags={"suite": "tests"})
-        cloned = section.clone(session=new_session)
-        temp = section.temp_dir
-
-        # Cleanup clone first — original still alive
-        cloned.cleanup()
-        assert temp.exists()
-
-        # Cleanup original (last ref) — temp_dir should be removed
-        section.cleanup()
-        assert not temp.exists()
-
-
 class TestMaxBytesZero:
     def test_max_bytes_zero_rejects_files(self, temp_dir: Path) -> None:
-        """max_bytes=0 should reject any file."""
         src = temp_dir / "tiny.txt"
         src.write_text("a")
         tgt = temp_dir / "workspace" / "tiny.txt"
@@ -552,7 +436,6 @@ class TestMaxBytesZero:
     def test_max_bytes_zero_rejects_directory_files(
         self, sample_source: Path, temp_dir: Path
     ) -> None:
-        """max_bytes=0 should reject files in a directory walk."""
         tgt = temp_dir / "workspace" / "source"
         tgt.mkdir(parents=True)
         mount = HostMount(host_path=str(sample_source), max_bytes=0)

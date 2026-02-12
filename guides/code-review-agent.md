@@ -172,7 +172,7 @@ class ReferenceParams:
 
    - Renders cached workspace summary from session state
 
-1. **Workspace Tools** (`ClaudeAgentWorkspaceSection`)
+1. **Workspace Tools** (`WorkspaceSection`)
 
    - Provides file tools via Claude Agent SDK
    - Uses configured host mounts

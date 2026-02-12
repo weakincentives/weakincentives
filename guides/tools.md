@@ -179,7 +179,7 @@ guidance without tools is toothless**.
 Examples:
 
 - `WorkspaceDigestSection` — Renders cached workspace digest
-- `ClaudeAgentWorkspaceSection` — Workspace with file tools (Claude Agent SDK)
+- `WorkspaceSection` — Workspace with file tools (works with all adapters)
 
 Each section bundles the instructions ("here's how to use these tools") with the
 tools themselves. The model sees them together.

@@ -33,7 +33,6 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter,
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
-    CodexWorkspaceSection,
 )
 from weakincentives.evals import (
     BASELINE,
@@ -45,7 +44,12 @@ from weakincentives.evals import (
     Score,
     collect_results,
 )
-from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    WorkspaceSection,
+)
 from weakincentives.runtime import AgentLoop, InMemoryMailbox, Session
 from weakincentives.runtime.agent_loop import AgentLoopRequest, AgentLoopResult
 
@@ -113,7 +117,7 @@ class CodexMathSolverLoop(AgentLoop[MathProblem, MathAnswer]):
             AgentLoopRequest[MathProblem], AgentLoopResult[MathAnswer]
         ],
         session: Session,
-        workspace: CodexWorkspaceSection,
+        workspace: WorkspaceSection,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
 
@@ -291,7 +295,7 @@ def test_codex_math_eval_single_sample() -> None:
     ] = InMemoryMailbox(name="dummy-requests")
 
     session = Session(tags={"loop": "codex-math-solver"})
-    workspace = CodexWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
 
     try:
         adapter = _make_adapter(str(workspace.temp_dir))
@@ -344,7 +348,7 @@ def test_codex_math_eval_full_dataset() -> None:
     ] = InMemoryMailbox(name="dummy-requests")
 
     session = Session(tags={"loop": "codex-math-solver"})
-    workspace = CodexWorkspaceSection(session=session)
+    workspace = WorkspaceSection(session=session)
 
     try:
         adapter = _make_adapter(str(workspace.temp_dir))

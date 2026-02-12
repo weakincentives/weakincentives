@@ -12,7 +12,7 @@
 
 """Tests for prompt protocol conformance.
 
-Verifies that all implementations of ToolSuiteSection and WorkspaceSection
+Verifies that all implementations of ToolSuiteSection and WorkspaceSectionProtocol
 protocols conform to the expected interfaces.
 """
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from weakincentives.prompt.protocols import ToolSuiteSection, WorkspaceSection
+from weakincentives.prompt.protocols import ToolSuiteSection, WorkspaceSectionProtocol
 from weakincentives.runtime import InProcessDispatcher, Session
 
 
@@ -64,39 +64,38 @@ class TestToolSuiteSectionProtocol:
 
 
 class TestWorkspaceSectionProtocol:
-    """Tests for WorkspaceSection protocol conformance."""
+    """Tests for WorkspaceSectionProtocol conformance."""
 
     def test_protocol_is_runtime_checkable(self) -> None:
-        """WorkspaceSection can be used with isinstance."""
-        assert hasattr(WorkspaceSection, "__protocol_attrs__") or hasattr(
-            WorkspaceSection, "_is_runtime_protocol"
+        """WorkspaceSectionProtocol can be used with isinstance."""
+        assert hasattr(WorkspaceSectionProtocol, "__protocol_attrs__") or hasattr(
+            WorkspaceSectionProtocol, "_is_runtime_protocol"
         )
 
     def test_workspace_section_extends_tool_suite(self) -> None:
-        """WorkspaceSection inherits from ToolSuiteSection.
+        """WorkspaceSectionProtocol inherits from ToolSuiteSection.
 
         Note: We can't use issubclass() because protocols with non-method
         members (properties) don't support it. We verify inheritance through
         the MRO instead.
         """
         # Check inheritance via MRO (Method Resolution Order)
-        assert ToolSuiteSection in WorkspaceSection.__mro__
+        assert ToolSuiteSection in WorkspaceSectionProtocol.__mro__
 
-    def test_claude_agent_workspace_section_conforms(self, session: Session) -> None:
-        """ClaudeAgentWorkspaceSection implements WorkspaceSection."""
-        from weakincentives.adapters.claude_agent_sdk import ClaudeAgentWorkspaceSection
+    def test_workspace_section_conforms(self, session: Session) -> None:
+        """WorkspaceSection (concrete class) implements WorkspaceSectionProtocol."""
+        from weakincentives.prompt import WorkspaceSection
 
-        section = ClaudeAgentWorkspaceSection(session=session)
+        section = WorkspaceSection(session=session)
 
         try:
-            assert isinstance(section, WorkspaceSection)
+            assert isinstance(section, WorkspaceSectionProtocol)
             assert hasattr(section, "filesystem")
 
             from weakincentives.filesystem import Filesystem
 
             assert isinstance(section.filesystem, Filesystem)
         finally:
-            # Clean up temp directory created by section
             section.cleanup()
 
 
@@ -104,20 +103,26 @@ class TestProtocolExports:
     """Tests for protocol module exports."""
 
     def test_protocols_exported_from_prompt(self) -> None:
-        """ToolSuiteSection and WorkspaceSection exported from prompt module."""
+        """ToolSuiteSection and WorkspaceSectionProtocol exported from prompt module."""
         from weakincentives.prompt import (
             ToolSuiteSection as ExportedToolSuite,
-            WorkspaceSection as ExportedWorkspace,
+            WorkspaceSectionProtocol as ExportedWorkspaceProtocol,
         )
 
         assert ExportedToolSuite is ToolSuiteSection
-        assert ExportedWorkspace is WorkspaceSection
+        assert ExportedWorkspaceProtocol is WorkspaceSectionProtocol
 
     def test_protocols_in_module_all(self) -> None:
         """Protocols listed in __all__ exports."""
         from weakincentives import prompt
 
         assert "ToolSuiteSection" in prompt.__all__
+        assert "WorkspaceSectionProtocol" in prompt.__all__
+
+    def test_workspace_section_in_module_all(self) -> None:
+        """WorkspaceSection (concrete class) listed in __all__ exports."""
+        from weakincentives import prompt
+
         assert "WorkspaceSection" in prompt.__all__
 
 
@@ -156,7 +161,7 @@ class TestDuckTypingConformance:
 
         # Should pass both protocol checks
         assert isinstance(custom, ToolSuiteSection)
-        assert isinstance(custom, WorkspaceSection)
+        assert isinstance(custom, WorkspaceSectionProtocol)
 
     def test_method_signature_mismatch_still_passes_runtime_check(self) -> None:
         """Runtime check only verifies attribute existence, not signatures.
