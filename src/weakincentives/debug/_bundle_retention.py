@@ -134,7 +134,8 @@ def _collect_existing_bundles(
         - file_identity: Dict mapping path to (inode, device) for TOCTOU
           protection during deletion
     """
-    from .bundle import BundleValidationError, DebugBundle
+    from ._bundle_reader import DebugBundle
+    from .bundle import BundleValidationError
 
     search_root = _get_retention_search_root(config, target)
     bundles: list[tuple[Path, datetime, int]] = []

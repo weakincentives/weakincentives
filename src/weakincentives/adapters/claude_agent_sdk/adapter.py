@@ -38,6 +38,7 @@ from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import tool_to_spec
 from ._async_utils import run_async
 from ._bridge import MCPToolExecutionState, create_bridged_tools
+from ._ephemeral_home import EphemeralHome
 from ._errors import normalize_sdk_error
 from ._hooks import HookConstraints, HookContext
 from ._result_extraction import (
@@ -55,7 +56,7 @@ from ._sdk_options import (
 from ._transcript_collector import TranscriptCollector
 from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
-from .isolation import EphemeralHome, IsolationConfig, get_default_model
+from .isolation import IsolationConfig, get_default_model
 
 if TYPE_CHECKING:
     from ...prompt.tool import Tool

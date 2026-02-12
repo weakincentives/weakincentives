@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
-from ..debug.bundle import BundleValidationError, DebugBundle
+from ..debug import BundleValidationError, DebugBundle
 from ..runtime.logging import StructuredLogger, configure_logging, get_logger
 from . import debug_app
 from .docs_metadata import GUIDE_DESCRIPTIONS, SPEC_DESCRIPTIONS

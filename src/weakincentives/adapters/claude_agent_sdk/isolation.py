@@ -50,32 +50,22 @@ from pathlib import Path
 from typing import Any
 
 from ...dataclasses import FrozenDataclass
-from ._ephemeral_home import AwsConfigResolution, EphemeralHome
 from ._model_utils import (
     DEFAULT_BEDROCK_MODEL,
     DEFAULT_MODEL,
-    get_supported_bedrock_models,
-    to_anthropic_model_name,
-    to_bedrock_model_id,
 )
 
 _logger = logging.getLogger(__name__)
 
 __all__ = [
-    "DEFAULT_BEDROCK_MODEL",
-    "DEFAULT_MODEL",
     "AuthMode",
-    "AwsConfigResolution",
     "BedrockConfig",
-    "EphemeralHome",
     "IsolationAuthError",
     "IsolationConfig",
     "IsolationOptions",
     "NetworkPolicy",
     "SandboxConfig",
-    "get_supported_bedrock_models",
-    "to_anthropic_model_name",
-    "to_bedrock_model_id",
+    "get_default_model",
 ]
 
 

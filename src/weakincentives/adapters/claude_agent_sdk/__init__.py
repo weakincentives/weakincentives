@@ -270,7 +270,15 @@ See Also
 
 from __future__ import annotations
 
+from ._ephemeral_home import AwsConfigResolution, EphemeralHome
 from ._hooks import create_task_completion_stop_hook
+from ._model_utils import (
+    DEFAULT_BEDROCK_MODEL,
+    DEFAULT_MODEL,
+    get_supported_bedrock_models,
+    to_anthropic_model_name,
+    to_bedrock_model_id,
+)
 from ._task_completion import (
     CompositeChecker,
     PlanBasedChecker,
@@ -287,20 +295,13 @@ from .config import (
     ReasoningEffort,
 )
 from .isolation import (
-    DEFAULT_BEDROCK_MODEL,
-    DEFAULT_MODEL,
     AuthMode,
-    AwsConfigResolution,
     BedrockConfig,
-    EphemeralHome,
     IsolationAuthError,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
     get_default_model,
-    get_supported_bedrock_models,
-    to_anthropic_model_name,
-    to_bedrock_model_id,
 )
 
 __all__ = [

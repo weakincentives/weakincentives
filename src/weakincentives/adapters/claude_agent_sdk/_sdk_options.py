@@ -24,6 +24,7 @@ from typing import Any
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ._bridge import create_mcp_server
+from ._ephemeral_home import EphemeralHome
 from ._hooks import (
     HookContext,
     create_post_tool_use_hook,
@@ -36,7 +37,6 @@ from ._hooks import (
 )
 from ._transcript_collector import TranscriptCollector
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
-from .isolation import EphemeralHome
 
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "claude_agent_sdk"}

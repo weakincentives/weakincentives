@@ -19,28 +19,32 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from weakincentives.cli.query import (
+from weakincentives.cli._query_helpers import (
+    _flatten_json,
+    _get_table_description,
+    _infer_sqlite_type,
+    _json_to_sql_value,
+    _normalize_slice_type,
+    _safe_json_dumps,
+)
+from weakincentives.cli._query_tables import (
+    _create_dynamic_slice_table,
+    _extract_slices_from_snapshot,
+    _extract_tool_call_from_entry,
+    _is_tool_event,
+    _process_session_line,
+)
+from weakincentives.cli._query_transcript import (
     _apply_bridged_tool_details,
     _apply_notification_item_details,
     _apply_split_block_details,
     _apply_tool_result_details,
     _apply_transcript_content_fallbacks,
-    _create_dynamic_slice_table,
-    _extract_slices_from_snapshot,
-    _extract_tool_call_from_entry,
     _extract_tool_use_from_content,
     _extract_transcript_details,
     _extract_transcript_message_details,
     _extract_transcript_parsed_obj,
     _extract_transcript_row,
-    _flatten_json,
-    _get_table_description,
-    _infer_sqlite_type,
-    _is_tool_event,
-    _json_to_sql_value,
-    _normalize_slice_type,
-    _process_session_line,
-    _safe_json_dumps,
     _stringify_transcript_content,
     _stringify_transcript_mapping,
     _stringify_transcript_tool_use,

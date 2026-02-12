@@ -24,20 +24,19 @@ from tests.cli._query_fixtures import (
     create_bundle_with_logs,
     create_test_bundle,
 )
+from weakincentives.cli._query_helpers import _get_table_description
 from weakincentives.cli.query import (
     ColumnInfo,
     QueryError,
     SchemaOutput,
     TableInfo,
-    _get_table_description,
     export_jsonl,
     open_query_database,
 )
+from weakincentives.debug import BundleWriter, DebugBundle
 from weakincentives.debug.bundle import (
     BundleConfig,
     BundleValidationError,
-    BundleWriter,
-    DebugBundle,
 )
 from weakincentives.runtime.session import Session
 

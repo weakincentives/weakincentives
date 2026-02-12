@@ -23,15 +23,20 @@ import pytest
 
 from weakincentives.adapters.claude_agent_sdk._ephemeral_home import (
     AwsConfigResolution,
+    EphemeralHome,
     _copy_skill,
     _is_sensitive_key,
 )
-from weakincentives.adapters.claude_agent_sdk.isolation import (
+from weakincentives.adapters.claude_agent_sdk._model_utils import (
     DEFAULT_BEDROCK_MODEL,
     DEFAULT_MODEL,
+    get_supported_bedrock_models,
+    to_anthropic_model_name,
+    to_bedrock_model_id,
+)
+from weakincentives.adapters.claude_agent_sdk.isolation import (
     AuthMode,
     BedrockConfig,
-    EphemeralHome,
     IsolationAuthError,
     IsolationConfig,
     IsolationOptions,
@@ -40,9 +45,6 @@ from weakincentives.adapters.claude_agent_sdk.isolation import (
     _get_effective_env_value,
     _read_host_claude_settings,
     get_default_model,
-    get_supported_bedrock_models,
-    to_anthropic_model_name,
-    to_bedrock_model_id,
 )
 from weakincentives.skills import (
     SkillMount,

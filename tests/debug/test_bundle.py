@@ -25,6 +25,7 @@ from uuid import uuid4
 
 import pytest
 
+from weakincentives.debug import BundleWriter, DebugBundle
 from weakincentives.debug._bundle_writer import _get_compression_type
 from weakincentives.debug.bundle import (
     BUNDLE_FORMAT_VERSION,
@@ -32,8 +33,6 @@ from weakincentives.debug.bundle import (
     BundleError,
     BundleManifest,
     BundleValidationError,
-    BundleWriter,
-    DebugBundle,
     compute_checksum,
     generate_readme,
 )

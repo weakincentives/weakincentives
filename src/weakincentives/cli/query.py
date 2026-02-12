@@ -17,7 +17,6 @@ into a cached SQLite database.
 """
 
 # pyright: reportPrivateUsage=false
-# Re-exports private helpers from sub-modules for backward compatibility.
 
 from __future__ import annotations
 
@@ -30,46 +29,29 @@ from pathlib import Path
 from typing import Any, cast, override
 
 from ..dataclasses import FrozenDataclass
-from ..debug.bundle import BundleValidationError, DebugBundle
+from ..debug import BundleValidationError, DebugBundle
 from ..errors import WinkError
 from ..resources.protocols import Closeable
 from ..types import JSONValue
 from ._query_helpers import (
     _MAX_COLUMN_WIDTH,
     _SCHEMA_VERSION,
-    _flatten_json as _flatten_json,
-    _get_table_description as _get_table_description,
-    _infer_sqlite_type as _infer_sqlite_type,
-    _is_cache_valid as _is_cache_valid,
-    _json_to_sql_value as _json_to_sql_value,
-    _normalize_slice_type as _normalize_slice_type,
-    _safe_json_dumps as _safe_json_dumps,
+    _flatten_json,
+    _get_table_description,
+    _is_cache_valid,
 )
 from ._query_tables import (
     _VIEW_DEFINITIONS,
-    _create_dynamic_slice_table as _create_dynamic_slice_table,
-    _extract_slices_from_snapshot as _extract_slices_from_snapshot,
-    _extract_tool_call_from_entry as _extract_tool_call_from_entry,
+    _create_dynamic_slice_table,
+    _extract_tool_call_from_entry,
     _insert_error_from_log,
     _insert_errors_from_tool_calls,
-    _is_tool_event as _is_tool_event,
-    _process_session_line as _process_session_line,
+    _is_tool_event,
+    _process_session_line,
 )
 from ._query_transcript import (
     _TRANSCRIPT_INSERT_SQL,
-    _apply_bridged_tool_details as _apply_bridged_tool_details,
-    _apply_notification_item_details as _apply_notification_item_details,
-    _apply_split_block_details as _apply_split_block_details,
-    _apply_tool_result_details as _apply_tool_result_details,
-    _apply_transcript_content_fallbacks as _apply_transcript_content_fallbacks,
-    _extract_tool_use_from_content as _extract_tool_use_from_content,
-    _extract_transcript_details as _extract_transcript_details,
-    _extract_transcript_message_details as _extract_transcript_message_details,
-    _extract_transcript_parsed_obj as _extract_transcript_parsed_obj,
-    _extract_transcript_row as _extract_transcript_row,
-    _stringify_transcript_content as _stringify_transcript_content,
-    _stringify_transcript_mapping as _stringify_transcript_mapping,
-    _stringify_transcript_tool_use as _stringify_transcript_tool_use,
+    _extract_transcript_row,
 )
 
 

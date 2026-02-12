@@ -45,7 +45,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import (
     IO,
-    TYPE_CHECKING,
     Protocol,
     override,
     runtime_checkable,
@@ -55,10 +54,6 @@ from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
 from ..serde import dump
 from ..types import JSONValue
-
-if TYPE_CHECKING:
-    from ._bundle_reader import DebugBundle as DebugBundle
-    from ._bundle_writer import BundleWriter as BundleWriter
 
 _logger = logging.getLogger(__name__)
 
@@ -424,19 +419,6 @@ def compute_checksum(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def __getattr__(name: str) -> object:
-    """Lazy re-exports to avoid circular imports."""
-    if name == "DebugBundle":
-        from ._bundle_reader import DebugBundle
-
-        return DebugBundle
-    if name == "BundleWriter":
-        from ._bundle_writer import BundleWriter
-
-        return BundleWriter
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 __all__ = [
     "BUNDLE_FORMAT_VERSION",
     "BUNDLE_ROOT_DIR",
@@ -447,9 +429,7 @@ __all__ = [
     "BundleRetentionPolicy",
     "BundleStorageHandler",
     "BundleValidationError",
-    "BundleWriter",
     "CaptureInfo",
-    "DebugBundle",
     "IntegrityInfo",
     "PromptInfo",
     "RequestInfo",

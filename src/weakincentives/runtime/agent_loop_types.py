@@ -34,7 +34,8 @@ from .run_context import RunContext
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse
-    from ..debug.bundle import BundleConfig, BundleWriter
+    from ..debug import BundleWriter
+    from ..debug.bundle import BundleConfig
     from .session import Session
 
 

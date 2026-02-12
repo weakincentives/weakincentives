@@ -1233,7 +1233,8 @@ def test_eval_loop_dlq_without_reply_to() -> None:
 
 def test_eval_loop_creates_debug_bundle(tmp_path: Path) -> None:
     """EvalLoop creates debug bundle when debug_bundle is configured."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1334,7 +1335,8 @@ def test_eval_loop_bundle_contains_request_id_directory(tmp_path: Path) -> None:
 
 def test_eval_loop_bundle_captures_failed_evaluation(tmp_path: Path) -> None:
     """EvalLoop bundle captures evaluation failures."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1379,7 +1381,8 @@ def test_eval_loop_bundle_captures_failed_evaluation(tmp_path: Path) -> None:
 
 def test_eval_loop_bundle_captures_none_output(tmp_path: Path) -> None:
     """EvalLoop bundle captures None output scenario."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1460,7 +1463,8 @@ def test_eval_loop_no_bundle_without_config() -> None:
 
 def test_eval_loop_bundle_with_session_aware_evaluator(tmp_path: Path) -> None:
     """EvalLoop bundle works with session-aware evaluators."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
     from weakincentives.evals import EvalLoopConfig
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -1529,7 +1533,7 @@ def test_eval_loop_bundle_fallback_on_error(tmp_path: Path) -> None:
 
         # Mock BundleWriter to raise an exception
         with patch(
-            "weakincentives.debug.bundle.BundleWriter.__enter__",
+            "weakincentives.debug._bundle_writer.BundleWriter.__enter__",
             side_effect=RuntimeError("Simulated bundle creation failure"),
         ):
             eval_loop.run(max_iterations=1)

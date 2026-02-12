@@ -23,7 +23,8 @@ import pytest
 from tests.cli.helpers import FakeLogger
 from weakincentives import cli
 from weakincentives.cli import wink
-from weakincentives.debug.bundle import BundleConfig, BundleWriter
+from weakincentives.debug import BundleWriter
+from weakincentives.debug.bundle import BundleConfig
 from weakincentives.runtime.session import Session
 
 

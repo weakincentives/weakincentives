@@ -19,7 +19,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from weakincentives.debug.bundle import BundleConfig, BundleWriter
+from weakincentives.debug import BundleWriter
+from weakincentives.debug.bundle import BundleConfig
 from weakincentives.runtime.session import Session
 
 
