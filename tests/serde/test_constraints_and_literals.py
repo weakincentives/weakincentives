@@ -373,7 +373,7 @@ def test_schema_additional_types() -> None:
 
     @dataclass
     class ObjectSchema:
-        payload: object
+        payload: Annotated[object, {"untyped": True}]
         none_field: None = None
 
     object_schema = schema(ObjectSchema)

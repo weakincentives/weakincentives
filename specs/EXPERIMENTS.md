@@ -19,17 +19,17 @@ optimization runs, and controlled rollouts.
 | --------------- | ----------------------- | ---------- | ------------------------ |
 | `name` | `str` | - | Unique identifier |
 | `overrides_tag` | `str` | `"latest"` | Tag for prompt overrides |
-| `flags` | `Mapping[str, object]` | `{}` | Feature flags |
+| `flags` | `Mapping[str, str]` | `{}` | Feature flags (string values) |
 | `owner` | `str \| None` | `None` | Owner identifier |
 | `description` | `str \| None` | `None` | Human-readable description |
 
 **Methods:**
 
 | Method | Returns | Description |
-| ------------------------- | ------------ | -------------------------------- |
+| ------------------------- | -------------- | -------------------------------- |
 | `with_flag(key, value)` | `Experiment` | New experiment with flag added |
 | `with_tag(tag)` | `Experiment` | New experiment with new tag |
-| `get_flag(key, default?)` | `object` | Get flag value or default |
+| `get_flag(key, default?)` | `str \| None` | Get flag value or default |
 | `has_flag(key)` | `bool` | Check if flag exists |
 
 ### Sentinel Experiments
@@ -94,12 +94,13 @@ Includes `experiment_name` for downstream aggregation.
 
 ## Feature Flags
 
-| Flag Type | Example |
-| --------- | ----------------------------------------- |
-| Boolean | `{"verbose_logging": True}` |
-| Numeric | `{"max_retries": 5}` |
-| String | `{"model_override": "gpt-4o-mini"}` |
-| Composite | `{"tool_policy": {"allow": ["read"]}}` |
+All flag values are strings. Parse as needed in consuming code:
+
+| Flag Type | Example | Usage |
+| --------- | ----------------------------------- | --------------------------------- |
+| Boolean | `{"verbose_logging": "true"}` | `flag == "true"` |
+| Numeric | `{"max_retries": "5"}` | `int(flag)` |
+| String | `{"model_override": "gpt-4o-mini"}` | Direct use |
 
 ## A/B Testing Workflow
 
@@ -112,7 +113,7 @@ baseline = BASELINE  # or Experiment(name="baseline")
 treatment = Experiment(
     name="v2-concise",
     overrides_tag="v2",
-    flags={"max_tokens": 2000},
+    flags={"max_tokens": "2000"},
     description="Test shorter prompts with token limit",
 )
 ```
