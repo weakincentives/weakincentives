@@ -22,12 +22,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from ..types import JSONValue
-from .bundle import BundleValidationError
+from .bundle import BUNDLE_ROOT_DIR, BundleValidationError
 
 if TYPE_CHECKING:
     from .bundle import BundleManifest
-
-BUNDLE_ROOT_DIR = "debug_bundle"
 
 
 _logger = logging.getLogger(__name__)
