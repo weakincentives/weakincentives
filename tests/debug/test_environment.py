@@ -25,6 +25,7 @@ from unittest.mock import patch
 
 import pytest
 
+from weakincentives.debug import BundleWriter, DebugBundle
 from weakincentives.debug._git import (
     GitInfo,
     _is_sensitive_file,
@@ -33,7 +34,6 @@ from weakincentives.debug._git import (
     capture_git_diff,
     capture_git_info,
 )
-from weakincentives.debug.bundle import BundleWriter, DebugBundle
 from weakincentives.debug.environment import (
     CommandInfo,
     ContainerInfo,

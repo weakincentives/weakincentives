@@ -1264,7 +1264,8 @@ def test_loop_includes_run_context_on_error() -> None:
 
 def test_loop_with_debug_bundle_enabled(tmp_path: Path) -> None:
     """AgentLoop creates debug bundle when enabled in config."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1309,7 +1310,8 @@ def test_loop_with_debug_bundle_enabled(tmp_path: Path) -> None:
 def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
     """AgentLoop includes filesystem snapshot in debug bundle when provided."""
     from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
     from weakincentives.filesystem import Filesystem
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
@@ -1359,7 +1361,8 @@ def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
 
 def test_loop_with_debug_bundle_no_filesystem_in_resources(tmp_path: Path) -> None:
     """AgentLoop handles debug bundle when resources exist but no Filesystem."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1495,7 +1498,9 @@ def test_loop_with_bundle_failure_uses_handle_failure(tmp_path: Path) -> None:
         def failing_enter(self: object) -> object:
             raise RuntimeError("Bundle creation failed")
 
-        with patch("weakincentives.debug.bundle.BundleWriter.__enter__", failing_enter):
+        with patch(
+            "weakincentives.debug._bundle_writer.BundleWriter.__enter__", failing_enter
+        ):
             loop.run(max_iterations=1, wait_time_seconds=0)
 
         # The error should have been handled via handle_failure path
@@ -1515,7 +1520,8 @@ def test_loop_with_bundle_failure_uses_handle_failure(tmp_path: Path) -> None:
 
 def test_loop_with_execution_failure_but_bundle_created(tmp_path: Path) -> None:
     """AgentLoop includes bundle_path in error response when execution fails."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1563,7 +1569,8 @@ def test_loop_with_execution_failure_but_bundle_created(tmp_path: Path) -> None:
 
 def test_loop_debug_bundle_calls_session_methods(tmp_path: Path) -> None:
     """AgentLoop attempts to write session snapshots to debug bundle."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1605,7 +1612,8 @@ def test_loop_debug_bundle_calls_session_methods(tmp_path: Path) -> None:
 
 def test_loop_debug_bundle_includes_metrics(tmp_path: Path) -> None:
     """AgentLoop writes metrics.json to debug bundle with timing and token info."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1645,7 +1653,8 @@ def test_loop_debug_bundle_includes_metrics(tmp_path: Path) -> None:
 
 def test_loop_debug_bundle_metrics_include_budget(tmp_path: Path) -> None:
     """AgentLoop writes budget info to metrics.json when budget tracking is enabled."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1686,7 +1695,8 @@ def test_loop_debug_bundle_metrics_include_budget(tmp_path: Path) -> None:
 
 def test_loop_debug_bundle_includes_prompt_info(tmp_path: Path) -> None:
     """AgentLoop writes prompt info (ns, key, adapter) to bundle manifest."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1744,7 +1754,8 @@ def test_get_adapter_name_uses_codex_canonical_name() -> None:
 
 def test_loop_debug_bundle_run_context_has_session_id(tmp_path: Path) -> None:
     """AgentLoop writes run_context.json with session_id after execution."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1784,7 +1795,8 @@ def test_loop_debug_bundle_run_context_has_session_id(tmp_path: Path) -> None:
 
 def test_loop_debug_bundle_includes_prompt_overrides(tmp_path: Path) -> None:
     """AgentLoop writes prompt_overrides.json when visibility overrides are set."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1831,7 +1843,8 @@ def test_loop_debug_bundle_includes_prompt_overrides(tmp_path: Path) -> None:
 
 def test_loop_debug_bundle_per_request_override(tmp_path: Path) -> None:
     """AgentLoop uses per-request debug_bundle config override."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1876,7 +1889,8 @@ def test_loop_debug_bundle_per_request_override(tmp_path: Path) -> None:
 
 def test_loop_handles_visibility_expansion_with_bundle(tmp_path: Path) -> None:
     """AgentLoop handles visibility expansion correctly with bundling enabled."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
@@ -1919,7 +1933,8 @@ def test_loop_handles_visibility_expansion_with_bundle(tmp_path: Path) -> None:
 
 def test_loop_with_debug_bundle_includes_environment(tmp_path: Path) -> None:
     """AgentLoop includes environment capture in debug bundle."""
-    from weakincentives.debug.bundle import BundleConfig, DebugBundle
+    from weakincentives.debug import DebugBundle
+    from weakincentives.debug.bundle import BundleConfig
 
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="results"

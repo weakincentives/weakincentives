@@ -77,7 +77,8 @@ from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
-    from ..debug.bundle import BundleConfig, BundleWriter
+    from ..debug import BundleWriter
+    from ..debug.bundle import BundleConfig
     from ..experiment import Experiment
     from ..prompt import Prompt
     from .agent_loop_types import BundleContext
@@ -335,7 +336,7 @@ class AgentLoop[UserRequestT, OutputT](
                                           bundle_config=config) as ctx:
                 ...  # Bundle will be uploaded to S3 after finalization
         """
-        from ..debug.bundle import BundleWriter
+        from ..debug import BundleWriter
         from .agent_loop_types import BundleContext
 
         bundle_target.mkdir(parents=True, exist_ok=True)
@@ -715,7 +716,7 @@ class AgentLoop[UserRequestT, OutputT](
         bundle_config: BundleConfig,
     ) -> None:
         """Process message with debug bundling enabled."""
-        from ..debug.bundle import BundleWriter
+        from ..debug import BundleWriter
 
         if bundle_config.target is None:  # pragma: no cover
             # Defensive guard: _handle_message only calls this when enabled=True

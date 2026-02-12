@@ -772,17 +772,23 @@ class TestAdapterName:
 
 class TestBuildOutputFormat:
     def test_none_output_type_returns_none(self, untyped_prompt: Prompt[None]) -> None:
-        adapter = ClaudeAgentSDKAdapter()
+        from weakincentives.adapters.claude_agent_sdk._result_extraction import (
+            build_output_format,
+        )
+
         rendered = untyped_prompt.render()
-        result = adapter._build_output_format(rendered)
+        result = build_output_format(rendered)
         assert result is None
 
     def test_dataclass_output_type_returns_schema(
         self, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        adapter = ClaudeAgentSDKAdapter()
+        from weakincentives.adapters.claude_agent_sdk._result_extraction import (
+            build_output_format,
+        )
+
         rendered = simple_prompt.render()
-        result = adapter._build_output_format(rendered)
+        result = build_output_format(rendered)
 
         assert result is not None
         assert result["type"] == "json_schema"
@@ -793,9 +799,12 @@ class TestBuildOutputFormat:
     def test_nullable_fields_collapse_anyof_for_claude(
         self, nullable_prompt: Prompt[NullableOutput]
     ) -> None:
-        adapter = ClaudeAgentSDKAdapter()
+        from weakincentives.adapters.claude_agent_sdk._result_extraction import (
+            build_output_format,
+        )
+
         rendered = nullable_prompt.render()
-        result = adapter._build_output_format(rendered)
+        result = build_output_format(rendered)
 
         assert result is not None
         count_schema = result["schema"]["properties"]["count"]
@@ -934,7 +943,7 @@ class TestSDKConfigOptions:
         with (
             sdk_patches(),
             patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter.create_mcp_server",
+                "weakincentives.adapters.claude_agent_sdk._sdk_options.create_mcp_server",
                 mock_mcp_server,
             ),
         ):
@@ -1731,7 +1740,7 @@ class TestMessageContentExtraction:
 
     def test_extract_content_block_tool_use(self) -> None:
         """Tool use blocks include name, id, and input."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_content_block,
         )
 
@@ -1749,7 +1758,7 @@ class TestMessageContentExtraction:
 
     def test_extract_content_block_text(self) -> None:
         """Text blocks include full text content."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_content_block,
         )
 
@@ -1760,7 +1769,7 @@ class TestMessageContentExtraction:
 
     def test_extract_content_block_tool_result(self) -> None:
         """Tool result blocks include tool_use_id and full content."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_content_block,
         )
 
@@ -1778,7 +1787,7 @@ class TestMessageContentExtraction:
 
     def test_extract_content_block_tool_result_no_is_error(self) -> None:
         """Tool result blocks without is_error field work correctly."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_content_block,
         )
 
@@ -1795,7 +1804,7 @@ class TestMessageContentExtraction:
 
     def test_extract_content_block_unknown_type(self) -> None:
         """Unknown block types include all fields."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_content_block,
         )
 
@@ -1807,7 +1816,7 @@ class TestMessageContentExtraction:
 
     def test_extract_list_content_mixed(self) -> None:
         """List content extracts all blocks with full content."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_list_content,
         )
 
@@ -1830,7 +1839,7 @@ class TestMessageContentExtraction:
 
     def test_extract_list_content_skips_non_dict(self) -> None:
         """Non-dict blocks are skipped."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_list_content,
         )
 
@@ -2000,7 +2009,7 @@ class TestMessageContentExtraction:
 
     def test_extract_inner_message_content_string(self) -> None:
         """String content is extracted fully."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_inner_message_content,
         )
 
@@ -2010,7 +2019,7 @@ class TestMessageContentExtraction:
 
     def test_extract_inner_message_content_list(self) -> None:
         """List content is extracted as content_blocks."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_inner_message_content,
         )
 
@@ -2029,7 +2038,7 @@ class TestMessageContentExtraction:
 
     def test_extract_inner_message_content_no_role(self) -> None:
         """Inner message without role skips role field."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_inner_message_content,
         )
 
@@ -2040,7 +2049,7 @@ class TestMessageContentExtraction:
 
     def test_extract_inner_message_content_non_str_non_list(self) -> None:
         """Non-string/non-list content returns only role."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_inner_message_content,
         )
 
@@ -2050,7 +2059,7 @@ class TestMessageContentExtraction:
 
     def test_extract_message_content_with_inner_message(self) -> None:
         """Message with inner message dict extracts full content."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_message_content,
         )
 
@@ -2066,7 +2075,7 @@ class TestMessageContentExtraction:
 
     def test_extract_message_content_with_result(self) -> None:
         """ResultMessage with result field extracts full result."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_message_content,
         )
 
@@ -2081,7 +2090,7 @@ class TestMessageContentExtraction:
 
     def test_extract_message_content_with_structured_output(self) -> None:
         """Message with structured_output includes full structured output."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_message_content,
         )
 
@@ -2096,7 +2105,7 @@ class TestMessageContentExtraction:
 
     def test_extract_message_content_with_usage(self) -> None:
         """Message with usage includes usage data."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_message_content,
         )
 
@@ -2111,7 +2120,7 @@ class TestMessageContentExtraction:
 
     def test_extract_message_content_no_attrs(self) -> None:
         """Message without expected attributes returns empty dict."""
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._message_extraction import (
             _extract_message_content,
         )
 
@@ -2122,7 +2131,7 @@ class TestMessageContentExtraction:
 
 
 class TestVerifyTaskCompletion:
-    """Tests for _verify_task_completion method."""
+    """Tests for verify_task_completion function."""
 
     @pytest.fixture
     def session(self) -> Session:
@@ -2132,12 +2141,23 @@ class TestVerifyTaskCompletion:
     def adapter(self) -> ClaudeAgentSDKAdapter:
         return ClaudeAgentSDKAdapter()
 
+    @staticmethod
+    def _call_verify(adapter: ClaudeAgentSDKAdapter, **kwargs: Any) -> None:
+        from weakincentives.adapters.claude_agent_sdk._result_extraction import (
+            verify_task_completion,
+        )
+
+        verify_task_completion(
+            **kwargs, client_config=adapter._client_config, adapter=adapter
+        )
+
     def test_no_checker_configured_does_nothing(
         self, adapter: ClaudeAgentSDKAdapter, session: Session
     ) -> None:
         """When no checker is configured, verification passes."""
         # Default adapter has no task_completion_checker
-        adapter._verify_task_completion(
+        self._call_verify(
+            adapter,
             output={"key": "value"},
             session=session,
             stop_reason="structured_output",
@@ -2157,7 +2177,8 @@ class TestVerifyTaskCompletion:
                 task_completion_checker=PlanBasedChecker(plan_type=Plan),
             ),
         )
-        adapter._verify_task_completion(
+        self._call_verify(
+            adapter,
             output=None,
             session=session,
             stop_reason="structured_output",
@@ -2199,7 +2220,8 @@ class TestVerifyTaskCompletion:
         caplog.set_level(logging.WARNING)
 
         # Should not raise an error, just log a warning
-        adapter._verify_task_completion(
+        self._call_verify(
+            adapter,
             output={"summary": "done"},
             session=session,
             stop_reason="structured_output",
@@ -2246,7 +2268,8 @@ class TestVerifyTaskCompletion:
         )
 
         # Should not raise
-        adapter._verify_task_completion(
+        self._call_verify(
+            adapter,
             output={"summary": "done"},
             session=session,
             stop_reason="structured_output",
@@ -2284,7 +2307,8 @@ class TestVerifyTaskCompletion:
         exceeded_deadline.remaining.return_value = timedelta(seconds=-1)
 
         # Should not raise despite incomplete tasks
-        adapter._verify_task_completion(
+        self._call_verify(
+            adapter,
             output={"summary": "partial"},
             session=session,
             stop_reason="structured_output",
@@ -2325,7 +2349,8 @@ class TestVerifyTaskCompletion:
         tracker.record_cumulative("test", TokenUsage(input_tokens=50, output_tokens=50))
 
         # Should not raise despite incomplete tasks
-        adapter._verify_task_completion(
+        self._call_verify(
+            adapter,
             output={"summary": "partial"},
             session=session,
             stop_reason="structured_output",
@@ -2365,7 +2390,8 @@ class TestVerifyTaskCompletion:
         mock_prompt = MagicMock()
         mock_prompt.resources = mock_resources
 
-        adapter._verify_task_completion(
+        self._call_verify(
+            adapter,
             output={"summary": "done"},
             session=session,
             stop_reason="structured_output",
@@ -2409,7 +2435,8 @@ class TestVerifyTaskCompletion:
         mock_prompt = MagicMock()
         mock_prompt.resources = mock_resources
 
-        adapter._verify_task_completion(
+        self._call_verify(
+            adapter,
             output={"summary": "done"},
             session=session,
             stop_reason="structured_output",
@@ -2462,7 +2489,8 @@ class TestVerifyTaskCompletion:
         caplog.set_level(logging.WARNING)
 
         # Should log warning because tasks are incomplete and budget is not exhausted
-        adapter._verify_task_completion(
+        self._call_verify(
+            adapter,
             output={"summary": "partial"},
             session=session,
             stop_reason="structured_output",
@@ -2897,19 +2925,20 @@ class TestMultiturnEdgeCases:
 
 
 class TestCheckTaskCompletion:
-    """Tests for _check_task_completion helper method."""
+    """Tests for check_task_completion function."""
 
     def test_returns_false_none_for_empty_messages(self, session: Session) -> None:
-        """_check_task_completion returns (False, None) for empty message list."""
-        adapter = ClaudeAgentSDKAdapter()
-        checker = MagicMock()
-
+        """check_task_completion returns (False, None) for empty message list."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
             HookConstraints,
             HookContext,
         )
+        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
+            check_task_completion,
+        )
         from weakincentives.prompt import Prompt, PromptTemplate
 
+        checker = MagicMock()
         template: PromptTemplate[None] = PromptTemplate(
             ns="test", key="test", name="test"
         )
@@ -2923,7 +2952,7 @@ class TestCheckTaskCompletion:
             constraints=constraints,
         )
 
-        result = adapter._check_task_completion(checker, [], hook_context)
+        result = check_task_completion(checker, [], hook_context)
 
         assert result == (False, None)
         # Checker should not be called when round_messages is empty
@@ -2934,7 +2963,7 @@ class TestCollapseNullableAnyOf:
     """Tests for _collapse_nullable_any_of edge cases."""
 
     def test_non_dict_entries_returns_none(self) -> None:
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
             _collapse_nullable_any_of,
         )
 
@@ -2942,7 +2971,7 @@ class TestCollapseNullableAnyOf:
         assert result is None
 
     def test_no_null_entry_returns_none(self) -> None:
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
             _collapse_nullable_any_of,
         )
 
@@ -2950,7 +2979,7 @@ class TestCollapseNullableAnyOf:
         assert result is None
 
     def test_list_type_collapses_with_null(self) -> None:
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
             _collapse_nullable_any_of,
         )
 
@@ -2961,7 +2990,7 @@ class TestCollapseNullableAnyOf:
         assert result["type"] == ["string", "integer", "null"]
 
     def test_list_type_already_has_null(self) -> None:
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
             _collapse_nullable_any_of,
         )
 
@@ -2972,7 +3001,7 @@ class TestCollapseNullableAnyOf:
         assert result["type"] == ["string", "null"]
 
     def test_unknown_type_returns_none(self) -> None:
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
             _collapse_nullable_any_of,
         )
 
@@ -2984,7 +3013,7 @@ class TestNormalizeClaudeOutputSchema:
     """Tests for _normalize_claude_output_schema recursive cases."""
 
     def test_object_without_properties(self) -> None:
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
             _normalize_claude_output_schema,
         )
 
@@ -2993,7 +3022,7 @@ class TestNormalizeClaudeOutputSchema:
         assert result == {"type": "object"}
 
     def test_array_items_normalized(self) -> None:
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
             _normalize_claude_output_schema,
         )
 
@@ -3008,7 +3037,7 @@ class TestNormalizeClaudeOutputSchema:
         assert "anyOf" not in result["items"]
 
     def test_defs_normalized(self) -> None:
-        from weakincentives.adapters.claude_agent_sdk.adapter import (
+        from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
             _normalize_claude_output_schema,
         )
 
@@ -3024,35 +3053,44 @@ class TestNormalizeClaudeOutputSchema:
 
 
 class TestSupportedOptionNames:
-    """Tests for _supported_option_names and _filter_unsupported_options."""
+    """Tests for supported_option_names and filter_unsupported_options."""
 
     def test_non_dataclass_with_fixed_params(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk._sdk_options import (
+            supported_option_names,
+        )
+
         class FixedOptions:
             def __init__(self, *, cwd: str, max_turns: int) -> None:
                 pass
 
-        adapter = ClaudeAgentSDKAdapter()
-        result = adapter._supported_option_names(FixedOptions)
+        result = supported_option_names(FixedOptions)
         assert result == {"cwd", "max_turns"}
 
     def test_signature_raises_returns_none(self) -> None:
-        adapter = ClaudeAgentSDKAdapter()
-        result = adapter._supported_option_names(int)
+        from weakincentives.adapters.claude_agent_sdk._sdk_options import (
+            supported_option_names,
+        )
+
+        result = supported_option_names(int)
         assert result is None
 
     def test_filter_with_no_unsupported_keys(self) -> None:
+        from weakincentives.adapters.claude_agent_sdk._sdk_options import (
+            filter_unsupported_options,
+        )
+
         class FixedOptions:
             def __init__(self, *, cwd: str) -> None:
                 pass
 
-        adapter = ClaudeAgentSDKAdapter()
         kwargs = {"cwd": "/tmp"}
-        result = adapter._filter_unsupported_options(kwargs, options_type=FixedOptions)
+        result = filter_unsupported_options(kwargs, options_type=FixedOptions)
         assert result == {"cwd": "/tmp"}
 
 
 class TestResolveResponseWaitTimeout:
-    """Tests for deadline-exceeded path in _resolve_response_wait_timeout."""
+    """Tests for deadline-exceeded path in resolve_response_wait_timeout."""
 
     def _make_expired_hook_context(self, session: Session) -> Any:
         from weakincentives.adapters.claude_agent_sdk._hooks import (
@@ -3078,10 +3116,13 @@ class TestResolveResponseWaitTimeout:
 
     def test_deadline_already_expired_returns_stop(self, session: Session) -> None:
         """When deadline remaining <= 0, should signal stop."""
-        adapter = ClaudeAgentSDKAdapter()
+        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
+            resolve_response_wait_timeout,
+        )
+
         hook_context = self._make_expired_hook_context(session)
 
-        timeout_val, should_stop = adapter._resolve_response_wait_timeout(
+        timeout_val, should_stop = resolve_response_wait_timeout(
             hook_context=hook_context,
             continuation_round=0,
             message_count=0,
@@ -3090,16 +3131,18 @@ class TestResolveResponseWaitTimeout:
         assert timeout_val is None
 
     def test_next_response_message_returns_none_on_stop(self, session: Session) -> None:
-        """_next_response_message returns None when deadline expired."""
+        """next_response_message returns None when deadline expired."""
+        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
+            next_response_message,
+        )
 
         async def _run() -> None:
-            adapter = ClaudeAgentSDKAdapter()
             hook_context = self._make_expired_hook_context(session)
 
             async def fake_stream() -> AsyncGenerator[object, None]:
                 yield "should not reach"
 
-            result = await adapter._next_response_message(
+            result = await next_response_message(
                 response_stream=fake_stream().__aiter__(),
                 hook_context=hook_context,
                 continuation_round=0,

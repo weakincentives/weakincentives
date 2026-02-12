@@ -37,7 +37,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
 
-from ..debug.bundle import DebugBundle
+from ..debug import DebugBundle
 from ..errors import WinkError
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types import JSONValue

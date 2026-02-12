@@ -35,8 +35,8 @@ src/weakincentives/runtime/session/session.py
 src/weakincentives/serde/parse.py
 
 # ── src/ function-length ────────────────────────────────────────────
+src/weakincentives/adapters/claude_agent_sdk/_sdk_execution.py:run_sdk_query
 src/weakincentives/adapters/claude_agent_sdk/adapter.py:ClaudeAgentSDKAdapter._evaluate_async
-src/weakincentives/adapters/claude_agent_sdk/adapter.py:ClaudeAgentSDKAdapter._run_sdk_query
 src/weakincentives/adapters/claude_agent_sdk/adapter.py:ClaudeAgentSDKAdapter._run_with_prompt_context
 src/weakincentives/adapters/codex_app_server/adapter.py:CodexAppServerAdapter._run_codex
 src/weakincentives/prompt/rendering.py:PromptRenderer.render

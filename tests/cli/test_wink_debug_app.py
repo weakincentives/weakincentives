@@ -31,12 +31,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from weakincentives.cli import debug_app
+from weakincentives.debug import BundleWriter
 from weakincentives.debug.bundle import (
     BUNDLE_FORMAT_VERSION,
     BUNDLE_ROOT_DIR,
     BundleConfig,
     BundleManifest,
-    BundleWriter,
 )
 from weakincentives.runtime.session import Session
 

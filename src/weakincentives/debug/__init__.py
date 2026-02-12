@@ -287,6 +287,8 @@ Notes
 
 from __future__ import annotations
 
+from ._bundle_reader import DebugBundle
+from ._bundle_writer import BundleWriter
 from .bundle import (
     BundleConfig,
     BundleError,
@@ -294,8 +296,6 @@ from .bundle import (
     BundleRetentionPolicy,
     BundleStorageHandler,
     BundleValidationError,
-    BundleWriter,
-    DebugBundle,
 )
 from .environment import (
     CommandInfo,
