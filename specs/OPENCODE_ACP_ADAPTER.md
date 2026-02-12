@@ -88,12 +88,14 @@ not installed (following the pattern in `openai.py` and `claude_agent_sdk/*`).
 WINK Prompt/Session
   └─ OpenCodeACPAdapter.evaluate()
       ├─ Render WINK prompt → markdown text
-      ├─ Start in-process MCP server (reuses Claude SDK infrastructure)
+      ├─ Build in-process MCP server (reuses Claude SDK infrastructure)
+      ├─ Expose MCP server over HTTP (same process, localhost)
       ├─ Spawn: opencode acp (stdio JSON-RPC NDJSON)
-      ├─ ACP handshake: initialize → session/new
+      ├─ ACP handshake: initialize → session/new (passes HttpMcpServer URL)
+      ├─ OpenCode connects to MCP HTTP server → discovers WINK tools
       ├─ Inspect new_session response (models, modes)
       ├─ set_session_model / set_session_mode (best-effort)
-      ├─ conn.prompt(text + MCP server config)
+      ├─ conn.prompt(text)
       ├─ Stream: session/update notifications
       │    ├─ AgentMessageChunk (assistant output)
       │    ├─ AgentThoughtChunk (reasoning, if configured)
@@ -107,6 +109,23 @@ WINK Prompt/Session
       └─ Return PromptResponse(text, output, token_usage)
 ```
 
+The MCP server runs **in the adapter process** and is exposed over HTTP on
+localhost. This is the same pattern used by the Claude Agent SDK adapter — the
+`create_mcp_server()` shared infrastructure creates an `mcp.server.Server`
+instance with all bridged tools registered. The difference is how the agent
+connects:
+
+- **Claude Agent SDK:** The SDK receives the server instance directly as an
+  in-process config object (`{'type': 'sdk', 'instance': <Server>}`) and
+  manages the transport internally.
+- **OpenCode ACP:** OpenCode is a separate subprocess, so the adapter must
+  expose the same `mcp.server.Server` instance over HTTP (via
+  `StreamableHTTPServerTransport` or equivalent) and pass the URL as an
+  `HttpMcpServer` config on `new_session`.
+
+Both approaches use the same `BridgedTool` wrappers and the same
+`mcp.server.Server` — only the transport layer differs.
+
 ## Module Structure
 
 ```
@@ -118,6 +137,7 @@ src/weakincentives/adapters/opencode_acp/
   _state.py             # OpenCodeACPSessionState slice for session reuse
   _events.py            # ACP updates → WINK ToolInvoked mapping
   _structured_output.py # structured_output MCP tool
+  _mcp_http.py          # HTTP transport for in-process MCP server
   _async.py             # asyncio helpers
 ```
 
@@ -125,7 +145,8 @@ Workspace management uses the generic `WorkspaceSection` from
 `weakincentives.prompt.workspace` — no adapter-specific workspace module.
 
 MCP tool bridging reuses `create_mcp_server()` from the shared adapter module
-`src/weakincentives/adapters/_shared/_bridge.py`.
+`src/weakincentives/adapters/_shared/_bridge.py`. The returned
+`mcp.server.Server` instance is exposed over HTTP by `_mcp_http.py`.
 
 ## Configuration
 
@@ -204,7 +225,7 @@ MCP tool bridging reuses `create_mcp_server()` from the shared adapter module
 |--------------|-------------|--------------|
 | **Prompt** (PromptTemplate + sections + tools) | Session + `prompt()` input text | Render, format, send via `conn.prompt()` |
 | **Session** (event-sourced state) | ACP session (persistent, with load/fork/resume) | Map session lifecycle to WINK session events |
-| **Tool** (Tool[ParamsT, ResultT]) | MCP tool via `McpServerStdio` on `new_session` | Bridge via `create_bridged_tools()` + `create_mcp_server()` |
+| **Tool** (Tool[ParamsT, ResultT]) | MCP tool via `HttpMcpServer` on `new_session` | Bridge via `create_bridged_tools()` + `create_mcp_server()` + HTTP transport |
 | **Tool Execution** (transactional) | `ToolCallStart` / `ToolCallProgress` updates | Map terminal `ToolCallProgress` → `ToolInvoked` |
 | **Output** (structured dataclass) | MCP `structured_output` tool call | Register tool, validate response, deserialize |
 | **Events** (PromptRendered, ToolInvoked, PromptExecuted) | `session/update` notifications | Translate and dispatch |
@@ -507,9 +528,10 @@ Benefits:
 2. create_bridged_tools(..., adapter_name="opencode_acp")
 3. Create structured_output tool if output_type declared
 4. create_mcp_server(bridged_tools + structured_output_tool)
-5. Pass MCP server config as McpServerStdio on new_session(mcp_servers=[...])
-6. OpenCode connects to MCP server
-7. Tool call → in-process BridgedTool.__call__()
+5. Expose MCP server over HTTP on localhost (StreamableHTTPServerTransport)
+6. Pass MCP server URL as HttpMcpServer on new_session(mcp_servers=[...])
+7. OpenCode connects to MCP HTTP server
+8. Tool call → in-process BridgedTool.__call__()
    ├─ Snapshot session state
    ├─ Execute handler
    ├─ Dispatch ToolInvoked
@@ -559,7 +581,8 @@ At `adapter.py`: `_build_mcp_server()`:
 
 1. `create_bridged_tools(rendered.tools, adapter_name="opencode_acp", ...)`
 1. Create `structured_output` tool if `output_type` declared
-1. `create_mcp_server(all_tools)` → `McpServerStdio` config
+1. `create_mcp_server(all_tools)` → `mcp.server.Server` instance
+1. Expose server over HTTP on localhost → `HttpMcpServer` config
 
 ### 4. Spawn OpenCode
 
@@ -1103,24 +1126,24 @@ Most models support variants: `low`, `medium`, `high`, `xhigh` (appended as
 
 ### MCP Server Config Format
 
-ACP uses `McpServerStdio` from `acp.schema`:
+The adapter exposes the in-process MCP server over HTTP and passes its URL to
+OpenCode as an `HttpMcpServer`:
 
 ```python
-from acp.schema import McpServerStdio
+from acp.schema import HttpMcpServer
 
-McpServerStdio(
-    command="/path/to/server",
-    args=["--flag"],
-    env={"KEY": "VALUE"},
+HttpMcpServer(
+    url="http://127.0.0.1:{port}/mcp",
     name="wink-tools",
 )
 ```
 
-Fields: `command` (str, required), `args` (list[str] | None), `env`
-(dict[str, str] | None), `name` (str | None).
+Fields: `url` (str, required), `name` (str | None).
 
-OpenCode also supports `HttpMcpServer` and `SseMcpServer` per its
-`McpCapabilities`.
+OpenCode also supports `McpServerStdio` and `SseMcpServer` per its
+`McpCapabilities`, but `HttpMcpServer` is used here because the MCP server
+runs in the adapter process and OpenCode is a separate subprocess — stdio
+would require spawning yet another process.
 
 ## Related Specifications
 
