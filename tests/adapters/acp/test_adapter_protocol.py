@@ -126,7 +126,7 @@ def _patch_mcp() -> tuple[Any, Any]:
     """Return (mock_mcp_cls_patch, mock_create_patch) context managers."""
     return (
         patch("weakincentives.adapters.acp.adapter.MCPHttpServer"),
-        patch("weakincentives.adapters.acp.adapter.create_mcp_server"),
+        patch("weakincentives.adapters.acp.adapter.create_mcp_tool_server"),
     )
 
 
@@ -169,7 +169,7 @@ class TestEvaluateProtocol:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             result = adapter.evaluate(prompt, session=session)
 
         assert result.prompt_name == "test-prompt"
@@ -209,7 +209,7 @@ class TestEvaluateProtocol:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             result = adapter.evaluate(prompt, session=session)
 
         assert result is not None
@@ -243,7 +243,7 @@ class TestEvaluateProtocol:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
 
             with pytest.raises(PromptEvaluationError, match="ACP execution failed"):
                 adapter.evaluate(prompt, session=session)
@@ -277,7 +277,7 @@ class TestEvaluateProtocol:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
 
             with pytest.raises(VisibilityExpansionRequired):
                 adapter.evaluate(prompt, session=session)
@@ -307,7 +307,7 @@ class TestEvaluateProtocol:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
 
             with pytest.raises(PromptEvaluationError, match="Model rate limit"):
                 adapter.evaluate(prompt, session=session)
@@ -349,7 +349,7 @@ class TestEvaluateProtocol:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             result = adapter.evaluate(
                 prompt, session=session, budget=budget, budget_tracker=tracker
             )
@@ -388,7 +388,7 @@ class TestEvaluateProtocol:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             result = adapter.evaluate(prompt, session=session, budget=budget)
 
         assert result is not None
@@ -426,7 +426,7 @@ class TestEvaluateProtocol:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             result = adapter.evaluate(prompt, session=session)
 
         assert result is not None
@@ -472,7 +472,7 @@ class TestEvaluateProtocol:
             ),
         ):
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             result = adapter.evaluate(prompt, session=session)
 
         # Should succeed without raising empty-response error
@@ -518,7 +518,7 @@ class TestEvaluateProtocol:
             ) as mock_signal_cls,
         ):
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             mock_signal = MagicMock()
             mock_signal.get_and_clear.return_value = vis_exc
             mock_signal_cls.return_value = mock_signal
@@ -541,7 +541,7 @@ class TestEvaluateProtocol:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             result = adapter.evaluate(prompt, session=session)
 
         assert result is not None
@@ -593,7 +593,7 @@ class TestHandshakeAndConfigure:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             result = adapter.evaluate(prompt, session=session)
 
         assert result is not None
@@ -627,7 +627,7 @@ class TestHandshakeAndConfigure:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             # Should NOT raise — model set failure is non-fatal
             result = adapter.evaluate(prompt, session=session)
 
@@ -664,7 +664,7 @@ class TestHandshakeAndConfigure:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             # Should NOT raise — mode set failure is non-fatal
             result = adapter.evaluate(prompt, session=session)
 
@@ -684,7 +684,7 @@ class TestHandshakeAndConfigure:
         mcp_cls_p, create_p = _patch_mcp()
         with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
             _make_mcp_mock(mock_mcp_cls)
-            mock_create.return_value = {"instance": MagicMock()}
+            mock_create.return_value = MagicMock()
             result = adapter.evaluate(prompt, session=session)
 
         assert result is not None
@@ -716,7 +716,7 @@ class TestProtocolImportError:
             asyncio.run(
                 adapter._execute_protocol(
                     client=MagicMock(),
-                    mcp_config={},
+                    mcp_server=MagicMock(),
                     session=_make_mock_session(),
                     prompt_name="test",
                     prompt_text="hello",

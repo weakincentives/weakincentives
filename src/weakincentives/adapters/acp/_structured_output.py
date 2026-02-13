@@ -60,7 +60,7 @@ class StructuredOutputCapture:
 class StructuredOutputTool:
     """MCP-compatible tool for capturing structured output.
 
-    Duck-typed to be compatible with ``create_mcp_server()`` --- has ``.name``,
+    Duck-typed to be compatible with ``create_mcp_tool_server()`` --- has ``.name``,
     ``.description``, ``.input_schema``, and ``__call__``.
     """
 
@@ -114,7 +114,7 @@ def create_structured_output_tool(
     """Create a structured output tool and its capture.
 
     Returns ``(tool, capture)`` tuple.  The tool is compatible with
-    ``create_mcp_server()``.
+    ``create_mcp_tool_server()``.
     """
     element_schema = generate_schema(output_type)
 

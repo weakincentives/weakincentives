@@ -17,11 +17,14 @@ from __future__ import annotations
 import asyncio
 import socket
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...runtime.logging import StructuredLogger, get_logger
 
-__all__ = ["MCPHttpServer"]
+if TYPE_CHECKING:
+    from .._shared._bridge import BridgedTool
+
+__all__ = ["MCPHttpServer", "create_mcp_tool_server"]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "acp_mcp_http"})
 
@@ -58,6 +61,51 @@ def _make_asgi_app(transport: Any) -> Any:
     return asgi_app
 
 
+def create_mcp_tool_server(
+    bridged_tools: tuple[BridgedTool, ...],
+) -> Any:
+    """Create an MCP ``Server`` with tool handlers registered directly.
+
+    Uses the standard ``mcp`` library decorators (``@server.list_tools()`` and
+    ``@server.call_tool()``) instead of routing through ``claude-agent-sdk``.
+
+    Args:
+        bridged_tools: Tuple of BridgedTool instances to register.
+
+    Returns:
+        An ``mcp.server.Server`` ready to be passed to ``MCPHttpServer``.
+    """
+    from mcp.server import Server
+    from mcp.types import TextContent, Tool
+
+    server = Server(name="wink-tools")
+    tools_by_name: dict[str, BridgedTool] = {bt.name: bt for bt in bridged_tools}
+
+    @server.list_tools()
+    async def _list_tools() -> list[Tool]:  # noqa: RUF029
+        return [
+            Tool(
+                name=bt.name,
+                description=bt.description,
+                inputSchema=bt.input_schema,
+            )
+            for bt in bridged_tools
+        ]
+
+    @server.call_tool()
+    async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
+        bt = tools_by_name.get(name)
+        if bt is None:
+            return [TextContent(type="text", text=f"Unknown tool: {name}")]
+        result = await asyncio.to_thread(bt, arguments or {})
+        return [
+            TextContent(type="text", text=item.get("text", ""))
+            for item in result.get("content", [])
+        ]
+
+    return server
+
+
 class MCPHttpServer:
     """Wraps an MCP server instance with HTTP transport.
 
@@ -68,11 +116,11 @@ class MCPHttpServer:
 
     def __init__(
         self,
-        mcp_server_config: Any,
+        mcp_server: Any,
         *,
         server_name: str = "wink-tools",
     ) -> None:
-        self._mcp_server_config = mcp_server_config
+        self._mcp_server = mcp_server
         self._server_name = server_name
         self._port: int | None = None
         self._thread: threading.Thread | None = None
@@ -116,7 +164,7 @@ class MCPHttpServer:
 
         self._port = _find_free_port()
 
-        mcp_server: Server = self._mcp_server_config["instance"]
+        mcp_server: Server = self._mcp_server
         transport = StreamableHTTPServerTransport(mcp_session_id=None)
 
         config = uvicorn.Config(

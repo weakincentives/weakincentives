@@ -25,6 +25,7 @@ from weakincentives.adapters.acp._mcp_http import (
     MCPHttpServer,
     _find_free_port,
     _make_asgi_app,
+    create_mcp_tool_server,
 )
 
 from .conftest import MockHttpMcpServer
@@ -126,27 +127,27 @@ class TestMakeAsgiApp:
 
 class TestMCPHttpServerProperties:
     def test_server_name_default(self) -> None:
-        server = MCPHttpServer(mcp_server_config={})
+        server = MCPHttpServer(MagicMock())
         assert server.server_name == "wink-tools"
 
     def test_server_name_custom(self) -> None:
-        server = MCPHttpServer(mcp_server_config={}, server_name="custom")
+        server = MCPHttpServer(MagicMock(), server_name="custom")
         assert server.server_name == "custom"
 
     def test_port_raises_before_start(self) -> None:
-        server = MCPHttpServer(mcp_server_config={})
+        server = MCPHttpServer(MagicMock())
         with pytest.raises(RuntimeError, match="Server not started"):
             _ = server.port
 
     def test_url_uses_port(self) -> None:
-        server = MCPHttpServer(mcp_server_config={})
+        server = MCPHttpServer(MagicMock())
         server._port = 12345
         assert server.url == "http://127.0.0.1:12345/mcp"
 
 
 class TestMCPHttpServerToHttpMcpServer:
     def test_constructs_config(self) -> None:
-        server = MCPHttpServer(mcp_server_config={}, server_name="test-srv")
+        server = MCPHttpServer(MagicMock(), server_name="test-srv")
         server._port = 9999
 
         mock_acp_schema = MagicMock()
@@ -187,8 +188,7 @@ def _mock_server_deps() -> dict[str, MagicMock]:
 class TestMCPHttpServerLifecycle:
     def test_start_and_stop(self) -> None:
         async def _run() -> None:
-            config: dict[str, Any] = {"instance": MagicMock()}
-            server = MCPHttpServer(mcp_server_config=config, server_name="test")
+            server = MCPHttpServer(MagicMock(), server_name="test")
             await server.start()
             assert server._port is not None
             assert server._thread is not None
@@ -202,15 +202,14 @@ class TestMCPHttpServerLifecycle:
 
     def test_stop_without_start(self) -> None:
         async def _run() -> None:
-            server = MCPHttpServer(mcp_server_config={})
+            server = MCPHttpServer(MagicMock())
             await server.stop()
 
         asyncio.run(_run())
 
     def test_context_manager(self) -> None:
         async def _run() -> None:
-            config: dict[str, Any] = {"instance": MagicMock()}
-            server = MCPHttpServer(mcp_server_config=config, server_name="ctx")
+            server = MCPHttpServer(MagicMock(), server_name="ctx")
             async with server as srv:
                 assert srv is server
                 assert srv._port is not None
@@ -218,3 +217,168 @@ class TestMCPHttpServerLifecycle:
 
         with patch.dict(sys.modules, _mock_server_deps()):
             asyncio.run(_run())
+
+
+class TestCreateMcpToolServer:
+    def test_creates_server_with_tools(self) -> None:
+        """create_mcp_tool_server registers list_tools and call_tool handlers."""
+        bt = MagicMock()
+        bt.name = "my_tool"
+        bt.description = "A test tool"
+        bt.input_schema = {"type": "object", "properties": {}}
+
+        mock_server = MagicMock()
+        mock_tool_cls = MagicMock()
+        mock_text_content_cls = MagicMock()
+
+        with patch.dict(
+            sys.modules,
+            {
+                "mcp": MagicMock(),
+                "mcp.server": MagicMock(Server=MagicMock(return_value=mock_server)),
+                "mcp.types": MagicMock(
+                    Tool=mock_tool_cls, TextContent=mock_text_content_cls
+                ),
+            },
+        ):
+            result = create_mcp_tool_server((bt,))
+
+        assert result is mock_server
+        # list_tools and call_tool decorators should have been called
+        mock_server.list_tools.assert_called_once()
+        mock_server.call_tool.assert_called_once()
+
+    def test_call_tool_dispatches_to_bridged_tool(self) -> None:
+        """call_tool handler invokes the correct BridgedTool."""
+        bt = MagicMock()
+        bt.name = "greet"
+        bt.description = "Greet user"
+        bt.input_schema = {"type": "object", "properties": {}}
+        bt.return_value = {
+            "content": [{"type": "text", "text": "hello"}],
+            "isError": False,
+        }
+
+        # Capture the handlers registered via decorators
+        registered_handlers: dict[str, Any] = {}
+
+        mock_server = MagicMock()
+
+        def _capture_list_tools() -> Any:
+            def decorator(fn: Any) -> Any:
+                registered_handlers["list_tools"] = fn
+                return fn
+
+            return decorator
+
+        def _capture_call_tool() -> Any:
+            def decorator(fn: Any) -> Any:
+                registered_handlers["call_tool"] = fn
+                return fn
+
+            return decorator
+
+        mock_server.list_tools = _capture_list_tools
+        mock_server.call_tool = _capture_call_tool
+
+        mock_tool_cls = MagicMock(side_effect=lambda **kw: kw)
+        mock_text_content_cls = MagicMock(side_effect=lambda **kw: kw)
+
+        with patch.dict(
+            sys.modules,
+            {
+                "mcp": MagicMock(),
+                "mcp.server": MagicMock(Server=MagicMock(return_value=mock_server)),
+                "mcp.types": MagicMock(
+                    Tool=mock_tool_cls, TextContent=mock_text_content_cls
+                ),
+            },
+        ):
+            create_mcp_tool_server((bt,))
+
+        # Verify list_tools returns the tool
+        tools = asyncio.run(registered_handlers["list_tools"]())
+        assert len(tools) == 1
+        assert tools[0]["name"] == "greet"
+
+        # Verify call_tool dispatches to BridgedTool
+        result = asyncio.run(
+            registered_handlers["call_tool"]("greet", {"name": "world"})
+        )
+        bt.assert_called_once_with({"name": "world"})
+        assert len(result) == 1
+        assert result[0]["text"] == "hello"
+
+    def test_call_tool_unknown_returns_error(self) -> None:
+        """call_tool returns error text for unknown tool name."""
+        registered_handlers: dict[str, Any] = {}
+        mock_server = MagicMock()
+
+        def _capture_call_tool() -> Any:
+            def decorator(fn: Any) -> Any:
+                registered_handlers["call_tool"] = fn
+                return fn
+
+            return decorator
+
+        mock_server.list_tools = lambda: lambda fn: fn
+        mock_server.call_tool = _capture_call_tool
+
+        mock_text_content_cls = MagicMock(side_effect=lambda **kw: kw)
+
+        with patch.dict(
+            sys.modules,
+            {
+                "mcp": MagicMock(),
+                "mcp.server": MagicMock(Server=MagicMock(return_value=mock_server)),
+                "mcp.types": MagicMock(
+                    Tool=MagicMock(), TextContent=mock_text_content_cls
+                ),
+            },
+        ):
+            create_mcp_tool_server(())
+
+        result = asyncio.run(registered_handlers["call_tool"]("nonexistent", {}))
+        assert len(result) == 1
+        assert "Unknown tool" in result[0]["text"]
+
+    def test_call_tool_none_arguments(self) -> None:
+        """call_tool passes empty dict when arguments is None."""
+        bt = MagicMock()
+        bt.name = "no_args"
+        bt.description = "No args tool"
+        bt.input_schema = {"type": "object", "properties": {}}
+        bt.return_value = {
+            "content": [{"type": "text", "text": "ok"}],
+            "isError": False,
+        }
+
+        registered_handlers: dict[str, Any] = {}
+        mock_server = MagicMock()
+
+        def _capture_call_tool() -> Any:
+            def decorator(fn: Any) -> Any:
+                registered_handlers["call_tool"] = fn
+                return fn
+
+            return decorator
+
+        mock_server.list_tools = lambda: lambda fn: fn
+        mock_server.call_tool = _capture_call_tool
+
+        mock_text_content_cls = MagicMock(side_effect=lambda **kw: kw)
+
+        with patch.dict(
+            sys.modules,
+            {
+                "mcp": MagicMock(),
+                "mcp.server": MagicMock(Server=MagicMock(return_value=mock_server)),
+                "mcp.types": MagicMock(
+                    Tool=MagicMock(), TextContent=mock_text_content_cls
+                ),
+            },
+        ):
+            create_mcp_tool_server((bt,))
+
+        asyncio.run(registered_handlers["call_tool"]("no_args", None))
+        bt.assert_called_once_with({})

@@ -50,7 +50,8 @@ claude-agent-sdk = [
 ]
 acp = [
     "agent-client-protocol>=0.8.0",
-    "claude-agent-sdk>=0.1.27",
+    "mcp>=1.26.0",
+    "uvicorn>=0.40.0",
 ]
 wink = [
     "fastapi>=0.129.0",
@@ -242,8 +243,8 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["agent-client-protocol", "claude-agent-sdk", "mcp", "pyyaml", "redis"]
-DEP003 = ["mcp", "starlette", "uvicorn"]
+DEP002 = ["agent-client-protocol", "claude-agent-sdk", "mcp", "pyyaml", "redis", "uvicorn"]
+DEP003 = ["starlette"]
 DEP004 = ["weakincentives"]  # Package imports itself; declared as dev dep for testing
 
 [tool.pyright]

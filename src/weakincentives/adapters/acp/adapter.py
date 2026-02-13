@@ -38,12 +38,12 @@ from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transcript import TranscriptEmitter
 from ...runtime.watchdog import Heartbeat
 from ...types import ACP_ADAPTER_NAME, AdapterName
-from .._shared._bridge import BridgedTool, create_bridged_tools, create_mcp_server
+from .._shared._bridge import BridgedTool, create_bridged_tools
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ._async import run_async
 from ._events import dispatch_tool_invoked, extract_token_usage
-from ._mcp_http import MCPHttpServer
+from ._mcp_http import MCPHttpServer, create_mcp_tool_server
 from ._structured_output import create_structured_output_tool
 from ._transcript import ACPTranscriptBridge
 from .client import ACPClient
@@ -258,7 +258,7 @@ class ACPAdapter(ProviderAdapter[Any]):
             visibility_signal=visibility_signal,
         )
 
-        mcp_config = create_mcp_server(tuple(all_tools))
+        mcp_server = create_mcp_tool_server(tuple(all_tools))
 
         start_time = _utcnow()
         client = ACPClient(self._client_config, workspace_root=effective_cwd)
@@ -278,7 +278,7 @@ class ACPAdapter(ProviderAdapter[Any]):
             bridge.on_user_message(prompt_text)
             result = await self._execute_protocol(
                 client=client,
-                mcp_config=mcp_config,
+                mcp_server=mcp_server,
                 session=session,
                 prompt_name=prompt_name,
                 prompt_text=prompt_text,
@@ -418,7 +418,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         self,
         *,
         client: ACPClient,
-        mcp_config: dict[str, Any],
+        mcp_server: Any,
         session: SessionProtocol,
         prompt_name: str,
         prompt_text: str,
@@ -443,7 +443,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         adapter_name = self._adapter_name()
 
         # Start MCP HTTP server
-        mcp_http = MCPHttpServer(mcp_config, server_name="wink-tools")
+        mcp_http = MCPHttpServer(mcp_server, server_name="wink-tools")
         await mcp_http.start()
 
         try:
