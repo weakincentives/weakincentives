@@ -38,17 +38,17 @@ from tests.serde._fixtures import (
     user_payload,
 )
 from weakincentives.serde import clone, dump, parse, schema
+from weakincentives.serde._coercers import (
+    _bool_from_str,
+    _coerce_to_type,
+)
 from weakincentives.serde._utils import (
     _merge_annotated_meta,
     _ordered_values,
     _ParseConfig,
 )
-from weakincentives.serde.parse import (
-    _bool_from_str,
-    _coerce_to_type,
-)
 
-parse_module = importlib.import_module("weakincentives.serde.parse")
+coercers_module = importlib.import_module("weakincentives.serde._coercers")
 
 pytestmark = pytest.mark.core
 
@@ -366,7 +366,7 @@ def test_parse_nested_typevar_with_dataclass_value() -> None:
 
 
 def test_get_field_types_with_generic_class() -> None:
-    from weakincentives.serde.parse import _get_field_types
+    from weakincentives.serde._generics import _get_field_types
 
     @dataclass(slots=True, frozen=True)
     class GenericClass[T]:
@@ -383,7 +383,7 @@ def test_get_field_types_with_type_checking_imports() -> None:
     """Resolves forward references from TYPE_CHECKING imports."""
     # AgentLoopConfig has BundleConfig under TYPE_CHECKING
     from weakincentives.runtime.agent_loop_types import AgentLoopConfig
-    from weakincentives.serde.parse import _get_field_types
+    from weakincentives.serde._generics import _get_field_types
 
     result = _get_field_types(AgentLoopConfig)
     assert "debug_bundle" in result
@@ -392,7 +392,7 @@ def test_get_field_types_with_type_checking_imports() -> None:
 def test_resolve_type_checking_imports_relative() -> None:
     """Resolves a relative TYPE_CHECKING import."""
     from weakincentives.runtime.agent_loop_types import AgentLoopConfig
-    from weakincentives.serde.parse import _resolve_type_checking_imports
+    from weakincentives.serde._generics import _resolve_type_checking_imports
 
     resolved = _resolve_type_checking_imports(AgentLoopConfig, "BundleConfig")
     assert resolved is not None
@@ -402,7 +402,7 @@ def test_resolve_type_checking_imports_relative() -> None:
 def test_resolve_type_checking_imports_not_found() -> None:
     """Returns None for a name that doesn't exist in TYPE_CHECKING."""
     from weakincentives.runtime.agent_loop_types import AgentLoopConfig
-    from weakincentives.serde.parse import _resolve_type_checking_imports
+    from weakincentives.serde._generics import _resolve_type_checking_imports
 
     resolved = _resolve_type_checking_imports(AgentLoopConfig, "NoSuchType")
     assert resolved is None
@@ -412,7 +412,7 @@ def test_is_type_checking_guard_attribute() -> None:
     """Handles typing.TYPE_CHECKING as an Attribute node."""
     import ast
 
-    from weakincentives.serde.parse import _is_type_checking_guard
+    from weakincentives.serde._generics import _is_type_checking_guard
 
     # typing.TYPE_CHECKING
     node = ast.parse("typing.TYPE_CHECKING").body[0]
@@ -429,7 +429,7 @@ def test_is_type_checking_guard_non_match() -> None:
     """Returns False for non-TYPE_CHECKING guards."""
     import ast
 
-    from weakincentives.serde.parse import _is_type_checking_guard
+    from weakincentives.serde._generics import _is_type_checking_guard
 
     node = ast.parse("42").body[0]
     assert isinstance(node, ast.Expr)
@@ -440,7 +440,7 @@ def test_find_import_in_block_skips_non_import() -> None:
     """Skips non-ImportFrom statements in TYPE_CHECKING blocks."""
     import ast
 
-    from weakincentives.serde.parse import _find_import_in_block
+    from weakincentives.serde._generics import _find_import_in_block
 
     # A block containing a pass statement (not an import)
     tree = ast.parse("pass")
@@ -452,7 +452,7 @@ def test_find_import_in_block_bare_relative() -> None:
     """Bare relative imports like ``from . import _utils`` resolve correctly."""
     import ast
 
-    from weakincentives.serde.parse import _find_import_in_block
+    from weakincentives.serde._generics import _find_import_in_block
 
     # ``from . import _utils`` inside weakincentives.serde.parse
     source = "from . import _utils"
@@ -468,7 +468,7 @@ def test_find_import_in_block_bare_relative_no_match() -> None:
     """Bare relative import that doesn't match the target name returns None."""
     import ast
 
-    from weakincentives.serde.parse import _find_import_in_block
+    from weakincentives.serde._generics import _find_import_in_block
 
     source = "from . import other"
     tree = ast.parse(source)
@@ -478,14 +478,14 @@ def test_find_import_in_block_bare_relative_no_match() -> None:
 
 def test_resolve_import_module_absolute() -> None:
     """Absolute imports return the module path unchanged."""
-    from weakincentives.serde.parse import _resolve_import_module
+    from weakincentives.serde._generics import _resolve_import_module
 
     assert _resolve_import_module("foo.bar", 0, "any.module") == "foo.bar"
 
 
 def test_resolve_import_module_relative() -> None:
     """Relative imports are resolved against the current module."""
-    from weakincentives.serde.parse import _resolve_import_module
+    from weakincentives.serde._generics import _resolve_import_module
 
     result = _resolve_import_module(
         "debug.bundle", 2, "weakincentives.runtime.agent_loop_types"
@@ -496,7 +496,7 @@ def test_resolve_import_module_relative() -> None:
 def test_build_typevar_map_unresolved_typevar() -> None:
     from typing import TypeVar
 
-    from weakincentives.serde.parse import _build_typevar_map
+    from weakincentives.serde._generics import _build_typevar_map
 
     UnrelatedTypeVar = TypeVar("UnrelatedTypeVar")
 
@@ -647,14 +647,14 @@ def test_union_without_matching_type_reports_error(
         coerce=True,
     )
 
-    original_get_args = parse_module.get_args
+    original_get_args = coercers_module.get_args
 
     def fake_get_args(typ: object) -> tuple[object, ...]:
         if typ is union_type:
             return (type(None),)
         return original_get_args(typ)
 
-    monkeypatch.setattr(parse_module, "get_args", fake_get_args)
+    monkeypatch.setattr(coercers_module, "get_args", fake_get_args)
 
     with pytest.raises(TypeError) as exc:
         _coerce_to_type("value", union_type, None, "field", config)

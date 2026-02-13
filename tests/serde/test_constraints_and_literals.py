@@ -295,8 +295,8 @@ def test_string_normalization_for_membership_constraints() -> None:
 
 
 def test_none_branch_and_literal_coercion() -> None:
+    from weakincentives.serde._coercers import _coerce_to_type
     from weakincentives.serde._utils import _ParseConfig
-    from weakincentives.serde.parse import _coerce_to_type
 
     config = _ParseConfig(
         extra="ignore",
