@@ -547,7 +547,9 @@ class EphemeralHome:
     def _apply_explicit_api_key_env(self, env: dict[str, str]) -> None:
         """Apply environment for explicit API key mode (Bedrock disabled)."""
         api_key = self._isolation.api_key
-        assert api_key is not None  # Caller checks api_key is truthy
+        if api_key is None:  # pragma: no cover
+            msg = "api_key must not be None when using explicit API key mode"
+            raise ValueError(msg)
         env["CLAUDE_CODE_USE_BEDROCK"] = "0"
         env["CLAUDE_USE_BEDROCK"] = "0"
         env["DISABLE_AUTOUPDATER"] = "1"
