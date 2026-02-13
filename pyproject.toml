@@ -48,6 +48,10 @@ redis = [
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.35",
 ]
+acp = [
+    "agent-client-protocol>=0.8.0",
+    "claude-agent-sdk>=0.1.27",
+]
 wink = [
     "fastapi>=0.129.0",
     "markdown-it-py[linkify]>=4.0.0",
@@ -161,6 +165,11 @@ combine-as-imports = true
 "src/weakincentives/adapters/codex_app_server/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
 "src/weakincentives/adapters/codex_app_server/client.py" = ["C901", "PLR6301"]
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
+"src/weakincentives/adapters/acp/client.py" = ["ANN401", "PLR6301"]
+"src/weakincentives/adapters/acp/_mcp_http.py" = ["ANN401"]
+"src/weakincentives/adapters/acp/_structured_output.py" = ["ANN401"]
+"src/weakincentives/adapters/acp/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
+"src/weakincentives/adapters/opencode_acp/adapter.py" = ["PLR0913", "ANN401", "PLR6301"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0904", "PLR0913"]
 "src/weakincentives/runtime/session/slices/_memory.py" = ["PLR6301"]
 "src/weakincentives/runtime/transactions.py" = ["PLR0914"]
@@ -233,7 +242,8 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["claude-agent-sdk", "mcp", "pyyaml", "redis"]
+DEP002 = ["agent-client-protocol", "claude-agent-sdk", "mcp", "pyyaml", "redis"]
+DEP003 = ["mcp", "starlette", "uvicorn"]
 DEP004 = ["weakincentives"]  # Package imports itself; declared as dev dep for testing
 
 [tool.pyright]
@@ -249,6 +259,8 @@ exclude = [
     ".ruff_cache",
     "dist",
     "src/weakincentives/adapters/claude_agent_sdk",
+    "src/weakincentives/adapters/acp",
+    "src/weakincentives/adapters/opencode_acp",
 
     "src/weakincentives/docs",
 ]
@@ -290,9 +302,17 @@ ignore_names = [
     "visit_*",
     "expression",  # Protocol method parameter in InterpreterProtocol.eval
     "stream",  # Protocol method parameter in _YAMLModule.safe_load
+    "terminal_id",  # ACP Client protocol method parameter
 ]
 
 [tool.ty]
+
+[tool.ty.src]
+exclude = [
+    "src/weakincentives/adapters/acp",
+    "src/weakincentives/adapters/opencode_acp",
+    "src/weakincentives/adapters/claude_agent_sdk",
+]
 
 [tool.ty.environment]
 python-version = "3.12"

@@ -890,7 +890,8 @@ Both are passed via `thread/start` → `config.mcp_servers`.
 
 - `specs/ADAPTERS.md` — Provider adapter protocol
 - `specs/CLAUDE_AGENT_SDK.md` — Reference adapter architecture
-- `specs/OPENCODE_ACP_ADAPTER.md` — Second adapter, similar patterns
+- `specs/ACP_ADAPTER.md` — Generic ACP adapter
+- `specs/OPENCODE_ADAPTER.md` — OpenCode ACP adapter
 - `specs/PROMPTS.md` — Prompt system
 - `specs/SESSIONS.md` — Session state and events
 - `specs/TOOLS.md` — Tool registration and policies

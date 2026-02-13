@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-class DebugBundle:  # noqa: PLR0904 - read-only property accessors, not complex logic
+class DebugBundle:  # noqa: PLR0904
     """Load and inspect existing debug bundles.
 
     Example::

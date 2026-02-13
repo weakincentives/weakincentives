@@ -1,0 +1,155 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for ACP structured output tool."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from weakincentives.adapters.acp._structured_output import (
+    STRUCTURED_OUTPUT_TOOL_NAME,
+    StructuredOutputCapture,
+    StructuredOutputTool,
+    create_structured_output_tool,
+)
+
+
+class TestStructuredOutputCapture:
+    def test_initial_state(self) -> None:
+        capture = StructuredOutputCapture()
+        assert not capture.called
+        assert capture.data is None
+
+    def test_store_sets_data_and_called(self) -> None:
+        capture = StructuredOutputCapture()
+        capture.store({"key": "value"})
+        assert capture.called
+        assert capture.data == {"key": "value"}
+
+    def test_store_overwrites(self) -> None:
+        capture = StructuredOutputCapture()
+        capture.store("first")
+        capture.store("second")
+        assert capture.data == "second"
+        assert capture.called
+
+    def test_store_none_value(self) -> None:
+        """Storing None explicitly still marks as called."""
+        capture = StructuredOutputCapture()
+        capture.store(None)
+        assert capture.called
+        assert capture.data is None
+
+
+class TestStructuredOutputTool:
+    def test_name(self) -> None:
+        capture = StructuredOutputCapture()
+        tool = StructuredOutputTool(
+            json_schema={"type": "object"},
+            capture=capture,
+        )
+        assert tool.name == STRUCTURED_OUTPUT_TOOL_NAME
+
+    def test_description_contains_schema(self) -> None:
+        schema = {"type": "object", "properties": {"x": {"type": "integer"}}}
+        capture = StructuredOutputCapture()
+        tool = StructuredOutputTool(json_schema=schema, capture=capture)
+        assert "x" in tool.description
+        assert "integer" in tool.description
+        assert "Call this tool" in tool.description
+
+    def test_input_schema_wraps_in_data(self) -> None:
+        inner = {"type": "object", "properties": {"x": {"type": "integer"}}}
+        capture = StructuredOutputCapture()
+        tool = StructuredOutputTool(json_schema=inner, capture=capture)
+        assert tool.input_schema["type"] == "object"
+        assert "data" in tool.input_schema["properties"]
+        assert tool.input_schema["properties"]["data"] == inner
+        assert tool.input_schema["required"] == ["data"]
+
+    def test_call_with_valid_data(self) -> None:
+        capture = StructuredOutputCapture()
+        tool = StructuredOutputTool(
+            json_schema={"type": "object"},
+            capture=capture,
+        )
+        result = tool({"data": {"key": "value"}})
+        assert not result["isError"]
+        assert capture.called
+        assert capture.data == {"key": "value"}
+
+    def test_call_with_missing_data(self) -> None:
+        capture = StructuredOutputCapture()
+        tool = StructuredOutputTool(
+            json_schema={"type": "object"},
+            capture=capture,
+        )
+        result = tool({})
+        assert result["isError"]
+        assert not capture.called
+
+    def test_call_result_format(self) -> None:
+        capture = StructuredOutputCapture()
+        tool = StructuredOutputTool(
+            json_schema={"type": "object"},
+            capture=capture,
+        )
+        result = tool({"data": "hello"})
+        assert len(result["content"]) == 1
+        assert result["content"][0]["type"] == "text"
+        assert "received" in result["content"][0]["text"]
+
+
+class TestCreateStructuredOutputTool:
+    def test_object_container(self) -> None:
+        @dataclass(frozen=True)
+        class Item:
+            name: str
+            count: int
+
+        tool, capture = create_structured_output_tool(Item)
+        assert tool.name == STRUCTURED_OUTPUT_TOOL_NAME
+        assert not capture.called
+
+        # Schema should be for the dataclass itself
+        assert "properties" in tool._json_schema
+        assert "name" in tool._json_schema["properties"]
+        assert "count" in tool._json_schema["properties"]
+
+    def test_array_container(self) -> None:
+        @dataclass(frozen=True)
+        class Item:
+            name: str
+
+        tool, capture = create_structured_output_tool(Item, container="array")
+        assert not capture.called
+
+        # Schema should have items wrapper
+        assert "properties" in tool._json_schema
+        assert "items" in tool._json_schema["properties"]
+        items_prop = tool._json_schema["properties"]["items"]
+        assert items_prop["type"] == "array"
+        assert "items" in items_prop  # the element schema
+        assert "properties" in items_prop["items"]
+        assert "name" in items_prop["items"]["properties"]
+
+    def test_tool_callable(self) -> None:
+        @dataclass(frozen=True)
+        class Item:
+            name: str
+
+        tool, capture = create_structured_output_tool(Item)
+        result = tool({"data": {"name": "test"}})
+        assert not result["isError"]
+        assert capture.called
+        assert capture.data == {"name": "test"}

@@ -19,7 +19,7 @@ framework's core concepts:
 - **AgentLoop**: Durable request processing with visibility timeout semantics
 - **InMemoryMailbox**: Thread-safe in-memory queue for request/response routing
 - **InProcessDispatcher**: Synchronous event delivery for telemetry
-- **ProviderAdapter**: Provider-agnostic evaluation (Claude SDK or Codex)
+- **ProviderAdapter**: Provider-agnostic evaluation (Claude SDK, Codex, or OpenCode)
 - **Session**: Event-sourced state container
 
 The agent runs in a single process with the dispatcher, mailboxes, and loop
@@ -40,11 +40,13 @@ Architecture:
 Usage:
     python code_reviewer_example.py /path/to/project "Review the main module"
     python code_reviewer_example.py --adapter codex /path/to/project "Focus area"
+    python code_reviewer_example.py --adapter opencode --model openai/gpt-5.3-codex /path/to/project
 
 Requirements:
     pip install weakincentives
     # Claude SDK adapter requires claude-agent-sdk
     # Codex adapter requires codex CLI on PATH
+    # OpenCode adapter requires opencode CLI on PATH + agent-client-protocol
 """
 
 from __future__ import annotations
@@ -68,6 +70,11 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter,
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
+)
+from weakincentives.adapters.opencode_acp import (
+    OpenCodeACPAdapter,
+    OpenCodeACPAdapterConfig,
+    OpenCodeACPClientConfig,
 )
 from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.deadlines import Deadline
@@ -98,6 +105,7 @@ if TYPE_CHECKING:
 # Adapter name constants
 ADAPTER_CLAUDE = "claude"
 ADAPTER_CODEX = "codex"
+ADAPTER_OPENCODE = "opencode"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -302,11 +310,21 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
                 MarkdownSection(
                     title="Output Format",
                     template=textwrap.dedent("""
-                        Return a structured review with:
-                        - **summary**: 1-2 sentence overview of findings
-                        - **issues**: List of problems or concerns found
-                        - **suggestions**: Specific improvement recommendations
-                        - **positive_notes**: Good practices observed
+                        Return your review as a JSON object with these fields:
+                        - **summary** (string): 1-2 sentence overview of findings
+                        - **issues** (list of strings): Problems or concerns found
+                        - **suggestions** (list of strings): Specific improvement recommendations
+                        - **positive_notes** (list of strings): Good practices observed
+
+                        Example:
+                        ```json
+                        {
+                          "summary": "...",
+                          "issues": ["..."],
+                          "suggestions": ["..."],
+                          "positive_notes": ["..."]
+                        }
+                        ```
                     """).strip(),
                     key="output-format",
                 ),
@@ -352,12 +370,25 @@ def create_mailboxes() -> tuple[
     return requests, responses
 
 
-def create_adapter(adapter_name: str) -> ProviderAdapter[ReviewResponse]:
+def create_adapter(
+    adapter_name: str,
+    *,
+    model_id: str | None = None,
+) -> ProviderAdapter[ReviewResponse]:
     """Create the appropriate adapter for evaluation."""
     if adapter_name == ADAPTER_CODEX:
         return CodexAppServerAdapter(
             model_config=CodexAppServerModelConfig(),
             client_config=CodexAppServerClientConfig(approval_policy="never"),
+        )
+    if adapter_name == ADAPTER_OPENCODE:
+        return OpenCodeACPAdapter(
+            adapter_config=OpenCodeACPAdapterConfig(model_id=model_id),
+            client_config=OpenCodeACPClientConfig(
+                permission_mode="auto",
+                allow_file_reads=True,
+                allow_file_writes=False,
+            ),
         )
     return ClaudeAgentSDKAdapter[ReviewResponse](
         client_config=ClaudeAgentSDKClientConfig(
@@ -392,6 +423,7 @@ def run_review(
     focus: str,
     *,
     adapter_name: str = ADAPTER_CLAUDE,
+    model_id: str | None = None,
     deadline_minutes: int = DEFAULT_DEADLINE_MINUTES,
 ) -> ReviewResponse | None:
     """Run a code review using the AgentLoop pattern."""
@@ -401,7 +433,7 @@ def run_review(
 
     requests, responses = create_mailboxes()
 
-    adapter = create_adapter(adapter_name)
+    adapter = create_adapter(adapter_name, model_id=model_id)
     config = AgentLoopConfig(
         debug_bundle=BundleConfig(target=Path("debug_bundles/")),
     )
@@ -506,20 +538,26 @@ def _create_argument_parser() -> argparse.ArgumentParser:
             Examples:
               %(prog)s /path/to/project
               %(prog)s --adapter codex /path/to/project "Review auth logic"
+              %(prog)s --adapter opencode --model openai/gpt-5.3-codex /path/to/project
 
             Architecture:
               This example demonstrates the AgentLoop pattern with:
               - InMemoryMailbox for request/response routing
               - InProcessDispatcher for session telemetry
-              - Provider-agnostic adapter (Claude SDK or Codex)
+              - Provider-agnostic adapter (Claude SDK, Codex, or OpenCode)
               - Durable processing with visibility timeouts
         """),
     )
     parser.add_argument(
         "--adapter",
-        choices=[ADAPTER_CLAUDE, ADAPTER_CODEX],
+        choices=[ADAPTER_CLAUDE, ADAPTER_CODEX, ADAPTER_OPENCODE],
         default=ADAPTER_CLAUDE,
         help=f"Which adapter to use (default: {ADAPTER_CLAUDE})",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Model ID for the adapter (e.g. openai/gpt-5.3-codex)",
     )
     parser.add_argument(
         "project_path",
@@ -567,6 +605,7 @@ def main() -> int:
             args.project_path.resolve(),
             args.focus,
             adapter_name=args.adapter,
+            model_id=args.model,
             deadline_minutes=args.deadline,
         )
     except KeyboardInterrupt:
