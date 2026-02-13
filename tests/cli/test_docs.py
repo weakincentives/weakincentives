@@ -17,6 +17,18 @@ from __future__ import annotations
 import pytest
 
 from weakincentives.cli import wink
+from weakincentives.cli._docs import (
+    SearchOptions,
+    _extract_headings,
+    _format_doc_list,
+    _list_guides,
+    _list_specs,
+    _normalize_doc_name,
+    _read_doc,
+    _read_guide,
+    _read_spec,
+    _search_docs,
+)
 
 # =============================================================================
 # List subcommand tests
@@ -353,7 +365,7 @@ def test_docs_no_subcommand_shows_usage(capsys: pytest.CaptureFixture[str]) -> N
 
 def test_read_doc_reads_bundled_file() -> None:
     """_read_doc reads from weakincentives.docs package."""
-    content = wink._read_doc("llms.md")
+    content = _read_doc("llms.md")
 
     assert isinstance(content, str)
     assert len(content) > 100
@@ -361,7 +373,7 @@ def test_read_doc_reads_bundled_file() -> None:
 
 def test_read_spec_reads_single_spec() -> None:
     """_read_spec reads a single spec file with header."""
-    content = wink._read_spec("ADAPTERS")
+    content = _read_spec("ADAPTERS")
 
     assert isinstance(content, str)
     assert content.startswith("<!-- specs/ADAPTERS.md -->")
@@ -369,7 +381,7 @@ def test_read_spec_reads_single_spec() -> None:
 
 def test_read_guide_reads_single_guide() -> None:
     """_read_guide reads a single guide file with header."""
-    content = wink._read_guide("quickstart")
+    content = _read_guide("quickstart")
 
     assert isinstance(content, str)
     assert content.startswith("<!-- guides/quickstart.md -->")
@@ -377,7 +389,7 @@ def test_read_guide_reads_single_guide() -> None:
 
 def test_list_specs_returns_sorted_names() -> None:
     """_list_specs returns sorted spec names."""
-    specs = wink._list_specs()
+    specs = _list_specs()
 
     assert isinstance(specs, list)
     assert len(specs) > 0
@@ -387,7 +399,7 @@ def test_list_specs_returns_sorted_names() -> None:
 
 def test_list_guides_returns_sorted_names() -> None:
     """_list_guides returns sorted guide names."""
-    guides = wink._list_guides()
+    guides = _list_guides()
 
     assert isinstance(guides, list)
     assert len(guides) > 0
@@ -398,15 +410,15 @@ def test_list_guides_returns_sorted_names() -> None:
 def test_extract_headings_extracts_markdown_headings() -> None:
     """_extract_headings extracts all markdown headings."""
     content = "# Title\n\nSome text\n\n## Section\n\nMore text\n\n### Subsection\n"
-    headings = wink._extract_headings(content)
+    headings = _extract_headings(content)
 
     assert headings == ["# Title", "## Section", "### Subsection"]
 
 
 def test_search_docs_returns_matches_with_context() -> None:
     """_search_docs returns matches with context lines."""
-    opts = wink.SearchOptions(max_results=5)
-    results = wink._search_docs("Session", opts)
+    opts = SearchOptions(max_results=5)
+    results = _search_docs("Session", opts)
 
     assert isinstance(results, list)
     assert len(results) > 0
@@ -419,24 +431,24 @@ def test_search_docs_returns_matches_with_context() -> None:
 
 def test_search_docs_respects_max_results() -> None:
     """_search_docs respects max_results limit."""
-    opts = wink.SearchOptions(max_results=3)
-    results = wink._search_docs("the", opts)
+    opts = SearchOptions(max_results=3)
+    results = _search_docs("the", opts)
 
     assert len(results) <= 3
 
 
 def test_search_docs_invalid_regex_raises() -> None:
     """_search_docs raises ValueError for invalid regex."""
-    opts = wink.SearchOptions(use_regex=True)
+    opts = SearchOptions(use_regex=True)
     with pytest.raises(ValueError, match="Invalid regex"):
-        wink._search_docs("[invalid", opts)
+        _search_docs("[invalid", opts)
 
 
 def test_format_doc_list_formats_correctly() -> None:
     """_format_doc_list produces expected format."""
     names = ["FOO", "BARBAZ"]
     descriptions = {"FOO": "Foo description", "BARBAZ": "Bar baz desc"}
-    output = wink._format_doc_list(names, descriptions, "TEST")
+    output = _format_doc_list(names, descriptions, "TEST")
 
     assert "TEST (2 documents)" in output
     assert "FOO" in output
@@ -448,13 +460,13 @@ def test_normalize_doc_name_case_insensitive() -> None:
     """_normalize_doc_name finds names case-insensitively."""
     available = ["ADAPTERS", "SESSIONS", "quickstart"]
 
-    assert wink._normalize_doc_name("ADAPTERS", available) == "ADAPTERS"
-    assert wink._normalize_doc_name("adapters", available) == "ADAPTERS"
-    assert wink._normalize_doc_name("Adapters", available) == "ADAPTERS"
-    assert wink._normalize_doc_name("quickstart", available) == "quickstart"
-    assert wink._normalize_doc_name("QUICKSTART", available) == "quickstart"
-    assert wink._normalize_doc_name("adapters.md", available) == "ADAPTERS"
-    assert wink._normalize_doc_name("NONEXISTENT", available) is None
+    assert _normalize_doc_name("ADAPTERS", available) == "ADAPTERS"
+    assert _normalize_doc_name("adapters", available) == "ADAPTERS"
+    assert _normalize_doc_name("Adapters", available) == "ADAPTERS"
+    assert _normalize_doc_name("quickstart", available) == "quickstart"
+    assert _normalize_doc_name("QUICKSTART", available) == "quickstart"
+    assert _normalize_doc_name("adapters.md", available) == "ADAPTERS"
+    assert _normalize_doc_name("NONEXISTENT", available) is None
 
 
 # =============================================================================
