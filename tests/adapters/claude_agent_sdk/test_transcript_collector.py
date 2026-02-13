@@ -1174,6 +1174,111 @@ class TestTranscriptCollector:
 
         asyncio.run(run_test())
 
+    def test_tool_result_correlates_tool_name(self, tmp_path: Path) -> None:
+        """tool_result entries include tool_name from earlier tool_use blocks."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="tool_name_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            assistant_entry = {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_abc",
+                            "name": "read_file",
+                            "input": {"path": "foo.py"},
+                        },
+                    ],
+                },
+            }
+            user_entry = {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_abc",
+                            "content": "file contents",
+                        },
+                    ],
+                },
+            }
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text(
+                json.dumps(assistant_entry) + "\n" + json.dumps(user_entry) + "\n"
+            )
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == ["tool_use", "tool_result"]
+
+            # tool_result has tool_name from the earlier tool_use
+            assert collected[1]["detail"]["tool_name"] == "read_file"
+
+        asyncio.run(run_test())
+
+    def test_tool_use_block_missing_id_skips_name_recording(
+        self, tmp_path: Path
+    ) -> None:
+        """tool_use block without id does not record a name mapping."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="no_id_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            entry = {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "orphan_tool",
+                            "input": {},
+                        },
+                    ],
+                },
+            }
+            transcript = tmp_path / "test.jsonl"
+            transcript.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript))
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert types == ["tool_use"]
+
+            # No name mapping was recorded (block had no id)
+            tailer = collector._tailers["main"]
+            assert tailer.tool_names == {}
+
+        asyncio.run(run_test())
+
     def test_user_message_no_split_without_tool_result(self, tmp_path: Path) -> None:
         """User message without tool_result is not split."""
 

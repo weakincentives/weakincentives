@@ -81,6 +81,9 @@ class _TailerState:
     entry_count: int = 0
     """Entries emitted from this file."""
 
+    tool_names: dict[str, str] = field(default_factory=dict)
+    """Map of tool_use_id → tool_name for correlating results."""
+
 
 @dataclass(slots=True)
 class TranscriptCollector:

@@ -1880,6 +1880,26 @@ select:focus-visible {
   border-left-color: var(--color-text-faint);
 }
 
+.transcript-entry.type-thinking {
+  border-left-color: var(--color-primary-hover);
+}
+
+.transcript-entry.type-token_usage {
+  border-left-color: var(--color-text-faint);
+}
+
+.transcript-entry.type-error {
+  border-left-color: var(--color-error);
+}
+
+.transcript-entry.type-unknown {
+  border-left-color: var(--color-text-faint);
+}
+
+.transcript-entry.type-system_event {
+  border-left-color: var(--color-text-muted);
+}
+
 .transcript-header {
   display: flex;
   align-items: center;
@@ -2577,37 +2597,6 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.transcript-entry {
-  padding: 14px 16px;
-  background: var(--color-bg-subtle);
-  border-radius: var(--radius-sm);
-  border-left: 3px solid var(--color-border);
-}
-
-.transcript-entry.transcript-user {
-  border-left-color: var(--color-success);
-}
-
-.transcript-entry.transcript-assistant {
-  border-left-color: var(--color-primary);
-}
-
-.transcript-entry.transcript-tool {
-  border-left-color: var(--color-warning);
-}
-
-.transcript-entry.transcript-system {
-  border-left-color: var(--color-text-muted);
-}
-
-.transcript-entry.transcript-thinking {
-  border-left-color: var(--color-primary-hover);
-}
-
-.transcript-entry.transcript-summary {
-  border-left-color: var(--color-primary-text);
 }
 
 .transcript-meta {
