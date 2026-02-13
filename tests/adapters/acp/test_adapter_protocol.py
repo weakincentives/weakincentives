@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -137,6 +138,7 @@ def _make_mcp_mock(cls_mock: MagicMock) -> MagicMock:
     mock_mcp.stop = AsyncMock()
     mock_mcp.url = "http://127.0.0.1:9999/mcp"
     mock_mcp.server_name = "wink-tools"
+    mock_mcp.to_http_mcp_server.return_value = MagicMock()
     cls_mock.return_value = mock_mcp
     return mock_mcp
 
@@ -773,3 +775,47 @@ class TestProtocolImportError:
                     structured_capture=None,
                 )
             )
+
+
+class TestHandshakeTimeout:
+    """Test that startup_timeout_s is enforced on the handshake."""
+
+    def setup_method(self) -> None:
+        self._mocks = _setup_acp_mocks()
+
+    def teardown_method(self) -> None:
+        _cleanup_acp_mocks()
+
+    def test_handshake_timeout_raises_prompt_evaluation_error(self) -> None:
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+
+        mock_acp = self._mocks["acp"]
+
+        async def _hang_forever(*_args: Any, **_kwargs: Any) -> MockNewSessionResponse:
+            await asyncio.sleep(999)
+            return MockNewSessionResponse()  # pragma: no cover
+
+        @asynccontextmanager
+        async def spawn_hang(*args: Any, **kwargs: Any) -> Any:
+            conn = make_mock_connection()
+            # Make initialize hang indefinitely
+            conn.initialize = AsyncMock(side_effect=_hang_forever)
+            yield conn, make_mock_process()
+
+        mock_acp.spawn_agent_process = spawn_hang
+
+        adapter = ACPAdapter(
+            adapter_config=ACPAdapterConfig(quiet_period_ms=0),
+            client_config=ACPClientConfig(cwd="/tmp", startup_timeout_s=0.05),
+        )
+
+        prompt = _make_mock_prompt()
+        session = _make_mock_session()
+
+        mcp_cls_p, create_p = _patch_mcp()
+        with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
+            _make_mcp_mock(mock_mcp_cls)
+            mock_create.return_value = MagicMock()
+
+            with pytest.raises(PromptEvaluationError, match="ACP handshake timed out"):
+                adapter.evaluate(prompt, session=session)

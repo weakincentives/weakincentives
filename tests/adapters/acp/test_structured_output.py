@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from unittest.mock import patch
 
 from weakincentives.adapters.acp._structured_output import (
     STRUCTURED_OUTPUT_TOOL_NAME,
@@ -134,10 +135,64 @@ class TestStructuredOutputTool:
             json_schema={"type": "object"},
             capture=capture,
         )
-        result = tool({"data": "hello"})
+        result = tool({"data": {"key": "value"}})
         assert len(result["content"]) == 1
         assert result["content"][0]["type"] == "text"
         assert "received" in result["content"][0]["text"]
+
+    def test_call_with_schema_violation(self) -> None:
+        """Data that violates the JSON schema returns isError without storing."""
+        capture = StructuredOutputCapture()
+        schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }
+        tool = StructuredOutputTool(json_schema=schema, capture=capture)
+        result = tool({"data": {"name": 42}})
+        assert result["isError"]
+        assert "Schema validation failed" in result["content"][0]["text"]
+        assert not capture.called
+
+    def test_call_with_valid_data_passes_schema(self) -> None:
+        """Data matching the JSON schema stores successfully."""
+        capture = StructuredOutputCapture()
+        schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }
+        tool = StructuredOutputTool(json_schema=schema, capture=capture)
+        result = tool({"data": {"name": "Alice"}})
+        assert not result["isError"]
+        assert capture.called
+        assert capture.data == {"name": "Alice"}
+
+    def test_call_graceful_degradation_without_jsonschema(self) -> None:
+        """When jsonschema is unavailable, validation is skipped."""
+        import builtins
+
+        original_import = builtins.__import__
+
+        def _block_jsonschema(name: str, *args: object, **kwargs: object) -> object:
+            if name == "jsonschema":
+                raise ImportError("no jsonschema")
+            return original_import(name, *args, **kwargs)
+
+        capture = StructuredOutputCapture()
+        schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }
+        tool = StructuredOutputTool(json_schema=schema, capture=capture)
+
+        with patch("builtins.__import__", side_effect=_block_jsonschema):
+            result = tool({"data": {"name": 42}})
+
+        # Should succeed (skip validation) — existing behavior preserved
+        assert not result["isError"]
+        assert capture.called
 
 
 class TestCreateStructuredOutputTool:

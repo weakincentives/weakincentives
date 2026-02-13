@@ -106,6 +106,24 @@ class StructuredOutputTool:
                 "isError": True,
             }
 
+        # Validate against schema before storing (best-effort).
+        try:
+            import jsonschema
+
+            jsonschema.validate(data, self._json_schema)
+        except ImportError:
+            pass  # jsonschema not available — skip validation
+        except jsonschema.ValidationError as exc:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Schema validation failed: {exc.message}",
+                    }
+                ],
+                "isError": True,
+            }
+
         self._capture.store(data)
 
         return {

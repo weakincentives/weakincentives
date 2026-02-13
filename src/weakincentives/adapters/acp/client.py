@@ -108,7 +108,9 @@ class ACPClient:
         elif update_type == "AgentThoughtChunk":
             self._thought_chunks.append(update)
         elif update_type == "ToolCallStart":
-            tc_id = self._resolve_tool_id(getattr(update, "id", ""), is_start=True)
+            tc_id = self._resolve_tool_id(
+                getattr(update, "tool_call_id", ""), is_start=True
+            )
             self._tool_call_tracker[tc_id] = {
                 "title": getattr(update, "title", ""),
                 "status": "started",
@@ -137,18 +139,21 @@ class ACPClient:
 
     def _track_tool_progress(self, update: Any) -> None:
         """Track a ToolCallProgress update."""
-        tc_id = self._resolve_tool_id(getattr(update, "id", ""), is_start=False)
+        tc_id = self._resolve_tool_id(
+            getattr(update, "tool_call_id", ""), is_start=False
+        )
         status = getattr(update, "status", "")
-        output = getattr(update, "output", "")
+        raw_output = getattr(update, "raw_output", None)
+        output_str = str(raw_output)[:1000] if raw_output is not None else ""
         if tc_id in self._tool_call_tracker:
-            self._tool_call_tracker[tc_id]["status"] = status
-            if output:
-                self._tool_call_tracker[tc_id]["output"] = str(output)[:1000]
+            self._tool_call_tracker[tc_id]["status"] = str(status) if status else ""
+            if output_str:
+                self._tool_call_tracker[tc_id]["output"] = output_str
         else:
             self._tool_call_tracker[tc_id] = {
                 "title": getattr(update, "title", ""),
-                "status": status,
-                "output": str(output)[:1000] if output else "",
+                "status": str(status) if status else "",
+                "output": output_str,
             }
 
     async def request_permission(

@@ -24,11 +24,13 @@ import pytest
 from weakincentives.adapters.acp._mcp_http import (
     MCPHttpServer,
     _find_free_port,
+    _get_header,
     _make_asgi_app,
+    _send_401,
     create_mcp_tool_server,
 )
 
-from .conftest import MockHttpMcpServer
+from .conftest import MockHttpHeader, MockHttpMcpServer
 
 
 class TestFindFreePort:
@@ -45,13 +47,19 @@ class TestFindFreePort:
 
 
 class TestMakeAsgiApp:
+    _TOKEN = "test-token-abc"
+
     def test_delegates_http_to_transport(self) -> None:
         transport = MagicMock()
         transport.handle_request = AsyncMock()
 
         async def _run() -> None:
-            app = _make_asgi_app(transport)
-            scope: dict[str, Any] = {"type": "http", "path": "/mcp"}
+            app = _make_asgi_app(transport, self._TOKEN)
+            scope: dict[str, Any] = {
+                "type": "http",
+                "path": "/mcp",
+                "headers": [(b"authorization", b"Bearer test-token-abc")],
+            }
             receive = MagicMock()
             send = MagicMock()
             await app(scope, receive, send)
@@ -70,7 +78,7 @@ class TestMakeAsgiApp:
         sent: list[dict[str, str]] = []
 
         async def _run() -> None:
-            app = _make_asgi_app(transport)
+            app = _make_asgi_app(transport, self._TOKEN)
 
             async def receive() -> dict[str, str]:
                 return next(messages)
@@ -98,7 +106,7 @@ class TestMakeAsgiApp:
         sent: list[dict[str, str]] = []
 
         async def _run() -> None:
-            app = _make_asgi_app(transport)
+            app = _make_asgi_app(transport, self._TOKEN)
 
             async def receive() -> dict[str, str]:
                 return next(messages)
@@ -118,11 +126,80 @@ class TestMakeAsgiApp:
         transport = MagicMock()
 
         async def _run() -> None:
-            app = _make_asgi_app(transport)
+            app = _make_asgi_app(transport, self._TOKEN)
             await app({"type": "websocket"}, MagicMock(), MagicMock())
             transport.handle_request.assert_not_called()
 
         asyncio.run(_run())
+
+    def test_rejects_missing_auth_header(self) -> None:
+        transport = MagicMock()
+        transport.handle_request = AsyncMock()
+        sent: list[dict[str, Any]] = []
+
+        async def _run() -> None:
+            app = _make_asgi_app(transport, self._TOKEN)
+            scope: dict[str, Any] = {"type": "http", "path": "/mcp", "headers": []}
+
+            async def send(msg: dict[str, Any]) -> None:
+                sent.append(msg)
+
+            await app(scope, MagicMock(), send)
+            transport.handle_request.assert_not_called()
+
+        asyncio.run(_run())
+        assert sent[0]["status"] == 401
+
+    def test_rejects_wrong_token(self) -> None:
+        transport = MagicMock()
+        transport.handle_request = AsyncMock()
+        sent: list[dict[str, Any]] = []
+
+        async def _run() -> None:
+            app = _make_asgi_app(transport, self._TOKEN)
+            scope: dict[str, Any] = {
+                "type": "http",
+                "path": "/mcp",
+                "headers": [(b"authorization", b"Bearer wrong-token")],
+            }
+
+            async def send(msg: dict[str, Any]) -> None:
+                sent.append(msg)
+
+            await app(scope, MagicMock(), send)
+            transport.handle_request.assert_not_called()
+
+        asyncio.run(_run())
+        assert sent[0]["status"] == 401
+
+
+class TestGetHeader:
+    def test_finds_header(self) -> None:
+        headers = [(b"content-type", b"text/plain"), (b"authorization", b"Bearer x")]
+        assert _get_header(headers, b"authorization") == b"Bearer x"
+
+    def test_case_insensitive(self) -> None:
+        headers = [(b"Authorization", b"Bearer y")]
+        assert _get_header(headers, b"authorization") == b"Bearer y"
+
+    def test_missing_header(self) -> None:
+        headers = [(b"content-type", b"text/plain")]
+        assert _get_header(headers, b"authorization") is None
+
+
+class TestSend401:
+    def test_sends_401_response(self) -> None:
+        sent: list[dict[str, Any]] = []
+
+        async def _run() -> None:
+            async def send(msg: dict[str, Any]) -> None:
+                sent.append(msg)
+
+            await _send_401(send)
+
+        asyncio.run(_run())
+        assert sent[0]["status"] == 401
+        assert sent[1]["body"] == b"Unauthorized"
 
 
 class TestMCPHttpServerProperties:
@@ -144,14 +221,25 @@ class TestMCPHttpServerProperties:
         server._port = 12345
         assert server.url == "http://127.0.0.1:12345/mcp"
 
+    def test_bearer_token_nonempty(self) -> None:
+        server = MCPHttpServer(MagicMock())
+        assert isinstance(server.bearer_token, str)
+        assert len(server.bearer_token) > 0
+
+    def test_two_instances_different_tokens(self) -> None:
+        s1 = MCPHttpServer(MagicMock())
+        s2 = MCPHttpServer(MagicMock())
+        assert s1.bearer_token != s2.bearer_token
+
 
 class TestMCPHttpServerToHttpMcpServer:
-    def test_constructs_config(self) -> None:
+    def test_constructs_config_with_auth_header(self) -> None:
         server = MCPHttpServer(MagicMock(), server_name="test-srv")
         server._port = 9999
 
         mock_acp_schema = MagicMock()
         mock_acp_schema.HttpMcpServer = MockHttpMcpServer
+        mock_acp_schema.HttpHeader = MockHttpHeader
         with patch.dict(
             sys.modules, {"acp.schema": mock_acp_schema, "acp": MagicMock()}
         ):
@@ -159,8 +247,11 @@ class TestMCPHttpServerToHttpMcpServer:
 
         assert result.url == "http://127.0.0.1:9999/mcp"
         assert result.name == "test-srv"
-        assert result.headers == []
         assert result.type == "http"
+        assert len(result.headers) == 1
+        header = result.headers[0]
+        assert header.name == "Authorization"
+        assert header.value == f"Bearer {server.bearer_token}"
 
 
 def _mock_server_deps() -> dict[str, MagicMock]:

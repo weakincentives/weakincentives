@@ -85,7 +85,7 @@ class TestChunkConsolidation:
     def test_message_flushed_on_tool_start(self) -> None:
         bridge, emitter = _make_bridge()
         bridge.on_update(MockAgentMessageChunk(content="I will read the file."))
-        bridge.on_update(MockToolCallStart(id="tc-1", title="read"))
+        bridge.on_update(MockToolCallStart(tool_call_id="tc-1", title="read"))
         # flush + tool_use = 2 calls
         assert emitter.emit.call_count == 2
         first_call = emitter.emit.call_args_list[0]
@@ -98,7 +98,7 @@ class TestChunkConsolidation:
         bridge, emitter = _make_bridge()
         bridge.on_update(MockAgentMessageChunk(content="text"))
         bridge.on_update(
-            MockToolCallProgress(id="tc-1", title="bash", status="completed")
+            MockToolCallProgress(tool_call_id="tc-1", title="bash", status="completed")
         )
         assert emitter.emit.call_count == 2
         assert emitter.emit.call_args_list[0].args[0] == "assistant_message"
@@ -166,11 +166,14 @@ class TestChunkConsolidation:
         bridge.on_update(MockAgentThoughtChunk(content="I need to "))
         bridge.on_update(MockAgentThoughtChunk(content="read files."))
         # Tool call flushes thinking, then emits tool_use
-        bridge.on_update(MockToolCallStart(id="tc-1", title="read"))
+        bridge.on_update(MockToolCallStart(tool_call_id="tc-1", title="read"))
         # Tool progress emits tool_result (no buffered text to flush)
         bridge.on_update(
             MockToolCallProgress(
-                id="tc-1", title="read", status="completed", output="data"
+                tool_call_id="tc-1",
+                title="read",
+                status="completed",
+                raw_output="data",
             )
         )
         # Response phase (buffered)
@@ -191,33 +194,62 @@ class TestChunkConsolidation:
 class TestToolEvents:
     def test_tool_start(self) -> None:
         bridge, emitter = _make_bridge()
-        update = MockToolCallStart(id="tc-1", title="bash")
+        update = MockToolCallStart(tool_call_id="tc-1", title="bash")
         bridge.on_update(update)
         emitter.emit.assert_called_once_with(
             "tool_use",
             detail={"tool_name": "bash", "tool_call_id": "tc-1"},
         )
 
+    def test_tool_start_with_input(self) -> None:
+        bridge, emitter = _make_bridge()
+        update = MockToolCallStart(
+            tool_call_id="tc-1",
+            title="read",
+            raw_input={"path": "/tmp/foo.py"},
+        )
+        bridge.on_update(update)
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert detail["tool_name"] == "read"
+        assert detail["tool_call_id"] == "tc-1"
+        assert "path" in detail["input"]
+
     def test_tool_progress(self) -> None:
         bridge, emitter = _make_bridge()
         update = MockToolCallProgress(
-            id="tc-1", title="bash", status="completed", output="done"
+            tool_call_id="tc-1",
+            title="bash",
+            status="completed",
+            raw_output="done",
         )
         bridge.on_update(update)
-        emitter.emit.assert_called_once_with(
-            "tool_result",
-            detail={
-                "tool_name": "bash",
-                "tool_call_id": "tc-1",
-                "status": "completed",
-                "output": "done",
-            },
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert detail["tool_name"] == "bash"
+        assert detail["tool_call_id"] == "tc-1"
+        assert detail["status"] == "completed"
+        assert detail["output"] == "done"
+
+    def test_tool_progress_with_input(self) -> None:
+        bridge, emitter = _make_bridge()
+        update = MockToolCallProgress(
+            tool_call_id="tc-1",
+            title="bash",
+            status="completed",
+            raw_input={"cmd": "ls"},
+            raw_output="file.py",
         )
+        bridge.on_update(update)
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert "cmd" in detail["input"]
+        assert detail["output"] == "file.py"
 
     def test_tool_progress_truncates_output(self) -> None:
         bridge, emitter = _make_bridge()
         update = MockToolCallProgress(
-            id="tc-1", title="bash", status="completed", output="x" * 1000
+            tool_call_id="tc-1",
+            title="bash",
+            status="completed",
+            raw_output="x" * 1000,
         )
         bridge.on_update(update)
         call_args = emitter.emit.call_args
@@ -225,16 +257,18 @@ class TestToolEvents:
 
     def test_tool_progress_non_string_output(self) -> None:
         bridge, emitter = _make_bridge()
-        update = MockToolCallProgress(id="tc-1", title="bash", status="completed")
-        object.__setattr__(update, "output", 42)
+        update = MockToolCallProgress(
+            tool_call_id="tc-1", title="bash", status="completed"
+        )
+        object.__setattr__(update, "raw_output", 42)
         bridge.on_update(update)
         call_args = emitter.emit.call_args
         assert call_args.kwargs["detail"]["output"] == "42"
 
-    def test_tool_progress_empty_output(self) -> None:
+    def test_tool_progress_none_output(self) -> None:
         bridge, emitter = _make_bridge()
         update = MockToolCallProgress(
-            id="tc-1", title="bash", status="completed", output=""
+            tool_call_id="tc-1", title="bash", status="completed"
         )
         bridge.on_update(update)
         call_args = emitter.emit.call_args

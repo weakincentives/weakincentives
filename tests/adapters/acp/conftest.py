@@ -69,11 +69,16 @@ MockAgentThoughtChunk = AgentThoughtChunk
 
 @dataclass
 class ToolCallStart:
-    """Mock of a ToolCallStart update."""
+    """Mock of a ToolCallStart update.
 
-    id: str
+    Field names match the real ACP ``ToolCall`` pydantic model.
+    """
+
+    tool_call_id: str
     title: str
     status: str = "in_progress"
+    raw_input: Any = None
+    raw_output: Any = None
 
 
 MockToolCallStart = ToolCallStart
@@ -84,12 +89,14 @@ class ToolCallProgress:
     """Mock of a ToolCallProgress update.
 
     Named to match real ACP class so ``type(update).__name__`` works in client.
+    Field names match the real ACP ``ToolCallUpdate`` pydantic model.
     """
 
-    id: str
+    tool_call_id: str
     title: str
     status: str  # "completed" | "failed"
-    output: str = ""
+    raw_input: Any = None
+    raw_output: Any = None
 
 
 MockToolCallProgress = ToolCallProgress
@@ -218,6 +225,14 @@ class MockSessionAccumulator:
 
     def snapshot(self) -> MockSessionSnapshot:
         return self._snapshot
+
+
+@dataclass
+class MockHttpHeader:
+    """Mock of acp.schema.HttpHeader."""
+
+    name: str
+    value: str
 
 
 @dataclass

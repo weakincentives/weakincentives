@@ -244,7 +244,7 @@ exclude_lines = [
 
 [tool.deptry.per_rule_ignores]
 DEP002 = ["agent-client-protocol", "claude-agent-sdk", "mcp", "pyyaml", "redis", "uvicorn"]
-DEP003 = ["starlette"]
+DEP003 = ["jsonschema", "starlette"]
 DEP004 = ["weakincentives"]  # Package imports itself; declared as dev dep for testing
 
 [tool.pyright]

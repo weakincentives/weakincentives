@@ -108,7 +108,7 @@ class TestACPClientSessionUpdate:
     def test_tracks_tool_call_start(self) -> None:
         async def _run() -> None:
             client = _make_client()
-            tool = MockToolCallStart(id="tc-1", title="bash")
+            tool = MockToolCallStart(tool_call_id="tc-1", title="bash")
             await client.session_update("sess-1", tool)
             assert "tc-1" in client.tool_call_tracker
             assert client.tool_call_tracker["tc-1"] == {
@@ -123,10 +123,13 @@ class TestACPClientSessionUpdate:
     def test_tracks_tool_call_progress_existing(self) -> None:
         async def _run() -> None:
             client = _make_client()
-            start = MockToolCallStart(id="tc-1", title="bash")
+            start = MockToolCallStart(tool_call_id="tc-1", title="bash")
             await client.session_update("sess-1", start)
             progress = MockToolCallProgress(
-                id="tc-1", title="bash", status="completed", output="ok"
+                tool_call_id="tc-1",
+                title="bash",
+                status="completed",
+                raw_output="ok",
             )
             await client.session_update("sess-1", progress)
             assert client.tool_call_tracker["tc-1"] == {
@@ -141,10 +144,10 @@ class TestACPClientSessionUpdate:
     def test_tracks_tool_call_progress_existing_empty_output(self) -> None:
         async def _run() -> None:
             client = _make_client()
-            start = MockToolCallStart(id="tc-1", title="bash")
+            start = MockToolCallStart(tool_call_id="tc-1", title="bash")
             await client.session_update("sess-1", start)
             progress = MockToolCallProgress(
-                id="tc-1", title="bash", status="completed", output=""
+                tool_call_id="tc-1", title="bash", status="completed"
             )
             await client.session_update("sess-1", progress)
             assert client.tool_call_tracker["tc-1"]["status"] == "completed"
@@ -157,7 +160,10 @@ class TestACPClientSessionUpdate:
         async def _run() -> None:
             client = _make_client()
             progress = MockToolCallProgress(
-                id="tc-2", title="search", status="completed", output="found"
+                tool_call_id="tc-2",
+                title="search",
+                status="completed",
+                raw_output="found",
             )
             await client.session_update("sess-1", progress)
             assert client.tool_call_tracker["tc-2"] == {
@@ -173,7 +179,10 @@ class TestACPClientSessionUpdate:
         async def _run() -> None:
             client = _make_client()
             progress = MockToolCallProgress(
-                id="tc-3", title="bash", status="completed", output="x" * 2000
+                tool_call_id="tc-3",
+                title="bash",
+                status="completed",
+                raw_output="x" * 2000,
             )
             await client.session_update("sess-1", progress)
             assert len(client.tool_call_tracker["tc-3"]["output"]) == 1000
@@ -184,8 +193,8 @@ class TestACPClientSessionUpdate:
     def test_synthetic_id_for_empty_tool_call_start(self) -> None:
         async def _run() -> None:
             client = _make_client()
-            t1 = MockToolCallStart(id="", title="glob")
-            t2 = MockToolCallStart(id="", title="read")
+            t1 = MockToolCallStart(tool_call_id="", title="glob")
+            t2 = MockToolCallStart(tool_call_id="", title="read")
             await client.session_update("sess-1", t1)
             await client.session_update("sess-1", t2)
             # Each gets a unique synthetic ID
@@ -202,12 +211,15 @@ class TestACPClientSessionUpdate:
         async def _run() -> None:
             client = _make_client()
             await client.session_update(
-                "sess-1", MockToolCallStart(id="", title="bash")
+                "sess-1", MockToolCallStart(tool_call_id="", title="bash")
             )
             await client.session_update(
                 "sess-1",
                 MockToolCallProgress(
-                    id="", title="bash", status="completed", output="ok"
+                    tool_call_id="",
+                    title="bash",
+                    status="completed",
+                    raw_output="ok",
                 ),
             )
             assert client.tool_call_tracker["_tc_1"]["status"] == "completed"
@@ -220,7 +232,7 @@ class TestACPClientSessionUpdate:
         async def _run() -> None:
             client = _make_client()
             await client.session_update(
-                "sess-1", MockToolCallStart(id="real-1", title="bash")
+                "sess-1", MockToolCallStart(tool_call_id="real-1", title="bash")
             )
             assert "real-1" in client.tool_call_tracker
             assert "_tc_" not in str(client.tool_call_tracker.keys())

@@ -34,6 +34,12 @@ __all__ = ["ACPTranscriptBridge"]
 _MAX_TEXT = 500
 
 
+def _truncate(value: object, limit: int) -> str:
+    """Convert *value* to string and truncate to *limit* characters."""
+    text = str(value)
+    return text[:limit] if len(text) > limit else text
+
+
 def _extract_chunk_text(chunk: object) -> str:
     """Extract text from an ACP content chunk."""
     raw = getattr(chunk, "content", "")
@@ -111,28 +117,36 @@ class ACPTranscriptBridge:
 
     def _handle_tool_start(self, update: object) -> None:
         title = getattr(update, "title", "")
-        tool_id = getattr(update, "id", "")
-        self._emitter.emit(
-            "tool_use",
-            detail={"tool_name": title, "tool_call_id": tool_id},
-        )
+        tool_id = getattr(update, "tool_call_id", "")
+        raw_input = getattr(update, "raw_input", None)
+
+        detail: dict[str, object] = {
+            "tool_name": title,
+            "tool_call_id": tool_id,
+        }
+        if raw_input is not None:
+            detail["input"] = _truncate(raw_input, _MAX_TEXT)
+
+        self._emitter.emit("tool_use", detail=detail)
 
     def _handle_tool_progress(self, update: object) -> None:
         status = getattr(update, "status", "")
-        tool_id = getattr(update, "id", "")
+        tool_id = getattr(update, "tool_call_id", "")
         title = getattr(update, "title", "")
-        output = getattr(update, "output", "")
-        if isinstance(output, str):
-            output_text = output[:_MAX_TEXT]
-        else:
-            output_text = str(output)[:_MAX_TEXT] if output else ""
+        raw_output = getattr(update, "raw_output", None)
 
-        self._emitter.emit(
-            "tool_result",
-            detail={
-                "tool_name": title,
-                "tool_call_id": tool_id,
-                "status": status,
-                "output": output_text,
-            },
-        )
+        detail: dict[str, object] = {
+            "tool_name": title,
+            "tool_call_id": tool_id,
+            "status": str(status) if status else "",
+            "output": _truncate(raw_output, _MAX_TEXT)
+            if raw_output is not None
+            else "",
+        }
+
+        # Include input if delivered on the update (some agents send it here).
+        raw_input = getattr(update, "raw_input", None)
+        if raw_input is not None:
+            detail["input"] = _truncate(raw_input, _MAX_TEXT)
+
+        self._emitter.emit("tool_result", detail=detail)

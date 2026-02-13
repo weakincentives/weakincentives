@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import socket
 import threading
 from typing import TYPE_CHECKING, Any
@@ -36,7 +37,27 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def _make_asgi_app(transport: Any) -> Any:
+def _get_header(headers: list[tuple[bytes, bytes]], name: bytes) -> bytes | None:
+    """Extract a header value by lowercase name from ASGI headers."""
+    for k, v in headers:
+        if k.lower() == name:
+            return v
+    return None
+
+
+async def _send_401(send: Any) -> None:
+    """Send a 401 Unauthorized ASGI response."""
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 401,
+            "headers": [(b"content-type", b"text/plain")],
+        }
+    )
+    await send({"type": "http.response.body", "body": b"Unauthorized"})
+
+
+def _make_asgi_app(transport: Any, bearer_token: str) -> Any:
     """Build a minimal ASGI app that delegates HTTP requests to the transport.
 
     Starlette's ``Route`` wraps bound methods with ``request_response()``,
@@ -44,7 +65,11 @@ def _make_asgi_app(transport: Any) -> Any:
     ``handle_request`` has an ASGI ``(scope, receive, send)`` signature, we
     mount it directly as a raw ASGI application with a minimal lifespan
     handler for uvicorn.
+
+    HTTP requests must include a valid ``Authorization: Bearer <token>``
+    header.  Requests with missing or invalid tokens receive a 401 response.
     """
+    expected = f"Bearer {bearer_token}".encode()
 
     async def asgi_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] == "lifespan":
@@ -56,6 +81,10 @@ def _make_asgi_app(transport: Any) -> Any:
                     await send({"type": "lifespan.shutdown.complete"})
                     return
         elif scope["type"] == "http":
+            auth = _get_header(scope.get("headers", []), b"authorization")
+            if auth != expected:
+                await _send_401(send)
+                return
             await transport.handle_request(scope, receive, send)
 
     return asgi_app
@@ -122,6 +151,7 @@ class MCPHttpServer:
     ) -> None:
         self._mcp_server = mcp_server
         self._server_name = server_name
+        self._bearer_token = secrets.token_urlsafe(32)
         self._port: int | None = None
         self._thread: threading.Thread | None = None
         self._uvicorn_server: Any = None
@@ -146,14 +176,24 @@ class MCPHttpServer:
         """Name passed to ACP ``HttpMcpServer``."""
         return self._server_name
 
+    @property
+    def bearer_token(self) -> str:
+        """Bearer token required for HTTP requests."""
+        return self._bearer_token
+
     def to_http_mcp_server(self) -> Any:
         """Construct an ``HttpMcpServer`` config for ACP ``new_session``."""
-        from acp.schema import HttpMcpServer
+        from acp.schema import HttpHeader, HttpMcpServer
 
         return HttpMcpServer(
             url=self.url,
             name=self._server_name,
-            headers=[],
+            headers=[
+                HttpHeader(
+                    name="Authorization",
+                    value=f"Bearer {self._bearer_token}",
+                ),
+            ],
             type="http",
         )
 
@@ -173,7 +213,7 @@ class MCPHttpServer:
         ready_event = self._ready_event
 
         config = uvicorn.Config(
-            app=_make_asgi_app(transport),
+            app=_make_asgi_app(transport, self._bearer_token),
             host="127.0.0.1",
             port=self._port,
             log_level="warning",

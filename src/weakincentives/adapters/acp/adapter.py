@@ -432,7 +432,6 @@ class ACPAdapter(ProviderAdapter[Any]):
         """Execute the ACP protocol flow."""
         try:
             from acp import spawn_agent_process
-            from acp.schema import HttpMcpServer
         except ImportError as e:
             msg = (
                 "agent-client-protocol is required for the ACP adapter. "
@@ -447,12 +446,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         await mcp_http.start()
 
         try:
-            wink_mcp = HttpMcpServer(
-                url=mcp_http.url,
-                name=mcp_http.server_name,
-                headers=[],
-                type="http",
-            )
+            wink_mcp = mcp_http.to_http_mcp_server()
             mcp_servers = [wink_mcp, *self._client_config.mcp_servers]
             merged_env = self._build_env()
 
@@ -468,7 +462,20 @@ class ACPAdapter(ProviderAdapter[Any]):
                 env=merged_env,
                 transport_kwargs={"limit": stdio_limit},
             ) as (conn, _proc):
-                acp_session_id = await self._handshake(conn, effective_cwd, mcp_servers)
+                try:
+                    acp_session_id = await asyncio.wait_for(
+                        self._handshake(conn, effective_cwd, mcp_servers),
+                        timeout=self._client_config.startup_timeout_s,
+                    )
+                except TimeoutError:
+                    raise PromptEvaluationError(
+                        message=(
+                            "ACP handshake timed out after "
+                            f"{self._client_config.startup_timeout_s}s"
+                        ),
+                        prompt_name=prompt_name,
+                        phase="request",
+                    ) from None
                 await self._configure_session(conn, acp_session_id)
 
                 from acp.schema import TextContentBlock
