@@ -1896,6 +1896,8 @@ select:focus-visible {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
 }
 
 .transcript-json {
@@ -1911,6 +1913,43 @@ select:focus-visible {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Copyable content wrapper with copy button */
+.transcript-copyable {
+  position: relative;
+}
+
+.transcript-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.transcript-copyable:hover .transcript-copy-btn {
+  opacity: 1;
+}
+
+.transcript-copy-btn:hover {
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  border-color: var(--color-text-muted);
 }
 
 .log-entry.log-debug {

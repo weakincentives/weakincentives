@@ -173,12 +173,16 @@ function createTranscriptMetadataHtml(entry) {
   return html;
 }
 
+function wrapCopyable(preHtml) {
+  return `<div class="transcript-copyable"><button class="transcript-copy-btn" title="Copy to clipboard"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>${preHtml}</div>`;
+}
+
 function createContentHtml(content, emptyMessage = "(no content)") {
   if (!content.value) {
     return `<div class="transcript-message muted">${emptyMessage}</div>`;
   }
   if (content.kind === "json") {
-    return `<pre class="transcript-json">${escapeHtml(content.value)}</pre>`;
+    return wrapCopyable(`<pre class="transcript-json">${escapeHtml(content.value)}</pre>`);
   }
   if (content.kind === "markdown" && content.html) {
     return `<div class="transcript-message transcript-markdown">${content.html}</div>`;
@@ -208,7 +212,9 @@ function createToolResultHtml(toolResult) {
   const parsed = safeParseParsed(toolResult);
   const output = parsed?.output;
   if (output) {
-    return `<div class="transcript-nested-result"><div class="transcript-result-divider">↓ result</div><pre class="transcript-json">${escapeHtml(prettyJson(output))}</pre></div>`;
+    const text = prettyJson(output);
+    const pre = `<pre class="transcript-json">${escapeHtml(text)}</pre>`;
+    return `<div class="transcript-nested-result"><div class="transcript-result-divider">↓ result</div>${wrapCopyable(pre)}</div>`;
   }
   const resultContent = formatTranscriptContent(toolResult);
   return `<div class="transcript-nested-result"><div class="transcript-result-divider">↓ result</div>${createContentHtml(resultContent, "(no result)")}</div>`;
@@ -223,7 +229,8 @@ function createPayloadHtml(entry) {
   if (!text) {
     return "";
   }
-  return `<div class="transcript-payload"><div class="transcript-payload-label">Payload</div><pre>${escapeHtml(text)}</pre></div>`;
+  const pre = `<pre>${escapeHtml(text)}</pre>`;
+  return `<div class="transcript-payload"><div class="transcript-payload-label">Payload</div>${wrapCopyable(pre)}</div>`;
 }
 
 function createCompositeInputHtml(entry) {
@@ -233,7 +240,9 @@ function createCompositeInputHtml(entry) {
   if (!input) {
     return "";
   }
-  return `<div class="transcript-tool-input"><div class="transcript-input-label">↓ input</div><pre class="transcript-json">${escapeHtml(prettyJson(input))}</pre></div>`;
+  const text = prettyJson(input);
+  const pre = `<pre class="transcript-json">${escapeHtml(text)}</pre>`;
+  return `<div class="transcript-tool-input"><div class="transcript-input-label">↓ input</div>${wrapCopyable(pre)}</div>`;
 }
 
 export function createTranscriptEntryElement(entry, index) {
@@ -588,6 +597,17 @@ export function initTranscriptView({ state, fetchJSON, showToast }) {
   // -- Wire up DOM events --
 
   els.list.addEventListener("click", (e) => {
+    const copyBtn = e.target.closest(".transcript-copy-btn");
+    if (copyBtn) {
+      const wrapper = copyBtn.closest(".transcript-copyable");
+      const pre = wrapper?.querySelector("pre");
+      const text = pre?.textContent || "";
+      navigator.clipboard.writeText(text).then(
+        () => showToast("Copied to clipboard", "success"),
+        () => showToast("Failed to copy", "error")
+      );
+      return;
+    }
     const sourceEl = e.target.closest(".transcript-source.clickable");
     if (sourceEl) {
       handleSourceClick(e, sourceEl);

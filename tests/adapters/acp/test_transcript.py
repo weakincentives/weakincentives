@@ -49,11 +49,12 @@ class TestACPTranscriptBridge:
             detail={"text": "Hello world"},
         )
 
-    def test_on_user_message_truncates(self) -> None:
+    def test_on_user_message_preserves_full_text(self) -> None:
         bridge, emitter = _make_bridge()
-        bridge.on_user_message("x" * 1000)
+        long_text = "x" * 1000
+        bridge.on_user_message(long_text)
         call_args = emitter.emit.call_args
-        assert len(call_args.kwargs["detail"]["text"]) == 500
+        assert call_args.kwargs["detail"]["text"] == long_text
 
 
 class TestChunkConsolidation:
@@ -138,13 +139,13 @@ class TestChunkConsolidation:
         bridge.flush()
         assert emitter.emit.call_count == 2
 
-    def test_consolidated_text_truncated(self) -> None:
+    def test_consolidated_text_preserves_full_content(self) -> None:
         bridge, emitter = _make_bridge()
         for _ in range(100):
             bridge.on_update(MockAgentMessageChunk(content="x" * 10))
         bridge.flush()
         call_args = emitter.emit.call_args
-        assert len(call_args.kwargs["detail"]["text"]) == 500
+        assert len(call_args.kwargs["detail"]["text"]) == 1000
 
     def test_flush_noop_when_empty(self) -> None:
         bridge, emitter = _make_bridge()
@@ -369,18 +370,19 @@ class TestToolEvents:
         assert "cmd" in detail["input"]
         assert detail["output"] == "file.py"
 
-    def test_tool_progress_truncates_output(self) -> None:
+    def test_tool_progress_preserves_full_output(self) -> None:
         bridge, emitter = _make_bridge()
+        long_output = "x" * 1000
         bridge.on_update(
             MockToolCallProgress(
                 tool_call_id="tc-1",
                 title="bash",
                 status="completed",
-                raw_output="x" * 1000,
+                raw_output=long_output,
             )
         )
         detail = emitter.emit.call_args.kwargs["detail"]
-        assert len(detail["output"]) == 500
+        assert detail["output"] == long_output
 
     def test_tool_progress_non_string_output(self) -> None:
         bridge, emitter = _make_bridge()

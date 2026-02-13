@@ -35,17 +35,13 @@ from ...runtime.transcript import TranscriptEmitter
 
 __all__ = ["ACPTranscriptBridge"]
 
-# Maximum text length stored in a single transcript detail entry.
-_MAX_TEXT = 500
-
 # Terminal tool-call statuses that trigger emission.
 _TERMINAL_STATUSES = frozenset({"completed", "failed"})
 
 
-def _truncate(value: object, limit: int) -> str:
-    """Convert *value* to string and truncate to *limit* characters."""
-    text = str(value)
-    return text[:limit] if len(text) > limit else text
+def _coerce_str(value: object) -> str:
+    """Convert *value* to string for transcript storage."""
+    return str(value)
 
 
 def _extract_chunk_text(chunk: object) -> str:
@@ -90,7 +86,7 @@ class ACPTranscriptBridge:
         """Emit ``user_message`` entry for the prompt text."""
         self._emitter.emit(
             "user_message",
-            detail={"text": text[:_MAX_TEXT]},
+            detail={"text": text},
         )
 
     def flush(self) -> None:
@@ -107,7 +103,7 @@ class ACPTranscriptBridge:
             entry_type = (
                 "assistant_message" if self._buf_type == "message" else "thinking"
             )
-            self._emitter.emit(entry_type, detail={"text": text[:_MAX_TEXT]})
+            self._emitter.emit(entry_type, detail={"text": text})
         self._buf_type = None
         self._buf_parts.clear()
 
@@ -149,7 +145,7 @@ class ACPTranscriptBridge:
             "tool_call_id": tool_id,
         }
         if raw_input is not None:
-            detail["input"] = _truncate(raw_input, _MAX_TEXT)
+            detail["input"] = _coerce_str(raw_input)
 
         self._emitter.emit("tool_use", detail=detail)
 
@@ -180,9 +176,9 @@ class ACPTranscriptBridge:
         if title and not buf["tool_name"]:
             buf["tool_name"] = title
         if raw_input is not None:
-            buf["input"] = _truncate(raw_input, _MAX_TEXT)
+            buf["input"] = _coerce_str(raw_input)
         if raw_output is not None:
-            buf["output"] = _truncate(raw_output, _MAX_TEXT)
+            buf["output"] = _coerce_str(raw_output)
 
         # Emit and clear on terminal status.
         if status in _TERMINAL_STATUSES:
