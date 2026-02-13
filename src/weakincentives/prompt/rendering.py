@@ -168,7 +168,7 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(  # noqa: C901
+    def render(
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
@@ -220,12 +220,7 @@ class PromptRenderer[OutputT]:
             # When rendering with SUMMARY visibility, skip children
             if effective_visibility == SectionVisibility.SUMMARY:
                 summary_skip_depth = node.depth
-                # Track whether summarized section (or descendants) has tools or skills.
-                # Skills are treated like tools for progressive disclosure - expanding
-                # a section with skills requires open_sections to activate them.
-                has_tools_or_skills = self._section_or_descendants_have_tools(
-                    node
-                ) or self._section_or_descendants_have_skills(node)
+                has_tools_or_skills = self._subtree_has_tools_or_skills(node)
                 if has_tools_or_skills:
                     has_summarized_with_tools = True
                 else:
@@ -234,23 +229,7 @@ class PromptRenderer[OutputT]:
             rendered = self._render_section(
                 node, section_params, override_body, effective_visibility
             )
-
-            # Append summary suffix for sections rendered with SUMMARY visibility
-            if (
-                effective_visibility == SectionVisibility.SUMMARY
-                and node.section.summary is not None
-                and rendered
-            ):
-                section_key = ".".join(node.path)
-                child_keys = self._collect_child_keys(node)
-                # Skills are treated like tools for progressive disclosure
-                has_tools_or_skills = self._section_or_descendants_have_tools(
-                    node
-                ) or self._section_or_descendants_have_skills(node)
-                suffix = build_summary_suffix(
-                    section_key, child_keys, has_tools=has_tools_or_skills
-                )
-                rendered += suffix
+            rendered = self._append_summary_suffix(node, effective_visibility, rendered)
 
             # Don't collect tools/skills when rendering with SUMMARY visibility
             if effective_visibility != SectionVisibility.SUMMARY:
@@ -265,42 +244,13 @@ class PromptRenderer[OutputT]:
             if rendered:
                 rendered_sections.append(rendered)
 
-        # Compute current visibility once for tool injection
-        current_visibility: dict[SectionPath, SectionVisibility] | None = None
-        if has_summarized_with_tools or has_summarized_without_tools:
-            current_visibility = compute_current_visibility(
-                self._registry,
-                param_lookup,
-                session=session,
-            )
-
-        # Inject open_sections tool when there are summarized sections with tools
-        if has_summarized_with_tools and current_visibility is not None:
-            open_sections_tool = create_open_sections_handler(
-                registry=self._registry,
-                current_visibility=current_visibility,
-            )
-            collected_tools.append(
-                cast(
-                    Tool[SupportsDataclassOrNone, SupportsToolResult],
-                    open_sections_tool,
-                )
-            )
-
-        # Inject read_section tool when there are summarized sections without tools
-        if has_summarized_without_tools and current_visibility is not None:
-            read_section_tool = create_read_section_handler(
-                registry=self._registry,
-                current_visibility=current_visibility,
-                param_lookup=param_lookup,
-                session=session,
-            )
-            collected_tools.append(
-                cast(
-                    Tool[SupportsDataclassOrNone, SupportsToolResult],
-                    read_section_tool,
-                )
-            )
+        self._inject_disclosure_tools(
+            param_lookup,
+            collected_tools,
+            has_summarized_with_tools=has_summarized_with_tools,
+            has_summarized_without_tools=has_summarized_without_tools,
+            session=session,
+        )
 
         text = "\n\n".join(rendered_sections)
 
@@ -327,6 +277,80 @@ class PromptRenderer[OutputT]:
                 field_description_patches
             ),
         )
+
+    def _subtree_has_tools_or_skills(
+        self, node: SectionNode[SupportsDataclass]
+    ) -> bool:
+        """Check if section or descendants have tools or skills."""
+        return self._section_or_descendants_have_tools(
+            node
+        ) or self._section_or_descendants_have_skills(node)
+
+    def _append_summary_suffix(
+        self,
+        node: SectionNode[SupportsDataclass],
+        effective_visibility: SectionVisibility,
+        rendered: str,
+    ) -> str:
+        """Append summary suffix when rendering with SUMMARY visibility."""
+        if (
+            effective_visibility != SectionVisibility.SUMMARY
+            or node.section.summary is None
+            or not rendered
+        ):
+            return rendered
+        section_key = ".".join(node.path)
+        child_keys = self._collect_child_keys(node)
+        has_tools_or_skills = self._subtree_has_tools_or_skills(node)
+        suffix = build_summary_suffix(
+            section_key, child_keys, has_tools=has_tools_or_skills
+        )
+        return rendered + suffix
+
+    def _inject_disclosure_tools(
+        self,
+        param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
+        collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        *,
+        has_summarized_with_tools: bool,
+        has_summarized_without_tools: bool,
+        session: SessionProtocol | None,
+    ) -> None:
+        """Inject progressive disclosure tools when sections are summarized."""
+        if not has_summarized_with_tools and not has_summarized_without_tools:
+            return
+
+        current_visibility = compute_current_visibility(
+            self._registry,
+            param_lookup,
+            session=session,
+        )
+
+        if has_summarized_with_tools:
+            open_sections_tool = create_open_sections_handler(
+                registry=self._registry,
+                current_visibility=current_visibility,
+            )
+            collected_tools.append(
+                cast(
+                    Tool[SupportsDataclassOrNone, SupportsToolResult],
+                    open_sections_tool,
+                )
+            )
+
+        if has_summarized_without_tools:
+            read_section_tool = create_read_section_handler(
+                registry=self._registry,
+                current_visibility=current_visibility,
+                param_lookup=param_lookup,
+                session=session,
+            )
+            collected_tools.append(
+                cast(
+                    Tool[SupportsDataclassOrNone, SupportsToolResult],
+                    read_section_tool,
+                )
+            )
 
     def _section_or_descendants_have_tools(
         self, parent_node: SectionNode[SupportsDataclass]

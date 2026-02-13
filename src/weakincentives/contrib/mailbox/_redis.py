@@ -41,13 +41,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast, get_origin
 from uuid import uuid4
 
-from weakincentives.formal import (
-    Action,
-    ActionParameter,
-    Invariant,
-    StateVar,
-    formal_spec,
-)
+from weakincentives.formal import formal_spec
 from weakincentives.runtime.mailbox import (
     CompositeResolver,
     Mailbox,
@@ -62,8 +56,22 @@ from weakincentives.runtime.mailbox import (
 )
 from weakincentives.serde import dump, parse
 
+from ._lua_scripts import (
+    LUA_ACKNOWLEDGE,
+    LUA_EXTEND,
+    LUA_NACK,
+    LUA_PURGE,
+    LUA_REAP,
+    LUA_RECEIVE,
+    LUA_SEND,
+)
+from ._redis_spec import REDIS_MAILBOX_SPEC_KWARGS
+
 if TYPE_CHECKING:
-    from weakincentives.runtime.mailbox import Mailbox, MailboxResolver
+    from redis import Redis
+    from redis.cluster import RedisCluster
+
+    from weakincentives.runtime.mailbox import MailboxResolver
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,182 +79,6 @@ _LOGGER = logging.getLogger(__name__)
 # Keys are refreshed on each operation, so active queues stay alive indefinitely.
 # Set to 0 to disable TTL expiration.
 DEFAULT_TTL_SECONDS: int = 259200  # 3 days = 3 * 24 * 60 * 60
-
-# =============================================================================
-# Lua Scripts for Atomic Operations
-# =============================================================================
-# These scripts ensure atomicity of multi-step operations in Redis.
-# Each script operates on keys with a common hash tag {queue:name} to
-# ensure cluster compatibility.
-#
-# All scripts use Redis server TIME for visibility calculations to eliminate
-# client clock skew as a correctness factor.
-
-# Helper: compute server time as float seconds
-_LUA_NOW = """
-local t = redis.call('TIME')
-local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
-"""
-
-_LUA_SEND = """
--- KEYS: [pending, invisible, data, meta]
--- ARGV: [msg_id, payload, enqueued_at, reply_to, max_size, ttl]
--- reply_to may be empty string for no reply
-local max_size = tonumber(ARGV[5])
-local ttl = tonumber(ARGV[6])
-if max_size and max_size > 0 then
-    local pending_n = redis.call('LLEN', KEYS[1])
-    local invisible_n = redis.call('ZCARD', KEYS[2])
-    if (pending_n + invisible_n) >= max_size then
-        return 0
-    end
-end
-redis.call('HSET', KEYS[3], ARGV[1], ARGV[2])
-redis.call('HSET', KEYS[4], ARGV[1] .. ':enqueued', ARGV[3])
-if ARGV[4] ~= '' then
-    redis.call('HSET', KEYS[4], ARGV[1] .. ':reply_to', ARGV[4])
-end
-redis.call('LPUSH', KEYS[1], ARGV[1])
--- Apply TTL to all keys
-if ttl and ttl > 0 then
-    redis.call('EXPIRE', KEYS[1], ttl)
-    redis.call('EXPIRE', KEYS[2], ttl)
-    redis.call('EXPIRE', KEYS[3], ttl)
-    redis.call('EXPIRE', KEYS[4], ttl)
-end
-return 1
-"""
-
-_LUA_RECEIVE = """
--- KEYS: [pending, invisible, data, meta]
--- ARGV: [visibility_timeout_seconds, receipt_suffix, ttl]
-local msg_id = redis.call('RPOP', KEYS[1])
-if not msg_id then return nil end
-local t = redis.call('TIME')
-local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
-local expiry = now + tonumber(ARGV[1])
-redis.call('ZADD', KEYS[2], expiry, msg_id)
-redis.call('HSET', KEYS[4], msg_id .. ':handle', ARGV[2])
-local data = redis.call('HGET', KEYS[3], msg_id)
-local count = redis.call('HINCRBY', KEYS[4], msg_id .. ':count', 1)
-local enqueued = redis.call('HGET', KEYS[4], msg_id .. ':enqueued')
-local reply_to = redis.call('HGET', KEYS[4], msg_id .. ':reply_to')
--- Apply TTL to all keys
-local ttl = tonumber(ARGV[3])
-if ttl and ttl > 0 then
-    redis.call('EXPIRE', KEYS[1], ttl)
-    redis.call('EXPIRE', KEYS[2], ttl)
-    redis.call('EXPIRE', KEYS[3], ttl)
-    redis.call('EXPIRE', KEYS[4], ttl)
-end
-return {msg_id, data, count, enqueued, reply_to}
-"""
-
-_LUA_ACKNOWLEDGE = """
--- KEYS: [invisible, data, meta]
--- ARGV: [msg_id, receipt_suffix, ttl]
-local expected = redis.call('HGET', KEYS[3], ARGV[1] .. ':handle')
-if expected ~= ARGV[2] then return 0 end
-local removed = redis.call('ZREM', KEYS[1], ARGV[1])
-if removed == 0 then return 0 end
-redis.call('HDEL', KEYS[2], ARGV[1])
-redis.call('HDEL', KEYS[3], ARGV[1] .. ':count')
-redis.call('HDEL', KEYS[3], ARGV[1] .. ':enqueued')
-redis.call('HDEL', KEYS[3], ARGV[1] .. ':handle')
-redis.call('HDEL', KEYS[3], ARGV[1] .. ':reply_to')
--- Refresh TTL on remaining keys
-local ttl = tonumber(ARGV[3])
-if ttl and ttl > 0 then
-    redis.call('EXPIRE', KEYS[1], ttl)
-    redis.call('EXPIRE', KEYS[2], ttl)
-    redis.call('EXPIRE', KEYS[3], ttl)
-end
-return 1
-"""
-
-_LUA_NACK = """
--- KEYS: [invisible, pending, meta, data]
--- ARGV: [msg_id, receipt_suffix, visibility_timeout_seconds, ttl]
-local expected = redis.call('HGET', KEYS[3], ARGV[1] .. ':handle')
-if expected ~= ARGV[2] then return 0 end
-local removed = redis.call('ZREM', KEYS[1], ARGV[1])
-if removed == 0 then return 0 end
-redis.call('HDEL', KEYS[3], ARGV[1] .. ':handle')
-local timeout = tonumber(ARGV[3])
-if timeout <= 0 then
-    redis.call('LPUSH', KEYS[2], ARGV[1])
-else
-    local t = redis.call('TIME')
-    local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
-    redis.call('ZADD', KEYS[1], now + timeout, ARGV[1])
-end
--- Refresh TTL on all keys including data
-local ttl = tonumber(ARGV[4])
-if ttl and ttl > 0 then
-    redis.call('EXPIRE', KEYS[1], ttl)
-    redis.call('EXPIRE', KEYS[2], ttl)
-    redis.call('EXPIRE', KEYS[3], ttl)
-    redis.call('EXPIRE', KEYS[4], ttl)
-end
-return 1
-"""
-
-_LUA_EXTEND = """
--- KEYS: [invisible, meta, data]
--- ARGV: [msg_id, receipt_suffix, timeout_seconds, ttl]
-local expected = redis.call('HGET', KEYS[2], ARGV[1] .. ':handle')
-if expected ~= ARGV[2] then return 0 end
-local t = redis.call('TIME')
-local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
-local expiry = now + tonumber(ARGV[3])
-redis.call('ZADD', KEYS[1], 'XX', expiry, ARGV[1])
-local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
-if not score then return 0 end
--- Refresh TTL on all keys including data
-local ttl = tonumber(ARGV[4])
-if ttl and ttl > 0 then
-    redis.call('EXPIRE', KEYS[1], ttl)
-    redis.call('EXPIRE', KEYS[2], ttl)
-    redis.call('EXPIRE', KEYS[3], ttl)
-end
-return 1
-"""
-
-_LUA_REAP = """
--- KEYS: [invisible, pending, meta, data]
--- ARGV: [ttl] (computes now from server time)
-local t = redis.call('TIME')
-local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
-local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, 100)
-local count = 0
-for i, msg_id in ipairs(expired) do
-    redis.call('ZREM', KEYS[1], msg_id)
-    redis.call('LPUSH', KEYS[2], msg_id)
-    redis.call('HDEL', KEYS[3], msg_id .. ':handle')
-    count = count + 1
-end
--- Always refresh TTL to keep active queues alive even when no messages expire.
--- This prevents data loss for queues with long visibility timeouts.
-local ttl = tonumber(ARGV[1])
-if ttl and ttl > 0 then
-    redis.call('EXPIRE', KEYS[1], ttl)
-    redis.call('EXPIRE', KEYS[2], ttl)
-    redis.call('EXPIRE', KEYS[3], ttl)
-    redis.call('EXPIRE', KEYS[4], ttl)
-end
-return count
-"""
-
-_LUA_PURGE = """
-local pending_count = redis.call('LLEN', KEYS[1])
-local invisible_count = redis.call('ZCARD', KEYS[2])
-redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
-return pending_count + invisible_count
-"""
-
-if TYPE_CHECKING:
-    from redis import Redis
-    from redis.cluster import RedisCluster
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,7 +117,7 @@ class RedisMailboxFactory[R]:
 
         # Worker can now reply to any queue name
         for msg in requests.receive():
-            msg.reply(result)  # Resolves reply_to → new RedisMailbox with same client
+            msg.reply(result)  # Resolves reply_to -> new RedisMailbox with same client
             msg.acknowledge()
     """
 
@@ -343,299 +175,12 @@ class RedisMailboxFactory[R]:
 
 
 @dataclass(slots=True)
-@formal_spec(
-    module="RedisMailbox",
-    extends=("Integers", "Sequences", "FiniteSets", "TLC"),
-    constants={
-        "MaxMessages": 2,
-        "MaxDeliveries": 2,
-        "NumConsumers": 2,
-        "VisibilityTimeout": 2,
-    },
-    state_vars=[
-        StateVar(
-            "pending", "Seq(MessageId)", "Sequence of message IDs in pending list"
-        ),
-        StateVar("invisible", "Function", "msg_id -> {expiresAt, handle}"),
-        StateVar("data", "Function", "msg_id -> body (or NULL if deleted)"),
-        StateVar("handles", "Function", "msg_id -> current valid handle suffix"),
-        StateVar("deleted", "Set", "Set of deleted message IDs"),
-        StateVar("now", "Nat", "Abstract time counter"),
-        StateVar(
-            "nextMsgId",
-            "Nat",
-            "Counter for generating message IDs",
-            initial_value="1",
-        ),
-        StateVar(
-            "nextHandle",
-            "Nat",
-            "Counter for generating handle suffixes",
-            initial_value="1",
-        ),
-        StateVar(
-            "consumerState",
-            "Function",
-            "consumer_id -> {holding, handle}",
-            initial_value="[c \\in 1..NumConsumers |-> [holding |-> NULL, handle |-> 0]]",
-        ),
-        StateVar(
-            "deliveryCounts", "Function", "msg_id -> count (persists across requeue)"
-        ),
-        StateVar(
-            "deliveryHistory", "Function", "msg_id -> Seq of (count, handle) for INV-4"
-        ),
-    ],
-    helpers={
-        "NULL": "0",
-        "InPending(msgId)": r"\E i \in 1..Len(pending): pending[i] = msgId",
-        "RemoveKey(f, k)": r"[m \in (DOMAIN f) \ {k} |-> f[m]]",
-        "UpdateFunc(f, k, v)": r"[m \in (DOMAIN f) \cup {k} |-> IF m = k THEN v ELSE f[m]]",
-    },
-    actions=[
-        Action(
-            name="Send",
-            parameters=(ActionParameter("body", "1..MaxMessages"),),
-            preconditions=("nextMsgId <= MaxMessages",),
-            updates={
-                "pending": "Append(pending, nextMsgId)",
-                "data": "UpdateFunc(data, nextMsgId, body)",
-                "deliveryCounts": "UpdateFunc(deliveryCounts, nextMsgId, 0)",
-                "deliveryHistory": "UpdateFunc(deliveryHistory, nextMsgId, <<>>)",
-                "nextMsgId": "nextMsgId + 1",
-            },
-            description="Add a new message to the pending queue (immediate visibility)",
-        ),
-        Action(
-            name="Receive",
-            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
-            preconditions=(
-                "Len(pending) > 0",
-                "consumerState[consumer].holding = NULL",
-            ),
-            updates={
-                "pending": "Tail(pending)",
-                "invisible": "UpdateFunc(invisible, Head(pending), [expiresAt |-> now + VisibilityTimeout, handle |-> nextHandle])",
-                "handles": "UpdateFunc(handles, Head(pending), nextHandle)",
-                "deliveryCounts": "[deliveryCounts EXCEPT ![Head(pending)] = @ + 1]",
-                "deliveryHistory": "[deliveryHistory EXCEPT ![Head(pending)] = Append(@, [count |-> deliveryCounts[Head(pending)] + 1, handle |-> nextHandle])]",
-                "nextHandle": "nextHandle + 1",
-                "consumerState": "[consumerState EXCEPT ![consumer] = [holding |-> Head(pending), handle |-> nextHandle]]",
-            },
-            description="Atomically move message from pending to invisible",
-        ),
-        Action(
-            name="Acknowledge",
-            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
-            preconditions=(
-                "consumerState[consumer].holding /= NULL",
-                r"consumerState[consumer].holding \in DOMAIN handles",
-                "handles[consumerState[consumer].holding] = consumerState[consumer].handle",
-                r"consumerState[consumer].holding \in DOMAIN invisible",
-            ),
-            updates={
-                "invisible": "RemoveKey(invisible, consumerState[consumer].holding)",
-                "data": "RemoveKey(data, consumerState[consumer].holding)",
-                "handles": "RemoveKey(handles, consumerState[consumer].holding)",
-                "deliveryCounts": "RemoveKey(deliveryCounts, consumerState[consumer].holding)",
-                r"deleted": r"deleted \cup {consumerState[consumer].holding}",
-                "consumerState": "[consumerState EXCEPT ![consumer] = [holding |-> NULL, handle |-> 0]]",
-            },
-            description="Successfully complete message processing",
-        ),
-        Action(
-            name="AcknowledgeFail",
-            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
-            preconditions=(
-                "consumerState[consumer].holding /= NULL",
-                r"consumerState[consumer].holding \notin DOMAIN handles \/ handles[consumerState[consumer].holding] /= consumerState[consumer].handle \/ consumerState[consumer].holding \notin DOMAIN invisible",
-            ),
-            updates={
-                "consumerState": "[consumerState EXCEPT ![consumer] = [holding |-> NULL, handle |-> 0]]",
-            },
-            description="Acknowledge fails if handle is stale",
-        ),
-        Action(
-            name="Nack",
-            parameters=(
-                ActionParameter("consumer", "1..NumConsumers"),
-                ActionParameter("newTimeout", "0..VisibilityTimeout"),
-            ),
-            preconditions=(
-                "consumerState[consumer].holding /= NULL",
-                r"consumerState[consumer].holding \in DOMAIN handles",
-                "handles[consumerState[consumer].holding] = consumerState[consumer].handle",
-                r"consumerState[consumer].holding \in DOMAIN invisible",
-            ),
-            updates={
-                "pending": "IF newTimeout = 0 THEN Append(pending, consumerState[consumer].holding) ELSE pending",
-                "invisible": "IF newTimeout = 0 THEN RemoveKey(invisible, consumerState[consumer].holding) ELSE [invisible EXCEPT ![consumerState[consumer].holding].expiresAt = now + newTimeout, ![consumerState[consumer].holding].handle = 0]",
-                "handles": "RemoveKey(handles, consumerState[consumer].holding)",
-                "consumerState": "[consumerState EXCEPT ![consumer] = [holding |-> NULL, handle |-> 0]]",
-            },
-            description="Return message to queue with optional delay",
-        ),
-        Action(
-            name="NackFail",
-            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
-            preconditions=(
-                "consumerState[consumer].holding /= NULL",
-                r"consumerState[consumer].holding \notin DOMAIN handles \/ handles[consumerState[consumer].holding] /= consumerState[consumer].handle \/ consumerState[consumer].holding \notin DOMAIN invisible",
-            ),
-            updates={
-                "consumerState": "[consumerState EXCEPT ![consumer] = [holding |-> NULL, handle |-> 0]]",
-            },
-            description="Nack fails if handle is stale",
-        ),
-        Action(
-            name="Extend",
-            parameters=(
-                ActionParameter("consumer", "1..NumConsumers"),
-                ActionParameter("newTimeout", "1..VisibilityTimeout"),
-            ),
-            preconditions=(
-                "consumerState[consumer].holding /= NULL",
-                r"consumerState[consumer].holding \in DOMAIN handles",
-                "handles[consumerState[consumer].holding] = consumerState[consumer].handle",
-                r"consumerState[consumer].holding \in DOMAIN invisible",
-            ),
-            updates={
-                "invisible": "[invisible EXCEPT ![consumerState[consumer].holding].expiresAt = now + newTimeout]",
-            },
-            description="Extend visibility timeout for a message",
-        ),
-        Action(
-            name="ExtendFail",
-            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
-            preconditions=(
-                "consumerState[consumer].holding /= NULL",
-                r"consumerState[consumer].holding \notin DOMAIN handles \/ handles[consumerState[consumer].holding] /= consumerState[consumer].handle \/ consumerState[consumer].holding \notin DOMAIN invisible",
-            ),
-            updates={
-                "consumerState": "[consumerState EXCEPT ![consumer] = [holding |-> NULL, handle |-> 0]]",
-            },
-            description="Extend fails if handle is stale or message not in invisible",
-        ),
-        Action(
-            name="ReapOne",
-            parameters=(),
-            preconditions=(
-                r"\E msgId \in DOMAIN invisible: invisible[msgId].expiresAt < now",
-            ),
-            updates={
-                r"pending": r"Append(pending, CHOOSE msgId \in DOMAIN invisible: invisible[msgId].expiresAt < now)",
-                r"invisible": r"RemoveKey(invisible, CHOOSE msgId \in DOMAIN invisible: invisible[msgId].expiresAt < now)",
-                r"handles": r"RemoveKey(handles, CHOOSE msgId \in DOMAIN invisible: invisible[msgId].expiresAt < now)",
-                r"consumerState": r"[c \in DOMAIN consumerState |-> IF consumerState[c].holding = (CHOOSE msgId \in DOMAIN invisible: invisible[msgId].expiresAt < now) THEN [holding |-> NULL, handle |-> 0] ELSE consumerState[c]]",
-            },
-            description="Move one expired message back to pending",
-        ),
-        Action(
-            name="Tick",
-            parameters=(),
-            preconditions=(),
-            updates={"now": "now + 1"},
-            description="Advance abstract time",
-        ),
-    ],
-    invariants=[
-        Invariant(
-            id="INV-1",
-            name="MessageStateExclusive",
-            predicate=r"""
-\A msgId \in 1..nextMsgId-1:
-    LET inPending == InPending(msgId)
-        inInvisible == msgId \in DOMAIN invisible
-        inDeleted == msgId \in deleted
-    IN (inPending /\ ~inInvisible /\ ~inDeleted) \/
-       (~inPending /\ inInvisible /\ ~inDeleted) \/
-       (~inPending /\ ~inInvisible /\ inDeleted)
-""".strip(),
-            description="A message must be in exactly one state: pending, invisible, or deleted",
-        ),
-        Invariant(
-            id="INV-2-3",
-            name="HandleValidity",
-            predicate=r"""
-\A c \in 1..NumConsumers:
-    LET state == consumerState[c]
-    IN state.holding /= NULL =>
-        (state.holding \in DOMAIN handles =>
-            handles[state.holding] = state.handle)
-""".strip(),
-            description="Consumers holding a message have a valid handle for it",
-        ),
-        Invariant(
-            id="INV-4",
-            name="DeliveryCountMonotonic",
-            predicate=r"""
-\A msgId \in DOMAIN deliveryHistory:
-    LET history == deliveryHistory[msgId]
-    IN \A i \in 1..Len(history)-1:
-        history[i].count < history[i+1].count
-""".strip(),
-            description="Delivery counts are strictly increasing",
-        ),
-        Invariant(
-            id="INV-4b",
-            name="DeliveryCountPersistence",
-            predicate=r"""
-\A msgId \in DOMAIN deliveryCounts:
-    \A i \in 1..Len(deliveryHistory[msgId]):
-        deliveryHistory[msgId][i].count = i
-""".strip(),
-            description="Delivery counts persist across requeue",
-        ),
-        Invariant(
-            id="INV-5",
-            name="NoMessageLoss",
-            predicate=r"""
-\A msgId \in DOMAIN data:
-    LET inPending == InPending(msgId)
-        inInvisible == msgId \in DOMAIN invisible
-    IN inPending \/ inInvisible
-""".strip(),
-            description="Every message with data is either pending or invisible",
-        ),
-        Invariant(
-            id="INV-7",
-            name="HandleUniqueness",
-            predicate=r"""
-\A msgId \in DOMAIN deliveryHistory:
-    LET history == deliveryHistory[msgId]
-    IN \A i, j \in 1..Len(history):
-        i /= j => history[i].handle /= history[j].handle
-""".strip(),
-            description="Each delivery of a message gets a unique handle",
-        ),
-        Invariant(
-            id="INV-8",
-            name="PendingNoDuplicates",
-            predicate=r"""
-\A i, j \in 1..Len(pending):
-    i /= j => pending[i] /= pending[j]
-""".strip(),
-            description="The pending queue contains no duplicate message IDs",
-        ),
-        Invariant(
-            id="INV-9",
-            name="DataIntegrity",
-            predicate=r"""
-\A msgId \in 1..nextMsgId-1:
-    (InPending(msgId) \/ msgId \in DOMAIN invisible) => msgId \in DOMAIN data
-""".strip(),
-            description="Every message in pending or invisible has associated data",
-        ),
-    ],
-    constraint="now <= 2",
-)
+@formal_spec(**REDIS_MAILBOX_SPEC_KWARGS)
 class RedisMailbox[T, R]:
     """Redis-backed mailbox with SQS-compatible visibility timeout semantics.
 
     This implementation is formally verified against the embedded TLA+ specification.
-    The specification can be extracted and model-checked with:
-
-        make verify-formal
+    The specification can be extracted and model-checked with ``make verify-formal``.
 
     Supports both standalone Redis and Redis Cluster deployments. Uses Lua scripts
     for atomic operations and a background reaper thread for visibility timeout
@@ -649,15 +194,14 @@ class RedisMailbox[T, R]:
 
         {queue:name}:pending    # LIST - messages awaiting delivery (LPUSH/RPOP)
         {queue:name}:invisible  # ZSET - in-flight messages scored by expiry timestamp
-        {queue:name}:data       # HASH - message ID → serialized message body
-        {queue:name}:meta       # HASH - message ID:count → delivery count,
-                                #        message ID:enqueued → enqueued timestamp,
-                                #        message ID:handle → current receipt handle suffix
-                                #        message ID:reply_to → reply destination
+        {queue:name}:data       # HASH - message ID -> serialized message body
+        {queue:name}:meta       # HASH - message ID:count -> delivery count,
+                                #        message ID:enqueued -> enqueued timestamp,
+                                #        message ID:handle -> current receipt handle suffix
+                                #        message ID:reply_to -> reply destination
 
     Formal Specification:
-        The @formal_spec decorator above defines the complete TLA+ state machine
-        for this implementation. Key invariants verified:
+        Key invariants verified by the ``@formal_spec`` decorator:
 
         - INV-1: Message State Exclusivity (pending XOR invisible XOR deleted)
         - INV-2-3: Receipt Handle Validity (stale handles rejected)
@@ -667,33 +211,7 @@ class RedisMailbox[T, R]:
         - INV-8: Pending No Duplicates (no duplicate IDs in pending queue)
         - INV-9: Data Integrity (queued messages have associated data)
 
-        See specs/VERIFICATION.md for complete verification documentation.
-
-    Example::
-
-        from redis import Redis
-        from weakincentives.contrib.mailbox import RedisMailbox
-
-        client = Redis(host="localhost", port=6379)
-        requests: RedisMailbox[MyEvent, MyResult] = RedisMailbox(
-            name="requests",
-            client=client,
-        )
-        responses: RedisMailbox[MyResult, None] = RedisMailbox(
-            name="responses",
-            client=client,
-        )
-
-        try:
-            # Send with mailbox reference (name is serialized to Redis)
-            requests.send(MyEvent(data="hello"), reply_to=responses)
-            for msg in requests.receive(visibility_timeout=60):
-                result = process(msg.body)
-                msg.reply(result)  # Replies to resolved mailbox
-                msg.acknowledge()
-        finally:
-            requests.close()
-            responses.close()
+        See ``specs/VERIFICATION.md`` for complete verification documentation.
     """
 
     name: str
@@ -761,13 +279,13 @@ class RedisMailbox[T, R]:
 
     def _register_scripts(self) -> None:
         """Register Lua scripts with Redis."""
-        self._scripts["send"] = self.client.register_script(_LUA_SEND)
-        self._scripts["receive"] = self.client.register_script(_LUA_RECEIVE)
-        self._scripts["acknowledge"] = self.client.register_script(_LUA_ACKNOWLEDGE)
-        self._scripts["nack"] = self.client.register_script(_LUA_NACK)
-        self._scripts["extend"] = self.client.register_script(_LUA_EXTEND)
-        self._scripts["reap"] = self.client.register_script(_LUA_REAP)
-        self._scripts["purge"] = self.client.register_script(_LUA_PURGE)
+        self._scripts["send"] = self.client.register_script(LUA_SEND)
+        self._scripts["receive"] = self.client.register_script(LUA_RECEIVE)
+        self._scripts["acknowledge"] = self.client.register_script(LUA_ACKNOWLEDGE)
+        self._scripts["nack"] = self.client.register_script(LUA_NACK)
+        self._scripts["extend"] = self.client.register_script(LUA_EXTEND)
+        self._scripts["reap"] = self.client.register_script(LUA_REAP)
+        self._scripts["purge"] = self.client.register_script(LUA_PURGE)
 
     def _start_reaper(self) -> None:
         """Start background thread to requeue expired messages."""

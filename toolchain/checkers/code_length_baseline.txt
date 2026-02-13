@@ -11,36 +11,14 @@
 #   path/to/file.py:Class.method           – function-length violation
 
 # ── src/ file-length ────────────────────────────────────────────────
-src/weakincentives/adapters/claude_agent_sdk/_hooks.py
-src/weakincentives/adapters/claude_agent_sdk/_transcript_collector.py
-src/weakincentives/adapters/claude_agent_sdk/adapter.py
-src/weakincentives/adapters/claude_agent_sdk/isolation.py
 src/weakincentives/adapters/codex_app_server/adapter.py
-src/weakincentives/cli/debug_app.py
 src/weakincentives/cli/query.py
 src/weakincentives/cli/wink.py
-src/weakincentives/contrib/mailbox/_redis.py
-src/weakincentives/contrib/tools/filesystem_memory.py
-src/weakincentives/dbc/__init__.py
-src/weakincentives/debug/bundle.py
-src/weakincentives/debug/environment.py
 src/weakincentives/filesystem/_host.py
-src/weakincentives/formal/__init__.py
-src/weakincentives/prompt/feedback.py
 src/weakincentives/prompt/overrides/validation.py
 src/weakincentives/prompt/registry.py
-src/weakincentives/prompt/tool.py
-src/weakincentives/runtime/agent_loop.py
 src/weakincentives/runtime/session/session.py
 src/weakincentives/serde/parse.py
-
-# ── src/ function-length ────────────────────────────────────────────
-src/weakincentives/adapters/claude_agent_sdk/_sdk_execution.py:run_sdk_query
-src/weakincentives/adapters/claude_agent_sdk/adapter.py:ClaudeAgentSDKAdapter._evaluate_async
-src/weakincentives/adapters/claude_agent_sdk/adapter.py:ClaudeAgentSDKAdapter._run_with_prompt_context
-src/weakincentives/adapters/codex_app_server/adapter.py:CodexAppServerAdapter._run_codex
-src/weakincentives/prompt/rendering.py:PromptRenderer.render
-src/weakincentives/runtime/agent_loop.py:AgentLoop._handle_message_with_bundle
 
 # ── tests/ file-length ──────────────────────────────────────────────
 tests/adapters/claude_agent_sdk/test_adapter.py
@@ -58,12 +36,9 @@ tests/debug/test_environment.py
 tests/evals/test_loop.py
 tests/evals/test_session_evaluators.py
 tests/evals/test_types.py
-tests/formal/test_formal_testing.py
 tests/helpers/filesystem.py
 tests/prompt/test_feedback.py
-tests/prompt/test_policy.py
 tests/prompts/overrides/test_local_prompt_overrides_store.py
-tests/prompts/overrides/test_prompt_versioning.py
 tests/prompts/test_progressive_disclosure.py
 tests/prompts/test_task_examples.py
 tests/prompts/test_text_section.py
@@ -74,6 +49,4 @@ tests/runtime/test_lifecycle.py
 tests/runtime/test_mailbox.py
 tests/serde/test_loop_serde.py
 tests/serde/test_parse_and_dump.py
-tests/toolchain/test_checker.py
 tests/toolchain/test_parsers.py
-tests/tools/test_filesystem.py
