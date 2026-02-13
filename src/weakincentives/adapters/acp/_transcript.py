@@ -21,6 +21,11 @@ sends ``item/completed`` with accumulated text), ACP only streams
 deltas.  The bridge buffers text and flushes when the update type
 changes or :meth:`flush` is called at session end.
 
+``ToolCallProgress`` updates are likewise consolidated: intermediate
+deltas (``in_progress``) are merged into a buffer keyed by
+``tool_call_id``, and a single ``tool_result`` is emitted when the
+status reaches a terminal value (``completed`` / ``failed``).
+
 See ``specs/TRANSCRIPT.md`` for the full specification.
 """
 
@@ -32,6 +37,9 @@ __all__ = ["ACPTranscriptBridge"]
 
 # Maximum text length stored in a single transcript detail entry.
 _MAX_TEXT = 500
+
+# Terminal tool-call statuses that trigger emission.
+_TERMINAL_STATUSES = frozenset({"completed", "failed"})
 
 
 def _truncate(value: object, limit: int) -> str:
@@ -59,6 +67,9 @@ class ACPTranscriptBridge:
     Streaming text (``AgentMessageChunk`` / ``AgentThoughtChunk``) is
     buffered and emitted as a single consolidated entry when the stream
     type changes or :meth:`flush` is called.
+
+    ``ToolCallProgress`` updates are buffered per ``tool_call_id`` and
+    emitted as a single ``tool_result`` on terminal status.
     """
 
     def __init__(self, emitter: TranscriptEmitter) -> None:
@@ -67,6 +78,8 @@ class ACPTranscriptBridge:
         # Buffering state: _buf_type is "message" | "thought" | None
         self._buf_type: str | None = None
         self._buf_parts: list[str] = []
+        # Tool progress consolidation: tool_call_id → accumulated detail
+        self._tool_bufs: dict[str, dict[str, object]] = {}
 
     @property
     def emitter(self) -> TranscriptEmitter:
@@ -81,7 +94,12 @@ class ACPTranscriptBridge:
         )
 
     def flush(self) -> None:
-        """Emit any buffered message/thought text."""
+        """Emit any buffered message/thought text and pending tool results."""
+        self._flush_text()
+        self._flush_tools()
+
+    def _flush_text(self) -> None:
+        """Emit buffered message/thought text."""
         if self._buf_type is None:
             return
         text = "".join(self._buf_parts)
@@ -93,6 +111,12 @@ class ACPTranscriptBridge:
         self._buf_type = None
         self._buf_parts.clear()
 
+    def _flush_tools(self) -> None:
+        """Emit all pending tool result buffers."""
+        for detail in self._tool_bufs.values():
+            self._emitter.emit("tool_result", detail=detail)
+        self._tool_bufs.clear()
+
     def on_update(self, update: object) -> None:
         """Map an ACP session update to a transcript entry and emit."""
         update_type = type(update).__name__
@@ -102,16 +126,16 @@ class ACPTranscriptBridge:
         elif update_type == "AgentThoughtChunk":
             self._buffer_chunk("thought", update)
         elif update_type == "ToolCallStart":
-            self.flush()
+            self._flush_text()
             self._handle_tool_start(update)
         elif update_type == "ToolCallProgress":
-            self.flush()
+            self._flush_text()
             self._handle_tool_progress(update)
 
     def _buffer_chunk(self, buf_type: str, update: object) -> None:
         """Buffer a streaming chunk, flushing if the type changed."""
         if self._buf_type is not None and self._buf_type != buf_type:
-            self.flush()
+            self._flush_text()
         self._buf_type = buf_type
         self._buf_parts.append(_extract_chunk_text(update))
 
@@ -130,23 +154,37 @@ class ACPTranscriptBridge:
         self._emitter.emit("tool_use", detail=detail)
 
     def _handle_tool_progress(self, update: object) -> None:
-        status = getattr(update, "status", "")
         tool_id = getattr(update, "tool_call_id", "")
+        status_raw = getattr(update, "status", "")
+        status = str(status_raw) if status_raw else ""
         title = getattr(update, "title", "")
+        raw_input = getattr(update, "raw_input", None)
         raw_output = getattr(update, "raw_output", None)
 
-        detail: dict[str, object] = {
-            "tool_name": title,
-            "tool_call_id": tool_id,
-            "status": str(status) if status else "",
-            "output": _truncate(raw_output, _MAX_TEXT)
-            if raw_output is not None
-            else "",
-        }
+        buf = self._tool_bufs.get(tool_id)
+        if buf is None:
+            buf = {
+                "tool_name": title or "",
+                "tool_call_id": tool_id,
+                "status": "",
+                "output": "",
+            }
+            self._tool_bufs[tool_id] = buf
 
-        # Include input if delivered on the update (some agents send it here).
-        raw_input = getattr(update, "raw_input", None)
+        # Merge fields — later updates override earlier ones.
+        if status:
+            buf["status"] = status
+        # Preserve the original tool name from the first update that
+        # carries one; OpenCode overwrites title to the file path on
+        # the completed update, which is less useful than "read"/"glob".
+        if title and not buf["tool_name"]:
+            buf["tool_name"] = title
         if raw_input is not None:
-            detail["input"] = _truncate(raw_input, _MAX_TEXT)
+            buf["input"] = _truncate(raw_input, _MAX_TEXT)
+        if raw_output is not None:
+            buf["output"] = _truncate(raw_output, _MAX_TEXT)
 
-        self._emitter.emit("tool_result", detail=detail)
+        # Emit and clear on terminal status.
+        if status in _TERMINAL_STATUSES:
+            self._emitter.emit("tool_result", detail=buf)
+            del self._tool_bufs[tool_id]

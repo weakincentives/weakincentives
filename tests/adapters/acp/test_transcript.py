@@ -97,12 +97,25 @@ class TestChunkConsolidation:
     def test_message_flushed_on_tool_progress(self) -> None:
         bridge, emitter = _make_bridge()
         bridge.on_update(MockAgentMessageChunk(content="text"))
+        # Terminal status emits both the flushed text and the tool_result.
         bridge.on_update(
             MockToolCallProgress(tool_call_id="tc-1", title="bash", status="completed")
         )
         assert emitter.emit.call_count == 2
         assert emitter.emit.call_args_list[0].args[0] == "assistant_message"
         assert emitter.emit.call_args_list[1].args[0] == "tool_result"
+
+    def test_message_flushed_on_non_terminal_progress(self) -> None:
+        bridge, emitter = _make_bridge()
+        bridge.on_update(MockAgentMessageChunk(content="text"))
+        # Non-terminal progress flushes the text but does not emit tool_result yet.
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1", title="bash", status="in_progress"
+            )
+        )
+        assert emitter.emit.call_count == 1
+        assert emitter.emit.call_args_list[0].args[0] == "assistant_message"
 
     def test_thought_flushed_when_message_starts(self) -> None:
         bridge, emitter = _make_bridge()
@@ -214,46 +227,160 @@ class TestToolEvents:
         assert detail["tool_call_id"] == "tc-1"
         assert "path" in detail["input"]
 
-    def test_tool_progress(self) -> None:
+    def test_tool_progress_emits_on_completed(self) -> None:
         bridge, emitter = _make_bridge()
-        update = MockToolCallProgress(
-            tool_call_id="tc-1",
-            title="bash",
-            status="completed",
-            raw_output="done",
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="bash",
+                status="completed",
+                raw_output="done",
+            )
         )
-        bridge.on_update(update)
+        emitter.emit.assert_called_once()
         detail = emitter.emit.call_args.kwargs["detail"]
         assert detail["tool_name"] == "bash"
         assert detail["tool_call_id"] == "tc-1"
         assert detail["status"] == "completed"
         assert detail["output"] == "done"
 
-    def test_tool_progress_with_input(self) -> None:
+    def test_tool_progress_emits_on_failed(self) -> None:
         bridge, emitter = _make_bridge()
-        update = MockToolCallProgress(
-            tool_call_id="tc-1",
-            title="bash",
-            status="completed",
-            raw_input={"cmd": "ls"},
-            raw_output="file.py",
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="bash",
+                status="failed",
+                raw_output="error",
+            )
         )
-        bridge.on_update(update)
+        emitter.emit.assert_called_once()
+        assert emitter.emit.call_args.kwargs["detail"]["status"] == "failed"
+
+    def test_tool_progress_buffers_non_terminal(self) -> None:
+        """Non-terminal (in_progress) updates do not emit immediately."""
+        bridge, emitter = _make_bridge()
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="bash",
+                status="in_progress",
+                raw_input={"cmd": "ls"},
+            )
+        )
+        emitter.emit.assert_not_called()
+
+    def test_tool_progress_consolidates_deltas(self) -> None:
+        """Multiple progress updates merge into one emitted tool_result."""
+        bridge, emitter = _make_bridge()
+        # First: in_progress with input
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="read",
+                status="in_progress",
+                raw_input={"filePath": "/tmp/foo.py"},
+            )
+        )
+        emitter.emit.assert_not_called()
+        # Second: completed with output
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="/tmp/foo.py",  # OpenCode overwrites title
+                status="completed",
+                raw_output="file contents",
+            )
+        )
+        emitter.emit.assert_called_once()
+        detail = emitter.emit.call_args.kwargs["detail"]
+        # Original tool name preserved (not overwritten to file path).
+        assert detail["tool_name"] == "read"
+        assert detail["tool_call_id"] == "tc-1"
+        assert detail["status"] == "completed"
+        assert "filePath" in detail["input"]
+        assert detail["output"] == "file contents"
+
+    def test_tool_progress_preserves_first_tool_name(self) -> None:
+        """First non-empty title sticks even if later updates change it."""
+        bridge, emitter = _make_bridge()
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1", title="glob", status="in_progress"
+            )
+        )
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1", title="/some/path", status="completed"
+            )
+        )
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert detail["tool_name"] == "glob"
+
+    def test_tool_progress_fills_empty_tool_name(self) -> None:
+        """If first update has empty title, a later update can fill it."""
+        bridge, emitter = _make_bridge()
+        bridge.on_update(
+            MockToolCallProgress(tool_call_id="tc-1", title="", status="in_progress")
+        )
+        bridge.on_update(
+            MockToolCallProgress(tool_call_id="tc-1", title="read", status="completed")
+        )
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert detail["tool_name"] == "read"
+
+    def test_tool_progress_empty_status_preserves_existing(self) -> None:
+        """An update with empty status does not overwrite existing status."""
+        bridge, emitter = _make_bridge()
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1", title="bash", status="in_progress"
+            )
+        )
+        # Update with empty status and some input.
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="",
+                status="",
+                raw_input={"cmd": "ls"},
+            )
+        )
+        # Complete to emit.
+        bridge.on_update(
+            MockToolCallProgress(tool_call_id="tc-1", title="", status="completed")
+        )
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert detail["status"] == "completed"
+        assert "cmd" in detail["input"]
+
+    def test_tool_progress_with_input_on_completed(self) -> None:
+        bridge, emitter = _make_bridge()
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="bash",
+                status="completed",
+                raw_input={"cmd": "ls"},
+                raw_output="file.py",
+            )
+        )
         detail = emitter.emit.call_args.kwargs["detail"]
         assert "cmd" in detail["input"]
         assert detail["output"] == "file.py"
 
     def test_tool_progress_truncates_output(self) -> None:
         bridge, emitter = _make_bridge()
-        update = MockToolCallProgress(
-            tool_call_id="tc-1",
-            title="bash",
-            status="completed",
-            raw_output="x" * 1000,
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="bash",
+                status="completed",
+                raw_output="x" * 1000,
+            )
         )
-        bridge.on_update(update)
-        call_args = emitter.emit.call_args
-        assert len(call_args.kwargs["detail"]["output"]) == 500
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert len(detail["output"]) == 500
 
     def test_tool_progress_non_string_output(self) -> None:
         bridge, emitter = _make_bridge()
@@ -262,17 +389,95 @@ class TestToolEvents:
         )
         object.__setattr__(update, "raw_output", 42)
         bridge.on_update(update)
-        call_args = emitter.emit.call_args
-        assert call_args.kwargs["detail"]["output"] == "42"
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert detail["output"] == "42"
 
     def test_tool_progress_none_output(self) -> None:
         bridge, emitter = _make_bridge()
-        update = MockToolCallProgress(
-            tool_call_id="tc-1", title="bash", status="completed"
+        bridge.on_update(
+            MockToolCallProgress(tool_call_id="tc-1", title="bash", status="completed")
         )
-        bridge.on_update(update)
-        call_args = emitter.emit.call_args
-        assert call_args.kwargs["detail"]["output"] == ""
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert detail["output"] == ""
+
+    def test_flush_emits_pending_tool_buffers(self) -> None:
+        """flush() emits non-terminal tool buffers (e.g. session ended early)."""
+        bridge, emitter = _make_bridge()
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="bash",
+                status="in_progress",
+                raw_input={"cmd": "ls"},
+            )
+        )
+        emitter.emit.assert_not_called()
+        bridge.flush()
+        emitter.emit.assert_called_once()
+        detail = emitter.emit.call_args.kwargs["detail"]
+        assert detail["tool_name"] == "bash"
+        assert detail["status"] == "in_progress"
+
+    def test_flush_clears_tool_buffers(self) -> None:
+        """After flush, pending tool buffers are cleared."""
+        bridge, emitter = _make_bridge()
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1", title="bash", status="in_progress"
+            )
+        )
+        bridge.flush()
+        assert emitter.emit.call_count == 1
+        bridge.flush()
+        # No additional emit.
+        assert emitter.emit.call_count == 1
+
+    def test_multiple_concurrent_tools(self) -> None:
+        """Interleaved progress from different tool_call_ids consolidates each."""
+        bridge, emitter = _make_bridge()
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="read",
+                status="in_progress",
+                raw_input={"path": "a.py"},
+            )
+        )
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-2",
+                title="glob",
+                status="in_progress",
+                raw_input={"pattern": "*.py"},
+            )
+        )
+        emitter.emit.assert_not_called()
+        # tc-1 completes first
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-1",
+                title="/tmp/a.py",
+                status="completed",
+                raw_output="contents-a",
+            )
+        )
+        assert emitter.emit.call_count == 1
+        d1 = emitter.emit.call_args.kwargs["detail"]
+        assert d1["tool_name"] == "read"
+        assert d1["output"] == "contents-a"
+        # tc-2 completes next
+        bridge.on_update(
+            MockToolCallProgress(
+                tool_call_id="tc-2",
+                title="/tmp",
+                status="completed",
+                raw_output="b.py\nc.py",
+            )
+        )
+        assert emitter.emit.call_count == 2
+        d2 = emitter.emit.call_args.kwargs["detail"]
+        assert d2["tool_name"] == "glob"
+        assert d2["output"] == "b.py\nc.py"
 
 
 class TestExtractChunkText:
