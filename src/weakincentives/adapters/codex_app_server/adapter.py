@@ -385,6 +385,32 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             await client.stop()
 
         accumulated_text, usage = result
+        return self._build_response(
+            accumulated_text=accumulated_text,
+            usage=usage,
+            output_schema=output_schema,
+            rendered=rendered,
+            prompt_name=prompt_name,
+            session=session,
+            budget_tracker=budget_tracker,
+            run_context=run_context,
+            start_time=start_time,
+        )
+
+    def _build_response[OutputT](
+        self,
+        *,
+        accumulated_text: str | None,
+        usage: TokenUsage | None,
+        output_schema: dict[str, Any] | None,
+        rendered: RenderedPrompt[OutputT],
+        prompt_name: str,
+        session: SessionProtocol,
+        budget_tracker: BudgetTracker | None,
+        run_context: RunContext | None,
+        start_time: datetime,
+    ) -> PromptResponse[OutputT]:
+        """Build PromptResponse, dispatch event, and log completion."""
         end_time = _utcnow()
         duration_ms = int((end_time - start_time).total_seconds() * 1000)
 

@@ -13,29 +13,18 @@
 """Agent loop orchestration for agent workflow execution.
 
 AgentLoop provides a mailbox-based pattern for durable request processing with
-at-least-once delivery semantics. Requests are received from a mailbox queue
-and results are sent via Message.reply().
+at-least-once delivery semantics.  Requests are received from a mailbox queue
+and results are sent via ``Message.reply()``.
 
 Example::
 
     class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResult]):
-        def __init__(
-            self,
-            *,
-            adapter: ProviderAdapter[ReviewResult],
-            requests: Mailbox[AgentLoopRequest[ReviewRequest], AgentLoopResult[ReviewResult]],
-        ) -> None:
+        def __init__(self, *, adapter, requests) -> None:
             super().__init__(adapter=adapter, requests=requests)
-            self._template = PromptTemplate[ReviewResult](...)
 
-        def prepare(
-            self, request: ReviewRequest
-        ) -> tuple[Prompt[ReviewResult], Session]:
-            prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-            session = Session(tags={"loop": "code-review"})
-            return prompt, session
+        def prepare(self, request):
+            return Prompt(self._template).bind(...), Session()
 
-    # Run the worker loop
     loop = CodeReviewLoop(adapter=adapter, requests=requests)
     loop.run(max_iterations=100)
 """
@@ -57,6 +46,11 @@ from uuid import UUID, uuid4
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
+from ._agent_loop_bundle import (
+    get_adapter_name as _get_adapter_name_fn,
+    handle_message_with_bundle as _handle_message_with_bundle_fn,
+    write_bundle_artifacts as _write_bundle_artifacts_fn,
+)
 from .agent_loop_types import (
     AgentLoopConfig,
     AgentLoopRequest,
@@ -82,7 +76,6 @@ if TYPE_CHECKING:
     from ..experiment import Experiment
     from ..prompt import Prompt
     from .agent_loop_types import BundleContext
-    from .session.visibility_overrides import VisibilityOverrides
 
 _logger: StructuredLogger = get_logger(
     __name__, context={"component": "runtime.agent_loop"}
@@ -384,7 +377,7 @@ class AgentLoop[UserRequestT, OutputT](
             yield ctx
 
             # Write remaining artifacts after caller has added metadata
-            self._write_bundle_artifacts(
+            _write_bundle_artifacts_fn(
                 writer=writer,
                 response=response,
                 session=session,
@@ -392,6 +385,7 @@ class AgentLoop[UserRequestT, OutputT](
                 started_at=started_at,
                 ended_at=ended_at,
                 budget_tracker=budget_tracker,
+                config=self._config,
             )
 
             prompt.cleanup()
@@ -437,53 +431,6 @@ class AgentLoop[UserRequestT, OutputT](
             )
 
         return response, session, prompt, budget_tracker
-
-    def _write_bundle_artifacts(  # noqa: PLR0913
-        self,
-        *,
-        writer: BundleWriter,
-        response: PromptResponse[OutputT],
-        session: Session,
-        prompt: Prompt[OutputT],
-        started_at: datetime,
-        ended_at: datetime,
-        budget_tracker: BudgetTracker | None,
-        run_context: RunContext | None = None,
-    ) -> None:
-        """Write bundle artifacts after execution.
-
-        Shared by execute_with_bundle and _handle_message_with_bundle.
-        """
-        from ..filesystem import Filesystem
-        from .session.visibility_overrides import VisibilityOverrides
-
-        writer.write_session_after(session)
-        writer.write_request_output(response)
-        writer.write_config(self._config)
-
-        if run_context is not None:
-            writer.write_run_context(run_context)
-
-        writer.write_metrics(
-            self._collect_metrics(
-                started_at=started_at,
-                ended_at=ended_at,
-                session=session,
-                budget_tracker=budget_tracker,
-            )
-        )
-
-        visibility_overrides = session[VisibilityOverrides].latest()
-        if visibility_overrides is not None and visibility_overrides.overrides:
-            writer.write_prompt_overrides(
-                self._format_visibility_overrides(visibility_overrides, session)
-            )
-
-        fs = prompt.resources.get_optional(Filesystem)
-        if fs is not None:
-            writer.write_filesystem(fs)
-
-        writer.write_environment()
 
     def _execute(
         self,
@@ -571,8 +518,8 @@ class AgentLoop[UserRequestT, OutputT](
     ) -> PromptResponse[OutputT]:
         """Run evaluation with visibility expansion retry loop.
 
-        Handles the core evaluate → catch VisibilityExpansionRequired →
-        dispatch overrides → retry cycle. Calls finalize() on success.
+        Handles the core evaluate -> catch VisibilityExpansionRequired ->
+        dispatch overrides -> retry cycle. Calls finalize() on success.
 
         Returns:
             The prompt response from successful evaluation.
@@ -701,294 +648,20 @@ class AgentLoop[UserRequestT, OutputT](
 
         # Lease extension is handled by MailboxWorker.run()
         if bundle_config is not None and bundle_config.enabled:
-            self._handle_message_with_bundle(
-                msg, request_event, run_context, log, bundle_config
+            _handle_message_with_bundle_fn(
+                self,  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
+                msg,
+                request_event,
+                run_context,
+                log,
+                bundle_config,
             )
         else:
             self._handle_message_without_bundle(msg, request_event, run_context)
 
-    def _handle_message_with_bundle(
-        self,
-        msg: Message[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]],
-        request_event: AgentLoopRequest[UserRequestT],
-        run_context: RunContext,
-        log: StructuredLogger,
-        bundle_config: BundleConfig,
-    ) -> None:
-        """Process message with debug bundling enabled."""
-        from ..debug import BundleWriter
-
-        if bundle_config.target is None:  # pragma: no cover
-            # Defensive guard: _handle_message only calls this when enabled=True
-            self._handle_message_without_bundle(msg, request_event, run_context)
-            return
-
-        # Determine trigger based on where config came from
-        trigger = "request" if request_event.debug_bundle is not None else "config"
-
-        writer: BundleWriter | None = None
-        prompt: Prompt[OutputT] | None = None
-        started_at = datetime.now(UTC)
-        budget_tracker: BudgetTracker | None = None
-        prompt_cleaned_up = False
-        try:
-            with BundleWriter(
-                bundle_config.target,
-                bundle_id=run_context.run_id,
-                config=bundle_config,
-                trigger=trigger,
-            ) as writer:
-                # Write request input
-                writer.write_request_input(request_event)
-
-                # Prepare prompt and session first so we can capture session/before
-                prompt, session = self.prepare(
-                    request_event.request,
-                    experiment=request_event.experiment,
-                )
-
-                # Publish request state to session after prepare()
-                _ = session.dispatch(LoopRequestState(request=request_event))
-
-                # Write session before execution
-                writer.write_session_before(session)
-
-                # Update run_context with session_id for early write
-                run_context = replace(run_context, session_id=session.session_id)
-                writer.write_run_context(run_context)
-
-                # Set prompt info for manifest
-                adapter_name = self._get_adapter_name()
-                writer.set_prompt_info(
-                    ns=prompt.ns,
-                    key=prompt.key,
-                    adapter=adapter_name,
-                )
-
-                # Resolve effective settings and execute
-                response, budget_tracker = self._execute_with_bundled_settings(
-                    request_event=request_event,
-                    prompt=prompt,
-                    session=session,
-                    run_context=run_context,
-                    writer=writer,
-                )
-
-                ended_at = datetime.now(UTC)
-
-                self._write_bundle_artifacts(
-                    writer=writer,
-                    response=response,
-                    session=session,
-                    prompt=prompt,
-                    started_at=started_at,
-                    ended_at=ended_at,
-                    budget_tracker=budget_tracker,
-                    run_context=run_context,
-                )
-
-                prompt_cleaned_up = True
-                prompt.cleanup()
-
-            # Bundle path is set after context manager exits (in __exit__ -> _finalize)
-            bundle_path = writer.path
-
-            result = AgentLoopResult[OutputT](
-                request_id=request_event.request_id,
-                output=response.output,
-                session_id=session.session_id,
-                run_context=run_context,
-                bundle_path=bundle_path,
-            )
-            reply_and_ack(msg, result)
-
-        except Exception as exc:
-            # Clean up prompt resources if prompt was created
-            if prompt is not None and not prompt_cleaned_up:
-                prompt.cleanup()
-
-            # Check if bundle was created despite the error
-            bundle_path = writer.path if writer is not None else None
-
-            if bundle_path is not None:
-                # Bundle was created successfully, error was during execution
-                log.info(
-                    "Execution failed but debug bundle was created",
-                    event="agent_loop.execution_failed_with_bundle",
-                    context={"error": str(exc), "bundle_path": str(bundle_path)},
-                )
-            else:
-                # True bundle creation failure
-                log.warning(
-                    "Debug bundle creation failed, falling back to unbundled execution",
-                    event="agent_loop.bundle_failed",
-                    context={"error": str(exc)},
-                )
-
-            handle_failure(
-                msg,
-                exc,
-                run_context=run_context,
-                dlq=self._dlq,
-                requests_mailbox=self._requests,
-                result_class=AgentLoopResult,
-                bundle_path=bundle_path,
-            )
-
-    def _execute_with_bundled_settings(
-        self,
-        *,
-        request_event: AgentLoopRequest[UserRequestT],
-        prompt: Prompt[OutputT],
-        session: Session,
-        run_context: RunContext,
-        writer: object,  # BundleWriter, but avoid import for typing
-    ) -> tuple[PromptResponse[OutputT], BudgetTracker | None]:
-        """Execute prompt with settings resolved and log capture enabled.
-
-        This helper reduces nesting in _handle_message_with_bundle by
-        encapsulating the execution loop with visibility override retry.
-        """
-        prompt, budget_tracker, eff_deadline = self._resolve_settings(
-            prompt,
-            budget=request_event.budget,
-            deadline=request_event.deadline,
-            resources=request_event.resources,
-        )
-
-        with writer.capture_logs():  # type: ignore[union-attr]
-            response = self._evaluate_with_retries(
-                prompt=prompt,
-                session=session,
-                deadline=eff_deadline,
-                budget_tracker=budget_tracker,
-                heartbeat=self._heartbeat,
-                run_context=run_context,
-            )
-
-        return response, budget_tracker
-
     def _get_adapter_name(self) -> str:
         """Get the canonical adapter name for the current adapter."""
-        from ..adapters import (
-            CLAUDE_AGENT_SDK_ADAPTER_NAME,
-            CODEX_APP_SERVER_ADAPTER_NAME,
-        )
-        from ..adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
-        from ..adapters.codex_app_server import CodexAppServerAdapter
-
-        if isinstance(self._adapter, ClaudeAgentSDKAdapter):
-            return CLAUDE_AGENT_SDK_ADAPTER_NAME  # pragma: no cover
-        if isinstance(self._adapter, CodexAppServerAdapter):
-            return CODEX_APP_SERVER_ADAPTER_NAME
-        return type(self._adapter).__name__
-
-    @staticmethod
-    def _collect_metrics(
-        *,
-        started_at: datetime,
-        ended_at: datetime,
-        session: Session,
-        budget_tracker: BudgetTracker | None,
-    ) -> dict[str, object]:
-        """Collect metrics for the bundle: timing, token usage, budget status."""
-        from weakincentives.runtime.events import PromptExecuted
-
-        # Calculate timing
-        duration_ms = (ended_at - started_at).total_seconds() * 1000
-
-        # Collect token usage from PromptExecuted events in session
-        total_input_tokens = 0
-        total_output_tokens = 0
-        total_cached_tokens = 0
-        prompt_count = 0
-
-        # Try to get PromptExecuted events from session telemetry
-        try:
-            telemetry_slice = session[PromptExecuted]
-            for event in telemetry_slice.all():  # pragma: no cover
-                prompt_count += 1  # pragma: no cover
-                if event.usage is not None:  # pragma: no cover
-                    total_input_tokens += (
-                        event.usage.input_tokens or 0
-                    )  # pragma: no cover
-                    total_output_tokens += (
-                        event.usage.output_tokens or 0
-                    )  # pragma: no cover
-                    total_cached_tokens += (
-                        event.usage.cached_tokens or 0
-                    )  # pragma: no cover
-        except (KeyError, AttributeError):  # pragma: no cover
-            pass  # pragma: no cover
-
-        metrics: dict[str, object] = {
-            "timing": {
-                "started_at": started_at.isoformat(),
-                "ended_at": ended_at.isoformat(),
-                "duration_ms": duration_ms,
-            },
-            "token_usage": {
-                "input_tokens": total_input_tokens,
-                "output_tokens": total_output_tokens,
-                "cached_tokens": total_cached_tokens,
-                "total_tokens": total_input_tokens + total_output_tokens,
-                "prompt_count": prompt_count,
-            },
-        }
-
-        # Add budget status if budget tracking was enabled
-        if budget_tracker is not None:
-            consumed = budget_tracker.consumed
-            budget = budget_tracker.budget
-            metrics["budget"] = {
-                "consumed": {
-                    "input_tokens": consumed.input_tokens,
-                    "output_tokens": consumed.output_tokens,
-                    "cached_tokens": consumed.cached_tokens,
-                    "total_tokens": consumed.total_tokens,
-                },
-                "limits": {
-                    "max_input_tokens": budget.max_input_tokens,
-                    "max_output_tokens": budget.max_output_tokens,
-                    "max_total_tokens": budget.max_total_tokens,
-                    "deadline": budget.deadline.expires_at.isoformat()
-                    if budget.deadline is not None
-                    else None,
-                },
-            }
-
-        return metrics
-
-    @staticmethod
-    def _format_visibility_overrides(
-        overrides: VisibilityOverrides,
-        session: Session,
-    ) -> dict[str, object]:
-        """Format visibility overrides for bundle export."""
-        from weakincentives.runtime.session.visibility_overrides import (
-            VisibilityOverrides as VOType,
-        )
-
-        formatted: dict[str, object] = {"overrides": {}}
-        overrides_dict: dict[str, str] = {}
-
-        for path, visibility in overrides.overrides.items():
-            # Convert tuple path to string format (e.g., "section.subsection")
-            path_str = ".".join(path)
-            overrides_dict[path_str] = visibility.value
-
-        formatted["overrides"] = overrides_dict
-
-        # Try to get provenance info from session history
-        try:
-            vo_slice = session[VOType]
-            history = [{"overrides": dict(item.overrides)} for item in vo_slice.all()]
-            if history:  # pragma: no cover
-                formatted["history_count"] = len(history)  # pragma: no cover
-        except (KeyError, AttributeError):  # pragma: no cover
-            pass  # pragma: no cover
-
-        return formatted
+        return _get_adapter_name_fn(self._adapter)
 
     def _handle_message_without_bundle(
         self,
