@@ -243,8 +243,9 @@ class TestACPClientSessionUpdate:
     def test_updates_last_update_time(self) -> None:
         async def _run() -> None:
             client = _make_client()
-            assert client.last_update_time == 0.0
+            assert client.last_update_time is None
             await client.session_update("sess-1", MagicMock())
+            assert client.last_update_time is not None
             assert client.last_update_time > 0.0
 
         with patch.dict(sys.modules, _mock_acp_modules()):
@@ -404,6 +405,41 @@ class TestACPClientFileOps:
         with patch.dict(sys.modules, _mock_acp_modules()):
             asyncio.run(_run())
 
+    def test_read_prefix_sibling_directory_blocked(self, tmp_path: Path) -> None:
+        """A sibling directory sharing a prefix must not bypass containment."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        evil = tmp_path / "ws-evil"
+        evil.mkdir()
+        secret = evil / "secret.txt"
+        secret.write_text("stolen")
+
+        async def _run() -> None:
+            client = _make_client(allow_file_reads=True, workspace_root=str(workspace))
+            with pytest.raises(MockRequestError) as exc_info:
+                await client.read_text_file(path=str(secret), session_id="s")
+            assert exc_info.value.code == -32600
+
+        with patch.dict(sys.modules, _mock_acp_modules()):
+            asyncio.run(_run())
+
+    def test_read_parent_traversal_blocked(self, tmp_path: Path) -> None:
+        """Path traversal via ``../`` must be rejected."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        outside = tmp_path / "secret.txt"
+        outside.write_text("stolen")
+
+        async def _run() -> None:
+            client = _make_client(allow_file_reads=True, workspace_root=str(workspace))
+            traversal_path = str(workspace / ".." / "secret.txt")
+            with pytest.raises(MockRequestError) as exc_info:
+                await client.read_text_file(path=traversal_path, session_id="s")
+            assert exc_info.value.code == -32600
+
+        with patch.dict(sys.modules, _mock_acp_modules()):
+            asyncio.run(_run())
+
     def test_read_success(self, tmp_path: Path) -> None:
         workspace = tmp_path / "ws"
         workspace.mkdir()
@@ -450,6 +486,23 @@ class TestACPClientFileOps:
                 await client.write_text_file(
                     content="x", path=str(outside), session_id="s"
                 )
+            assert exc_info.value.code == -32600
+
+        with patch.dict(sys.modules, _mock_acp_modules()):
+            asyncio.run(_run())
+
+    def test_write_prefix_sibling_directory_blocked(self, tmp_path: Path) -> None:
+        """A sibling directory sharing a prefix must not bypass containment."""
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        evil = tmp_path / "ws-evil"
+        evil.mkdir()
+
+        async def _run() -> None:
+            client = _make_client(allow_file_writes=True, workspace_root=str(workspace))
+            target = str(evil / "payload.txt")
+            with pytest.raises(MockRequestError) as exc_info:
+                await client.write_text_file(content="x", path=target, session_id="s")
             assert exc_info.value.code == -32600
 
         with patch.dict(sys.modules, _mock_acp_modules()):

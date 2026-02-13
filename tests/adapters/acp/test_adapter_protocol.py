@@ -690,6 +690,51 @@ class TestHandshakeAndConfigure:
         assert result is not None
 
 
+class TestDrainQuietPeriod:
+    """Tests for _drain_quiet_period behaviour."""
+
+    def test_exits_immediately_when_no_updates(self) -> None:
+        """Drain returns immediately when no updates have been received."""
+        import asyncio
+
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+        from weakincentives.adapters.acp.client import ACPClient
+
+        adapter = ACPAdapter(
+            adapter_config=ACPAdapterConfig(quiet_period_ms=5000),
+            client_config=ACPClientConfig(cwd="/tmp"),
+        )
+        client = ACPClient(ACPClientConfig(), workspace_root="/tmp")
+        assert client.last_update_time is None
+
+        # Should return immediately — not block for 5 s.
+        asyncio.run(adapter._drain_quiet_period(client, deadline=None))
+
+    def test_respects_max_drain_cap(self) -> None:
+        """Drain exits within the max cap when no deadline is set."""
+        import asyncio
+        import time
+
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+        from weakincentives.adapters.acp.client import ACPClient
+
+        adapter = ACPAdapter(
+            adapter_config=ACPAdapterConfig(quiet_period_ms=60_000),
+            client_config=ACPClientConfig(cwd="/tmp"),
+        )
+        adapter._MAX_DRAIN_S = 0.05  # 50 ms cap for test speed
+
+        client = ACPClient(ACPClientConfig(), workspace_root="/tmp")
+        client._last_update_time = time.monotonic()
+
+        start = time.monotonic()
+        asyncio.run(adapter._drain_quiet_period(client, deadline=None))
+        elapsed = time.monotonic() - start
+
+        # Should finish well under 1 s (capped at ~50 ms, not 60 s).
+        assert elapsed < 1.0
+
+
 class TestProtocolImportError:
     def test_raises_import_error(self) -> None:
         import asyncio

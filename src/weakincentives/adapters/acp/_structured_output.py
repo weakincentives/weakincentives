@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 from ...runtime.logging import StructuredLogger, get_logger
@@ -35,26 +36,35 @@ STRUCTURED_OUTPUT_TOOL_NAME = "structured_output"
 
 
 class StructuredOutputCapture:
-    """Thread-safe capture for structured output data."""
+    """Thread-safe capture for structured output data.
+
+    The MCP tool handler runs in a thread pool (via ``asyncio.to_thread`` in
+    ``create_mcp_tool_server``) while the adapter reads from the main asyncio
+    thread.  A lock serialises access to ``_data`` and ``_called``.
+    """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._data: Any = None
         self._called = False
 
     @property
     def called(self) -> bool:
         """Whether ``store`` has been called."""
-        return self._called
+        with self._lock:
+            return self._called
 
     @property
     def data(self) -> Any:
         """The stored data, or ``None`` if not yet called."""
-        return self._data
+        with self._lock:
+            return self._data
 
     def store(self, data: Any) -> None:
         """Store structured output data."""
-        self._data = data
-        self._called = True
+        with self._lock:
+            self._data = data
+            self._called = True
 
 
 class StructuredOutputTool:

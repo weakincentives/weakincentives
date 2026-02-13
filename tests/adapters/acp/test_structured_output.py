@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 
 from weakincentives.adapters.acp._structured_output import (
@@ -49,6 +50,35 @@ class TestStructuredOutputCapture:
         capture.store(None)
         assert capture.called
         assert capture.data is None
+
+    def test_concurrent_store_and_read(self) -> None:
+        """Concurrent store/read from multiple threads must not corrupt state."""
+        capture = StructuredOutputCapture()
+        barrier = threading.Barrier(3)
+        errors: list[str] = []
+
+        def writer() -> None:
+            barrier.wait()
+            for i in range(200):
+                capture.store({"v": i})
+
+        def reader() -> None:
+            barrier.wait()
+            for _ in range(200):
+                called = capture.called
+                data = capture.data
+                # Once called is True, data must be a dict
+                if called and not isinstance(data, dict):
+                    errors.append(f"called={called} but data={data!r}")
+
+        t1 = threading.Thread(target=writer)
+        t2 = threading.Thread(target=reader)
+        t1.start()
+        t2.start()
+        barrier.wait()
+        t1.join()
+        t2.join()
+        assert not errors, errors
 
 
 class TestStructuredOutputTool:

@@ -189,16 +189,26 @@ class TestMCPHttpServerLifecycle:
     def test_start_and_stop(self) -> None:
         async def _run() -> None:
             server = MCPHttpServer(MagicMock(), server_name="test")
-            await server.start()
-            assert server._port is not None
-            assert server._thread is not None
-            assert server.url.startswith("http://127.0.0.1:")
+            mock_thread = MagicMock()
+
+            async def fake_to_thread(fn: Any, *args: Any) -> None:
+                return None
+
+            with (
+                patch.dict(sys.modules, _mock_server_deps()),
+                patch("threading.Thread", return_value=mock_thread),
+                patch("asyncio.to_thread", fake_to_thread),
+            ):
+                await server.start()
+                assert server._port is not None
+                assert server._thread is mock_thread
+                assert server.url.startswith("http://127.0.0.1:")
+                assert server._startup_error is None
             await server.stop()
             assert server._port is None
             assert server._thread is None
 
-        with patch.dict(sys.modules, _mock_server_deps()):
-            asyncio.run(_run())
+        asyncio.run(_run())
 
     def test_stop_without_start(self) -> None:
         async def _run() -> None:
@@ -210,13 +220,45 @@ class TestMCPHttpServerLifecycle:
     def test_context_manager(self) -> None:
         async def _run() -> None:
             server = MCPHttpServer(MagicMock(), server_name="ctx")
-            async with server as srv:
-                assert srv is server
-                assert srv._port is not None
+            mock_thread = MagicMock()
+
+            async def fake_to_thread(fn: Any, *args: Any) -> None:
+                return None
+
+            with (
+                patch.dict(sys.modules, _mock_server_deps()),
+                patch("threading.Thread", return_value=mock_thread),
+                patch("asyncio.to_thread", fake_to_thread),
+            ):
+                async with server as srv:
+                    assert srv is server
+                    assert srv._port is not None
             assert server._port is None
 
-        with patch.dict(sys.modules, _mock_server_deps()):
-            asyncio.run(_run())
+        asyncio.run(_run())
+
+    def test_startup_error_propagated(self) -> None:
+        """If the background thread fails during startup, start() re-raises."""
+
+        async def _run() -> None:
+            server = MCPHttpServer(MagicMock(), server_name="fail")
+            mock_thread = MagicMock()
+            mock_thread.start.side_effect = lambda: setattr(
+                server, "_startup_error", RuntimeError("bind failed")
+            )
+
+            async def fake_to_thread(fn: Any, *args: Any) -> None:
+                return None
+
+            with (
+                patch.dict(sys.modules, _mock_server_deps()),
+                patch("threading.Thread", return_value=mock_thread),
+                patch("asyncio.to_thread", fake_to_thread),
+            ):
+                with pytest.raises(RuntimeError, match="bind failed"):
+                    await server.start()
+
+        asyncio.run(_run())
 
 
 class TestCreateMcpToolServer:

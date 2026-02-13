@@ -47,7 +47,7 @@ class ACPClient:
         self._workspace_root = workspace_root
         self._accumulator: Any = None  # Lazy: SessionAccumulator
         self._transcript_bridge: ACPTranscriptBridge | None = None
-        self._last_update_time: float = 0.0
+        self._last_update_time: float | None = None
         self._message_chunks: list[Any] = []
         self._thought_chunks: list[Any] = []
         # tool_call_id -> {title, status, output}
@@ -64,8 +64,8 @@ class ACPClient:
         self._transcript_bridge = bridge
 
     @property
-    def last_update_time(self) -> float:
-        """Monotonic time of the last session update."""
+    def last_update_time(self) -> float | None:
+        """Monotonic time of the last session update, or ``None`` if never updated."""
         return self._last_update_time
 
     @property
@@ -181,7 +181,7 @@ class ACPClient:
 
         resolved = Path(path).resolve()
         workspace = Path(self._workspace_root).resolve()
-        if not str(resolved).startswith(str(workspace)):
+        if not resolved.is_relative_to(workspace):
             raise RequestError("Path outside workspace", code=-32600)
 
         content = resolved.read_text()
@@ -202,7 +202,7 @@ class ACPClient:
 
         resolved = Path(path).resolve()
         workspace = Path(self._workspace_root).resolve()
-        if not str(resolved).startswith(str(workspace)):
+        if not resolved.is_relative_to(workspace):
             raise RequestError("Path outside workspace", code=-32600)
 
         resolved.parent.mkdir(parents=True, exist_ok=True)

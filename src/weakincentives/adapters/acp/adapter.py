@@ -513,7 +513,14 @@ class ACPAdapter(ProviderAdapter[Any]):
             await mcp_http.stop()
 
     def _build_env(self) -> dict[str, str] | None:
-        """Build merged environment variables."""
+        """Build merged environment variables.
+
+        When ``config.env`` is set, the full ``os.environ`` is forwarded with
+        config entries taking precedence.  This mirrors stdlib
+        ``subprocess.Popen`` behaviour where ``env=None`` inherits the parent
+        environment.  Returning ``None`` (no config env) lets the subprocess
+        inherit the parent env via the stdlib default.
+        """
         if not self._client_config.env:
             return None
         import os
@@ -589,31 +596,46 @@ class ACPAdapter(ProviderAdapter[Any]):
             except Exception as err:
                 self._handle_mode_error(err)
 
+    _MAX_DRAIN_S: float = 30.0
+
     async def _drain_quiet_period(
         self,
         client: ACPClient,
         deadline: Deadline | None,
     ) -> None:
-        """Wait until no new updates arrive for quiet_period_ms."""
+        """Wait until no new updates arrive for quiet_period_ms.
+
+        If no updates have been received (``client.last_update_time is None``),
+        the drain exits immediately.  A hard cap of ``_MAX_DRAIN_S`` prevents
+        unbounded waiting when no deadline is set.
+        """
+        if client.last_update_time is None:
+            return
+
         quiet_s = self._adapter_config.quiet_period_ms / 1000.0
+        now = time.monotonic()
+        hard_cap = now + self._MAX_DRAIN_S
         deadline_time = (
             time.monotonic() + deadline.remaining().total_seconds()
             if deadline
             else None
         )
+        if deadline_time is not None:
+            effective_deadline = min(deadline_time, hard_cap)
+        else:
+            effective_deadline = hard_cap
 
         while True:
             now = time.monotonic()
-            if deadline_time and now >= deadline_time:
+            if now >= effective_deadline:
                 break
 
-            elapsed = now - client.last_update_time if client.last_update_time else now
+            elapsed = now - client.last_update_time
             if elapsed >= quiet_s:
                 break
 
             wait_s = quiet_s - elapsed
-            if deadline_time:
-                wait_s = min(wait_s, deadline_time - now)
+            wait_s = min(wait_s, effective_deadline - now)
             await asyncio.sleep(wait_s)
 
     def _extract_text(self, client: ACPClient) -> str | None:

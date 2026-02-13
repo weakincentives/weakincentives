@@ -125,6 +125,8 @@ class MCPHttpServer:
         self._port: int | None = None
         self._thread: threading.Thread | None = None
         self._uvicorn_server: Any = None
+        self._ready_event = threading.Event()
+        self._startup_error: BaseException | None = None
 
     @property
     def port(self) -> int:
@@ -163,9 +165,12 @@ class MCPHttpServer:
         from mcp.types import ServerCapabilities, ToolsCapability
 
         self._port = _find_free_port()
+        self._ready_event.clear()
+        self._startup_error = None
 
         mcp_server: Server = self._mcp_server
         transport = StreamableHTTPServerTransport(mcp_session_id=None)
+        ready_event = self._ready_event
 
         config = uvicorn.Config(
             app=_make_asgi_app(transport),
@@ -189,14 +194,18 @@ class MCPHttpServer:
                     mcp_server.run(read_stream, write_stream, init_options)
                 )
                 uv_task = asyncio.create_task(uv_server.serve())
+                ready_event.set()
                 await uv_task
                 mcp_task.cancel()
 
-        def _thread_target() -> None:
+        def _thread_target() -> None:  # pragma: no cover - runs in bg thread
             loop = asyncio.new_event_loop()
             try:
                 loop.run_until_complete(_run_server())
+            except BaseException as exc:
+                self._startup_error = exc
             finally:
+                ready_event.set()
                 loop.close()
 
         self._thread = threading.Thread(
@@ -206,8 +215,10 @@ class MCPHttpServer:
         )
         self._thread.start()
 
-        # Brief wait for server to be ready
-        await asyncio.sleep(0.1)
+        # Wait for the server to be ready or fail
+        await asyncio.to_thread(self._ready_event.wait, 5.0)
+        if self._startup_error is not None:
+            raise self._startup_error
 
         logger.info(
             "acp.mcp_http.started",
