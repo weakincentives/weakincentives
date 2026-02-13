@@ -49,7 +49,7 @@ def git_env() -> dict[str, str]:
 def run_git(
     args: Sequence[str],
     *,
-    git_dir: str | None,
+    git_dir: str,
     root: str,
     check: bool = True,
     text: bool = False,
@@ -85,21 +85,19 @@ def run_git(
     )
 
 
-def init_git_repo(root: str, git_dir: str | None) -> str:
+def init_git_repo(git_dir: str | None) -> str:
     """Initialize git repository for snapshot support.
 
     Creates the git repository in an external directory (outside the
     workspace root) to prevent agents from accessing git internals.
 
     Args:
-        root: Workspace root path (unused directly, reserved for future use).
         git_dir: Optional custom git directory path. If None, a temporary
             directory is created.
 
     Returns:
         The git directory path (newly created or existing).
     """
-    _ = root  # Reserved for future use
     needs_init = False
     if git_dir is None:
         git_dir = tempfile.mkdtemp(prefix="wink-git-")
@@ -155,7 +153,7 @@ def init_git_repo(root: str, git_dir: str | None) -> str:
 
 
 def create_snapshot(
-    root: str, git_dir: str | None, *, tag: str | None = None
+    root: str, git_dir: str, *, tag: str | None = None
 ) -> FilesystemSnapshot:
     """Capture current filesystem state as a git commit.
 
@@ -164,7 +162,7 @@ def create_snapshot(
 
     Args:
         root: Workspace root path.
-        git_dir: External git directory path.
+        git_dir: External git directory path (must be initialized).
         tag: Optional human-readable label for the snapshot.
 
     Returns:
@@ -226,9 +224,7 @@ def create_snapshot(
     )
 
 
-def restore_snapshot(
-    root: str, git_dir: str | None, snapshot: FilesystemSnapshot
-) -> None:
+def restore_snapshot(root: str, git_dir: str, snapshot: FilesystemSnapshot) -> None:
     """Restore filesystem to a previous git commit.
 
     Performs a hard reset to the snapshot's commit and removes any
@@ -236,7 +232,7 @@ def restore_snapshot(
 
     Args:
         root: Workspace root path.
-        git_dir: External git directory path.
+        git_dir: External git directory path (must be initialized).
         snapshot: The snapshot to restore.
 
     Raises:

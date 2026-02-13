@@ -566,12 +566,17 @@ class HostFilesystem:
 
     # --- Snapshot Operations ---
 
-    def _ensure_git(self) -> None:
-        """Initialize git repository if needed for snapshot support."""
-        if self._git_initialized:
-            return
-        self._git_dir = init_git_repo(self._root, self._git_dir)
-        self._git_initialized = True
+    def _ensure_git(self) -> str:
+        """Initialize git repository if needed for snapshot support.
+
+        Returns:
+            The git directory path (guaranteed non-None).
+        """
+        if not self._git_initialized:
+            self._git_dir = init_git_repo(self._git_dir)
+            self._git_initialized = True
+        # init_git_repo always returns str, so _git_dir is set after first call
+        return self._git_dir  # type: ignore[return-value]
 
     def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
         """Capture current filesystem state as a git commit.
@@ -585,8 +590,8 @@ class HostFilesystem:
         Returns:
             Immutable snapshot that can be stored in session state.
         """
-        self._ensure_git()
-        return create_snapshot(self._root, self._git_dir, tag=tag)
+        git_dir = self._ensure_git()
+        return create_snapshot(self._root, git_dir, tag=tag)
 
     def restore(self, snapshot: FilesystemSnapshot) -> None:
         """Restore filesystem to a previous git commit.
@@ -603,8 +608,8 @@ class HostFilesystem:
         # Use git_dir from snapshot if available and we don't have one yet
         if snapshot.git_dir is not None and self._git_dir is None:
             self._git_dir = snapshot.git_dir
-        self._ensure_git()
-        restore_snapshot(self._root, self._git_dir, snapshot)
+        git_dir = self._ensure_git()
+        restore_snapshot(self._root, git_dir, snapshot)
 
     def cleanup(self) -> None:
         """Remove the external git directory.
