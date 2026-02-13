@@ -16,17 +16,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
-from typing import TypeVar
 
 from ..experiment import Experiment
 from ..runtime.mailbox import Mailbox
 from ._types import Dataset, EvalReport, EvalRequest, EvalResult
 
-InputT = TypeVar("InputT")
-ExpectedT = TypeVar("ExpectedT")
 
-
-def submit_dataset(
+def submit_dataset[InputT, ExpectedT](
     dataset: Dataset[InputT, ExpectedT],
     experiment: Experiment,
     requests: Mailbox[EvalRequest[InputT, ExpectedT], None],
@@ -58,7 +54,7 @@ def submit_dataset(
     return count
 
 
-def submit_experiments(
+def submit_experiments[InputT, ExpectedT](
     dataset: Dataset[InputT, ExpectedT],
     experiments: Sequence[Experiment],
     requests: Mailbox[EvalRequest[InputT, ExpectedT], None],

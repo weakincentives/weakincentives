@@ -271,7 +271,7 @@ def FrozenDataclass[T](
     }
 
     def decorator(cls: type[T]) -> type[T]:
-        dataclass_cls = cast(Callable[[type[T]], type[T]], dataclass(**options))(cls)
+        dataclass_cls = dataclass(**options)(cls)
         _attach_helpers(dataclass_cls)
         return dataclass_cls
 
