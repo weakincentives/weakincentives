@@ -786,6 +786,42 @@ class TestHandshakeTimeout:
     def teardown_method(self) -> None:
         _cleanup_acp_mocks()
 
+    def test_evaluate_prompt_timeout(self) -> None:
+        """conn.prompt() respects the deadline and raises PromptEvaluationError."""
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+
+        mock_acp = self._mocks["acp"]
+
+        async def _hang_forever(*_args: Any, **_kwargs: Any) -> MockPromptResponse:
+            await asyncio.sleep(999)
+            return MockPromptResponse()  # pragma: no cover
+
+        @asynccontextmanager
+        async def spawn_hang_prompt(*args: Any, **kwargs: Any) -> Any:
+            conn = make_mock_connection()
+            conn.new_session = AsyncMock(return_value=MockNewSessionResponse())
+            conn.prompt = AsyncMock(side_effect=_hang_forever)
+            yield conn, make_mock_process()
+
+        mock_acp.spawn_agent_process = spawn_hang_prompt
+
+        adapter = ACPAdapter(
+            adapter_config=ACPAdapterConfig(quiet_period_ms=0),
+            client_config=ACPClientConfig(cwd="/tmp"),
+        )
+
+        prompt = _make_mock_prompt()
+        session = _make_mock_session()
+        deadline = _make_mock_deadline(remaining_s=0.05)
+
+        mcp_cls_p, create_p = _patch_mcp()
+        with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
+            _make_mcp_mock(mock_mcp_cls)
+            mock_create.return_value = MagicMock()
+
+            with pytest.raises(PromptEvaluationError, match="ACP prompt timed out"):
+                adapter.evaluate(prompt, session=session, deadline=deadline)
+
     def test_handshake_timeout_raises_prompt_evaluation_error(self) -> None:
         from weakincentives.adapters.acp.adapter import ACPAdapter
 

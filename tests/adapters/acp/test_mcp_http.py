@@ -272,8 +272,8 @@ class TestMCPHttpServerLifecycle:
                 side_effect=lambda: setattr(server, "_port", 54321)
             )
 
-            async def fake_to_thread(fn: Any, *args: Any) -> None:
-                return None
+            async def fake_to_thread(fn: Any, *args: Any) -> bool:
+                return True
 
             with (
                 patch.dict(sys.modules, _mock_server_deps()),
@@ -307,8 +307,8 @@ class TestMCPHttpServerLifecycle:
                 side_effect=lambda: setattr(server, "_port", 54321)
             )
 
-            async def fake_to_thread(fn: Any, *args: Any) -> None:
-                return None
+            async def fake_to_thread(fn: Any, *args: Any) -> bool:
+                return True
 
             with (
                 patch.dict(sys.modules, _mock_server_deps()),
@@ -319,6 +319,29 @@ class TestMCPHttpServerLifecycle:
                     assert srv is server
                     assert srv._port == 54321
             assert server._port is None
+
+        asyncio.run(_run())
+
+    def test_startup_timeout_detected(self) -> None:
+        """If the ready event times out (wait returns False), raise RuntimeError."""
+
+        async def _run() -> None:
+            server = MCPHttpServer(MagicMock(), server_name="slow")
+            mock_thread = MagicMock()
+
+            async def fake_to_thread(fn: Any, *args: Any) -> bool:
+                return False
+
+            with (
+                patch.dict(sys.modules, _mock_server_deps()),
+                patch("threading.Thread", return_value=mock_thread),
+                patch("asyncio.to_thread", fake_to_thread),
+            ):
+                with pytest.raises(
+                    RuntimeError,
+                    match="MCP HTTP server failed to start within 5 seconds",
+                ):
+                    await server.start()
 
         asyncio.run(_run())
 

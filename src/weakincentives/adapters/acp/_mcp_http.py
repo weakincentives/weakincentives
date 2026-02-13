@@ -253,9 +253,12 @@ class MCPHttpServer:
         self._thread.start()
 
         # Wait for the server to be ready or fail
-        await asyncio.to_thread(self._ready_event.wait, 5.0)
+        started = await asyncio.to_thread(self._ready_event.wait, 5.0)
         if self._startup_error is not None:
             raise self._startup_error
+        if not started:
+            msg = "MCP HTTP server failed to start within 5 seconds"
+            raise RuntimeError(msg)
 
         logger.info(
             "acp.mcp_http.started",

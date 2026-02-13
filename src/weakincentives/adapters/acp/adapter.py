@@ -480,10 +480,19 @@ class ACPAdapter(ProviderAdapter[Any]):
 
                 from acp.schema import TextContentBlock
 
-                prompt_resp = await conn.prompt(
+                prompt_coro = conn.prompt(
                     [TextContentBlock(type="text", text=prompt_text)],
                     session_id=acp_session_id,
                 )
+                timeout_s = deadline.remaining().total_seconds() if deadline else None
+                try:
+                    prompt_resp = await asyncio.wait_for(prompt_coro, timeout=timeout_s)
+                except TimeoutError:
+                    raise PromptEvaluationError(
+                        message="ACP prompt timed out (deadline expired)",
+                        prompt_name=prompt_name,
+                        phase="request",
+                    ) from None
 
                 await self._drain_quiet_period(client, deadline)
 
