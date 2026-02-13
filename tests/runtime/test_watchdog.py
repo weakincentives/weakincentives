@@ -395,6 +395,9 @@ def test_health_server_readiness_with_heartbeat() -> None:
         assert server.address is not None
         _, port = server.address
 
+        # Beat to ensure freshness after server startup
+        hb.beat()
+
         # Initially ready
         resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/health/ready")
         assert resp.status == 200

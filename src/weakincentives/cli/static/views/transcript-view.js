@@ -220,7 +220,11 @@ function createToolResultHtml(toolResult) {
   return `<div class="transcript-nested-result"><div class="transcript-result-divider">↓ result</div>${createContentHtml(resultContent, "(no result)")}</div>`;
 }
 
-function createPayloadHtml(entry) {
+function isToolEntryType(entryType) {
+  return entryType === "tool_use" || entryType === "tool_call" || entryType === "tool_result";
+}
+
+function createPayloadHtml(entry, entryType) {
   const raw = entry.parsed || entry.raw_json;
   if (!raw) {
     return "";
@@ -230,7 +234,10 @@ function createPayloadHtml(entry) {
     return "";
   }
   const pre = `<pre>${escapeHtml(text)}</pre>`;
-  return `<div class="transcript-payload"><div class="transcript-payload-label">Payload</div>${wrapCopyable(pre)}</div>`;
+  if (isToolEntryType(entryType)) {
+    return `<div class="transcript-payload"><div class="transcript-payload-label">Payload</div>${wrapCopyable(pre)}</div>`;
+  }
+  return `<details class="transcript-payload transcript-payload-collapsible"><summary class="transcript-payload-label">Payload</summary>${wrapCopyable(pre)}</details>`;
 }
 
 function createCompositeInputHtml(entry) {
@@ -263,7 +270,8 @@ export function createTranscriptEntryElement(entry, index) {
   }
 
   const content = formatTranscriptContent(entry);
-  container.innerHTML = headerHtml + createContentHtml(content) + createPayloadHtml(entry);
+  container.innerHTML =
+    headerHtml + createContentHtml(content) + createPayloadHtml(entry, entryType);
 
   return container;
 }

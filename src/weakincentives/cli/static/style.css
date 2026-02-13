@@ -1655,7 +1655,7 @@ select:focus-visible {
   overflow-y: auto;
 }
 
-/* Always-visible payload section */
+/* Payload section */
 .transcript-payload {
   margin-top: 8px;
 }
@@ -1666,6 +1666,35 @@ select:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-faint);
+  margin-bottom: 4px;
+}
+
+/* Collapsible payload (non-tool entries) */
+.transcript-payload-collapsible > .transcript-payload-label {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+  margin-bottom: 0;
+}
+
+.transcript-payload-collapsible > .transcript-payload-label::-webkit-details-marker {
+  display: none;
+}
+
+.transcript-payload-collapsible > .transcript-payload-label::before {
+  content: "▶";
+  font-size: 9px;
+  transition: transform 0.15s ease;
+}
+
+.transcript-payload-collapsible[open] > .transcript-payload-label::before {
+  transform: rotate(90deg);
+}
+
+.transcript-payload-collapsible[open] > .transcript-payload-label {
   margin-bottom: 4px;
 }
 
