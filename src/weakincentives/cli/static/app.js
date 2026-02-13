@@ -14,7 +14,6 @@ import { initKeyboardShortcuts } from "./views/keyboard-shortcuts.js";
 import { initLogsView } from "./views/logs-view.js";
 import { initSessionsView } from "./views/sessions-view.js";
 import { initTranscriptView } from "./views/transcript-view.js";
-import { initZoomModal } from "./views/zoom-modal.js";
 
 // ============================================================================
 // STATE
@@ -122,8 +121,6 @@ let transcriptView;
 let logsView;
 let filesystemView;
 let environmentView;
-let zoomModal;
-
 function initScrollerIfNeeded(viewName) {
   if (viewName === "transcript" && !state.transcriptScroller) {
     transcriptView.initVirtualScroller();
@@ -327,15 +324,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     logsView = initLogsView(deps);
     filesystemView = initFilesystemView(deps);
     environmentView = initEnvironmentView(deps);
-    zoomModal = initZoomModal({ state, transcriptView, showToast });
-
-    // Initialize keyboard shortcuts (cross-cutting concern)
     initKeyboardShortcuts({
       state,
       sessionsView,
       transcriptView,
       logsView,
-      zoomModal,
       switchView,
       reloadBundle,
       toggleTheme,
@@ -343,13 +336,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       navigateBundle,
     });
 
-    // Initialize virtual scrollers
     logsView.initVirtualScroller();
     transcriptView.initVirtualScroller();
 
-    // Load initial data (sessionsView.refreshMeta fetches /api/meta and
-    // sets state.meta, so we render bundle info from that same response
-    // rather than making a duplicate request)
     await sessionsView.refreshMeta();
     renderBundleInfo(state.meta);
     await refreshBundles();

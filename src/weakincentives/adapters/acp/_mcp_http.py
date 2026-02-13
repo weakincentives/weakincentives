@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-import socket
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -28,13 +27,6 @@ if TYPE_CHECKING:
 __all__ = ["MCPHttpServer", "create_mcp_tool_server"]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "acp_mcp_http"})
-
-
-def _find_free_port() -> int:
-    """Find a free TCP port on localhost."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _get_header(headers: list[tuple[bytes, bytes]], name: bytes) -> bytes | None:
@@ -204,7 +196,7 @@ class MCPHttpServer:
         from mcp.server.streamable_http import StreamableHTTPServerTransport
         from mcp.types import ServerCapabilities, ToolsCapability
 
-        self._port = _find_free_port()
+        self._port = None  # Set by _run_server after uvicorn binds
         self._ready_event.clear()
         self._startup_error = None
 
@@ -215,7 +207,7 @@ class MCPHttpServer:
         config = uvicorn.Config(
             app=_make_asgi_app(transport, self._bearer_token),
             host="127.0.0.1",
-            port=self._port,
+            port=0,  # Let OS assign a free port atomically
             log_level="warning",
         )
         uv_server = uvicorn.Server(config)
@@ -234,6 +226,11 @@ class MCPHttpServer:
                     mcp_server.run(read_stream, write_stream, init_options)
                 )
                 uv_task = asyncio.create_task(uv_server.serve())
+                # Wait until uvicorn has actually bound the socket.
+                while not uv_server.started:
+                    await asyncio.sleep(0.01)
+                # Read real port from bound socket.
+                self._port = uv_server.servers[0].sockets[0].getsockname()[1]
                 ready_event.set()
                 await uv_task
                 mcp_task.cancel()

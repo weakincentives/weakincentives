@@ -6,8 +6,6 @@ import { createActiveFilter, createFilterChip } from "../components/filter-chips
 import { VirtualScroller } from "../components/virtual-scroller.js";
 import { escapeHtml } from "../lib.js";
 
-const ZOOM_BUTTON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`;
-
 // ============================================================================
 // Query building
 // ============================================================================
@@ -39,102 +37,53 @@ function buildTranscriptQueryParams(state, offset = 0) {
 }
 
 // ============================================================================
-// Transcript entry preprocessing (tool call + result combining)
+// Transcript entry preprocessing (nest tool_result under tool_use)
 // ============================================================================
 
-function isToolCall(entry) {
-  return entry.entry_type === "assistant" && entry.tool_name && entry.tool_name !== "";
-}
-
-function parseEntryData(entry) {
-  const parsed = entry.parsed;
-  if (typeof parsed === "string") {
-    try {
-      return JSON.parse(parsed);
-    } catch {
-      return null;
+function indexToolResults(entries) {
+  const map = new Map();
+  for (const entry of entries) {
+    if (entry.entry_type === "tool_result" && entry.tool_use_id) {
+      map.set(entry.tool_use_id, entry);
     }
   }
-  if (parsed) {
-    return parsed;
-  }
-  if (entry.raw_json) {
-    try {
-      return JSON.parse(entry.raw_json);
-    } catch {
-      return null;
-    }
-  }
-  return null;
+  return map;
 }
 
-function getMessageContent(parsed) {
-  const content = parsed?.message?.content;
-  return Array.isArray(content) ? content : null;
+function isConsumedResult(entry, consumed) {
+  return entry.entry_type === "tool_result" && entry.tool_use_id && consumed.has(entry.tool_use_id);
 }
 
-function isToolResult(entry) {
-  if (entry.entry_type !== "user") {
-    return false;
+function tryNestToolUse(entry, resultsByCallId, consumed) {
+  if (entry.entry_type !== "tool_use" || !entry.tool_use_id) {
+    return null;
   }
-  const content = getMessageContent(parseEntryData(entry));
-  return content ? content.some((item) => item.type === "tool_result") : false;
-}
-
-function findToolIdInContent(content) {
-  for (const item of content) {
-    if (item.type === "tool_use" && item.id) {
-      return item.id;
-    }
-    if (item.type === "tool_result" && item.tool_use_id) {
-      return item.tool_use_id;
-    }
+  const result = resultsByCallId.get(entry.tool_use_id);
+  if (!result) {
+    return null;
   }
-  return null;
+  consumed.add(entry.tool_use_id);
+  return { ...entry, isComposite: true, toolResult: result };
 }
 
-function extractToolUseId(entry) {
-  if (entry.tool_use_id) {
-    return entry.tool_use_id;
-  }
-  const content = getMessageContent(parseEntryData(entry));
-  return content ? findToolIdInContent(content) : null;
-}
+/**
+ * Match tool_result entries to their tool_use by tool_use_id and nest them.
+ * Consumed tool_result entries are removed from the flat list.  Unmatched
+ * tool_result entries (e.g. when the tool_use was filtered out) stay as-is.
+ */
+export function preprocessTranscriptEntries(entries) {
+  const resultsByCallId = indexToolResults(entries);
+  const consumed = new Set();
+  const processed = [];
 
-function findMatchingToolResult(entries, startIndex, toolId, usedIndices) {
-  const searchLimit = Math.min(startIndex + 10, entries.length);
-  for (let j = startIndex + 1; j < searchLimit; j++) {
-    if (usedIndices.has(j)) {
+  for (const entry of entries) {
+    if (isConsumedResult(entry, consumed)) {
       continue;
     }
-    const candidate = entries[j];
-    if (isToolResult(candidate) && extractToolUseId(candidate) === toolId) {
-      usedIndices.add(j);
-      return candidate;
-    }
+    const nested = tryNestToolUse(entry, resultsByCallId, consumed);
+    processed.push(nested || entry);
   }
-  return null;
-}
 
-function processEntry(entry, entries, index, usedIndices) {
-  if (!isToolCall(entry)) {
-    return entry;
-  }
-  const resultEntry = findMatchingToolResult(entries, index, extractToolUseId(entry), usedIndices);
-  if (resultEntry) {
-    return { ...entry, isComposite: true, toolResult: resultEntry };
-  }
-  return entry;
-}
-
-export function preprocessTranscriptEntries(entries) {
-  const processed = [];
-  const usedIndices = new Set();
-  for (let i = 0; i < entries.length; i++) {
-    if (!usedIndices.has(i)) {
-      processed.push(processEntry(entries[i], entries, i, usedIndices));
-    }
-  }
   return processed;
 }
 
@@ -142,11 +91,38 @@ export function preprocessTranscriptEntries(entries) {
 // Content formatting
 // ============================================================================
 
+function tryParseJson(str) {
+  if (typeof str !== "string" || str.length < 2) {
+    return null;
+  }
+  const ch = str[0];
+  if (ch !== "{" && ch !== "[") {
+    return null;
+  }
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
+}
+
 function formatStringContent(entry) {
   if (entry.content_html) {
     return { kind: "markdown", value: entry.content, html: entry.content_html };
   }
+  const parsed = tryParseJson(entry.content);
+  if (parsed !== null) {
+    return { kind: "json", value: JSON.stringify(parsed, null, 2) };
+  }
   return { kind: "text", value: entry.content };
+}
+
+function prettyJson(value) {
+  if (typeof value === "string") {
+    const obj = tryParseJson(value);
+    return obj !== null ? JSON.stringify(obj, null, 2) : value;
+  }
+  return JSON.stringify(value, null, 2);
 }
 
 export function formatTranscriptContent(entry) {
@@ -157,10 +133,10 @@ export function formatTranscriptContent(entry) {
     return { kind: "json", value: JSON.stringify(entry.content, null, 2) };
   }
   if (entry.parsed !== null && entry.parsed !== undefined) {
-    return { kind: "json", value: JSON.stringify(entry.parsed, null, 2) };
+    return { kind: "json", value: prettyJson(entry.parsed) };
   }
   if (entry.raw_json !== null && entry.raw_json !== undefined) {
-    return { kind: "json", value: JSON.stringify(entry.raw_json, null, 2) };
+    return { kind: "json", value: prettyJson(entry.raw_json) };
   }
   return { kind: "text", value: "" };
 }
@@ -204,23 +180,60 @@ function createContentHtml(content, emptyMessage = "(no content)") {
   if (content.kind === "json") {
     return `<pre class="transcript-json">${escapeHtml(content.value)}</pre>`;
   }
+  if (content.kind === "markdown" && content.html) {
+    return `<div class="transcript-message transcript-markdown">${content.html}</div>`;
+  }
   return `<div class="transcript-message">${escapeHtml(content.value)}</div>`;
+}
+
+function safeParseParsed(entry) {
+  const raw = entry.parsed || entry.raw_json;
+  if (!raw) {
+    return null;
+  }
+  if (typeof raw === "object") {
+    return raw;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 function createToolResultHtml(toolResult) {
   if (!toolResult) {
     return "";
   }
+  const parsed = safeParseParsed(toolResult);
+  const output = parsed?.output;
+  if (output) {
+    return `<div class="transcript-nested-result"><div class="transcript-result-divider">↓ result</div><pre class="transcript-json">${escapeHtml(prettyJson(output))}</pre></div>`;
+  }
   const resultContent = formatTranscriptContent(toolResult);
-  return `<div class="transcript-result-divider">↓ result</div>${createContentHtml(resultContent, "(no result)")}`;
+  return `<div class="transcript-nested-result"><div class="transcript-result-divider">↓ result</div>${createContentHtml(resultContent, "(no result)")}</div>`;
 }
 
-function createDetailsHtml(entry) {
-  const payload = entry.parsed || entry.raw_json;
-  if (!payload) {
+function createPayloadHtml(entry) {
+  const raw = entry.parsed || entry.raw_json;
+  if (!raw) {
     return "";
   }
-  return `<details class="transcript-details"><summary>Details</summary><pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre></details>`;
+  const text = prettyJson(raw);
+  if (!text) {
+    return "";
+  }
+  return `<div class="transcript-payload"><div class="transcript-payload-label">Payload</div><pre>${escapeHtml(text)}</pre></div>`;
+}
+
+function createCompositeInputHtml(entry) {
+  const useParsed = safeParseParsed(entry);
+  const resultParsed = entry.toolResult ? safeParseParsed(entry.toolResult) : null;
+  const input = resultParsed?.input || useParsed?.input;
+  if (!input) {
+    return "";
+  }
+  return `<div class="transcript-tool-input"><div class="transcript-input-label">↓ input</div><pre class="transcript-json">${escapeHtml(prettyJson(input))}</pre></div>`;
 }
 
 export function createTranscriptEntryElement(entry, index) {
@@ -229,17 +242,19 @@ export function createTranscriptEntryElement(entry, index) {
   const cssClass = role ? `role-${role}` : `type-${entryType}`;
 
   const container = document.createElement("div");
-  container.className = `transcript-entry ${cssClass} compact${entry.isComposite ? " combined" : ""}`;
+  container.className = `transcript-entry ${cssClass}${entry.isComposite ? " combined" : ""}`;
   container.dataset.entryIndex = index;
 
-  const headerHtml = `<div class="transcript-header"><button class="zoom-button" type="button" data-zoom-index="${index}" title="Expand entry" aria-label="Expand entry">${ZOOM_BUTTON_SVG}</button>${createTranscriptTypeHtml(entry, entryType)}${createTranscriptMetadataHtml(entry)}</div>`;
+  const headerHtml = `<div class="transcript-header">${createTranscriptTypeHtml(entry, entryType)}${createTranscriptMetadataHtml(entry)}</div>`;
+
+  if (entry.isComposite) {
+    container.innerHTML =
+      headerHtml + createCompositeInputHtml(entry) + createToolResultHtml(entry.toolResult);
+    return container;
+  }
 
   const content = formatTranscriptContent(entry);
-  container.innerHTML =
-    headerHtml +
-    createContentHtml(content) +
-    (entry.isComposite ? createToolResultHtml(entry.toolResult) : "") +
-    createDetailsHtml(entry);
+  container.innerHTML = headerHtml + createContentHtml(content) + createPayloadHtml(entry);
 
   return container;
 }

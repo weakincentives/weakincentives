@@ -105,7 +105,11 @@ def _extract_tool_use_from_content(content: object) -> tuple[str, str]:
     for candidate in candidates:
         if candidate.get("type") == "tool_use":
             name = candidate.get("name")
-            tool_id = candidate.get("id") or candidate.get("tool_use_id")
+            tool_id = (
+                candidate.get("id")
+                or candidate.get("tool_use_id")
+                or candidate.get("tool_call_id")
+            )
             return (
                 str(name) if name is not None else "",
                 str(tool_id) if tool_id is not None else "",
@@ -126,7 +130,9 @@ def _apply_split_block_details(
         name_val = parsed.get("name")
         if isinstance(name_val, str):
             tool_name = name_val
-        id_val = parsed.get("id") or parsed.get("tool_use_id")
+        id_val = (
+            parsed.get("id") or parsed.get("tool_use_id") or parsed.get("tool_call_id")
+        )
         if isinstance(id_val, str):
             tool_use_id = id_val
     if (
@@ -134,7 +140,7 @@ def _apply_split_block_details(
         and not tool_use_id
         and parsed.get("type") == "tool_result"
     ):
-        id_val = parsed.get("tool_use_id")
+        id_val = parsed.get("tool_use_id") or parsed.get("tool_call_id")
         if isinstance(id_val, str):
             tool_use_id = id_val
         content_val = parsed.get("content")
@@ -172,7 +178,7 @@ def _apply_tool_result_details(
     tool_use_id: str,
 ) -> tuple[str, str, str]:
     resolved_tool_use_id = tool_use_id
-    tool_id_val = parsed.get("tool_use_id")
+    tool_id_val = parsed.get("tool_use_id") or parsed.get("tool_call_id")
     if isinstance(tool_id_val, str):
         resolved_tool_use_id = resolved_tool_use_id or tool_id_val
 
@@ -334,6 +340,16 @@ def _extract_transcript_details(
         tool_name=tool_name,
         tool_use_id=tool_use_id,
     )
+    # Fallback: ACP adapter uses "tool_call_id" and direct "tool_name" keys
+    # in its detail payload instead of the Anthropic-style "tool_use_id"/"id".
+    if not tool_use_id:
+        call_id = parsed.get("tool_call_id")
+        if isinstance(call_id, str):
+            tool_use_id = call_id
+    if not tool_name:
+        name_val = parsed.get("tool_name")
+        if isinstance(name_val, str):
+            tool_name = name_val
     content = _apply_transcript_content_fallbacks(parsed, entry_type, content)
     return role, content, tool_name, tool_use_id
 

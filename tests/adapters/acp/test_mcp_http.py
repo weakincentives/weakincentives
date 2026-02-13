@@ -23,7 +23,6 @@ import pytest
 
 from weakincentives.adapters.acp._mcp_http import (
     MCPHttpServer,
-    _find_free_port,
     _get_header,
     _make_asgi_app,
     _send_401,
@@ -31,19 +30,6 @@ from weakincentives.adapters.acp._mcp_http import (
 )
 
 from .conftest import MockHttpHeader, MockHttpMcpServer
-
-
-class TestFindFreePort:
-    def test_returns_positive_integer(self) -> None:
-        port = _find_free_port()
-        assert isinstance(port, int)
-        assert port > 0
-
-    def test_returns_different_ports(self) -> None:
-        p1 = _find_free_port()
-        p2 = _find_free_port()
-        assert isinstance(p1, int)
-        assert isinstance(p2, int)
 
 
 class TestMakeAsgiApp:
@@ -281,6 +267,10 @@ class TestMCPHttpServerLifecycle:
         async def _run() -> None:
             server = MCPHttpServer(MagicMock(), server_name="test")
             mock_thread = MagicMock()
+            # Simulate _run_server setting the port after uvicorn binds
+            mock_thread.start = MagicMock(
+                side_effect=lambda: setattr(server, "_port", 54321)
+            )
 
             async def fake_to_thread(fn: Any, *args: Any) -> None:
                 return None
@@ -291,9 +281,9 @@ class TestMCPHttpServerLifecycle:
                 patch("asyncio.to_thread", fake_to_thread),
             ):
                 await server.start()
-                assert server._port is not None
+                assert server._port == 54321
                 assert server._thread is mock_thread
-                assert server.url.startswith("http://127.0.0.1:")
+                assert server.url == "http://127.0.0.1:54321/mcp"
                 assert server._startup_error is None
             await server.stop()
             assert server._port is None
@@ -312,6 +302,10 @@ class TestMCPHttpServerLifecycle:
         async def _run() -> None:
             server = MCPHttpServer(MagicMock(), server_name="ctx")
             mock_thread = MagicMock()
+            # Simulate _run_server setting the port after uvicorn binds
+            mock_thread.start = MagicMock(
+                side_effect=lambda: setattr(server, "_port", 54321)
+            )
 
             async def fake_to_thread(fn: Any, *args: Any) -> None:
                 return None
@@ -323,7 +317,7 @@ class TestMCPHttpServerLifecycle:
             ):
                 async with server as srv:
                     assert srv is server
-                    assert srv._port is not None
+                    assert srv._port == 54321
             assert server._port is None
 
         asyncio.run(_run())

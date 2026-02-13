@@ -383,6 +383,18 @@ def test_index_and_error_endpoints(tmp_path: Path) -> None:
     assert "Bundle must live under" in wrong_root.json()["detail"]
 
 
+def test_static_files_have_no_cache_header(tmp_path: Path) -> None:
+    bundle_path = _create_test_bundle(tmp_path, ["a"])
+    logger = debug_app.get_logger("test.routes")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/static/app.js")
+    assert response.status_code == 200
+    assert response.headers.get("cache-control") == "no-cache"
+
+
 def test_api_logs_endpoint(tmp_path: Path) -> None:
     """Test the logs API endpoint."""
     # Create a bundle with logs

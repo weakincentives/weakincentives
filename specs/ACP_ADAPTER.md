@@ -51,7 +51,8 @@ Key capabilities surfaced through ACP:
 
 1. An ACP-compatible agent binary installed and available on `PATH`
 1. **ACP Python SDK**: `agent-client-protocol>=0.8.0`
-1. **Claude Agent SDK**: `claude-agent-sdk>=0.1.27` (for shared MCP server infrastructure)
+1. **MCP Python SDK**: `mcp>=1.26.0` (for in-process MCP server)
+1. **ASGI server**: `uvicorn>=0.40.0` (for MCP HTTP transport)
 1. WINK (`weakincentives`) runtime
 
 ### WINK Packaging
@@ -61,7 +62,8 @@ See `pyproject.toml` — the `acp` optional dependency group:
 ```toml
 acp = [
   "agent-client-protocol>=0.8.0",
-  "claude-agent-sdk>=0.1.27",
+  "mcp>=1.26.0",
+  "uvicorn>=0.40.0",
 ]
 ```
 
