@@ -1123,7 +1123,7 @@ def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
     import json
     from unittest.mock import patch
 
-    from weakincentives.adapters.claude_agent_sdk.isolation import EphemeralHome
+    from weakincentives.adapters.claude_agent_sdk import EphemeralHome
 
     # Capture state: {home_path: (env_home, settings_dict or None)}
     captured: dict[Path, tuple[str, dict[str, object] | None]] = {}
@@ -2701,10 +2701,14 @@ def test_claude_agent_sdk_adapter_transcript_collection_mock_subagents(  # noqa:
         TranscriptCollector,
     )
 
-    # Enable DEBUG logging
+    # Enable DEBUG logging for both transcript emitter and collector
     caplog.set_level(
         logging.DEBUG,
         logger="weakincentives.runtime.transcript",
+    )
+    caplog.set_level(
+        logging.DEBUG,
+        logger="weakincentives.adapters.claude_agent_sdk._transcript_collector",
     )
 
     # Create a collector with fast discovery
