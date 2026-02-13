@@ -244,7 +244,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         )
 
         dynamic_tool_specs = bridged_tools_to_dynamic_specs(bridged_tools)
-        tool_lookup: dict[str, Any] = {t.name: t for t in bridged_tools}
+        tool_lookup = {t.name: t for t in bridged_tools}
 
         output_schema = build_output_schema(rendered)
 
