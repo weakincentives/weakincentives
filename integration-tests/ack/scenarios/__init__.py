@@ -28,7 +28,7 @@ from weakincentives.prompt import (
 )
 from weakincentives.skills import SkillMount
 
-_ACK_NS_PREFIX = "integration/ack"
+_ACK_NS_PREFIX = "integration.ack"
 
 
 @dataclass(slots=True)
@@ -365,7 +365,7 @@ def build_skill_prompt(
 
 def make_adapter_ns(adapter_name: str) -> str:
     """Return a stable ACK namespace for the given adapter."""
-    return f"{_ACK_NS_PREFIX}/{adapter_name}"
+    return f"{_ACK_NS_PREFIX}.{adapter_name.replace('_', '-')}"
 
 
 __all__ = [

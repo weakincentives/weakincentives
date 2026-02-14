@@ -37,6 +37,7 @@ from .._shared._bridge import create_bridged_tools
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ._async import run_async
+from ._ephemeral_home import CodexEphemeralHome
 from ._protocol import execute_protocol
 from ._response import build_response
 from ._schema import bridged_tools_to_dynamic_specs, build_output_schema
@@ -255,9 +256,19 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
 
         output_schema = build_output_schema(rendered)
 
+        # Set up ephemeral home for skill discovery when skills are present
+        ephemeral_home: CodexEphemeralHome | None = None
+        if rendered.skills:
+            ephemeral_home = CodexEphemeralHome()
+            ephemeral_home.mount_skills(rendered.skills)
+
+        client_env = dict(self._client_config.env or {})
+        if ephemeral_home is not None:
+            client_env.update(ephemeral_home.get_env())
+
         client = CodexAppServerClient(
             codex_bin=self._client_config.codex_bin,
-            env=self._client_config.env,
+            env=client_env or None,
             suppress_stderr=self._client_config.suppress_stderr,
         )
 
@@ -300,6 +311,8 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             ) from error
         finally:
             await client.stop()
+            if ephemeral_home is not None:
+                ephemeral_home.cleanup()
 
         accumulated_text, usage = result
         return build_response(
