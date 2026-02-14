@@ -127,6 +127,7 @@ extend-select = [
     "TRY",
     "PLR",
     "PERF",
+    "TID251",
 ]
 extend-ignore = ["TRY003", "RUF067"]
 fixable = ["I001", "F401"]
@@ -200,6 +201,9 @@ notice-rgx = '''(?s)\A(?:#!/[^\n]+\n)?# Licensed under the Apache License, Versi
 # limitations under the License.
 
 '''
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pydantic".msg = "Pydantic is banned. Use weakincentives.serde instead."
 
 [tool.ruff.format]
 quote-style = "double"
