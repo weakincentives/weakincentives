@@ -55,6 +55,7 @@ class ClaudeAgentSDKFixture:
             custom_env_forwarding=True,
             network_policy=True,
             sandbox_policy=True,
+            skill_installation=True,
         )
 
     def is_available(self) -> bool:

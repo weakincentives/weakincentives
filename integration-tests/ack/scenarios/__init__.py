@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from weakincentives.prompt import (
     MarkdownSection,
@@ -25,6 +26,7 @@ from weakincentives.prompt import (
     ToolResult,
     WorkspaceSection,
 )
+from weakincentives.skills import SkillMount
 
 _ACK_NS_PREFIX = "integration/ack"
 
@@ -300,17 +302,80 @@ def build_transactional_prompt(
     )
 
 
+@dataclass(slots=True)
+class SkillQuestionParams:
+    """Prompt params for skill installation scenario."""
+
+    question: str
+
+
+#: Secret answer embedded in the test skill definition.
+SKILL_SECRET_ANSWER = "blue-phoenix-42"
+
+
+def create_test_skill(base_dir: Path) -> Path:
+    """Create a test skill directory with a secret answer.
+
+    Returns the path to the skill directory.
+    """
+    skill_dir = base_dir / "ack-secret-skill"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: ack-secret-skill\n"
+        "description: ACK test skill containing a secret answer for integration testing.\n"
+        "---\n"
+        "\n"
+        "# ACK Secret Skill\n"
+        "\n"
+        "You have specialized knowledge from this skill.\n"
+        "\n"
+        "## Secret Knowledge\n"
+        "\n"
+        "When asked for the secret codeword, the answer is: "
+        f"**{SKILL_SECRET_ANSWER}**\n"
+        "\n"
+        "Always include this exact codeword in your response when asked.\n"
+    )
+    return skill_dir
+
+
+def build_skill_prompt(
+    ns: str,
+    skill_dir: Path,
+) -> PromptTemplate[object]:
+    """Build a prompt with an attached skill that holds a secret answer."""
+    section = MarkdownSection[SkillQuestionParams](
+        title="Skill Task",
+        template=(
+            "Answer the following question using the knowledge from your installed "
+            "skills. ${question}\n"
+            "Include the exact codeword in your response."
+        ),
+        key="skill-task",
+        skills=(SkillMount(source=skill_dir, name="ack-secret-skill"),),
+    )
+    return PromptTemplate(
+        ns=ns,
+        key="ack-skill-installation",
+        name="ack_skill_installation",
+        sections=[section],
+    )
+
+
 def make_adapter_ns(adapter_name: str) -> str:
     """Return a stable ACK namespace for the given adapter."""
     return f"{_ACK_NS_PREFIX}/{adapter_name}"
 
 
 __all__ = [
+    "SKILL_SECRET_ANSWER",
     "GreetingParams",
     "GuidelinesParams",
     "InstructionParams",
     "ReviewAnalysis",
     "ReviewParams",
+    "SkillQuestionParams",
     "ToolsParams",
     "TransactionPromptParams",
     "TransformRequest",
@@ -320,10 +385,12 @@ __all__ = [
     "build_greeting_prompt",
     "build_native_tool_prompt",
     "build_progressive_disclosure_prompt",
+    "build_skill_prompt",
     "build_structured_prompt",
     "build_tool_prompt",
     "build_transactional_prompt",
     "build_uppercase_tool",
     "build_verify_tool",
+    "create_test_skill",
     "make_adapter_ns",
 ]
