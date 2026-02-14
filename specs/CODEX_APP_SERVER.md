@@ -83,11 +83,14 @@ WINK Prompt/Session
 ```
 src/weakincentives/adapters/codex_app_server/
   __init__.py
-  adapter.py                # CodexAppServerAdapter
+  adapter.py                # CodexAppServerAdapter (high-level orchestration)
   config.py                 # CodexAppServerClientConfig, CodexAppServerModelConfig
   client.py                 # CodexAppServerClient (stdio JSON-RPC client)
-  workspace.py              # (removed — use WorkspaceSection from weakincentives.prompt)
+  _schema.py                # Schema transforms (DynamicToolSpec, OpenAI strict schema)
+  _protocol.py              # JSON-RPC protocol orchestration (init, auth, thread, turn, stream)
+  _response.py              # Response building and structured output parsing
   _events.py                # Codex item/turn notifications → WINK ToolInvoked mapping
+  _transcript.py            # Transcript bridging for Codex notifications
   _async.py                 # asyncio helpers for stdio NDJSON processing
 ```
 
@@ -302,9 +305,9 @@ message to valid JSON conforming to the schema.
 
 ### Schema Generation
 
-At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_build_output_schema()` generates the JSON schema via `serde.schema()` and
-then applies `_openai_strict_schema()` to make it compatible with OpenAI/Codex
+At `src/weakincentives/adapters/codex_app_server/_schema.py`:
+`build_output_schema()` generates the JSON schema via `serde.schema()` and
+then applies `openai_strict_schema()` to make it compatible with OpenAI/Codex
 structured output requirements: adds `additionalProperties: false` on all
 object types and lists all properties in `required`. For `container="array"`
 prompts, wraps in an `{"items": [...]}` envelope.
@@ -358,8 +361,8 @@ The entire integration is:
 
 ### DynamicToolSpec Conversion
 
-At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_bridged_tools_to_dynamic_specs()` converts each `BridgedTool` to a dict
+At `src/weakincentives/adapters/codex_app_server/_schema.py`:
+`bridged_tools_to_dynamic_specs()` converts each `BridgedTool` to a dict
 with `name`, `description`, and `inputSchema` keys.
 
 ### Tool Bridging Flow
@@ -380,8 +383,8 @@ with `name`, `description`, and `inputSchema` keys.
 
 ### item/tool/call Handling
 
-At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_handle_tool_call()` processes `item/tool/call` server requests:
+At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
+`handle_tool_call()` processes `item/tool/call` server requests:
 
 1. Extract `tool` name and `arguments` from `params` (handles string arguments
    via `json.loads`)
@@ -464,8 +467,8 @@ capture loop are started as asyncio tasks.
 
 ### 5. Initialize Handshake
 
-At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_execute_protocol()` sends the `initialize` request with `experimentalApi: true` (enables dynamic tools on `thread/start`), then sends an `initialized`
+At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
+`execute_protocol()` sends the `initialize` request with `experimentalApi: true` (enables dynamic tools on `thread/start`), then sends an `initialized`
 notification. The `startup_timeout_s` config controls the handshake timeout.
 
 The server rejects all methods before `initialize`. Repeated `initialize` calls
@@ -473,8 +476,8 @@ return `Already initialized`.
 
 ### 6. Authenticate (Optional)
 
-At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_authenticate()` sends `account/login/start` if `auth_mode` is configured:
+At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
+`authenticate()` sends `account/login/start` if `auth_mode` is configured:
 
 - `ApiKeyAuth` — `{"type": "apiKey", "apiKey": ...}`
 - `ExternalTokenAuth` — `{"type": "chatgptAuthTokens", "idToken": ..., "accessToken": ...}`
@@ -484,35 +487,35 @@ On error, raise `PromptEvaluationError(phase="request")`.
 
 ### 7. Start Thread
 
-At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_create_thread()` sends `thread/start` with `model`, `cwd`,
+At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
+`create_thread()` sends `thread/start` with `model`, `cwd`,
 `approvalPolicy`, and `ephemeral`. Optional fields `sandbox`,
 `dynamicTools`, and `config.mcp_servers` are included only when configured.
 Returns `result["thread"]["id"]`.
 
 ### 8. Start Turn
 
-At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_start_turn()` sends `turn/start` with `threadId` and `input` (text).
+At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
+`start_turn()` sends `turn/start` with `threadId` and `input` (text).
 Optional fields `effort`, `summary`, `personality`, and `outputSchema` are
 included only when set. Returns `result["turn"]["id"]`.
 
 ### 9. Stream Notifications
 
-At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_stream_turn()` reads messages via `client.read_messages()` until
+At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
+`stream_turn()` reads messages via `client.read_messages()` until
 `turn/completed`. A deadline watchdog task sends `turn/interrupt` if the
 deadline expires.
 
 **Server requests** (both `id` and `method`) are dispatched by
-`_handle_server_request()`:
+`handle_server_request()`:
 
-- `item/tool/call` — execute `BridgedTool` in-process via `_handle_tool_call()`
+- `item/tool/call` — execute `BridgedTool` in-process via `handle_tool_call()`
 - `item/commandExecution/requestApproval` / `item/fileChange/requestApproval` —
   auto-respond per approval policy
 - Unknown methods — respond with empty result
 
-**Notifications** (method only) are processed by `_process_notification()`:
+**Notifications** (method only) are processed by `process_notification()`:
 
 - `item/agentMessage/delta` — accumulate assistant text
 - `item/completed` — dispatch `ToolInvoked` for `commandExecution`,
@@ -526,8 +529,8 @@ items. The two paths are distinct — no deduplication needed.
 
 ### 10. Handle Approvals
 
-At `src/weakincentives/adapters/codex_app_server/adapter.py`:
-`_handle_server_request()` auto-responds to approval requests:
+At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
+`handle_server_request()` auto-responds to approval requests:
 
 | Policy | Decision |
 |--------|----------|
