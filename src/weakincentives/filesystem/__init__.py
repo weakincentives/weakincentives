@@ -230,6 +230,7 @@ Writing filesystem-agnostic tools::
 from __future__ import annotations
 
 from ._host import HostFilesystem
+from ._path import strip_mount_point
 from ._protocol import Filesystem, SnapshotableFilesystem
 from ._types import (
     DEFAULT_READ_LIMIT,
@@ -281,5 +282,6 @@ __all__ = [
     "is_path_under",
     "normalize_path",
     "now",
+    "strip_mount_point",
     "validate_path",
 ]

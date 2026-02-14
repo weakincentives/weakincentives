@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ..dataclasses import FrozenDataclass
-from ..filesystem._path import strip_mount_point
+from ..filesystem import strip_mount_point
 from ..types.dataclass import SupportsDataclass
 
 if TYPE_CHECKING:

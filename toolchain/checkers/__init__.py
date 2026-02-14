@@ -33,6 +33,7 @@ from ..parsers import (
 from .architecture import ArchitectureChecker
 from .code_length import CodeLengthChecker
 from .docs import DocsChecker
+from .private_imports import PrivateImportChecker
 
 
 def create_format_checker() -> AutoFormatChecker:
@@ -258,6 +259,11 @@ def create_docs_checker() -> DocsChecker:
     return DocsChecker()
 
 
+def create_private_imports_checker() -> PrivateImportChecker:
+    """Create the private module import checker."""
+    return PrivateImportChecker()
+
+
 def create_all_checkers() -> list[Checker]:
     """Create all standard checkers in recommended execution order."""
     return [
@@ -268,6 +274,7 @@ def create_all_checkers() -> list[Checker]:
         create_deptry_checker(),
         create_pip_audit_checker(),
         create_architecture_checker(),
+        create_private_imports_checker(),
         create_code_length_checker(),
         create_docs_checker(),
         create_markdown_checker(),
@@ -288,6 +295,7 @@ __all__ = [
     "create_pip_audit_checker",
     "create_markdown_checker",
     "create_architecture_checker",
+    "create_private_imports_checker",
     "create_code_length_checker",
     "create_docs_checker",
 ]

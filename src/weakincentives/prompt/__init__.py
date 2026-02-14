@@ -254,6 +254,7 @@ Module Structure
 
 from __future__ import annotations
 
+from ._normalization import normalize_component_key
 from ._prompt_resources import PromptResources
 from ._types import ToolRenderableResult
 from .errors import (
@@ -399,6 +400,7 @@ __all__ = [
     "compute_workspace_fingerprint",
     "hash_json",
     "hash_text",
+    "normalize_component_key",
     "parse_structured_output",
     "run_feedback_providers",
 ]
