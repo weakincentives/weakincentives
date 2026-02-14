@@ -110,7 +110,8 @@ Time and Clocks
 - ``Clock``: Unified clock protocol (monotonic + wall-clock + sleep)
 - ``MonotonicClock``: Protocol for elapsed time measurement
 - ``WallClock``: Protocol for UTC datetime operations
-- ``Sleeper``: Protocol for delay operations
+- ``Sleeper``: Protocol for synchronous delay operations
+- ``AsyncSleeper``: Protocol for asynchronous delay operations
 - ``SystemClock``: Production clock using system time
 - ``FakeClock``: Controllable clock for deterministic testing
 - ``SYSTEM_CLOCK``: Default system clock singleton
@@ -241,6 +242,7 @@ from .adapters import PromptResponse
 from .budget import Budget, BudgetExceededError, BudgetTracker
 from .clock import (
     SYSTEM_CLOCK,
+    AsyncSleeper,
     Clock,
     FakeClock,
     MonotonicClock,
@@ -273,6 +275,7 @@ from .types import JSONValue, SupportsDataclass
 
 __all__ = [
     "SYSTEM_CLOCK",
+    "AsyncSleeper",
     "Budget",
     "BudgetExceededError",
     "BudgetTracker",

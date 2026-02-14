@@ -25,7 +25,7 @@ from typing import Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
-from ...clock import SYSTEM_CLOCK
+from ...clock import SYSTEM_CLOCK, AsyncSleeper
 from ...deadlines import Deadline
 from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
@@ -93,10 +93,12 @@ class ACPAdapter(ProviderAdapter[Any]):
         *,
         adapter_config: ACPAdapterConfig | None = None,
         client_config: ACPClientConfig | None = None,
+        async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
     ) -> None:
         super().__init__()
         self._adapter_config = adapter_config or ACPAdapterConfig()
         self._client_config = client_config or ACPClientConfig()
+        self._async_sleeper = async_sleeper
 
         logger.debug(
             "acp.adapter.init",
@@ -663,7 +665,7 @@ class ACPAdapter(ProviderAdapter[Any]):
 
             wait_s = quiet_s - elapsed
             wait_s = min(wait_s, effective_deadline - now)
-            await asyncio.sleep(wait_s)
+            await self._async_sleeper.async_sleep(wait_s)
 
     def _extract_text(self, client: ACPClient) -> str | None:
         """Extract accumulated text from client message chunks."""
