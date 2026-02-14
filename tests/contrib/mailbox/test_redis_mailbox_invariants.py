@@ -546,10 +546,9 @@ class TestDecodeResponsesCompatibility:
         except Exception:
             pytest.skip("Redis not available")
 
-        mailbox: RedisMailbox[_TestEvent] = RedisMailbox(
+        mailbox = RedisMailbox[_TestEvent, None](
             name=f"test-decode-dataclass-{uuid4().hex[:8]}",
             client=str_client,  # type: ignore[arg-type]
-            body_type=_TestEvent,
             reaper_interval=0.1,
         )
 
