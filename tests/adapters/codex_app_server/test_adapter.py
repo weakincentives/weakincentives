@@ -358,6 +358,10 @@ class TestAdapterInit:
         assert adapter._model_config.model == "o3"
         assert adapter._client_config.codex_bin == "/usr/bin/codex"
 
+    def test_adapter_name_property(self) -> None:
+        adapter = CodexAppServerAdapter()
+        assert adapter.adapter_name == "codex_app_server"
+
 
 class TestAuthenticate:
     def test_no_auth(self) -> None:

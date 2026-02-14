@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 
 class WinkError(Exception):
     """Base class for all weakincentives exceptions.
@@ -52,8 +54,48 @@ class RestoreFailedError(TransactionError):
     """Failed to restore from snapshot during transaction rollback."""
 
 
+PromptEvaluationPhase = Literal["request", "response", "tool", "budget"]
+"""Phases where a prompt evaluation error can occur."""
+
+PROMPT_EVALUATION_PHASE_REQUEST: PromptEvaluationPhase = "request"
+"""Prompt evaluation failed while issuing the provider request."""
+
+PROMPT_EVALUATION_PHASE_RESPONSE: PromptEvaluationPhase = "response"
+"""Prompt evaluation failed while handling the provider response."""
+
+PROMPT_EVALUATION_PHASE_TOOL: PromptEvaluationPhase = "tool"
+"""Prompt evaluation failed while handling a tool invocation."""
+
+PROMPT_EVALUATION_PHASE_BUDGET: PromptEvaluationPhase = "budget"
+"""Prompt evaluation failed due to budget limits being exceeded."""
+
+
+class PromptEvaluationError(WinkError, RuntimeError):
+    """Raised when evaluation against a provider fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        prompt_name: str,
+        phase: PromptEvaluationPhase,
+        provider_payload: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.prompt_name = prompt_name
+        self.phase: PromptEvaluationPhase = phase
+        self.provider_payload = provider_payload
+
+
 __all__ = [
+    "PROMPT_EVALUATION_PHASE_BUDGET",
+    "PROMPT_EVALUATION_PHASE_REQUEST",
+    "PROMPT_EVALUATION_PHASE_RESPONSE",
+    "PROMPT_EVALUATION_PHASE_TOOL",
     "DeadlineExceededError",
+    "PromptEvaluationError",
+    "PromptEvaluationPhase",
     "RestoreFailedError",
     "SnapshotError",
     "SnapshotRestoreError",

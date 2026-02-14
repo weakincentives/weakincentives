@@ -68,3 +68,7 @@ class TestClaudeAgentSDKAdapterInit:
 
         assert adapter._allowed_tools == ("Read", "Write")
         assert adapter._disallowed_tools == ("Bash",)
+
+    def test_adapter_name_property(self) -> None:
+        adapter = ClaudeAgentSDKAdapter()
+        assert adapter.adapter_name == "claude_agent_sdk"

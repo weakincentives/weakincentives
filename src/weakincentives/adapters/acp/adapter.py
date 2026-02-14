@@ -107,6 +107,12 @@ class ACPAdapter(ProviderAdapter[Any]):
             },
         )
 
+    @property
+    @override
+    def adapter_name(self) -> str:
+        """Return the canonical adapter name. Override in subclasses."""
+        return self._adapter_name()
+
     def _adapter_name(self) -> AdapterName:
         """Return the canonical adapter name. Override in subclasses."""
         return ACP_ADAPTER_NAME

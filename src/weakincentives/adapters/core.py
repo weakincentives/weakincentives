@@ -15,12 +15,19 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
-from ..errors import WinkError
+from ..errors import (
+    PROMPT_EVALUATION_PHASE_BUDGET,
+    PROMPT_EVALUATION_PHASE_REQUEST,
+    PROMPT_EVALUATION_PHASE_RESPONSE,
+    PROMPT_EVALUATION_PHASE_TOOL,
+    PromptEvaluationError,
+    PromptEvaluationPhase,
+)
 from ..prompt import Prompt
 from ..runtime.session.protocols import SessionProtocol
 
@@ -44,6 +51,16 @@ class ProviderAdapter(ABC):
     @classmethod
     def __class_getitem__(cls, _: object) -> type[ProviderAdapter[Any]]:
         return cls
+
+    @property
+    def adapter_name(self) -> str:
+        """Canonical name for this adapter instance.
+
+        Default implementation returns the class name.  Concrete adapters
+        should override this to return a stable, well-known identifier
+        (e.g. ``CLAUDE_AGENT_SDK_ADAPTER_NAME``).
+        """
+        return type(self).__name__
 
     @abstractmethod
     def evaluate[OutputT](
@@ -80,40 +97,6 @@ class ProviderAdapter(ABC):
         """
 
         ...
-
-
-class PromptEvaluationError(WinkError, RuntimeError):
-    """Raised when evaluation against a provider fails."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        prompt_name: str,
-        phase: PromptEvaluationPhase,
-        provider_payload: dict[str, Any] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.message = message
-        self.prompt_name = prompt_name
-        self.phase: PromptEvaluationPhase = phase
-        self.provider_payload = provider_payload
-
-
-PromptEvaluationPhase = Literal["request", "response", "tool", "budget"]
-"""Phases where a prompt evaluation error can occur."""
-
-PROMPT_EVALUATION_PHASE_REQUEST: PromptEvaluationPhase = "request"
-"""Prompt evaluation failed while issuing the provider request."""
-
-PROMPT_EVALUATION_PHASE_RESPONSE: PromptEvaluationPhase = "response"
-"""Prompt evaluation failed while handling the provider response."""
-
-PROMPT_EVALUATION_PHASE_TOOL: PromptEvaluationPhase = "tool"
-"""Prompt evaluation failed while handling a tool invocation."""
-
-PROMPT_EVALUATION_PHASE_BUDGET: PromptEvaluationPhase = "budget"
-"""Prompt evaluation failed due to budget limits being exceeded."""
 
 
 __all__ = [

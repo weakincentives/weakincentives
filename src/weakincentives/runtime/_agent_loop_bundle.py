@@ -261,18 +261,7 @@ def write_bundle_artifacts(  # noqa: PLR0913
 
 def get_adapter_name(adapter: ProviderAdapter[Any]) -> str:
     """Get the canonical adapter name for the given adapter instance."""
-    from ..adapters import (
-        CLAUDE_AGENT_SDK_ADAPTER_NAME,
-        CODEX_APP_SERVER_ADAPTER_NAME,
-    )
-    from ..adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
-    from ..adapters.codex_app_server import CodexAppServerAdapter
-
-    if isinstance(adapter, ClaudeAgentSDKAdapter):
-        return CLAUDE_AGENT_SDK_ADAPTER_NAME  # pragma: no cover
-    if isinstance(adapter, CodexAppServerAdapter):
-        return CODEX_APP_SERVER_ADAPTER_NAME
-    return type(adapter).__name__
+    return adapter.adapter_name
 
 
 # ---------------------------------------------------------------------------

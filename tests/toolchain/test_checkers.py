@@ -49,6 +49,7 @@ class TestArchitectureChecker:
         result = checker.run()
         # Should pass if codebase is properly structured
         assert result.name == "architecture"
+        assert result.status == "passed", [d.message for d in result.diagnostics]
 
     def test_fails_on_missing_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -63,9 +64,13 @@ class TestArchitectureChecker:
             pkg.mkdir()
             (pkg / "__init__.py").write_text("")
 
-            # Create core module that imports contrib
-            core = pkg / "core.py"
-            core.write_text("from weakincentives.contrib import something")
+            # Create a runtime (core layer) module that imports contrib (high-level)
+            runtime = pkg / "runtime"
+            runtime.mkdir()
+            (runtime / "__init__.py").write_text("")
+            (runtime / "core.py").write_text(
+                "from weakincentives.contrib import something"
+            )
 
             # Create contrib directory
             contrib = pkg / "contrib"
@@ -97,14 +102,18 @@ class TestArchitectureChecker:
             checker = ArchitectureChecker(src_dir=Path(tmpdir))
             result = checker.run()
             # Should pass - contrib can import contrib
-            assert not any("contrib" in d.message.lower() for d in result.diagnostics)
+            assert not any("layer violation" in d.message.lower() for d in result.diagnostics)
 
     def test_handles_syntax_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             pkg = Path(tmpdir) / "weakincentives"
             pkg.mkdir()
             (pkg / "__init__.py").write_text("")
-            (pkg / "broken.py").write_text("def broken(")  # Syntax error
+            # Put the broken file in a known-layer package so it's checked
+            runtime = pkg / "runtime"
+            runtime.mkdir()
+            (runtime / "__init__.py").write_text("")
+            (runtime / "broken.py").write_text("def broken(")  # Syntax error
 
             checker = ArchitectureChecker(src_dir=Path(tmpdir))
             result = checker.run()
@@ -127,6 +136,170 @@ class TestArchitectureChecker:
             result = checker.run()
             # Should pass - pycache is skipped
             assert result.status == "passed"
+
+    # ------------------------------------------------------------------
+    # Four-layer model tests
+    # ------------------------------------------------------------------
+
+    def test_detects_core_importing_adapters(self) -> None:
+        """Core (layer 2) must not import Adapters (layer 3) at runtime."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            runtime = pkg / "runtime"
+            runtime.mkdir()
+            (runtime / "__init__.py").write_text("")
+            (runtime / "loop.py").write_text(
+                "from weakincentives.adapters.core import PromptEvaluationError"
+            )
+
+            adapters = pkg / "adapters"
+            adapters.mkdir()
+            (adapters / "__init__.py").write_text("")
+            (adapters / "core.py").write_text("")
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert any("layer violation" in d.message.lower() for d in result.diagnostics)
+
+    def test_allows_type_checking_imports_across_layers(self) -> None:
+        """TYPE_CHECKING imports are exempt from layer checks."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            runtime = pkg / "runtime"
+            runtime.mkdir()
+            (runtime / "__init__.py").write_text("")
+            (runtime / "loop.py").write_text(
+                "from __future__ import annotations\n"
+                "from typing import TYPE_CHECKING\n"
+                "if TYPE_CHECKING:\n"
+                "    from weakincentives.adapters.core import ProviderAdapter\n"
+            )
+
+            adapters = pkg / "adapters"
+            adapters.mkdir()
+            (adapters / "__init__.py").write_text("")
+            (adapters / "core.py").write_text("")
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "passed"
+
+    def test_allows_same_layer_imports(self) -> None:
+        """Core modules can import from other core modules."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            runtime = pkg / "runtime"
+            runtime.mkdir()
+            (runtime / "__init__.py").write_text("")
+            (runtime / "loop.py").write_text(
+                "from weakincentives.prompt import Prompt"
+            )
+
+            prompt = pkg / "prompt"
+            prompt.mkdir()
+            (prompt / "__init__.py").write_text("")
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "passed"
+
+    def test_allows_lower_layer_imports(self) -> None:
+        """Core modules can import from Foundation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            runtime = pkg / "runtime"
+            runtime.mkdir()
+            (runtime / "__init__.py").write_text("")
+            (runtime / "loop.py").write_text(
+                "from weakincentives.errors import WinkError"
+            )
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "passed"
+
+    def test_detects_foundation_importing_core(self) -> None:
+        """Foundation (layer 1) must not import Core (layer 2)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            types_dir = pkg / "types"
+            types_dir.mkdir()
+            (types_dir / "__init__.py").write_text(
+                "from weakincentives.runtime import Session"
+            )
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert any("layer violation" in d.message.lower() for d in result.diagnostics)
+
+    def test_allows_adapters_importing_core(self) -> None:
+        """Adapters (layer 3) can import from Core (layer 2)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            adapters = pkg / "adapters"
+            adapters.mkdir()
+            (adapters / "__init__.py").write_text("")
+            (adapters / "sdk.py").write_text(
+                "from weakincentives.runtime import Session"
+            )
+
+            runtime = pkg / "runtime"
+            runtime.mkdir()
+            (runtime / "__init__.py").write_text("")
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "passed"
+
+    def test_detects_adapters_importing_high_level(self) -> None:
+        """Adapters (layer 3) must not import High-level (layer 4)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            adapters = pkg / "adapters"
+            adapters.mkdir()
+            (adapters / "__init__.py").write_text("")
+            (adapters / "sdk.py").write_text(
+                "from weakincentives.contrib import tool"
+            )
+
+            contrib = pkg / "contrib"
+            contrib.mkdir()
+            (contrib / "__init__.py").write_text("")
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert any("layer violation" in d.message.lower() for d in result.diagnostics)
+
+    def test_real_codebase_passes(self) -> None:
+        """The actual codebase must pass layer checks after violation fixes."""
+        root = Path(__file__).parents[2]
+        checker = ArchitectureChecker(src_dir=root / "src")
+        result = checker.run()
+        assert result.status == "passed", [d.message for d in result.diagnostics]
 
 
 class TestDocsChecker:

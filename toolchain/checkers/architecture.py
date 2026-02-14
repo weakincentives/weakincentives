@@ -12,8 +12,19 @@
 
 """Architecture verification checker.
 
-Enforces core/contrib separation: core modules cannot import from contrib.
-This ensures that contrib builds on core, not vice versa.
+Enforces the four-layer module boundary model:
+
+    Layer 4  HIGH-LEVEL   contrib, evals, cli, docs
+    Layer 3  ADAPTERS     adapters
+    Layer 2  CORE         runtime, prompt, resources, filesystem, serde,
+                          skills, formal, debug, optimizers
+    Layer 1  FOUNDATION   types, errors, dataclasses, dbc, deadlines,
+                          budget, clock, experiment
+
+Rules:
+  - A module in layer *N* may import from layers 1 .. *N* (same or lower).
+  - Imports inside ``if TYPE_CHECKING:`` are always allowed.
+  - Core/contrib separation is a strict subset of the layer model.
 """
 
 from __future__ import annotations
@@ -23,15 +34,78 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..result import CheckResult, Diagnostic, Location
-from ..utils import extract_imports, get_subpackage, path_to_module
+from ..utils import ImportInfo, extract_imports, get_subpackage, path_to_module
+
+# ---------------------------------------------------------------------------
+# Layer definitions
+# ---------------------------------------------------------------------------
+
+FOUNDATION = 1
+CORE = 2
+ADAPTERS = 3
+HIGH_LEVEL = 4
+
+_LAYER_NAME: dict[int, str] = {
+    FOUNDATION: "Foundation",
+    CORE: "Core",
+    ADAPTERS: "Adapters",
+    HIGH_LEVEL: "High-level",
+}
+
+# Maps the first sub-package component to its layer.
+_PACKAGE_LAYER: dict[str, int] = {
+    # Foundation (layer 1)
+    "types": FOUNDATION,
+    "errors": FOUNDATION,
+    "dataclasses": FOUNDATION,
+    "dbc": FOUNDATION,
+    "deadlines": FOUNDATION,
+    "budget": FOUNDATION,
+    "clock": FOUNDATION,
+    "experiment": FOUNDATION,
+    # Core (layer 2)
+    "runtime": CORE,
+    "prompt": CORE,
+    "resources": CORE,
+    "filesystem": CORE,
+    "serde": CORE,
+    "skills": CORE,
+    "formal": CORE,
+    "debug": CORE,
+    "optimizers": CORE,
+    # Adapters (layer 3)
+    "adapters": ADAPTERS,
+    # High-level (layer 4)
+    "contrib": HIGH_LEVEL,
+    "evals": HIGH_LEVEL,
+    "cli": HIGH_LEVEL,
+    "docs": HIGH_LEVEL,
+}
+
+
+def _layer_of(subpackage: str | None) -> int | None:
+    """Return the layer number for a subpackage, or *None* if unknown."""
+    if subpackage is None:
+        return None
+    return _PACKAGE_LAYER.get(subpackage)
+
+
+def _target_subpackage(imported_from: str) -> str | None:
+    """Extract the weakincentives sub-package from a resolved import path."""
+    return get_subpackage(imported_from)
+
+
+# ---------------------------------------------------------------------------
+# Checker
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class ArchitectureChecker:
-    """Checker for core/contrib separation.
+    """Checker enforcing the four-layer module boundary model.
 
-    Ensures that core modules (weakincentives.*) don't import from
-    contrib modules (weakincentives.contrib.*).
+    Also enforces the legacy core/contrib separation rule as a strict
+    subset of the layer model.
     """
 
     src_dir: Path | None = None
@@ -42,7 +116,7 @@ class ArchitectureChecker:
 
     @property
     def description(self) -> str:
-        return "Check core/contrib separation"
+        return "Check core/contrib separation and layer boundaries"
 
     def run(self) -> CheckResult:
         start = time.monotonic()
@@ -79,12 +153,13 @@ class ArchitectureChecker:
         )
 
     def _check_file(self, py_file: Path, src: Path) -> list[Diagnostic]:
-        """Check a single Python file for core/contrib violations."""
+        """Check a single Python file for layer violations."""
         module_name = path_to_module(py_file, src)
-        module_pkg = get_subpackage(module_name)
+        source_pkg = get_subpackage(module_name)
+        source_layer = _layer_of(source_pkg)
 
-        # Skip contrib and docs - they can import from contrib
-        if module_pkg in ("contrib", "docs", None):
+        # Packages not in the layer map are unconstrained
+        if source_layer is None:
             return []
 
         try:
@@ -105,19 +180,48 @@ class ArchitectureChecker:
 
         diagnostics: list[Diagnostic] = []
         for imp in imports:
-            if "contrib" in imp.imported_from:
-                msg = (
-                    f"Core module imports from contrib: {imp.imported_from}\n"
-                    f"Import: {imp.statement}\n"
-                    f"Fix: Move code to contrib or refactor to use protocols\n"
-                    f"Architecture: Core modules must not depend on contrib\n"
-                    f"See: CLAUDE.md for architecture guidelines"
-                )
-                diagnostics.append(
-                    Diagnostic(
-                        message=msg,
-                        location=Location(file=str(py_file), line=imp.lineno),
-                    )
-                )
+            diag = self._check_import(imp, py_file, source_pkg, source_layer)
+            if diag is not None:
+                diagnostics.append(diag)
 
         return diagnostics
+
+    @staticmethod
+    def _check_import(
+        imp: ImportInfo,
+        py_file: Path,
+        source_pkg: str | None,
+        source_layer: int,
+    ) -> Diagnostic | None:
+        """Return a diagnostic if *imp* violates the layer model."""
+        # TYPE_CHECKING imports never violate layer boundaries
+        if imp.in_type_checking:
+            return None
+
+        target_pkg = _target_subpackage(imp.imported_from)
+        target_layer = _layer_of(target_pkg)
+
+        # Only enforce boundaries for internal weakincentives imports
+        if target_layer is None:
+            return None
+
+        # Same or lower layer — allowed
+        if target_layer <= source_layer:
+            return None
+
+        # --- violation ---
+        src_label = _LAYER_NAME[source_layer]
+        tgt_label = _LAYER_NAME[target_layer]
+        msg = (
+            f"Layer violation: {src_label} (layer {source_layer}) "
+            f"imports {tgt_label} (layer {target_layer})\n"
+            f"Module: {imp.module} ({source_pkg})\n"
+            f"Import: {imp.statement}\n"
+            f"Fix: Use TYPE_CHECKING for type-only imports, "
+            f"move code to a higher layer, or refactor to use protocols\n"
+            f"See: specs/MODULE_BOUNDARIES.md"
+        )
+        return Diagnostic(
+            message=msg,
+            location=Location(file=str(py_file), line=imp.lineno),
+        )

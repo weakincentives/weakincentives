@@ -538,7 +538,7 @@ class AgentLoop[UserRequestT, OutputT](
             except VisibilityExpansionRequired as e:
                 retries += 1
                 if retries > _MAX_VISIBILITY_RETRIES:
-                    from ..adapters.core import PromptEvaluationError
+                    from ..errors import PromptEvaluationError
 
                     raise PromptEvaluationError(
                         f"Visibility expansion retries exceeded ({_MAX_VISIBILITY_RETRIES})",
