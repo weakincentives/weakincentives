@@ -736,6 +736,67 @@ class TestDrainQuietPeriod:
         # Should finish well under 1 s (capped at ~50 ms, not 60 s).
         assert elapsed < 1.0
 
+    def test_drain_snapshot_consistency(self) -> None:
+        """Drain uses a snapshot of last_update_time per iteration."""
+        import asyncio
+        import time
+
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+        from weakincentives.adapters.acp.client import ACPClient
+
+        adapter = ACPAdapter(
+            adapter_config=ACPAdapterConfig(quiet_period_ms=100),
+            client_config=ACPClientConfig(cwd="/tmp"),
+        )
+        adapter._MAX_DRAIN_S = 1.0
+
+        client = ACPClient(ACPClientConfig(), workspace_root="/tmp")
+        # Set last_update_time to "just now" so drain waits for quiet period.
+        client._last_update_time = time.monotonic()
+
+        start = time.monotonic()
+        asyncio.run(adapter._drain_quiet_period(client, deadline=None))
+        elapsed = time.monotonic() - start
+
+        # Should terminate after ~100 ms quiet period, not hang.
+        assert elapsed < 1.0
+        # Should have waited at least the quiet period.
+        assert elapsed >= 0.05
+
+    def test_drain_exits_when_snapshot_becomes_none(self) -> None:
+        """Drain exits if last_update_time becomes None mid-loop."""
+        import asyncio
+        import time
+
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+        from weakincentives.adapters.acp.client import ACPClient
+
+        adapter = ACPAdapter(
+            adapter_config=ACPAdapterConfig(quiet_period_ms=60_000),
+            client_config=ACPClientConfig(cwd="/tmp"),
+        )
+        adapter._MAX_DRAIN_S = 5.0
+
+        client = ACPClient(ACPClientConfig(), workspace_root="/tmp")
+        client._last_update_time = time.monotonic()
+
+        original_sleep = asyncio.sleep
+
+        async def _clear_and_sleep(s: float) -> None:
+            # Simulate last_update_time becoming None during the sleep.
+            client._last_update_time = None
+            await original_sleep(min(s, 0.01))
+
+        start = time.monotonic()
+        with patch(
+            "weakincentives.adapters.acp.adapter.asyncio.sleep", _clear_and_sleep
+        ):
+            asyncio.run(adapter._drain_quiet_period(client, deadline=None))
+        elapsed = time.monotonic() - start
+
+        # Should exit quickly, not wait the full 60 s quiet period.
+        assert elapsed < 1.0
+
 
 class TestProtocolImportError:
     def test_raises_import_error(self) -> None:

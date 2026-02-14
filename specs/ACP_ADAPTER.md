@@ -127,14 +127,11 @@ Defined at `src/weakincentives/adapters/acp/config.py:29`.
 | `agent_args` | `tuple[str, ...]` | `("acp",)` | Arguments for the agent binary |
 | `cwd` | `str \| None` | `None` | Working directory (absolute; defaults to `Path.cwd().resolve()`) |
 | `env` | `Mapping[str, str] \| None` | `None` | Extra environment variables (merged with `os.environ`) |
-| `suppress_stderr` | `bool` | `True` | Capture stderr for errors |
 | `startup_timeout_s` | `float` | `10.0` | Max time for initialize/session/new |
 | `permission_mode` | `Literal["auto", "deny", "prompt"]` | `"auto"` | Response to permission requests |
 | `allow_file_reads` | `bool` | `False` | Advertise `readTextFile` capability |
 | `allow_file_writes` | `bool` | `False` | Advertise `writeTextFile` capability |
-| `allow_terminal` | `bool` | `False` | Advertise terminal capability |
 | `mcp_servers` | `tuple[Any, ...]` | `()` | Additional MCP servers (WINK server always added first) |
-| `reuse_session` | `bool` | `False` | Load/reuse session ID |
 
 > **CWD requirement:** ACP requires `cwd` to be an absolute path. If `None`, the
 > adapter resolves to the prompt's `HostFilesystem` root or `Path.cwd().resolve()`.

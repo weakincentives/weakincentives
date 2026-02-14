@@ -29,14 +29,11 @@ class TestOpenCodeACPClientConfig:
         assert opencode.agent_args == base.agent_args
         assert opencode.cwd == base.cwd
         assert opencode.env == base.env
-        assert opencode.suppress_stderr == base.suppress_stderr
         assert opencode.startup_timeout_s == base.startup_timeout_s
         assert opencode.permission_mode == base.permission_mode
         assert opencode.allow_file_reads == base.allow_file_reads
         assert opencode.allow_file_writes == base.allow_file_writes
-        assert opencode.allow_terminal == base.allow_terminal
         assert opencode.mcp_servers == base.mcp_servers
-        assert opencode.reuse_session == base.reuse_session
 
     def test_is_subtype(self) -> None:
         opencode = OpenCodeACPClientConfig()

@@ -127,6 +127,22 @@ def create_mcp_tool_server(
     return server
 
 
+def _start_event_loop(  # pragma: no cover - runs in bg thread
+    server: MCPHttpServer,
+    coro_fn: Any,
+    ready_event: threading.Event,
+) -> None:
+    """Thread target: run *coro_fn()* in a fresh event loop."""
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(coro_fn())
+    except BaseException as exc:
+        server._startup_error = exc
+    finally:
+        ready_event.set()
+        loop.close()
+
+
 class MCPHttpServer:
     """Wraps an MCP server instance with HTTP transport.
 
@@ -220,33 +236,28 @@ class MCPHttpServer:
         )
 
         async def _run_server() -> None:  # pragma: no cover - runs in bg thread
-            """Run both the MCP server and uvicorn together."""
             async with transport.connect() as (read_stream, write_stream):
                 mcp_task = asyncio.create_task(
                     mcp_server.run(read_stream, write_stream, init_options)
                 )
                 uv_task = asyncio.create_task(uv_server.serve())
-                # Wait until uvicorn has actually bound the socket.
                 while not uv_server.started:
                     await asyncio.sleep(0.01)
-                # Read real port from bound socket.
                 self._port = uv_server.servers[0].sockets[0].getsockname()[1]
                 ready_event.set()
-                await uv_task
-                mcp_task.cancel()
-
-        def _thread_target() -> None:  # pragma: no cover - runs in bg thread
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(_run_server())
-            except BaseException as exc:
-                self._startup_error = exc
-            finally:
-                ready_event.set()
-                loop.close()
+                done, pending = await asyncio.wait(
+                    [mcp_task, uv_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+                for task in done:
+                    if (exc := task.exception()) is not None:
+                        raise exc
 
         self._thread = threading.Thread(
-            target=_thread_target,
+            target=_start_event_loop,
+            args=(self, _run_server, ready_event),
             daemon=True,
             name=f"mcp-http-{self._server_name}",
         )

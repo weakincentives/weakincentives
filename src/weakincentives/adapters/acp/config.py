@@ -36,28 +36,22 @@ class ACPClientConfig:
         agent_args: Arguments passed to the agent binary.
         cwd: Working directory (must be absolute; defaults to Path.cwd()).
         env: Extra environment variables merged into the subprocess env.
-        suppress_stderr: Capture stderr for debugging instead of printing.
         startup_timeout_s: Max time for the initialize handshake.
         permission_mode: How to handle permissions in the ACP agent.
         allow_file_reads: Allow the agent to read files.
         allow_file_writes: Allow the agent to write files.
-        allow_terminal: Allow the agent to run terminal commands.
         mcp_servers: Additional external MCP server configurations.
-        reuse_session: If true, reuse existing ACP session when possible.
     """
 
     agent_bin: str = "opencode"
     agent_args: tuple[str, ...] = ("acp",)
     cwd: str | None = None
     env: Mapping[str, str] | None = None
-    suppress_stderr: bool = True
     startup_timeout_s: float = 10.0
     permission_mode: Literal["auto", "deny", "prompt"] = "auto"
     allow_file_reads: bool = False
     allow_file_writes: bool = False
-    allow_terminal: bool = False
     mcp_servers: tuple[McpServerConfig, ...] = ()
-    reuse_session: bool = False
 
 
 @FrozenDataclass()

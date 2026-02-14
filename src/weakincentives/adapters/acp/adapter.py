@@ -564,7 +564,7 @@ class ACPAdapter(ProviderAdapter[Any]):
                     read_text_file=self._client_config.allow_file_reads,
                     write_text_file=self._client_config.allow_file_writes,
                 ),
-                terminal=self._client_config.allow_terminal,
+                terminal=False,
             ),
             client_info=Implementation(
                 name="wink",
@@ -646,7 +646,11 @@ class ACPAdapter(ProviderAdapter[Any]):
             if now >= effective_deadline:
                 break
 
-            elapsed = now - client.last_update_time
+            snapshot = client.last_update_time
+            if snapshot is None:
+                break
+
+            elapsed = now - snapshot
             if elapsed >= quiet_s:
                 break
 

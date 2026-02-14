@@ -27,14 +27,11 @@ class TestACPClientConfig:
         assert cfg.agent_args == ("acp",)
         assert cfg.cwd is None
         assert cfg.env is None
-        assert cfg.suppress_stderr is True
         assert cfg.startup_timeout_s == 10.0
         assert cfg.permission_mode == "auto"
         assert cfg.allow_file_reads is False
         assert cfg.allow_file_writes is False
-        assert cfg.allow_terminal is False
         assert cfg.mcp_servers == ()
-        assert cfg.reuse_session is False
 
     def test_custom_values(self) -> None:
         cfg = ACPClientConfig(
@@ -42,28 +39,22 @@ class TestACPClientConfig:
             agent_args=("serve", "--port", "8080"),
             cwd="/tmp/work",
             env={"API_KEY": "secret"},
-            suppress_stderr=False,
             startup_timeout_s=30.0,
             permission_mode="deny",
             allow_file_reads=True,
             allow_file_writes=True,
-            allow_terminal=True,
             mcp_servers=({"command": "npx", "args": ["mcp"]},),
-            reuse_session=True,
         )
         assert cfg.agent_bin == "/usr/local/bin/myagent"
         assert cfg.agent_args == ("serve", "--port", "8080")
         assert cfg.cwd == "/tmp/work"
         assert cfg.env is not None
         assert cfg.env["API_KEY"] == "secret"
-        assert cfg.suppress_stderr is False
         assert cfg.startup_timeout_s == 30.0
         assert cfg.permission_mode == "deny"
         assert cfg.allow_file_reads is True
         assert cfg.allow_file_writes is True
-        assert cfg.allow_terminal is True
         assert len(cfg.mcp_servers) == 1
-        assert cfg.reuse_session is True
 
     def test_frozen(self) -> None:
         cfg = ACPClientConfig()
