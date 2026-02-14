@@ -884,6 +884,37 @@ class TestExtractTranscriptDetailsSplitToolUse:
         assert tool_use_id == ""
 
 
+class TestExtractTranscriptDetailsAcpFallback:
+    """Tests for ACP adapter-style detail dicts using tool_call_id."""
+
+    def test_acp_tool_use_extracts_tool_call_id_and_tool_name(self) -> None:
+        """ACP adapter emits tool_call_id and tool_name (no 'type' key)."""
+        parsed: dict[str, object] = {
+            "tool_name": "read",
+            "tool_call_id": "call_abc123",
+            "input": {"path": "/tmp/a.txt"},
+        }
+        _role, _content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_use"
+        )
+        assert tool_name == "read"
+        assert tool_use_id == "call_abc123"
+
+    def test_acp_tool_result_extracts_tool_call_id(self) -> None:
+        """ACP adapter tool_result entries also use tool_call_id."""
+        parsed: dict[str, object] = {
+            "tool_name": "glob",
+            "tool_call_id": "call_xyz789",
+            "status": "completed",
+            "output": {"files": ["a.py"]},
+        }
+        _role, _content, tool_name, tool_use_id = _extract_transcript_details(
+            parsed, "tool_result"
+        )
+        assert tool_name == "glob"
+        assert tool_use_id == "call_xyz789"
+
+
 class TestApplySplitBlockDetails:
     """Direct tests for _apply_split_block_details."""
 

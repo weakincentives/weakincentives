@@ -25,8 +25,16 @@ CLAUDE_AGENT_SDK_ADAPTER_NAME: Final[AdapterName] = "claude_agent_sdk"
 CODEX_APP_SERVER_ADAPTER_NAME: Final[AdapterName] = "codex_app_server"
 """Canonical label for the Codex App Server adapter."""
 
+ACP_ADAPTER_NAME: Final[AdapterName] = "acp"
+"""Canonical label for the generic ACP adapter."""
+
+OPENCODE_ACP_ADAPTER_NAME: Final[AdapterName] = "opencode_acp"
+"""Canonical label for the OpenCode ACP adapter."""
+
 __all__ = [
+    "ACP_ADAPTER_NAME",
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
     "CODEX_APP_SERVER_ADAPTER_NAME",
+    "OPENCODE_ACP_ADAPTER_NAME",
     "AdapterName",
 ]

@@ -587,9 +587,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         transcript_config = self._client_config.transcript_collection
         collector: TranscriptCollector | None = None
         if transcript_config is not None:
+            session_id = getattr(session, "session_id", None)
             collector = TranscriptCollector(
                 prompt_name=prompt_name,
                 config=transcript_config,
+                session_id=str(session_id) if session_id else None,
             )
 
         try:

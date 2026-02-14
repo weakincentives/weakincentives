@@ -23,13 +23,13 @@ import base64
 import json
 import threading
 import webbrowser
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from importlib.resources import files
 from pathlib import Path
 from typing import Annotated
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -60,9 +60,12 @@ class _DebugAppHandlers:
         self._logger = logger
         self._static_dir = static_dir
 
-    def index(self) -> str:
+    def index(self) -> HTMLResponse:
         index_path = self._static_dir / "index.html"
-        return index_path.read_text()
+        return HTMLResponse(
+            content=index_path.read_text(),
+            headers={"Cache-Control": "no-cache"},
+        )
 
     def get_meta(self) -> Mapping[str, JSONValue]:
         return self._store.get_meta()
@@ -268,7 +271,20 @@ def build_debug_app(store: BundleStore, logger: StructuredLogger) -> FastAPI:
     app = FastAPI(title="wink debug bundle server")
     app.state.bundle_store = store
     app.state.logger = logger
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(static_dir)),
+        name="static",
+    )
+
+    @app.middleware("http")
+    async def _no_cache_static(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     _ = app.get("/", response_class=HTMLResponse)(handlers.index)
     _ = app.get("/api/meta")(handlers.get_meta)

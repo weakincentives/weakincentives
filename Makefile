@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo sync-docs all clean biome biome-fix test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 test-group-6 test-parallel
+.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests bun-test property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-opencode sync-docs all clean biome biome-fix test-group-1 test-group-2 test-group-3 test-group-4 test-group-5 test-group-6 test-parallel
 
 # =============================================================================
 # Code Formatting
@@ -265,14 +265,18 @@ clean-extracted:
 # =============================================================================
 
 # Code reviewer demo
-# Usage: make demo-claude [PROJECT=...] [FOCUS="..."]
-#        make demo-codex  [PROJECT=...] [FOCUS="..."]
+# Usage: make demo-claude    [PROJECT=...] [FOCUS="..."]
+#        make demo-codex     [PROJECT=...] [FOCUS="..."]
+#        make demo-opencode  [PROJECT=...] [FOCUS="..."] [MODEL=...]
 PROJECT ?= test-repositories/sunfish
 FOCUS ?= Review how the UCI implementation is handled via the packaging scripts
+MODEL ?= openai/gpt-5.3-codex
 demo-claude:
 	@uv run --all-extras python code_reviewer_example.py --adapter claude "$(PROJECT)" "$(FOCUS)"
 demo-codex:
 	@uv run --all-extras python code_reviewer_example.py --adapter codex "$(PROJECT)" "$(FOCUS)"
+demo-opencode:
+	@uv run --all-extras python code_reviewer_example.py --adapter opencode --model "$(MODEL)" "$(PROJECT)" "$(FOCUS)"
 demo: demo-claude
 
 # =============================================================================

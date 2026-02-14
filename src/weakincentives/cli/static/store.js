@@ -80,11 +80,6 @@ export function createInitialState() {
     hasEnvironmentData: false,
     // Shortcuts overlay
     shortcutsOpen: false,
-    // Zoom modal state
-    zoomOpen: false,
-    zoomType: null,
-    zoomIndex: -1,
-    zoomEntry: null,
     // Virtual scrollers (initialized after DOM ready)
     logsScroller: null,
     transcriptScroller: null,

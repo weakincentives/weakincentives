@@ -10,7 +10,6 @@
  * @param {object} deps.sessionsView - Sessions view module
  * @param {object} deps.transcriptView - Transcript view module
  * @param {object} deps.logsView - Logs view module
- * @param {object} deps.zoomModal - Zoom modal module
  * @param {function} deps.switchView - View switching function
  * @param {function} deps.reloadBundle - Bundle reload function
  * @param {function} deps.toggleTheme - Theme toggle function
@@ -22,7 +21,6 @@ export function initKeyboardShortcuts({
   sessionsView,
   transcriptView,
   logsView,
-  zoomModal,
   switchView,
   reloadBundle,
   toggleTheme,
@@ -95,30 +93,9 @@ export function initKeyboardShortcuts({
   // -- Key handler helpers --
 
   function handleEscapeKey(e) {
-    if (zoomModal.isOpen()) {
-      e.preventDefault();
-      zoomModal.closeZoomModal();
-      return true;
-    }
     if (state.shortcutsOpen) {
       e.preventDefault();
       closeShortcuts();
-      return true;
-    }
-    return false;
-  }
-
-  async function handleZoomModalKeys(e) {
-    const nextKeys = ["j", "J", "ArrowDown", "ArrowRight"];
-    const prevKeys = ["k", "K", "ArrowUp", "ArrowLeft"];
-    if (nextKeys.includes(e.key)) {
-      e.preventDefault();
-      await zoomModal.zoomNext();
-      return true;
-    }
-    if (prevKeys.includes(e.key)) {
-      e.preventDefault();
-      zoomModal.zoomPrev();
       return true;
     }
     return false;
@@ -197,22 +174,9 @@ export function initKeyboardShortcuts({
 
   // -- Global keydown handler --
 
-  async function handleZoomKeydown(e) {
-    if (zoomModal.isNextPending()) {
-      e.preventDefault();
-      return;
-    }
-    await handleZoomModalKeys(e);
-  }
-
-  async function handleKeydown(e) {
+  function handleKeydown(e) {
     if (e.key === "Escape") {
       handleEscapeKey(e);
-      return;
-    }
-
-    if (zoomModal.isOpen()) {
-      await handleZoomKeydown(e);
       return;
     }
 

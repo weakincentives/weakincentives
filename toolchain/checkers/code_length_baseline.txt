@@ -11,6 +11,7 @@
 #   path/to/file.py:Class.method           – function-length violation
 
 # ── src/ file-length ────────────────────────────────────────────────
+src/weakincentives/adapters/acp/adapter.py
 src/weakincentives/adapters/codex_app_server/adapter.py
 src/weakincentives/cli/query.py
 src/weakincentives/cli/wink.py
@@ -21,6 +22,7 @@ src/weakincentives/runtime/session/session.py
 src/weakincentives/serde/parse.py
 
 # ── tests/ file-length ──────────────────────────────────────────────
+tests/adapters/acp/test_adapter_protocol.py
 tests/adapters/claude_agent_sdk/test_adapter.py
 tests/adapters/claude_agent_sdk/test_bridge.py
 tests/adapters/claude_agent_sdk/test_hooks.py

@@ -167,6 +167,13 @@ def emit_assistant_split(
             raw=line,
         )
 
+    # Record tool_use_id → tool_name mappings for later tool_result correlation
+    for block in tool_blocks:
+        block_id = block.get("id")
+        block_name = block.get("name")
+        if block_id and block_name:
+            tailer.tool_names[block_id] = block_name
+
     # Emit one tool_use entry per tool_use block
     for block in tool_blocks:
         tailer.entry_count += 1
@@ -226,10 +233,15 @@ def emit_user_tool_result_split(
 
     # Emit one tool_result entry per tool_result block
     for block in result_blocks:
+        tool_use_id = block.get("tool_use_id", "")
+        tool_name = tailer.tool_names.get(tool_use_id, "")
+        detail: dict[str, Any] = {"sdk_entry": block}
+        if tool_name:
+            detail["tool_name"] = tool_name
         tailer.entry_count += 1
         emitter.emit(
             "tool_result",
             source=tailer.source,
-            detail={"sdk_entry": block},
+            detail=detail,
             raw=None if other_blocks else line,
         )

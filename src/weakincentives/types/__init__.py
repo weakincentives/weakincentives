@@ -164,8 +164,10 @@ When to Use These Types
 from __future__ import annotations
 
 from .adapter import (
+    ACP_ADAPTER_NAME,
     CLAUDE_AGENT_SDK_ADAPTER_NAME,
     CODEX_APP_SERVER_ADAPTER_NAME,
+    OPENCODE_ACP_ADAPTER_NAME,
     AdapterName,
 )
 from .dataclass import (
@@ -186,8 +188,10 @@ from .json import (
 )
 
 __all__ = [
+    "ACP_ADAPTER_NAME",
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
     "CODEX_APP_SERVER_ADAPTER_NAME",
+    "OPENCODE_ACP_ADAPTER_NAME",
     "AdapterName",
     "ContractResult",
     "DataclassFieldMapping",
