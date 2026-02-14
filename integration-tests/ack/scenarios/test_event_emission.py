@@ -105,7 +105,7 @@ def test_rendered_tools_event(
 ) -> None:
     """Adapters that support it emit RenderedTools correlated to PromptRendered."""
     tool = build_uppercase_tool()
-    prompt = Prompt(build_tool_prompt("integration/ack/rendered-tools", tool)).bind(
+    prompt = Prompt(build_tool_prompt("integration.ack.rendered-tools", tool)).bind(
         TransformRequest(text="hello")
     )
 

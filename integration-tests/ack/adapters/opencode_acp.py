@@ -43,7 +43,7 @@ class OpenCodeACPFixture:
             structured_output=True,
             event_emission=True,
             transcript=True,
-            rendered_tools_event=False,
+            rendered_tools_event=True,
             progressive_disclosure=True,
             transactional_tools=True,
             deadline_enforcement=True,
