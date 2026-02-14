@@ -34,6 +34,8 @@ Implementations:
 from __future__ import annotations
 
 import io
+import os
+import tempfile
 from collections.abc import Buffer, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -365,6 +367,9 @@ class HostByteReader:
     def open(cls, resolved_path: Path, relative_path: str) -> HostByteReader:
         """Open a file for reading.
 
+        Opens the file first, then gets size from the file descriptor
+        via ``os.fstat`` to avoid TOCTOU races.
+
         Args:
             resolved_path: Absolute path to the file on disk.
             relative_path: Path relative to filesystem root.
@@ -376,14 +381,14 @@ class HostByteReader:
             FileNotFoundError: If file does not exist.
             IsADirectoryError: If path is a directory.
         """
-        if not resolved_path.exists():
-            raise FileNotFoundError(relative_path)
-        if resolved_path.is_dir():
+        try:
+            handle = resolved_path.open("rb")
+        except FileNotFoundError:
+            raise FileNotFoundError(relative_path) from None
+        except IsADirectoryError:
             msg = f"Is a directory: {relative_path}"
-            raise IsADirectoryError(msg)
-
-        size = resolved_path.stat().st_size
-        handle = resolved_path.open("rb")
+            raise IsADirectoryError(msg) from None
+        size = os.fstat(handle.fileno()).st_size
         return cls(_path=relative_path, _handle=handle, _size=size)
 
     @property
@@ -464,10 +469,20 @@ class HostByteWriter:
     """ByteWriter implementation backed by a native file handle.
 
     Wraps a host filesystem file for streaming byte writes.
+
+    For ``create`` and ``overwrite`` modes, writes go to a temporary file
+    in the same directory and are atomically renamed to the target path on
+    successful ``close()``. If the context manager exits due to an exception,
+    the temporary file is removed and the original is left untouched.
+
+    For ``append`` mode, writes go directly to the target file (atomic
+    rename is not meaningful for appends).
     """
 
     _path: str
     _handle: BinaryIO
+    _final_path: Path | None
+    _temp_path: Path | None
     _bytes_written: int = field(default=0, init=False)
     _closed: bool = field(default=False, init=False)
 
@@ -481,6 +496,11 @@ class HostByteWriter:
         create_parents: bool,
     ) -> HostByteWriter:
         """Open a file for writing.
+
+        For ``create`` mode, uses ``"xb"`` to atomically fail if the file
+        already exists (no TOCTOU race). For ``create`` and ``overwrite``
+        modes, writes to a temporary file that is renamed on close for
+        atomic writes. For ``append`` mode, writes directly.
 
         Args:
             resolved_path: Absolute path to the file on disk.
@@ -504,12 +524,34 @@ class HostByteWriter:
                 )
             parent_dir.mkdir(parents=True, exist_ok=True)
 
-        if mode == "create" and resolved_path.exists():
-            raise FileExistsError(f"File already exists: {relative_path}")
+        if mode == "append":
+            handle = resolved_path.open("ab")
+            return cls(
+                _path=relative_path,
+                _handle=handle,
+                _final_path=None,
+                _temp_path=None,
+            )
 
-        file_mode = "ab" if mode == "append" else "wb"
-        handle = resolved_path.open(file_mode)
-        return cls(_path=relative_path, _handle=handle)
+        # create/overwrite: write to temp file, rename on close
+        if mode == "create":
+            # Validate atomically via "xb" — raises FileExistsError if exists
+            try:
+                handle = resolved_path.open("xb")
+            except FileExistsError:
+                raise FileExistsError(f"File already exists: {relative_path}") from None
+            # Close the placeholder and write to temp file instead
+            handle.close()
+
+        fd, temp_path_str = tempfile.mkstemp(dir=str(parent_dir), prefix=".wink_tmp_")
+        temp_path = Path(temp_path_str)
+        handle = os.fdopen(fd, "wb")
+        return cls(
+            _path=relative_path,
+            _handle=handle,
+            _final_path=resolved_path,
+            _temp_path=temp_path,
+        )
 
     @property
     def path(self) -> str:
@@ -557,14 +599,48 @@ class HostByteWriter:
         exc_val: BaseException | None,
         exc_tb: object,
     ) -> None:
-        """Exit context manager."""
-        self.close()
+        """Exit context manager.
+
+        On error, removes the temp file without committing. On success,
+        atomically renames the temp file to the final path.
+        """
+        if exc_type is not None:
+            self._abort()
+        else:
+            self.close()
+
+    def _abort(self) -> None:
+        """Discard writes and clean up temp file without committing."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._handle.close()
+        finally:
+            if self._temp_path is not None:
+                self._temp_path.unlink(missing_ok=True)
 
     def close(self) -> None:
-        """Close the writer."""
-        if not self._closed:
+        """Close the writer and commit the temp file.
+
+        For create/overwrite modes, flushes data and atomically renames
+        the temporary file to the final path. For append mode, simply
+        closes the file handle.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._handle.flush()
+            os.fsync(self._handle.fileno())
             self._handle.close()
-            self._closed = True
+        except BaseException:
+            # Clean up temp file on flush/close failure
+            if self._temp_path is not None:
+                self._temp_path.unlink(missing_ok=True)
+            raise
+        if self._final_path is not None and self._temp_path is not None:
+            _ = self._temp_path.replace(self._final_path)
 
 
 # ---------------------------------------------------------------------------
