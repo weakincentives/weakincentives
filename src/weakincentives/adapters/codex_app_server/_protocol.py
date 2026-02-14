@@ -163,6 +163,7 @@ async def execute_protocol(  # noqa: PLR0913
             deadline=deadline,
             run_context=run_context,
             bridge=bridge,
+            visibility_signal=visibility_signal,
         )
     finally:
         # 6. Stop transcript emitter — must run even on exception.
@@ -272,6 +273,7 @@ async def stream_turn(  # noqa: PLR0913
     deadline: Deadline | None,
     run_context: RunContext | None,
     bridge: CodexTranscriptBridge | None = None,
+    visibility_signal: VisibilityExpansionSignal | None = None,
 ) -> tuple[str | None, TokenUsage | None]:
     """Stream turn notifications until turn/completed.
 
@@ -294,6 +296,7 @@ async def stream_turn(  # noqa: PLR0913
             accumulated_text=accumulated_text,
             usage=usage,
             bridge=bridge,
+            visibility_signal=visibility_signal,
         )
     finally:
         if watchdog_task is not None:
@@ -340,6 +343,7 @@ async def consume_messages(  # noqa: PLR0913
     accumulated_text: str,
     usage: TokenUsage | None,
     bridge: CodexTranscriptBridge | None = None,
+    visibility_signal: VisibilityExpansionSignal | None = None,
 ) -> tuple[str, TokenUsage | None]:
     """Consume messages from the client until turn/completed."""
     turn_completed = False
@@ -352,6 +356,11 @@ async def consume_messages(  # noqa: PLR0913
                 approval_policy=approval_policy,
                 bridge=bridge,
             )
+            # Break early if a tool call triggered visibility expansion.
+            # The caller will re-raise the stored exception after cleanup.
+            if visibility_signal is not None and visibility_signal.is_set():
+                turn_completed = True
+                break
             continue
 
         # Emit transcript entry for this notification.

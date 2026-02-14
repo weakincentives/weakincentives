@@ -90,6 +90,9 @@ def emit_entry(
         )
         return
 
+    # Record observed entry type for fallback suppression.
+    tailer.observed_types.add(entry_type)
+
     # Split messages that mix content with tool blocks
     if _try_emit_split(emitter, tailer, entry, entry_type, line):
         return

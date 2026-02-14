@@ -41,6 +41,52 @@ logger: StructuredLogger = get_logger(
     __name__, context={"component": "transcript_collector"}
 )
 
+_SHUTDOWN_DRAIN_ATTEMPTS = 5
+"""Number of drain polls after SDK query completes."""
+
+_SHUTDOWN_DRAIN_DELAY = 0.2
+"""Seconds between drain polls."""
+
+
+def _extract_text_from_content(content: object) -> str:
+    """Extract text from an SDK message content field.
+
+    Content may be a string, a list of dicts (JSONL transcript format),
+    or a list of typed objects with ``.text`` attributes (SDK API format).
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        text = getattr(block, "text", None)
+        if isinstance(text, str) and text:
+            parts.append(text)
+            continue
+        if isinstance(block, dict) and block.get("type") == "text":
+            text = block.get("text", "")
+            if text:
+                parts.append(text)
+    return "\n".join(parts)
+
+
+def _extract_assistant_text(messages: list[Any]) -> str:
+    """Extract text from the last assistant message in SDK response.
+
+    Handles both SDK API objects (``AssistantMessage`` with ``.content``)
+    and JSONL transcript dicts (``{"role": "assistant", "content": ...}``).
+    """
+    for message in reversed(messages):
+        # SDK API format: AssistantMessage with .content attribute
+        if type(message).__name__ == "AssistantMessage":
+            return _extract_text_from_content(getattr(message, "content", None))
+        # JSONL transcript format: dict with role/content
+        inner = getattr(message, "message", None)
+        if isinstance(inner, dict) and inner.get("role") == "assistant":
+            return _extract_text_from_content(inner.get("content"))
+    return ""
+
 
 @dataclass(slots=True, frozen=True)
 class TranscriptCollectorConfig:
@@ -83,6 +129,9 @@ class _TailerState:
 
     tool_names: dict[str, str] = field(default_factory=dict)
     """Map of tool_use_id → tool_name for correlating results."""
+
+    observed_types: set[str] = field(default_factory=set)
+    """Canonical entry types observed from file parsing."""
 
 
 @dataclass(slots=True)
@@ -139,6 +188,12 @@ class TranscriptCollector:
     _emitter: TranscriptEmitter | None = field(default=None, init=False)
     """Shared emitter instance (created at run() time)."""
 
+    _fallback_user_text: str | None = field(default=None, init=False)
+    """Stored user message text for fallback emission."""
+
+    _fallback_messages: list[Any] | None = field(default=None, init=False)
+    """Stored assistant messages for fallback emission."""
+
     @property
     def main_entry_count(self) -> int:
         """Number of entries from main transcript."""
@@ -170,6 +225,43 @@ class TranscriptCollector:
                 emit_raw=self.config.emit_raw,
             )
         return self._emitter
+
+    def set_user_message_fallback(self, text: str) -> None:
+        """Store user message text for fallback emission at shutdown.
+
+        Called by the adapter before the SDK query starts.  The message
+        is emitted during shutdown only if the transcript file did not
+        already contain a ``user_message`` entry.
+        """
+        self._fallback_user_text = text
+
+    def set_assistant_message_fallback(self, messages: list[Any]) -> None:
+        """Store assistant messages for fallback emission at shutdown.
+
+        Called by the adapter after the SDK query completes.  The message
+        is emitted during shutdown only if the transcript file did not
+        already contain an ``assistant_message`` entry.
+        """
+        self._fallback_messages = messages
+
+    def _emit_fallbacks(self) -> None:
+        """Emit fallback user/assistant messages if not observed from file.
+
+        Checks the main tailer's ``observed_types``.  If ``user_message``
+        was not observed and ``_fallback_user_text`` is set, emits a
+        ``user_message``.  Same for ``assistant_message``.
+        """
+        main_tailer = self._tailers.get("main")
+        observed = main_tailer.observed_types if main_tailer else set()
+        emitter = self._get_emitter()
+
+        if "user_message" not in observed and self._fallback_user_text is not None:
+            emitter.emit("user_message", detail={"text": self._fallback_user_text})
+
+        if "assistant_message" not in observed and self._fallback_messages is not None:
+            text = _extract_assistant_text(self._fallback_messages)
+            if text:
+                emitter.emit("assistant_message", detail={"text": text})
 
     async def hook_callback(
         self,
@@ -283,9 +375,21 @@ class TranscriptCollector:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._discovery_task
 
-            # Final poll to capture remaining content
+            # Drain: the SDK may still be flushing transcript content to
+            # disk after the query completes, especially for fast evaluations.
+            # Poll a few extra times with a short delay to capture trailing
+            # entries and to resolve any pending tailers.  Skip the loop
+            # entirely when there are no pending tailers (common case).
+            for _ in range(_SHUTDOWN_DRAIN_ATTEMPTS):
+                if not self._pending_tailers:
+                    break
+                await asyncio.sleep(_SHUTDOWN_DRAIN_DELAY)
+                await self._poll_once()
+
+            # Final poll to pick up any trailing content from active tailers.
             await self._poll_once()
 
+            self._emit_fallbacks()
             emitter.stop()
 
     async def _remember_transcript_path(self, transcript_path: str) -> None:

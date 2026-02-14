@@ -596,6 +596,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         try:
             async with collector.run() if collector else contextlib.nullcontext():
+                if collector is not None:
+                    collector.set_user_message_fallback(prompt_text)
                 messages = await self._run_sdk_query(
                     sdk=sdk,
                     prompt_text=prompt_text,
@@ -607,6 +609,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     visibility_signal=visibility_signal,
                     collector=collector,
                 )
+                if collector is not None:
+                    collector.set_assistant_message_fallback(messages)
         except VisibilityExpansionRequired:
             logger.debug(
                 "claude_agent_sdk.run_context.visibility_expansion_required",
