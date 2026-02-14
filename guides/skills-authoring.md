@@ -155,31 +155,28 @@ skills or moving large assets elsewhere.
 
 ## Mounting Skills with WINK
 
-Skills are mounted via `IsolationConfig` when creating a Claude Agent SDK
-adapter:
+Skills are attached at the section level using the `skills` parameter on
+`Section` (or any section subclass like `MarkdownSection`):
 
 ```python nocheck
 from pathlib import Path
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    IsolationConfig,
-)
-from weakincentives.skills import SkillConfig, SkillMount
+from weakincentives.prompt import MarkdownSection
+from weakincentives.skills import SkillMount
 
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        isolation=IsolationConfig(
-            skills=SkillConfig(
-                skills=(
-                    SkillMount(Path("./skills/code-review")),
-                    SkillMount(Path("./skills/python-style")),
-                )
-            ),
-        ),
+section = MarkdownSection(
+    title="Instructions",
+    key="instructions",
+    template="You are a code reviewer.",
+    skills=(
+        SkillMount(Path("./skills/code-review")),
+        SkillMount(Path("./skills/python-style")),
     ),
 )
 ```
+
+When the section is enabled, its skills are included in the agent's context.
+This co-locates skills with the instructions that use them, following the same
+pattern as tools.
 
 ### Auto-Discovery
 
@@ -187,7 +184,7 @@ Mount all skills in a directory:
 
 ```python nocheck
 from pathlib import Path
-from weakincentives.skills import SkillConfig, SkillMount
+from weakincentives.skills import SkillMount
 
 SKILLS_ROOT = Path("./skills")
 
@@ -197,7 +194,12 @@ skill_mounts = tuple(
     if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()
 )
 
-skills = SkillConfig(skills=skill_mounts)
+section = MarkdownSection(
+    title="Instructions",
+    key="instructions",
+    template="...",
+    skills=skill_mounts,
+)
 ```
 
 ### Conditional Skills
@@ -226,32 +228,7 @@ SkillMount(
 ```
 
 For directory skills, the `name` field in SKILL.md must match the source
-directory name to pass validation. If you need to mount a directory skill under
-a different name, you must disable validation:
-
-```python nocheck
-# Directory skill with name override requires disabling validation
-SkillMount(
-    source=Path("./skills/my-cool-skill-v2"),
-    name="my-cool-skill",
-)
-# ...
-SkillConfig(skills=(...), validate_on_mount=False)
-```
-
-This is not recommended for external or untrusted skills.
-
-### Disable Validation
-
-Skip validation for trusted skills:
-
-```python nocheck
-SkillConfig(skills=(...), validate_on_mount=False)
-```
-
-Use this when you control the skill source and need flexibility (e.g., name
-overrides for directory skills). Avoid for external sources where validation
-catches malformed or potentially malicious skills.
+directory name to pass validation.
 
 ## Complete Example
 
@@ -281,16 +258,20 @@ parametrization with `@pytest.mark.parametrize`, and assertion best practices).
 **references/fixtures.md** contains common fixture patterns like database
 sessions and temporary files that the skill instructions can reference.
 
-**Mount the skill:**
+**Mount the skill on a section:**
 
 ```python nocheck
 from pathlib import Path
-from weakincentives.skills import SkillConfig, SkillMount
+from weakincentives.prompt import MarkdownSection
+from weakincentives.skills import SkillMount
 
-skills = SkillConfig(
+section = MarkdownSection(
+    title="Testing",
+    key="testing",
+    template="Write tests following our patterns.",
     skills=(
         SkillMount(Path("./skills/pytest-patterns")),
-    )
+    ),
 )
 ```
 

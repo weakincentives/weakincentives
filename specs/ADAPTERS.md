@@ -89,6 +89,25 @@ At `src/weakincentives/adapters/codex_app_server/adapter.py`:
 
 See [CODEX_APP_SERVER.md](CODEX_APP_SERVER.md) for complete documentation.
 
+### ACP Adapter
+
+At `src/weakincentives/adapters/acp/`:
+
+- Generic Agent Communication Protocol (ACP) adapter
+- Bridges WINK prompts and tools to ACP-compatible harnesses
+- Protocol-level tool bridging and session management
+
+See [ACP_ADAPTER.md](ACP_ADAPTER.md) for complete documentation.
+
+### OpenCode ACP Adapter
+
+At `src/weakincentives/adapters/opencode_acp/`:
+
+- ACP adapter specialized for OpenCode harness
+- Quirk handling for OpenCode-specific behaviors
+
+See [OPENCODE_ACP_ADAPTER.md](OPENCODE_ACP_ADAPTER.md) for complete documentation.
+
 ## Shared Adapter Module
 
 At `src/weakincentives/adapters/_shared/`:

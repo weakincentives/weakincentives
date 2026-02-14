@@ -2,17 +2,21 @@
 
 ## Near-Term Initiatives
 
-### ACP Integration
+### ACP Integration — Completed in v0.26.0
 
-- Integrate with OpenCode via the Agent Communication Protocol (ACP) to enable WINK agents within the OpenCode harness.
-- Build generic ACP support that allows WINK agents to run inside other execution harnesses adopting the protocol.
-- Define clear boundaries between agent definition (WINK-owned) and harness concerns (ACP-mediated).
+- ~~Integrate with OpenCode via the Agent Communication Protocol (ACP) to enable WINK agents within the OpenCode harness.~~
+- ~~Build generic ACP support that allows WINK agents to run inside other execution harnesses adopting the protocol.~~
+- ~~Define clear boundaries between agent definition (WINK-owned) and harness concerns (ACP-mediated).~~
 
-### Codex App Server Integration
+Generic `ACPAdapter` handles the full ACP protocol flow; `OpenCodeACPAdapter`
+adds OpenCode-specific quirks. Unified integration testing via the Adapter
+Compatibility Kit (ACK) validates all three adapters against a shared contract.
 
-- Integrate with [Codex App Server](https://developers.openai.com/codex/app-server) as an execution environment for WINK agents.
-- Adapt the runtime to operate within Codex's sandboxed execution model.
-- Enable WINK agent definitions to be deployed and executed through the Codex infrastructure.
+### Codex App Server Integration — Completed in v0.25.0
+
+- ~~Integrate with [Codex App Server](https://developers.openai.com/codex/app-server) as an execution environment for WINK agents.~~
+- ~~Adapt the runtime to operate within Codex's sandboxed execution model.~~
+- ~~Enable WINK agent definitions to be deployed and executed through the Codex infrastructure.~~
 
 ### Checkpointer Mechanism
 

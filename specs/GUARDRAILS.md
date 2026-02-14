@@ -282,7 +282,6 @@ At `src/weakincentives/prompt/feedback.py` (`run_feedback_providers`):
 | Adapter | Delivery Method |
 |---------|-----------------|
 | Claude Agent SDK | `PostToolUse` hook `additionalContext` |
-| OpenAI | Appended to tool result message |
 
 ### Built-in Provider: DeadlineFeedback
 

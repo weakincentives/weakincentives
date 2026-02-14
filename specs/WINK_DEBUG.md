@@ -69,6 +69,7 @@ A debug bundle (`.zip`) contains:
     │   └── after.jsonl        # Final session state
     ├── logs/
     │   └── app.jsonl          # Structured log entries (includes transcript events)
+    ├── transcript.jsonl       # Transcript entries (extracted from logs)
     ├── config.json            # Runtime configuration
     ├── run_context.json       # Execution context
     └── filesystem/            # Workspace snapshot (optional)
@@ -92,4 +93,4 @@ difficult to use for typical production runs:
 
 - Debug bundle format: `specs/DEBUG_BUNDLE.md`
 - Logging specification: `specs/LOGGING.md`
-- Session state: `specs/SESSION.md`
+- Session state: `specs/SESSIONS.md`

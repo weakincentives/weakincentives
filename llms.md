@@ -161,9 +161,12 @@ weakincentives.runtime            # Session, events, lifecycle, mailbox
 weakincentives.runtime.session    # Slice ops, reducers, snapshots
 weakincentives.runtime.events     # Dispatcher, event types
 weakincentives.runtime.mailbox    # Message queues
+weakincentives.runtime.transcript # TranscriptEmitter, TranscriptEntry, TranscriptSummary
 weakincentives.adapters           # Provider base, config, throttling
 weakincentives.adapters.claude_agent_sdk  # ClaudeAgentSDKAdapter
 weakincentives.adapters.codex_app_server  # CodexAppServerAdapter
+weakincentives.adapters.acp              # ACPAdapter (generic ACP protocol)
+weakincentives.adapters.opencode_acp     # OpenCodeACPAdapter
 weakincentives.adapters._shared   # Shared adapter utilities (MCP bridge)
 weakincentives.contrib.tools      # Workspace digest tools
 weakincentives.contrib.optimizers # WorkspaceDigestOptimizer
@@ -176,7 +179,7 @@ weakincentives.serde              # Dataclass serialization
 weakincentives.dbc                # Design-by-contract decorators
 weakincentives.formal             # TLA+ specification embedding
 weakincentives.skills             # Agent Skills support
-weakincentives.types              # JSON type aliases
+weakincentives.types              # JSON type aliases, adapter name constants
 ```
 
 ______________________________________________________________________
@@ -226,6 +229,15 @@ from weakincentives.runtime import (
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 from weakincentives.adapters.codex_app_server import CodexAppServerAdapter
 from weakincentives.adapters import PromptResponse
+from weakincentives.types import ACP_ADAPTER_NAME, OPENCODE_ACP_ADAPTER_NAME
+
+# Transcript (runtime-level, adapter-agnostic)
+from weakincentives.runtime.transcript import (
+    TranscriptEmitter,
+    TranscriptEntry,
+    TranscriptSummary,
+    reconstruct_transcript,
+)
 
 # Contrib tools
 from weakincentives.contrib.tools import (
@@ -319,6 +331,33 @@ from weakincentives.adapters.codex_app_server import (
 from weakincentives.prompt import (
     WorkspaceSection,
     HostMount,
+)
+```
+
+### ACP Adapter (Generic)
+
+Requires `pip install weakincentives[acp]`.
+
+```python
+from weakincentives.adapters.acp import (
+    ACPAdapter,
+    ACPAdapterConfig,
+    ACPClient,
+    ACPClientConfig,
+    ACPSessionState,
+    McpServerConfig,
+)
+```
+
+### OpenCode ACP Adapter
+
+Requires `pip install weakincentives[acp]`.
+
+```python
+from weakincentives.adapters.opencode_acp import (
+    OpenCodeACPAdapter,
+    OpenCodeACPAdapterConfig,
+    OpenCodeACPClientConfig,
 )
 ```
 
@@ -425,6 +464,7 @@ section = MarkdownSection[ReviewParams](
     template="Focus on: ${focus}",  # Template.substitute syntax
     default_params=ReviewParams(focus="correctness"),
     tools=(),  # Tools attached to section
+    skills=(),  # Skills attached to section (SkillMount instances)
     children=(),  # Nested sections
     visibility=SectionVisibility.FULL,  # Or SUMMARY for progressive disclosure
     summary="Guidelines available.",  # Shown when visibility=SUMMARY
@@ -581,10 +621,12 @@ session.restore(snapshot)
 
 ### 6. Adapters
 
-Provider-agnostic evaluation interface. Two adapters are available:
+Provider-agnostic evaluation interface. Four adapters are available:
 
 - **ClaudeAgentSDKAdapter** - Claude Code capabilities via claude-code-sdk (recommended)
 - **CodexAppServerAdapter** - Codex via its app-server stdio protocol
+- **ACPAdapter** - Generic ACP (Agent Communication Protocol) adapter
+- **OpenCodeACPAdapter** - OpenCode-specific ACP adapter with quirk handling
 
 ```python nocheck
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
@@ -974,6 +1016,8 @@ ______________________________________________________________________
 ```text
 Claude Code SDK available?     → ClaudeAgentSDKAdapter (recommended)
 Codex CLI on PATH?             → CodexAppServerAdapter
+Generic ACP agent binary?      → ACPAdapter
+OpenCode ACP agent?            → OpenCodeACPAdapter
 ```
 
 ### Which Workspace Tool?
@@ -1075,8 +1119,10 @@ ______________________________________________________________________
 src/weakincentives/
 ├── adapters/           # Provider adapters
 │   ├── _shared/        # Shared adapter utilities (MCP bridge)
+│   ├── acp/            # ACPAdapter (generic ACP protocol)
 │   ├── claude_agent_sdk/  # ClaudeAgentSDKAdapter
-│   └── codex_app_server/  # CodexAppServerAdapter
+│   ├── codex_app_server/  # CodexAppServerAdapter
+│   └── opencode_acp/   # OpenCodeACPAdapter
 ├── cli/                # wink CLI
 ├── contrib/
 │   ├── tools/          # Workspace digest tools
@@ -1116,6 +1162,8 @@ Read before modifying related code:
 | `specs/ADAPTERS.md` | Provider adapters, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
 | `specs/CODEX_APP_SERVER.md` | Codex App Server adapter, stdio JSON-RPC |
+| `specs/ACP_ADAPTER.md` | Generic ACP adapter, protocol flow |
+| `specs/OPENCODE_ACP_ADAPTER.md` | OpenCode ACP adapter, quirk handling |
 | `specs/WORKSPACE.md` | Workspace sections, host mounts |
 | `specs/TRANSCRIPT.md` | Unified transcript format, adapter mapping |
 | `specs/DEBUG_BUNDLE.md` | Debug bundle format, BundleConfig |
@@ -1124,6 +1172,7 @@ Read before modifying related code:
 | `specs/AGENT_LOOP.md` | AgentLoop orchestration |
 | `specs/MAILBOX.md` | Message queue abstraction |
 | `specs/LIFECYCLE.md` | LoopGroup, ShutdownCoordinator |
+| `specs/SKILLS.md` | Agent skills support |
 
 ______________________________________________________________________
 
@@ -1149,6 +1198,7 @@ MarkdownSection[ParamsT](
     template: str,              # ${field} syntax
     default_params: ParamsT,
     tools: tuple[Tool],
+    skills: tuple[SkillMount],  # Agent skills attached to section
     children: tuple[Section],
     visibility: SectionVisibility,
     summary: str,               # For SUMMARY visibility

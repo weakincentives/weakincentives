@@ -26,9 +26,9 @@ WINK organizes code into four layers, each with a clear purpose:
 | Layer | Packages | Purpose |
 |-------|----------|---------|
 | Foundation | `types`, `errors`, `dataclasses`, `dbc`, `deadlines`, `budget`, `clock`, `experiment` | Base types, contracts, time, and utilities that depend only on stdlib |
-| Core | `runtime`, `prompt`, `resources`, `filesystem`, `serde`, `skills`, `formal`, `debug`, `optimizers` | Library primitives that implement WINK's main abstractions |
+| Core | `runtime`, `prompt`, `resources`, `filesystem`, `serde`, `skills`, `formal`, `debug` | Library primitives that implement WINK's main abstractions |
 | Adapters | `adapters` | Provider integrations that bridge prompts to execution harnesses |
-| High-Level | `contrib`, `evals`, `cli`, `docs` | User-facing features built on everything below |
+| High-Level | `contrib`, `evals`, `cli` | User-facing features built on everything below |
 
 ### Dependency Direction
 

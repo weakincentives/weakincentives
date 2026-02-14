@@ -121,9 +121,10 @@ capabilities once, in one place, and the definition ports across runtimes.
   process published events. State is immutable and inspectable—you can snapshot
   at any point. See [Session State](specs/SESSIONS.md).
 - **Harness-swappable adapters.** Keep the agent definition stable while
-  switching runtimes. WINK integrates with agentic harnesses—Claude Agent SDK
-  and Codex App Server—that provide native tools and sandboxing while WINK
-  supplies the definition. See [Adapters](specs/ADAPTERS.md).
+  switching runtimes. WINK integrates with agentic harnesses—Claude Agent SDK,
+  Codex App Server, and ACP-compatible agents (e.g., OpenCode)—that provide
+  native tools and sandboxing while WINK supplies the definition. See
+  [Adapters](specs/ADAPTERS.md).
 
 ## Getting Started
 
@@ -133,6 +134,7 @@ capabilities once, in one place, and the definition ports across runtimes.
 uv add weakincentives
 # optional extras
 uv add "weakincentives[claude-agent-sdk]" # Claude Agent SDK adapter
+uv add "weakincentives[acp]"              # ACP adapter (OpenCode, etc.)
 uv add "weakincentives[wink]"             # debug UI
 ```
 
@@ -241,7 +243,7 @@ key, and tag.
 
 WINK integrates with agentic execution harnesses—vendor runtimes that own the
 planning loop, sandboxing, and tool execution. Your agent definition stays the
-same; the adapter bridges it to the harness. Two harnesses are supported today.
+same; the adapter bridges it to the harness. Three harnesses are supported today.
 
 ### Claude Agent SDK
 
@@ -336,6 +338,51 @@ workspace.cleanup()
 ```
 
 See [Codex App Server Adapter](specs/CODEX_APP_SERVER.md) for full configuration.
+
+### ACP (Agent Client Protocol)
+
+The ACP harness delegates execution to any ACP-compatible agent binary (e.g.,
+OpenCode) via JSON-RPC over stdio. The generic `ACPAdapter` handles the full
+protocol flow (initialize, new_session, prompt dispatch, drain); the
+`OpenCodeACPAdapter` subclass adds model validation, empty-response detection,
+and OpenCode-specific quirks.
+
+- **Native tools**: Agent's built-in command execution, file changes, web search
+- **MCP bridging**: WINK tools bridged to the agent via an in-process MCP HTTP server
+- **Vendor-neutral**: Same protocol works across OpenCode, Gemini CLI, and future ACP agents
+- **Transcript emission**: Canonical transcript entries via `ACPTranscriptBridge`
+
+```bash
+uv add "weakincentives[acp]"  # requires agent-client-protocol, mcp, uvicorn
+```
+
+```python
+from weakincentives.adapters.opencode_acp import (
+    OpenCodeACPAdapter,
+    OpenCodeACPAdapterConfig,
+    OpenCodeACPClientConfig,
+)
+from weakincentives.prompt import WorkspaceSection, HostMount
+
+workspace = WorkspaceSection(
+    session=session,
+    mounts=(HostMount(host_path="src", mount_path="src"),),
+    allowed_host_roots=("/path/to/project",),
+)
+
+adapter = OpenCodeACPAdapter(
+    adapter_config=OpenCodeACPAdapterConfig(),
+    client_config=OpenCodeACPClientConfig(
+        cwd=str(workspace.temp_dir),
+    ),
+)
+
+response = adapter.evaluate(prompt, session=session)
+workspace.cleanup()
+```
+
+See [ACP Adapter](specs/ACP_ADAPTER.md) and
+[OpenCode Adapter](specs/OPENCODE_ADAPTER.md) for full configuration.
 
 ## Development
 

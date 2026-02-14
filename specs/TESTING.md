@@ -49,9 +49,11 @@ format-check    → ruff format --check
 lint            → ruff --preview
 typecheck       → pyright strict + ty
 bandit          → Security scanning
-vulture         → Dead code detection
 deptry          → Dependency hygiene
 pip-audit       → Vulnerability scanning
+architecture    → Core/contrib separation
+code-length     → Function/file length limits
+docs            → Documentation verification
 markdown-check  → Doc formatting
 test            → 100% line+branch coverage
 ```
@@ -68,14 +70,28 @@ test            → 100% line+branch coverage
 
 ## Test Organization
 
+Tests mirror the `src/weakincentives/` package structure:
+
 ```
 tests/
-├── unit/           # Fast isolated tests
-├── property/       # Hypothesis tests
-├── regression/     # Bug reproduction tests
+├── adapters/       # Adapter tests (claude_agent_sdk, codex_app_server, acp, etc.)
+├── cli/            # CLI command tests
+├── contrib/        # Contrib module tests
+├── debug/          # Debug bundle tests
+├── evals/          # Evaluation framework tests
+├── filesystem/     # Filesystem abstraction tests
+├── prompt/         # Prompt system tests
+├── runtime/        # Runtime (session, agent_loop, lifecycle) tests
+├── serde/          # Serialization tests
+├── skills/         # Skill tests
 ├── helpers/        # Shared fixtures
-└── plugins/        # pytest plugins
+├── plugins/        # pytest plugins
+└── toolchain/      # Verification toolchain tests
 ```
+
+Integration tests live in a separate `integration-tests/` directory with
+their own timeout defaults (120s per test via `ACK_TIMEOUT` environment
+variable).
 
 ## What This Spec Does NOT Include
 

@@ -3,11 +3,54 @@
 Key concepts that appear throughout Weak Incentives. Each entry links to the
 canonical specification for deeper context.
 
+## ACK (Adapter Compatibility Kit)
+
+A unified suite of integration tests that validates any `ProviderAdapter`
+implementation against the behavioral contract defined by the WINK framework.
+A passing ACK run certifies that an adapter correctly implements prompt
+evaluation, tool bridging, event emission, transcript logging, error handling,
+and transactional semantics. See [ACK specification](specs/ACK.md).
+
+## ACP (Agent Client Protocol)
+
+A vendor-neutral JSON-RPC 2.0 protocol for client-agent communication over
+stdio. WINK uses ACP to integrate with execution harnesses like OpenCode and
+Gemini CLI without coupling to provider-specific APIs. See
+[ACP Adapter specification](specs/ACP_ADAPTER.md).
+
+## ACPAdapter
+
+Generic adapter in `weakincentives.adapters.acp` that implements the full ACP
+protocol flow (spawn, initialize, new_session, prompt dispatch, drain) and
+bridges WINK tools via an in-process MCP HTTP server. Agent-specific behavior
+is delegated to subclass hooks (e.g., `OpenCodeACPAdapter`). See
+[ACP Adapter specification](specs/ACP_ADAPTER.md).
+
+## ACPTranscriptBridge
+
+Adapter-specific bridge in `weakincentives.adapters.acp` that converts ACP
+`session/update` notifications into canonical `TranscriptEntry` records via the
+shared `TranscriptEmitter`. Ensures ACP adapters emit structurally identical
+transcript entries to Claude SDK and Codex adapters.
+
 ## Binding
 
 Associates a protocol type with a provider function and scope in the
 `ResourceRegistry`. Bindings define how resources are constructed and their
 lifecycle. See [Resource Registry specification](specs/RESOURCE_REGISTRY.md).
+
+## CodeLengthChecker
+
+Build-time checker in `toolchain/checkers/code_length.py` that enforces maximum
+function and method length limits across the codebase. Known violations are
+tracked in a baseline file. Integrated into the `make check` pipeline.
+
+## CodexTranscriptBridge
+
+Adapter-specific bridge in `weakincentives.adapters.codex_app_server` that
+converts Codex App Server stdio events into canonical `TranscriptEntry` records
+via the shared `TranscriptEmitter`. Part of the unified transcript system that
+ensures all adapters emit structurally identical entries.
 
 ## Dataclass Serde Utilities
 
@@ -178,6 +221,21 @@ is defined in [Structured Output via `Prompt[OutputT]`](specs/PROMPTS.md).
 Identifies components that assume single-threaded use and outlines the
 synchronization work required for multi-threaded adapters. Refer to the
 [Thread Safety specification](specs/THREAD_SAFETY.md).
+
+## TranscriptEmitter
+
+Shared helper in `weakincentives.runtime.transcript` that constructs and emits
+transcript entries as DEBUG-level structured log records. Lives in the runtime
+layer so adapters (Claude SDK, Codex App Server, ACP) don't duplicate envelope
+logic. Each adapter uses an adapter-specific bridge to feed events into the
+emitter. See `specs/TRANSCRIPT.md`.
+
+## TranscriptEntry
+
+Frozen dataclass in `weakincentives.runtime.transcript` representing a single
+entry in a reconstructed transcript. Carries prompt name, adapter identifier,
+entry type (one of 9 canonical types), sequence number, timestamp, and optional
+detail payload. Used by debug bundles and `wink query` for post-hoc analysis.
 
 ## Tool Runtime
 
