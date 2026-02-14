@@ -358,6 +358,14 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
+    @property
+    @override
+    def adapter_name(self) -> str:
+        """Return the canonical Claude Agent SDK adapter name."""
+        from ...types import CLAUDE_AGENT_SDK_ADAPTER_NAME
+
+        return CLAUDE_AGENT_SDK_ADAPTER_NAME
+
     @override
     def evaluate(
         self,

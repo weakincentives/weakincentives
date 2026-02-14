@@ -94,6 +94,12 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             },
         )
 
+    @property
+    @override
+    def adapter_name(self) -> str:
+        """Return the canonical Codex App Server adapter name."""
+        return CODEX_APP_SERVER_ADAPTER_NAME
+
     @override
     def evaluate[OutputT](
         self,

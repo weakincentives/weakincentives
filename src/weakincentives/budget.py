@@ -17,21 +17,37 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import TYPE_CHECKING, Literal, override
+from typing import Literal, override
 
 from .dataclasses import FrozenDataclass
 from .deadlines import Deadline
 from .errors import WinkError
-
-if TYPE_CHECKING:
-    from .runtime.events import TokenUsage
 
 __all__ = [
     "Budget",
     "BudgetExceededDimension",
     "BudgetExceededError",
     "BudgetTracker",
+    "TokenUsage",
 ]
+
+
+@FrozenDataclass()
+class TokenUsage:
+    """Token accounting captured from provider responses."""
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_tokens: int | None = None
+
+    @property
+    def total_tokens(self) -> int | None:
+        """Return a best-effort total when counts are available."""
+
+        if self.input_tokens is None and self.output_tokens is None:
+            return None
+        return (self.input_tokens or 0) + (self.output_tokens or 0)
+
 
 BudgetExceededDimension = Literal[
     "deadline", "total_tokens", "input_tokens", "output_tokens"
@@ -106,11 +122,8 @@ class BudgetTracker:
     @property
     def consumed(self) -> TokenUsage:
         """Sum usage across all evaluations."""
-        # Import lazily to avoid circular import
-        from .runtime.events import TokenUsage as TokenUsageClass
-
         with self._lock:
-            return TokenUsageClass(
+            return TokenUsage(
                 input_tokens=sum(
                     u.input_tokens or 0 for u in self._per_evaluation.values()
                 ),

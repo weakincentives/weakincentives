@@ -83,6 +83,7 @@ class ImportInfo:
     imported_from: str  # Module being imported
     lineno: int
     statement: str  # The reconstructed import statement text
+    in_type_checking: bool = False  # True when inside ``if TYPE_CHECKING:``
 
 
 def _format_alias(alias: ast.alias) -> str:
@@ -107,23 +108,47 @@ def _format_import_statement(node: ast.Import | ast.ImportFrom, alias: ast.alias
     return f"from {from_part} import {_format_alias(alias)}"
 
 
+def _is_type_checking_guard(node: ast.If) -> bool:
+    """Return True when *node* is ``if TYPE_CHECKING:``."""
+    test = node.test
+    if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+        return True
+    # Handle ``typing.TYPE_CHECKING``
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+
+def _collect_type_checking_lines(tree: ast.Module) -> frozenset[int]:
+    """Return the set of line numbers inside ``if TYPE_CHECKING:`` blocks."""
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and _is_type_checking_guard(node):
+            for child in ast.walk(node):
+                if hasattr(child, "lineno"):
+                    lines.add(child.lineno)
+    return frozenset(lines)
+
+
 def extract_imports(source: str, module_name: str) -> list[ImportInfo]:
     """Extract imports from Python source code."""
     tree = ast.parse(source)
+    tc_lines = _collect_type_checking_lines(tree)
     imports: list[ImportInfo] = []
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                imports.append(
-                    ImportInfo(
-                        module=module_name,
-                        imported_from=alias.name.split(".")[0],
-                        lineno=node.lineno,
-                        statement=_format_import_statement(node, alias),
-                    )
+            in_tc = node.lineno in tc_lines
+            imports.extend(
+                ImportInfo(
+                    module=module_name,
+                    imported_from=alias.name.split(".")[0],
+                    lineno=node.lineno,
+                    statement=_format_import_statement(node, alias),
+                    in_type_checking=in_tc,
                 )
+                for alias in node.names
+            )
         elif isinstance(node, ast.ImportFrom) and node.module:
+            in_tc = node.lineno in tc_lines
             if node.level > 0:
                 # Resolve relative import
                 base = module_name.split(".")
@@ -135,15 +160,16 @@ def extract_imports(source: str, module_name: str) -> list[ImportInfo]:
                 imported_from = node.module
 
             # For ImportFrom, create one entry per alias for precise error reporting
-            for alias in node.names:
-                imports.append(
-                    ImportInfo(
-                        module=module_name,
-                        imported_from=imported_from,
-                        lineno=node.lineno,
-                        statement=_format_import_statement(node, alias),
-                    )
+            imports.extend(
+                ImportInfo(
+                    module=module_name,
+                    imported_from=imported_from,
+                    lineno=node.lineno,
+                    statement=_format_import_statement(node, alias),
+                    in_type_checking=in_tc,
                 )
+                for alias in node.names
+            )
 
     return imports
 

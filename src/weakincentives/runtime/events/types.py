@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
+from ...budget import TokenUsage
 from ...dataclasses import FrozenDataclass
 from ...types import AdapterName
 from ..run_context import RunContext
@@ -105,23 +106,6 @@ class DispatchResult:
             message,
             tuple(cast(Exception, failure.error) for failure in self.errors),
         )
-
-
-@FrozenDataclass()
-class TokenUsage:
-    """Token accounting captured from provider responses."""
-
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    cached_tokens: int | None = None
-
-    @property
-    def total_tokens(self) -> int | None:
-        """Return a best-effort total when counts are available."""
-
-        if self.input_tokens is None and self.output_tokens is None:
-            return None
-        return (self.input_tokens or 0) + (self.output_tokens or 0)
 
 
 @FrozenDataclass()

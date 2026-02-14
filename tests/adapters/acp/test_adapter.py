@@ -100,6 +100,12 @@ class TestACPAdapterName:
         adapter = ACPAdapter()
         assert adapter._adapter_name() == "acp"
 
+    def test_adapter_name_property(self) -> None:
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+
+        adapter = ACPAdapter()
+        assert adapter.adapter_name == "acp"
+
 
 class TestExpiredDeadline:
     def test_raises_on_expired_deadline(self) -> None:
