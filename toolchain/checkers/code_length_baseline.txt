@@ -12,14 +12,7 @@
 
 # ── src/ file-length ────────────────────────────────────────────────
 src/weakincentives/adapters/acp/adapter.py
-src/weakincentives/adapters/codex_app_server/adapter.py
-src/weakincentives/cli/query.py
-src/weakincentives/cli/wink.py
-src/weakincentives/filesystem/_host.py
-src/weakincentives/prompt/overrides/validation.py
-src/weakincentives/prompt/registry.py
 src/weakincentives/runtime/session/session.py
-src/weakincentives/serde/parse.py
 
 # ── tests/ file-length ──────────────────────────────────────────────
 tests/adapters/acp/test_adapter_protocol.py
