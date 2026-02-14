@@ -40,27 +40,27 @@ Portable agents across sophisticated execution harnesses
 
 # The Landscape
 
-Two production-grade agentic harnesses exist today:
+Three production-grade agentic harnesses:
 
-| Harness | Provider | Runtime |
-|---------|----------|---------|
-| **Claude Code** | Anthropic | Claude Agent SDK |
-| **OpenAI Codex** | OpenAI | Codex App Server |
+| Harness | Provider | Protocol |
+|---------|----------|----------|
+| **Claude Code** | Anthropic | Claude Agent SDK (Python) |
+| **OpenAI Codex** | OpenAI | Codex App Server (stdio JSON-RPC) |
+| **OpenCode** | sst.dev | ACP (stdio JSON-RPC 2.0) |
 
-Both provide planning loops, native tools, sandboxing, and orchestration.
+Each provides planning loops, native tools, sandboxing, and orchestration.
 
-**Your agent definition shouldn't be locked to either.**
+**Your agent definition shouldn't be locked to any of them.**
 
 ---
 
 # What These Harnesses Provide
 
-Both Claude Code and Codex are **full agentic runtimes**:
+All three are **full agentic runtimes**:
 
 - Planning and reasoning loops
 - Native file and shell tools
-- OS-level or policy-based sandboxing
-- Approval flows and permissions
+- Sandboxing and permission management
 - Crash recovery and retries
 - Token budgets and deadlines
 
@@ -74,8 +74,8 @@ You build an agent on Claude Code. It works.
 
 Now you need to:
 - Run on Codex for a different customer
-- Support both for redundancy
-- Migrate when pricing changes
+- Try OpenCode for its model flexibility
+- Support multiple for redundancy
 
 **How much do you rewrite?**
 
@@ -105,7 +105,7 @@ Your definition is **portable**. The harness is **rented**.
 
 ---
 
-# Two Harnesses, One Definition
+# Three Harnesses, One Definition
 
 ```python
 from weakincentives.adapters.claude_agent_sdk import (
@@ -115,17 +115,37 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerAdapter, CodexAppServerModelConfig,
     CodexAppServerClientConfig,
 )
+from weakincentives.adapters.opencode_acp import (
+    OpenCodeACPAdapter, OpenCodeACPAdapterConfig,
+    OpenCodeACPClientConfig,
+)
+```
 
-# Run on Claude Code
-adapter = ClaudeAgentSDKAdapter(
+Same prompt, same tools, same policies — pick your adapter.
+
+---
+
+# Adapter Instantiation
+
+```python
+# Claude Code
+claude = ClaudeAgentSDKAdapter(
     model="claude-opus-4-6",
-    client_config=ClaudeAgentSDKClientConfig(permission_mode="bypassPermissions"),
+    client_config=ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+    ),
 )
 
-# Run on OpenAI Codex
-adapter = CodexAppServerAdapter(
+# OpenAI Codex
+codex = CodexAppServerAdapter(
     model_config=CodexAppServerModelConfig(model="gpt-5.3-codex"),
     client_config=CodexAppServerClientConfig(sandbox_mode="workspace-write"),
+)
+
+# OpenCode (via ACP)
+opencode = OpenCodeACPAdapter(
+    adapter_config=OpenCodeACPAdapterConfig(model_id="openai/gpt-5.1-codex"),
+    client_config=OpenCodeACPClientConfig(permission_mode="auto"),
 )
 ```
 
@@ -134,7 +154,7 @@ adapter = CodexAppServerAdapter(
 # Same Evaluation Call
 
 ```python
-# Same prompt, same tools, same policies — either adapter
+# Any adapter — same prompt, same session
 response = adapter.evaluate(prompt, session=session)
 ```
 
@@ -146,13 +166,13 @@ Your definition doesn't change. Only the adapter does.
 
 | Capability | Implementation |
 |------------|----------------|
-| Native tools | File read/write, shell, network |
+| Native tools | Read, Write, Edit, Glob, Grep, Bash |
 | Sandboxing | bubblewrap (Linux), seatbelt (macOS) |
 | Isolation | Ephemeral home directory |
-| Custom tools | MCP bridging |
-| Permissions | Configurable approval modes |
+| Custom tools | MCP bridging (in-process) |
+| Permissions | bypassPermissions, acceptEdits, etc. |
 
-WINK bridges your tools via MCP. Claude handles everything else.
+WINK bridges your tools via an in-process MCP server.
 
 ---
 
@@ -161,26 +181,76 @@ WINK bridges your tools via MCP. Claude handles everything else.
 | Capability | Implementation |
 |------------|----------------|
 | Native tools | Command execution, file changes, web search |
-| Sandboxing | read-only, workspace-write, full-access policies |
-| Threads | Persistent conversation state with fork/resume |
-| Custom tools | Dynamic tools (in-process) |
-| Approvals | Configurable policy per action type |
+| Sandboxing | read-only, workspace-write, full-access |
+| Custom tools | Dynamic tools over stdio |
+| Structured output | Native `outputSchema` |
+| Approvals | Configurable per action type |
 
-WINK bridges your tools via dynamic tools. Codex handles everything else.
+WINK bridges your tools via Codex dynamic tools.
 
 ---
 
-# What Lives in Your Definition?
+# OpenCode (ACP): What It Provides
 
-| Component | Purpose | Portable? |
-|-----------|---------|-----------|
-| **Prompt structure** | Context engineering | Yes |
-| **Custom tools** | Domain-specific capabilities | Yes |
-| **Hard guardrails** | Policies that gate tool calls | Yes |
-| **Soft feedback** | Guidance that nudges behavior | Yes |
-| **Completion criteria** | "Done" verification | Yes |
+| Capability | Implementation |
+|------------|----------------|
+| Native tools | Command execution, file edits, web search |
+| Protocol | ACP v1 (vendor-neutral JSON-RPC 2.0) |
+| Model access | OpenAI, OpenCode Zen, and more |
+| Custom tools | MCP passthrough (HTTP, in-process) |
+| Modes | build (execute), plan (read-only) |
 
-All of this travels with your agent. None of it is harness-specific.
+WINK bridges your tools via an MCP HTTP server.
+
+---
+
+# Why ACP Matters
+
+The Agent Client Protocol is a **vendor-neutral standard**:
+
+- Same protocol implemented by multiple agents
+- Not tied to any single provider's runtime
+- Sessions, model discovery, and MCP passthrough built-in
+
+WINK's `ACPAdapter` is a reusable base — `OpenCodeACPAdapter` is just the first concrete implementation. Future ACP agents (Gemini CLI, others) plug in via the same base.
+
+---
+
+# Tool Bridging: Three Paths, One Definition
+
+```python
+def search_handler(
+    params: SearchParams, *, context: ToolContext
+) -> ToolResult[SearchResult]:
+    results = engine.query(params.query)
+    return ToolResult.ok(SearchResult(matches=results))
+
+search = Tool[SearchParams, SearchResult](
+    name="search_docs",
+    description="Search documentation for relevant content",
+    handler=search_handler,
+)
+```
+
+---
+
+# Automatic Bridging Per Harness
+
+```
+┌───────────────────────────────────────────────────┐
+│          Tool[SearchParams, SearchResult]          │
+└──────────────────┬────────────────────────────────┘
+                   │
+       ┌───────────┼───────────┐
+       ▼           ▼           ▼
+┌────────────┐ ┌────────┐ ┌───────────┐
+│ Claude Code│ │ Codex  │ │ OpenCode  │
+│(MCP in-proc)│ │(Dynamic│ │(MCP HTTP) │
+│            │ │ Tool)  │ │           │
+└────────────┘ └────────┘ └───────────┘
+```
+
+Same tool definition. Three bridging mechanisms. Automatic.
 
 ---
 
@@ -194,7 +264,7 @@ Your definition includes control at three strengths:
 | **Soft feedback** | Advisory guidance | Nudge behavior |
 | **Completion check** | Block termination | Verify goals |
 
-These work identically on both harnesses.
+These work identically across all three harnesses.
 
 ---
 
@@ -214,7 +284,7 @@ SequentialDependencyPolicy(
 # -> Blocks deploy until test and build have succeeded
 ```
 
-Works on Claude Code. Works on Codex. Same policy definition.
+Same policy definition on all three harnesses.
 
 ---
 
@@ -246,8 +316,6 @@ FeedbackProviderConfig(
 
 Every 30 seconds: *"2 minutes remaining. Consider wrapping up."*
 
-Same feedback, both harnesses.
-
 ---
 
 # Completion Checking: "Done" Means Done
@@ -272,50 +340,6 @@ CompositeChecker(
 
 ---
 
-# Custom Tools: Bridged Automatically
-
-Define tools once. WINK bridges them to each harness:
-
-```python
-from weakincentives.prompt import Tool, ToolContext, ToolResult
-
-def search_docs_handler(
-    params: SearchParams, *, context: ToolContext
-) -> ToolResult[SearchResult]:
-    results = my_search_engine.query(params.query)
-    return ToolResult.ok(SearchResult(matches=results))
-
-search_docs = Tool[SearchParams, SearchResult](
-    name="search_docs",
-    description="Search documentation for relevant content",
-    handler=search_docs_handler,
-)
-```
-
----
-
-# Tool Bridging
-
-- **Claude Code**: Bridged via MCP server
-- **Codex**: Bridged via dynamic tools
-
-Same tool definition. Automatic bridging to each harness.
-
-```
-┌─────────────────────────────────────────────┐
-│         Tool[SearchParams, SearchResult]     │
-└─────────────────┬───────────────────────────┘
-                  │
-       ┌──────────┴──────────┐
-       ▼                     ▼
-┌──────────────┐     ┌──────────────┐
-│  Claude Code │     │    Codex     │
-│  (MCP Bridge)│     │(Dynamic Tool)│
-└──────────────┘     └──────────────┘
-```
-
----
-
 # Prompt as Agent
 
 The prompt is a **typed, hierarchical document** where sections bundle instructions and tools together.
@@ -323,24 +347,12 @@ The prompt is a **typed, hierarchical document** where sections bundle instructi
 ```
 PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
-├── WorkspaceDigestSection     <- cached codebase summary
-├── CustomToolsSection         <- your domain tools + policies
+├── WorkspaceSection            <- host file mounts (any adapter)
+├── CustomToolsSection          <- your domain tools + policies
 └── MarkdownSection (request)
 ```
 
 Sections travel with the prompt. Switch harnesses, keep everything.
-
----
-
-# Co-location Enables Portability
-
-A section bundles:
-- Instructions (markdown)
-- Tools (your custom capabilities)
-- Policies (constraints on those tools)
-- Documentation (for the model)
-
-All travel together. Nothing to synchronize across harness boundaries.
 
 ---
 
@@ -360,7 +372,7 @@ class ReadFiles:
 
 - State is **immutable and inspectable**
 - Policies and feedback query this state
-- Same state model on both harnesses
+- Same state model across all harnesses
 
 ---
 
@@ -391,31 +403,31 @@ Test your definition. No harness mocking required.
 
 | Scenario | Recommendation |
 |----------|----------------|
-| Claude-native features needed | Claude Code |
-| OpenAI models required | Codex |
-| Maximum sandboxing | Claude Code (OS-level) |
-| Thread persistence | Codex |
-| Redundancy/failover | Both |
+| Claude models, OS-level sandboxing | Claude Code |
+| OpenAI models, native structured output | Codex |
+| Multi-provider model access | OpenCode (ACP) |
+| Vendor-neutral protocol | OpenCode (ACP) |
+| Redundancy / failover | Mix adapters |
 
-Your definition works on either. Choose based on requirements.
+Your definition works on any of them.
 
 ---
 
 # What You Get
 
-- **Portability** — same definition on Claude Code and Codex
-- **Hard guardrails** — fail-closed policies on both harnesses
-- **Soft feedback** — advisory guidance on both harnesses
-- **Completion checking** — goal verification on both harnesses
-- **Custom tools** — automatic bridging to each harness
-- **Testability** — validate definition without harness
+- **Portability** — same definition on Claude Code, Codex, and OpenCode
+- **Hard guardrails** — fail-closed policies across all harnesses
+- **Soft feedback** — advisory guidance across all harnesses
+- **Completion checking** — goal verification across all harnesses
+- **Custom tools** — automatic bridging per harness
+- **Testability** — validate definition without any harness
 
 ---
 
 # What WINK Is
 
 - A Python library for **portable agent definitions**
-- Adapters for **Claude Code** and **OpenAI Codex**
+- Adapters for **Claude Code**, **Codex**, and **OpenCode (ACP)**
 - **Three-tier control**: policies, feedback, completion checking
 - A philosophy: **own the definition, rent the harness**
 
@@ -425,31 +437,29 @@ Your definition works on either. Choose based on requirements.
 
 - Not a planning loop (the harness provides that)
 - Not a sandboxing system (the harness provides that)
-- Not trying to replace Claude Code or Codex
+- Not trying to replace Claude Code, Codex, or OpenCode
 
-WINK is the **definition layer** that makes your agent portable across these sophisticated harnesses.
+WINK is the **definition layer** that makes your agent portable across these harnesses.
 
 ---
 
 # The Bet
 
-Agentic harnesses will keep improving. Planning loops will get smarter. Sandboxing will get tighter. Native tools will expand.
+Agentic harnesses will keep improving. Planning loops will get smarter. Sandboxing will get tighter. Native tools will expand. New harnesses will appear.
 
 **You don't want to own that machinery.**
 
-You want to own the definition: your prompts, your tools, your policies, your completion criteria.
-
-WINK lets you own what matters and rent the rest.
+You want to own the definition: your prompts, your tools, your policies, your completion criteria. WINK lets you own what matters and rent the rest.
 
 ---
 
 # Key Takeaways
 
-1. **Two production harnesses exist**: Claude Code and Codex
-2. **Agent definitions should be portable** across both
-3. **Hard guardrails** (policies) fail-closed on both harnesses
-4. **Soft feedback** nudges on both harnesses
-5. **Custom tools** bridge automatically to each harness
+1. **Three harnesses today** — Claude Code, Codex, OpenCode (ACP)
+2. **Agent definitions should be portable** across all of them
+3. **Hard guardrails** (policies) fail-closed on every harness
+4. **Soft feedback** nudges on every harness
+5. **Custom tools** bridge automatically per harness
 6. **Own the definition, rent the harness**
 
 ---
