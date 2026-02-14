@@ -72,8 +72,8 @@ Components depend on the narrowest protocol that meets their needs:
 | `sleep_for()` | `Sleeper` | Only needs sleep |
 | `InMemoryMailbox` | `MonotonicClock` | Message visibility timing |
 | `TranscriptCollector` | `AsyncSleeper` | Async polling delays |
-| `deadline_watchdog()` | `AsyncSleeper` | Async deadline sleep |
-| `ACPAdapter._drain_quiet_period()` | `AsyncSleeper` | Async drain wait |
+| `CodexAppServerAdapter` | `AsyncSleeper` | Async deadline sleep |
+| `ACPAdapter` | `AsyncSleeper` | Async drain wait |
 
 ## SystemClock
 
@@ -263,7 +263,7 @@ The pattern is consistent across all components:
 | `sleep_for()` | `sleeper` | `Sleeper` | `SYSTEM_CLOCK` |
 | `InMemoryMailbox` | `clock` | `MonotonicClock` | `SYSTEM_CLOCK` |
 | `TranscriptCollector` | `async_sleeper` | `AsyncSleeper` | `SYSTEM_CLOCK` |
-| `deadline_watchdog()` | `async_sleeper` | `AsyncSleeper` | `SYSTEM_CLOCK` |
+| `CodexAppServerAdapter` | `async_sleeper` | `AsyncSleeper` | `SYSTEM_CLOCK` |
 | `ACPAdapter` | `async_sleeper` | `AsyncSleeper` | `SYSTEM_CLOCK` |
 
 ## Prohibited: Direct `datetime.now(UTC)` Calls

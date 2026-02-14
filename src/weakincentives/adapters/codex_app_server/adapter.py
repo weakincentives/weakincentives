@@ -22,7 +22,7 @@ from typing import Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
-from ...clock import SYSTEM_CLOCK
+from ...clock import SYSTEM_CLOCK, AsyncSleeper
 from ...deadlines import Deadline
 from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
@@ -76,10 +76,12 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         *,
         model_config: CodexAppServerModelConfig | None = None,
         client_config: CodexAppServerClientConfig | None = None,
+        async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
     ) -> None:
         super().__init__()
         self._model_config = model_config or CodexAppServerModelConfig()
         self._client_config = client_config or CodexAppServerClientConfig()
+        self._async_sleeper = async_sleeper
 
         logger.debug(
             "codex_app_server.adapter.init",
@@ -273,6 +275,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 budget_tracker=budget_tracker,
                 run_context=run_context,
                 visibility_signal=visibility_signal,
+                async_sleeper=self._async_sleeper,
             )
         except VisibilityExpansionRequired:
             raise
