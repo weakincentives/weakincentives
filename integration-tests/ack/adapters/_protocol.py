@@ -49,6 +49,7 @@ class AdapterCapabilities:
     custom_env_forwarding: bool = False
     network_policy: bool = False
     sandbox_policy: bool = False
+    skill_installation: bool = False
 
 
 @runtime_checkable

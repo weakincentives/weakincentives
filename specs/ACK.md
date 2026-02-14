@@ -136,7 +136,8 @@ integration-tests/
 │       ├── test_native_tools.py        # Adapter-specific: native tool ToolInvoked events
 │       ├── test_workspace_isolation.py # Adapter-specific: host mounts, env forwarding
 │       ├── test_sandbox_policy.py      # Adapter-specific: sandbox enforcement
-│       └── test_network_policy.py      # Adapter-specific: network restrictions
+│       ├── test_network_policy.py      # Adapter-specific: network restrictions
+│       └── test_skill_installation.py  # Adapter-specific: skill mounting
 ```
 
 ### AdapterFixture Protocol
@@ -583,6 +584,19 @@ test_network_allowed_for_listed_domains
     Given an adapter with network_policy = with_domains("example.com")
     When the model makes a request to example.com
     Then the request succeeds
+```
+
+#### `test_skill_installation.py`
+
+Requires: `skill_installation`
+
+```
+test_skill_knowledge_available
+    Given a prompt with a SkillMount pointing to a test skill directory
+    And the skill contains a secret codeword in its SKILL.md
+    When adapter.evaluate() is called with a question about the codeword
+    Then the response contains the exact secret codeword
+    And this verifies skills are automatically copied to the agent environment
 ```
 
 ## Shared Scenarios
