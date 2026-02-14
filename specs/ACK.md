@@ -32,9 +32,13 @@ every adapter must pass.
   adapter-agnostic record of what happened. ACK asserts against transcript
   structure, entry types, and ordering — the strongest evidence that an adapter
   works correctly end-to-end.
-- **Incremental adoption.** Adapters opt in to ACK tiers. A new adapter can
-  pass Tier 1 (basic evaluation) before tackling Tier 3 (transactional tools).
-  Existing per-adapter tests remain until their ACK equivalent is proven stable.
+- **Clean break.** ACK replaces all per-adapter integration test files in a
+  single step. No coexistence period, no gradual porting. The old files are
+  deleted and ACK is the sole integration test suite from day one.
+- **Capability gating over phasing.** New or immature adapters declare
+  conservative capabilities; tests they cannot pass yet are skipped, not
+  missing. This replaces incremental migration phases with a static suite
+  where each adapter simply declares what it supports.
 - **Skip, don't fail.** When an adapter's provider is unavailable (no API key,
   CLI not on PATH), the entire adapter is skipped — never a spurious failure.
 
@@ -71,29 +75,31 @@ Integration tests live in `integration-tests/` as flat files:
    (`PromptRendered`, `ToolInvoked`, `PromptExecuted`) but not transcript
    entries, missing an entire dimension of adapter correctness.
 
-### Migration Path
+### Migration
 
-ACK does not replace everything at once. The migration proceeds in phases:
+ACK replaces all per-adapter integration test files in a single changeset.
+Every scenario that exists today — greeting, tool invocation, structured
+output, events, progressive disclosure, transactional tools, isolation,
+sandbox, network policy — is ported to ACK or absorbed into adapter-specific
+scenario files within the ACK directory. The old flat files are deleted.
 
-1. **Phase 1: ACK scaffold + Tier 1 tests.** Create the fixture/scenario
-   structure. Port greeting, tool invocation, and structured output tests.
-   Existing per-adapter tests remain untouched.
+**What ships in the ACK changeset:**
 
-1. **Phase 2: Tier 2 + Tier 3 tests.** Port event emission, progressive
-   disclosure, and transactional tool tests. Add transcript validation.
-   Per-adapter tests that have ACK equivalents are deleted.
+1. The `integration-tests/ack/` directory with the full scenario suite
+   (Tier 1 through Tier 3), adapter-specific scenario files, fixture modules
+   for Claude SDK, Codex, and ACP/OpenCode, and all shared helpers.
 
-1. **Phase 3: Adapter-specific tiers.** Consolidate isolation, sandbox, and
-   network policy tests into adapter-specific ACK tiers. Delete remaining
-   per-adapter files.
+1. Deletion of every per-adapter integration test file that ACK subsumes
+   (see [What Gets Deleted](#what-gets-deleted) below).
 
-1. **Phase 4: ACP/OpenCode onboarding.** New adapters implement ACK fixtures
-   and run the full suite from day one.
+1. Fixture modules for ACP/OpenCode with conservative capability declarations
+   (capabilities they haven't been validated against are set to `False` and
+   will produce `SKIPPED` rather than `FAILED`).
 
-At completion, `integration-tests/` contains only:
+**After the changeset, `integration-tests/` contains:**
 
-- `ack/` — the unified suite
-- `test_redis_mailbox_integration.py` — non-adapter infrastructure test
+- `ack/` — the unified suite (all adapter integration tests)
+- `test_redis_mailbox_integration.py` — infrastructure, not adapter-specific
 - `test_package_structure.py` — module structure verification
 - `conftest.py` — shared configuration
 
@@ -104,6 +110,8 @@ At completion, `integration-tests/` contains only:
 ```
 integration-tests/
 ├── conftest.py                         # Shared hooks (unchanged)
+├── test_redis_mailbox_integration.py   # Infrastructure (not adapter-specific)
+├── test_package_structure.py           # Module structure verification
 ├── ack/
 │   ├── conftest.py                     # ACK-wide fixtures, adapter parameterization
 │   ├── adapters/
@@ -114,7 +122,9 @@ integration-tests/
 │   │   ├── acp.py                      # Generic ACP fixture
 │   │   └── opencode_acp.py            # OpenCode ACP fixture
 │   └── scenarios/
-│       ├── __init__.py
+│       ├── __init__.py                 # Shared prompt builders
+│       ├── _transcript_helpers.py      # Transcript assertion helpers
+│       ├── _event_helpers.py           # Event assertion helpers
 │       ├── test_basic_evaluation.py    # Tier 1: text response, prompt name
 │       ├── test_tool_invocation.py     # Tier 1: bridged tool execution
 │       ├── test_structured_output.py   # Tier 1: typed output parsing
@@ -122,7 +132,11 @@ integration-tests/
 │       ├── test_transcript.py          # Tier 2: transcript entry types, ordering, envelope
 │       ├── test_progressive_disclosure.py  # Tier 3: section expansion, leaf tool access
 │       ├── test_transactional_tools.py # Tier 3: rollback on failure, session + filesystem
-│       └── test_error_handling.py      # Tier 3: deadline expiry, budget exhaustion, invalid input
+│       ├── test_error_handling.py      # Tier 3: deadline expiry, budget exhaustion, invalid input
+│       ├── test_native_tools.py        # Adapter-specific: native tool ToolInvoked events
+│       ├── test_workspace_isolation.py # Adapter-specific: host mounts, env forwarding
+│       ├── test_sandbox_policy.py      # Adapter-specific: sandbox enforcement
+│       └── test_network_policy.py      # Adapter-specific: network restrictions
 ```
 
 ### AdapterFixture Protocol
@@ -146,7 +160,8 @@ class AdapterCapabilities:
     """Declares which ACK tiers this adapter supports.
 
     Adapters that do not support a capability are skipped for tests
-    that require it. This enables incremental onboarding.
+    that require it. New adapters start with conservative declarations
+    and enable capabilities as they mature.
     """
 
     # Tier 1: Basic evaluation
@@ -498,6 +513,78 @@ test_invalid_tool_params_returns_error
     And evaluation continues (adapter does not abort)
 ```
 
+### Adapter-Specific Scenarios
+
+These tests exercise capabilities that only some adapters support. They use
+capability gating — adapters that do not declare the relevant capability are
+skipped.
+
+#### `test_native_tools.py`
+
+Requires: `native_tools`
+
+```
+test_native_tool_emits_tool_invoked
+    Given a prompt that triggers a native tool (file read, command execution)
+    When adapter.evaluate() is called
+    Then at least one ToolInvoked event is emitted for the native tool
+    And event.adapter matches adapter_fixture.adapter_name
+```
+
+#### `test_workspace_isolation.py`
+
+Requires: `workspace_isolation`
+
+```
+test_workspace_section_mounts_host_files
+    Given a WorkspaceSection with a HostMount pointing to a directory with files
+    When adapter.evaluate() is called with a prompt referencing those files
+    Then the model can read the mounted files
+    And the response references the file content
+
+test_workspace_uses_temp_dir_as_cwd
+    Given a WorkspaceSection
+    When adapter.evaluate() is called
+    Then the adapter's effective cwd is the workspace temp_dir
+
+test_custom_env_forwarded
+    Given a custom environment variable set in the adapter config
+    When the model runs a command that echoes the variable
+    Then the variable's value appears in the output
+```
+
+#### `test_sandbox_policy.py`
+
+Requires: `sandbox_policy`
+
+```
+test_sandbox_restricts_writes_outside_workspace
+    Given a sandboxed adapter configuration
+    When the model attempts to write outside the workspace
+    Then the write is denied or has no effect
+
+test_sandbox_allows_writes_inside_workspace
+    Given a sandboxed adapter configuration
+    When the model writes a file inside the workspace
+    Then the file is created successfully
+```
+
+#### `test_network_policy.py`
+
+Requires: `network_policy`
+
+```
+test_network_denied_by_default
+    Given an adapter with network_policy = no_network()
+    When the model attempts a network request
+    Then the request fails or is blocked
+
+test_network_allowed_for_listed_domains
+    Given an adapter with network_policy = with_domains("example.com")
+    When the model makes a request to example.com
+    Then the request succeeds
+```
+
 ## Shared Scenarios
 
 To avoid duplication within ACK itself, test scenarios are built from shared
@@ -790,47 +877,45 @@ ack:
 To onboard a new adapter:
 
 1. **Create a fixture module** in `integration-tests/ack/adapters/` implementing
-   `AdapterFixture`. Start with conservative capabilities (disable tiers you
-   haven't tested manually).
+   `AdapterFixture`. Declare capabilities honestly — set `False` for anything
+   the adapter does not yet support. Tests for unsupported capabilities produce
+   `SKIPPED`, not `FAILED`.
 
 1. **Register the fixture** in `integration-tests/ack/conftest.py` by adding it
    to `_ALL_FIXTURES`.
 
-1. **Run Tier 1** (`test_basic_evaluation.py`, `test_tool_invocation.py`,
-   `test_structured_output.py`). Fix any failures — these are almost always
-   real adapter bugs, not test issues.
+1. **Run the full suite.** All scenarios execute; unsupported capabilities are
+   skipped. Fix failures — these are almost always real adapter bugs.
 
-1. **Enable Tier 2** by setting `event_emission=True` and `transcript=True` in
-   capabilities. Run `test_event_emission.py` and `test_transcript.py`.
+1. **Expand capabilities.** As the adapter matures, flip capability flags from
+   `False` to `True`. The corresponding tests automatically start running.
 
-1. **Enable Tier 3** capabilities incrementally. Each capability unlocks
-   additional test scenarios.
+## What Gets Deleted
 
-1. **Add adapter-specific tests** (if needed) as separate files in
-   `integration-tests/ack/scenarios/` with an `_<adapter>` suffix, guarded by
-   the appropriate capability marker.
-
-## What Gets Deleted (After Full Migration)
+Every per-adapter integration test file is deleted in the ACK changeset. No
+coexistence, no forwarding shims.
 
 | Deleted | Replaced By |
 |---------|-------------|
-| `test_claude_agent_sdk_adapter_integration.py` | `ack/scenarios/test_basic_evaluation.py` + `test_tool_invocation.py` + `test_structured_output.py` + `test_event_emission.py` |
+| `test_claude_agent_sdk_adapter_integration.py` | `ack/scenarios/test_basic_evaluation.py` + `test_tool_invocation.py` + `test_structured_output.py` + `test_event_emission.py` + `test_transcript.py` |
 | `test_codex_app_server_adapter_integration.py` | Same ACK scenarios |
 | `test_progressive_disclosure_integration.py` | `ack/scenarios/test_progressive_disclosure.py` |
 | `test_codex_progressive_disclosure_integration.py` | Same ACK scenario |
 | `test_transactional_tools_integration.py` | `ack/scenarios/test_transactional_tools.py` |
 | `test_codex_transactional_tools_integration.py` | Same ACK scenario |
-| `test_evals_math_integration.py` | Not ACK — evals remain separate |
-| `test_codex_evals_math_integration.py` | Not ACK — evals remain separate |
+| `test_codex_isolation_integration.py` | `ack/scenarios/test_workspace_isolation.py` |
+| `test_codex_sandbox_integration.py` | `ack/scenarios/test_sandbox_policy.py` |
+| `test_codex_network_policy_integration.py` | `ack/scenarios/test_network_policy.py` |
+| `test_evals_math_integration.py` | `ack/scenarios/test_basic_evaluation.py` (core eval scenarios absorbed; benchmark-specific evals remain in `evals/`) |
+| `test_codex_evals_math_integration.py` | Same ACK scenario |
+| `redis_utils.py` | Stays — used by `test_redis_mailbox_integration.py` |
 
-**Not deleted:**
+**Not deleted (not adapter tests):**
 
-- `test_redis_mailbox_integration.py` — infrastructure, not adapter
-- `test_package_structure.py` — module structure, not adapter
-- `test_codex_isolation_integration.py` — adapter-specific, becomes ACK adapter-specific tier
-- `test_codex_sandbox_integration.py` — adapter-specific
-- `test_codex_network_policy_integration.py` — adapter-specific
-- Eval tests — separate concern; evals have their own framework
+- `test_redis_mailbox_integration.py` — infrastructure, not adapter-specific
+- `test_package_structure.py` — module structure verification
+- `conftest.py` — shared hooks
+- `redis_utils.py` — shared Redis test utilities
 
 ## Related Specifications
 
