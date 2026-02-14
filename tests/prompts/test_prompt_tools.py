@@ -117,7 +117,7 @@ def _build_prompt() -> tuple[
 
     return (
         PromptTemplate(
-            ns="tests/prompts",
+            ns="tests.prompts",
             key="tools-basic",
             sections=[guidance, secondary],
         ),
@@ -178,7 +178,7 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
 
     with pytest.raises(PromptValidationError) as error_info:
         PromptTemplate(
-            ns="tests/prompts",
+            ns="tests.prompts",
             key="tools-duplicate",
             sections=[first_section, second_section],
         )
@@ -212,7 +212,7 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="tools-duplicate-params",
         sections=[first_section, second_section],
     )
@@ -248,7 +248,7 @@ def test_prompt_tools_requires_tool_instances() -> None:
 
     with pytest.raises(PromptValidationError) as error_info:
         PromptTemplate(
-            ns="tests/prompts",
+            ns="tests.prompts",
             key="tools-invalid-instance",
             sections=[invalid_section],
         )
@@ -272,7 +272,7 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
 
     with pytest.raises(PromptValidationError) as error_info:
         PromptTemplate(
-            ns="tests/prompts",
+            ns="tests.prompts",
             key="tools-bad-params-type",
             sections=[section],
         )
@@ -330,7 +330,7 @@ def test_policies_for_tool_collects_section_and_prompt_policies() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="policies-collection",
         sections=[section],
         policies=(prompt_policy,),
@@ -349,7 +349,7 @@ def test_policies_for_tool_returns_prompt_policies_for_unknown_tool() -> None:
     prompt_policy = _TestPolicy(label="prompt")
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="policies-unknown-tool",
         sections=[],
         policies=(prompt_policy,),
@@ -403,7 +403,7 @@ def test_policies_for_tool_iterates_through_sections_and_tools() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="policies-iteration",
         sections=[first_section, second_section],
     )

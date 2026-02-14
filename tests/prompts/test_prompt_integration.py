@@ -71,7 +71,7 @@ def build_compose_prompt() -> PromptTemplate:
         ),
     ]
 
-    return PromptTemplate(ns="tests/prompts", key="compose-email", sections=sections)
+    return PromptTemplate(ns="tests.prompts", key="compose-email", sections=sections)
 
 
 def test_prompt_integration_renders_expected_markdown() -> None:

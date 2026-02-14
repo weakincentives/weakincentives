@@ -69,7 +69,7 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
     )
 
     prompt = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="prompt-init",
         name="demo",
         sections=[root],
@@ -97,7 +97,7 @@ def test_prompt_requires_non_empty_key() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        PromptTemplate(ns="tests/prompts", key="   ", sections=[section])
+        PromptTemplate(ns="tests.prompts", key="   ", sections=[section])
 
 
 def test_prompt_requires_non_empty_namespace() -> None:
@@ -107,6 +107,35 @@ def test_prompt_requires_non_empty_namespace() -> None:
 
     with pytest.raises(PromptValidationError):
         PromptTemplate(ns="   ", key="prompt-ns", sections=[section])
+
+
+def test_prompt_rejects_invalid_key_pattern() -> None:
+    section = MarkdownSection[RootParams](
+        title="Root", template="Body: ${title}", key="root"
+    )
+
+    with pytest.raises(PromptValidationError, match="must match"):
+        PromptTemplate(ns="tests.prompts", key="Invalid Key", sections=[section])
+
+
+def test_prompt_rejects_invalid_namespace_pattern() -> None:
+    section = MarkdownSection[RootParams](
+        title="Root", template="Body: ${title}", key="root"
+    )
+
+    with pytest.raises(PromptValidationError, match="must match"):
+        PromptTemplate(ns="tests/prompts", key="prompt-ns", sections=[section])
+
+
+def test_prompt_normalizes_ns_and_key_to_lowercase() -> None:
+    section = MarkdownSection[RootParams](
+        title="Root", template="Root: ${title}", key="root"
+    )
+
+    prompt = PromptTemplate(ns=" Tests ", key=" My-Key ", sections=[section])
+
+    assert prompt.ns == "tests"
+    assert prompt.key == "my-key"
 
 
 def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
@@ -124,7 +153,7 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="duplicate-defaults",
         sections=[first, second],
     )
@@ -149,7 +178,7 @@ def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="duplicate-shared",
         sections=[first, second],
     )
@@ -165,7 +194,7 @@ def test_prompt_exposes_placeholders_from_registry_snapshot() -> None:
         title="Root", template="Root: ${title}", key="root"
     )
 
-    prompt = PromptTemplate(ns="tests/prompts", key="placeholder", sections=[section])
+    prompt = PromptTemplate(ns="tests.prompts", key="placeholder", sections=[section])
 
     assert prompt.placeholders == {("root",): frozenset({"title"})}
 
@@ -186,7 +215,7 @@ def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_defa
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="duplicate-type-default",
         sections=[first, second],
     )
@@ -210,7 +239,7 @@ def test_prompt_validates_text_section_placeholders() -> None:
 
     with pytest.raises(PromptValidationError) as exc:
         PromptTemplate(
-            ns="tests/prompts", key="invalid-placeholder", sections=[section]
+            ns="tests.prompts", key="invalid-placeholder", sections=[section]
         )
 
     assert isinstance(exc.value, PromptValidationError)
@@ -243,7 +272,7 @@ def test_prompt_template_is_immutable() -> None:
         title="Root", template="Root: ${title}", key="root"
     )
 
-    prompt = PromptTemplate(ns="tests/prompts", key="immutable", sections=[section])
+    prompt = PromptTemplate(ns="tests.prompts", key="immutable", sections=[section])
 
     with pytest.raises(AttributeError):
         prompt.ns = "changed"
@@ -258,11 +287,11 @@ def test_prompt_descriptor_cached_on_first_access(
         title="Root", template="Root: ${title}", key="root"
     )
 
-    template = PromptTemplate(ns="tests/prompts", key="descriptor", sections=[section])
+    template = PromptTemplate(ns="tests.prompts", key="descriptor", sections=[section])
 
     # First access triggers lazy creation and caches the descriptor
     first_descriptor = template.descriptor
-    assert first_descriptor.ns == "tests/prompts"
+    assert first_descriptor.ns == "tests.prompts"
 
     def _fail(
         cls: type[PromptDescriptor], prompt_like: PromptTemplate[SupportsDataclass]
