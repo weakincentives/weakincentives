@@ -46,25 +46,23 @@ from weakincentives.filesystem import (
     MAX_WRITE_BYTES,
     MAX_WRITE_LENGTH,
     READ_ENTIRE_FILE,
+    DefaultTextReader,
     FileEntry,
     FileStat,
     FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
+    MemoryByteReader,
+    MemoryByteWriter,
     ReadBytesResult,
     ReadResult,
+    TextReader,
     WriteResult,
     glob_match,
     is_path_under,
     normalize_path,
     now,
     validate_path,
-)
-from weakincentives.filesystem._streams import (
-    DefaultTextReader,
-    MemoryByteReader,
-    MemoryByteWriter,
-    TextReader,
 )
 
 # Re-export READ_ENTIRE_FILE for direct imports from this module
@@ -847,8 +845,23 @@ class _InMemoryByteWriter:
         exc_val: BaseException | None,
         exc_tb: object,
     ) -> None:
-        """Exit context manager, committing and closing."""
-        self.close()
+        """Exit context manager.
+
+        On error, discards buffered writes without committing (matching
+        the HostByteWriter abort-on-error contract). On success, commits
+        the content to the filesystem.
+        """
+        if exc_type is not None:
+            self._abort()
+        else:
+            self.close()
+
+    def _abort(self) -> None:
+        """Discard buffered writes without committing to filesystem."""
+        if self._closed:
+            return
+        self._closed = True
+        self._writer.close()
 
     def close(self) -> None:
         """Close the writer and commit content to filesystem."""
