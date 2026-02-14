@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 
 from weakincentives.adapters.core import ProviderAdapter
@@ -69,6 +70,48 @@ class CodexAppServerFixture:
             client_config=CodexAppServerClientConfig(
                 cwd=str(tmp_path),
                 approval_policy="never",
+            ),
+        )
+
+    def create_adapter_with_sandbox(
+        self,
+        tmp_path: Path,
+        *,
+        sandbox_mode: str,
+    ) -> ProviderAdapter[object]:
+        from weakincentives.adapters.codex_app_server import (
+            CodexAppServerAdapter,
+            CodexAppServerClientConfig,
+            CodexAppServerModelConfig,
+        )
+
+        return CodexAppServerAdapter(
+            model_config=CodexAppServerModelConfig(model=self.get_model()),
+            client_config=CodexAppServerClientConfig(
+                cwd=str(tmp_path),
+                approval_policy="never",
+                sandbox_mode=sandbox_mode,
+            ),
+        )
+
+    def create_adapter_with_env(
+        self,
+        tmp_path: Path,
+        *,
+        env: Mapping[str, str],
+    ) -> ProviderAdapter[object]:
+        from weakincentives.adapters.codex_app_server import (
+            CodexAppServerAdapter,
+            CodexAppServerClientConfig,
+            CodexAppServerModelConfig,
+        )
+
+        return CodexAppServerAdapter(
+            model_config=CodexAppServerModelConfig(model=self.get_model()),
+            client_config=CodexAppServerClientConfig(
+                cwd=str(tmp_path),
+                approval_policy="never",
+                env=dict(env),
             ),
         )
 
