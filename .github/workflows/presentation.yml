@@ -1,0 +1,56 @@
+name: Build Presentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'wink-presentation.md'
+      - '.github/workflows/presentation.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'wink-presentation.md'
+      - '.github/workflows/presentation.yml'
+  workflow_dispatch:
+
+# Cancel in-progress runs when a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Marp CLI
+        run: npm install -g @marp-team/marp-cli
+
+      - name: Convert to PDF
+        run: marp wink-presentation.md --pdf --allow-local-files -o wink-presentation.pdf
+
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wink-presentation-pdf
+          path: wink-presentation.pdf
+          retention-days: 30
+
+  build-html:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Marp CLI
+        run: npm install -g @marp-team/marp-cli
+
+      - name: Convert to HTML
+        run: marp wink-presentation.md --html --allow-local-files -o wink-presentation.html
+
+      - name: Upload HTML artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wink-presentation-html
+          path: wink-presentation.html
+          retention-days: 30
