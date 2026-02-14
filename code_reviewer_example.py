@@ -21,6 +21,8 @@ framework's core concepts:
 - **InProcessDispatcher**: Synchronous event delivery for telemetry
 - **ProviderAdapter**: Provider-agnostic evaluation (Claude SDK, Codex, or OpenCode)
 - **Session**: Event-sourced state container
+- **Tool**: Custom tool registration with typed params, results, and examples
+- **SkillMount**: Skill composition via the Agent Skills specification
 
 The agent runs in a single process with the dispatcher, mailboxes, and loop
 all in the same address space. This pattern is ideal for development and
@@ -84,6 +86,10 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptTemplate,
+    Tool,
+    ToolContext,
+    ToolExample,
+    ToolResult,
     WorkspaceSection,
 )
 from weakincentives.prompt.section import Section
@@ -97,6 +103,7 @@ from weakincentives.runtime import (
     Session,
 )
 from weakincentives.runtime.logging import configure_logging
+from weakincentives.skills import SkillMount
 
 if TYPE_CHECKING:
     from weakincentives.adapters.core import ProviderAdapter
@@ -119,31 +126,32 @@ def _configure_logging() -> None:
     configure_logging(level=logging.DEBUG, force=True)
 
 
-# Default include patterns for code review
-DEFAULT_INCLUDE_GLOBS: tuple[str, ...] = (
+# Sunfish mount configuration — include source and docs, exclude binary assets.
+SUNFISH_MOUNT_INCLUDE_GLOBS: tuple[str, ...] = (
     "*.py",
     "*.md",
     "*.txt",
     "*.yml",
     "*.yaml",
     "*.toml",
+    "*.gitignore",
     "*.json",
     "*.cfg",
     "*.ini",
     "*.sh",
+    "*.6",
 )
 
-# Exclude patterns
-DEFAULT_EXCLUDE_GLOBS: tuple[str, ...] = (
-    "**/__pycache__/**",
-    "**/.git/**",
-    "**/.venv/**",
-    "**/node_modules/**",
-    "**/*.pyc",
+SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
+    "**/*.pickle",
+    "**/*.png",
+    "**/*.bmp",
 )
 
-# Maximum bytes to include in workspace
-DEFAULT_MAX_BYTES = 200_000
+SUNFISH_MOUNT_MAX_BYTES = 600_000
+
+# Skills directory (ships alongside this script)
+SKILLS_DIR = Path(__file__).resolve().parent / "demo-skills"
 
 # Default deadline for review operations
 DEFAULT_DEADLINE_MINUTES = 15
@@ -200,6 +208,84 @@ class ReviewParams:
 
 
 # =============================================================================
+# Custom Tool: count_lines
+# =============================================================================
+
+
+@FrozenDataclass()
+class CountLinesParams:
+    """Parameters for the count_lines tool."""
+
+    path: str = field(
+        metadata={"description": "Relative file path within the project."}
+    )
+
+
+@FrozenDataclass()
+class CountLinesResult:
+    """Line-count breakdown for a single file."""
+
+    path: str
+    total: int
+    code: int
+    blank: int
+    comment: int
+
+    def render(self) -> str:
+        return (
+            f"{self.path}: {self.total} total, {self.code} code, "
+            f"{self.blank} blank, {self.comment} comment"
+        )
+
+
+def _create_count_lines_tool(
+    project_path: str,
+) -> Tool[CountLinesParams, CountLinesResult]:
+    """Create a ``count_lines`` tool bound to *project_path*."""
+
+    def count_lines(
+        params: CountLinesParams, *, context: ToolContext
+    ) -> ToolResult[CountLinesResult]:
+        """Count lines of code, blanks, and comments in a project file."""
+        _ = context
+        target = Path(project_path) / params.path
+        if not target.is_file():
+            return ToolResult.error(f"File not found: {params.path}")
+        try:
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return ToolResult.error(f"Cannot read {params.path}: {exc}")
+        lines = text.splitlines()
+        total = len(lines)
+        blank = sum(1 for line in lines if not line.strip())
+        comment = sum(1 for line in lines if line.strip().startswith("#"))
+        code = total - blank - comment
+        result = CountLinesResult(
+            path=params.path,
+            total=total,
+            code=code,
+            blank=blank,
+            comment=comment,
+        )
+        return ToolResult.ok(result, message=result.render())
+
+    return Tool[CountLinesParams, CountLinesResult](
+        name="count_lines",
+        description="Count lines of code, blanks, and comments in a project file.",
+        handler=count_lines,
+        examples=(
+            ToolExample(
+                description="Count lines in the main engine file",
+                input=CountLinesParams(path="sunfish.py"),
+                output=CountLinesResult(
+                    path="sunfish.py", total=425, code=298, blank=47, comment=80
+                ),
+            ),
+        ),
+    )
+
+
+# =============================================================================
 # AgentLoop Implementation
 # =============================================================================
 
@@ -208,15 +294,15 @@ def _create_workspace_section(
     session: Session,
     project_path: str,
 ) -> Section:
-    """Create the workspace section."""
+    """Create the workspace section with sunfish-specific mount config."""
     return WorkspaceSection(
         session=session,
         mounts=[
             HostMount(
                 host_path=project_path,
-                include_glob=DEFAULT_INCLUDE_GLOBS,
-                exclude_glob=DEFAULT_EXCLUDE_GLOBS,
-                max_bytes=DEFAULT_MAX_BYTES,
+                include_glob=SUNFISH_MOUNT_INCLUDE_GLOBS,
+                exclude_glob=SUNFISH_MOUNT_EXCLUDE_GLOBS,
+                max_bytes=SUNFISH_MOUNT_MAX_BYTES,
             )
         ],
     )
@@ -271,6 +357,13 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
 
         workspace = _create_workspace_section(session, request.project_path)
 
+        # Custom tool — attach to any section via tools=(...).
+        count_lines_tool = _create_count_lines_tool(request.project_path)
+
+        # Skills — mount SKILL.md directories via skills=(...).
+        code_review_skill = SkillMount(source=SKILLS_DIR / "code-review")
+        python_style_skill = SkillMount(source=SKILLS_DIR / "python-style")
+
         template = PromptTemplate[ReviewResponse](
             ns="code-review",
             key="review-agent",
@@ -287,6 +380,7 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
                         good practices. Focus on actionable feedback.
                     """).strip(),
                     key="role",
+                    skills=(code_review_skill, python_style_skill),
                 ),
                 MarkdownSection[ReviewParams](
                     title="Review Focus",
@@ -295,17 +389,17 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
                 ),
                 workspace,
                 MarkdownSection(
-                    title="Instructions",
+                    title="Analysis",
                     template=textwrap.dedent("""
                         1. Explore the workspace to understand the project structure
-                        2. Read key files to understand the codebase
-                        3. Identify issues, risks, or areas for improvement
-                        4. Note positive aspects and good practices
-                        5. Provide specific, actionable suggestions
-
-                        Use the workspace tools to explore files as needed.
+                        2. Use the ``count_lines`` tool to gauge file size and composition
+                        3. Read key files to understand the codebase
+                        4. Identify issues, risks, or areas for improvement
+                        5. Note positive aspects and good practices
+                        6. Provide specific, actionable suggestions
                     """).strip(),
-                    key="instructions",
+                    key="analysis",
+                    tools=(count_lines_tool,),
                 ),
                 MarkdownSection(
                     title="Output Format",

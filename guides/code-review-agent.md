@@ -8,12 +8,12 @@ planning, and the `AgentLoop` pattern in one place.
 ## Rationale and Scope
 
 - **Purpose**: Canonical end-to-end walkthrough for a review agent exercising
-  prompt templates, overrides, workspace tooling, and auto-optimization.
+  prompt templates, custom tool registration, skill composition, workspace
+  tooling, and the `AgentLoop` pattern.
 - **Scope**: Focused on the bundled `sunfish` repository fixture under
   `test-repositories/`. Mounts are read-only with a 600 KB payload cap.
-- **Principles**: Declarative prompt assembly, ergonomic overrides (tagged by
-  namespace/key), reusable workspace tools, and full observability via event
-  subscribers.
+- **Principles**: Declarative prompt assembly, section-scoped tools and skills,
+  reusable workspace tools, and full observability via event subscribers.
 
 ## Transactional Tool Execution
 
@@ -32,6 +32,82 @@ or take a different approach without debugging "what state are we actually in?"
 
 No explicit error handling code is required—the framework handles rollback
 automatically. See [Sessions](../specs/SESSIONS.md) for details.
+
+## Custom Tool Registration
+
+The example registers a `count_lines` tool that lets the agent gauge file
+size and composition during a review. This demonstrates the full tool API:
+
+1. **Typed params/result** — frozen dataclasses with field metadata
+1. **Handler** — `(params, *, context: ToolContext) -> ToolResult[R]`
+1. **Examples** — `ToolExample` instances documenting expected I/O
+1. **Section attachment** — `tools=(count_lines_tool,)` on a section
+
+```python nocheck
+@FrozenDataclass()
+class CountLinesParams:
+    path: str = field(metadata={"description": "Relative file path within the project."})
+
+@FrozenDataclass()
+class CountLinesResult:
+    path: str
+    total: int
+    code: int
+    blank: int
+    comment: int
+
+    def render(self) -> str:
+        return f"{self.path}: {self.total} total, {self.code} code, ..."
+
+def count_lines(params: CountLinesParams, *, context: ToolContext) -> ToolResult[CountLinesResult]:
+    """Count lines of code, blanks, and comments in a project file."""
+    ...
+    return ToolResult.ok(result, message=result.render())
+
+tool = Tool[CountLinesParams, CountLinesResult](
+    name="count_lines",
+    description="Count lines of code, blanks, and comments in a project file.",
+    handler=count_lines,
+    examples=(
+        ToolExample(
+            description="Count lines in the main engine file",
+            input=CountLinesParams(path="sunfish.py"),
+            output=CountLinesResult(path="sunfish.py", total=425, code=298, blank=47, comment=80),
+        ),
+    ),
+)
+```
+
+The tool is attached to the **Analysis** section so the agent can call it
+while working through the review checklist. See [Tools](../specs/TOOLS.md)
+for the full specification.
+
+## Skill Composition
+
+The example mounts two skills from `demo-skills/` onto the **Role** section:
+
+- `code-review` — review checklist (security, error handling, tests, performance)
+- `python-style` — PEP 8 / PEP 484 / PEP 257 best-practice guidelines
+
+```python nocheck
+from weakincentives.skills import SkillMount
+
+code_review_skill = SkillMount(source=SKILLS_DIR / "code-review")
+python_style_skill = SkillMount(source=SKILLS_DIR / "python-style")
+
+MarkdownSection(
+    title="Role",
+    template="...",
+    key="role",
+    skills=(code_review_skill, python_style_skill),
+)
+```
+
+Skills follow the [Agent Skills specification](https://agentskills.io).
+Each skill directory contains a `SKILL.md` with YAML frontmatter (`name`,
+`description`) and markdown instructions. The adapter injects skill content
+into the agent's context at evaluation time, following the same visibility
+rules as tools. See [Skills](../specs/SKILLS.md) for the full specification.
 
 ## Runtime Architecture
 
@@ -151,36 +227,32 @@ class ReferenceParams:
 
 ### Sections (in order)
 
-1. **Code Review Brief** (`MarkdownSection[ReviewGuidance]`)
+1. **Role** (`MarkdownSection`)
 
-   - Template describing tooling and output format
-   - Key: `code-review-brief`
+   - Expert code-reviewer persona
+   - Key: `role`
+   - Skills: `code-review`, `python-style`
 
-1. **Workspace Digest** (`WorkspaceDigestSection`)
+1. **Review Focus** (`MarkdownSection[ReviewParams]`)
 
-   - Cached workspace notes from session
-   - Auto-populated on first request via optimization
-
-1. **Reference Documentation** (`MarkdownSection[ReferenceParams]`)
-
-   - Progressive disclosure section (starts summarized)
-   - Key: `reference-docs`
-   - Visibility: `SectionVisibility.SUMMARY`
-   - Summary: "Documentation for ${project_name} is available..."
-
-1. **Workspace Digest** (`WorkspaceDigestSection`)
-
-   - Renders cached workspace summary from session state
+   - Template: `${focus}`
+   - Key: `focus`
 
 1. **Workspace Tools** (`WorkspaceSection`)
 
-   - Provides file tools via Claude Agent SDK
-   - Uses configured host mounts
+   - Provides file tools via the adapter
+   - Uses sunfish-specific host mounts
 
-1. **Review Request** (`MarkdownSection[ReviewTurnParams]`)
+1. **Analysis** (`MarkdownSection`)
 
-   - Template: `${request}`
-   - Key: `review-request`
+   - Step-by-step review instructions
+   - Key: `analysis`
+   - Tools: `count_lines`
+
+1. **Output Format** (`MarkdownSection`)
+
+   - Structured JSON output specification
+   - Key: `output-format`
 
 ### Mount Configuration
 
@@ -311,12 +383,12 @@ The example imports several helpers from the `examples` package:
 ## Key Files
 
 | File | Purpose |
-| ---------------------------- | ----------------------------- |
+| --------------------------------- | --------------------------------------- |
 | `code_reviewer_example.py` | Main script |
-| `examples/` | Shared example utilities |
+| `demo-skills/code-review/` | Code-review skill (mounted on Role) |
+| `demo-skills/python-style/` | Python-style skill (mounted on Role) |
 | `test-repositories/sunfish/` | Mounted repository fixture |
-| `snapshots/` | Session dump output directory |
-| `.weakincentives/prompts/overrides/` | Default overrides storage (created in current project directory) |
+| `debug_bundles/` | Per-request debug bundle output |
 
 ## Next Steps
 
