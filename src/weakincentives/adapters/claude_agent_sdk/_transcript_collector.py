@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from ...clock import SYSTEM_CLOCK, AsyncSleeper
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.transcript import TranscriptEmitter
 from ._transcript_parser import emit_entry
@@ -163,6 +164,9 @@ class TranscriptCollector:
 
     session_id: str | None = None
     """Optional session UUID."""
+
+    async_sleeper: AsyncSleeper = field(default=SYSTEM_CLOCK)
+    """Async sleeper for delay operations (injectable for testing)."""
 
     _tailers: dict[str, _TailerState] = field(default_factory=dict, init=False)
     """Active tailers by source."""
@@ -383,7 +387,7 @@ class TranscriptCollector:
             for _ in range(_SHUTDOWN_DRAIN_ATTEMPTS):
                 if not self._pending_tailers:
                     break
-                await asyncio.sleep(_SHUTDOWN_DRAIN_DELAY)
+                await self.async_sleeper.async_sleep(_SHUTDOWN_DRAIN_DELAY)
                 await self._poll_once()
 
             # Final poll to pick up any trailing content from active tailers.
@@ -473,13 +477,15 @@ class TranscriptCollector:
         """Background polling loop for transcript content."""
         while self._running:
             await self._poll_once()
-            await asyncio.sleep(self.config.poll_interval)
+            await self.async_sleeper.async_sleep(self.config.poll_interval)
 
     async def _discovery_loop(self) -> None:
         """Background loop for subagent discovery."""
         while self._running:
             await self._discover_subagents()
-            await asyncio.sleep(self.config.subagent_discovery_interval)
+            await self.async_sleeper.async_sleep(
+                self.config.subagent_discovery_interval
+            )
 
     async def _poll_once(self) -> None:
         """Poll all active tailers for new content."""

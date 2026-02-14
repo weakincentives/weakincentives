@@ -20,6 +20,7 @@ import json
 from typing import Any, cast
 
 from ...budget import BudgetTracker
+from ...clock import SYSTEM_CLOCK, AsyncSleeper
 from ...deadlines import Deadline
 from ...runtime.events.types import TokenUsage
 from ...runtime.run_context import RunContext
@@ -420,6 +421,7 @@ def create_deadline_watchdog(
     thread_id: str,
     turn_id: int,
     deadline: Deadline | None,
+    async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
 ) -> asyncio.Task[None] | None:
     """Create a watchdog task if a deadline is set."""
     if deadline is None:
@@ -427,7 +429,9 @@ def create_deadline_watchdog(
     remaining = deadline.remaining().total_seconds()
     if remaining <= 0:
         return None
-    return asyncio.create_task(deadline_watchdog(client, thread_id, turn_id, remaining))
+    return asyncio.create_task(
+        deadline_watchdog(client, thread_id, turn_id, remaining, async_sleeper)
+    )
 
 
 def process_notification(
@@ -600,9 +604,10 @@ async def deadline_watchdog(
     thread_id: str,
     turn_id: int,
     remaining_seconds: float,
+    async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
 ) -> None:
     """Sleep until deadline, then interrupt the turn."""
-    await asyncio.sleep(remaining_seconds)
+    await async_sleeper.async_sleep(remaining_seconds)
     with contextlib.suppress(CodexClientError):
         _ = await client.send_request(
             "turn/interrupt",

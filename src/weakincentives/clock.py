@@ -23,6 +23,11 @@ There are two distinct time domains:
 - **Wall-clock time** (UTC datetime): For timestamps, deadlines, and recording
   when events occurred. Can jump due to NTP adjustments.
 
+There are two sleep domains:
+
+- **Synchronous** (:class:`Sleeper`): Blocks the calling thread.
+- **Asynchronous** (:class:`AsyncSleeper`): Yields control to the event loop.
+
 Example (production)::
 
     from weakincentives.clock import SYSTEM_CLOCK
@@ -30,6 +35,12 @@ Example (production)::
     start = SYSTEM_CLOCK.monotonic()
     SYSTEM_CLOCK.sleep(1.0)
     elapsed = SYSTEM_CLOCK.monotonic() - start  # ~1.0
+
+Example (async production)::
+
+    from weakincentives.clock import SYSTEM_CLOCK
+
+    await SYSTEM_CLOCK.async_sleep(1.0)  # Yields to event loop
 
 Example (testing)::
 
@@ -39,10 +50,14 @@ Example (testing)::
     start = clock.monotonic()
     clock.sleep(10)  # Advances instantly, no real delay
     assert clock.monotonic() - start == 10
+
+    await clock.async_sleep(5)  # Also advances instantly
+    assert clock.monotonic() - start == 15
 """
 
 from __future__ import annotations
 
+import asyncio as _asyncio
 import threading
 import time as _time
 from dataclasses import dataclass, field
@@ -84,7 +99,7 @@ class WallClock(Protocol):
 
 @runtime_checkable
 class Sleeper(Protocol):
-    """Protocol for sleep/delay operations.
+    """Protocol for synchronous sleep/delay operations.
 
     Separating sleep from clock allows tests to advance time without
     actually sleeping, while production code uses real delays.
@@ -96,7 +111,22 @@ class Sleeper(Protocol):
 
 
 @runtime_checkable
-class Clock(MonotonicClock, WallClock, Sleeper, Protocol):
+class AsyncSleeper(Protocol):
+    """Protocol for asynchronous sleep/delay operations.
+
+    The async counterpart of :class:`Sleeper` for code running in an
+    ``asyncio`` event loop.  Production code delegates to
+    :func:`asyncio.sleep`; :class:`FakeClock` advances time instantly
+    without yielding, enabling deterministic async tests.
+    """
+
+    async def async_sleep(self, seconds: float) -> None:
+        """Asynchronously sleep for the specified duration in seconds."""
+        ...
+
+
+@runtime_checkable
+class Clock(MonotonicClock, WallClock, Sleeper, AsyncSleeper, Protocol):
     """Unified clock combining monotonic, wall-clock, and sleep.
 
     Components that need multiple time capabilities should depend on
@@ -136,6 +166,10 @@ class SystemClock:
     def sleep(self, seconds: float) -> None:
         """Sleep using time.sleep()."""
         _time.sleep(seconds)
+
+    async def async_sleep(self, seconds: float) -> None:
+        """Asynchronously sleep using asyncio.sleep()."""
+        await _asyncio.sleep(seconds)
 
 
 # Module-level singleton for production use
@@ -189,6 +223,10 @@ class FakeClock:
         """Advance time immediately without blocking."""
         self.advance(seconds)
 
+    async def async_sleep(self, seconds: float) -> None:
+        """Advance time immediately without blocking (async version)."""
+        self.advance(seconds)
+
     def advance(self, seconds: float) -> None:
         """Advance both clocks by the given duration.
 
@@ -228,6 +266,7 @@ class FakeClock:
 
 __all__ = [
     "SYSTEM_CLOCK",
+    "AsyncSleeper",
     "Clock",
     "FakeClock",
     "MonotonicClock",

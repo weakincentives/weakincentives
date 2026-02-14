@@ -13,8 +13,9 @@ without real delays or fragile monkeypatching.
 - `MonotonicClock` - Protocol for elapsed time measurement (timeouts, rate
   limiting)
 - `WallClock` - Protocol for UTC timestamps (deadlines, event recording)
-- `Sleeper` - Protocol for delay operations
-- `Clock` - Unified protocol combining all three capabilities
+- `Sleeper` - Protocol for synchronous delay operations
+- `AsyncSleeper` - Protocol for asynchronous delay operations
+- `Clock` - Unified protocol combining all capabilities
 - `SystemClock` - Production implementation using real system calls
 - `FakeClock` - Test implementation that advances time instantly
 - `SYSTEM_CLOCK` - Module-level singleton for production use
@@ -35,6 +36,7 @@ when events occurred. Can jump due to NTP adjustments but always timezone-aware
 
 ```python
 from weakincentives.clock import (
+    AsyncSleeper,
     Clock,
     MonotonicClock,
     WallClock,
@@ -51,8 +53,11 @@ class WallClock(Protocol):
 class Sleeper(Protocol):
     def sleep(self, seconds: float) -> None: ...
 
+class AsyncSleeper(Protocol):
+    async def async_sleep(self, seconds: float) -> None: ...
+
 # Combined protocol for components needing multiple capabilities
-class Clock(MonotonicClock, WallClock, Sleeper, Protocol):
+class Clock(MonotonicClock, WallClock, Sleeper, AsyncSleeper, Protocol):
     pass
 ```
 
@@ -66,6 +71,9 @@ Components depend on the narrowest protocol that meets their needs:
 | `wait_until()` | `Clock` | Needs sleep + monotonic |
 | `sleep_for()` | `Sleeper` | Only needs sleep |
 | `InMemoryMailbox` | `MonotonicClock` | Message visibility timing |
+| `TranscriptCollector` | `AsyncSleeper` | Async polling delays |
+| `deadline_watchdog()` | `AsyncSleeper` | Async deadline sleep |
+| `ACPAdapter._drain_quiet_period()` | `AsyncSleeper` | Async drain wait |
 
 ## SystemClock
 
@@ -89,6 +97,7 @@ now = clock.utcnow()  # datetime.now(UTC)
 - `monotonic()` → `time.monotonic()`
 - `utcnow()` → `datetime.now(UTC)`
 - `sleep()` → `time.sleep()`
+- `async_sleep()` → `asyncio.sleep()`
 
 ## FakeClock
 
@@ -115,11 +124,13 @@ assert clock.monotonic() - start == 70
 | `monotonic()` | Return current monotonic time |
 | `utcnow()` | Return current wall-clock time |
 | `sleep(seconds)` | Advance time instantly (calls `advance()`) |
+| `async_sleep(seconds)` | Async version — advance time instantly (calls `advance()`) |
 | `advance(seconds)` | Advance both clocks by duration (non-negative only) |
 | `set_monotonic(value)` | Set monotonic time to absolute value |
 | `set_wall(value)` | Set wall-clock time (must be timezone-aware) |
 
-Both `advance()` and `sleep()` advance monotonic and wall-clock time together.
+Both `advance()`, `sleep()`, and `async_sleep()` advance monotonic and
+wall-clock time together.
 All operations are thread-safe. `advance()` raises `ValueError` if given
 negative seconds; use `set_monotonic()` and `set_wall()` for explicit clock
 positioning when needed.
@@ -202,6 +213,32 @@ sleep_for(timedelta(seconds=5), sleeper=clock)
 assert clock.monotonic() == initial + 5
 ```
 
+### Async Sleep Testing
+
+```python
+import asyncio
+from weakincentives.clock import FakeClock
+
+clock = FakeClock()
+start = clock.monotonic()
+
+await clock.async_sleep(5.0)  # Advances instantly, no real delay
+assert clock.monotonic() - start == 5.0
+```
+
+Async components accept an `async_sleeper` parameter defaulting to
+`SYSTEM_CLOCK`:
+
+```python
+from weakincentives.clock import FakeClock
+
+clock = FakeClock()
+collector = TranscriptCollector(
+    prompt_name="test",
+    async_sleeper=clock,
+)
+```
+
 ## Component Integration
 
 All clock-dependent components accept a clock parameter with a sensible default:
@@ -225,6 +262,9 @@ The pattern is consistent across all components:
 | `wait_until()` | `clock` | `Clock` | `SYSTEM_CLOCK` |
 | `sleep_for()` | `sleeper` | `Sleeper` | `SYSTEM_CLOCK` |
 | `InMemoryMailbox` | `clock` | `MonotonicClock` | `SYSTEM_CLOCK` |
+| `TranscriptCollector` | `async_sleeper` | `AsyncSleeper` | `SYSTEM_CLOCK` |
+| `deadline_watchdog()` | `async_sleeper` | `AsyncSleeper` | `SYSTEM_CLOCK` |
+| `ACPAdapter` | `async_sleeper` | `AsyncSleeper` | `SYSTEM_CLOCK` |
 
 ## Prohibited: Direct `datetime.now(UTC)` Calls
 
@@ -314,6 +354,7 @@ From the main package:
 ```python
 from weakincentives import (
     SYSTEM_CLOCK,
+    AsyncSleeper,
     Clock,
     FakeClock,
     MonotonicClock,
