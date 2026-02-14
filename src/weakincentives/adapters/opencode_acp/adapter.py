@@ -14,12 +14,16 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from typing import Any, override
 
+from ...prompt import RenderedPrompt
 from ...types import OPENCODE_ACP_ADAPTER_NAME, AdapterName
 from ..acp.adapter import ACPAdapter
 from ..acp.client import ACPClient
 from ..core import PromptEvaluationError
+from ._ephemeral_home import OpenCodeEphemeralHome
 from .config import OpenCodeACPAdapterConfig, OpenCodeACPClientConfig
 
 __all__ = ["OpenCodeACPAdapter"]
@@ -80,3 +84,38 @@ class OpenCodeACPAdapter(ACPAdapter):
                 prompt_name="",
                 phase="response",
             )
+
+    @override
+    def _prepare_execution_env(
+        self,
+        *,
+        rendered: RenderedPrompt[Any],
+        effective_cwd: str,
+    ) -> tuple[dict[str, str] | None, Callable[[], None]]:
+        """Prepare subprocess environment with optional ephemeral home.
+
+        When skills are present in the rendered prompt, creates an ephemeral
+        home directory, mounts skills, and overrides HOME in the env so
+        OpenCode discovers them at ``$HOME/.claude/skills/<name>/SKILL.md``.
+
+        When no skills are present, delegates to the parent implementation.
+        """
+        if not rendered.skills:
+            return super()._prepare_execution_env(
+                rendered=rendered,
+                effective_cwd=effective_cwd,
+            )
+
+        home = OpenCodeEphemeralHome(workspace_path=effective_cwd)
+        try:
+            home.mount_skills(rendered.skills)
+        except Exception:
+            home.cleanup()
+            raise
+
+        base_env = self._build_env()
+        if base_env is None:
+            base_env = dict(os.environ)
+        base_env["HOME"] = home.home_path
+
+        return base_env, home.cleanup

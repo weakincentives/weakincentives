@@ -429,6 +429,39 @@ class TestBuildEnv:
         assert "PATH" in result
 
 
+class TestPrepareExecutionEnv:
+    def test_default_returns_build_env_and_noop(self) -> None:
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+
+        adapter = ACPAdapter(client_config=ACPClientConfig(env=None))
+        rendered = MagicMock()
+
+        env, cleanup = adapter._prepare_execution_env(
+            rendered=rendered,
+            effective_cwd="/tmp",
+        )
+
+        assert env is None  # _build_env returns None when no config env
+        cleanup()  # Should be a no-op, must not raise
+
+    def test_default_with_config_env(self) -> None:
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+
+        adapter = ACPAdapter(
+            client_config=ACPClientConfig(env={"KEY": "val"}),
+        )
+        rendered = MagicMock()
+
+        env, cleanup = adapter._prepare_execution_env(
+            rendered=rendered,
+            effective_cwd="/tmp",
+        )
+
+        assert env is not None
+        assert env["KEY"] == "val"
+        cleanup()
+
+
 class TestPrepareTools:
     def test_no_structured_output(self) -> None:
         from weakincentives.adapters.acp.adapter import ACPAdapter

@@ -53,6 +53,7 @@ class OpenCodeACPFixture:
             custom_env_forwarding=False,
             network_policy=False,
             sandbox_policy=False,
+            skill_installation=True,
         )
 
     def is_available(self) -> bool:
