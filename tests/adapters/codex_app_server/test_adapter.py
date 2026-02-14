@@ -23,11 +23,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from weakincentives.adapters.codex_app_server._protocol import (
+    authenticate,
+    create_deadline_watchdog,
+    create_thread,
+    deadline_remaining_s,
+    deadline_watchdog,
+    handle_server_request,
+    handle_tool_call,
+    process_notification,
+    raise_for_terminal_notification,
+    start_turn,
+)
+from weakincentives.adapters.codex_app_server._response import (
+    parse_structured_output_or_raise,
+)
+from weakincentives.adapters.codex_app_server._schema import (
+    bridged_tools_to_dynamic_specs,
+    openai_strict_schema,
+)
 from weakincentives.adapters.codex_app_server.adapter import (
     CODEX_APP_SERVER_ADAPTER_NAME,
     CodexAppServerAdapter,
-    _bridged_tools_to_dynamic_specs,
-    _openai_strict_schema,
 )
 from weakincentives.adapters.codex_app_server.client import (
     CodexAppServerClient,
@@ -135,14 +152,14 @@ class TestAdapterName:
 
 class TestBridgedToolsToDynamicSpecs:
     def test_empty(self) -> None:
-        assert _bridged_tools_to_dynamic_specs(()) == []
+        assert bridged_tools_to_dynamic_specs(()) == []
 
     def test_converts_tools(self) -> None:
         tool = MagicMock()
         tool.name = "my_tool"
         tool.description = "Does something"
         tool.input_schema = {"type": "object", "properties": {}}
-        specs = _bridged_tools_to_dynamic_specs((tool,))
+        specs = bridged_tools_to_dynamic_specs((tool,))
         assert len(specs) == 1
         assert specs[0]["name"] == "my_tool"
         assert specs[0]["description"] == "Does something"
@@ -156,7 +173,7 @@ class TestOpenaiStrictSchema:
             "properties": {"a": {"type": "string"}},
             "additionalProperties": True,
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["additionalProperties"] is False
 
     def test_all_properties_required(self) -> None:
@@ -165,7 +182,7 @@ class TestOpenaiStrictSchema:
             "properties": {"a": {"type": "string"}, "b": {"type": "integer"}},
             "required": ["a"],
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert sorted(result["required"]) == ["a", "b"]
 
     def test_nested_objects(self) -> None:
@@ -180,26 +197,26 @@ class TestOpenaiStrictSchema:
             },
             "additionalProperties": True,
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["additionalProperties"] is False
         assert result["properties"]["inner"]["additionalProperties"] is False
         assert result["properties"]["inner"]["required"] == ["x"]
 
     def test_non_object_unchanged(self) -> None:
         s = {"type": "array", "items": {"type": "string"}}
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["type"] == "array"
         assert result["items"] == {"type": "string"}
 
     def test_object_without_properties(self) -> None:
         s = {"type": "object", "additionalProperties": True}
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["additionalProperties"] is False
         assert "required" not in result
 
     def test_preserves_other_fields(self) -> None:
         s = {"type": "object", "title": "Foo", "properties": {"a": {"type": "string"}}}
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["title"] == "Foo"
         assert result["required"] == ["a"]
 
@@ -212,7 +229,7 @@ class TestOpenaiStrictSchema:
                 "additionalProperties": True,
             },
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["items"]["additionalProperties"] is False
         assert result["items"]["required"] == ["x"]
 
@@ -227,7 +244,7 @@ class TestOpenaiStrictSchema:
                 {"type": "string"},
             ]
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["anyOf"][0]["additionalProperties"] is False
         assert result["anyOf"][0]["required"] == ["a"]
         assert result["anyOf"][1] == {"type": "string"}
@@ -242,7 +259,7 @@ class TestOpenaiStrictSchema:
                 },
             ]
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["oneOf"][0]["additionalProperties"] is False
 
     def test_allof_strictified(self) -> None:
@@ -255,7 +272,7 @@ class TestOpenaiStrictSchema:
                 },
             ]
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["allOf"][0]["additionalProperties"] is False
 
     def test_defs_strictified(self) -> None:
@@ -270,7 +287,7 @@ class TestOpenaiStrictSchema:
                 }
             },
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["$defs"]["Inner"]["additionalProperties"] is False
         assert result["$defs"]["Inner"]["required"] == ["val"]
 
@@ -284,7 +301,7 @@ class TestOpenaiStrictSchema:
                 }
             }
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         assert result["definitions"]["Foo"]["additionalProperties"] is False
 
     def test_deeply_nested_array_of_objects(self) -> None:
@@ -311,7 +328,7 @@ class TestOpenaiStrictSchema:
             },
             "additionalProperties": True,
         }
-        result = _openai_strict_schema(s)
+        result = openai_strict_schema(s)
         # Top-level object
         assert result["additionalProperties"] is False
         # Array items object
@@ -343,22 +360,16 @@ class TestAdapterInit:
 class TestAuthenticate:
     def test_no_auth(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
-            await adapter._authenticate(client)
+            await authenticate(client, None)
             client.send_request.assert_not_called()
 
         asyncio.run(_run())
 
     def test_api_key_auth(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                client_config=CodexAppServerClientConfig(
-                    auth_mode=ApiKeyAuth(api_key="sk-test")
-                )
-            )
             client = _make_mock_client()
-            await adapter._authenticate(client)
+            await authenticate(client, ApiKeyAuth(api_key="sk-test"))
             client.send_request.assert_called_once()
             args = client.send_request.call_args
             assert args[0][0] == "account/login/start"
@@ -369,15 +380,11 @@ class TestAuthenticate:
 
     def test_external_token_auth(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                client_config=CodexAppServerClientConfig(
-                    auth_mode=ExternalTokenAuth(
-                        id_token="id-tok", access_token="access-tok"
-                    )
-                )
-            )
             client = _make_mock_client()
-            await adapter._authenticate(client)
+            await authenticate(
+                client,
+                ExternalTokenAuth(id_token="id-tok", access_token="access-tok"),
+            )
             args = client.send_request.call_args
             assert args[0][1]["type"] == "chatgptAuthTokens"
             assert args[0][1]["idToken"] == "id-tok"
@@ -389,11 +396,16 @@ class TestAuthenticate:
 class TestStartTurn:
     def test_basic_turn(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             client.send_request.return_value = {"turn": {"id": 1}}
 
-            result = await adapter._start_turn(client, "thread-1", "Hello", None)
+            result = await start_turn(
+                client,
+                "thread-1",
+                "Hello",
+                None,
+                model_config=CodexAppServerModelConfig(),
+            )
             assert result["turn"]["id"] == 1
 
             args = client.send_request.call_args
@@ -408,12 +420,10 @@ class TestStartTurn:
 
     def test_turn_with_options(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                model_config=CodexAppServerModelConfig(
-                    effort="high",
-                    summary="concise",
-                    personality="friendly",
-                )
+            model_config = CodexAppServerModelConfig(
+                effort="high",
+                summary="concise",
+                personality="friendly",
             )
             client = _make_mock_client()
             client.send_request.return_value = {"turn": {"id": 2}}
@@ -422,7 +432,13 @@ class TestStartTurn:
                 "type": "object",
                 "properties": {"answer": {"type": "integer"}},
             }
-            await adapter._start_turn(client, "thread-1", "Solve", out_schema)
+            await start_turn(
+                client,
+                "thread-1",
+                "Solve",
+                out_schema,
+                model_config=model_config,
+            )
 
             params = client.send_request.call_args[0][1]
             assert params["effort"] == "high"
@@ -436,11 +452,16 @@ class TestStartTurn:
 class TestCreateThread:
     def test_basic_thread(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             client.send_request.return_value = {"thread": {"id": "t-abc"}}
 
-            thread_id = await adapter._create_thread(client, "/tmp/work", [])
+            thread_id = await create_thread(
+                client,
+                "/tmp/work",
+                [],
+                client_config=CodexAppServerClientConfig(),
+                model_config=CodexAppServerModelConfig(),
+            )
             assert thread_id == "t-abc"
 
             params = client.send_request.call_args[0][1]
@@ -453,17 +474,21 @@ class TestCreateThread:
 
     def test_thread_with_sandbox_and_tools(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                client_config=CodexAppServerClientConfig(
-                    sandbox_mode="read-only",
-                    mcp_servers={"srv": {"command": "npx"}},
-                )
+            client_config = CodexAppServerClientConfig(
+                sandbox_mode="read-only",
+                mcp_servers={"srv": {"command": "npx"}},
             )
             client = _make_mock_client()
             client.send_request.return_value = {"thread": {"id": "t-1"}}
 
             tools = [{"name": "t", "description": "d", "inputSchema": {}}]
-            await adapter._create_thread(client, "/tmp", tools)
+            await create_thread(
+                client,
+                "/tmp",
+                tools,
+                client_config=client_config,
+                model_config=CodexAppServerModelConfig(),
+            )
 
             params = client.send_request.call_args[0][1]
             assert params["sandbox"] == "read-only"
@@ -475,34 +500,30 @@ class TestCreateThread:
 
 class TestProcessNotification:
     def test_delta(self) -> None:
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {"method": "item/agentMessage/delta", "params": {"delta": "hello"}}
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result == ("delta", "hello")
 
     def test_item_completed_agent_message(self) -> None:
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {
             "method": "item/completed",
             "params": {"item": {"type": "agentMessage", "text": "final answer"}},
         }
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result == ("text", "final answer")
 
     def test_item_completed_agent_message_no_text(self) -> None:
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {
             "method": "item/completed",
             "params": {"item": {"type": "agentMessage"}},
         }
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result is None
 
     def test_item_completed_command_execution(self) -> None:
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {
             "method": "item/completed",
@@ -516,28 +537,25 @@ class TestProcessNotification:
                 }
             },
         }
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result is None  # Tool dispatch doesn't return a kind
 
     def test_token_usage_updated(self) -> None:
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {"method": "thread/tokenUsage/updated", "params": {}}
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result == ("usage", "")
 
     def test_turn_completed_done(self) -> None:
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {
             "method": "turn/completed",
             "params": {"turn": {"status": "completed"}},
         }
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result == ("done", "")
 
     def test_turn_completed_failed(self) -> None:
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {
             "method": "turn/completed",
@@ -549,70 +567,63 @@ class TestProcessNotification:
                 }
             },
         }
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result is not None
         assert result[0] == "error"
         assert "unauthorized" in result[1]
 
     def test_turn_completed_interrupted(self) -> None:
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {
             "method": "turn/completed",
             "params": {"turn": {"status": "interrupted"}},
         }
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result == ("interrupted", "")
 
     def test_unknown_method(self) -> None:
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {"method": "unknown/thing", "params": {}}
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result is None
 
     def test_item_completed_unknown_type(self) -> None:
         """item/completed with an unrecognized item type returns None."""
-        adapter = CodexAppServerAdapter()
         session, _ = _make_session()
         msg = {
             "method": "item/completed",
             "params": {"item": {"type": "somethingNew", "status": "completed"}},
         }
-        result = adapter._process_notification(msg, session, "p", None)
+        result = process_notification(msg, session, "codex_app_server", "p", None)
         assert result is None
 
 
 class TestRaiseForTerminalNotification:
     def test_error_raises(self) -> None:
-        adapter = CodexAppServerAdapter()
         msg: dict[str, Any] = {"params": {"turn": {"codexErrorInfo": "sandboxError"}}}
         with pytest.raises(PromptEvaluationError) as exc_info:
-            adapter._raise_for_terminal_notification("error", "boom", "p", msg)
+            raise_for_terminal_notification("error", "boom", "p", msg)
         assert exc_info.value.phase == "tool"
 
     def test_interrupted_raises(self) -> None:
-        adapter = CodexAppServerAdapter()
         with pytest.raises(PromptEvaluationError, match="interrupted"):
-            adapter._raise_for_terminal_notification("interrupted", "", "p", {})
+            raise_for_terminal_notification("interrupted", "", "p", {})
 
     def test_other_kind_is_noop(self) -> None:
-        adapter = CodexAppServerAdapter()
         # Should not raise
-        adapter._raise_for_terminal_notification("done", "", "p", {})
+        raise_for_terminal_notification("done", "", "p", {})
 
 
 class TestHandleServerRequest:
     def test_unknown_tool(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             msg = {
                 "id": 1,
                 "method": "item/tool/call",
                 "params": {"tool": "nonexistent", "arguments": {}},
             }
-            await adapter._handle_server_request(client, msg, {})
+            await handle_server_request(client, msg, {}, approval_policy="never")
             client.send_response.assert_called_once()
             resp = client.send_response.call_args[0][1]
             assert resp["success"] is False
@@ -621,14 +632,13 @@ class TestHandleServerRequest:
 
     def test_command_approval_accept(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             msg = {
                 "id": 2,
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await adapter._handle_server_request(client, msg, {})
+            await handle_server_request(client, msg, {}, approval_policy="never")
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "accept"
 
@@ -636,16 +646,13 @@ class TestHandleServerRequest:
 
     def test_command_approval_decline(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                client_config=CodexAppServerClientConfig(approval_policy="on-request")
-            )
             client = _make_mock_client()
             msg = {
                 "id": 3,
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await adapter._handle_server_request(client, msg, {})
+            await handle_server_request(client, msg, {}, approval_policy="on-request")
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "decline"
 
@@ -653,14 +660,13 @@ class TestHandleServerRequest:
 
     def test_file_approval(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             msg = {
                 "id": 4,
                 "method": "item/fileChange/requestApproval",
                 "params": {},
             }
-            await adapter._handle_server_request(client, msg, {})
+            await handle_server_request(client, msg, {}, approval_policy="never")
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "accept"
 
@@ -668,10 +674,9 @@ class TestHandleServerRequest:
 
     def test_unknown_server_request(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             msg = {"id": 5, "method": "unknown/request", "params": {}}
-            await adapter._handle_server_request(client, msg, {})
+            await handle_server_request(client, msg, {}, approval_policy="never")
             client.send_response.assert_called_once_with(5, {})
 
         asyncio.run(_run())
@@ -680,7 +685,6 @@ class TestHandleServerRequest:
 class TestHandleToolCall:
     def test_successful_tool_call(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             mock_tool = MagicMock()
             mock_tool.return_value = {
@@ -688,7 +692,7 @@ class TestHandleToolCall:
                 "isError": False,
             }
             tool_lookup = {"calc": mock_tool}
-            await adapter._handle_tool_call(
+            await handle_tool_call(
                 client, 10, {"tool": "calc", "arguments": {"x": 1}}, tool_lookup
             )
             resp = client.send_response.call_args[0][1]
@@ -699,7 +703,6 @@ class TestHandleToolCall:
 
     def test_tool_call_with_string_arguments(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             mock_tool = MagicMock()
             mock_tool.return_value = {
@@ -707,7 +710,7 @@ class TestHandleToolCall:
                 "isError": False,
             }
             tool_lookup = {"t": mock_tool}
-            await adapter._handle_tool_call(
+            await handle_tool_call(
                 client, 11, {"tool": "t", "arguments": '{"a": 1}'}, tool_lookup
             )
             mock_tool.assert_called_once_with({"a": 1})
@@ -716,7 +719,6 @@ class TestHandleToolCall:
 
     def test_tool_call_with_invalid_string_arguments(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             mock_tool = MagicMock()
             mock_tool.return_value = {
@@ -724,7 +726,7 @@ class TestHandleToolCall:
                 "isError": False,
             }
             tool_lookup = {"t": mock_tool}
-            await adapter._handle_tool_call(
+            await handle_tool_call(
                 client, 12, {"tool": "t", "arguments": "not json"}, tool_lookup
             )
             mock_tool.assert_called_once_with({})
@@ -733,7 +735,6 @@ class TestHandleToolCall:
 
     def test_tool_call_error_result(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             mock_tool = MagicMock()
             mock_tool.return_value = {
@@ -741,7 +742,7 @@ class TestHandleToolCall:
                 "isError": True,
             }
             tool_lookup = {"t": mock_tool}
-            await adapter._handle_tool_call(
+            await handle_tool_call(
                 client, 13, {"tool": "t", "arguments": {}}, tool_lookup
             )
             resp = client.send_response.call_args[0][1]
@@ -752,13 +753,11 @@ class TestHandleToolCall:
 
 class TestCreateDeadlineWatchdog:
     def test_no_deadline(self) -> None:
-        adapter = CodexAppServerAdapter()
         client = _make_mock_client()
-        result = adapter._create_deadline_watchdog(client, "t", 1, None)
+        result = create_deadline_watchdog(client, "t", 1, None)
         assert result is None
 
     def test_expired_deadline(self) -> None:
-        adapter = CodexAppServerAdapter()
         client = _make_mock_client()
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
@@ -766,16 +765,15 @@ class TestCreateDeadlineWatchdog:
         deadline = Deadline(expires_at=anchor + timedelta(seconds=5), clock=clock)
         # Advance clock past expiration
         clock.advance(10)
-        result = adapter._create_deadline_watchdog(client, "t", 1, deadline)
+        result = create_deadline_watchdog(client, "t", 1, deadline)
         assert result is None
 
     def test_active_deadline_creates_task(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             future_time = datetime.now(UTC) + timedelta(seconds=60)
             deadline = Deadline(expires_at=future_time)
-            task = adapter._create_deadline_watchdog(client, "t", 1, deadline)
+            task = create_deadline_watchdog(client, "t", 1, deadline)
             try:
                 assert task is not None
                 assert isinstance(task, asyncio.Task)
@@ -975,7 +973,7 @@ class TestEvaluateEndToEnd:
             assert exc_info.value.phase == "request"
 
     def test_stream_eof_before_turn_completed(self) -> None:
-        """Stream ends with messages but no turn/completed → raises."""
+        """Stream ends with messages but no turn/completed -> raises."""
         adapter = CodexAppServerAdapter(
             client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
         )
@@ -1007,7 +1005,7 @@ class TestEvaluateEndToEnd:
                 adapter.evaluate(prompt, session=session)
 
     def test_stream_eof_empty_stream(self) -> None:
-        """Zero messages in stream → raises."""
+        """Zero messages in stream -> raises."""
         adapter = CodexAppServerAdapter(
             client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
         )
@@ -1162,8 +1160,6 @@ class TestParseStructuredOutput:
         from weakincentives.prompt.rendering import RenderedPrompt as RP
         from weakincentives.prompt.structured_output import StructuredOutputConfig
 
-        adapter = CodexAppServerAdapter()
-
         @dataclass(slots=True, frozen=True)
         class Result:
             answer: int
@@ -1177,15 +1173,13 @@ class TestParseStructuredOutput:
             ),
         )
 
-        result = adapter._parse_structured_output('{"answer": 42}', rendered, "test")
+        result = parse_structured_output_or_raise('{"answer": 42}', rendered, "test")
         assert result is not None
         assert result.answer == 42
 
     def test_invalid_json_raises(self) -> None:
         from weakincentives.prompt.rendering import RenderedPrompt as RP
         from weakincentives.prompt.structured_output import StructuredOutputConfig
-
-        adapter = CodexAppServerAdapter()
 
         @dataclass(slots=True, frozen=True)
         class Dummy:
@@ -1201,13 +1195,11 @@ class TestParseStructuredOutput:
         )
 
         with pytest.raises(PromptEvaluationError, match="parse structured"):
-            adapter._parse_structured_output("not json", rendered, "test")
+            parse_structured_output_or_raise("not json", rendered, "test")
 
     def test_array_container_parsed(self) -> None:
         from weakincentives.prompt.rendering import RenderedPrompt as RP
         from weakincentives.prompt.structured_output import StructuredOutputConfig
-
-        adapter = CodexAppServerAdapter()
 
         @dataclass(slots=True, frozen=True)
         class Item:
@@ -1224,7 +1216,7 @@ class TestParseStructuredOutput:
 
         # Array wrapper format: {"items": [...]}
         text = '{"items": [{"value": 1}, {"value": 2}]}'
-        result = adapter._parse_structured_output(text, rendered, "test")
+        result = parse_structured_output_or_raise(text, rendered, "test")
         assert isinstance(result, list)
         assert len(result) == 2
         assert result[0].value == 1
@@ -1574,10 +1566,9 @@ class TestDeadlineWatchdogBody:
 
     def test_watchdog_sends_interrupt(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             client.send_request.return_value = {}
-            await adapter._deadline_watchdog(client, "t-1", 42, 0.01)
+            await deadline_watchdog(client, "t-1", 42, 0.01)
             # After sleep, it should send turn/interrupt
             client.send_request.assert_called_once()
             args = client.send_request.call_args
@@ -1589,11 +1580,10 @@ class TestDeadlineWatchdogBody:
 
     def test_watchdog_suppresses_error(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             client.send_request.side_effect = CodexClientError("already done")
             # Should not raise
-            await adapter._deadline_watchdog(client, "t-1", 42, 0.01)
+            await deadline_watchdog(client, "t-1", 42, 0.01)
 
         asyncio.run(_run())
 
@@ -1649,7 +1639,6 @@ class TestToolCallRunsInThread:
         """Tool dispatch is wrapped in asyncio.to_thread."""
 
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             mock_tool = MagicMock()
             mock_tool.return_value = {
@@ -1663,7 +1652,7 @@ class TestToolCallRunsInThread:
                     "content": [{"type": "text", "text": "threaded"}],
                     "isError": False,
                 }
-                await adapter._handle_tool_call(
+                await handle_tool_call(
                     client, 20, {"tool": "calc", "arguments": {"x": 1}}, tool_lookup
                 )
                 mock_to_thread.assert_called_once_with(mock_tool, {"x": 1})
@@ -1673,11 +1662,9 @@ class TestToolCallRunsInThread:
 
 class TestDeadlineRemainingS:
     def test_no_deadline_returns_none(self) -> None:
-        adapter = CodexAppServerAdapter()
-        assert adapter._deadline_remaining_s(None, "p") is None
+        assert deadline_remaining_s(None, "p") is None
 
     def test_expired_deadline_raises(self) -> None:
-        adapter = CodexAppServerAdapter()
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
@@ -1685,16 +1672,15 @@ class TestDeadlineRemainingS:
         clock.advance(10)
 
         with pytest.raises(PromptEvaluationError, match="Deadline expired during"):
-            adapter._deadline_remaining_s(deadline, "test-prompt")
+            deadline_remaining_s(deadline, "test-prompt")
 
     def test_active_deadline_returns_seconds(self) -> None:
-        adapter = CodexAppServerAdapter()
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
         deadline = Deadline(expires_at=anchor + timedelta(seconds=30), clock=clock)
 
-        remaining = adapter._deadline_remaining_s(deadline, "test-prompt")
+        remaining = deadline_remaining_s(deadline, "test-prompt")
         assert remaining is not None
         assert remaining > 0
 
@@ -1731,11 +1717,17 @@ class TestSetupRPCDeadlineBounding:
         """Verify timeout is forwarded to send_request for setup RPCs."""
 
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             client.send_request.return_value = {"thread": {"id": "t-1"}}
 
-            await adapter._create_thread(client, "/tmp", [], timeout=5.0)
+            await create_thread(
+                client,
+                "/tmp",
+                [],
+                client_config=CodexAppServerClientConfig(),
+                model_config=CodexAppServerModelConfig(),
+                timeout=5.0,
+            )
             call_args = client.send_request.call_args
             assert call_args[1].get("timeout") == 5.0 or call_args[0][2] == 5.0
 
@@ -1743,14 +1735,9 @@ class TestSetupRPCDeadlineBounding:
 
     def test_authenticate_passes_timeout(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                client_config=CodexAppServerClientConfig(
-                    auth_mode=ApiKeyAuth(api_key="sk-test")
-                )
-            )
             client = _make_mock_client()
 
-            await adapter._authenticate(client, timeout=3.0)
+            await authenticate(client, ApiKeyAuth(api_key="sk-test"), timeout=3.0)
             call_args = client.send_request.call_args
             assert call_args[1].get("timeout") == 3.0
 
@@ -1758,11 +1745,17 @@ class TestSetupRPCDeadlineBounding:
 
     def test_start_turn_passes_timeout(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             client.send_request.return_value = {"turn": {"id": 1}}
 
-            await adapter._start_turn(client, "thread-1", "Hello", None, timeout=7.0)
+            await start_turn(
+                client,
+                "thread-1",
+                "Hello",
+                None,
+                model_config=CodexAppServerModelConfig(),
+                timeout=7.0,
+            )
             call_args = client.send_request.call_args
             assert call_args[1].get("timeout") == 7.0
 
@@ -1811,7 +1804,6 @@ class TestTranscriptBridgeIntegration:
         """Tool call emits transcript entries via bridge."""
 
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             mock_tool = MagicMock()
             mock_tool.return_value = {
@@ -1821,7 +1813,7 @@ class TestTranscriptBridgeIntegration:
             tool_lookup = {"calc": mock_tool}
 
             bridge = MagicMock()
-            await adapter._handle_tool_call(
+            await handle_tool_call(
                 client,
                 10,
                 {"tool": "calc", "arguments": {"x": 1}},
@@ -1841,12 +1833,11 @@ class TestTranscriptBridgeIntegration:
         """Unknown tool call still emits tool_result via bridge."""
 
         async def _run() -> None:
-            adapter = CodexAppServerAdapter()
             client = _make_mock_client()
             tool_lookup: dict[str, Any] = {}
 
             bridge = MagicMock()
-            await adapter._handle_tool_call(
+            await handle_tool_call(
                 client,
                 10,
                 {"tool": "missing", "arguments": {}},
@@ -1864,16 +1855,13 @@ class TestTranscriptBridgeIntegration:
 class TestApprovalPolicyUntrusted:
     def test_approval_untrusted_declines(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                client_config=CodexAppServerClientConfig(approval_policy="untrusted")
-            )
             client = _make_mock_client()
             msg = {
                 "id": 6,
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await adapter._handle_server_request(client, msg, {})
+            await handle_server_request(client, msg, {}, approval_policy="untrusted")
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "decline"
 
@@ -1881,16 +1869,13 @@ class TestApprovalPolicyUntrusted:
 
     def test_approval_on_failure_accepts_requested_approval(self) -> None:
         async def _run() -> None:
-            adapter = CodexAppServerAdapter(
-                client_config=CodexAppServerClientConfig(approval_policy="on-failure")
-            )
             client = _make_mock_client()
             msg = {
                 "id": 7,
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await adapter._handle_server_request(client, msg, {})
+            await handle_server_request(client, msg, {}, approval_policy="on-failure")
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "accept"
 
