@@ -172,6 +172,89 @@ def test_tool_invocation_updates_session():
     assert plan.steps == ("step 1", "step 2")
 ```
 
+## Testing Time-Dependent Code with FakeClock
+
+Time-dependent code (deadlines, timeouts, rate limiting) needs deterministic
+testing. WINK provides `FakeClock` to advance time instantly without real delays:
+
+```python nocheck
+from weakincentives.clock import FakeClock
+
+def test_timeout_logic():
+    clock = FakeClock()
+
+    start = clock.monotonic()
+    clock.sleep(10)  # Advances instantly, no real delay
+    assert clock.monotonic() - start == 10
+
+    # Or advance manually
+    clock.advance(60)
+    assert clock.monotonic() - start == 70
+```
+
+**Key methods:**
+
+| Method | Description |
+| --- | --- |
+| `monotonic()` | Return current monotonic time (seconds) |
+| `utcnow()` | Return current wall-clock time (UTC datetime) |
+| `sleep(seconds)` | Advance time instantly (calls `advance()`) |
+| `advance(seconds)` | Advance both clocks by duration |
+| `set_monotonic(value)` | Set monotonic time to absolute value |
+| `set_wall(value)` | Set wall-clock time (must be timezone-aware) |
+
+### Testing Deadlines
+
+```python nocheck
+from datetime import UTC, datetime, timedelta
+from weakincentives import Deadline
+from weakincentives.clock import FakeClock
+
+def test_deadline_remaining():
+    clock = FakeClock()
+    clock.set_wall(datetime(2024, 6, 1, 12, 0, tzinfo=UTC))
+
+    deadline = Deadline(
+        expires_at=datetime(2024, 6, 1, 13, 0, tzinfo=UTC),
+        clock=clock,
+    )
+
+    assert deadline.remaining() == timedelta(hours=1)
+
+    clock.advance(1800)  # 30 minutes
+    assert deadline.remaining() == timedelta(minutes=30)
+```
+
+### Using the Pytest Fixture
+
+WINK provides a `fake_clock` fixture for convenience:
+
+```python nocheck
+from weakincentives.clock import FakeClock
+from tests.helpers.time import fake_clock  # pytest fixture
+
+def test_heartbeat_elapsed(fake_clock: FakeClock) -> None:
+    hb = Heartbeat(clock=fake_clock)
+
+    hb.beat()
+    assert hb.elapsed() == 0.0
+
+    fake_clock.advance(10)
+    assert hb.elapsed() == 10.0
+```
+
+All clock-dependent components in WINK accept a `clock` parameter with a
+sensible default (`SYSTEM_CLOCK`). Inject `FakeClock` for testing:
+
+```python nocheck
+# Production: uses real system time
+deadline = Deadline(expires_at=datetime(2024, 12, 31, tzinfo=UTC))
+
+# Testing: inject FakeClock for deterministic behavior
+clock = FakeClock()
+deadline = Deadline(expires_at=..., clock=clock)
+```
+
 ## What the WINK Codebase Does
 
 WINK itself enforces:
