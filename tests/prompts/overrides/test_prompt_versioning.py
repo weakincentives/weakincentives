@@ -62,7 +62,7 @@ class _StaticSection(Section[_GreetingParams]):
 
 def _build_prompt() -> PromptTemplate:
     return PromptTemplate(
-        ns="tests/versioning",
+        ns="tests.versioning",
         key="versioned-greeting",
         name="greeting",
         sections=[
@@ -95,7 +95,7 @@ def _build_tool_prompt(
         accepts_overrides=accepts_overrides,
     )
     prompt = PromptTemplate(
-        ns="tests/versioning",
+        ns="tests.versioning",
         key="versioned-greeting-tools",
         name="greeting-tools",
         sections=[
@@ -120,7 +120,7 @@ def _build_sequence_tool_prompt(
         accepts_overrides=accepts_overrides,
     )
     prompt = PromptTemplate(
-        ns="tests/versioning",
+        ns="tests.versioning",
         key="versioned-greeting-tools-seq",
         name="greeting-tools-seq",
         sections=[
@@ -140,7 +140,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
 
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    assert descriptor.ns == "tests/versioning"
+    assert descriptor.ns == "tests.versioning"
     assert descriptor.key == "versioned-greeting"
     assert descriptor.sections == [
         SectionDescriptor(
@@ -155,7 +155,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
 def test_prompt_descriptor_ignores_non_hash_sections() -> None:
     section = _StaticSection(title="Static", key="static")
     prompt = PromptTemplate(
-        ns="tests/versioning",
+        ns="tests.versioning",
         key="versioned-static",
         sections=[section],
     )
@@ -358,7 +358,7 @@ def test_prompt_render_ignores_non_matching_override() -> None:
     prompt = _build_prompt()
 
     override = PromptOverride(
-        ns="tests/versioning",
+        ns="tests.versioning",
         prompt_key="other-prompt",
         tag="latest",
         sections={

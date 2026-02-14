@@ -124,7 +124,7 @@ def test_prompt_tools_integration_example() -> None:
     )
 
     prompt_template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="tools-overview",
         name="tools_overview",
         sections=[guidance],
@@ -174,7 +174,7 @@ def test_prompt_renders_tool_examples_with_rendered_output() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="tools-rendered-output",
         name="tools_rendered_output",
         sections=[tools_section],
@@ -243,7 +243,7 @@ def test_prompt_renders_tool_examples_inline() -> None:
     )
 
     prompt_template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="tools-overview",
         name="tools_overview",
         sections=[guidance],

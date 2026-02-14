@@ -27,6 +27,7 @@ from typing import (
 
 from ..dataclasses import FrozenDataclass
 from ..resources import ResourceRegistry
+from ._normalization import normalize_component_key
 from ._overrides_protocols import PromptOverridesStore
 from ._prompt_resources import PromptResources
 from ._types import SupportsDataclass
@@ -195,12 +196,14 @@ class PromptTemplate[OutputT]:
             else ResourceRegistry()
         )
 
-        stripped_ns = ns_str.strip()
-        if not stripped_ns:
-            raise PromptValidationError("Prompt namespace must be a non-empty string.")
-        stripped_key = key_str.strip()
-        if not stripped_key:
-            raise PromptValidationError("Prompt key must be a non-empty string.")
+        try:
+            stripped_ns = normalize_component_key(ns_str, owner="Prompt namespace")
+        except ValueError as exc:
+            raise PromptValidationError(str(exc)) from exc
+        try:
+            stripped_key = normalize_component_key(key_str, owner="Prompt key")
+        except ValueError as exc:
+            raise PromptValidationError(str(exc)) from exc
 
         sections_tuple = tuple(sections_input or ())
         registry = PromptRegistry()

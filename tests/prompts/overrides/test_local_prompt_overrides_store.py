@@ -59,7 +59,7 @@ class _ToolResult:
 
 def _build_prompt() -> PromptTemplate:
     return PromptTemplate(
-        ns="tests/versioning",
+        ns="tests.versioning",
         key="versioned-greeting",
         sections=[
             MarkdownSection[_GreetingParams](
@@ -78,7 +78,7 @@ def _build_prompt_with_tool() -> PromptTemplate:
         handler=None,
     )
     return PromptTemplate(
-        ns="tests/versioning",
+        ns="tests.versioning",
         key="versioned-greeting-tools",
         sections=[
             MarkdownSection[_GreetingParams](
@@ -855,7 +855,7 @@ def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
     )
 
     prompt = PromptTemplate(
-        ns="tests/versioning",
+        ns="tests.versioning",
         key="plain-metadata",
         sections=[
             MarkdownSection[_GreetingParams](
@@ -894,7 +894,7 @@ def test_collect_param_descriptions_with_partial_metadata(tmp_path: Path) -> Non
     )
 
     prompt = PromptTemplate(
-        ns="tests/versioning",
+        ns="tests.versioning",
         key="mixed-metadata",
         sections=[
             MarkdownSection[_GreetingParams](

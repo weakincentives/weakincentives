@@ -68,7 +68,7 @@ def build_prompt() -> PromptTemplate:
         default_params=OutroParams(footer="bye"),
     )
     return PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="render-basic",
         sections=[intro, details, outro],
     )
@@ -142,7 +142,7 @@ def build_nested_prompt() -> PromptTemplate:
         key="summary",
     )
     return PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="render-nested",
         sections=[parent, summary],
     )
@@ -218,7 +218,7 @@ def test_prompt_render_iterates_through_siblings() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="siblings",
         sections=[
             MarkdownSection(
@@ -335,7 +335,7 @@ def test_prompt_render_wraps_template_errors_with_context() -> None:
         key="explode",
     )
     template = PromptTemplate(
-        ns="tests/prompts", key="render-error", sections=[section]
+        ns="tests.prompts", key="render-error", sections=[section]
     )
 
     with pytest.raises(PromptRenderError) as exc:
@@ -361,7 +361,7 @@ def test_prompt_render_propagates_enabled_errors() -> None:
         enabled=cast(Callable[[SupportsDataclass], bool], raising_enabled),
     )
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="render-enabled-error",
         sections=[section],
     )
@@ -396,7 +396,7 @@ def test_rendered_prompt_allow_extra_keys_none_without_structured_output() -> No
 
 def test_prompt_bind_mutates_and_replaces_params() -> None:
     prompt = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="bind-mutation",
         sections=[
             MarkdownSection[IntroParams](title="Intro", template="", key="intro")
@@ -465,7 +465,7 @@ def test_section_rendering_empty_string_is_skipped() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="empty-section",
         sections=[empty_section, non_empty],
     )
@@ -511,7 +511,7 @@ def test_collect_child_keys_exits_on_sibling() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="collect-children",
         sections=[parent, sibling],
     )
@@ -567,7 +567,7 @@ def test_collect_child_keys_skips_grandchildren() -> None:
     )
 
     template = PromptTemplate(
-        ns="tests/prompts",
+        ns="tests.prompts",
         key="grandchildren-skip",
         sections=[parent],
     )
