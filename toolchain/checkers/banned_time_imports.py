@@ -105,10 +105,12 @@ class BannedTimeImportsChecker:
                 msg = (
                     f"Direct time import is banned: {line.strip()}\n"
                     f"Fix: Use weakincentives.clock protocols instead\n"
-                    f"  - time.monotonic() -> MonotonicClock.monotonic()\n"
-                    f"  - time.time()      -> MonotonicClock.monotonic()\n"
-                    f"  - time.sleep()     -> Sleeper.sleep()\n"
-                    f"  - Wall-clock time  -> WallClock.utcnow()\n"
+                    f"  - time.monotonic()  -> MonotonicClock.monotonic()\n"
+                    f"  - time.time()       -> MonotonicClock.monotonic() "
+                    f"(elapsed/deadline)\n"
+                    f"                      -> WallClock.utcnow() "
+                    f"(wall-clock timestamps)\n"
+                    f"  - time.sleep()      -> Sleeper.sleep()\n"
                     f"Inject clock parameter (default SYSTEM_CLOCK)"
                 )
                 diagnostics.append(
