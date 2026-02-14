@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import fields, is_dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from ..types.dataclass import (
@@ -28,6 +29,132 @@ from .tool import Tool
 
 if TYPE_CHECKING:
     from .registry import PromptRegistry, SectionNode
+    from .section import Section
+
+
+# ---------------------------------------------------------------------------
+# Section registration validators
+# ---------------------------------------------------------------------------
+
+
+def validate_section_params_type(
+    section: Section[SupportsDataclass],
+    path: SectionPath,
+) -> type[SupportsDataclass] | None:
+    """Validate and return the section's params type, or *None*."""
+
+    params_type = section.params_type
+    if params_type is not None and not is_dataclass(params_type):
+        raise PromptValidationError(
+            "Section params must be a dataclass.",
+            section_path=path,
+            dataclass_type=params_type,
+        )
+    return params_type
+
+
+def validate_section_defaults(
+    default_value: object,
+    path: SectionPath,
+    params_type: type[SupportsDataclass],
+) -> None:
+    """Validate that *default_value* is a dataclass instance matching *params_type*."""
+
+    if isinstance(default_value, type) or not is_dataclass(default_value):
+        raise PromptValidationError(
+            "Section defaults must be dataclass instances.",
+            section_path=path,
+            dataclass_type=params_type,
+        )
+    if type(default_value) is not params_type:
+        raise PromptValidationError(
+            "Section defaults must match section params type.",
+            section_path=path,
+            dataclass_type=params_type,
+        )
+
+
+def validate_section_placeholders(
+    placeholder_names: set[str],
+    path: SectionPath,
+    params_type: type[SupportsDataclass] | None,
+) -> None:
+    """Validate placeholder names are backed by fields in *params_type*."""
+
+    if params_type is None:
+        if placeholder_names:
+            placeholder = sorted(placeholder_names)[0]
+            raise PromptValidationError(
+                "Section does not accept parameters but declares placeholders.",
+                section_path=path,
+                placeholder=placeholder,
+            )
+        return
+
+    param_fields = {field.name for field in fields(params_type)}
+    unknown_placeholders = placeholder_names - param_fields
+    if unknown_placeholders:
+        placeholder = sorted(unknown_placeholders)[0]
+        raise PromptValidationError(
+            "Template references unknown placeholder.",
+            section_path=path,
+            dataclass_type=params_type,
+            placeholder=placeholder,
+        )
+
+
+def validate_tool_instance(
+    tool: object,
+    path: SectionPath,
+    params_type: type[SupportsDataclass] | None,
+) -> None:
+    """Validate that *tool* is a :class:`Tool` instance."""
+
+    if not isinstance(tool, Tool):
+        raise PromptValidationError(
+            "Section tools must be Tool instances.",
+            section_path=path,
+            dataclass_type=params_type,
+        )
+
+
+def validate_tool_registration(
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    path: SectionPath,
+    tool_name_registry: Mapping[str, SectionPath],
+) -> None:
+    """Validate tool params type and uniqueness within the registry."""
+
+    params_type = tool.params_type
+    if params_type is not type(None) and not is_dataclass(params_type):
+        raise PromptValidationError(
+            "Tool parameters must be dataclass types.",
+            section_path=path,
+            dataclass_type=params_type,
+        )
+
+    existing_path = tool_name_registry.get(tool.name)
+    if existing_path is not None:
+        raise PromptValidationError(
+            "Duplicate tool name registered for prompt.",
+            section_path=path,
+            dataclass_type=tool.params_type,
+        )
+
+
+def validate_skill_registration(
+    name: str,
+    path: SectionPath,
+    skill_name_registry: Mapping[str, SectionPath],
+) -> None:
+    """Validate that skill *name* is unique within the registry."""
+
+    existing_path = skill_name_registry.get(name)
+    if existing_path is not None:
+        raise PromptValidationError(
+            f"Duplicate skill name '{name}' registered for prompt.",
+            section_path=path,
+        )
 
 
 # ---------------------------------------------------------------------------
