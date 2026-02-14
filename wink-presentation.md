@@ -46,7 +46,7 @@ Three production-grade agentic harnesses:
 |---------|----------|----------|
 | **Claude Code** | Anthropic | Claude Agent SDK (Python) |
 | **OpenAI Codex** | OpenAI | Codex App Server (stdio JSON-RPC) |
-| **OpenCode** | sst.dev | ACP (stdio JSON-RPC 2.0) |
+| **OpenCode** | opencode.ai | ACP (stdio JSON-RPC 2.0) |
 
 Each provides planning loops, native tools, sandboxing, and orchestration.
 
