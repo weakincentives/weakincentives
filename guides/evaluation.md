@@ -310,6 +310,138 @@ for msg in requests.receive():
 This is how evaluation results flow back to the submitter, regardless of which
 worker processed each sample.
 
+## Experiments
+
+Experiments enable A/B testing by running the same dataset through different
+configurations. Each experiment bundles a name, prompt overrides tag, and
+feature flags—allowing you to compare prompt variations, model settings, or
+runtime behaviors systematically.
+
+**Defining experiments:**
+
+```python nocheck
+from weakincentives.evals import Experiment, BASELINE
+
+# The baseline uses default prompts (overrides_tag="latest")
+baseline = BASELINE
+
+# Treatment with different prompt overrides
+treatment = Experiment(
+    name="v2-concise-prompts",
+    overrides_tag="v2",
+    owner="alice@example.com",
+    description="Test shorter, more direct prompt phrasing",
+)
+
+# Variant with feature flags
+aggressive = Experiment(
+    name="aggressive-tools",
+    flags={"max_tool_calls": 10, "parallel_tools": True},
+)
+```
+
+**Running A/B tests:**
+
+Use `submit_experiments()` to run your dataset under multiple configurations:
+
+```python nocheck
+from weakincentives.evals import submit_experiments, collect_results
+
+# Submit dataset under both experiments
+count = submit_experiments(
+    dataset,
+    experiments=[baseline, treatment],
+    requests=eval_requests,
+)
+print(f"Submitted {count} total requests")  # len(dataset) * 2
+
+# Run evaluation worker
+eval_loop.run(max_iterations=1)
+
+# Collect all results
+report = collect_results(eval_results, expected_count=count)
+```
+
+**Analyzing results by experiment:**
+
+```python nocheck
+# View pass rates for each experiment
+for name, rate in report.pass_rate_by_experiment().items():
+    print(f"{name}: {rate:.1%}")
+
+# View mean scores
+for name, score in report.mean_score_by_experiment().items():
+    print(f"{name}: {score:.2f}")
+
+# Access results grouped by experiment
+for name, results in report.by_experiment().items():
+    failures = [r for r in results if not r.score.passed]
+    print(f"{name}: {len(failures)} failures")
+```
+
+**Statistical comparison:**
+
+Compare treatment against baseline with `compare_experiments()`:
+
+```python nocheck
+comparison = report.compare_experiments("baseline", "v2-concise-prompts")
+
+print(f"Baseline pass rate: {comparison.baseline_pass_rate:.1%}")
+print(f"Treatment pass rate: {comparison.treatment_pass_rate:.1%}")
+print(f"Delta: {comparison.pass_rate_delta:+.1%}")
+
+if comparison.relative_improvement:
+    print(f"Relative improvement: {comparison.relative_improvement:+.1%}")
+```
+
+**Feature flags:**
+
+Experiments can carry feature flags that your agent code checks at runtime:
+
+```python nocheck
+# Define experiment with flags
+exp = Experiment(
+    name="high-retry",
+    flags={"max_retries": 5, "timeout_seconds": 120},
+)
+
+# In your agent code, check flags
+max_retries = experiment.get_flag("max_retries", default=3)
+if experiment.has_flag("debug"):
+    enable_debug_logging()
+```
+
+**Prompt overrides:**
+
+The `overrides_tag` field controls which prompt overrides are loaded. Override
+files live in `.weakincentives/prompts/overrides/{ns}/{key}/{tag}.json`:
+
+```python nocheck
+# Baseline uses "latest" tag (default prompts)
+baseline = Experiment(name="baseline")
+
+# Treatment uses "v2" overrides
+treatment = Experiment(name="v2-test", overrides_tag="v2")
+
+# Create variant from existing experiment
+variant = treatment.with_tag("v3").with_flag("verbose", True)
+```
+
+**Multi-variant testing:**
+
+Test more than two variants by including additional experiments:
+
+```python nocheck
+experiments = [
+    BASELINE,
+    Experiment(name="model-a", flags={"model": "gpt-4o"}),
+    Experiment(name="model-b", flags={"model": "claude-3-sonnet"}),
+    Experiment(name="model-c", flags={"model": "gemini-pro"}),
+]
+
+submit_experiments(dataset, experiments, requests)
+```
+
 ## Next Steps
 
 - [Lifecycle](lifecycle.md): Run AgentLoop and EvalLoop together with LoopGroup
