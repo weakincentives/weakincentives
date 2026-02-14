@@ -644,6 +644,305 @@ class FilesystemValidationSuite:
         result = fs.read("café/日本語/файл.txt")
         assert result.content == "content with émojis 🎉"
 
+    # -------------------------------------------------------------------------
+    # Streaming Read Operations (open_read)
+    # -------------------------------------------------------------------------
+
+    def test_open_read_basic(self, fs: Filesystem) -> None:
+        """open_read() should return a ByteReader for reading file content."""
+        fs.write_bytes("file.bin", b"hello world")
+        with fs.open_read("file.bin") as reader:
+            content = reader.read()
+            assert content == b"hello world"
+            assert reader.path == "file.bin"
+            assert reader.size == 11
+
+    def test_open_read_chunks(self, fs: Filesystem) -> None:
+        """open_read() should support chunk iteration."""
+        data = b"a" * 100000  # 100KB
+        fs.write_bytes("large.bin", data)
+        with fs.open_read("large.bin") as reader:
+            chunks = list(reader.chunks(size=10000))  # 10KB chunks
+            assert len(chunks) == 10
+            assert b"".join(chunks) == data
+
+    def test_open_read_default_iteration(self, fs: Filesystem) -> None:
+        """open_read() should support default chunk iteration via __iter__."""
+        data = b"x" * 1000
+        fs.write_bytes("file.bin", data)
+        with fs.open_read("file.bin") as reader:
+            chunks = list(reader)
+            assert b"".join(chunks) == data
+
+    def test_open_read_seek(self, fs: Filesystem) -> None:
+        """open_read() should support seek operations."""
+        fs.write_bytes("file.bin", b"0123456789")
+        with fs.open_read("file.bin") as reader:
+            pos = reader.seek(5)
+            assert pos == 5
+            assert reader.position == 5
+            content = reader.read()
+            assert content == b"56789"
+
+    def test_open_read_seek_from_end(self, fs: Filesystem) -> None:
+        """open_read() should support seeking from end."""
+        fs.write_bytes("file.bin", b"0123456789")
+        with fs.open_read("file.bin") as reader:
+            pos = reader.seek(-3, 2)  # whence=2 is from end
+            assert pos == 7
+            content = reader.read()
+            assert content == b"789"
+
+    def test_open_read_seek_invalid_whence_raises(self, fs: Filesystem) -> None:
+        """open_read() should raise ValueError for invalid whence."""
+        fs.write_bytes("file.bin", b"content")
+        with fs.open_read("file.bin") as reader:
+            with pytest.raises(ValueError, match="whence"):
+                reader.seek(0, 99)  # Invalid whence value
+
+    def test_open_read_missing_file_raises(self, fs: Filesystem) -> None:
+        """open_read() should raise FileNotFoundError for missing files."""
+        with pytest.raises(FileNotFoundError):
+            fs.open_read("missing.bin")
+
+    def test_open_read_directory_raises(self, fs: Filesystem) -> None:
+        """open_read() should raise IsADirectoryError for directories."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.open_read("mydir")
+
+    def test_open_read_closed_raises(self, fs: Filesystem) -> None:
+        """Reading from closed reader should raise ValueError."""
+        fs.write_bytes("file.bin", b"content")
+        reader = fs.open_read("file.bin")
+        reader.close()
+        with pytest.raises(ValueError, match="closed"):
+            reader.read()
+
+    def test_open_read_context_manager(self, fs: Filesystem) -> None:
+        """open_read() should work as context manager."""
+        fs.write_bytes("file.bin", b"content")
+        with fs.open_read("file.bin") as reader:
+            assert not reader.closed
+            _ = reader.read()
+        assert reader.closed
+
+    def test_open_read_close_idempotent(self, fs: Filesystem) -> None:
+        """close() on reader should be idempotent."""
+        fs.write_bytes("file.bin", b"content")
+        reader = fs.open_read("file.bin")
+        _ = reader.read()
+        reader.close()
+        reader.close()  # Should not raise
+        assert reader.closed
+
+    # -------------------------------------------------------------------------
+    # Streaming Write Operations (open_write)
+    # -------------------------------------------------------------------------
+
+    def test_open_write_basic(self, fs: Filesystem) -> None:
+        """open_write() should return a ByteWriter for writing file content."""
+        with fs.open_write("file.bin", mode="create") as writer:
+            written = writer.write(b"hello world")
+            assert written == 11
+            assert writer.path == "file.bin"
+        assert fs.read_bytes("file.bin").content == b"hello world"
+
+    def test_open_write_write_all(self, fs: Filesystem) -> None:
+        """open_write() should support write_all for iterables."""
+        chunks = [b"hello", b" ", b"world"]
+        with fs.open_write("file.bin") as writer:
+            total = writer.write_all(chunks)
+            assert total == 11
+            assert writer.bytes_written == 11
+        assert fs.read_bytes("file.bin").content == b"hello world"
+
+    def test_open_write_overwrite_mode(self, fs: Filesystem) -> None:
+        """open_write() with mode='overwrite' should replace content."""
+        fs.write_bytes("file.bin", b"original")
+        with fs.open_write("file.bin", mode="overwrite") as writer:
+            writer.write(b"new")
+        assert fs.read_bytes("file.bin").content == b"new"
+
+    def test_open_write_append_mode(self, fs: Filesystem) -> None:
+        """open_write() with mode='append' should add to existing content."""
+        fs.write_bytes("file.bin", b"hello")
+        with fs.open_write("file.bin", mode="append") as writer:
+            writer.write(b" world")
+        assert fs.read_bytes("file.bin").content == b"hello world"
+
+    def test_open_write_create_mode_existing_raises(self, fs: Filesystem) -> None:
+        """open_write() with mode='create' should raise if file exists."""
+        fs.write_bytes("file.bin", b"existing")
+        with pytest.raises(FileExistsError):
+            fs.open_write("file.bin", mode="create")
+
+    def test_open_write_creates_parents(self, fs: Filesystem) -> None:
+        """open_write() should create parent directories by default."""
+        with fs.open_write("a/b/c/file.bin") as writer:
+            writer.write(b"content")
+        assert fs.exists("a/b/c/file.bin")
+
+    def test_open_write_no_create_parents_raises(self, fs: Filesystem) -> None:
+        """open_write() with create_parents=False should raise if parent missing."""
+        with pytest.raises(FileNotFoundError):
+            fs.open_write("missing_parent/file.bin", create_parents=False)
+
+    def test_open_write_root_raises(self, fs: Filesystem) -> None:
+        """open_write() should raise ValueError when trying to write to root."""
+        with pytest.raises(ValueError, match="root"):
+            fs.open_write(".")
+
+    def test_open_write_closed_raises(self, fs: Filesystem) -> None:
+        """Writing to closed writer should raise ValueError."""
+        writer = fs.open_write("file.bin")
+        writer.close()
+        with pytest.raises(ValueError, match="closed"):
+            writer.write(b"content")
+
+    def test_open_write_context_manager(self, fs: Filesystem) -> None:
+        """open_write() should work as context manager."""
+        with fs.open_write("file.bin") as writer:
+            assert not writer.closed
+            writer.write(b"content")
+        assert writer.closed
+
+    def test_open_write_close_idempotent(self, fs: Filesystem) -> None:
+        """close() on writer should be idempotent."""
+        writer = fs.open_write("file.bin")
+        writer.write(b"content")
+        writer.close()
+        writer.close()  # Should not raise or double-commit
+        assert writer.closed
+        assert fs.read_bytes("file.bin").content == b"content"
+
+    def test_open_write_abort_on_error_overwrite(self, fs: Filesystem) -> None:
+        """On error exit, overwrite should not commit partial writes."""
+        fs.write_bytes("file.bin", b"original")
+
+        with pytest.raises(RuntimeError, match="simulated"):
+            with fs.open_write("file.bin", mode="overwrite") as writer:
+                writer.write(b"partial data that should be discarded")
+                msg = "simulated error"
+                raise RuntimeError(msg)
+
+        assert fs.read_bytes("file.bin").content == b"original"
+
+    def test_open_write_abort_on_error_create(self, fs: Filesystem) -> None:
+        """On error exit, create should not leave partial file."""
+        with pytest.raises(RuntimeError, match="simulated"):
+            with fs.open_write("new_file.bin", mode="create") as writer:
+                writer.write(b"partial data")
+                msg = "simulated error"
+                raise RuntimeError(msg)
+
+        assert not fs.exists("new_file.bin")
+
+    def test_open_write_abort_after_close_is_noop(self, fs: Filesystem) -> None:
+        """Abort after explicit close should not discard committed data."""
+        writer = fs.open_write("file.bin")
+        writer.write(b"content")
+        writer.close()
+        # Simulate __exit__ with error after explicit close
+        writer.__exit__(RuntimeError, RuntimeError("late"), None)
+        assert writer.closed
+        assert fs.read_bytes("file.bin").content == b"content"
+
+    # -------------------------------------------------------------------------
+    # Streaming Text Operations (open_text)
+    # -------------------------------------------------------------------------
+
+    def test_open_text_basic(self, fs: Filesystem) -> None:
+        """open_text() should return a TextReader for reading text content."""
+        fs.write("file.txt", "line1\nline2\nline3")
+        with fs.open_text("file.txt") as reader:
+            content = reader.read()
+            assert "line1" in content
+            assert "line2" in content
+            assert reader.path == "file.txt"
+            assert reader.encoding == "utf-8"
+
+    def test_open_text_readline(self, fs: Filesystem) -> None:
+        """open_text() should support readline()."""
+        fs.write("file.txt", "line1\nline2\nline3\n")
+        with fs.open_text("file.txt") as reader:
+            line1 = reader.readline()
+            assert line1 == "line1\n"
+            line2 = reader.readline()
+            assert line2 == "line2\n"
+            assert reader.line_number == 2
+
+    def test_open_text_iteration(self, fs: Filesystem) -> None:
+        """open_text() should support line iteration."""
+        fs.write("file.txt", "line1\nline2\nline3\n")
+        with fs.open_text("file.txt") as reader:
+            lines = list(reader)
+            assert len(lines) == 3
+            assert lines[0] == "line1\n"
+            assert reader.line_number == 3
+
+    def test_open_text_lines_with_strip(self, fs: Filesystem) -> None:
+        """open_text() lines() should support stripping."""
+        fs.write("file.txt", "  line1  \n  line2  \n")
+        with fs.open_text("file.txt") as reader:
+            lines = list(reader.lines(strip=True))
+            assert lines == ["  line1", "  line2"]
+
+    def test_open_text_lines_without_strip(self, fs: Filesystem) -> None:
+        """open_text() lines() should preserve whitespace by default."""
+        fs.write("file.txt", "  line1  \n  line2  \n")
+        with fs.open_text("file.txt") as reader:
+            lines = list(reader.lines(strip=False))
+            assert lines == ["  line1  \n", "  line2  \n"]
+
+    def test_open_text_missing_file_raises(self, fs: Filesystem) -> None:
+        """open_text() should raise FileNotFoundError for missing files."""
+        with pytest.raises(FileNotFoundError):
+            fs.open_text("missing.txt")
+
+    def test_open_text_directory_raises(self, fs: Filesystem) -> None:
+        """open_text() should raise IsADirectoryError for directories."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.open_text("mydir")
+
+    def test_open_text_unsupported_encoding_raises(self, fs: Filesystem) -> None:
+        """open_text() should raise ValueError for unsupported encoding."""
+        fs.write("file.txt", "content")
+        with pytest.raises(ValueError, match="utf-8"):
+            fs.open_text("file.txt", encoding="latin-1")
+
+    def test_open_text_closed_raises(self, fs: Filesystem) -> None:
+        """Reading from closed TextReader should raise ValueError."""
+        fs.write("file.txt", "content")
+        reader = fs.open_text("file.txt")
+        reader.close()
+        with pytest.raises(ValueError, match="closed"):
+            reader.read()
+
+    def test_open_text_context_manager(self, fs: Filesystem) -> None:
+        """open_text() should work as context manager."""
+        fs.write("file.txt", "content")
+        with fs.open_text("file.txt") as reader:
+            assert not reader.closed
+            _ = reader.read()
+        assert reader.closed
+
+    # -------------------------------------------------------------------------
+    # Streaming Copy Pattern
+    # -------------------------------------------------------------------------
+
+    def test_streaming_copy(self, fs: Filesystem) -> None:
+        """Streaming copy should work with open_read and open_write."""
+        data = b"x" * 50000  # 50KB
+        fs.write_bytes("source.bin", data)
+
+        with fs.open_read("source.bin") as src:
+            with fs.open_write("dest.bin") as dst:
+                dst.write_all(src)
+
+        assert fs.read_bytes("dest.bin").content == data
+
 
 class ReadOnlyFilesystemValidationSuite:
     """Test suite for read-only Filesystem behavior.
@@ -681,6 +980,11 @@ class ReadOnlyFilesystemValidationSuite:
         """write_bytes() should raise PermissionError on read-only filesystem."""
         with pytest.raises(PermissionError):
             fs_readonly.write_bytes("file.bin", b"content")
+
+    def test_open_write_fails_on_readonly(self, fs_readonly: Filesystem) -> None:
+        """open_write() should raise PermissionError on read-only filesystem."""
+        with pytest.raises(PermissionError):
+            fs_readonly.open_write("file.bin")
 
 
 class SnapshotableFilesystemValidationSuite:

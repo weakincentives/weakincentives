@@ -31,7 +31,7 @@ Additional implementations in `weakincentives.contrib.tools`:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from ._types import (
     FileEntry,
@@ -43,6 +43,9 @@ from ._types import (
     ReadResult,
     WriteResult,
 )
+
+if TYPE_CHECKING:
+    from ._streams import ByteReader, ByteWriter, TextReader
 
 
 @runtime_checkable
@@ -277,6 +280,105 @@ class Filesystem(Protocol):
     @property
     def read_only(self) -> bool:
         """True if write operations are disabled."""
+        ...
+
+    # --- Streaming Operations (Primary API) ---
+
+    def open_read(self, path: str) -> ByteReader:
+        """Open a file for streaming byte reads.
+
+        Returns a ByteReader context manager for chunked reading with
+        fixed memory footprint. The reader supports seek() for random
+        access and iteration over chunks.
+
+        Example::
+
+            with filesystem.open_read("large_file.bin") as reader:
+                for chunk in reader.chunks(size=65536):
+                    process(chunk)
+
+        Args:
+            path: Relative path from workspace root.
+
+        Returns:
+            ByteReader context manager.
+
+        Raises:
+            FileNotFoundError: Path does not exist.
+            IsADirectoryError: Path is a directory.
+            PermissionError: Read access denied.
+        """
+        ...
+
+    def open_write(
+        self,
+        path: str,
+        *,
+        mode: Literal["create", "overwrite", "append"] = "overwrite",
+        create_parents: bool = True,
+    ) -> ByteWriter:
+        """Open a file for streaming byte writes.
+
+        Returns a ByteWriter context manager for chunked writing with
+        fixed memory footprint. Bytes are written immediately without
+        buffering the entire file in memory.
+
+        Example::
+
+            with filesystem.open_write("output.bin", mode="create") as writer:
+                for chunk in data_source:
+                    writer.write(chunk)
+
+        Args:
+            path: Relative path from workspace root.
+            mode: Write behavior.
+                - "create": Fail if file exists.
+                - "overwrite": Replace existing content.
+                - "append": Add to end of file.
+            create_parents: Create parent directories if missing.
+
+        Returns:
+            ByteWriter context manager.
+
+        Raises:
+            FileExistsError: mode="create" and file exists.
+            FileNotFoundError: Parent directory missing and create_parents=False.
+            PermissionError: Write access denied or filesystem is read-only.
+        """
+        ...
+
+    def open_text(
+        self,
+        path: str,
+        *,
+        encoding: str = "utf-8",
+    ) -> TextReader:
+        """Open a file for streaming text reads with lazy decoding.
+
+        Returns a TextReader context manager that decodes bytes to text
+        lazily as lines are requested. This avoids the memory cost of
+        decoding entire files upfront.
+
+        Example::
+
+            with filesystem.open_text("log.txt") as reader:
+                for line in reader.lines(strip=True):
+                    if "ERROR" in line:
+                        print(f"Line {reader.line_number}: {line}")
+
+        Args:
+            path: Relative path from workspace root.
+            encoding: Text encoding. Only "utf-8" is supported.
+
+        Returns:
+            TextReader context manager.
+
+        Raises:
+            FileNotFoundError: Path does not exist.
+            IsADirectoryError: Path is a directory.
+            PermissionError: Read access denied.
+            ValueError: Unsupported encoding.
+        """
         ...
 
 

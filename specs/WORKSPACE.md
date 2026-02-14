@@ -146,10 +146,13 @@ print(result.content)  # "Hello, world!"
 
 | Limit | Value |
 |-------|-------|
-| Content per write | 48,000 characters |
+| Convenience read/write | 32MB |
 | Path depth | 16 segments |
 | Segment length | 80 characters |
-| Encoding | UTF-8 text only |
+| Default encoding | UTF-8 |
+
+**Note:** Streaming operations (`open_read`, `open_write`) have no inherent size
+limits. See `FILESYSTEM.md` for streaming API details.
 
 ## Cloning
 
@@ -188,7 +191,8 @@ See `specs/CODEX_APP_SERVER.md` for details on workspace configuration.
 ## Limitations
 
 - **Ephemeral state**: All workspace data dies with session
-- **Text-only**: Binary content rejected for in-memory filesystem
+- **No network**: Podman containers have no network access
+- **Cooperative timeout**: ASTEval interrupts cooperatively only
 - **Synchronized clocks**: Timestamps require UTC synchronization
 
 ## Related Specifications
