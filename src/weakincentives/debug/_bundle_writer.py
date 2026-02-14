@@ -22,11 +22,12 @@ import tempfile
 import zipfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 from uuid import UUID, uuid4
 
+from ..clock import SYSTEM_CLOCK
 from ..serde import dump
 from ..types import JSONValue
 from ._bundle_retention import apply_retention_policy, invoke_storage_handler
@@ -142,7 +143,7 @@ class BundleWriter:
         self._bundle_id = bundle_id if bundle_id is not None else uuid4()
         self._config = config if config is not None else BundleConfig()
         self._temp_dir = None
-        self._started_at = datetime.now(UTC)
+        self._started_at = SYSTEM_CLOCK.utcnow()
         self._ended_at = None
         self._files = []
         self._checksums = {}
@@ -564,7 +565,7 @@ class BundleWriter:
         if self._finalized or self._temp_dir is None:
             return
 
-        self._ended_at = datetime.now(UTC)
+        self._ended_at = SYSTEM_CLOCK.utcnow()
 
         # Add logs to file list if captured
         if self._log_collector_path is not None and self._log_collector_path.exists():

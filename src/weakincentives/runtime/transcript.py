@@ -27,9 +27,10 @@ import contextlib
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
+from ..clock import SYSTEM_CLOCK
 from .logging import StructuredLogger, get_logger
 
 __all__ = [
@@ -130,7 +131,7 @@ class TranscriptEmitter:
                 self._counters[source] = seq
                 self._type_counts[entry_type] = self._type_counts.get(entry_type, 0) + 1
 
-            ts = datetime.now(UTC).isoformat()
+            ts = SYSTEM_CLOCK.utcnow().isoformat()
             context: dict[str, Any] = {
                 "prompt_name": self._prompt_name,
                 "adapter": self._adapter,
@@ -249,7 +250,7 @@ def _parse_transcript_record(ctx: dict[str, object]) -> TranscriptEntry:
     """
     ts_raw = ctx.get("timestamp")
     ts_str = str(ts_raw) if ts_raw is not None else ""
-    ts = datetime.fromisoformat(ts_str) if ts_str else datetime.now(UTC)
+    ts = datetime.fromisoformat(ts_str) if ts_str else SYSTEM_CLOCK.utcnow()
 
     prompt_name = str(ctx["prompt_name"])
     adapter = str(ctx["adapter"])

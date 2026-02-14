@@ -21,7 +21,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from claude_agent_sdk.types import (
@@ -32,6 +32,7 @@ from claude_agent_sdk.types import (
 )
 
 from ...budget import BudgetTracker
+from ...clock import SYSTEM_CLOCK
 from ...deadlines import Deadline
 from ...prompt.feedback import collect_feedback
 from ...runtime.events.types import ToolInvoked
@@ -61,7 +62,7 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "sdk_hooks
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC)
+    return SYSTEM_CLOCK.utcnow()
 
 
 def _compute_budget_info(budget_tracker: BudgetTracker | None) -> dict[str, Any]:

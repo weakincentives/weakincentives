@@ -14,10 +14,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+from ...clock import SYSTEM_CLOCK
 from ...prompt.tool import ToolResult
 from ...runtime.events import ToolInvoked
 from ...runtime.events.types import TokenUsage
@@ -95,7 +95,7 @@ def dispatch_item_tool_invoked(
         params=params,
         result=result,
         session_id=session_id,
-        created_at=datetime.now(UTC),
+        created_at=SYSTEM_CLOCK.utcnow(),
         usage=None,
         rendered_output=rendered_output,
         call_id=item.get("id"),

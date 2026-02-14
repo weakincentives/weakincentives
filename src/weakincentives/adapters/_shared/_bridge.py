@@ -21,10 +21,10 @@ import threading
 from collections import deque
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
+from ...clock import SYSTEM_CLOCK
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
@@ -449,7 +449,7 @@ class BridgedTool:
             params=args,
             result=cast(ToolResult[object], result),
             session_id=getattr(self._session, "session_id", None),
-            created_at=datetime.now(UTC),
+            created_at=SYSTEM_CLOCK.utcnow(),
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
             call_id=call_id,

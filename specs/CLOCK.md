@@ -226,6 +226,70 @@ The pattern is consistent across all components:
 | `sleep_for()` | `sleeper` | `Sleeper` | `SYSTEM_CLOCK` |
 | `InMemoryMailbox` | `clock` | `MonotonicClock` | `SYSTEM_CLOCK` |
 
+## Prohibited: Direct `datetime.now(UTC)` Calls
+
+**`datetime.now(UTC)` must never appear in production code outside of
+`SystemClock.utcnow()`.**
+
+`datetime.now(UTC)` is syntactically correct (timezone-aware), but it bypasses
+the `WallClock` protocol and makes the calling code untestable without
+monkeypatching. All wall-clock access must flow through the protocol so that
+tests can inject `FakeClock` for deterministic time control.
+
+### How to Get the Current Time
+
+Choose the approach that matches your context, from most testable to least:
+
+| Approach | When to use | Testability |
+| --- | --- | --- |
+| `self.clock.utcnow()` | Component has an injected `WallClock` field | Full control via `FakeClock` |
+| `SYSTEM_CLOCK.utcnow()` | No injected clock available (utility functions, event DTOs) | Patchable singleton |
+| `datetime.now(UTC)` | **Never** (only inside `SystemClock.utcnow()`) | None |
+
+### Preferred: Inject a `WallClock` Parameter
+
+Components that need wall-clock time should accept a `clock` parameter typed to
+the narrowest protocol, defaulting to `SYSTEM_CLOCK`:
+
+```python
+from weakincentives.clock import SYSTEM_CLOCK, WallClock
+
+@dataclass(slots=True)
+class MyComponent:
+    clock: WallClock = field(default=SYSTEM_CLOCK, repr=False, compare=False)
+
+    def record_event(self) -> Event:
+        return Event(created_at=self.clock.utcnow())
+```
+
+### Acceptable: `SYSTEM_CLOCK.utcnow()` for DTOs and Utilities
+
+Event dataclasses and utility functions that don't accept a clock parameter
+should use `SYSTEM_CLOCK.utcnow()` rather than `datetime.now(UTC)`:
+
+```python
+from weakincentives.clock import SYSTEM_CLOCK
+
+@dataclass(frozen=True, slots=True)
+class MyEvent:
+    created_at: datetime = field(default_factory=SYSTEM_CLOCK.utcnow)
+```
+
+This routes through the protocol and is patchable at `SYSTEM_CLOCK` level when
+needed.
+
+### Module-Level `_utcnow()` Helpers
+
+Several adapter modules define a private `_utcnow()` helper as a testability
+seam. These must delegate to `SYSTEM_CLOCK`:
+
+```python
+from weakincentives.clock import SYSTEM_CLOCK
+
+def _utcnow() -> datetime:
+    return SYSTEM_CLOCK.utcnow()
+```
+
 ## Test Helpers
 
 The `tests/helpers/time.py` module re-exports `FakeClock` and provides a pytest

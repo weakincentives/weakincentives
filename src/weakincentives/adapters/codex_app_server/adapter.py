@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
+from ...clock import SYSTEM_CLOCK
 from ...deadlines import Deadline
 from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
@@ -59,7 +60,7 @@ CODEX_APP_SERVER_ADAPTER_NAME: AdapterName = "codex_app_server"
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC)
+    return SYSTEM_CLOCK.utcnow()
 
 
 class CodexAppServerAdapter(ProviderAdapter[Any]):

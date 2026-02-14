@@ -19,12 +19,13 @@ import json
 import shutil
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
+from ...clock import SYSTEM_CLOCK
 from ...deadlines import Deadline
 from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
@@ -55,7 +56,7 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "acp_adapt
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC)
+    return SYSTEM_CLOCK.utcnow()
 
 
 def _extract_chunk_text(chunk: Any) -> str:

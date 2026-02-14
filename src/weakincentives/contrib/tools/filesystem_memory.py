@@ -34,10 +34,11 @@ import re
 import types
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import uuid4
 
+from weakincentives.clock import SYSTEM_CLOCK
 from weakincentives.errors import SnapshotRestoreError
 from weakincentives.filesystem import (
     DEFAULT_READ_LIMIT,
@@ -652,7 +653,7 @@ class InMemoryFilesystem:
 
         return FilesystemSnapshot(
             snapshot_id=uuid4(),
-            created_at=datetime.now(UTC),
+            created_at=SYSTEM_CLOCK.utcnow(),
             commit_ref=commit_ref,
             root_path="/",
             tag=tag,

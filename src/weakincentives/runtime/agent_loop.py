@@ -38,12 +38,12 @@ from abc import abstractmethod
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 from uuid import UUID, uuid4
 
 from ..budget import Budget, BudgetTracker
+from ..clock import SYSTEM_CLOCK
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
 from ._agent_loop_bundle import (
@@ -333,7 +333,7 @@ class AgentLoop[UserRequestT, OutputT](
         from .agent_loop_types import BundleContext
 
         bundle_target.mkdir(parents=True, exist_ok=True)
-        started_at = datetime.now(UTC)
+        started_at = SYSTEM_CLOCK.utcnow()
         start_mono = time.monotonic()
 
         with BundleWriter(
@@ -363,7 +363,7 @@ class AgentLoop[UserRequestT, OutputT](
                 request_event=request_event,
             )
 
-            ended_at = datetime.now(UTC)
+            ended_at = SYSTEM_CLOCK.utcnow()
 
             # Create context for caller to access results and add metadata
             ctx: BundleContext[OutputT] = BundleContext(

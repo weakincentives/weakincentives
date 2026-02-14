@@ -20,12 +20,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from ..budget import Budget
+from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..experiment import Experiment
@@ -62,7 +63,7 @@ class AgentLoopResult[OutputT]:
     run_context: RunContext | None = None
     """Execution context with correlation identifiers and metadata."""
 
-    completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime = field(default_factory=SYSTEM_CLOCK.utcnow)
     """Timestamp when processing completed."""
 
     bundle_path: Path | None = None
@@ -169,7 +170,7 @@ class AgentLoopRequest[UserRequestT]:
     deadline: Deadline | None = None
     resources: Mapping[type[object], object] | None = None
     request_id: UUID = field(default_factory=uuid4)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(default_factory=SYSTEM_CLOCK.utcnow)
     run_context: RunContext | None = None
     """Optional execution context. If not provided, AgentLoop creates one."""
     experiment: Experiment | None = None
@@ -199,7 +200,7 @@ class LoopRequestState[UserRequestT]:
     event_id: UUID = field(default_factory=uuid4)
     """Unique identifier for this state entry."""
 
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(default_factory=SYSTEM_CLOCK.utcnow)
     """Timestamp when this state was captured."""
 
 
@@ -223,7 +224,7 @@ class LoopRawResponse[OutputT]:
     event_id: UUID = field(default_factory=uuid4)
     """Unique identifier for this state entry."""
 
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(default_factory=SYSTEM_CLOCK.utcnow)
     """Timestamp when this state was captured."""
 
 
@@ -247,7 +248,7 @@ class LoopFinalResponse[OutputT]:
     event_id: UUID = field(default_factory=uuid4)
     """Unique identifier for this state entry."""
 
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(default_factory=SYSTEM_CLOCK.utcnow)
     """Timestamp when this state was captured."""
 
 

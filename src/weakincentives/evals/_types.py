@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 if TYPE_CHECKING:
     from ..runtime.session import SessionProtocol, SessionViewProtocol
 
+from ..clock import SYSTEM_CLOCK
 from ..experiment import Experiment
 from ..serde import parse
 
@@ -435,7 +436,7 @@ class EvalRequest[InputT, ExpectedT]:
     request_id: UUID = field(default_factory=uuid4)
     """Unique request identifier."""
 
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(default_factory=SYSTEM_CLOCK.utcnow)
     """When the request was created."""
 
 

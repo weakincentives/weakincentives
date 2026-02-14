@@ -21,9 +21,9 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, override
 
+from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ..debug.bundle import BundleConfig
 from ..runtime.dlq import DeadLetter, DLQPolicy
@@ -456,7 +456,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
             delivery_count=msg.delivery_count,
             last_error=str(error),
             last_error_type=f"{type(error).__module__}.{type(error).__qualname__}",
-            dead_lettered_at=datetime.now(UTC),
+            dead_lettered_at=SYSTEM_CLOCK.utcnow(),
             first_received_at=msg.enqueued_at,
             request_id=msg.body.request_id,
             reply_to=msg.reply_to.name if msg.reply_to else None,

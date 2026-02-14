@@ -25,10 +25,10 @@ import shutil
 import subprocess  # nosec: B404
 import tempfile
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from weakincentives.clock import SYSTEM_CLOCK
 from weakincentives.errors import SnapshotError, SnapshotRestoreError
 
 from ._types import FilesystemSnapshot
@@ -173,7 +173,7 @@ def create_snapshot(
 
     # Commit (allow empty for idempotent snapshots)
     # Use --no-gpg-sign to avoid issues in environments with signing hooks
-    message = tag or f"snapshot-{datetime.now(UTC).isoformat()}"
+    message = tag or f"snapshot-{SYSTEM_CLOCK.utcnow().isoformat()}"
     commit_result = run_git(
         ["commit", "-m", message, "--allow-empty", "--no-gpg-sign"],
         git_dir=git_dir,
@@ -216,7 +216,7 @@ def create_snapshot(
 
     return FilesystemSnapshot(
         snapshot_id=uuid4(),
-        created_at=datetime.now(UTC),
+        created_at=SYSTEM_CLOCK.utcnow(),
         commit_ref=commit_ref,
         root_path=root,
         git_dir=git_dir,

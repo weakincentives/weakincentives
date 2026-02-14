@@ -37,10 +37,11 @@ import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, is_dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast, get_origin
 from uuid import uuid4
 
+from weakincentives.clock import SYSTEM_CLOCK
 from weakincentives.formal import formal_spec
 from weakincentives.runtime.mailbox import (
     CompositeResolver,
@@ -373,7 +374,7 @@ class RedisMailbox[T, R]:
         """
         msg_id = str(uuid4())
         serialized = self._serialize(body)
-        enqueued_at = datetime.now(UTC).isoformat()
+        enqueued_at = SYSTEM_CLOCK.utcnow().isoformat()
 
         try:
             keys = [
@@ -523,7 +524,7 @@ class RedisMailbox[T, R]:
             )
             enqueued_at = datetime.fromisoformat(enqueued_str)
         else:
-            enqueued_at = datetime.now(UTC)
+            enqueued_at = SYSTEM_CLOCK.utcnow()
 
         # Parse reply_to name and resolve to mailbox
         reply_to: Mailbox[R, None] | None = None

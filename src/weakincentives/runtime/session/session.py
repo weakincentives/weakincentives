@@ -34,6 +34,7 @@ from types import MappingProxyType
 from typing import Any, Final, cast, override
 from uuid import UUID, uuid4
 
+from ...clock import SYSTEM_CLOCK
 from ...dbc import invariant
 from ...types.dataclass import SupportsDataclass
 from ..events import (
@@ -210,7 +211,7 @@ class Session(SessionProtocol):
         super().__init__()
         resolved_session_id = session_id if session_id is not None else uuid4()
         resolved_created_at = (
-            created_at if created_at is not None else datetime.now(UTC)
+            created_at if created_at is not None else SYSTEM_CLOCK.utcnow()
         )
         if resolved_created_at.tzinfo is None:
             msg = "Session created_at must be timezone-aware."

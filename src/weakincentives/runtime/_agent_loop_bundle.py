@@ -25,10 +25,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ..budget import Budget, BudgetTracker
+from ..clock import SYSTEM_CLOCK
 from ..deadlines import Deadline
 from .agent_loop_types import (
     AgentLoopConfig,
@@ -368,7 +369,7 @@ def handle_message_with_bundle(  # noqa: PLR0913, PLR0917
 
     writer: BundleWriter | None = None
     prompt: Prompt[Any] | None = None
-    started_at = datetime.now(UTC)
+    started_at = SYSTEM_CLOCK.utcnow()
     budget_tracker: BudgetTracker | None = None
     prompt_cleaned_up = False
     try:
@@ -414,7 +415,7 @@ def handle_message_with_bundle(  # noqa: PLR0913, PLR0917
                 writer=writer,
             )
 
-            ended_at = datetime.now(UTC)
+            ended_at = SYSTEM_CLOCK.utcnow()
 
             write_bundle_artifacts(
                 writer=writer,

@@ -48,9 +48,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 
 if TYPE_CHECKING:
@@ -69,7 +70,7 @@ if TYPE_CHECKING:
 
 def _utcnow() -> datetime:
     """Return the current UTC timestamp."""
-    return datetime.now(UTC)
+    return SYSTEM_CLOCK.utcnow()
 
 
 # ---------------------------------------------------------------------------
