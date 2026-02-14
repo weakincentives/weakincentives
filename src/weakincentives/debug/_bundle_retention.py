@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from ..clock import SYSTEM_CLOCK
+
 if TYPE_CHECKING:
     from .bundle import (
         BundleConfig,
@@ -184,7 +186,7 @@ def _apply_age_limit(
     """Mark bundles older than max_age_seconds for deletion."""
     if retention.max_age_seconds is None:
         return
-    now = datetime.now(UTC)
+    now = SYSTEM_CLOCK.utcnow()
     for bundle_path, created_at, _ in bundles:
         # Timestamps are already normalized to UTC in _collect_existing_bundles
         if (now - created_at).total_seconds() > retention.max_age_seconds:

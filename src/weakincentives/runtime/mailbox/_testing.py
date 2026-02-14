@@ -16,9 +16,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
+from ...clock import SYSTEM_CLOCK
 from ._types import (
     Mailbox,
     MailboxError,
@@ -240,7 +241,7 @@ class FakeMailbox[T, R]:
             raise self._connection_error
 
         msg_id = str(uuid4())
-        self._pending.append((msg_id, body, datetime.now(UTC), 0, reply_to))
+        self._pending.append((msg_id, body, SYSTEM_CLOCK.utcnow(), 0, reply_to))
         return msg_id
 
     def receive(
@@ -378,7 +379,7 @@ class FakeMailbox[T, R]:
         """
         msg_id = msg_id or str(uuid4())
         self._pending.append(
-            (msg_id, body, datetime.now(UTC), delivery_count, reply_to)
+            (msg_id, body, SYSTEM_CLOCK.utcnow(), delivery_count, reply_to)
         )
         return msg_id
 

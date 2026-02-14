@@ -17,11 +17,12 @@ from __future__ import annotations
 import contextlib
 import shutil
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
+from ...clock import SYSTEM_CLOCK
 from ...deadlines import Deadline
 from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
@@ -76,7 +77,7 @@ CLAUDE_AGENT_SDK_ADAPTER_NAME: AdapterName = "claude_agent_sdk"
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC)
+    return SYSTEM_CLOCK.utcnow()
 
 
 def _import_sdk() -> Any:  # pragma: no cover

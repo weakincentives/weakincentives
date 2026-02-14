@@ -19,11 +19,11 @@ session state and restoring from those snapshots for transaction rollback.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from threading import RLock
 from typing import TYPE_CHECKING
 from uuid import UUID  # used in type annotations
 
+from ...clock import SYSTEM_CLOCK
 from ._slice_types import SessionSlice, SessionSliceType
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import (
@@ -148,7 +148,7 @@ class SessionSnapshotter:
             msg = "Unable to serialize session slices"
             raise SnapshotSerializationError(msg) from error
 
-        created_at = datetime.now(UTC)
+        created_at = SYSTEM_CLOCK.utcnow()
         return Snapshot(
             created_at=created_at,
             parent_id=parent_id,

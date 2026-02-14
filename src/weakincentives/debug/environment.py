@@ -45,6 +45,7 @@ from dataclasses import field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ._git import GitInfo, capture_git_diff, capture_git_info
 
@@ -451,8 +452,6 @@ def capture_environment(
     Returns:
         EnvironmentCapture containing all collected information.
     """
-    from datetime import UTC, datetime
-
     # Capture in order of speed (fast first, slow last)
     system = _capture_system_info()
     python = _capture_python_info()
@@ -476,7 +475,7 @@ def capture_environment(
         git_diff=git_diff,
         command=command,
         container=container,
-        captured_at=datetime.now(UTC).isoformat(),
+        captured_at=SYSTEM_CLOCK.utcnow().isoformat(),
     )
 
 

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -76,35 +76,26 @@ class TestRetentionPolicyIntegration:
 
     def test_retention_max_age_deletes_old_bundles(self, tmp_path: Path) -> None:
         """Test max_age_seconds limit deletes old bundles."""
-        # Create a bundle with old timestamp
+        from weakincentives.clock import FakeClock
+
+        # Create a bundle with old timestamp using real clock
         with BundleWriter(tmp_path) as old_writer:
             old_writer.write_request_input({"old": True})
         assert old_writer.path is not None
         old_path = old_writer.path
 
-        # Patch datetime.now to return a time far in the future for retention check
-        original_now = datetime.now
-
-        def future_now(tz: object = None) -> datetime:
-            if tz is not None:
-                return original_now(tz) + __import__("datetime").timedelta(days=2)
-            return original_now() + __import__("datetime").timedelta(days=2)
+        # Create a fake clock set 2 days in the future for retention check
+        future_clock = FakeClock()
+        future_clock.set_wall(datetime.now(UTC) + timedelta(days=2))
 
         # Create a new bundle with retention policy
         retention = BundleRetentionPolicy(max_age_seconds=86400)  # 24 hours
         config = BundleConfig(target=tmp_path, retention=retention)
 
         with (
-            patch("weakincentives.debug.bundle.datetime") as mock_datetime,
-            patch(
-                "weakincentives.debug._bundle_retention.datetime"
-            ) as mock_retention_dt,
+            patch("weakincentives.debug._bundle_writer.SYSTEM_CLOCK", future_clock),
+            patch("weakincentives.debug._bundle_retention.SYSTEM_CLOCK", future_clock),
         ):
-            mock_datetime.now = future_now
-            mock_datetime.fromisoformat = datetime.fromisoformat
-            mock_retention_dt.now = future_now
-            mock_retention_dt.fromisoformat = datetime.fromisoformat
-            # Need to patch at the class level for the retention check
             with BundleWriter(tmp_path, config=config) as new_writer:
                 new_writer.write_request_input({"new": True})
 

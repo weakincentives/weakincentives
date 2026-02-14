@@ -19,9 +19,9 @@ including failure handling, dead-lettering, and reply/acknowledge operations.
 from __future__ import annotations
 
 import contextlib
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from ..clock import SYSTEM_CLOCK
 from .dlq import DeadLetter
 from .logging import StructuredLogger, bind_run_context, get_logger
 from .mailbox import Message, ReceiptHandleExpiredError, ReplyNotAvailableError
@@ -130,7 +130,7 @@ def dead_letter_message[UserRequestT, OutputT](  # noqa: PLR0913
         delivery_count=msg.delivery_count,
         last_error=str(error),
         last_error_type=f"{type(error).__module__}.{type(error).__qualname__}",
-        dead_lettered_at=datetime.now(UTC),
+        dead_lettered_at=SYSTEM_CLOCK.utcnow(),
         first_received_at=msg.enqueued_at,
         request_id=msg.body.request_id,
         reply_to=msg.reply_to.name if msg.reply_to else None,

@@ -29,10 +29,11 @@ import tempfile
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Final, override
 
+from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
 from ..filesystem import Filesystem, HostFilesystem
@@ -120,7 +121,7 @@ class HostMountPreview:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC)
+    return SYSTEM_CLOCK.utcnow()
 
 
 def _resolve_mount_path(host_path: str, allowed_roots: Sequence[Path]) -> Path:

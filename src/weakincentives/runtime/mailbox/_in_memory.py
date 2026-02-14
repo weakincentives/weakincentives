@@ -18,7 +18,7 @@ import threading
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
 from ...clock import SYSTEM_CLOCK, MonotonicClock
@@ -217,7 +217,7 @@ class InMemoryMailbox[T, R]:
             in_flight = _InFlightMessage[T, R](
                 id=msg_id,
                 body=body,
-                enqueued_at=datetime.now(UTC),
+                enqueued_at=SYSTEM_CLOCK.utcnow(),
                 delivery_count=0,
                 receipt_handle="",
                 reply_to=reply_to,

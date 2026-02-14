@@ -14,9 +14,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from ...clock import SYSTEM_CLOCK
 from ...prompt.tool import ToolResult
 from ...runtime.events import ToolInvoked
 from ...runtime.events.types import TokenUsage
@@ -69,7 +69,7 @@ def dispatch_tool_invoked(  # noqa: PLR0913
         params={},
         result=result,
         session_id=getattr(session, "session_id", None),
-        created_at=datetime.now(UTC),
+        created_at=SYSTEM_CLOCK.utcnow(),
         usage=None,
         rendered_output=rendered_output,
         call_id=tool_call_id,

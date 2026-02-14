@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from typing import Final, Literal
 from uuid import UUID
 
+from ..clock import SYSTEM_CLOCK
 from ._path import (
     MAX_PATH_DEPTH,
     MAX_SEGMENT_LENGTH,
@@ -160,7 +161,7 @@ def normalize_path(path: str) -> str:
 
 def now() -> datetime:
     """Return current UTC time truncated to milliseconds."""
-    value = datetime.now(UTC)
+    value = SYSTEM_CLOCK.utcnow()
     microsecond = value.microsecond - value.microsecond % 1000
     return value.replace(microsecond=microsecond, tzinfo=UTC)
 
