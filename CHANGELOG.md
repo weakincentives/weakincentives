@@ -2,9 +2,9 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.26.0 — 2026-02-14
 
-*Commits reviewed: 2026-02-07 (b47a2736) through 2026-02-13 (a8da20c4)*
+*Commits reviewed: 2026-02-07 (b47a2736) through 2026-02-14 (a8da20c4)*
 
 ### TL;DR
 

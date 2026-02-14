@@ -94,7 +94,7 @@ Pre-built views for common query patterns:
 
 The `logs` table includes a `seq` column extracted from `context.sequence_number`
 when present. This enables range queries on events that emit sequence numbers
-(e.g. legacy `log_aggregator.log_line`, and `transcript.collector.entry`).
+(e.g. legacy `log_aggregator.log_line`, and `transcript.entry`).
 
 ```sql
 -- Query native tool logs by sequence range
@@ -108,7 +108,7 @@ For events without a sequence number in context, `seq` is NULL.
 
 ## Transcript Table
 
-The `transcript` table normalizes `transcript.collector.entry` logs into
+The `transcript` table normalizes `transcript.entry` logs into
 queryable columns:
 
 | Column | Description |
@@ -264,7 +264,7 @@ Cache invalidated when:
 1. If stale/missing, create SQLite at `<bundle>.sqlite`:
    - `manifest.json` → `manifest`
    - `logs/app.jsonl` → `logs` (with `seq` extraction)
-   - `transcript.collector.entry` logs → `transcript`
+   - `transcript.entry` logs → `transcript`
    - `session/after.jsonl` → `session_slices` + `slice_*`
    - `config.json` → `config` (flattened)
    - `metrics.json` → `metrics`

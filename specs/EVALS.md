@@ -184,11 +184,12 @@ Statistical comparison between two experiments.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `lease_extender` | `LeaseExtenderConfig \| None` | `None` | Message visibility extension |
-| `debug_bundle_dir` | `Path \| None` | `None` | Debug bundle output directory |
+| `debug_bundle` | `BundleConfig \| None` | `None` | Debug bundle creation per sample |
 
-When `debug_bundle_dir` is set, EvalLoop creates debug bundles for each
-evaluation sample containing session state, logs, and eval metadata. See
-`specs/DEBUG_BUNDLE.md` for bundle format details.
+When `debug_bundle` is set with a `target` directory, EvalLoop creates debug
+bundles for each evaluation sample containing session state, logs, and eval
+metadata. The config also supports `retention` policy and `storage_handler`
+for external storage. See `specs/DEBUG_BUNDLE.md` for bundle format details.
 
 ### EvalLoop
 

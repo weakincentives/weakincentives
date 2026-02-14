@@ -73,6 +73,17 @@ Internal framework shared by runtime modules.
 | `tool.execution.complete` | DEBUG | tool_name, success |
 | `tool_handler_exception` | ERROR | provider_payload |
 
+### Transcript Events
+
+| Event | Level | Context |
+|-------|-------|---------|
+| `transcript.entry` | DEBUG | prompt_name, sequence_number, entry_type |
+| `transcript.start` | DEBUG | prompt_name, source |
+| `transcript.stop` | DEBUG | prompt_name, entry_count |
+| `transcript.error` | WARNING | prompt_name, error |
+| `transcript.path_discovered` | DEBUG | prompt_name, path |
+| `transcript.subagent_discovered` | DEBUG | prompt_name, subagent_id |
+
 ### Resource Events
 
 | Event | Level | Context |

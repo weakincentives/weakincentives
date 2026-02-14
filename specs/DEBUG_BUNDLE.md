@@ -43,6 +43,7 @@ debug_bundle/
     after.jsonl           # Session state after execution
   logs/
     app.jsonl             # All structured log records during execution (incl. transcript events when available)
+  transcript.jsonl        # Transcript entries extracted from logs (when available)
   environment/            # Reproducibility envelope
     system.json           # OS, kernel, arch, CPU, memory
     python.json           # Python version, executable, venv info
@@ -73,6 +74,7 @@ debug_bundle/
 | `session/before.jsonl` | No | Pre-execution session snapshot |
 | `session/after.jsonl` | Yes | Post-execution session snapshot |
 | `logs/app.jsonl` | Yes | Structured log records with request correlation (and transcript events when emitted) |
+| `transcript.jsonl` | No | Transcript entries extracted from logs (present when transcript events exist) |
 | `environment/` | No | Reproducibility envelope (system, Python, packages, git) |
 | `config.json` | Yes | AgentLoop, adapter, prompt configuration |
 | `run_context.json` | Yes | Run/request/session IDs, tracing spans |

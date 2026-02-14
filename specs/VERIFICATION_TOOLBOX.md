@@ -111,6 +111,7 @@ See `toolchain/checkers/__init__.py` for factory functions and execution order.
 | `deptry` | `SubprocessChecker` | Dependencies | Unused/missing dependencies |
 | `pip-audit` | `SubprocessChecker` | Vulnerabilities | Known CVEs in dependencies |
 | `architecture` | `ArchitectureChecker` | Code structure | Core/contrib separation |
+| `code-length` | `CodeLengthChecker` | Code size | Function/method and file length limits with baseline |
 | `docs` | `DocsChecker` | Documentation | Examples, links, references |
 | `markdown` | `AutoFormatChecker` | Markdown format | `mdformat` (auto-fix locally, check in CI) |
 | `bun-test` | `SubprocessChecker` | JavaScript tests | `bun test --coverage` (skips if bun not installed) |
@@ -313,6 +314,7 @@ See existing checkers for patterns:
 - `create_markdown_checker()` for `AutoFormatChecker` with text file list parsing
 - `create_bun_test_checker()` for `SubprocessChecker` with graceful skip
 - `ArchitectureChecker` for custom logic checker
+- `CodeLengthChecker` for AST-based analysis with baseline support
 
 ## Output Formatters
 
