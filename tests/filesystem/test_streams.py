@@ -18,10 +18,15 @@ be exercised through the full filesystem protocol tests.
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from weakincentives.filesystem._streams import (
     DefaultTextReader,
+    HostByteReader,
+    HostByteWriter,
     MemoryByteReader,
     MemoryByteWriter,
 )
@@ -301,3 +306,135 @@ class TestDefaultTextReader:
         reader.close()
         with pytest.raises(ValueError, match="closed"):
             list(reader)
+
+
+class TestHostByteReader:
+    """Tests for HostByteReader with host filesystem."""
+
+    def test_open_directory_raises(self, tmp_path: Path) -> None:
+        """Opening a directory should raise IsADirectoryError and close handle."""
+        subdir = tmp_path / "mydir"
+        subdir.mkdir()
+        with pytest.raises(IsADirectoryError, match="mydir"):
+            HostByteReader.open(subdir, "mydir")
+
+    def test_open_uses_fstat_for_size(self, tmp_path: Path) -> None:
+        """open() should get file size from os.fstat, not stat before open."""
+        f = tmp_path / "file.bin"
+        f.write_bytes(b"hello world")
+        reader = HostByteReader.open(f, "file.bin")
+        assert reader.size == 11
+        reader.close()
+
+
+class TestHostByteWriter:
+    """Tests for HostByteWriter atomic write behavior."""
+
+    def test_overwrite_is_atomic(self, tmp_path: Path) -> None:
+        """Overwrite should use temp file + rename for atomicity."""
+        f = tmp_path / "file.bin"
+        f.write_bytes(b"original")
+
+        with HostByteWriter.open(
+            f, "file.bin", mode="overwrite", create_parents=False
+        ) as w:
+            w.write(b"new content")
+
+        assert f.read_bytes() == b"new content"
+        # No temp files should remain
+        remaining = list(tmp_path.glob(".wink_tmp_*"))
+        assert remaining == []
+
+    def test_abort_on_error_preserves_original(self, tmp_path: Path) -> None:
+        """On error exit, original file should be preserved (no partial write)."""
+        f = tmp_path / "file.bin"
+        f.write_bytes(b"original")
+
+        with pytest.raises(RuntimeError, match="simulated"):
+            with HostByteWriter.open(
+                f, "file.bin", mode="overwrite", create_parents=False
+            ) as w:
+                w.write(b"partial data that should be discarded")
+                msg = "simulated error"
+                raise RuntimeError(msg)
+
+        # Original file should be untouched
+        assert f.read_bytes() == b"original"
+        # No temp files should remain
+        remaining = list(tmp_path.glob(".wink_tmp_*"))
+        assert remaining == []
+
+    def test_abort_when_already_closed_is_noop(self, tmp_path: Path) -> None:
+        """_abort() on already-closed writer should be a no-op."""
+        f = tmp_path / "file.bin"
+        writer = HostByteWriter.open(
+            f, "file.bin", mode="overwrite", create_parents=False
+        )
+        writer.write(b"content")
+        writer.close()
+        assert f.read_bytes() == b"content"
+        # Calling _abort after close should not raise or change anything
+        writer._abort()
+        assert f.read_bytes() == b"content"
+
+    def test_create_mode_atomic(self, tmp_path: Path) -> None:
+        """Create mode should atomically fail if file already exists."""
+        f = tmp_path / "file.bin"
+        f.write_bytes(b"existing")
+        with pytest.raises(FileExistsError):
+            HostByteWriter.open(f, "file.bin", mode="create", create_parents=False)
+
+    def test_append_mode_direct(self, tmp_path: Path) -> None:
+        """Append mode should write directly (no temp file)."""
+        f = tmp_path / "file.bin"
+        f.write_bytes(b"hello")
+        with HostByteWriter.open(
+            f, "file.bin", mode="append", create_parents=False
+        ) as w:
+            w.write(b" world")
+        assert f.read_bytes() == b"hello world"
+
+    def test_close_flush_failure_cleans_temp(self, tmp_path: Path) -> None:
+        """If flush/fsync fails during close, temp file should be cleaned up."""
+        f = tmp_path / "file.bin"
+        writer = HostByteWriter.open(
+            f, "file.bin", mode="overwrite", create_parents=False
+        )
+        writer.write(b"data")
+
+        with patch("os.fsync", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                writer.close()
+
+        # Temp file should have been cleaned up
+        remaining = list(tmp_path.glob(".wink_tmp_*"))
+        assert remaining == []
+        assert writer.closed
+
+    def test_abort_on_error_append_mode(self, tmp_path: Path) -> None:
+        """Abort in append mode (no temp file) should still close cleanly."""
+        f = tmp_path / "file.bin"
+        f.write_bytes(b"hello")
+
+        with pytest.raises(RuntimeError, match="simulated"):
+            with HostByteWriter.open(
+                f, "file.bin", mode="append", create_parents=False
+            ) as w:
+                w.write(b" world")
+                msg = "simulated error"
+                raise RuntimeError(msg)
+
+        assert w.closed
+
+    def test_close_flush_failure_append_mode(self, tmp_path: Path) -> None:
+        """Flush failure in append mode (no temp file) should still propagate."""
+        f = tmp_path / "file.bin"
+        f.write_bytes(b"hello")
+        writer = HostByteWriter.open(f, "file.bin", mode="append", create_parents=False)
+        writer.write(b" world")
+
+        with patch("os.fsync", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                writer.close()
+
+        assert writer.closed
