@@ -18,12 +18,14 @@ import asyncio
 import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from weakincentives.adapters._shared._visibility_signal import VisibilityExpansionSignal
+from weakincentives.adapters.codex_app_server._ephemeral_home import CodexEphemeralHome
 from weakincentives.adapters.codex_app_server._protocol import (
     authenticate,
     consume_messages,
@@ -72,6 +74,7 @@ from weakincentives.runtime.events import (
     PromptRendered,
 )
 from weakincentives.runtime.session import Session
+from weakincentives.skills import SkillMount
 
 # ---- Helpers ----
 
@@ -1939,3 +1942,229 @@ class TestApprovalPolicyUntrusted:
             assert resp["decision"] == "accept"
 
         asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Helpers for skill frontmatter
+# ---------------------------------------------------------------------------
+
+_SKILL_MD = "---\nname: {name}\ndescription: A test skill\n---\n\n# {name}\n"
+
+
+def _make_dir_skill(base: Path, name: str) -> Path:
+    d = base / name
+    d.mkdir()
+    (d / "SKILL.md").write_text(_SKILL_MD.format(name=name))
+    return d
+
+
+# ---------------------------------------------------------------------------
+# Skill mounting integration in _run_codex
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluateWithSkills:
+    """Test that skills trigger ephemeral home creation and env merging."""
+
+    def _success_messages(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "method": "item/completed",
+                "params": {"item": {"type": "agentMessage", "text": "ok"}},
+            },
+            {
+                "method": "turn/completed",
+                "params": {"turn": {"status": "completed"}},
+            },
+        ]
+
+    def test_skills_create_ephemeral_home(self, tmp_path: Path) -> None:
+        """When rendered prompt has skills, client env includes HOME + CODEX_HOME."""
+        skill_dir = _make_dir_skill(tmp_path, "my-skill")
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        original_render = prompt.render
+
+        def patched_render(**kwargs: Any) -> Any:
+            from weakincentives.prompt.rendering import RenderedPrompt
+
+            rendered = original_render(**kwargs)
+            return RenderedPrompt(
+                text=rendered.text,
+                _tools=rendered.tools,
+                _skills=(SkillMount(source=skill_dir),),
+            )
+
+        with (
+            patch(
+                "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+            ) as MockClient,
+            patch.object(prompt, "render", side_effect=patched_render),
+        ):
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+            mock_client.read_messages.return_value = _messages_iterator(
+                self._success_messages()
+            )
+            MockClient.return_value = mock_client
+
+            result = adapter.evaluate(prompt, session=session)
+
+        assert result.text == "ok"
+        # Verify client was constructed with env containing HOME
+        constructor_kwargs = MockClient.call_args[1]
+        env = constructor_kwargs.get("env") or {}
+        assert "HOME" in env
+
+    def test_no_skills_no_ephemeral_home(self) -> None:
+        """When rendered prompt has no skills, env is unchanged."""
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        with patch(
+            "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+        ) as MockClient:
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+            mock_client.read_messages.return_value = _messages_iterator(
+                self._success_messages()
+            )
+            MockClient.return_value = mock_client
+
+            adapter.evaluate(prompt, session=session)
+
+        # No skills -> env should be None (from empty dict)
+        constructor_kwargs = MockClient.call_args[1]
+        assert constructor_kwargs.get("env") is None
+
+    def test_ephemeral_home_cleaned_up_on_error(self, tmp_path: Path) -> None:
+        """Ephemeral home is cleaned up even when protocol raises."""
+        skill_dir = _make_dir_skill(tmp_path, "my-skill")
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        original_render = prompt.render
+
+        def patched_render(**kwargs: Any) -> Any:
+            from weakincentives.prompt.rendering import RenderedPrompt
+
+            rendered = original_render(**kwargs)
+            return RenderedPrompt(
+                text=rendered.text,
+                _tools=rendered.tools,
+                _skills=(SkillMount(source=skill_dir),),
+            )
+
+        with (
+            patch(
+                "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+            ) as MockClient,
+            patch.object(prompt, "render", side_effect=patched_render),
+            patch.object(CodexEphemeralHome, "cleanup") as mock_cleanup,
+        ):
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = CodexClientError("fail")
+            MockClient.return_value = mock_client
+
+            with pytest.raises(PromptEvaluationError):
+                adapter.evaluate(prompt, session=session)
+
+        mock_cleanup.assert_called()
+
+    def test_client_receives_merged_env(self, tmp_path: Path) -> None:
+        """Config env and ephemeral home env are merged."""
+        skill_dir = _make_dir_skill(tmp_path, "my-skill")
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(
+                cwd="/tmp/test",
+                env={"CUSTOM_VAR": "value"},
+            ),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        original_render = prompt.render
+
+        def patched_render(**kwargs: Any) -> Any:
+            from weakincentives.prompt.rendering import RenderedPrompt
+
+            rendered = original_render(**kwargs)
+            return RenderedPrompt(
+                text=rendered.text,
+                _tools=rendered.tools,
+                _skills=(SkillMount(source=skill_dir),),
+            )
+
+        with (
+            patch(
+                "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+            ) as MockClient,
+            patch.object(prompt, "render", side_effect=patched_render),
+        ):
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+            mock_client.read_messages.return_value = _messages_iterator(
+                self._success_messages()
+            )
+            MockClient.return_value = mock_client
+
+            adapter.evaluate(prompt, session=session)
+
+        constructor_kwargs = MockClient.call_args[1]
+        env = constructor_kwargs.get("env") or {}
+        assert env.get("CUSTOM_VAR") == "value"
+        assert "HOME" in env
+
+    def test_ephemeral_home_cleaned_up_on_mount_failure(self, tmp_path: Path) -> None:
+        """Ephemeral home is cleaned up when mount_skills raises."""
+        nonexistent = tmp_path / "does-not-exist"
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        original_render = prompt.render
+
+        def patched_render(**kwargs: Any) -> Any:
+            from weakincentives.prompt.rendering import RenderedPrompt
+
+            rendered = original_render(**kwargs)
+            return RenderedPrompt(
+                text=rendered.text,
+                _tools=rendered.tools,
+                _skills=(SkillMount(source=nonexistent),),
+            )
+
+        with (
+            patch.object(prompt, "render", side_effect=patched_render),
+            patch.object(CodexEphemeralHome, "cleanup") as mock_cleanup,
+        ):
+            from weakincentives.skills import SkillNotFoundError
+
+            with pytest.raises(SkillNotFoundError):
+                adapter.evaluate(prompt, session=session)
+
+        mock_cleanup.assert_called()

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast, override
@@ -37,6 +38,7 @@ from .._shared._bridge import create_bridged_tools
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ._async import run_async
+from ._ephemeral_home import CodexEphemeralHome
 from ._protocol import execute_protocol
 from ._response import build_response
 from ._schema import bridged_tools_to_dynamic_specs, build_output_schema
@@ -220,6 +222,30 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
 
         return effective_cwd, temp_workspace_dir, prompt
 
+    @staticmethod
+    def _setup_skill_env(
+        rendered: RenderedPrompt[object],
+        config_env: Mapping[str, str] | None,
+    ) -> tuple[CodexEphemeralHome | None, dict[str, str] | None]:
+        """Create an ephemeral home for skill discovery if needed.
+
+        Returns (ephemeral_home_or_none, merged_env_or_none).
+        """
+        ephemeral_home: CodexEphemeralHome | None = None
+        if rendered.skills:
+            ephemeral_home = CodexEphemeralHome()
+            try:
+                ephemeral_home.mount_skills(rendered.skills)
+            except BaseException:
+                ephemeral_home.cleanup()
+                raise
+
+        client_env = dict(config_env or {})
+        if ephemeral_home is not None:
+            client_env.update(ephemeral_home.get_env())
+
+        return ephemeral_home, client_env or None
+
     async def _run_codex[OutputT](
         self,
         *,
@@ -257,9 +283,13 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
 
         output_schema = build_output_schema(rendered)
 
+        ephemeral_home, client_env = self._setup_skill_env(
+            rendered, self._client_config.env
+        )
+
         client = CodexAppServerClient(
             codex_bin=self._client_config.codex_bin,
-            env=self._client_config.env,
+            env=client_env,
             suppress_stderr=self._client_config.suppress_stderr,
         )
 
@@ -303,6 +333,8 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             ) from error
         finally:
             await client.stop()
+            if ephemeral_home is not None:
+                ephemeral_home.cleanup()
 
         accumulated_text, usage = result
         return build_response(
