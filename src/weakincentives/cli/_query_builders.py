@@ -27,6 +27,7 @@ from typing import Any, cast
 
 from ..debug import BundleValidationError, DebugBundle
 from ..types import JSONValue
+from ._query_environment import _build_environment_tables
 from ._query_helpers import _flatten_json
 from ._query_tables import (
     _VIEW_DEFINITIONS,
@@ -43,19 +44,7 @@ from ._query_transcript import (
 )
 
 __all__ = [
-    "_build_config_table",
-    "_build_errors_table",
-    "_build_eval_table",
-    "_build_files_table",
-    "_build_logs_table",
-    "_build_manifest_table",
-    "_build_metrics_table",
-    "_build_prompt_overrides_table",
-    "_build_run_context_table",
-    "_build_session_slices_table",
-    "_build_tool_calls_table",
-    "_build_transcript_table",
-    "_build_views",
+    "build_all_tables",
 ]
 
 
@@ -427,3 +416,26 @@ def _build_views(conn: sqlite3.Connection) -> None:
     """Create SQL views for common query patterns."""
     for sql in _VIEW_DEFINITIONS:
         _ = conn.execute(sql)
+
+
+def build_all_tables(conn: sqlite3.Connection, bundle: DebugBundle) -> None:
+    """Build all tables and views from bundle contents.
+
+    Orchestrates the full table-building pipeline: manifest, logs,
+    transcript, tool calls, errors, session slices, files, config,
+    metrics, run context, prompt overrides, eval, environment, and views.
+    """
+    _build_manifest_table(conn, bundle)
+    _build_logs_table(conn, bundle)
+    _build_transcript_table(conn, bundle)
+    _build_tool_calls_table(conn, bundle)
+    _build_errors_table(conn, bundle)
+    _build_session_slices_table(conn, bundle)
+    _build_files_table(conn, bundle)
+    _build_config_table(conn, bundle)
+    _build_metrics_table(conn, bundle)
+    _build_run_context_table(conn, bundle)
+    _build_prompt_overrides_table(conn, bundle)
+    _build_eval_table(conn, bundle)
+    _build_environment_tables(conn, bundle)
+    _build_views(conn)

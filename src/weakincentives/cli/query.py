@@ -32,22 +32,7 @@ from ..dataclasses import FrozenDataclass
 from ..debug import BundleValidationError, DebugBundle
 from ..errors import WinkError
 from ..resources.protocols import Closeable
-from ._query_builders import (
-    _build_config_table,
-    _build_errors_table,
-    _build_eval_table,
-    _build_files_table,
-    _build_logs_table,
-    _build_manifest_table,
-    _build_metrics_table,
-    _build_prompt_overrides_table,
-    _build_run_context_table,
-    _build_session_slices_table,
-    _build_tool_calls_table,
-    _build_transcript_table,
-    _build_views,
-)
-from ._query_environment import _build_environment_tables
+from ._query_builders import build_all_tables
 from ._query_formatters import (
     export_jsonl as export_jsonl,
     format_as_json as format_as_json,
@@ -187,27 +172,13 @@ class QueryDatabase(Closeable):
     def build(self) -> None:
         """Build SQLite database from bundle contents."""
         conn = self.connection
-        bundle = self._bundle
         _ = conn.execute(
             "CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY)"
         )
         _ = conn.execute(
             "INSERT INTO _schema_version (version) VALUES (?)", (_SCHEMA_VERSION,)
         )
-        _build_manifest_table(conn, bundle)
-        _build_logs_table(conn, bundle)
-        _build_transcript_table(conn, bundle)
-        _build_tool_calls_table(conn, bundle)
-        _build_errors_table(conn, bundle)
-        _build_session_slices_table(conn, bundle)
-        _build_files_table(conn, bundle)
-        _build_config_table(conn, bundle)
-        _build_metrics_table(conn, bundle)
-        _build_run_context_table(conn, bundle)
-        _build_prompt_overrides_table(conn, bundle)
-        _build_eval_table(conn, bundle)
-        _build_environment_tables(conn, bundle)
-        _build_views(conn)
+        build_all_tables(conn, self._bundle)
         conn.commit()
         self._built = True
         self.close()
