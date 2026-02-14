@@ -19,11 +19,11 @@ single SDK execution run.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ...budget import BudgetTracker
+from ...clock import SYSTEM_CLOCK, MonotonicClock
 from ...deadlines import Deadline
 from ...prompt.protocols import PromptProtocol
 from ...runtime.run_context import RunContext
@@ -114,7 +114,7 @@ class HookContext:
     HookContext provides richer functionality for session state management.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         session: SessionProtocol,
@@ -122,6 +122,7 @@ class HookContext:
         adapter_name: str,
         prompt_name: str,
         constraints: HookConstraints | None = None,
+        clock: MonotonicClock = SYSTEM_CLOCK,
     ) -> None:
         self._session = session
         self._prompt = prompt
@@ -137,7 +138,8 @@ class HookContext:
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
         self.stats: HookStats = HookStats()
-        self._start_time = time.monotonic()
+        self.clock = clock
+        self._start_time = clock.monotonic()
 
     def beat(self) -> None:
         """Record a heartbeat to prove processing is active.
@@ -188,4 +190,4 @@ class HookContext:
     @property
     def elapsed_ms(self) -> int:
         """Return elapsed time in milliseconds since context creation."""
-        return int((time.monotonic() - self._start_time) * 1000)
+        return int((self.clock.monotonic() - self._start_time) * 1000)

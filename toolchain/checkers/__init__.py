@@ -31,6 +31,7 @@ from ..parsers import (
     parse_ty,
 )
 from .architecture import ArchitectureChecker
+from .banned_time_imports import BannedTimeImportsChecker
 from .code_length import CodeLengthChecker
 from .docs import DocsChecker
 from .private_imports import PrivateImportChecker
@@ -244,6 +245,15 @@ def create_architecture_checker() -> ArchitectureChecker:
     return ArchitectureChecker()
 
 
+def create_banned_time_imports_checker() -> BannedTimeImportsChecker:
+    """Create the banned time imports checker.
+
+    Flags direct ``import time`` in src/weakincentives/ (excluding clock.py).
+    Production code must use clock protocols instead.
+    """
+    return BannedTimeImportsChecker()
+
+
 def create_code_length_checker() -> CodeLengthChecker:
     """Create the code length checker.
 
@@ -275,6 +285,7 @@ def create_all_checkers() -> list[Checker]:
         create_pip_audit_checker(),
         create_architecture_checker(),
         create_private_imports_checker(),
+        create_banned_time_imports_checker(),
         create_code_length_checker(),
         create_docs_checker(),
         create_markdown_checker(),
@@ -296,6 +307,7 @@ __all__ = [
     "create_markdown_checker",
     "create_architecture_checker",
     "create_private_imports_checker",
+    "create_banned_time_imports_checker",
     "create_code_length_checker",
     "create_docs_checker",
 ]

@@ -14,10 +14,10 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ...clock import SYSTEM_CLOCK, MonotonicClock
 from ...runtime.logging import StructuredLogger, get_logger
 
 if TYPE_CHECKING:
@@ -42,9 +42,11 @@ class ACPClient:
         config: ACPClientConfig,
         *,
         workspace_root: str | None = None,
+        clock: MonotonicClock = SYSTEM_CLOCK,
     ) -> None:
         self._config = config
         self._workspace_root = workspace_root
+        self._clock = clock
         self._accumulator: Any = None  # Lazy: SessionAccumulator
         self._transcript_bridge: ACPTranscriptBridge | None = None
         self._last_update_time: float | None = None
@@ -87,7 +89,7 @@ class ACPClient:
         """Handle ``session/update`` notification."""
         from acp.schema import SessionNotification
 
-        self._last_update_time = time.monotonic()
+        self._last_update_time = self._clock.monotonic()
 
         # Wrap in SessionNotification for accumulator
         notification = SessionNotification(sessionId=session_id, update=update)

@@ -20,10 +20,9 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import time
 from typing import TYPE_CHECKING, override
 
-from ..clock import SYSTEM_CLOCK
+from ..clock import SYSTEM_CLOCK, MonotonicClock
 from ..dataclasses import FrozenDataclass
 from ..debug.bundle import BundleConfig
 from ..runtime.dlq import DeadLetter, DLQPolicy
@@ -108,8 +107,9 @@ class EvalLoop[InputT, OutputT, ExpectedT](
     _evaluator: Evaluator | SessionEvaluator
     _config: EvalLoopConfig
     _dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None
+    _clock: MonotonicClock
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         loop: AgentLoop[InputT, OutputT],
@@ -117,6 +117,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
         config: EvalLoopConfig | None = None,
         dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None = None,
+        clock: MonotonicClock = SYSTEM_CLOCK,
     ) -> None:
         """Initialize the EvalLoop.
 
@@ -141,6 +142,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         self._evaluator = evaluator
         self._config = effective_config
         self._dlq = dlq
+        self._clock = clock
 
     @override
     def _process_message(
@@ -220,7 +222,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         """Execute and score a sample without debug bundling."""
         sample = request.sample
         experiment = request.experiment
-        start = time.monotonic()
+        start = self._clock.monotonic()
 
         # Pass our heartbeat and experiment to AgentLoop
         response, session = self._loop.execute(
@@ -228,7 +230,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
             heartbeat=self._heartbeat,
             experiment=experiment,
         )
-        latency_ms = int((time.monotonic() - start) * 1000)
+        latency_ms = int((self._clock.monotonic() - start) * 1000)
 
         # Beat after sample execution to prove progress
         self._heartbeat.beat()

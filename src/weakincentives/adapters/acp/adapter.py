@@ -18,14 +18,13 @@ import asyncio
 import json
 import shutil
 import tempfile
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
-from ...clock import SYSTEM_CLOCK, AsyncSleeper
+from ...clock import SYSTEM_CLOCK, AsyncSleeper, MonotonicClock
 from ...deadlines import Deadline
 from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
@@ -94,11 +93,13 @@ class ACPAdapter(ProviderAdapter[Any]):
         adapter_config: ACPAdapterConfig | None = None,
         client_config: ACPClientConfig | None = None,
         async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
+        clock: MonotonicClock = SYSTEM_CLOCK,
     ) -> None:
         super().__init__()
         self._adapter_config = adapter_config or ACPAdapterConfig()
         self._client_config = client_config or ACPClientConfig()
         self._async_sleeper = async_sleeper
+        self._clock = clock
 
         logger.debug(
             "acp.adapter.init",
@@ -270,7 +271,9 @@ class ACPAdapter(ProviderAdapter[Any]):
         mcp_server = create_mcp_tool_server(tuple(all_tools))
 
         start_time = _utcnow()
-        client = ACPClient(self._client_config, workspace_root=effective_cwd)
+        client = ACPClient(
+            self._client_config, workspace_root=effective_cwd, clock=self._clock
+        )
 
         # Create transcript bridge for debug bundle visibility.
         session_id = getattr(session, "session_id", None)
@@ -638,10 +641,10 @@ class ACPAdapter(ProviderAdapter[Any]):
             return
 
         quiet_s = self._adapter_config.quiet_period_ms / 1000.0
-        now = time.monotonic()
+        now = self._clock.monotonic()
         hard_cap = now + self._MAX_DRAIN_S
         deadline_time = (
-            time.monotonic() + deadline.remaining().total_seconds()
+            self._clock.monotonic() + deadline.remaining().total_seconds()
             if deadline
             else None
         )
@@ -651,7 +654,7 @@ class ACPAdapter(ProviderAdapter[Any]):
             effective_deadline = hard_cap
 
         while True:
-            now = time.monotonic()
+            now = self._clock.monotonic()
             if now >= effective_deadline:
                 break
 

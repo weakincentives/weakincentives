@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import os
 import socket
-import time
 from abc import abstractmethod
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -43,7 +42,7 @@ from typing import TYPE_CHECKING, override
 from uuid import UUID, uuid4
 
 from ..budget import Budget, BudgetTracker
-from ..clock import SYSTEM_CLOCK
+from ..clock import SYSTEM_CLOCK, MonotonicClock
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
 from ._agent_loop_bundle import (
@@ -128,7 +127,7 @@ class AgentLoop[UserRequestT, OutputT](
     _dlq: DLQPolicy[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]] | None
     _worker_id: str
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         adapter: ProviderAdapter[OutputT],
@@ -137,6 +136,7 @@ class AgentLoop[UserRequestT, OutputT](
         worker_id: str | None = None,
         dlq: DLQPolicy[AgentLoopRequest[UserRequestT], AgentLoopResult[OutputT]]
         | None = None,
+        clock: MonotonicClock = SYSTEM_CLOCK,
     ) -> None:
         """Initialize the AgentLoop.
 
@@ -161,6 +161,7 @@ class AgentLoop[UserRequestT, OutputT](
         self._adapter = adapter
         self._config = effective_config
         self._dlq = dlq
+        self._clock = clock
         # Auto-generate worker_id if not provided
         if worker_id:
             self._worker_id = worker_id
@@ -334,7 +335,7 @@ class AgentLoop[UserRequestT, OutputT](
 
         bundle_target.mkdir(parents=True, exist_ok=True)
         started_at = SYSTEM_CLOCK.utcnow()
-        start_mono = time.monotonic()
+        start_mono = self._clock.monotonic()
 
         with BundleWriter(
             bundle_target, bundle_id=uuid4(), config=bundle_config, trigger="direct"
@@ -370,7 +371,7 @@ class AgentLoop[UserRequestT, OutputT](
                 writer=writer,
                 response=response,
                 session=session,
-                latency_ms=int((time.monotonic() - start_mono) * 1000),
+                latency_ms=int((self._clock.monotonic() - start_mono) * 1000),
             )
 
             # Yield to allow caller to compute score and add eval metadata

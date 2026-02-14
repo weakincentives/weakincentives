@@ -51,4 +51,5 @@ tests/runtime/test_lifecycle.py
 tests/runtime/test_mailbox.py
 tests/serde/test_loop_serde.py
 tests/serde/test_parse_and_dump.py
+tests/toolchain/test_checkers.py
 tests/toolchain/test_parsers.py
