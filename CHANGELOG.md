@@ -4,36 +4,46 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-*Commits reviewed: 2026-02-07 (b47a2736) through 2026-02-07 (0431d828)*
+*Commits reviewed: 2026-02-07 (b47a2736) through 2026-02-13 (a8da20c4)*
 
 ### TL;DR
 
-WINK introduces a **unified transcript system** across adapters — a shared
-`TranscriptEmitter` in the runtime layer and a `CodexTranscriptBridge` enable
-both the Claude Agent SDK and Codex App Server adapters to emit structurally
+WINK gains a full **ACP adapter** with **OpenCode integration** (~2,100 lines of
+adapter code, ~4,200 lines of tests), enabling agents to run against any
+ACP-compatible CLI (e.g., OpenCode) with MCP-over-HTTP tool bridging,
+consolidated transcript emission, and structured output via an MCP tool. The
+adapter stack is two-layer: a generic `ACPAdapter` handles the protocol flow
+(initialize, new_session, prompt dispatch, drain quiet period), while
+`OpenCodeACPAdapter` adds model validation, empty-response detection, and
+OpenCode-specific quirks.
+
+The **unified transcript system** introduced earlier this cycle is now
+production-complete — a shared `TranscriptEmitter` in the runtime layer and
+adapter-specific bridges (`CodexTranscriptBridge`, `ACPTranscriptBridge`) enable
+all three adapters (Claude SDK, Codex App Server, ACP) to emit structurally
 identical transcript entries using 9 canonical entry types. The Claude adapter
-now **splits mixed content blocks** (e.g., an assistant message containing
-tool_use blocks becomes separate `assistant_message` + `tool_use` entries),
-making cross-adapter transcript analysis uniform. Debug bundles gain a dedicated
-`transcript.jsonl` artifact, and the `wink query` schema is upgraded to v9
-with corrected tool metrics and bridged-tool event tracking.
+**splits mixed content blocks** (assistant messages containing `tool_use` blocks
+become separate `assistant_message` + `tool_use` entries). Debug bundles gain a
+dedicated `transcript.jsonl` artifact, and `wink query` schema is upgraded to v9.
 
-**Skills move from adapter config to prompt sections** — `SkillConfig` is
-deleted, `IsolationConfig.skills` is removed, and `SkillMount` instances are
-now attached directly to sections via `Section(skills=(...))`. Skills follow
-the same rendering, visibility, and progressive disclosure rules as tools.
+**Adapter workspace sections are consolidated** into a single provider-agnostic
+`WorkspaceSection` in the prompt layer, replacing `ClaudeAgentWorkspaceSection`
+and `CodexWorkspaceSection`. **Skills move from adapter config to prompt
+sections** — `SkillConfig` is deleted and `SkillMount` instances attach directly
+to sections via `Section(skills=(...))`. The `deadline` field is **removed from
+`AgentLoopConfig`**. The **serde API is simplified** by removing
+`case_insensitive`, `alias_generator`, `aliases` parameters, `extra="allow"`
+mode, and AST-based type resolution. The `@pure` decorator is **removed from
+all production code**.
 
-The `deadline` field is **removed from `AgentLoopConfig`** — deadlines are now
-exclusively per-request via `AgentLoopRequest` or `execute(deadline=...)`.
-A **bug fix** in the transcript collector prevents permanent loss of transcripts
-when the `.jsonl` file doesn't exist at hook time, using a retry-on-poll
-mechanism. Documentation receives substantial updates: the debugging guide gains
-complete `wink query` reference material and AI agent integration instructions,
-the README documents both execution harnesses side-by-side, and a new unified
-`TRANSCRIPT.md` spec replaces the Claude-specific `TRANSCRIPT_COLLECTION.md`.
-The **serde API is simplified** by removing `case_insensitive`, `alias_generator`,
-`aliases` parameters, `extra="allow"` mode, and AST-based type resolution;
-field-level aliases via `field(metadata={"alias": "..."})` remain supported.
+A massive **modular decomposition** splits 15+ large source files and 5+
+monolithic test files into focused, single-responsibility modules — the Codex
+adapter, Claude SDK adapter, serde, prompt registry, query database, debug
+bundle, and CLI are all restructured. A new **Adapter Compatibility Kit (ACK)
+specification** defines a unified integration testing framework across all
+adapters. A new **code length checker** enforces 120-line method and 720-line
+file limits. The **WINK presentation slides** are added as a Marp-based deck
+with a GitHub Actions build workflow.
 
 ---
 
@@ -95,7 +105,7 @@ loop.execute(my_request, deadline=Deadline(...))
 
 `SkillConfig` is deleted. `IsolationConfig.skills` is removed along with the
 `skills` parameter on all `IsolationConfig` factory methods
-(`inherit_host_auth`, `with_api_key`, `with_anthropic_api_key`, `with_bedrock`).
+(`inherit_host_auth`, `explicit_api_key`, `require_anthropic_env`, `bedrock`).
 `SkillMount.enabled` is removed — use section visibility instead.
 
 Skills are now attached to sections and collected during prompt rendering,
@@ -133,6 +143,26 @@ section = MarkdownSection(
 - `PromptRegistry` tracks skill names, detects duplicates, and computes
   `subtree_has_skills` index
 - `EphemeralHome.mount_skills()` is now public with single-call enforcement
+
+#### Consolidated `WorkspaceSection` Replaces Per-Adapter Implementations
+
+`ClaudeAgentWorkspaceSection` (492 lines, deleted) and `CodexWorkspaceSection`
+(450 lines, deleted) are replaced by a single provider-agnostic
+`WorkspaceSection` in `weakincentives.prompt.workspace`. `HostMount`,
+`HostMountPreview`, `WorkspaceBudgetExceededError`, `WorkspaceSecurityError`,
+and `compute_workspace_fingerprint` also move to the prompt layer. The old
+protocol `WorkspaceSection` in `prompt/protocols.py` is renamed to
+`WorkspaceSectionProtocol`.
+
+**Migration:**
+```python
+# Old ❌
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentWorkspaceSection
+from weakincentives.adapters.codex_app_server import CodexWorkspaceSection
+
+# New ✅
+from weakincentives.prompt import WorkspaceSection
+```
 
 #### Serde API Simplification
 
@@ -214,11 +244,60 @@ will differ from previous behavior.
 **Query database:** Schema bumped to v9. Existing cached databases will be
 rebuilt automatically.
 
+#### Removed `@pure` Decorator from Production Code
+
+The `@pure` decorator has been removed from all 28 production functions across
+`cli/query.py` (18 functions), `runtime/session/` (8 functions), and public
+API listings. The decorator infrastructure remains in the `dbc` module but is
+no longer applied or exported. Related purity tests are deleted (159 lines
+removed from `test_dbc_contracts.py`).
+
 ---
 
 ### New Features
 
-#### Unified Transcript System (`TranscriptEmitter` + `CodexTranscriptBridge`)
+#### ACP Adapter with OpenCode Integration
+
+New two-layer ACP adapter stack (`src/weakincentives/adapters/acp/`, ~1,900
+lines; `src/weakincentives/adapters/opencode_acp/`, ~150 lines) for running
+WINK agents against any ACP-compatible CLI.
+
+**`ACPAdapter`** (`adapter.py`, 737 lines): Core adapter implementing the full
+ACP protocol flow — CWD resolution, MCP server lifecycle, ACP handshake
+(`initialize` + `new_session`), session configuration, prompt dispatch, drain
+quiet period, text extraction, and structured output resolution. Provides
+subclass hooks: `_validate_model()`, `_handle_mode_error()`,
+`_detect_empty_response()`.
+
+**`ACPClient`** (`client.py`, 264 lines): Implements `acp.interfaces.Client`
+protocol. Handles `session_update()` notifications (tracking
+`AgentMessageChunk`, `AgentThoughtChunk`, `ToolCallStart`, `ToolCallProgress`),
+permission requests, and filesystem access with workspace-boundary enforcement.
+Generates synthetic monotonic tool IDs (`_tc_1`, `_tc_2`, ...) for agents that
+send empty `tool_call_id` values.
+
+**`MCPHttpServer`** (`_mcp_http.py`, 295 lines): In-process HTTP server
+exposing WINK tools to ACP agents via `StreamableHTTPServerTransport` with
+per-instance bearer token authentication. Runs uvicorn in a daemon thread.
+
+**`ACPTranscriptBridge`** (`_transcript.py`, 186 lines): Buffers streaming
+deltas and emits consolidated transcript entries on type change or session end.
+Reduces ~850 raw token-level entries to ~70 consolidated entries.
+
+**`StructuredOutputTool`** (`_structured_output.py`, 162 lines): MCP-compatible
+tool that captures structured output. Discovered via `tools/list`, validates
+against JSON schema. Thread-safe capture for cross-thread access.
+
+**`OpenCodeACPAdapter`** (`opencode_acp/adapter.py`, 82 lines): Thin subclass
+adding model validation against `available_models`, empty-response detection
+(raises on zero `AgentMessageChunk` updates), and adapter name override.
+
+**New optional dependency:** `weakincentives[acp]` requires
+`agent-client-protocol>=0.8.0`, `mcp>=1.26.0`, `uvicorn>=0.40.0`.
+
+**New adapter name constants:** `ACP_ADAPTER_NAME`, `OPENCODE_ACP_ADAPTER_NAME`.
+
+#### Unified Transcript System (`TranscriptEmitter` + Adapter Bridges)
 
 A shared transcript runtime (`src/weakincentives/runtime/transcript.py`, 283
 lines) provides adapter-agnostic transcript emission with 9 canonical entry
@@ -244,6 +323,13 @@ types: `user_message`, `assistant_message`, `tool_use`, `tool_result`,
 - Handles `turn/started`, `item/started`, `item/completed`,
   `item/reasoning/completed`, `thread/tokenUsage/updated`, `turn/completed`
 - Emits `tool_use`/`tool_result` for WINK-bridged tool calls
+
+**ACP integration** via `ACPTranscriptBridge`
+(`adapters/acp/_transcript.py`, 186 lines):
+- Buffers `AgentMessageChunk` and `AgentThoughtChunk` streaming deltas
+- Consolidates `ToolCallProgress` updates per `tool_call_id`
+- Emits consolidated `assistant_message`, `thinking`, `tool_use`, `tool_result`
+  entries on type change or session end
 
 **Claude SDK message splitting** — mixed content blocks are split into
 separate transcript entries for structural consistency with Codex:
@@ -285,13 +371,110 @@ New extraction functions handle the unified transcript format:
   notification items
 - `_apply_bridged_tool_details()` — extracts tool metadata from WINK bridged
   tool events
+- `tool_call_id` added as fallback key alongside `id` and `tool_use_id` for ACP
+  adapter compatibility
 - Two-phase transcript loading: artifact-first, log-fallback
+
+#### Debug UI Improvements
+
+- `wink debug` index page now returns `HTMLResponse` with `Cache-Control:
+  no-cache` header. HTTP middleware `_no_cache_static()` added to prevent stale
+  static asset caching.
 
 #### Integration Test Timeout Increase
 
 Integration test timeout bumped from 180s to 300s for `integration-tests`,
 `redis-tests`, `redis-standalone-tests`, and `redis-cluster-tests` in the
 Makefile.
+
+#### Modernized Type Hints and Error Handling
+
+- `evals/_helpers.py`: `submit_dataset` and `submit_experiments` migrated from
+  `TypeVar` declarations to PEP 695 generic syntax (`def func[InputT, ...]`)
+- `_ephemeral_home.py`: Bare `assert api_key is not None` replaced with
+  explicit `ValueError` raise
+- `dataclasses/__init__.py`: Redundant `cast(Callable[[type[T]], type[T]], ...)`
+  simplified to direct `dataclass()` call
+
+---
+
+### Refactoring
+
+#### Large-Scale Modular Decomposition
+
+15+ large source files were decomposed into focused, single-responsibility
+private modules. All public APIs remain unchanged — imports continue to work
+through package `__init__.py` re-exports. In total, ~30 new private modules
+were created. Key decompositions:
+
+**Claude Agent SDK adapter** (`adapters/claude_agent_sdk/`):
+- `adapter.py` (1,774 → 695 lines): extracted `_message_extraction.py`,
+  `_schema_normalization.py`, `_result_extraction.py`, `_sdk_execution.py`,
+  `_sdk_options.py`
+- `isolation.py` (1,249 → 551 lines): extracted `_ephemeral_home.py`,
+  `_model_utils.py`
+- `_transcript_collector.py`: parsing logic extracted to
+  `_transcript_parser.py`
+- `_hooks.py`: extracted `_hook_context.py` (HookStats, HookContext) and
+  `_hook_tools.py` (constraint checking, tool processing)
+
+**Codex App Server adapter** (`adapters/codex_app_server/`):
+- `adapter.py`: extracted `_protocol.py` (JSON-RPC execution flow),
+  `_response.py` (response building), `_schema.py` (tool spec conversion)
+
+**Debug system** (`debug/`):
+- `bundle.py` (1,591 → 459 lines): extracted `_bundle_reader.py`,
+  `_bundle_writer.py`, `_bundle_retention.py`
+- `environment.py`: git operations extracted to `_git.py`
+
+**CLI** (`cli/`):
+- `query.py` (2,204 → 996 lines): extracted `_query_helpers.py`,
+  `_query_tables.py`, `_query_transcript.py`, then further into
+  `_query_builders.py`, `_query_environment.py`, `_query_formatters.py`.
+  `build_all_tables()` orchestration function added.
+- `wink.py`: doc subcommand logic extracted to `_docs.py`
+- `debug_app.py` (736 → 34 lines): extracted `_bundle_store.py`
+
+**Prompt system** (`prompt/`):
+- `registry.py`: extracted `_validators.py` (section/tool/skill validation
+  functions, registry invariant callbacks) and `_indices.py`
+  (`build_registry_indices()`)
+- `overrides/validation.py` (853 lines): split into `_section_overrides.py`,
+  `_tool_overrides.py`, `_task_example_overrides.py`
+
+**Serde** (`serde/`):
+- `parse.py`: extracted `_coercers.py` (all type coercion functions) and
+  `_generics.py` (generic type resolution, TypeVar mapping)
+
+**Formal verification** (`formal/`):
+- `__init__.py`: extracted `_metadata.py` (data types) and `_codegen.py`
+  (TLA+ generation)
+
+**Filesystem** (`filesystem/`):
+- `_host.py`: git operations extracted to `_git_ops.py`
+
+**Runtime** (`runtime/`):
+- `agent_loop.py`: bundle metrics/artifacts extracted to
+  `_agent_loop_bundle.py`
+
+**Contrib** (`contrib/mailbox/`):
+- `_redis.py`: Lua scripts extracted to `_lua_scripts.py`, TLA+ spec to
+  `_redis_spec.py`
+
+All backward-compatibility `__getattr__` shims and `TYPE_CHECKING` re-export
+aliases removed — imports updated to reference defining modules directly.
+
+#### Test Suite Reorganization
+
+Five monolithic test files decomposed into focused test modules:
+
+- `test_hooks.py` (2,044 lines) → 8 focused modules in `tests/adapters/claude_agent_sdk/hooks/`
+- `test_bundle.py` (2,248 lines) → 6 modules by concern (config, writer, loader, retention, filesystem, storage)
+- `test_wink_query_database.py` (2,259 lines) → 5 modules (core, transcript, logs, views, files)
+- `test_adapter.py` for Claude SDK (3,153 lines) → 11 modules in `tests/adapters/claude_agent_sdk/`
+- `test_agent_loop.py` (2,207 lines) → 10 modules in `tests/runtime/agent_loop/`
+
+All restructured tests preserve existing assertions with no functional changes.
 
 ---
 
@@ -303,15 +486,38 @@ New `specs/TRANSCRIPT.md` (486 lines) replaces the Claude-specific
 `specs/TRANSCRIPT_COLLECTION.md` (409 lines, deleted). The new spec covers:
 
 - Common envelope schema with 9 canonical entry types
-- Adapter mapping tables for both Claude Agent SDK and Codex App Server
+- Adapter mapping tables for Claude Agent SDK, Codex App Server, and ACP
 - `TranscriptEmitter`, `TranscriptEntry`, `TranscriptSummary` class specs
-- `CodexTranscriptBridge` specification with all notification handlers
+- `CodexTranscriptBridge` and `ACPTranscriptBridge` specifications
 - `reconstruct_transcript()` function spec
 - Debug bundle `transcript.jsonl` integration
 - Seven formal invariants (envelope completeness, sequence monotonicity, type
   vocabulary, non-blocking emission, adapter labeling, source consistency,
   timestamp ordering)
 - Configuration changes and migration guide
+
+#### ACP Adapter Specifications
+
+- `specs/ACP_ADAPTER.md` (430 lines): Generic ACP adapter protocol flow, MCP
+  HTTP bridging, session lifecycle, transcript consolidation, structured output,
+  tool event dispatch
+- `specs/OPENCODE_ADAPTER.md` (250 lines): OpenCode-specific model validation,
+  empty response detection, quirk handling, config defaults
+- `specs/OPENCODE_ACP_ADAPTER.md` trimmed to overview pointing at the two new
+  specs
+
+#### Adapter Compatibility Kit (ACK) Specification
+
+New `specs/ACK.md` (931 lines) defines a unified integration testing framework
+across all provider adapters:
+
+- `AdapterFixture` protocol with capability-based test gating
+- Three test tiers: basic evaluation, observability, advanced behavior
+- Shared scenario builders and assertion helpers
+- Transcript-centric validation with envelope completeness and sequence
+  monotonicity invariants
+- Four-phase migration plan from per-adapter tests to unified ACK suite
+- Concrete fixture examples for Claude SDK, Codex, ACP, and OpenCode adapters
 
 #### Debugging Guide Expansion
 
@@ -345,9 +551,13 @@ layout:
   Write, Edit, Glob, Grep, Bash) and install command
 - New `### Codex App Server` subsection with feature list (native tools,
   dynamic tools, structured output, no extra deps), install command, and
-  complete Python usage example showing `CodexAppServerAdapter`,
-  `CodexAppServerClientConfig`, `CodexAppServerModelConfig`,
-  `WorkspaceSection`, and `HostMount`
+  complete Python usage example
+
+#### Codex App Server Spec Update
+
+`specs/CODEX_APP_SERVER.md` updated to reflect modular architecture: documents
+new module locations (`_protocol.py`, `_response.py`, `_schema.py`,
+`_transcript.py`, `_events.py`).
 
 #### Serde Documentation Updated for API Simplification
 
@@ -359,6 +569,44 @@ layout:
   Mapping", and "Case-Insensitive Parsing" sections; removed `extra="allow"`
   mode and examples; removed `alias_generator` from `dump()` and `schema()`
   option tables
+
+#### WINK Presentation Slides
+
+New `wink-presentation.md` (472 lines) — Marp-based presentation covering WINK
+architecture, design philosophy, and usage patterns. Published via
+`.github/workflows/presentation.yml` GitHub Actions workflow.
+
+---
+
+### Developer Experience
+
+#### Code Length Checker
+
+New `CodeLengthChecker` in `toolchain/checkers/code_length.py` integrated into
+`make check`. Uses AST-based analysis to enforce:
+
+- Maximum file length: 720 lines
+- Maximum function/method length: 120 lines
+
+Known violations tracked in `toolchain/checkers/code_length_baseline.txt` (79
+entries). New violations fail the check; existing ones warn.
+
+Six methods refactored to satisfy the 120-line limit:
+`FormalSpec.to_tla`, `QueryDatabase._build_views`, `CompositeSnapshot.from_json`,
+`model_check`, and two test helpers.
+
+---
+
+### Dependencies
+
+- `redis`: 7.1.0 → 7.1.1
+- `claude-agent-sdk`: 0.1.27 → 0.1.35
+- `fastapi`: 0.128.0 → 0.129.0
+- `ruff`: 0.15.0 → 0.15.1
+- `ty`: 0.0.14 → 0.0.16
+- `hypothesis`: 6.151.4 → 6.151.6
+- New optional: `agent-client-protocol>=0.8.0`, `mcp>=1.26.0` (via `[acp]` extra)
+- Lint rule: `ANN201` replaced with `RUF069` in per-file test ignores
 
 ---
 
