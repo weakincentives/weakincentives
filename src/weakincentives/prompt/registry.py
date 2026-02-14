@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import is_dataclass, replace
 from types import MappingProxyType
 from typing import Any, cast
 
@@ -30,9 +30,15 @@ from ._indices import build_registry_indices
 from ._validators import (
     params_registry_is_consistent,
     registry_paths_are_registered,
+    validate_section_defaults,
+    validate_section_params_type,
+    validate_section_placeholders,
+    validate_skill_registration,
     validate_task_examples,
+    validate_tool_instance,
+    validate_tool_registration,
 )
-from .errors import PromptRenderError, PromptValidationError, SectionPath
+from .errors import PromptRenderError, SectionPath
 from .section import Section
 from .tool import Tool
 
@@ -185,7 +191,7 @@ class PromptRegistry:
         path: SectionPath,
         depth: int,
     ) -> None:
-        params_type = self._validate_section_params(section, path)
+        params_type = validate_section_params_type(section, path)
         node = self._register_section_node(section, path, depth)
         self._register_params_registry(params_type, node)
         self._register_section_defaults(section, path, params_type)
@@ -193,20 +199,6 @@ class PromptRegistry:
         self._register_section_tools_if_present(section, path, params_type)
         self._register_section_skills_if_present(section, path)
         self._register_child_sections(section, path, depth)
-
-    @staticmethod
-    def _validate_section_params(
-        section: Section[SupportsDataclass],
-        path: SectionPath,
-    ) -> type[SupportsDataclass] | None:
-        params_type = section.params_type
-        if params_type is not None and not is_dataclass(params_type):
-            raise PromptValidationError(
-                "Section params must be a dataclass.",
-                section_path=path,
-                dataclass_type=params_type,
-            )
-        return params_type
 
     def _register_section_node(
         self,
@@ -239,18 +231,7 @@ class PromptRegistry:
             return
 
         default_value = section.default_params
-        if isinstance(default_value, type) or not is_dataclass(default_value):
-            raise PromptValidationError(
-                "Section defaults must be dataclass instances.",
-                section_path=path,
-                dataclass_type=params_type,
-            )
-        if type(default_value) is not params_type:
-            raise PromptValidationError(
-                "Section defaults must match section params type.",
-                section_path=path,
-                dataclass_type=params_type,
-            )
+        validate_section_defaults(default_value, path, params_type)
         self._defaults_by_path[path] = default_value
         _ = self._defaults_by_type.setdefault(params_type, default_value)
 
@@ -262,26 +243,7 @@ class PromptRegistry:
     ) -> None:
         section_placeholders = section.placeholder_names()
         self._placeholders[path] = set(section_placeholders)
-        if params_type is None:
-            if section_placeholders:
-                placeholder = sorted(section_placeholders)[0]
-                raise PromptValidationError(
-                    "Section does not accept parameters but declares placeholders.",
-                    section_path=path,
-                    placeholder=placeholder,
-                )
-            return
-
-        param_fields = {field.name for field in fields(params_type)}
-        unknown_placeholders = section_placeholders - param_fields
-        if unknown_placeholders:
-            placeholder = sorted(unknown_placeholders)[0]
-            raise PromptValidationError(
-                "Template references unknown placeholder.",
-                section_path=path,
-                dataclass_type=params_type,
-                placeholder=placeholder,
-            )
+        validate_section_placeholders(section_placeholders, path, params_type)
 
     def _register_section_tools_if_present(
         self,
@@ -294,17 +256,9 @@ class PromptRegistry:
             return
 
         for tool in section_tools:
-            if not isinstance(tool, Tool):
-                raise PromptValidationError(
-                    "Section tools must be Tool instances.",
-                    section_path=path,
-                    dataclass_type=params_type,
-                )
+            validate_tool_instance(tool, path, params_type)
             typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
-            self._register_section_tools(
-                typed_tool,
-                path,
-            )
+            self._register_section_tool(typed_tool, path)
 
     def _register_section_skills_if_present(
         self,
@@ -320,12 +274,7 @@ class PromptRegistry:
         # Skills are already validated as SkillMount by Section._normalize_skills
         for mount in section_skills:
             name = resolve_skill_name(mount)
-            existing_path = self._skill_name_registry.get(name)
-            if existing_path is not None:
-                raise PromptValidationError(
-                    f"Duplicate skill name '{name}' registered for prompt.",
-                    section_path=path,
-                )
+            validate_skill_registration(name, path, self._skill_name_registry)
             self._skill_name_registry[name] = path
 
     def _register_child_sections(
@@ -350,30 +299,12 @@ class PromptRegistry:
 
         return ".".join(str(value) for value in self._numbering_stack)
 
-    def _register_section_tools[
-        ParamsT: SupportsDataclassOrNone,
-        ResultT: SupportsToolResult,
-    ](
+    def _register_section_tool(
         self,
-        tool: Tool[ParamsT, ResultT],
+        tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
         path: SectionPath,
     ) -> None:
-        params_type = tool.params_type
-        if params_type is not type(None) and not is_dataclass(params_type):
-            raise PromptValidationError(
-                "Tool parameters must be dataclass types.",
-                section_path=path,
-                dataclass_type=params_type,
-            )
-
-        existing_path = self._tool_name_registry.get(tool.name)
-        if existing_path is not None:
-            raise PromptValidationError(
-                "Duplicate tool name registered for prompt.",
-                section_path=path,
-                dataclass_type=tool.params_type,
-            )
-
+        validate_tool_registration(tool, path, self._tool_name_registry)
         self._tool_name_registry[tool.name] = path
 
     def snapshot(
