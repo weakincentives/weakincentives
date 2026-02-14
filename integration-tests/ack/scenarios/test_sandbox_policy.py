@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,32 +23,7 @@ from weakincentives.runtime.session import Session
 
 from ..adapters import AdapterFixture
 
-if TYPE_CHECKING:
-    from weakincentives.adapters.codex_app_server import CodexAppServerAdapter
-
 pytestmark = pytest.mark.ack_capability("sandbox_policy")
-
-
-def _make_codex_adapter(
-    adapter_fixture: AdapterFixture,
-    *,
-    cwd: Path,
-    sandbox_mode: str,
-) -> CodexAppServerAdapter:
-    from weakincentives.adapters.codex_app_server import (
-        CodexAppServerAdapter,
-        CodexAppServerClientConfig,
-        CodexAppServerModelConfig,
-    )
-
-    return CodexAppServerAdapter(
-        model_config=CodexAppServerModelConfig(model=adapter_fixture.get_model()),
-        client_config=CodexAppServerClientConfig(
-            cwd=str(cwd),
-            approval_policy="never",
-            sandbox_mode=sandbox_mode,
-        ),
-    )
 
 
 def test_sandbox_restricts_writes_outside_workspace(
@@ -58,13 +32,16 @@ def test_sandbox_restricts_writes_outside_workspace(
     tmp_path: Path,
 ) -> None:
     """Read-only sandbox blocks writes outside the working directory."""
+    # Use a subdirectory as the workspace cwd so that "outside" is truly
+    # outside the working directory (not a child of cwd).
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir()
     outside_file = outside_dir / "blocked.txt"
 
-    adapter = _make_codex_adapter(
-        adapter_fixture,
-        cwd=tmp_path,
+    adapter = adapter_fixture.create_adapter_with_sandbox(
+        workspace_dir,
         sandbox_mode="read-only",
     )
 
@@ -97,9 +74,8 @@ def test_sandbox_allows_writes_inside_workspace(
     """Workspace-write sandbox allows writes under cwd."""
     target = tmp_path / "sandbox_allowed.txt"
 
-    adapter = _make_codex_adapter(
-        adapter_fixture,
-        cwd=tmp_path,
+    adapter = adapter_fixture.create_adapter_with_sandbox(
+        tmp_path,
         sandbox_mode="workspace-write",
     )
 

@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,32 +23,7 @@ from weakincentives.runtime.session import Session
 
 from ..adapters import AdapterFixture
 
-if TYPE_CHECKING:
-    from weakincentives.adapters.codex_app_server import CodexAppServerAdapter
-
 pytestmark = pytest.mark.ack_capability("network_policy")
-
-
-def _make_codex_adapter(
-    adapter_fixture: AdapterFixture,
-    *,
-    cwd: Path,
-    sandbox_mode: str,
-) -> CodexAppServerAdapter:
-    from weakincentives.adapters.codex_app_server import (
-        CodexAppServerAdapter,
-        CodexAppServerClientConfig,
-        CodexAppServerModelConfig,
-    )
-
-    return CodexAppServerAdapter(
-        model_config=CodexAppServerModelConfig(model=adapter_fixture.get_model()),
-        client_config=CodexAppServerClientConfig(
-            cwd=str(cwd),
-            approval_policy="never",
-            sandbox_mode=sandbox_mode,
-        ),
-    )
 
 
 def test_network_denied_by_default(
@@ -58,9 +32,8 @@ def test_network_denied_by_default(
     tmp_path: Path,
 ) -> None:
     """Network requests are blocked under read-only sandbox defaults."""
-    adapter = _make_codex_adapter(
-        adapter_fixture,
-        cwd=tmp_path,
+    adapter = adapter_fixture.create_adapter_with_sandbox(
+        tmp_path,
         sandbox_mode="read-only",
     )
 
@@ -105,9 +78,8 @@ def test_network_allowed_for_listed_domains(
     tmp_path: Path,
 ) -> None:
     """Network requests succeed under workspace-write sandbox."""
-    adapter = _make_codex_adapter(
-        adapter_fixture,
-        cwd=tmp_path,
+    adapter = adapter_fixture.create_adapter_with_sandbox(
+        tmp_path,
         sandbox_mode="workspace-write",
     )
 

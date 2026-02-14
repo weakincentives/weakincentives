@@ -119,19 +119,9 @@ def test_custom_env_forwarded(
     tmp_path: Path,
 ) -> None:
     """Adapter forwards configured environment variables to subprocess execution."""
-    from weakincentives.adapters.codex_app_server import (
-        CodexAppServerAdapter,
-        CodexAppServerClientConfig,
-        CodexAppServerModelConfig,
-    )
-
-    adapter = CodexAppServerAdapter(
-        model_config=CodexAppServerModelConfig(model=adapter_fixture.get_model()),
-        client_config=CodexAppServerClientConfig(
-            cwd=str(tmp_path),
-            approval_policy="never",
-            env={"ACK_TEST_ENV": "ack_env_value"},
-        ),
+    adapter = adapter_fixture.create_adapter_with_env(
+        tmp_path,
+        env={"ACK_TEST_ENV": "ack_env_value"},
     )
 
     prompt = Prompt(

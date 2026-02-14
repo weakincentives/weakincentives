@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -70,6 +71,37 @@ class AdapterFixture(Protocol):
 
     def create_adapter(self, tmp_path: Path) -> ProviderAdapter[object]:
         """Create a configured adapter rooted at ``tmp_path``."""
+        ...
+
+    def create_adapter_with_sandbox(
+        self,
+        tmp_path: Path,
+        *,
+        sandbox_mode: str,
+    ) -> ProviderAdapter[object]:
+        """Create an adapter with a specific sandbox mode.
+
+        Args:
+            tmp_path: Workspace root directory.
+            sandbox_mode: Sandbox mode string. Adapters map this to their
+                native sandbox configuration:
+                - ``"read-only"``: No writes outside sandbox defaults.
+                - ``"workspace-write"``: Writes allowed under ``tmp_path``.
+        """
+        ...
+
+    def create_adapter_with_env(
+        self,
+        tmp_path: Path,
+        *,
+        env: Mapping[str, str],
+    ) -> ProviderAdapter[object]:
+        """Create an adapter that forwards extra environment variables.
+
+        Args:
+            tmp_path: Workspace root directory.
+            env: Additional environment variables to forward.
+        """
         ...
 
     def create_session(self) -> Session:

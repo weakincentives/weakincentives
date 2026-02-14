@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from weakincentives.adapters.core import ProviderAdapter
@@ -50,10 +51,10 @@ class ClaudeAgentSDKFixture:
             deadline_enforcement=True,
             budget_enforcement=False,
             native_tools=True,
-            workspace_isolation=False,
-            custom_env_forwarding=False,
-            network_policy=False,
-            sandbox_policy=False,
+            workspace_isolation=True,
+            custom_env_forwarding=True,
+            network_policy=True,
+            sandbox_policy=True,
         )
 
     def is_available(self) -> bool:
@@ -67,6 +68,7 @@ class ClaudeAgentSDKFixture:
         from weakincentives.adapters.claude_agent_sdk import (
             ClaudeAgentSDKAdapter,
             ClaudeAgentSDKClientConfig,
+            IsolationConfig,
         )
 
         return ClaudeAgentSDKAdapter(
@@ -74,6 +76,71 @@ class ClaudeAgentSDKFixture:
             client_config=ClaudeAgentSDKClientConfig(
                 permission_mode="bypassPermissions",
                 cwd=str(tmp_path),
+                isolation=IsolationConfig.inherit_host_auth(),
+            ),
+        )
+
+    def create_adapter_with_sandbox(
+        self,
+        tmp_path: Path,
+        *,
+        sandbox_mode: str,
+    ) -> ProviderAdapter[object]:
+        from weakincentives.adapters.claude_agent_sdk import (
+            ClaudeAgentSDKAdapter,
+            ClaudeAgentSDKClientConfig,
+            IsolationConfig,
+            NetworkPolicy,
+            SandboxConfig,
+        )
+
+        if sandbox_mode == "read-only":
+            sandbox = SandboxConfig(enabled=True, writable_paths=())
+            network_policy = NetworkPolicy.no_network()
+            # acceptEdits respects sandbox boundaries; bypassPermissions
+            # skips all permission checks and overrides the sandbox.
+            permission_mode = "acceptEdits"
+        elif sandbox_mode == "workspace-write":
+            sandbox = SandboxConfig(
+                enabled=True,
+                writable_paths=(str(tmp_path),),
+            )
+            network_policy = None
+            permission_mode = "bypassPermissions"
+        else:
+            msg = f"Unsupported sandbox_mode: {sandbox_mode}"
+            raise ValueError(msg)
+
+        return ClaudeAgentSDKAdapter(
+            model=self.get_model(),
+            client_config=ClaudeAgentSDKClientConfig(
+                permission_mode=permission_mode,
+                cwd=str(tmp_path),
+                isolation=IsolationConfig.inherit_host_auth(
+                    sandbox=sandbox,
+                    network_policy=network_policy,
+                ),
+            ),
+        )
+
+    def create_adapter_with_env(
+        self,
+        tmp_path: Path,
+        *,
+        env: Mapping[str, str],
+    ) -> ProviderAdapter[object]:
+        from weakincentives.adapters.claude_agent_sdk import (
+            ClaudeAgentSDKAdapter,
+            ClaudeAgentSDKClientConfig,
+            IsolationConfig,
+        )
+
+        return ClaudeAgentSDKAdapter(
+            model=self.get_model(),
+            client_config=ClaudeAgentSDKClientConfig(
+                permission_mode="bypassPermissions",
+                cwd=str(tmp_path),
+                isolation=IsolationConfig.inherit_host_auth(env=dict(env)),
             ),
         )
 

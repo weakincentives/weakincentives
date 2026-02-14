@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
+from typing import NoReturn
 
 from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.runtime.session import Session
@@ -73,6 +75,22 @@ class OpenCodeACPFixture:
                 permission_mode="auto",
             ),
         )
+
+    def create_adapter_with_sandbox(
+        self,
+        tmp_path: Path,
+        *,
+        sandbox_mode: str,
+    ) -> NoReturn:
+        raise NotImplementedError("OpenCode ACP does not support sandbox_policy")
+
+    def create_adapter_with_env(
+        self,
+        tmp_path: Path,
+        *,
+        env: Mapping[str, str],
+    ) -> NoReturn:
+        raise NotImplementedError("OpenCode ACP does not support custom_env_forwarding")
 
     def create_session(self) -> Session:
         return Session(tags={"suite": "ack", "adapter": self.adapter_name})
