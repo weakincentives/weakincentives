@@ -281,7 +281,9 @@ class BridgedTool:
             if self._tool.params_type is type(None):
                 params = None
             else:
-                params = parse(self._tool.params_type, args, extra="forbid")
+                params = parse(
+                    self._tool.params_type, args, extra="forbid", coerce=False
+                )
 
             # Resources are accessed through prompt.resources
             # The prompt context must be entered and resources bound before tool calls

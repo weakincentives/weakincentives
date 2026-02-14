@@ -23,8 +23,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from weakincentives.adapters._shared._visibility_signal import VisibilityExpansionSignal
 from weakincentives.adapters.codex_app_server._protocol import (
     authenticate,
+    consume_messages,
     create_deadline_watchdog,
     create_thread,
     deadline_remaining_s,
@@ -1632,6 +1634,59 @@ class TestVisibilitySignalPassthrough:
 
                 with pytest.raises(VisibilityExpansionRequired):
                     adapter.evaluate(prompt, session=session)
+
+
+class TestConsumeMessagesVisibilitySignal:
+    """Test that consume_messages breaks early when visibility signal is set."""
+
+    def test_early_break_on_visibility_signal(self) -> None:
+        """consume_messages exits after tool call sets visibility signal."""
+        session, _ = _make_session()
+        signal = VisibilityExpansionSignal()
+
+        # Simulate: tool call sets signal, then more messages that shouldn't be read
+        messages = [
+            {
+                "id": 1,
+                "method": "item/tool/call",
+                "params": {"tool": "t", "arguments": {}},
+            },
+            # These should never be reached after early break:
+            {
+                "method": "item/completed",
+                "params": {"item": {"type": "agentMessage", "text": "x"}},
+            },
+            {"method": "turn/completed", "params": {"turn": {"status": "completed"}}},
+        ]
+
+        client = _make_mock_client()
+        client.read_messages.return_value = _messages_iterator(messages)
+        # Respond to tool call, then set the signal to simulate open_sections
+        client.send_response = AsyncMock(
+            side_effect=lambda *a, **kw: signal.set(
+                VisibilityExpansionRequired(
+                    "expand", requested_overrides={}, reason="test", section_keys=()
+                )
+            )
+        )
+
+        async def _run() -> None:
+            text, _ = await consume_messages(
+                client=client,
+                session=session,
+                adapter_name="codex_app_server",
+                prompt_name="test",
+                tool_lookup={},
+                approval_policy="never",
+                run_context=None,
+                accumulated_text="",
+                usage=None,
+                visibility_signal=signal,
+            )
+            # Should return empty text (broke early, no turn/completed text)
+            assert text == ""
+
+        asyncio.run(_run())
 
 
 class TestToolCallRunsInThread:

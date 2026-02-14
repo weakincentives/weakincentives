@@ -354,6 +354,15 @@ first, falling back to log scanning.
 
 ### Improvements
 
+#### Adapter Compatibility Kit (ACK) Integration Suite
+
+Adapter integration testing now lives under a unified
+`integration-tests/ack/` tree with shared, capability-gated scenarios and
+adapter fixture modules (`claude_agent_sdk`, `codex_app_server`,
+`opencode_acp`). The old flat per-adapter files for greeting/tool/structured
+output, progressive disclosure, transactional tools, sandbox/network policy,
+and eval overlap have been deleted in favor of the ACK suite.
+
 #### Section-Level Skill Registration with Duplicate Detection
 
 `PromptRegistry` now tracks skill names across sections with duplicate

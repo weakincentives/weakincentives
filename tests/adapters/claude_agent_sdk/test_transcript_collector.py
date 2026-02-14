@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import json
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,6 +27,8 @@ import pytest
 from weakincentives.adapters.claude_agent_sdk._transcript_collector import (
     TranscriptCollector,
     TranscriptCollectorConfig,
+    _extract_assistant_text,
+    _extract_text_from_content,
 )
 from weakincentives.adapters.claude_agent_sdk._transcript_parser import emit_entry
 
@@ -815,6 +818,191 @@ class TestTranscriptCollector:
 
         asyncio.run(run_test())
 
+    def test_shutdown_drain_resolves_pending_tailer(self, tmp_path: Path) -> None:
+        """Shutdown drain polls resolve pending tailers when file appears."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="shutdown_drain_test",
+                config=TranscriptCollectorConfig(poll_interval=60),
+            )
+
+            transcript_path = tmp_path / "session456.jsonl"
+
+            async with collector.run():
+                # Hook fires — file does not exist yet.
+                await collector._remember_transcript_path(str(transcript_path))
+                assert "main" not in collector._tailers
+                assert "main" in collector._pending_tailers
+
+                # File appears just before context exit (simulating SDK flush).
+                transcript_path.write_text('{"type": "user", "message": "shutdown"}\n')
+
+            # Shutdown drain should have picked up the file.
+            assert collector.main_entry_count == 1
+            assert "main" not in collector._pending_tailers
+
+        asyncio.run(run_test())
+
+    def test_shutdown_drain_completes_without_error(self, tmp_path: Path) -> None:
+        """Shutdown drain completes gracefully when file never appears."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="drain_no_file_test",
+                config=TranscriptCollectorConfig(poll_interval=60),
+            )
+
+            transcript_path = tmp_path / "never_created.jsonl"
+
+            async with collector.run():
+                # Hook fires — file does not exist.
+                await collector._remember_transcript_path(str(transcript_path))
+                assert "main" in collector._pending_tailers
+
+            # All drain polls completed, file never appeared.
+            assert "main" not in collector._tailers
+            assert collector.main_entry_count == 0
+
+        asyncio.run(run_test())
+
+    def test_shutdown_drain_skips_when_no_pending(self, tmp_path: Path) -> None:
+        """Drain loop exits immediately when there are no pending tailers."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="drain_skip_test",
+                config=TranscriptCollectorConfig(poll_interval=60),
+            )
+
+            transcript_path = tmp_path / "session789.jsonl"
+            transcript_path.write_text('{"type": "user", "message": "hi"}\n')
+
+            async with collector.run():
+                await collector._remember_transcript_path(str(transcript_path))
+                # File exists → no pending tailers.
+                assert not collector._pending_tailers
+
+            # Drain loop should have exited immediately (no sleep delay).
+            assert collector.main_entry_count == 1
+
+        asyncio.run(run_test())
+
+    def test_fallback_user_message_emitted_when_not_in_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Fallback user_message is emitted when file has no user entry."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="fallback_user_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            # Transcript with only an assistant entry (no user entry).
+            transcript_path = tmp_path / "session.jsonl"
+            entry = {
+                "type": "assistant",
+                "message": {"role": "assistant", "content": "reply"},
+            }
+            transcript_path.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript_path))
+                    collector.set_user_message_fallback("Hello from user")
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            # File had assistant_message; fallback adds user_message.
+            assert "assistant_message" in types
+            assert "user_message" in types
+
+        asyncio.run(run_test())
+
+    def test_fallback_user_message_not_emitted_when_in_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Fallback user_message is NOT emitted when file already has user entry."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="no_fallback_user_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            # Transcript with a user entry.
+            transcript_path = tmp_path / "session.jsonl"
+            entry = {
+                "type": "user",
+                "message": {"role": "user", "content": "from file"},
+            }
+            transcript_path.write_text(json.dumps(entry) + "\n")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript_path))
+                    collector.set_user_message_fallback("Hello from user")
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            # Only one user_message (from file), not two.
+            assert types.count("user_message") == 1
+
+        asyncio.run(run_test())
+
+    def test_fallback_assistant_message_emitted_when_not_in_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Fallback assistant_message emitted when file has no assistant entry."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="fallback_assistant_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            # Transcript with only a user entry (no assistant entry).
+            transcript_path = tmp_path / "session.jsonl"
+            entry = {
+                "type": "user",
+                "message": {"role": "user", "content": "hello"},
+            }
+            transcript_path.write_text(json.dumps(entry) + "\n")
+
+            # Create a fake SDK message for fallback.
+            class FakeAssistantMessage:
+                content = "I can help with that"
+
+            FakeAssistantMessage.__name__ = "AssistantMessage"
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript_path))
+                    collector.set_assistant_message_fallback([FakeAssistantMessage()])
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            assert "user_message" in types
+            assert "assistant_message" in types
+
+        asyncio.run(run_test())
+
     def test_inode_change_triggers_position_reset(
         self, collector: TranscriptCollector, temp_dir: Path
     ) -> None:
@@ -1311,5 +1499,134 @@ class TestTranscriptCollector:
             types = [c["entry_type"] for c in collected]
             assert types == ["user_message"]
             assert collector.main_entry_count == 1
+
+        asyncio.run(run_test())
+
+
+class TestExtractTextFromContent:
+    """Tests for _extract_text_from_content helper."""
+
+    def test_string_content(self) -> None:
+        assert _extract_text_from_content("hello") == "hello"
+
+    def test_non_list_non_string_returns_empty(self) -> None:
+        assert _extract_text_from_content(42) == ""
+        assert _extract_text_from_content(None) == ""
+
+    def test_dict_text_blocks(self) -> None:
+        content = [
+            {"type": "text", "text": "first"},
+            {"type": "text", "text": "second"},
+        ]
+        assert _extract_text_from_content(content) == "first\nsecond"
+
+    def test_object_text_attributes(self) -> None:
+        @dataclass
+        class Block:
+            text: str
+
+        content = [Block("alpha"), Block("beta")]
+        assert _extract_text_from_content(content) == "alpha\nbeta"
+
+    def test_mixed_blocks_and_empty(self) -> None:
+        content = [
+            {"type": "text", "text": ""},
+            {"type": "image", "url": "x"},
+            {"type": "text", "text": "valid"},
+        ]
+        assert _extract_text_from_content(content) == "valid"
+
+
+class TestExtractAssistantText:
+    """Tests for _extract_assistant_text helper."""
+
+    def test_empty_messages(self) -> None:
+        assert _extract_assistant_text([]) == ""
+
+    def test_jsonl_transcript_format(self) -> None:
+        @dataclass
+        class Msg:
+            message: dict
+
+        msg = Msg({"role": "assistant", "content": "from jsonl"})
+        assert _extract_assistant_text([msg]) == "from jsonl"
+
+    def test_no_matching_message(self) -> None:
+        @dataclass
+        class Msg:
+            message: dict = field(
+                default_factory=lambda: {"role": "user", "content": "not assistant"}
+            )
+
+        assert _extract_assistant_text([Msg()]) == ""
+
+    def test_sdk_api_format(self) -> None:
+        class FakeAssistantMessage:
+            content = "sdk response"
+
+        FakeAssistantMessage.__name__ = "AssistantMessage"
+        assert _extract_assistant_text([FakeAssistantMessage()]) == "sdk response"
+
+
+class TestEmitFallbacksBranches:
+    """Tests for edge cases in _emit_fallbacks."""
+
+    def test_fallback_assistant_skipped_when_text_empty(self, tmp_path: Path) -> None:
+        """Fallback assistant_message is NOT emitted when text extraction is empty."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="empty_assistant_test",
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+            )
+
+            # Transcript with no assistant entry.
+            transcript_path = tmp_path / "session.jsonl"
+            entry = {
+                "type": "user",
+                "message": {"role": "user", "content": "hello"},
+            }
+            transcript_path.write_text(json.dumps(entry) + "\n")
+
+            # Set fallback with messages that yield empty text.
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    await collector._remember_transcript_path(str(transcript_path))
+                    collector.set_assistant_message_fallback([{"role": "user"}])
+                    await asyncio.sleep(0.05)
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            types = [c["entry_type"] for c in collected]
+            # Only user_message from file; no assistant_message fallback.
+            assert types == ["user_message"]
+
+        asyncio.run(run_test())
+
+    def test_fallbacks_with_no_main_tailer(self) -> None:
+        """_emit_fallbacks handles missing main tailer gracefully."""
+
+        async def run_test() -> None:
+            collector = TranscriptCollector(
+                prompt_name="no_tailer_test",
+                config=TranscriptCollectorConfig(poll_interval=60),
+            )
+            collector.set_user_message_fallback("hello")
+
+            collected: list[dict] = []
+            with patch("weakincentives.runtime.transcript._logger") as mock_logger:
+                async with collector.run():
+                    pass  # No transcript path set → no main tailer.
+
+                for call in mock_logger.debug.call_args_list:
+                    if call[1].get("event") == "transcript.entry":
+                        collected.append(call[1]["context"])
+
+            # Fallback should fire since observed_types is empty set.
+            types = [c["entry_type"] for c in collected]
+            assert "user_message" in types
 
         asyncio.run(run_test())

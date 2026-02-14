@@ -210,6 +210,7 @@ addopts = "--cov=src/weakincentives --cov=toolchain --cov-report=term-missing --
 markers = [
     "core: marks fast, high-value tests that always run in CI.",
     "integration: marks tests that exercise live provider integrations.",
+    "ack_capability(capability): marks ACK tests requiring a named adapter capability.",
     "timeout(timeout): set per-test timeout in seconds via pytest-timeout.",
     "threadstress: repeat tests under randomized thread-pool conditions.",
     "redis: marks all Redis integration tests (standalone and cluster).",
