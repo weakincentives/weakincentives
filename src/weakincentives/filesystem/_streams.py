@@ -540,8 +540,12 @@ class HostByteWriter:
                 handle = resolved_path.open("xb")
             except FileExistsError:
                 raise FileExistsError(f"File already exists: {relative_path}") from None
-            # Close the placeholder and write to temp file instead
+            # Remove the placeholder immediately — its only purpose was to
+            # atomically verify no file existed.  The real content arrives
+            # via temp-file rename in close().  Removing it here avoids
+            # orphan files if temp file creation fails or the writer aborts.
             handle.close()
+            resolved_path.unlink()
 
         fd, temp_path_str = tempfile.mkstemp(dir=str(parent_dir), prefix=".wink_tmp_")
         temp_path = Path(temp_path_str)
@@ -601,8 +605,13 @@ class HostByteWriter:
     ) -> None:
         """Exit context manager.
 
-        On error, removes the temp file without committing. On success,
-        atomically renames the temp file to the final path.
+        For create/overwrite modes: on error, removes the temp file
+        without committing (original preserved). On success, atomically
+        renames the temp file to the final path.
+
+        For append mode: writes are already on disk. On error, the
+        handle is closed but bytes already appended are *not* rolled
+        back — append is inherently non-transactional.
         """
         if exc_type is not None:
             self._abort()
@@ -610,7 +619,12 @@ class HostByteWriter:
             self.close()
 
     def _abort(self) -> None:
-        """Discard writes and clean up temp file without committing."""
+        """Discard writes and clean up without committing.
+
+        For create/overwrite modes, removes the temp file so the
+        original is preserved. For append mode (no temp file), simply
+        closes the handle; bytes already appended are not rolled back.
+        """
         if self._closed:
             return
         self._closed = True

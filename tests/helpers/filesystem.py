@@ -816,6 +816,38 @@ class FilesystemValidationSuite:
         assert writer.closed
         assert fs.read_bytes("file.bin").content == b"content"
 
+    def test_open_write_abort_on_error_overwrite(self, fs: Filesystem) -> None:
+        """On error exit, overwrite should not commit partial writes."""
+        fs.write_bytes("file.bin", b"original")
+
+        with pytest.raises(RuntimeError, match="simulated"):
+            with fs.open_write("file.bin", mode="overwrite") as writer:
+                writer.write(b"partial data that should be discarded")
+                msg = "simulated error"
+                raise RuntimeError(msg)
+
+        assert fs.read_bytes("file.bin").content == b"original"
+
+    def test_open_write_abort_on_error_create(self, fs: Filesystem) -> None:
+        """On error exit, create should not leave partial file."""
+        with pytest.raises(RuntimeError, match="simulated"):
+            with fs.open_write("new_file.bin", mode="create") as writer:
+                writer.write(b"partial data")
+                msg = "simulated error"
+                raise RuntimeError(msg)
+
+        assert not fs.exists("new_file.bin")
+
+    def test_open_write_abort_after_close_is_noop(self, fs: Filesystem) -> None:
+        """Abort after explicit close should not discard committed data."""
+        writer = fs.open_write("file.bin")
+        writer.write(b"content")
+        writer.close()
+        # Simulate __exit__ with error after explicit close
+        writer.__exit__(RuntimeError, RuntimeError("late"), None)
+        assert writer.closed
+        assert fs.read_bytes("file.bin").content == b"content"
+
     # -------------------------------------------------------------------------
     # Streaming Text Operations (open_text)
     # -------------------------------------------------------------------------
