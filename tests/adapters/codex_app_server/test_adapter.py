@@ -2136,3 +2136,35 @@ class TestEvaluateWithSkills:
         env = constructor_kwargs.get("env") or {}
         assert env.get("CUSTOM_VAR") == "value"
         assert "HOME" in env
+
+    def test_ephemeral_home_cleaned_up_on_mount_failure(self, tmp_path: Path) -> None:
+        """Ephemeral home is cleaned up when mount_skills raises."""
+        nonexistent = tmp_path / "does-not-exist"
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, _ = _make_session()
+        prompt = _make_simple_prompt()
+
+        original_render = prompt.render
+
+        def patched_render(**kwargs: Any) -> Any:
+            from weakincentives.prompt.rendering import RenderedPrompt
+
+            rendered = original_render(**kwargs)
+            return RenderedPrompt(
+                text=rendered.text,
+                _tools=rendered.tools,
+                _skills=(SkillMount(source=nonexistent),),
+            )
+
+        with (
+            patch.object(prompt, "render", side_effect=patched_render),
+            patch.object(CodexEphemeralHome, "cleanup") as mock_cleanup,
+        ):
+            from weakincentives.skills import SkillNotFoundError
+
+            with pytest.raises(SkillNotFoundError):
+                adapter.evaluate(prompt, session=session)
+
+        mock_cleanup.assert_called()
