@@ -24,8 +24,7 @@ from dataclasses import field, replace
 from typing import TYPE_CHECKING
 
 from ...dataclasses import FrozenDataclass
-from ...prompt._visibility import SectionVisibility
-from ...prompt.errors import SectionPath
+from ...prompt.errors import SectionPath, SectionVisibility
 from .slices import Replace
 from .state_slice import reducer
 

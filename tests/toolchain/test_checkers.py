@@ -27,11 +27,13 @@ from toolchain.checkers import (
     create_lint_checker,
     create_markdown_checker,
     create_pip_audit_checker,
+    create_private_imports_checker,
     create_test_checker,
     create_typecheck_checker,
 )
 from toolchain.checkers.architecture import ArchitectureChecker
 from toolchain.checkers.docs import DocsChecker
+from toolchain.checkers.private_imports import PrivateImportChecker
 
 
 class TestArchitectureChecker:
@@ -451,6 +453,11 @@ class TestFactoryFunctions:
         assert checker.name == "docs"
         assert isinstance(checker, DocsChecker)
 
+    def test_create_private_imports_checker(self) -> None:
+        checker = create_private_imports_checker()
+        assert checker.name == "private-imports"
+        assert isinstance(checker, PrivateImportChecker)
+
     def test_create_all_checkers(self) -> None:
         checkers = create_all_checkers()
         assert len(checkers) >= 10  # At least 10 checkers
@@ -460,6 +467,7 @@ class TestFactoryFunctions:
         assert "typecheck" in names
         assert "test" in names
         assert "architecture" in names
+        assert "private-imports" in names
         assert "docs" in names
 
 

@@ -13,12 +13,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, override
+from typing import override
 
 from ..errors import WinkError
-
-if TYPE_CHECKING:
-    from ._visibility import SectionVisibility
+from ._visibility import SectionVisibility
 
 type SectionPath = tuple[str, ...]
 
@@ -90,5 +88,6 @@ __all__ = [
     "PromptRenderError",
     "PromptValidationError",
     "SectionPath",
+    "SectionVisibility",
     "VisibilityExpansionRequired",
 ]

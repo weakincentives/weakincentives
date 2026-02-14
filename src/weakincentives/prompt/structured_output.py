@@ -19,7 +19,7 @@ from typing import Final, Literal, cast
 
 from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
-from ..serde._scope import SerdeScope
+from ..serde import SerdeScope
 from ..serde.parse import parse as parse_dataclass
 from ..types import JSONValue, ParseableDataclassT
 from ._structured_output_config import StructuredOutputConfig
