@@ -39,6 +39,7 @@ from .registry import PromptRegistry, SectionNode
 from .rendering import PromptRenderer, RenderedPrompt
 from .section import Section
 from .structured_output import StructuredOutputConfig
+from .task_completion import TaskCompletionChecker
 
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
@@ -116,6 +117,7 @@ class PromptTemplate[OutputT]:
     ) = ()
     policies: Sequence[ToolPolicy] = ()
     feedback_providers: Sequence[FeedbackProviderConfig] = ()
+    task_completion_checker: TaskCompletionChecker | None = None
     allow_extra_keys: bool = False
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
     _snapshot: RegistrySnapshot | None = field(init=False, default=None)
@@ -161,6 +163,7 @@ class PromptTemplate[OutputT]:
         | None = MISSING,
         policies: Sequence[ToolPolicy] | object = MISSING,
         feedback_providers: Sequence[FeedbackProviderConfig] | object = MISSING,
+        task_completion_checker: TaskCompletionChecker | object | None = MISSING,
         allow_extra_keys: bool | object = MISSING,
         resources: ResourceRegistry | object = MISSING,
     ) -> dict[str, Any]:
@@ -222,6 +225,11 @@ class PromptTemplate[OutputT]:
             "sections": snapshot.sections,
             "policies": tuple(policies_input),
             "feedback_providers": tuple(feedback_providers_input),
+            "task_completion_checker": (
+                cast(TaskCompletionChecker | None, task_completion_checker)
+                if task_completion_checker is not MISSING
+                else None
+            ),
             "allow_extra_keys": allow_extra,
             "resources": resources_val,
             "_snapshot": snapshot,
@@ -339,6 +347,11 @@ class Prompt[OutputT]:
     def feedback_providers(self) -> tuple[FeedbackProviderConfig, ...]:
         """Return feedback providers configured on this prompt."""
         return tuple(self.template.feedback_providers)
+
+    @property
+    def task_completion_checker(self) -> TaskCompletionChecker | None:
+        """Return task completion checker configured on this prompt."""
+        return self.template.task_completion_checker
 
     def policies_for_tool(self, tool_name: str) -> tuple[ToolPolicy, ...]:
         """Collect policies that apply to a tool from sections and template.

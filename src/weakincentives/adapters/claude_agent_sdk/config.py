@@ -75,7 +75,7 @@ class ClaudeAgentSDKClientConfig:
             allowing the agent to stop. Both the stop hook and StructuredOutput
             handling use this checker to determine if tasks are complete.
             Supports various implementations:
-            - ``PlanBasedChecker``: Checks session Plan state
+            - ``FileOutputChecker``: Checks required output files exist
             - ``CompositeChecker``: Combines multiple checkers
             When None, no task completion checking is performed and the agent
             can stop freely.

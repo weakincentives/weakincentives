@@ -305,7 +305,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     TaskCompletionChecker,
     TaskCompletionContext,
     TaskCompletionResult,
-    PlanBasedChecker,
+    FileOutputChecker,
     CompositeChecker,
     # Transcript collection
     TranscriptCollector,
@@ -815,25 +815,19 @@ agents_config = FeedbackProviderConfig(
 Verify agents complete all tasks before stopping. Critical for unattended
 agents.
 
-```python
-from dataclasses import dataclass
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    PlanBasedChecker,
-    CompositeChecker,
+```python nocheck
+from weakincentives.prompt import (
+    FileOutputChecker,
+    PromptTemplate,
 )
 
-# Define a plan type that the checker can inspect
-@dataclass(frozen=True, slots=True)
-class TaskPlan:
-    objective: str
-    steps: tuple  # Should have items with .status attribute
-
-# Plan-based: ensure all plan steps are "done"
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(plan_type=TaskPlan),
+# File-based: ensure required output files exist
+template = PromptTemplate(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    task_completion_checker=FileOutputChecker(
+        files=("report.md", "results.json"),
     ),
 )
 ```

@@ -137,6 +137,11 @@ class PromptProtocol[PromptOutputT](Protocol):
         """Return feedback providers configured on this prompt."""
         ...
 
+    @property
+    def task_completion_checker(self) -> object | None:
+        """Return task completion checker if configured."""
+        ...
+
     def bind(
         self,
         *params: SupportsDataclass,

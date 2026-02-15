@@ -27,12 +27,12 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     create_task_completion_stop_hook,
     create_user_prompt_submit_hook,
 )
-from weakincentives.adapters.claude_agent_sdk._task_completion import PlanBasedChecker
 from weakincentives.prompt.protocols import PromptProtocol
+from weakincentives.prompt.task_completion import FileOutputChecker
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
-from ._hook_helpers import Plan, _make_prompt
+from ._hook_helpers import _make_prompt
 
 
 class TestHookEventNameValidation:
@@ -97,7 +97,7 @@ class TestHookEventNameValidation:
         """TaskCompletion stop hook returns empty dict for wrong event name."""
         context = self._make_context()
         hook = create_task_completion_stop_hook(
-            context, checker=PlanBasedChecker(plan_type=Plan)
+            context, checker=FileOutputChecker(files=("output.txt",))
         )
 
         # Call with wrong event name

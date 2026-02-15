@@ -24,17 +24,16 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     create_post_tool_use_hook,
 )
-from weakincentives.adapters.claude_agent_sdk._task_completion import PlanBasedChecker
+from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.prompt.protocols import PromptProtocol
+from weakincentives.prompt.task_completion import FileOutputChecker
 from weakincentives.runtime.events.types import ToolInvoked
 from weakincentives.runtime.session import Session
 
 from ._hook_helpers import (
-    Plan,
-    PlanStep,
-    _initialize_plan_session,
     _make_prompt,
     _make_prompt_with_feedback_provider,
+    _make_prompt_with_fs,
 )
 
 
@@ -296,30 +295,22 @@ class TestPostToolUseHook:
         result = asyncio.run(hook(input_data, "call-mcp-456", {"signal": None}))
         assert result == {}
 
-    def test_returns_context_when_structured_output_with_incomplete_tasks(
+    def test_returns_context_when_structured_output_with_missing_files(
         self, session: Session
     ) -> None:
-        """PostToolUse returns additionalContext for StructuredOutput when tasks incomplete."""
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test objective",
-                status="active",
-                steps=(
-                    PlanStep(step_id=1, title="Done task", status="done"),
-                    PlanStep(step_id=2, title="Pending task", status="pending"),
-                ),
-            )
-        )
+        """PostToolUse returns additionalContext for StructuredOutput when files missing."""
+        fs = InMemoryFilesystem()
+        # Don't create the required file
 
         context = HookContext(
             session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
         hook = create_post_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
+            context,
+            task_completion_checker=FileOutputChecker(files=("output.txt",)),
         )
         input_data = {
             "hook_event_name": "PostToolUse",
@@ -330,39 +321,30 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
-        # Should return continue_: True to force continuation (SDK converts to "continue")
+        # Should return continue_: True to force continuation
         assert result.get("continue_") is True
         # Should return additionalContext with feedback
         hook_output = result.get("hookSpecificOutput", {})
         assert hook_output.get("hookEventName") == "PostToolUse"
         additional_context = hook_output.get("additionalContext", "")
-        assert "incomplete" in additional_context.lower()
-        assert "Pending task" in additional_context
+        assert "output.txt" in additional_context
 
-    def test_stops_when_structured_output_with_complete_tasks(
+    def test_stops_when_structured_output_with_all_files_present(
         self, session: Session
     ) -> None:
-        """PostToolUse stops after StructuredOutput when all tasks complete."""
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test objective",
-                status="completed",
-                steps=(
-                    PlanStep(step_id=1, title="Task 1", status="done"),
-                    PlanStep(step_id=2, title="Task 2", status="done"),
-                ),
-            )
-        )
+        """PostToolUse stops after StructuredOutput when all required files exist."""
+        fs = InMemoryFilesystem()
+        fs.write("output.txt", "done")
 
         context = HookContext(
             session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
         hook = create_post_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
+            context,
+            task_completion_checker=FileOutputChecker(files=("output.txt",)),
         )
         input_data = {
             "hook_event_name": "PostToolUse",
@@ -373,13 +355,14 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
-        # Should stop - all tasks complete
+        # Should stop - all required files exist
         assert result == {"continue_": False}
 
-    def test_stops_when_structured_output_without_plan(self, session: Session) -> None:
-        """PostToolUse stops after StructuredOutput when no plan exists."""
-        # Don't initialize Plan slice
-
+    def test_stops_when_structured_output_without_filesystem(
+        self, session: Session
+    ) -> None:
+        """PostToolUse stops after StructuredOutput when no filesystem available."""
+        # Prompt has no filesystem bound - checker fails open
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
@@ -387,7 +370,8 @@ class TestPostToolUseHook:
             prompt_name="test_prompt",
         )
         hook = create_post_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
+            context,
+            task_completion_checker=FileOutputChecker(files=("output.txt",)),
         )
         input_data = {
             "hook_event_name": "PostToolUse",
@@ -398,7 +382,7 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
-        # Should stop - no plan means nothing to enforce
+        # Should stop - no filesystem means fail-open
         assert result == {"continue_": False}
 
     def test_returns_feedback_when_provider_triggers(self, session: Session) -> None:

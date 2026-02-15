@@ -25,12 +25,19 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
 )
-from weakincentives.adapters.claude_agent_sdk._task_completion import PlanBasedChecker
+from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
+from weakincentives.prompt.task_completion import (
+    FileOutputChecker,
+    TaskCompletionChecker,
+    TaskCompletionContext,
+    TaskCompletionResult,
+)
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
-from ._hook_helpers import Plan, PlanStep, _initialize_plan_session
+from ._hook_helpers import _make_prompt_with_fs
 
 
 class TestVerifyTaskCompletion:
@@ -70,7 +77,7 @@ class TestVerifyTaskCompletion:
         """When output is None, verification passes."""
         adapter = ClaudeAgentSDKAdapter(
             client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+                task_completion_checker=FileOutputChecker(files=("output.txt",)),
             ),
         )
         self._call_verify(
@@ -81,90 +88,64 @@ class TestVerifyTaskCompletion:
             prompt_name="test",
         )
 
-    def test_logs_warning_when_tasks_incomplete(
+    def test_logs_warning_when_files_missing(
         self, session: Session, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """When tasks are incomplete, logs warning but doesn't raise error."""
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="active",
-                steps=(
-                    PlanStep(step_id=1, title="Done", status="done"),
-                    PlanStep(step_id=2, title="Pending", status="pending"),
-                ),
-            )
-        )
+        """When required files are missing, logs warning but doesn't raise error."""
+        fs = InMemoryFilesystem()
+        # Don't create any files
 
         adapter = ClaudeAgentSDKAdapter(
             client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+                task_completion_checker=FileOutputChecker(files=("output.txt",)),
             ),
         )
 
         caplog.set_level(logging.WARNING)
 
+        prompt = _make_prompt_with_fs(fs)
         self._call_verify(
             adapter,
             output={"summary": "done"},
             session=session,
             stop_reason="structured_output",
             prompt_name="test_prompt",
+            prompt=prompt,
         )
 
         assert any("incomplete_tasks" in record.message for record in caplog.records), (
             "Should log warning about incomplete tasks"
         )
-        warning_logged = False
-        for record in caplog.records:
-            if "incomplete_tasks" in record.message:
-                warning_logged = True
-                break
-        assert warning_logged, "Should have logged incomplete tasks warning"
 
-    def test_passes_when_tasks_complete(self, session: Session) -> None:
-        """When all tasks are complete, verification passes."""
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="completed",
-                steps=(
-                    PlanStep(step_id=1, title="Task 1", status="done"),
-                    PlanStep(step_id=2, title="Task 2", status="done"),
-                ),
-            )
-        )
+    def test_passes_when_files_exist(self, session: Session) -> None:
+        """When all required files exist, verification passes."""
+        fs = InMemoryFilesystem()
+        fs.write("output.txt", "done")
+        fs.write("summary.md", "# Summary")
 
         adapter = ClaudeAgentSDKAdapter(
             client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+                task_completion_checker=FileOutputChecker(
+                    files=("output.txt", "summary.md")
+                ),
             ),
         )
 
+        prompt = _make_prompt_with_fs(fs)
         self._call_verify(
             adapter,
             output={"summary": "done"},
             session=session,
             stop_reason="structured_output",
             prompt_name="test_prompt",
+            prompt=prompt,
         )
 
     def test_skips_when_deadline_exceeded(self, session: Session) -> None:
         """When deadline is exceeded, verification is skipped."""
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="active",
-                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
-            )
-        )
-
         adapter = ClaudeAgentSDKAdapter(
             client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+                task_completion_checker=FileOutputChecker(files=("output.txt",)),
             ),
         )
 
@@ -185,18 +166,9 @@ class TestVerifyTaskCompletion:
         from weakincentives.budget import Budget, BudgetTracker
         from weakincentives.runtime.events.types import TokenUsage
 
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="active",
-                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
-            )
-        )
-
         adapter = ClaudeAgentSDKAdapter(
             client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+                task_completion_checker=FileOutputChecker(files=("output.txt",)),
             ),
         )
 
@@ -215,13 +187,6 @@ class TestVerifyTaskCompletion:
 
     def test_passes_filesystem_and_adapter_to_context(self, session: Session) -> None:
         """Filesystem and adapter are passed to TaskCompletionContext."""
-        from weakincentives.adapters.claude_agent_sdk._task_completion import (
-            TaskCompletionChecker,
-            TaskCompletionContext,
-            TaskCompletionResult,
-        )
-        from weakincentives.filesystem import Filesystem
-
         captured_context: list[TaskCompletionContext] = []
 
         class CapturingChecker(TaskCompletionChecker):
@@ -257,11 +222,6 @@ class TestVerifyTaskCompletion:
 
     def test_handles_filesystem_lookup_failure(self, session: Session) -> None:
         """When filesystem lookup fails, context still gets adapter but no filesystem."""
-        from weakincentives.adapters.claude_agent_sdk._task_completion import (
-            TaskCompletionChecker,
-            TaskCompletionContext,
-            TaskCompletionResult,
-        )
         from weakincentives.resources.errors import UnboundResourceError
 
         captured_context: list[TaskCompletionContext] = []
@@ -303,18 +263,12 @@ class TestVerifyTaskCompletion:
         from weakincentives.budget import Budget, BudgetTracker
         from weakincentives.runtime.events.types import TokenUsage
 
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="active",
-                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
-            )
-        )
+        fs = InMemoryFilesystem()
+        # Don't create the required file
 
         adapter = ClaudeAgentSDKAdapter(
             client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+                task_completion_checker=FileOutputChecker(files=("output.txt",)),
             ),
         )
 
@@ -324,6 +278,7 @@ class TestVerifyTaskCompletion:
 
         caplog.set_level(logging.WARNING)
 
+        prompt = _make_prompt_with_fs(fs)
         self._call_verify(
             adapter,
             output={"summary": "partial"},
@@ -331,6 +286,7 @@ class TestVerifyTaskCompletion:
             stop_reason="structured_output",
             prompt_name="test_prompt",
             budget_tracker=tracker,
+            prompt=prompt,
         )
 
         assert any("incomplete_tasks" in record.message for record in caplog.records), (
