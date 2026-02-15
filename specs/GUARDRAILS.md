@@ -336,10 +336,106 @@ ______________________________________________________________________
 
 ## Task Completion Checking
 
-**Implementation:** `src/weakincentives/adapters/claude_agent_sdk/_task_completion.py`
+**Current implementation:** `src/weakincentives/adapters/claude_agent_sdk/_task_completion.py`
+
+**Target implementation:** `prompt/task_completion.py` (under `src/weakincentives/`)
 
 Verify agents complete all assigned tasks before stopping. Critical for ensuring
 agents don't prematurely terminate with work incomplete.
+
+### Motivation for Relocation
+
+Task completion checking is currently configured on the adapter
+(`ClaudeAgentSDKClientConfig.task_completion_checker`). This is architecturally
+inconsistent with how tool policies and feedback providers are handled: both are
+declared on the prompt (definition), not the adapter (harness). The asymmetry
+creates three problems:
+
+1. **Definition/harness coupling.** The same agent definition cannot carry its
+   completion criteria across adapters. Users must reconfigure task completion
+   when switching from Claude Agent SDK to Codex, ACP, or any future adapter.
+   This violates the "definition vs harness" separation that is core to WINK.
+
+1. **Incomplete prompt portability.** A `PromptTemplate` captures tools,
+   policies, and feedback providers — everything an agent *is* — except for task
+   completion. The prompt is not self-describing without the adapter config.
+
+1. **ACK blind spot.** The Adapter Compatibility Kit validates adapter behavior
+   against a shared contract. Task completion enforcement is adapter-specific
+   behavior that cannot be tested via ACK because the checker lives in the
+   adapter config, not in the prompt that ACK scenarios construct.
+
+### Design: Prompt-Scoped Task Completion
+
+Move the `TaskCompletionChecker` declaration from adapter config to
+`PromptTemplate`, mirroring the pattern used by `feedback_providers`.
+
+#### New PromptTemplate Field
+
+```python
+@FrozenDataclass(slots=False)
+class PromptTemplate[OutputT]:
+    ns: str
+    key: str
+    sections: ...
+    policies: Sequence[ToolPolicy] = ()
+    feedback_providers: Sequence[FeedbackProviderConfig] = ()
+    task_completion_checker: TaskCompletionChecker | None = None  # NEW
+    ...
+```
+
+#### Prompt Instance Forwarding
+
+```python
+class Prompt[OutputT]:
+    @property
+    def task_completion_checker(self) -> TaskCompletionChecker | None:
+        """Return task completion checker configured on this prompt."""
+        return self.template.task_completion_checker
+```
+
+#### Protocol Update
+
+```python
+class PromptProtocol[PromptOutputT](Protocol):
+    ...
+    @property
+    def task_completion_checker(self) -> object | None:
+        """Return task completion checker if configured."""
+        ...
+```
+
+### Module Relocation
+
+Move the following types from
+`src/weakincentives/adapters/claude_agent_sdk/_task_completion.py` to
+a new `task_completion` module under `prompt/`:
+
+| Type | Description |
+|------|-------------|
+| `TaskCompletionResult` | Frozen dataclass for check results |
+| `TaskCompletionContext` | Mutable context for checkers |
+| `TaskCompletionChecker` | Runtime-checkable protocol |
+| `PlanBasedChecker` | Built-in plan-based implementation |
+| `CompositeChecker` | Built-in composite implementation |
+
+The old adapter module re-exports these types for backward compatibility during
+transition. The re-exports are removed in the same release (alpha software; no
+backward-compatibility shims per project policy).
+
+### Public API
+
+After relocation, the canonical import path is `weakincentives.prompt`:
+
+```python
+from weakincentives.prompt import (
+    TaskCompletionChecker,    # Protocol
+    TaskCompletionContext,    # Context dataclass
+    TaskCompletionResult,     # Result dataclass
+    PlanBasedChecker,         # Built-in implementation
+    CompositeChecker,         # Built-in composition
+)
+```
 
 ### TaskCompletionResult
 
@@ -354,7 +450,7 @@ Factory methods: `TaskCompletionResult.ok()`, `TaskCompletionResult.incomplete(f
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `session` | `Session` | Session containing state |
+| `session` | `SessionProtocol` | Session containing state |
 | `tentative_output` | `Any` | Output being produced |
 | `filesystem` | `Filesystem \| None` | Optional filesystem |
 | `adapter` | `ProviderAdapter \| None` | Optional adapter |
@@ -363,6 +459,7 @@ Factory methods: `TaskCompletionResult.ok()`, `TaskCompletionResult.incomplete(f
 ### TaskCompletionChecker Protocol
 
 ```python
+@runtime_checkable
 class TaskCompletionChecker(Protocol):
     def check(self, context: TaskCompletionContext) -> TaskCompletionResult: ...
 ```
@@ -394,9 +491,112 @@ checker = CompositeChecker(
 checker = CompositeChecker(checkers=(...), all_must_pass=False)
 ```
 
+### Prompt Integration (New)
+
+Configure via `PromptTemplate`:
+
+```python
+template = PromptTemplate(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    policies=[ReadBeforeWritePolicy()],
+    feedback_providers=(
+        FeedbackProviderConfig(
+            provider=DeadlineFeedback(),
+            trigger=FeedbackTrigger(every_n_seconds=30),
+        ),
+    ),
+    task_completion_checker=PlanBasedChecker(plan_type=Plan),  # NEW
+)
+```
+
+All three guardrail mechanisms now live on the prompt definition:
+
+| Mechanism | PromptTemplate Field | Prompt Property |
+|-----------|---------------------|-----------------|
+| Tool Policies | `policies` | `policies_for_tool(name)` |
+| Feedback Providers | `feedback_providers` | `feedback_providers` |
+| Task Completion | `task_completion_checker` | `task_completion_checker` |
+
 ### Adapter Integration
 
-Configure via `ClaudeAgentSDKClientConfig`:
+Adapters read the checker from the prompt, not from their own config.
+
+#### Resolution Order
+
+When evaluating a prompt, the adapter resolves the checker as follows:
+
+1. `prompt.task_completion_checker` (prompt-scoped, preferred)
+1. `client_config.task_completion_checker` (adapter-scoped, deprecated fallback)
+
+If both are set, the prompt-scoped checker wins. A deprecation warning is logged
+when the adapter-scoped checker is used and the prompt does not declare one.
+When `client_config.task_completion_checker` is set but
+`prompt.task_completion_checker` is also set, the prompt wins silently (no
+conflict warning — the prompt is the source of truth).
+
+#### Adapter Checker Resolution (Pseudocode)
+
+```python
+def _resolve_checker(
+    prompt: PromptProtocol,
+    client_config: ClaudeAgentSDKClientConfig,
+) -> TaskCompletionChecker | None:
+    """Resolve task completion checker with prompt-first precedence."""
+    prompt_checker = getattr(prompt, "task_completion_checker", None)
+    if prompt_checker is not None:
+        return prompt_checker
+
+    adapter_checker = client_config.task_completion_checker
+    if adapter_checker is not None:
+        logger.warning(
+            "task_completion.deprecated_adapter_config",
+            event="task_completion.deprecated_adapter_config",
+            context={"prompt_name": prompt.name},
+        )
+    return adapter_checker
+```
+
+#### Hook Integration
+
+Adapters translate the prompt-declared checker into their hook mechanism.
+The hooks themselves are unchanged — only the source of the checker changes.
+
+- **PostToolUse Hook (StructuredOutput)**: If incomplete, adds feedback context
+- **Stop Hook**: Returns `needsMoreTurns: True` if incomplete
+- **Final Verification**: Logs warning if incomplete after execution
+
+#### Claude Agent SDK
+
+The existing `build_hooks_config` function changes from:
+
+```python
+checker = client_config.task_completion_checker
+```
+
+to:
+
+```python
+checker = _resolve_checker(prompt, client_config)
+```
+
+All other hook mechanics remain identical.
+
+#### Other Adapters
+
+For Codex, ACP, and OpenCode adapters, the checker is read from the prompt and
+translated into the adapter's stop/continuation mechanism. The adapter-agnostic
+protocol ensures each adapter can implement enforcement using its native
+primitives.
+
+### Deprecation of Adapter-Scoped Checker
+
+`ClaudeAgentSDKClientConfig.task_completion_checker` is deprecated and will be
+removed. The migration path is straightforward — move the checker from the
+adapter config to the prompt template.
+
+**Before (deprecated):**
 
 ```python
 adapter = ClaudeAgentSDKAdapter(
@@ -406,21 +606,117 @@ adapter = ClaudeAgentSDKAdapter(
 )
 ```
 
-#### Hook Integration
+**After:**
 
-- **PostToolUse Hook (StructuredOutput)**: If incomplete, adds feedback context
-- **Stop Hook**: Returns `needsMoreTurns: True` if incomplete
-- **Final Verification**: Raises `PromptEvaluationError` if incomplete
+```python
+template = PromptTemplate(
+    ...,
+    task_completion_checker=PlanBasedChecker(plan_type=Plan),
+)
+
+adapter = ClaudeAgentSDKAdapter()  # No checker config needed
+```
+
+### ACK Integration
+
+With the checker on the prompt, ACK scenarios can construct prompts with task
+completion checkers and verify enforcement across all adapters.
+
+#### New ACK Capability
+
+Add `task_completion` to `AdapterCapabilities`:
+
+```python
+@dataclass(slots=True, frozen=True)
+class AdapterCapabilities:
+    ...
+    # Tier 3: Advanced
+    task_completion: bool = True  # NEW
+    ...
+```
+
+#### New ACK Scenario: `test_task_completion.py`
+
+```
+test_task_completion_blocks_early_stop
+    Given a prompt with a PlanBasedChecker and a plan tool
+    And the plan has incomplete steps
+    When adapter.evaluate() is called
+    Then the agent does not stop until plan steps are marked done
+    Or budget/deadline is exhausted
+
+test_task_completion_allows_stop_when_complete
+    Given a prompt with a PlanBasedChecker
+    And all plan steps are marked done
+    When the agent attempts to stop
+    Then the stop is allowed
+
+test_task_completion_skipped_on_deadline_exhaustion
+    Given a prompt with a PlanBasedChecker and a near-past deadline
+    When adapter.evaluate() is called
+    Then task completion checking is bypassed
+    And the agent stops despite incomplete tasks
+
+test_task_completion_skipped_on_budget_exhaustion
+    Given a prompt with a PlanBasedChecker and an exhausted budget
+    When adapter.evaluate() is called
+    Then task completion checking is bypassed
+
+test_composite_checker_all_must_pass
+    Given a prompt with a CompositeChecker (all_must_pass=True)
+    And two checkers where one returns incomplete
+    When the agent attempts to stop
+    Then the stop is blocked with feedback from the failing checker
+
+test_no_checker_allows_free_stop
+    Given a prompt with no task_completion_checker
+    When the agent produces output and attempts to stop
+    Then the stop is allowed without any completion verification
+```
+
+#### Prompt Builder
+
+```python
+# integration-tests/ack/scenarios/__init__.py
+
+def build_task_completion_prompt(
+    ns: str,
+    *,
+    checker: TaskCompletionChecker,
+) -> tuple[PromptTemplate[object], Tool]:
+    """Build a prompt with task completion checking and a plan tool."""
+    ...
+```
+
+### Unit Test Coverage
+
+Existing unit tests in `tests/adapters/claude_agent_sdk/test_task_completion.py`
+and `tests/adapters/claude_agent_sdk/test_verify_task_completion.py` are
+relocated to a new `test_task_completion` module under `tests/prompt/`. The tests exercise the
+protocol, `PlanBasedChecker`, and `CompositeChecker` in isolation (no adapter
+dependency). Adapter-specific hook tests remain in their current location but
+are updated to resolve the checker from the prompt.
 
 ### Operational Notes
 
-- **Default disabled**: Must configure checker to enable
-- **Budget/deadline bypass**: Skipped when exhausted
-- **Feedback truncation**: Plan checker limits to 3 task titles
+- **Default disabled**: Must configure checker on prompt to enable
+- **Budget/deadline bypass**: Skipped when exhausted (unchanged)
+- **Feedback truncation**: Plan checker limits to 3 task titles (unchanged)
+- **Adapter fallback**: Adapter-scoped config still works but logs deprecation
 
 ______________________________________________________________________
 
 ## Design Rationale
+
+### Definition Owns Constraints (Task Completion)
+
+The prompt definition is the single artifact that is versioned, reviewed, tested,
+and ported across adapters. Task completion criteria are an inherent property of
+the agent's goal — they belong with the definition, not the harness.
+
+The precedent is clear: tool policies and feedback providers already live on the
+prompt. Task completion was the sole exception, creating an asymmetry that made
+agent definitions incomplete without adapter-specific configuration.
 
 ### Immediate Delivery (Feedback)
 
@@ -447,6 +743,42 @@ When uncertain, deny. Agent reasons about why and adjusts.
 
 Expose reasoning. Denial feedback enables self-correction.
 
+### ACK as Cross-Adapter Verification
+
+By placing the checker on the prompt, ACK can construct task completion scenarios
+once and verify enforcement across every adapter. This eliminates the current gap
+where task completion enforcement is tested only against the Claude Agent SDK.
+
+______________________________________________________________________
+
+## Migration Summary
+
+### What Moves
+
+| From | To |
+|------|-----|
+| `adapters/claude_agent_sdk/_task_completion.py` | `prompt/` (new `task_completion` module) |
+| `ClaudeAgentSDKClientConfig.task_completion_checker` | `PromptTemplate.task_completion_checker` |
+| `tests/adapters/claude_agent_sdk/test_task_completion.py` | `tests/prompt/` (new `test_task_completion` module) |
+
+### What Stays
+
+| Location | Reason |
+|----------|--------|
+| Hook implementations in `adapters/claude_agent_sdk/_hooks.py` | Adapter-specific translation of checker into SDK hooks |
+| `verify_task_completion` in `_result_extraction.py` | Adapter-specific final verification call |
+| Adapter-specific hook tests | Test hook behavior, not checker logic |
+
+### What Gets Added
+
+| Location | Content |
+|----------|---------|
+| `PromptTemplate.task_completion_checker` field | New optional field |
+| `Prompt.task_completion_checker` property | Forwards from template |
+| `PromptProtocol.task_completion_checker` property | Protocol surface |
+| `integration-tests/ack/scenarios/test_task_completion.py` | ACK scenario |
+| `AdapterCapabilities.task_completion` | New capability flag |
+
 ______________________________________________________________________
 
 ## Related Specifications
@@ -455,3 +787,4 @@ ______________________________________________________________________
 - `TOOLS.md` - Tool runtime
 - `SESSIONS.md` - Session state, snapshots
 - `CLAUDE_AGENT_SDK.md` - SDK adapter integration
+- `ACK.md` - Adapter Compatibility Kit
