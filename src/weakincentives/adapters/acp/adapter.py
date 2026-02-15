@@ -18,6 +18,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast, override
@@ -52,6 +53,10 @@ from .config import ACPAdapterConfig, ACPClientConfig
 __all__ = ["ACPAdapter"]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "acp_adapter"})
+
+
+def _noop() -> None:
+    pass
 
 
 def _utcnow() -> datetime:
@@ -457,10 +462,14 @@ class ACPAdapter(ProviderAdapter[Any]):
         mcp_http = MCPHttpServer(mcp_server, server_name="wink-tools")
         await mcp_http.start()
 
+        env_cleanup: Callable[[], None] = _noop
         try:
             wink_mcp = mcp_http.to_http_mcp_server()
             mcp_servers = [wink_mcp, *self._client_config.mcp_servers]
-            merged_env = self._build_env()
+            merged_env, env_cleanup = self._prepare_execution_env(
+                rendered=rendered,
+                effective_cwd=effective_cwd,
+            )
 
             # Use 10 MB readline limit (asyncio default is 64 KB) to
             # handle large JSON-RPC messages on stdio.
@@ -539,6 +548,7 @@ class ACPAdapter(ProviderAdapter[Any]):
                 return accumulated_text, usage
         finally:
             await mcp_http.stop()
+            env_cleanup()
 
     def _build_env(self) -> dict[str, str] | None:
         """Build merged environment variables.
@@ -747,3 +757,16 @@ class ACPAdapter(ProviderAdapter[Any]):
 
     def _detect_empty_response(self, client: ACPClient, prompt_resp: Any) -> None:
         """Detect empty or invalid response. Override in subclasses."""
+
+    def _prepare_execution_env(
+        self,
+        *,
+        rendered: RenderedPrompt[Any],
+        effective_cwd: str,
+    ) -> tuple[dict[str, str] | None, Callable[[], None]]:
+        """Prepare subprocess environment. Override for isolation/ephemeral home.
+
+        Returns:
+            Tuple of (env dict or None to inherit parent, cleanup callable).
+        """
+        return self._build_env(), _noop

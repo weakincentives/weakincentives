@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,6 +25,7 @@ from weakincentives.adapters.opencode_acp.config import (
     OpenCodeACPAdapterConfig,
     OpenCodeACPClientConfig,
 )
+from weakincentives.skills import SkillMount
 
 from ..acp.conftest import AgentMessageChunk, MockModelInfo
 
@@ -87,3 +89,104 @@ class TestDetectEmptyResponse:
 
         # Should not raise
         adapter._detect_empty_response(client, MagicMock())
+
+
+def _make_skill_dir(base: Path, name: str = "test-skill") -> Path:
+    """Create a minimal valid skill directory."""
+    skill_dir = base / name
+    skill_dir.mkdir(parents=True)
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(
+        f"---\nname: {name}\ndescription: A test skill\n---\n\n# {name}\n\nTest content.\n"
+    )
+    return skill_dir
+
+
+class TestPrepareExecutionEnv:
+    def test_no_skills_delegates_to_parent(self) -> None:
+        adapter = OpenCodeACPAdapter()
+        rendered = MagicMock()
+        rendered.skills = ()
+
+        env, cleanup = adapter._prepare_execution_env(
+            rendered=rendered,
+            effective_cwd="/tmp",
+        )
+
+        # Parent returns None when no config env is set
+        assert env is None
+        cleanup()  # Should be a no-op
+
+    def test_no_skills_with_config_env(self) -> None:
+        adapter = OpenCodeACPAdapter(
+            client_config=OpenCodeACPClientConfig(env={"FOO": "bar"}),
+        )
+        rendered = MagicMock()
+        rendered.skills = ()
+
+        env, cleanup = adapter._prepare_execution_env(
+            rendered=rendered,
+            effective_cwd="/tmp",
+        )
+
+        assert env is not None
+        assert env["FOO"] == "bar"
+        cleanup()
+
+    def test_with_skills_creates_ephemeral_home(self, tmp_path: Path) -> None:
+        adapter = OpenCodeACPAdapter()
+        skill_dir = _make_skill_dir(tmp_path, "my-skill")
+
+        rendered = MagicMock()
+        rendered.skills = (SkillMount(skill_dir),)
+
+        env, cleanup = adapter._prepare_execution_env(
+            rendered=rendered,
+            effective_cwd=str(tmp_path),
+        )
+
+        assert env is not None
+        assert "HOME" in env
+        ephemeral_home = Path(env["HOME"])
+        assert ephemeral_home.exists()
+
+        # Skill should be accessible at the expected path
+        installed = ephemeral_home / ".claude" / "skills" / "my-skill" / "SKILL.md"
+        assert installed.exists()
+
+        # Cleanup should remove the ephemeral home
+        cleanup()
+        assert not ephemeral_home.exists()
+
+    def test_with_skills_preserves_config_env(self, tmp_path: Path) -> None:
+        adapter = OpenCodeACPAdapter(
+            client_config=OpenCodeACPClientConfig(env={"MY_KEY": "my_value"}),
+        )
+        skill_dir = _make_skill_dir(tmp_path, "env-skill")
+
+        rendered = MagicMock()
+        rendered.skills = (SkillMount(skill_dir),)
+
+        env, cleanup = adapter._prepare_execution_env(
+            rendered=rendered,
+            effective_cwd=str(tmp_path),
+        )
+
+        assert env is not None
+        assert env["MY_KEY"] == "my_value"
+        assert "HOME" in env
+
+        cleanup()
+
+    def test_mount_failure_cleans_up_temp_dir(self, tmp_path: Path) -> None:
+        adapter = OpenCodeACPAdapter()
+        rendered = MagicMock()
+        rendered.skills = (SkillMount(tmp_path / "nonexistent-skill"),)
+
+        from weakincentives.skills import SkillNotFoundError
+
+        with pytest.raises(SkillNotFoundError):
+            adapter._prepare_execution_env(
+                rendered=rendered,
+                effective_cwd=str(tmp_path),
+            )
