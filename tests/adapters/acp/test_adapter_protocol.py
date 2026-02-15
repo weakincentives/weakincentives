@@ -548,6 +548,88 @@ class TestEvaluateProtocol:
 
         assert result is not None
 
+    def test_evaluate_with_tools_dispatches_schemas(self) -> None:
+        """Tool schemas are extracted and dispatched via RenderedTools."""
+        from dataclasses import dataclass
+
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+        from weakincentives.prompt import Tool
+        from weakincentives.prompt.tool import ToolContext, ToolResult
+        from weakincentives.runtime.session.rendered_tools import RenderedTools
+
+        @dataclass(slots=True, frozen=True)
+        class _Params:
+            x: int
+
+        @dataclass(slots=True, frozen=True)
+        class _Result:
+            value: int
+
+        def _handler(params: _Params, *, context: ToolContext) -> ToolResult[_Result]:
+            return ToolResult.ok(_Result(value=params.x))
+
+        tool = Tool[_Params, _Result](
+            name="calc", description="Calculate", handler=_handler
+        )
+
+        adapter = ACPAdapter(
+            adapter_config=ACPAdapterConfig(quiet_period_ms=0),
+            client_config=ACPClientConfig(cwd="/tmp"),
+        )
+
+        prompt = _make_mock_prompt()
+        prompt.render.return_value.tools = (tool,)
+        session = _make_mock_session()
+
+        dispatched: list[RenderedTools] = []
+        session.dispatcher.subscribe(RenderedTools, dispatched.append)
+
+        mcp_cls_p, create_p = _patch_mcp()
+        with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
+            _make_mcp_mock(mock_mcp_cls)
+            mock_create.return_value = MagicMock()
+            result = adapter.evaluate(prompt, session=session)
+
+        assert result is not None
+        assert len(dispatched) == 1
+        assert len(dispatched[0].tools) == 1
+        assert dispatched[0].tools[0].name == "calc"
+
+    def test_rendered_tools_dispatch_failure_logs(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """RenderedTools dispatch failure is logged, not raised."""
+        import logging
+
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+        from weakincentives.runtime.session.rendered_tools import RenderedTools
+
+        def _failing_handler(event: RenderedTools) -> None:
+            raise RuntimeError("boom")
+
+        adapter = ACPAdapter(
+            adapter_config=ACPAdapterConfig(quiet_period_ms=0),
+            client_config=ACPClientConfig(cwd="/tmp"),
+        )
+
+        prompt = _make_mock_prompt()
+        session = _make_mock_session()
+        session.dispatcher.subscribe(RenderedTools, _failing_handler)
+
+        caplog.set_level(logging.ERROR)
+
+        mcp_cls_p, create_p = _patch_mcp()
+        with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
+            _make_mcp_mock(mock_mcp_cls)
+            mock_create.return_value = MagicMock()
+            result = adapter.evaluate(prompt, session=session)
+
+        assert result is not None
+        assert any(
+            "rendered_tools_dispatch_failed" in record.message
+            for record in caplog.records
+        )
+
 
 class TestHandshakeAndConfigure:
     """Test _handshake and _configure_session via full evaluate."""
