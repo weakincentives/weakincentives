@@ -2,6 +2,220 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+*Commits reviewed: 2026-02-14 (92bc161f) through 2026-02-14 (a1c26f09)*
+
+### TL;DR
+
+All direct `datetime.now(UTC)`, `time.monotonic()`, `time.sleep()`, and
+`asyncio.sleep()` calls are **eliminated from production code** and routed
+through injectable clock protocols (`WallClock`, `MonotonicClock`, `Sleeper`,
+new `AsyncSleeper`), making every timing-dependent code path deterministically
+testable with `FakeClock`. A **full four-layer module boundary model**
+(Foundation → Core → Adapters → High-level) is now enforced by a revamped
+architecture checker, alongside a new **private-module import checker** that
+prevents cross-package `_`-prefixed imports. Prompt `ns` and `key` values are
+now **validated and normalized** to lowercase against the section-key regex.
+**Skill installation** lands for Codex and OpenCode adapters via hermetic
+ephemeral home directories, and **`RenderedTools` event emission** is extended
+to all three adapter families. Direct `pydantic` imports are **banned
+project-wide** via a new lint rule.
+
+---
+
+### Added
+
+#### `AsyncSleeper` protocol for async delay operations
+
+A new `@runtime_checkable` protocol `AsyncSleeper` with a single method
+`async_sleep(seconds: float) -> None` is added to `weakincentives.clock`. The
+unified `Clock` protocol now inherits from `AsyncSleeper` in addition to
+`MonotonicClock`, `WallClock`, and `Sleeper`. Both `SystemClock` (delegates to
+`asyncio.sleep`) and `FakeClock` (calls `advance()` instantly) implement the new
+method. All bare `await asyncio.sleep(...)` calls across three adapter
+subsystems — ACP drain loop, Claude Agent SDK `TranscriptCollector` (shutdown
+drain, poll loop, discovery loop), and Codex App Server deadline watchdog — are
+replaced with calls through an injectable `async_sleeper` parameter.
+(`clock.py`, `adapters/acp/adapter.py`, `adapters/claude_agent_sdk/_transcript_collector.py`,
+`adapters/codex_app_server/_protocol.py`, `adapters/codex_app_server/adapter.py`)
+
+#### Skill installation for Codex App Server adapter
+
+A new `CodexEphemeralHome` class creates a temporary `$HOME` directory, copies
+skills into `$HOME/.agents/skills/<name>/`, and sets `CODEX_HOME` to the
+original `~/.codex` so auth tokens remain accessible. The adapter's `_run_codex`
+method now calls `_setup_skill_env()` to construct and mount skills before
+launching the subprocess, with guaranteed cleanup in a `finally` block. Skills
+are size-capped via `MAX_SKILL_TOTAL_BYTES`, single-mount enforced, and
+symlink-safe. (`adapters/codex_app_server/_ephemeral_home.py`,
+`adapters/codex_app_server/adapter.py`; ~500 lines of tests)
+
+#### Skill installation for OpenCode ACP adapter
+
+A parallel `OpenCodeEphemeralHome` class creates a temporary `$HOME`, copies
+skills into `$HOME/.claude/skills/<name>/`, and passes through OpenCode auth
+data (`~/.local/share/opencode/`) and AWS credentials (`~/.aws/`) via
+best-effort copy. The base `ACPAdapter` gains a `_prepare_execution_env()` hook
+(returns env dict + cleanup callable) that `OpenCodeACPAdapter` overrides to
+inject the ephemeral home. Cleanup is guaranteed via `finally` in
+`_execute_protocol`. (`adapters/acp/adapter.py`,
+`adapters/opencode_acp/_ephemeral_home.py`, `adapters/opencode_acp/adapter.py`;
+~500 lines of tests)
+
+#### ACK skill installation integration test
+
+A new `test_skill_installation.py` scenario in the Adapter Compatibility Kit
+uses a "secret codeword" pattern: a test skill embeds the string
+`"blue-phoenix-42"` in its `SKILL.md`, the agent is asked to return it, and the
+test asserts the codeword appears in the response. Gated by a new
+`skill_installation` capability flag on `AdapterCapabilities`. Claude Agent SDK
+and Codex adapters opt in. (`integration-tests/ack/scenarios/test_skill_installation.py`)
+
+#### `RenderedTools` event emission for Codex and ACP adapters
+
+Previously only the Claude Agent SDK adapter dispatched `RenderedTools` events.
+Now the Codex App Server and ACP adapters also emit `RenderedTools` after
+`PromptRendered`, sharing a correlated `render_event_id` UUID. Failures are
+logged but never abort evaluation. The `_extract_tool_schema` helper was
+extracted from the Claude SDK adapter into a shared `extract_tool_schema()`
+function in `adapters/tool_spec.py`. ACK integration tests now run the
+rendered-tools scenario against all three adapters.
+(`adapters/tool_spec.py`, `adapters/acp/adapter.py`,
+`adapters/codex_app_server/adapter.py`)
+
+#### Four-layer module boundary enforcement
+
+The architecture checker is upgraded from a simple "core must not import contrib"
+rule to a full four-layer model: Foundation (1) → Core (2) → Adapters (3) →
+High-level (4). Each `weakincentives` sub-package is mapped to a layer.
+Runtime imports from a higher layer are flagged as violations;
+`TYPE_CHECKING`-guarded imports are exempt. Three pre-existing violations were
+fixed: `PromptEvaluationError`/`PromptEvaluationPhase` moved from
+`adapters.core` to `errors` (Foundation), `TokenUsage` moved from
+`runtime.events` to `budget` (Foundation), and `get_adapter_name()` replaced
+with a new `adapter_name` property on `ProviderAdapter`.
+(`toolchain/checkers/architecture.py`, `toolchain/utils.py`, `adapters/core.py`,
+`budget.py`, `errors.py`, `runtime/_agent_loop_bundle.py`)
+
+#### Private-module import boundary checker
+
+A new `PrivateImportChecker` statically scans all source files for imports that
+reach into `_`-prefixed (private) modules from outside the owning package.
+Dunder modules (`__init__`, `__future__`) are exempt. Five pre-existing
+violations were fixed by adding public re-exports: `strip_mount_point` via
+`filesystem/__init__.py`, `normalize_component_key` via `prompt/__init__.py`,
+and `SectionVisibility` via `prompt/errors.py`.
+(`toolchain/checkers/private_imports.py`; 265 lines of tests)
+
+#### Banned `time` module imports checker
+
+A new `BannedTimeImportsChecker` uses regex scanning to flag any `import time`
+or `from time import ...` in production code under `src/weakincentives/`, with
+`clock.py` as the sole exemption. This enforces the clock-protocol discipline
+established by the `datetime.now(UTC)` and `time.*` refactoring commits.
+(`toolchain/checkers/banned_time_imports.py`; 115 lines of tests)
+
+#### Banned direct Pydantic imports
+
+The `TID251` ruff rule is activated with a `[tool.ruff.lint.flake8-tidy-imports.banned-api]`
+entry that rejects all `import pydantic` / `from pydantic import ...`
+statements, enforcing exclusive use of the `weakincentives.serde` abstraction.
+(`pyproject.toml`)
+
+#### Prompt namespace and key validation
+
+`PromptTemplate.__pre_init__()` now validates `ns` and `key` through
+`normalize_component_key()`, enforcing the existing section-key regex
+`^[a-z0-9][a-z0-9._-]{0,63}$` and normalizing to lowercase. Previously only
+empty-string checks were performed. (`prompt/prompt.py`)
+
+---
+
+### Changed
+
+#### All `datetime.now(UTC)` calls routed through `WallClock`
+
+~40 call sites across 29 production files (adapters, contrib, debug, evals,
+filesystem, prompt, runtime) are mechanically changed from `datetime.now(UTC)`
+to `SYSTEM_CLOCK.utcnow()`. Three patterns are applied: (1) `_utcnow()` module
+helpers redirect to `SYSTEM_CLOCK`, (2) `default_factory` lambdas on dataclass
+fields replaced with `SYSTEM_CLOCK.utcnow` method references, (3) inline calls
+replaced directly. A new `specs/CLOCK.md` section codifies the three-tier rule:
+inject `WallClock` (preferred), use `SYSTEM_CLOCK` singleton (acceptable),
+`datetime.now(UTC)` (prohibited except inside `SystemClock`).
+
+#### All `time.*` calls routed through `MonotonicClock` / `Sleeper`
+
+9 production files across 5 subsystems (ACP adapter/client, Claude SDK hooks,
+Codex deadline watchdog, Redis mailbox, evals, agent loop) have their `import
+time` removed and replaced with injected `MonotonicClock` and `Sleeper`
+protocol parameters. Notable semantic improvement: `RedisMailbox` and
+`collect_results()` switch from `time.time()` (wall-clock, NTP-vulnerable) to
+`monotonic()` for deadline calculations. New constructor parameters with
+`SYSTEM_CLOCK` defaults are added to `ACPAdapter`, `ACPClient`, `HookContext`,
+`RedisMailbox`, `EvalLoop`, `AgentLoop`, and `collect_results()`.
+
+#### `ProviderAdapter` gains `adapter_name` property
+
+A new non-abstract property `adapter_name` on `ProviderAdapter` returns
+`type(self).__name__` by default. Each concrete adapter overrides it:
+`ClaudeAgentSDKAdapter` → `"claude_agent_sdk"`, `CodexAppServerAdapter` →
+`"codex_app_server"`, `ACPAdapter` → `"acp"`. This eliminates the cross-layer
+`isinstance` checks in `get_adapter_name()`.
+
+#### `PromptEvaluationError` and `TokenUsage` relocated
+
+`PromptEvaluationError`, `PromptEvaluationPhase`, and the phase constants move
+from `adapters.core` to `errors` (Foundation layer). `TokenUsage` moves from
+`runtime.events.types` to `budget` (Foundation layer). Both original locations
+re-import and re-export for backward compatibility.
+
+#### ACK namespace format normalized
+
+Integration test namespace strings change from slash-separated
+(`integration/ack/adapter_name`) to dot-separated with hyphenated adapter names
+(`integration.ack.adapter-name`) to comply with the new prompt namespace
+validation regex.
+
+---
+
+### Breaking Changes
+
+#### `Clock` protocol now includes `AsyncSleeper`
+
+Any class structurally implementing the full `Clock` protocol must now also
+define `async def async_sleep(self, seconds: float) -> None`. The built-in
+`SystemClock` and `FakeClock` are updated. Classes that only implement narrower
+protocols (`WallClock`, `MonotonicClock`, `Sleeper`) are unaffected.
+
+#### Prompt `ns` and `key` reject slashes and enforce lowercase
+
+`PromptTemplate` construction now rejects namespaces/keys containing `/`, `@`,
+spaces, or any character outside `[a-z0-9._-]`. Uppercase input is silently
+normalized to lowercase. Keys longer than 64 characters are rejected. Code using
+`ns="myapp/prompts"` must migrate to `ns="myapp.prompts"`.
+
+#### Stricter architecture checker
+
+The architecture checker now enforces a four-layer boundary model. Runtime
+imports from a higher layer (e.g., Core importing from Adapters, Foundation
+importing from Core) produce `make check` failures. `TYPE_CHECKING`-guarded
+imports are exempt. Any code with cross-layer violations will fail `make check`.
+
+#### Private-module import enforcement
+
+Cross-package imports of `_`-prefixed modules (e.g.,
+`from weakincentives.serde._scope import SerdeScope`) now fail `make check`. Use
+the public API re-exports instead (e.g., `from weakincentives.serde import SerdeScope`).
+
+#### Direct Pydantic imports banned
+
+Any `import pydantic` or `from pydantic import ...` triggers ruff lint error
+`TID251`. Use `weakincentives.serde` instead.
+
+---
+
 ## v0.26.0 — 2026-02-14
 
 *Commits reviewed: 2026-02-07 (b47a2736) through 2026-02-14 (a8da20c4)*
