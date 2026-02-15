@@ -23,7 +23,7 @@ from typing import NoReturn
 from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.runtime.session import Session
 
-from ._protocol import AdapterCapabilities
+from ._protocol import AdapterCapabilities, SandboxSpec
 
 _MODEL_ENV_VAR = "OPENCODE_ACP_TEST_MODEL"
 
@@ -81,7 +81,7 @@ class OpenCodeACPFixture:
         self,
         tmp_path: Path,
         *,
-        sandbox_mode: str,
+        sandbox: SandboxSpec,
     ) -> NoReturn:
         raise NotImplementedError("OpenCode ACP does not support sandbox_policy")
 

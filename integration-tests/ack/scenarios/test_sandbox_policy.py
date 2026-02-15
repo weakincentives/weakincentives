@@ -21,7 +21,7 @@ import pytest
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.session import Session
 
-from ..adapters import AdapterFixture
+from ..adapters import AdapterFixture, FileSystemMode, NetworkMode, SandboxSpec
 
 pytestmark = pytest.mark.ack_capability("sandbox_policy")
 
@@ -42,7 +42,10 @@ def test_sandbox_restricts_writes_outside_workspace(
 
     adapter = adapter_fixture.create_adapter_with_sandbox(
         workspace_dir,
-        sandbox_mode="read-only",
+        sandbox=SandboxSpec(
+            filesystem=FileSystemMode.READ_ONLY,
+            network=NetworkMode.BLOCKED,
+        ),
     )
 
     prompt = Prompt(
@@ -76,7 +79,10 @@ def test_sandbox_allows_writes_inside_workspace(
 
     adapter = adapter_fixture.create_adapter_with_sandbox(
         tmp_path,
-        sandbox_mode="workspace-write",
+        sandbox=SandboxSpec(
+            filesystem=FileSystemMode.WORKSPACE_WRITE,
+            network=NetworkMode.ENABLED,
+        ),
     )
 
     prompt = Prompt(
@@ -90,6 +96,44 @@ def test_sandbox_allows_writes_inside_workspace(
                     key="task",
                     template=(
                         "Create a file named sandbox_allowed.txt in the current directory and "
+                        "write 'ok' to it."
+                    ),
+                )
+            ],
+        )
+    )
+
+    _ = adapter.evaluate(prompt, session=session)
+    assert target.exists()
+
+
+def test_sandbox_allows_writes_with_network_disabled(
+    adapter_fixture: AdapterFixture,
+    session: Session,
+    tmp_path: Path,
+) -> None:
+    """Workspace writes succeed even when network is blocked."""
+    target = tmp_path / "offline_write.txt"
+
+    adapter = adapter_fixture.create_adapter_with_sandbox(
+        tmp_path,
+        sandbox=SandboxSpec(
+            filesystem=FileSystemMode.WORKSPACE_WRITE,
+            network=NetworkMode.BLOCKED,
+        ),
+    )
+
+    prompt = Prompt(
+        PromptTemplate(
+            ns="integration/ack/sandbox",
+            key="offline-write",
+            name="ack_sandbox_offline_write",
+            sections=[
+                MarkdownSection(
+                    title="Task",
+                    key="task",
+                    template=(
+                        "Create a file named offline_write.txt in the current directory and "
                         "write 'ok' to it."
                     ),
                 )

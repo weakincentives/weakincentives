@@ -41,6 +41,7 @@ from .config import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
     CodexAuthMode,
+    sandbox_policy_to_dict,
 )
 
 
@@ -141,6 +142,7 @@ async def execute_protocol(  # noqa: PLR0913
                 thread_id,
                 prompt_text,
                 output_schema,
+                client_config=client_config,
                 model_config=model_config,
                 timeout=timeout,
             )
@@ -226,8 +228,6 @@ async def create_thread(  # noqa: PLR0913
         "approvalPolicy": client_config.approval_policy,
         "ephemeral": client_config.ephemeral,
     }
-    if client_config.sandbox_mode is not None:
-        thread_params["sandbox"] = client_config.sandbox_mode
     if dynamic_tool_specs:
         thread_params["dynamicTools"] = dynamic_tool_specs
     if client_config.mcp_servers:
@@ -243,6 +243,7 @@ async def start_turn(  # noqa: PLR0913
     prompt_text: str,
     output_schema: dict[str, Any] | None,
     *,
+    client_config: CodexAppServerClientConfig,
     model_config: CodexAppServerModelConfig,
     timeout: float | None = None,
 ) -> dict[str, Any]:
@@ -250,6 +251,7 @@ async def start_turn(  # noqa: PLR0913
     turn_params: dict[str, Any] = {
         "threadId": thread_id,
         "input": [{"type": "text", "text": prompt_text}],
+        "sandboxPolicy": sandbox_policy_to_dict(client_config.sandbox_policy),
     }
     if model_config.effort is not None:
         turn_params["effort"] = model_config.effort

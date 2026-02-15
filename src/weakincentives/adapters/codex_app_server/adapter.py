@@ -95,7 +95,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 "codex_bin": self._client_config.codex_bin,
                 "cwd": self._client_config.cwd,
                 "approval_policy": self._client_config.approval_policy,
-                "sandbox_mode": self._client_config.sandbox_mode,
+                "sandbox_policy": type(self._client_config.sandbox_policy).__name__,
                 "ephemeral": self._client_config.ephemeral,
             },
         )
