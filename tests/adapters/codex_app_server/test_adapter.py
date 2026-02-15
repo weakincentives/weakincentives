@@ -63,7 +63,7 @@ from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 from weakincentives.filesystem import Filesystem
-from weakincentives.prompt import Prompt, PromptTemplate, Tool
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate, Tool
 from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.prompt.tool import ToolContext, ToolResult
 from weakincentives.runtime.events import (
@@ -98,11 +98,18 @@ class _AddParams:
     y: int
 
 
-def _add_handler(params: _AddParams, *, context: ToolContext) -> ToolResult[int]:
-    return ToolResult.ok(params.x + params.y, message=str(params.x + params.y))
+@dataclass(slots=True, frozen=True)
+class _AddResult:
+    sum: int
 
 
-_ADD_TOOL = Tool[_AddParams, int](
+def _add_handler(params: _AddParams, *, context: ToolContext) -> ToolResult[_AddResult]:
+    return ToolResult.ok(
+        _AddResult(sum=params.x + params.y), message=str(params.x + params.y)
+    )
+
+
+_ADD_TOOL = Tool[_AddParams, _AddResult](
     name="add",
     description="Add two numbers",
     handler=_add_handler,
@@ -110,11 +117,16 @@ _ADD_TOOL = Tool[_AddParams, int](
 
 
 def _make_prompt_with_tool(name: str = "tool-prompt") -> Prompt[object]:
+    section = MarkdownSection(
+        title="Tools",
+        template="Use the tools below.",
+        key="tools",
+        tools=[_ADD_TOOL],
+    )
     template: PromptTemplate[object] = PromptTemplate(
         ns="test",
         key="with-tool",
-        sections=(),
-        tools=(_ADD_TOOL,),
+        sections=(section,),
         name=name,
     )
     return Prompt(template)
@@ -1070,6 +1082,104 @@ class TestEvaluateEndToEnd:
 
             result = adapter.evaluate(prompt, session=session, budget=budget)
             assert result.text == "ok"
+
+    def test_rendered_tools_dispatch_failure_logs_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that RenderedTools dispatch failures are logged."""
+        import logging
+
+        from weakincentives.runtime.session.rendered_tools import RenderedTools
+
+        def failing_handler(event: RenderedTools) -> None:
+            raise RuntimeError("Subscriber error")
+
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, dispatcher = _make_session()
+        dispatcher.subscribe(RenderedTools, failing_handler)
+
+        prompt = _make_simple_prompt()
+
+        messages = [
+            {
+                "method": "item/completed",
+                "params": {"item": {"type": "agentMessage", "text": "Done"}},
+            },
+            {
+                "method": "turn/completed",
+                "params": {"turn": {"status": "completed"}},
+            },
+        ]
+
+        caplog.set_level(logging.ERROR)
+
+        with patch(
+            "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+        ) as MockClient:
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+            mock_client.read_messages.return_value = _messages_iterator(messages)
+            MockClient.return_value = mock_client
+
+            result = adapter.evaluate(prompt, session=session)
+
+        assert result.text == "Done"
+        assert any(
+            "rendered_tools_dispatch_failed" in record.message
+            for record in caplog.records
+        )
+
+
+class TestEvaluateWithTools:
+    """Test that prompt tools are extracted into RenderedTools schemas."""
+
+    def test_tool_schemas_dispatched(self) -> None:
+        from weakincentives.runtime.session.rendered_tools import RenderedTools
+
+        adapter = CodexAppServerAdapter(
+            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+        )
+        session, dispatcher = _make_session()
+        prompt = _make_prompt_with_tool()
+
+        dispatched: list[RenderedTools] = []
+        dispatcher.subscribe(RenderedTools, lambda e: dispatched.append(e))
+
+        messages = [
+            {
+                "method": "item/completed",
+                "params": {"item": {"type": "agentMessage", "text": "ok"}},
+            },
+            {
+                "method": "turn/completed",
+                "params": {"turn": {"status": "completed"}},
+            },
+        ]
+
+        with patch(
+            "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"
+        ) as MockClient:
+            mock_client = _make_mock_client()
+            mock_client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+            mock_client.read_messages.return_value = _messages_iterator(messages)
+            MockClient.return_value = mock_client
+
+            result = adapter.evaluate(prompt, session=session)
+
+        assert result.text == "ok"
+        assert len(dispatched) == 1
+        assert len(dispatched[0].tools) == 1
+        assert dispatched[0].tools[0].name == "add"
 
 
 class TestResolveCwd:
