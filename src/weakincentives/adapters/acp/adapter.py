@@ -462,6 +462,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         mcp_http = MCPHttpServer(mcp_server, server_name="wink-tools")
         await mcp_http.start()
 
+        env_cleanup: Callable[[], None] = _noop
         try:
             wink_mcp = mcp_http.to_http_mcp_server()
             mcp_servers = [wink_mcp, *self._client_config.mcp_servers]
