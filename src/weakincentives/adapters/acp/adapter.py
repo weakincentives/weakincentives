@@ -36,12 +36,14 @@ from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
+from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.transcript import TranscriptEmitter
 from ...runtime.watchdog import Heartbeat
 from ...types import ACP_ADAPTER_NAME, AdapterName
 from .._shared._bridge import BridgedTool, create_bridged_tools
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
+from ..tool_spec import extract_tool_schema
 from ._async import run_async
 from ._events import dispatch_tool_invoked, extract_token_usage
 from ._mcp_http import MCPHttpServer, create_mcp_tool_server
@@ -180,6 +182,8 @@ class ACPAdapter(ProviderAdapter[Any]):
         adapter_name = self._adapter_name()
 
         session_id = getattr(session, "session_id", None)
+        render_event_id = uuid4()
+        created_at = _utcnow()
 
         # Dispatch PromptRendered
         _ = session.dispatcher.dispatch(
@@ -191,12 +195,34 @@ class ACPAdapter(ProviderAdapter[Any]):
                 session_id=session_id,
                 render_inputs=(),
                 rendered_prompt=prompt_text,
-                created_at=_utcnow(),
+                created_at=created_at,
                 descriptor=None,
                 run_context=run_context,
-                event_id=uuid4(),
+                event_id=render_event_id,
             )
         )
+
+        # Dispatch RenderedTools
+        tool_schemas = tuple(extract_tool_schema(tool) for tool in rendered.tools)
+        tools_result = session.dispatcher.dispatch(
+            RenderedTools(
+                prompt_ns=prompt.ns,
+                prompt_key=prompt.key,
+                tools=tool_schemas,
+                render_event_id=render_event_id,
+                session_id=session_id,
+                created_at=created_at,
+            )
+        )
+        if not tools_result.ok:
+            logger.error(
+                "acp.evaluate.rendered_tools_dispatch_failed",
+                event="rendered_tools_dispatch_failed",
+                context={
+                    "failure_count": len(tools_result.errors),
+                    "tool_count": len(tool_schemas),
+                },
+            )
 
         # Determine CWD
         effective_cwd, temp_workspace_dir, prompt = self._resolve_cwd(prompt)

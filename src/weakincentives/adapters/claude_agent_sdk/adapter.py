@@ -18,7 +18,7 @@ import contextlib
 import shutil
 import tempfile
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
@@ -32,11 +32,11 @@ from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
-from ...runtime.session.rendered_tools import RenderedTools, ToolSchema
+from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.watchdog import Heartbeat
 from ...types import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
-from ..tool_spec import tool_to_spec
+from ..tool_spec import extract_tool_schema
 from ._async_utils import run_async
 from ._bridge import MCPToolExecutionState, create_bridged_tools
 from ._ephemeral_home import EphemeralHome
@@ -58,10 +58,6 @@ from ._transcript_collector import TranscriptCollector
 from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import IsolationConfig, get_default_model
-
-if TYPE_CHECKING:
-    from ...prompt.tool import Tool
-    from ...types.dataclass import SupportsDataclassOrNone, SupportsToolResult
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
@@ -120,18 +116,7 @@ def _dispatch_render_events(
         )
     )
 
-    def _extract_tool_schema(
-        tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
-    ) -> ToolSchema:
-        spec = tool_to_spec(tool)
-        fn = spec["function"]
-        return ToolSchema(
-            name=fn["name"],
-            description=fn["description"],
-            parameters=fn["parameters"],
-        )
-
-    tool_schemas = tuple(_extract_tool_schema(tool) for tool in rendered.tools)
+    tool_schemas = tuple(extract_tool_schema(tool) for tool in rendered.tools)
     tools_result = session.dispatcher.dispatch(
         RenderedTools(
             prompt_ns=prompt.ns,
