@@ -59,6 +59,7 @@ from weakincentives.adapters.codex_app_server.config import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
     ExternalTokenAuth,
+    ReadOnlyPolicy,
 )
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.budget import Budget, BudgetTracker
@@ -425,6 +426,7 @@ class TestStartTurn:
                 "thread-1",
                 "Hello",
                 None,
+                client_config=CodexAppServerClientConfig(),
                 model_config=CodexAppServerModelConfig(),
             )
             assert result["turn"]["id"] == 1
@@ -434,6 +436,13 @@ class TestStartTurn:
             params = args[0][1]
             assert params["threadId"] == "thread-1"
             assert params["input"][0]["text"] == "Hello"
+            assert params["sandboxPolicy"] == {
+                "type": "workspaceWrite",
+                "networkAccess": False,
+                "writableRoots": [],
+                "excludeSlashTmp": False,
+                "excludeTmpdirEnvVar": False,
+            }
             assert "effort" not in params
             assert "outputSchema" not in params
 
@@ -458,6 +467,7 @@ class TestStartTurn:
                 "thread-1",
                 "Solve",
                 out_schema,
+                client_config=CodexAppServerClientConfig(),
                 model_config=model_config,
             )
 
@@ -466,6 +476,30 @@ class TestStartTurn:
             assert params["summary"] == "concise"
             assert params["personality"] == "friendly"
             assert params["outputSchema"] == out_schema
+
+        asyncio.run(_run())
+
+    def test_turn_with_read_only_policy(self) -> None:
+        async def _run() -> None:
+            client = _make_mock_client()
+            client.send_request.return_value = {"turn": {"id": 3}}
+
+            await start_turn(
+                client,
+                "thread-1",
+                "Read files",
+                None,
+                client_config=CodexAppServerClientConfig(
+                    sandbox_policy=ReadOnlyPolicy(),
+                ),
+                model_config=CodexAppServerModelConfig(),
+            )
+
+            params = client.send_request.call_args[0][1]
+            assert params["sandboxPolicy"] == {
+                "type": "readOnly",
+                "access": {"type": "fullAccess"},
+            }
 
         asyncio.run(_run())
 
@@ -493,10 +527,9 @@ class TestCreateThread:
 
         asyncio.run(_run())
 
-    def test_thread_with_sandbox_and_tools(self) -> None:
+    def test_thread_with_tools_and_mcp(self) -> None:
         async def _run() -> None:
             client_config = CodexAppServerClientConfig(
-                sandbox_mode="read-only",
                 mcp_servers={"srv": {"command": "npx"}},
             )
             client = _make_mock_client()
@@ -512,7 +545,7 @@ class TestCreateThread:
             )
 
             params = client.send_request.call_args[0][1]
-            assert params["sandbox"] == "read-only"
+            assert "sandbox" not in params
             assert params["dynamicTools"] == tools
             assert "config" in params
 
@@ -1925,6 +1958,7 @@ class TestSetupRPCDeadlineBounding:
                 "thread-1",
                 "Hello",
                 None,
+                client_config=CodexAppServerClientConfig(),
                 model_config=CodexAppServerModelConfig(),
                 timeout=7.0,
             )

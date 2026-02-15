@@ -65,8 +65,8 @@ WINK Prompt/Session
       ├─ Convert to DynamicToolSpec list [{name, description, inputSchema}]
       ├─ Spawn: codex app-server (stdio NDJSON)
       ├─ Handshake: initialize (experimentalApi) → initialized
-      ├─ thread/start (model, cwd, sandbox, dynamicTools)
-      ├─ turn/start (text input, outputSchema if structured)
+      ├─ thread/start (model, cwd, dynamicTools)
+      ├─ turn/start (text input, sandboxPolicy, outputSchema if structured)
       ├─ Stream: item/*, turn/* notifications
       │    ├─ item/agentMessage/delta (params.delta — assistant output)
       │    ├─ item/started + item/completed (commands, file changes, MCP tools)
@@ -109,7 +109,7 @@ Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
 | `suppress_stderr` | `bool` | `True` | Capture stderr for debugging (not printed unless debugging) |
 | `startup_timeout_s` | `float` | `10.0` | Max time for initialize handshake |
 | `approval_policy` | `ApprovalPolicy` | `"never"` | How to handle command/file approvals |
-| `sandbox_mode` | `SandboxMode \| None` | `None` | Sandbox mode for `thread/start` |
+| `sandbox_policy` | `SandboxPolicy` | `WorkspaceWritePolicy()` | Sandbox policy sent on `turn/start` |
 | `auth_mode` | `CodexAuthMode \| None` | `None` | Authentication configuration |
 | `mcp_servers` | `dict[str, McpServerConfig] \| None` | `None` | Additional external MCP servers |
 | `ephemeral` | `bool` | `False` | If true, thread is not persisted to disk |
@@ -140,19 +140,34 @@ ApprovalPolicy = Literal["never", "untrusted", "on-failure", "on-request"]
 | `"on-failure"` | Approval required after command failure |
 | `"on-request"` | Approval required on every action |
 
-#### SandboxMode
+#### SandboxPolicy
 
 ```python
-SandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
+SandboxPolicy = WorkspaceWritePolicy | ReadOnlyPolicy | ExternalSandboxPolicy | DangerFullAccessPolicy
+
+@FrozenDataclass()
+class WorkspaceWritePolicy:
+    network_access: bool = False
+    writable_roots: tuple[str, ...] = ()
+    exclude_slash_tmp: bool = False
+    exclude_tmpdir_env_var: bool = False
+
+@FrozenDataclass()
+class ReadOnlyPolicy:
+    pass  # full read access, no writes
+
+@FrozenDataclass()
+class ExternalSandboxPolicy:
+    network_access: Literal["restricted", "enabled"] = "restricted"
+
+@FrozenDataclass()
+class DangerFullAccessPolicy:
+    pass  # unrestricted access
 ```
 
-Sent as a string on `thread/start` via the `sandbox` field. The response
-returns the object form (e.g. `{"type": "dangerFullAccess"}`).
-
-Codex also supports a `sandboxPolicy` override on `turn/start` with richer
-options (`writableRoots`, `networkAccess`, `excludeSlashTmp`,
-`excludeTmpdirEnvVar`), but the adapter does not expose this in v1 — the
-thread-level `SandboxMode` string is sufficient.
+Serialized via `sandbox_policy_to_dict()` and sent as `sandboxPolicy` on
+`turn/start`. The default `WorkspaceWritePolicy()` enables workspace writes
+with network **disabled** — callers must opt in to `network_access=True`.
 
 #### CodexAuthMode
 
@@ -489,16 +504,16 @@ On error, raise `PromptEvaluationError(phase="request")`.
 
 At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
 `create_thread()` sends `thread/start` with `model`, `cwd`,
-`approvalPolicy`, and `ephemeral`. Optional fields `sandbox`,
-`dynamicTools`, and `config.mcp_servers` are included only when configured.
-Returns `result["thread"]["id"]`.
+`approvalPolicy`, and `ephemeral`. Optional fields `dynamicTools` and
+`config.mcp_servers` are included only when configured. Returns
+`result["thread"]["id"]`.
 
 ### 8. Start Turn
 
 At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
-`start_turn()` sends `turn/start` with `threadId` and `input` (text).
-Optional fields `effort`, `summary`, `personality`, and `outputSchema` are
-included only when set. Returns `result["turn"]["id"]`.
+`start_turn()` sends `turn/start` with `threadId`, `input` (text), and
+`sandboxPolicy`. Optional fields `effort`, `summary`, `personality`, and
+`outputSchema` are included only when set. Returns `result["turn"]["id"]`.
 
 ### 9. Stream Notifications
 
@@ -724,7 +739,7 @@ adapter = CodexAppServerAdapter(
     client_config=CodexAppServerClientConfig(
         cwd="/absolute/path/to/workspace",
         approval_policy="never",
-        sandbox_mode="workspace-write",
+        sandbox_policy=WorkspaceWritePolicy(),
     ),
 )
 
@@ -765,7 +780,7 @@ workspace = WorkspaceSection(
 adapter = CodexAppServerAdapter(
     client_config=CodexAppServerClientConfig(
         cwd=str(workspace.temp_dir),
-        sandbox_mode="workspace-write",
+        sandbox_policy=WorkspaceWritePolicy(),
     ),
 )
 ```
@@ -805,7 +820,6 @@ summary: Summary = resp.output  # Typed structured output
 - Full Codex review integration (`review/start`) — can be added later
 - Codex skill invocation — can be added later
 - ChatGPT browser OAuth flow — requires interactive browser
-- Per-turn `sandboxPolicy` overrides — thread-level `SandboxMode` is sufficient
 - Apps/connectors (`app/list`) — can be added later
 - Configuration management (`config/*`) — Codex handles its own config
 - Multi-thread management — one thread per `evaluate()` call

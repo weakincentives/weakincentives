@@ -14,7 +14,13 @@
 
 from __future__ import annotations
 
-from ._protocol import AdapterCapabilities, AdapterFixture
+from ._protocol import (
+    AdapterCapabilities,
+    AdapterFixture,
+    FileSystemMode,
+    NetworkMode,
+    SandboxSpec,
+)
 from .claude_agent_sdk import ClaudeAgentSDKFixture
 from .codex_app_server import CodexAppServerFixture
 from .opencode_acp import OpenCodeACPFixture
@@ -24,5 +30,8 @@ __all__ = [
     "AdapterFixture",
     "ClaudeAgentSDKFixture",
     "CodexAppServerFixture",
+    "FileSystemMode",
+    "NetworkMode",
     "OpenCodeACPFixture",
+    "SandboxSpec",
 ]

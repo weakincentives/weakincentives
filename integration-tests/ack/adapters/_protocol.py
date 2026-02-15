@@ -16,11 +16,39 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.runtime.session import Session
+
+
+class FileSystemMode(Enum):
+    """Filesystem access level for sandbox configuration."""
+
+    READ_ONLY = "read-only"
+    WORKSPACE_WRITE = "workspace-write"
+
+
+class NetworkMode(Enum):
+    """Network access level for sandbox configuration."""
+
+    BLOCKED = "blocked"
+    ENABLED = "enabled"
+
+
+@dataclass(slots=True, frozen=True)
+class SandboxSpec:
+    """Adapter-agnostic sandbox specification.
+
+    Composes two independent dimensions — filesystem access and network
+    access — into a single value that each adapter fixture maps to its
+    native configuration.
+    """
+
+    filesystem: FileSystemMode = FileSystemMode.READ_ONLY
+    network: NetworkMode = NetworkMode.BLOCKED
 
 
 @dataclass(slots=True, frozen=True)
@@ -78,16 +106,15 @@ class AdapterFixture(Protocol):
         self,
         tmp_path: Path,
         *,
-        sandbox_mode: str,
+        sandbox: SandboxSpec,
     ) -> ProviderAdapter[object]:
-        """Create an adapter with a specific sandbox mode.
+        """Create an adapter with a specific sandbox configuration.
 
         Args:
             tmp_path: Workspace root directory.
-            sandbox_mode: Sandbox mode string. Adapters map this to their
-                native sandbox configuration:
-                - ``"read-only"``: No writes outside sandbox defaults.
-                - ``"workspace-write"``: Writes allowed under ``tmp_path``.
+            sandbox: Adapter-agnostic sandbox specification describing
+                filesystem and network access levels. Each adapter maps
+                this to its native configuration.
         """
         ...
 

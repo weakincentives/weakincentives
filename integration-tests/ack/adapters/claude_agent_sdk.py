@@ -17,11 +17,12 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
+from typing import assert_never
 
 from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.runtime.session import Session
 
-from ._protocol import AdapterCapabilities
+from ._protocol import AdapterCapabilities, FileSystemMode, NetworkMode, SandboxSpec
 
 _MODEL_ENV_VAR = "CLAUDE_AGENT_SDK_TEST_MODEL"
 
@@ -85,7 +86,7 @@ class ClaudeAgentSDKFixture:
         self,
         tmp_path: Path,
         *,
-        sandbox_mode: str,
+        sandbox: SandboxSpec,
     ) -> ProviderAdapter[object]:
         from weakincentives.adapters.claude_agent_sdk import (
             ClaudeAgentSDKAdapter,
@@ -95,22 +96,27 @@ class ClaudeAgentSDKFixture:
             SandboxConfig,
         )
 
-        if sandbox_mode == "read-only":
-            sandbox = SandboxConfig(enabled=True, writable_paths=())
-            network_policy = NetworkPolicy.no_network()
+        if sandbox.filesystem is FileSystemMode.READ_ONLY:
+            sdk_sandbox = SandboxConfig(enabled=True, writable_paths=())
             # acceptEdits respects sandbox boundaries; bypassPermissions
             # skips all permission checks and overrides the sandbox.
             permission_mode = "acceptEdits"
-        elif sandbox_mode == "workspace-write":
-            sandbox = SandboxConfig(
+        elif sandbox.filesystem is FileSystemMode.WORKSPACE_WRITE:
+            sdk_sandbox = SandboxConfig(
                 enabled=True,
                 writable_paths=(str(tmp_path),),
             )
-            network_policy = None
             permission_mode = "bypassPermissions"
         else:
-            msg = f"Unsupported sandbox_mode: {sandbox_mode}"
-            raise ValueError(msg)
+            assert_never(sandbox.filesystem)
+
+        network_policy: NetworkPolicy | None
+        if sandbox.network is NetworkMode.BLOCKED:
+            network_policy = NetworkPolicy.no_network()
+        elif sandbox.network is NetworkMode.ENABLED:
+            network_policy = None
+        else:
+            assert_never(sandbox.network)
 
         return ClaudeAgentSDKAdapter(
             model=self.get_model(),
@@ -118,7 +124,7 @@ class ClaudeAgentSDKFixture:
                 permission_mode=permission_mode,
                 cwd=str(tmp_path),
                 isolation=IsolationConfig.inherit_host_auth(
-                    sandbox=sandbox,
+                    sandbox=sdk_sandbox,
                     network_policy=network_policy,
                 ),
             ),

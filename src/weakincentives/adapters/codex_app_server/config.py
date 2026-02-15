@@ -25,19 +25,21 @@ __all__ = [
     "CodexAppServerClientConfig",
     "CodexAppServerModelConfig",
     "CodexAuthMode",
+    "DangerFullAccessPolicy",
+    "ExternalSandboxPolicy",
     "ExternalTokenAuth",
     "McpServerConfig",
     "Personality",
+    "ReadOnlyPolicy",
     "ReasoningEffort",
     "ReasoningSummary",
-    "SandboxMode",
+    "SandboxPolicy",
+    "WorkspaceWritePolicy",
+    "sandbox_policy_to_dict",
 ]
 
 ApprovalPolicy = Literal["never", "untrusted", "on-failure", "on-request"]
 """How command/file approvals are handled."""
-
-SandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
-"""Sandbox mode for thread/start."""
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 """Reasoning effort level for the model."""
@@ -53,6 +55,68 @@ McpServerConfig = dict[str, Any]
 
 DEFAULT_MODEL = "gpt-5.3-codex"
 """Default Codex model identifier."""
+
+
+@FrozenDataclass()
+class WorkspaceWritePolicy:
+    """Sandbox policy allowing writes to the workspace directory.
+
+    Sent as ``sandboxPolicy`` on ``turn/start``.
+    """
+
+    network_access: bool = False
+    writable_roots: tuple[str, ...] = ()
+    exclude_slash_tmp: bool = False
+    exclude_tmpdir_env_var: bool = False
+
+
+@FrozenDataclass()
+class ReadOnlyPolicy:
+    """Sandbox policy with full read access but no writes."""
+
+
+@FrozenDataclass()
+class ExternalSandboxPolicy:
+    """Sandbox policy delegating enforcement to an external sandbox."""
+
+    network_access: Literal["restricted", "enabled"] = "restricted"
+
+
+@FrozenDataclass()
+class DangerFullAccessPolicy:
+    """Sandbox policy granting unrestricted filesystem and network access."""
+
+
+SandboxPolicy = (
+    WorkspaceWritePolicy
+    | ReadOnlyPolicy
+    | ExternalSandboxPolicy
+    | DangerFullAccessPolicy
+)
+"""Union of supported sandbox policy types."""
+
+
+def sandbox_policy_to_dict(policy: SandboxPolicy) -> dict[str, Any]:
+    """Serialize a sandbox policy to its camelCase JSON-RPC dict."""
+    if isinstance(policy, WorkspaceWritePolicy):
+        return {
+            "type": "workspaceWrite",
+            "networkAccess": policy.network_access,
+            "writableRoots": list(policy.writable_roots),
+            "excludeSlashTmp": policy.exclude_slash_tmp,
+            "excludeTmpdirEnvVar": policy.exclude_tmpdir_env_var,
+        }
+    if isinstance(policy, ReadOnlyPolicy):
+        return {
+            "type": "readOnly",
+            "access": {"type": "fullAccess"},
+        }
+    if isinstance(policy, ExternalSandboxPolicy):
+        return {
+            "type": "externalSandbox",
+            "networkAccess": policy.network_access,
+        }
+    return {"type": "dangerFullAccess"}
 
 
 @FrozenDataclass()
@@ -85,7 +149,7 @@ class CodexAppServerClientConfig:
         suppress_stderr: Capture stderr for debugging instead of printing.
         startup_timeout_s: Max time for the initialize handshake.
         approval_policy: How to handle command/file approvals.
-        sandbox_mode: Sandbox mode for thread/start.
+        sandbox_policy: Sandbox policy sent on turn/start.
         auth_mode: Authentication configuration. None inherits host credentials.
         mcp_servers: Additional external MCP server configurations.
         ephemeral: If true, thread is not persisted to disk.
@@ -99,7 +163,7 @@ class CodexAppServerClientConfig:
     suppress_stderr: bool = True
     startup_timeout_s: float = 10.0
     approval_policy: ApprovalPolicy = "never"
-    sandbox_mode: SandboxMode | None = None
+    sandbox_policy: SandboxPolicy = WorkspaceWritePolicy()
     auth_mode: CodexAuthMode | None = None
     mcp_servers: dict[str, McpServerConfig] | None = None
     ephemeral: bool = False

@@ -19,7 +19,12 @@ from weakincentives.adapters.codex_app_server.config import (
     ApiKeyAuth,
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
+    DangerFullAccessPolicy,
+    ExternalSandboxPolicy,
     ExternalTokenAuth,
+    ReadOnlyPolicy,
+    WorkspaceWritePolicy,
+    sandbox_policy_to_dict,
 )
 
 
@@ -59,7 +64,7 @@ class TestCodexAppServerClientConfig:
         assert cfg.suppress_stderr is True
         assert cfg.startup_timeout_s == 10.0
         assert cfg.approval_policy == "never"
-        assert cfg.sandbox_mode is None
+        assert isinstance(cfg.sandbox_policy, WorkspaceWritePolicy)
         assert cfg.auth_mode is None
         assert cfg.mcp_servers is None
         assert cfg.ephemeral is False
@@ -75,7 +80,7 @@ class TestCodexAppServerClientConfig:
             suppress_stderr=False,
             startup_timeout_s=30.0,
             approval_policy="on-request",
-            sandbox_mode="read-only",
+            sandbox_policy=ReadOnlyPolicy(),
             auth_mode=auth,
             mcp_servers={"server1": {"command": "npx", "args": ["mcp"]}},
             ephemeral=True,
@@ -85,7 +90,7 @@ class TestCodexAppServerClientConfig:
         assert cfg.codex_bin == "/usr/local/bin/codex"
         assert cfg.cwd == "/tmp/work"
         assert cfg.approval_policy == "on-request"
-        assert cfg.sandbox_mode == "read-only"
+        assert isinstance(cfg.sandbox_policy, ReadOnlyPolicy)
         assert cfg.auth_mode is auth
         assert cfg.mcp_servers is not None
         assert "server1" in cfg.mcp_servers
@@ -112,3 +117,56 @@ class TestCodexAppServerModelConfig:
         assert cfg.effort == "high"
         assert cfg.summary == "concise"
         assert cfg.personality == "friendly"
+
+
+class TestSandboxPolicyToDict:
+    def test_workspace_write_defaults(self) -> None:
+        result = sandbox_policy_to_dict(WorkspaceWritePolicy())
+        assert result == {
+            "type": "workspaceWrite",
+            "networkAccess": False,
+            "writableRoots": [],
+            "excludeSlashTmp": False,
+            "excludeTmpdirEnvVar": False,
+        }
+
+    def test_workspace_write_custom(self) -> None:
+        policy = WorkspaceWritePolicy(
+            network_access=True,
+            writable_roots=("/tmp/a", "/tmp/b"),
+            exclude_slash_tmp=True,
+            exclude_tmpdir_env_var=True,
+        )
+        result = sandbox_policy_to_dict(policy)
+        assert result == {
+            "type": "workspaceWrite",
+            "networkAccess": True,
+            "writableRoots": ["/tmp/a", "/tmp/b"],
+            "excludeSlashTmp": True,
+            "excludeTmpdirEnvVar": True,
+        }
+
+    def test_read_only(self) -> None:
+        result = sandbox_policy_to_dict(ReadOnlyPolicy())
+        assert result == {
+            "type": "readOnly",
+            "access": {"type": "fullAccess"},
+        }
+
+    def test_external_sandbox_defaults(self) -> None:
+        result = sandbox_policy_to_dict(ExternalSandboxPolicy())
+        assert result == {
+            "type": "externalSandbox",
+            "networkAccess": "restricted",
+        }
+
+    def test_external_sandbox_enabled(self) -> None:
+        result = sandbox_policy_to_dict(ExternalSandboxPolicy(network_access="enabled"))
+        assert result == {
+            "type": "externalSandbox",
+            "networkAccess": "enabled",
+        }
+
+    def test_danger_full_access(self) -> None:
+        result = sandbox_policy_to_dict(DangerFullAccessPolicy())
+        assert result == {"type": "dangerFullAccess"}

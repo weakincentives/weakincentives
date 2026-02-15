@@ -18,11 +18,12 @@ import os
 import shutil
 from collections.abc import Mapping
 from pathlib import Path
+from typing import assert_never
 
 from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.runtime.session import Session
 
-from ._protocol import AdapterCapabilities
+from ._protocol import AdapterCapabilities, FileSystemMode, NetworkMode, SandboxSpec
 
 _MODEL_ENV_VAR = "CODEX_APP_SERVER_TEST_MODEL"
 _DEFAULT_MODEL = "gpt-5.3-codex"
@@ -78,20 +79,31 @@ class CodexAppServerFixture:
         self,
         tmp_path: Path,
         *,
-        sandbox_mode: str,
+        sandbox: SandboxSpec,
     ) -> ProviderAdapter[object]:
         from weakincentives.adapters.codex_app_server import (
             CodexAppServerAdapter,
             CodexAppServerClientConfig,
             CodexAppServerModelConfig,
+            ReadOnlyPolicy,
+            WorkspaceWritePolicy,
         )
+
+        if sandbox.filesystem is FileSystemMode.READ_ONLY:
+            policy = ReadOnlyPolicy()
+        elif sandbox.filesystem is FileSystemMode.WORKSPACE_WRITE:
+            policy = WorkspaceWritePolicy(
+                network_access=(sandbox.network is NetworkMode.ENABLED),
+            )
+        else:
+            assert_never(sandbox.filesystem)
 
         return CodexAppServerAdapter(
             model_config=CodexAppServerModelConfig(model=self.get_model()),
             client_config=CodexAppServerClientConfig(
                 cwd=str(tmp_path),
                 approval_policy="never",
-                sandbox_mode=sandbox_mode,
+                sandbox_policy=policy,
             ),
         )
 

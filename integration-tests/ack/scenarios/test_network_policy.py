@@ -21,7 +21,7 @@ import pytest
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.session import Session
 
-from ..adapters import AdapterFixture
+from ..adapters import AdapterFixture, FileSystemMode, NetworkMode, SandboxSpec
 
 pytestmark = pytest.mark.ack_capability("network_policy")
 
@@ -34,7 +34,10 @@ def test_network_denied_by_default(
     """Network requests are blocked under read-only sandbox defaults."""
     adapter = adapter_fixture.create_adapter_with_sandbox(
         tmp_path,
-        sandbox_mode="read-only",
+        sandbox=SandboxSpec(
+            filesystem=FileSystemMode.READ_ONLY,
+            network=NetworkMode.BLOCKED,
+        ),
     )
 
     prompt = Prompt(
@@ -80,7 +83,10 @@ def test_network_allowed_for_listed_domains(
     """Network requests succeed under workspace-write sandbox."""
     adapter = adapter_fixture.create_adapter_with_sandbox(
         tmp_path,
-        sandbox_mode="workspace-write",
+        sandbox=SandboxSpec(
+            filesystem=FileSystemMode.WORKSPACE_WRITE,
+            network=NetworkMode.ENABLED,
+        ),
     )
 
     prompt = Prompt(
@@ -107,3 +113,52 @@ def test_network_allowed_for_listed_domains(
     text = response.text.lower()
     success_indicators = ("200", "example domain", "example.com", "success", "ok")
     assert any(indicator in text for indicator in success_indicators)
+
+
+def test_network_blocked_with_workspace_write(
+    adapter_fixture: AdapterFixture,
+    session: Session,
+    tmp_path: Path,
+) -> None:
+    """Network is blocked when writes are allowed but network is disabled."""
+    adapter = adapter_fixture.create_adapter_with_sandbox(
+        tmp_path,
+        sandbox=SandboxSpec(
+            filesystem=FileSystemMode.WORKSPACE_WRITE,
+            network=NetworkMode.BLOCKED,
+        ),
+    )
+
+    prompt = Prompt(
+        PromptTemplate(
+            ns="integration/ack/network",
+            key="blocked-with-write",
+            name="ack_network_blocked_write",
+            sections=[
+                MarkdownSection(
+                    title="Task",
+                    key="task",
+                    template=(
+                        "Try to fetch https://httpbin.org/get with curl. If blocked, "
+                        "reply with 'network blocked'."
+                    ),
+                )
+            ],
+        )
+    )
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.text is not None
+    text = response.text.lower()
+    failure_indicators = (
+        "blocked",
+        "denied",
+        "fail",
+        "error",
+        "cannot",
+        "unable",
+        "permission",
+        "restricted",
+    )
+    assert any(indicator in text for indicator in failure_indicators)

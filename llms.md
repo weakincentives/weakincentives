@@ -325,7 +325,9 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
     ReasoningEffort,
-    SandboxMode,
+    WorkspaceWritePolicy,
+    ReadOnlyPolicy,
+    SandboxPolicy,
     ApprovalPolicy,
 )
 from weakincentives.prompt import (
