@@ -426,6 +426,21 @@ class TestHostByteWriter:
 
         assert w.closed
 
+    def test_close_flush_failure_create_mode_cleans_file(self, tmp_path: Path) -> None:
+        """If flush/fsync fails in create mode, the new file should be removed."""
+        f = tmp_path / "new_file.bin"
+        writer = HostByteWriter.open(
+            f, "new_file.bin", mode="create", create_parents=False
+        )
+        writer.write(b"data")
+
+        with patch("os.fsync", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                writer.close()
+
+        assert not f.exists()
+        assert writer.closed
+
     def test_close_flush_failure_append_mode(self, tmp_path: Path) -> None:
         """Flush failure in append mode (no temp file) should still propagate."""
         f = tmp_path / "file.bin"

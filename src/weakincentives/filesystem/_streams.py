@@ -470,13 +470,23 @@ class HostByteWriter:
 
     Wraps a host filesystem file for streaming byte writes.
 
-    For ``create`` and ``overwrite`` modes, writes go to a temporary file
-    in the same directory and are atomically renamed to the target path on
-    successful ``close()``. If the context manager exits due to an exception,
-    the temporary file is removed and the original is left untouched.
+    Mode behavior:
 
-    For ``append`` mode, writes go directly to the target file (atomic
-    rename is not meaningful for appends).
+    ``overwrite``
+        Writes to a temporary file in the same directory, atomically
+        renamed to the target on ``close()``.  On abort the temp file
+        is removed and the original is left untouched.
+
+    ``create``
+        Opens the target directly with ``"xb"`` (exclusive create).
+        On abort the newly created file is deleted.  No temp-file
+        indirection is needed because there is no pre-existing file
+        to protect.
+
+    ``append``
+        Writes directly to the target file.  Append is inherently
+        non-transactional: bytes already written are *not* rolled
+        back on abort.
     """
 
     _path: str
@@ -498,9 +508,10 @@ class HostByteWriter:
         """Open a file for writing.
 
         For ``create`` mode, uses ``"xb"`` to atomically fail if the file
-        already exists (no TOCTOU race). For ``create`` and ``overwrite``
-        modes, writes to a temporary file that is renamed on close for
-        atomic writes. For ``append`` mode, writes directly.
+        already exists (no TOCTOU race) and writes directly to the new
+        file.  For ``overwrite`` mode, writes to a temporary file that
+        is renamed on close for atomic writes.  For ``append`` mode,
+        writes directly.
 
         Args:
             resolved_path: Absolute path to the file on disk.
@@ -533,20 +544,22 @@ class HostByteWriter:
                 _temp_path=None,
             )
 
-        # create/overwrite: write to temp file, rename on close
         if mode == "create":
-            # Validate atomically via "xb" — raises FileExistsError if exists
+            # "xb" atomically fails if the file exists and writes
+            # directly to the target — no temp-file indirection needed
+            # since there is no pre-existing file to protect.
             try:
                 handle = resolved_path.open("xb")
             except FileExistsError:
                 raise FileExistsError(f"File already exists: {relative_path}") from None
-            # Remove the placeholder immediately — its only purpose was to
-            # atomically verify no file existed.  The real content arrives
-            # via temp-file rename in close().  Removing it here avoids
-            # orphan files if temp file creation fails or the writer aborts.
-            handle.close()
-            resolved_path.unlink()
+            return cls(
+                _path=relative_path,
+                _handle=handle,
+                _final_path=resolved_path,
+                _temp_path=None,
+            )
 
+        # overwrite: write to temp file, rename on close
         fd, temp_path_str = tempfile.mkstemp(dir=str(parent_dir), prefix=".wink_tmp_")
         temp_path = Path(temp_path_str)
         handle = os.fdopen(fd, "wb")
@@ -605,13 +618,8 @@ class HostByteWriter:
     ) -> None:
         """Exit context manager.
 
-        For create/overwrite modes: on error, removes the temp file
-        without committing (original preserved). On success, atomically
-        renames the temp file to the final path.
-
-        For append mode: writes are already on disk. On error, the
-        handle is closed but bytes already appended are *not* rolled
-        back — append is inherently non-transactional.
+        On error, calls ``_abort()`` to discard writes. On success,
+        calls ``close()`` to commit.
         """
         if exc_type is not None:
             self._abort()
@@ -621,9 +629,10 @@ class HostByteWriter:
     def _abort(self) -> None:
         """Discard writes and clean up without committing.
 
-        For create/overwrite modes, removes the temp file so the
-        original is preserved. For append mode (no temp file), simply
-        closes the handle; bytes already appended are not rolled back.
+        ``overwrite``: removes the temp file; original is preserved.
+        ``create``: deletes the newly created file.
+        ``append``: closes the handle; bytes already appended are not
+        rolled back.
         """
         if self._closed:
             return
@@ -633,13 +642,16 @@ class HostByteWriter:
         finally:
             if self._temp_path is not None:
                 self._temp_path.unlink(missing_ok=True)
+            elif self._final_path is not None:
+                self._final_path.unlink(missing_ok=True)
 
     def close(self) -> None:
-        """Close the writer and commit the temp file.
+        """Close the writer and commit writes.
 
-        For create/overwrite modes, flushes data and atomically renames
-        the temporary file to the final path. For append mode, simply
-        closes the file handle.
+        ``overwrite``: flushes, fsyncs, then atomically renames the
+        temp file to the target path.
+        ``create``: flushes and fsyncs the file in place.
+        ``append``: flushes and fsyncs the file in place.
         """
         if self._closed:
             return
@@ -649,9 +661,10 @@ class HostByteWriter:
             os.fsync(self._handle.fileno())
             self._handle.close()
         except BaseException:
-            # Clean up temp file on flush/close failure
             if self._temp_path is not None:
                 self._temp_path.unlink(missing_ok=True)
+            elif self._final_path is not None:
+                self._final_path.unlink(missing_ok=True)
             raise
         if self._final_path is not None and self._temp_path is not None:
             _ = self._temp_path.replace(self._final_path)
