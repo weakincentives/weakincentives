@@ -134,7 +134,7 @@ SUNFISH_MOUNT_INCLUDE_GLOBS: tuple[str, ...] = (
     "*.yml",
     "*.yaml",
     "*.toml",
-    "*.gitignore",
+    ".gitignore",
     "*.json",
     "*.cfg",
     "*.ini",
@@ -143,6 +143,11 @@ SUNFISH_MOUNT_INCLUDE_GLOBS: tuple[str, ...] = (
 )
 
 SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
+    "**/__pycache__/**",
+    "**/.git/**",
+    "**/.venv/**",
+    "**/node_modules/**",
+    "**/*.pyc",
     "**/*.pickle",
     "**/*.png",
     "**/*.bmp",
@@ -248,7 +253,10 @@ def _create_count_lines_tool(
     ) -> ToolResult[CountLinesResult]:
         """Count lines of code, blanks, and comments in a project file."""
         _ = context
-        target = Path(project_path) / params.path
+        root = Path(project_path).resolve()
+        target = (root / params.path).resolve()
+        if not target.is_relative_to(root):
+            return ToolResult.error("Path escapes project directory")
         if not target.is_file():
             return ToolResult.error(f"File not found: {params.path}")
         try:
@@ -524,7 +532,6 @@ def run_review(
     _LOGGER.info(
         "Starting code review for: %s (adapter=%s)", project_path, adapter_name
     )
-
     requests, responses = create_mailboxes()
 
     adapter = create_adapter(adapter_name, model_id=model_id)
@@ -633,13 +640,6 @@ def _create_argument_parser() -> argparse.ArgumentParser:
               %(prog)s /path/to/project
               %(prog)s --adapter codex /path/to/project "Review auth logic"
               %(prog)s --adapter opencode --model openai/gpt-5.3-codex /path/to/project
-
-            Architecture:
-              This example demonstrates the AgentLoop pattern with:
-              - InMemoryMailbox for request/response routing
-              - InProcessDispatcher for session telemetry
-              - Provider-agnostic adapter (Claude SDK, Codex, or OpenCode)
-              - Durable processing with visibility timeouts
         """),
     )
     parser.add_argument(

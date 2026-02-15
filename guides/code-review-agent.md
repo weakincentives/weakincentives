@@ -259,9 +259,13 @@ class ReferenceParams:
 ```python nocheck
 SUNFISH_MOUNT_INCLUDE_GLOBS = (
     "*.md", "*.py", "*.txt", "*.yml", "*.yaml", "*.toml",
-    "*.gitignore", "*.json", "*.cfg", "*.ini", "*.sh", "*.6",
+    ".gitignore", "*.json", "*.cfg", "*.ini", "*.sh", "*.6",
 )
-SUNFISH_MOUNT_EXCLUDE_GLOBS = ("**/*.pickle", "**/*.png", "**/*.bmp")
+SUNFISH_MOUNT_EXCLUDE_GLOBS = (
+    "**/__pycache__/**", "**/.git/**", "**/.venv/**",
+    "**/node_modules/**", "**/*.pyc",
+    "**/*.pickle", "**/*.png", "**/*.bmp",
+)
 SUNFISH_MOUNT_MAX_BYTES = 600_000
 ```
 
