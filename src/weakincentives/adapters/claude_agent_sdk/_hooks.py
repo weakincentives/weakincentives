@@ -37,7 +37,6 @@ hooks in the Python SDK. Only the hook types listed above are available.
 
 from __future__ import annotations
 
-import time
 from typing import Any, cast
 
 from claude_agent_sdk.types import (
@@ -118,7 +117,7 @@ def create_pre_tool_use_hook(
         sdk_context: SdkHookContext,
     ) -> SyncHookJSONOutput:
         _ = sdk_context
-        hook_start = time.monotonic()
+        hook_start = hook_context.clock.monotonic()
         hook_context.beat()
 
         if (
@@ -222,7 +221,7 @@ def create_post_tool_use_hook(
         sdk_context: SdkHookContext,
     ) -> SyncHookJSONOutput:
         _ = sdk_context
-        hook_start = time.monotonic()
+        hook_start = hook_context.clock.monotonic()
 
         if (
             not isinstance(input_data, dict)

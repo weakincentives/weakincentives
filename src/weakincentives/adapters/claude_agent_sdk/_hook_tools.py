@@ -18,7 +18,6 @@ tool transaction management, event dispatch, and feedback collection.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -171,7 +170,7 @@ def _setup_tool_execution_state(
         hook_context.mcp_tool_state.enqueue(tool_name, tool_input, tool_use_id)
     elif tool_use_id is not None and not is_mcp_tool:
         hook_context.begin_tool_execution(tool_use_id=tool_use_id, tool_name=tool_name)
-        hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
+        hook_duration_ms = int((hook_context.clock.monotonic() - hook_start) * 1000)
         logger.debug(
             "claude_agent_sdk.hook.snapshot_taken",
             event="hook.snapshot_taken",
@@ -375,7 +374,7 @@ def _handle_tool_transaction(
             tool_use_id=tool_use_id, success=success
         )
         if restored:
-            hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
+            hook_duration_ms = int((hook_context.clock.monotonic() - hook_start) * 1000)
             logger.info(
                 "claude_agent_sdk.hook.state_restored",
                 event="hook.state_restored",

@@ -34,14 +34,13 @@ import contextlib
 import json
 import logging
 import threading
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, is_dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast, get_origin
 from uuid import uuid4
 
-from weakincentives.clock import SYSTEM_CLOCK
+from weakincentives.clock import SYSTEM_CLOCK, MonotonicClock, Sleeper
 from weakincentives.formal import formal_spec
 from weakincentives.runtime.mailbox import (
     CompositeResolver,
@@ -240,6 +239,12 @@ class RedisMailbox[T, R]:
     Set to 0 to disable TTL. Keys are refreshed on each operation including
     the background reaper, so active queues stay alive indefinitely."""
 
+    clock: MonotonicClock = field(default=SYSTEM_CLOCK, repr=False)
+    """Clock for monotonic time measurement. Defaults to system clock."""
+
+    sleeper: Sleeper = field(default=SYSTEM_CLOCK, repr=False)
+    """Sleeper for delay operations. Defaults to system clock."""
+
     _keys: _QueueKeys = field(init=False, repr=False)
     _scripts: dict[str, Any] = field(init=False, default_factory=dict, repr=False)
     _reaper_thread: threading.Thread | None = field(
@@ -435,11 +440,11 @@ class RedisMailbox[T, R]:
 
         max_messages = min(max(1, max_messages), 10)
         messages: list[Message[T, R]] = []
-        deadline = time.time() + wait_time_seconds
+        deadline = self.clock.monotonic() + wait_time_seconds
 
         try:
             while len(messages) < max_messages and not self._closed:
-                remaining = deadline - time.time()
+                remaining = deadline - self.clock.monotonic()
                 msg = self._receive_one(visibility_timeout, remaining)
                 if msg is not None:
                     messages.append(msg)
@@ -478,7 +483,7 @@ class RedisMailbox[T, R]:
         lua_keys = [keys.pending, keys.invisible, keys.data, keys.meta]
         poll_interval = 0.3  # 300ms between poll attempts
 
-        deadline = time.time() + wait_seconds
+        deadline = self.clock.monotonic() + wait_seconds
 
         while True:
             receipt_suffix = str(uuid4())
@@ -504,12 +509,12 @@ class RedisMailbox[T, R]:
                 break
 
             # No message available
-            remaining = deadline - time.time()
+            remaining = deadline - self.clock.monotonic()
             if remaining <= 0:
                 return None
 
             # Poll again after interval (but don't overshoot deadline)
-            time.sleep(min(poll_interval, remaining))
+            self.sleeper.sleep(min(poll_interval, remaining))
 
         if data is None:
             # Message data was deleted (shouldn't happen, but handle gracefully)

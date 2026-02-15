@@ -14,9 +14,9 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 
+from ..clock import SYSTEM_CLOCK, MonotonicClock
 from ..experiment import Experiment
 from ..runtime.mailbox import Mailbox
 from ._types import Dataset, EvalReport, EvalRequest, EvalResult
@@ -94,6 +94,7 @@ def collect_results(
     expected_count: int,
     *,
     timeout_seconds: float = 300,
+    clock: MonotonicClock = SYSTEM_CLOCK,
 ) -> EvalReport:
     """Collect evaluation results into a report.
 
@@ -117,10 +118,10 @@ def collect_results(
         >>> print(f"Pass rate: {report.pass_rate:.1%}")
     """
     collected: list[EvalResult] = []
-    deadline = time.time() + timeout_seconds
+    deadline = clock.monotonic() + timeout_seconds
 
-    while len(collected) < expected_count and time.time() < deadline:
-        remaining = deadline - time.time()
+    while len(collected) < expected_count and clock.monotonic() < deadline:
+        remaining = deadline - clock.monotonic()
         wait_time = min(20, max(1, int(remaining)))
 
         for msg in results.receive(wait_time_seconds=wait_time):

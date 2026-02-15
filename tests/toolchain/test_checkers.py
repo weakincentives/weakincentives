@@ -21,6 +21,7 @@ from toolchain.checkers import (
     create_all_checkers,
     create_architecture_checker,
     create_bandit_checker,
+    create_banned_time_imports_checker,
     create_deptry_checker,
     create_docs_checker,
     create_format_checker,
@@ -32,6 +33,7 @@ from toolchain.checkers import (
     create_typecheck_checker,
 )
 from toolchain.checkers.architecture import ArchitectureChecker
+from toolchain.checkers.banned_time_imports import BannedTimeImportsChecker
 from toolchain.checkers.docs import DocsChecker
 from toolchain.checkers.private_imports import PrivateImportChecker
 
@@ -302,6 +304,113 @@ class TestArchitectureChecker:
         checker = ArchitectureChecker(src_dir=root / "src")
         result = checker.run()
         assert result.status == "passed", [d.message for d in result.diagnostics]
+
+
+class TestBannedTimeImportsChecker:
+    """Tests for BannedTimeImportsChecker."""
+
+    def test_name_and_description(self) -> None:
+        checker = BannedTimeImportsChecker()
+        assert checker.name == "banned-time-imports"
+        assert "clock" in checker.description.lower()
+
+    def test_passes_on_real_codebase(self) -> None:
+        root = Path(__file__).parents[2]
+        checker = BannedTimeImportsChecker(src_dir=root / "src")
+        result = checker.run()
+        assert result.status == "passed", [d.message for d in result.diagnostics]
+
+    def test_fails_on_missing_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checker = BannedTimeImportsChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert any("not found" in d.message.lower() for d in result.diagnostics)
+
+    def test_detects_import_time(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+            (pkg / "bad.py").write_text("import time\n\nx = time.monotonic()\n")
+
+            checker = BannedTimeImportsChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert len(result.diagnostics) == 1
+            assert "import time" in result.diagnostics[0].message
+            assert result.diagnostics[0].location is not None
+            assert result.diagnostics[0].location.line == 1
+
+    def test_detects_from_time_import(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+            (pkg / "bad.py").write_text("from time import sleep\n")
+
+            checker = BannedTimeImportsChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert any("from time import" in d.message for d in result.diagnostics)
+
+    def test_allows_clock_py(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+            (pkg / "clock.py").write_text("import time as _time\n")
+
+            checker = BannedTimeImportsChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "passed"
+
+    def test_skips_pycache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+            pycache = pkg / "__pycache__"
+            pycache.mkdir()
+            (pycache / "bad.py").write_text("import time\n")
+
+            checker = BannedTimeImportsChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "passed"
+
+    def test_handles_unreadable_file(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+            (pkg / "bad.py").write_text("import time\n")
+
+            original_read = Path.read_text
+
+            def mock_read(self: Path, *args: object, **kwargs: object) -> str:
+                if self.name == "bad.py":
+                    raise OSError("Permission denied")
+                return original_read(self, *args, **kwargs)  # type: ignore[arg-type]
+
+            with patch.object(Path, "read_text", mock_read):
+                checker = BannedTimeImportsChecker(src_dir=Path(tmpdir))
+                result = checker.run()
+            # Should pass - unreadable files are skipped gracefully
+            assert result.status == "passed"
+
+    def test_multiple_violations_in_one_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+            (pkg / "bad.py").write_text("import time\nfrom time import sleep\n")
+
+            checker = BannedTimeImportsChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert len(result.diagnostics) == 2
 
 
 class TestDocsChecker:
@@ -631,6 +740,11 @@ class TestFactoryFunctions:
         assert checker.name == "private-imports"
         assert isinstance(checker, PrivateImportChecker)
 
+    def test_create_banned_time_imports_checker(self) -> None:
+        checker = create_banned_time_imports_checker()
+        assert checker.name == "banned-time-imports"
+        assert isinstance(checker, BannedTimeImportsChecker)
+
     def test_create_all_checkers(self) -> None:
         checkers = create_all_checkers()
         assert len(checkers) >= 10  # At least 10 checkers
@@ -641,6 +755,7 @@ class TestFactoryFunctions:
         assert "test" in names
         assert "architecture" in names
         assert "private-imports" in names
+        assert "banned-time-imports" in names
         assert "docs" in names
 
 
