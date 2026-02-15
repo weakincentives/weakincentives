@@ -31,13 +31,13 @@ from ...runtime.events import PromptRendered
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
-from ...runtime.session.rendered_tools import RenderedTools, ToolSchema
+from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.watchdog import Heartbeat
 from ...types import AdapterName
 from .._shared._bridge import create_bridged_tools
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
-from ..tool_spec import tool_to_spec
+from ..tool_spec import extract_tool_schema
 from ._async import run_async
 from ._protocol import execute_protocol
 from ._response import build_response
@@ -178,16 +178,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         )
 
         # Dispatch RenderedTools
-        def _extract_tool_schema(tool: Any) -> ToolSchema:
-            spec = tool_to_spec(tool)
-            fn = spec["function"]
-            return ToolSchema(
-                name=fn["name"],
-                description=fn["description"],
-                parameters=fn["parameters"],
-            )
-
-        tool_schemas = tuple(_extract_tool_schema(tool) for tool in rendered.tools)
+        tool_schemas = tuple(extract_tool_schema(tool) for tool in rendered.tools)
         tools_result = session.dispatcher.dispatch(
             RenderedTools(
                 prompt_ns=prompt.ns,

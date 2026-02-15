@@ -36,6 +36,7 @@ from .core import (
 
 if TYPE_CHECKING:
     from ..prompt.tool import Tool
+    from ..runtime.session.rendered_tools import ToolSchema
 
 
 ToolChoice = str | Mapping[str, Any] | None
@@ -77,6 +78,21 @@ def tool_to_spec(
             "parameters": parameters_schema,
         },
     }
+
+
+def extract_tool_schema(
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+) -> ToolSchema:
+    """Extract a ``ToolSchema`` from a tool definition via ``tool_to_spec``."""
+    from ..runtime.session.rendered_tools import ToolSchema as _ToolSchema
+
+    spec = tool_to_spec(tool)
+    fn = spec["function"]
+    return _ToolSchema(
+        name=fn["name"],
+        description=fn["description"],
+        parameters=fn["parameters"],
+    )
 
 
 def serialize_tool_call(tool_call: ProviderToolCall) -> dict[str, Any]:
@@ -138,6 +154,7 @@ __all__ = [
     "ToolArguments",
     "ToolArgumentsParser",
     "ToolChoice",
+    "extract_tool_schema",
     "parse_tool_arguments",
     "serialize_tool_call",
     "tool_to_spec",
