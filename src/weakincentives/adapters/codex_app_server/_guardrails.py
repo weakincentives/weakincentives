@@ -20,7 +20,7 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING, Any
 
-from ...budget import BudgetTracker
+from ...budget import BudgetTracker, TokenUsage
 from ...deadlines import Deadline
 from ...prompt.feedback import collect_feedback
 from ...prompt.task_completion import TaskCompletionContext
@@ -52,6 +52,17 @@ def append_feedback(
         content_items.append({"type": "inputText", "text": feedback_text})
 
 
+def accumulate_usage(current: TokenUsage | None, new: TokenUsage) -> TokenUsage:
+    """Sum token usage across continuation rounds."""
+    if current is None:
+        return new
+    return TokenUsage(
+        input_tokens=(current.input_tokens or 0) + (new.input_tokens or 0),
+        output_tokens=(current.output_tokens or 0) + (new.output_tokens or 0),
+        cached_tokens=(current.cached_tokens or 0) + (new.cached_tokens or 0),
+    )
+
+
 def resolve_filesystem(prompt: PromptProtocol[Any] | None) -> Filesystem | None:
     """Extract filesystem from prompt resources if available."""
     if prompt is None:
@@ -63,7 +74,7 @@ def resolve_filesystem(prompt: PromptProtocol[Any] | None) -> Filesystem | None:
     return None
 
 
-def check_task_completion(
+def check_task_completion(  # noqa: PLR0911
     *,
     prompt: PromptProtocol[Any] | None,
     session: SessionProtocol,
@@ -74,7 +85,8 @@ def check_task_completion(
     """Check if the task is complete according to the prompt's checker.
 
     Returns (should_continue, feedback). When should_continue is True,
-    the caller should start another turn with the feedback as prompt text.
+    feedback is guaranteed to be a non-empty string that the caller should
+    use as the prompt text for the next turn.
     """
     if prompt is None:
         return False, None
@@ -117,6 +129,14 @@ def check_task_completion(
             "codex_app_server.task_completion.complete",
             event="task_completion.complete",
             context={"feedback": result.feedback},
+        )
+        return False, None
+
+    # Incomplete without feedback — nothing actionable to send as a new turn.
+    if not result.feedback:
+        logger.debug(
+            "codex_app_server.task_completion.incomplete_no_feedback",
+            event="task_completion.incomplete_no_feedback",
         )
         return False, None
 

@@ -20,6 +20,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from weakincentives.adapters._shared._visibility_signal import VisibilityExpansionSignal
+from weakincentives.adapters.codex_app_server._guardrails import accumulate_usage
 from weakincentives.adapters.codex_app_server._protocol import execute_protocol
 from weakincentives.adapters.codex_app_server.client import (
     CodexAppServerClient,
@@ -32,11 +33,13 @@ from weakincentives.adapters.codex_app_server.config import (
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
+from weakincentives.prompt import VisibilityExpansionRequired
 from weakincentives.prompt.task_completion import (
     TaskCompletionChecker,
     TaskCompletionResult,
 )
 from weakincentives.runtime.events import InProcessDispatcher
+from weakincentives.runtime.events.types import TokenUsage
 from weakincentives.runtime.session import Session
 
 # ---- Helpers ----
@@ -189,8 +192,6 @@ class TestContinuationLoop:
             assert second_turn_call[0][0] == "turn/start"
             turn_params = second_turn_call[0][1]
             assert turn_params["input"][0]["text"] == "Missing file"
-            # Second turn should not include output schema
-            assert "outputSchema" not in turn_params
 
         asyncio.run(_run())
 
@@ -374,7 +375,7 @@ class TestContinuationLoop:
         asyncio.run(_run())
 
     def test_usage_accumulated_across_turns(self) -> None:
-        """Token usage from later turns replaces earlier usage."""
+        """Token usage is summed across continuation rounds."""
 
         async def _run() -> None:
             client = _make_mock_client()
@@ -463,10 +464,10 @@ class TestContinuationLoop:
                 visibility_signal=signal,
                 prompt=mock_prompt,
             )
-            # Usage from the second turn should be the final usage
+            # Usage should be accumulated: 10+30=40, 5+15=20
             assert usage is not None
-            assert usage.input_tokens == 30
-            assert usage.output_tokens == 15
+            assert usage.input_tokens == 40
+            assert usage.output_tokens == 20
 
         asyncio.run(_run())
 
@@ -508,3 +509,98 @@ class TestContinuationLoop:
                 )
 
         asyncio.run(_run())
+
+    def test_visibility_signal_skips_continuation(self) -> None:
+        """Continuation stops when visibility expansion signal is set."""
+
+        async def _run() -> None:
+            client = _make_mock_client()
+            session, _ = _make_session()
+
+            client.send_request.side_effect = [
+                {"capabilities": {}},
+                {"thread": {"id": "t-1"}},
+                {"turn": {"id": 1}},
+            ]
+
+            # Set the visibility signal during the message stream.
+            signal = VisibilityExpansionSignal()
+
+            async def _messages_with_signal() -> Any:
+                yield {
+                    "method": "item/agentMessage/delta",
+                    "params": {"delta": "response"},
+                }
+                signal.set(
+                    VisibilityExpansionRequired(
+                        "expand",
+                        requested_overrides={},
+                        reason="expand",
+                        section_keys=(),
+                    )
+                )
+                yield {
+                    "method": "turn/completed",
+                    "params": {"turn": {"status": "completed"}},
+                }
+
+            client.read_messages.return_value = _messages_with_signal()
+
+            mock_checker = MagicMock(spec=TaskCompletionChecker)
+            mock_checker.check.return_value = TaskCompletionResult.incomplete(
+                "Missing file"
+            )
+
+            mock_prompt = MagicMock()
+            mock_prompt.task_completion_checker = mock_checker
+            mock_prompt.resources.get_optional.return_value = None
+
+            import pytest
+
+            with pytest.raises(VisibilityExpansionRequired):
+                await execute_protocol(
+                    client_config=CodexAppServerClientConfig(),
+                    model_config=CodexAppServerModelConfig(),
+                    client=client,
+                    session=session,
+                    adapter_name="codex_app_server",
+                    prompt_name="test",
+                    prompt_text="do something",
+                    effective_cwd="/tmp",
+                    dynamic_tool_specs=[],
+                    tool_lookup={},
+                    output_schema=None,
+                    deadline=None,
+                    budget_tracker=None,
+                    run_context=None,
+                    visibility_signal=signal,
+                    prompt=mock_prompt,
+                )
+            # Checker should not have been called — loop broke early.
+            mock_checker.check.assert_not_called()
+
+        asyncio.run(_run())
+
+
+class TestAccumulateUsage:
+    """Tests for accumulate_usage helper."""
+
+    def test_none_current(self) -> None:
+        new = TokenUsage(input_tokens=10, output_tokens=5)
+        result = accumulate_usage(None, new)
+        assert result is new
+
+    def test_sums_all_fields(self) -> None:
+        current = TokenUsage(input_tokens=10, output_tokens=5, cached_tokens=2)
+        new = TokenUsage(input_tokens=30, output_tokens=15, cached_tokens=3)
+        result = accumulate_usage(current, new)
+        assert result.input_tokens == 40
+        assert result.output_tokens == 20
+        assert result.cached_tokens == 5
+
+    def test_none_fields_treated_as_zero(self) -> None:
+        current = TokenUsage(input_tokens=None, output_tokens=5)
+        new = TokenUsage(input_tokens=10, output_tokens=None)
+        result = accumulate_usage(current, new)
+        assert result.input_tokens == 10
+        assert result.output_tokens == 5

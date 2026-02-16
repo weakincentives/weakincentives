@@ -34,7 +34,7 @@ from ._events import (
     extract_token_usage,
     map_codex_error_phase,
 )
-from ._guardrails import append_feedback, check_task_completion
+from ._guardrails import accumulate_usage, append_feedback, check_task_completion
 from ._transcript import CodexTranscriptBridge
 from .client import CodexAppServerClient, CodexClientError
 from .config import (
@@ -131,7 +131,7 @@ async def _initialize_session(  # noqa: PLR0913
         ) from error
 
 
-async def execute_protocol(  # noqa: PLR0913, PLR0914
+async def execute_protocol(  # noqa: C901, PLR0913
     *,
     client_config: CodexAppServerClientConfig,
     model_config: CodexAppServerModelConfig,
@@ -180,7 +180,7 @@ async def execute_protocol(  # noqa: PLR0913, PLR0914
             try:
                 if bridge is not None:
                     bridge.on_user_message(current_prompt_text)
-                current_schema = output_schema if continuation_round == 0 else None
+                current_schema = output_schema
                 timeout = deadline_remaining_s(deadline, prompt_name)
                 turn_result = await start_turn(
                     client,
@@ -216,7 +216,11 @@ async def execute_protocol(  # noqa: PLR0913, PLR0914
             )
             accumulated_text = turn_text
             if turn_usage is not None:
-                usage = turn_usage
+                usage = accumulate_usage(usage, turn_usage)
+
+            # Skip continuation when visibility expansion is pending.
+            if visibility_signal.is_set():
+                break
 
             should_continue, feedback = check_task_completion(
                 prompt=prompt,
@@ -225,11 +229,7 @@ async def execute_protocol(  # noqa: PLR0913, PLR0914
                 deadline=deadline,
                 budget_tracker=budget_tracker,
             )
-            if (
-                should_continue
-                and feedback
-                and continuation_round < max_continuation_rounds
-            ):
+            if should_continue and continuation_round < max_continuation_rounds:
                 current_prompt_text = feedback
                 continuation_round += 1
                 continue

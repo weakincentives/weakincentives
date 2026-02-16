@@ -389,7 +389,7 @@ class TestCheckTaskCompletion:
         assert feedback == "Missing report.md"
 
     def test_incomplete_without_feedback(self) -> None:
-        """Incomplete result with None feedback still returns should_continue=True."""
+        """Incomplete with None feedback returns should_continue=False."""
         session, _ = _make_session()
         mock_checker = MagicMock(spec=TaskCompletionChecker)
         mock_checker.check.return_value = TaskCompletionResult(
@@ -410,7 +410,7 @@ class TestCheckTaskCompletion:
                 deadline=None,
                 budget_tracker=None,
             )
-        assert should_continue is True
+        assert should_continue is False
         assert feedback is None
 
     def test_deadline_exhausted(self) -> None:
