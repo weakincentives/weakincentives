@@ -286,6 +286,8 @@ class BridgedTool:
             denial = self._check_policies(params, context=context)
             if denial is not None:
                 self._restore_snapshot(snapshot, reason="policy_denial")
+                denied_result: ToolResult[None] = ToolResult.error(denial)
+                self._dispatch_tool_invoked(args, denied_result, denial, tool_use_id)
                 return {
                     "content": [{"type": "text", "text": denial}],
                     "isError": True,

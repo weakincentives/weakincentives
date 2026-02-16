@@ -1851,6 +1851,84 @@ class TestBridgedToolPolicyEnforcement:
         assert result["isError"] is True
         assert on_result_calls == []  # on_result never called
 
+    def test_policy_denial_dispatches_tool_invoked(
+        self,
+        session: Session,
+        mock_adapter: MagicMock,
+    ) -> None:
+        """Policy denial still dispatches a ToolInvoked event."""
+        from weakincentives.prompt import MarkdownSection, PolicyDecision
+        from weakincentives.runtime.events.types import ToolInvoked
+
+        @dataclass(frozen=True)
+        class DenyPolicy:
+            @property
+            def name(self) -> str:
+                return "deny_all"
+
+            def check(
+                self,
+                tool: Tool[object, object],
+                params: object,
+                *,
+                context: ToolContext,
+            ) -> PolicyDecision:
+                del tool, params, context
+                return PolicyDecision.deny("Blocked.")
+
+            def on_result(
+                self,
+                tool: Tool[object, object],
+                params: object,
+                result: ToolResult[object],
+                *,
+                context: ToolContext,
+            ) -> None:
+                del tool, params, result, context
+
+        section = MarkdownSection[SearchParams](
+            title="Task",
+            template="Search for ${query}",
+            tools=(search_tool,),
+            key="task",
+        )
+        template = PromptTemplate(
+            ns="tests",
+            key="policy-deny-event",
+            sections=[section],
+            policies=[DenyPolicy()],
+        )
+        prompt_with_policy: Prompt[object] = Prompt(template)
+        prompt_with_policy.resources.__enter__()
+
+        events: list[ToolInvoked] = []
+        session.dispatcher.subscribe(ToolInvoked, events.append)
+
+        bridged = BridgedTool(
+            name="search",
+            description="Search",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=cast("PromptProtocol[object]", prompt_with_policy),
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        result = bridged({"query": "test"})
+
+        assert result["isError"] is True
+        assert len(events) == 1
+        event = events[0]
+        assert event.name == "search"
+        assert not event.result.success
+        assert "Blocked" in event.rendered_output
+
     def test_no_policies_allows_execution(
         self,
         session: Session,
