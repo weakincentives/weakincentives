@@ -189,6 +189,16 @@ def build_sdk_options_kwargs(  # noqa: PLR0913
     options_kwargs["env"] = env_vars
     options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
 
+    # Pass typed sandbox settings via ClaudeAgentOptions.sandbox so the SDK
+    # receives them directly (in addition to the settings.json path).
+    from ._sandbox_conversion import to_sdk_sandbox_settings
+
+    isolation = ephemeral_home.isolation
+    options_kwargs["sandbox"] = to_sdk_sandbox_settings(
+        isolation.sandbox,
+        isolation.network_policy,
+    )
+
     logger.debug(
         "claude_agent_sdk.sdk_query.env_configured",
         event="sdk_query.env_configured",
