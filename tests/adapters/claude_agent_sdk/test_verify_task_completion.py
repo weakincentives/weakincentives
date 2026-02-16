@@ -441,3 +441,31 @@ class TestCheckTaskCompletion:
         assert should_continue is True
         assert feedback is not None
         assert "No filesystem" in feedback
+
+    def test_filesystem_resolution_failure_returns_none(self, session: Session) -> None:
+        """When filesystem lookup raises, context gets filesystem=None."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
+            _resolve_filesystem,
+        )
+
+        # Prompt without resources context entered → resources.get raises RuntimeError
+        template: PromptTemplate[None] = PromptTemplate(
+            ns="test", key="test", name="test"
+        )
+        prompt: Prompt[None] = Prompt(template)
+        constraints = HookConstraints()
+        hook_context = HookContext(
+            prompt=prompt,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+        result = _resolve_filesystem(hook_context)
+
+        assert result is None

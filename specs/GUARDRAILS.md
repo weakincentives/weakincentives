@@ -401,6 +401,10 @@ checker = FileOutputChecker(files=("report.md", "results.json"))
 1. If any missing, return `TaskCompletionResult.incomplete(feedback)` listing
    the missing files
 
+All file existence checks go through the `Filesystem` abstraction.
+`HostFilesystem` resolves both relative and absolute paths (under its root),
+so callers can pass absolute workspace paths without bypassing the abstraction.
+
 ```python
 class FileOutputChecker(TaskCompletionChecker):
     def __init__(self, files: tuple[str, ...]) -> None:
@@ -409,28 +413,14 @@ class FileOutputChecker(TaskCompletionChecker):
     def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
         if context.filesystem is None:
             if not self._files:
-                return TaskCompletionResult.ok(
-                    "No files required; filesystem not needed."
-                )
-            return TaskCompletionResult.incomplete(
-                f"<blocker>\nNo filesystem available to verify "
-                f"{len(self._files)} required output file(s).\n</blocker>"
-            )
+                return TaskCompletionResult.ok(...)
+            return TaskCompletionResult.incomplete(...)
 
         missing = [f for f in self._files if not context.filesystem.exists(f)]
         if not missing:
-            return TaskCompletionResult.ok(
-                f"All {len(self._files)} required output(s) exist."
-            )
+            return TaskCompletionResult.ok(...)
 
-        file_list = ", ".join(missing[:3])
-        if len(missing) > 3:
-            file_list += "..."
-        return TaskCompletionResult.incomplete(
-            f"<blocker>\n"
-            f"{len(missing)} required output file(s) not found: {file_list}\n"
-            f"</blocker>"
-        )
+        return TaskCompletionResult.incomplete(...)
 ```
 
 #### CompositeChecker

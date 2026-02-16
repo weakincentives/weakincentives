@@ -27,7 +27,6 @@ from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.prompt import (
     MarkdownSection,
     PolicyDecision,
-    PolicyState,
     Prompt,
     PromptTemplate,
     Tool,
@@ -81,17 +80,31 @@ def _build_write_tool(calls: list[str]) -> Tool[WriteParams, WriteResult]:
 class AlwaysDenyPolicy:
     """Test policy that denies all write_file calls."""
 
-    def applies_to(self, tool_name: str) -> bool:
-        return tool_name == "write_file"
+    @property
+    def name(self) -> str:
+        return "always_deny"
 
-    def evaluate(
+    def check(
         self,
-        tool_name: str,
-        tool_input: dict[str, object],
+        tool: Tool[object, object],
+        params: object,
         *,
-        state: PolicyState,
+        context: ToolContext,
     ) -> PolicyDecision:
-        return PolicyDecision.deny("Write denied by test policy.")
+        del params, context
+        if tool.name == "write_file":
+            return PolicyDecision.deny("Write denied by test policy.")
+        return PolicyDecision.allow()
+
+    def on_result(
+        self,
+        tool: Tool[object, object],
+        params: object,
+        result: ToolResult[object],
+        *,
+        context: ToolContext,
+    ) -> None:
+        del tool, params, result, context
 
 
 def test_tool_policy_denies_call(

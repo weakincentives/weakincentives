@@ -143,6 +143,10 @@ class PromptProtocol[PromptOutputT](Protocol):
         """Return task completion checker if configured."""
         ...
 
+    def policies_for_tool(self, tool_name: str) -> tuple[Any, ...]:
+        """Return policies applicable to the named tool."""
+        ...
+
     def bind(
         self,
         *params: SupportsDataclass,

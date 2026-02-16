@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.filesystem import Filesystem, HostFilesystem
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -127,7 +128,11 @@ def test_task_completion_blocks_early_stop(
         ),
     )
 
-    prompt = Prompt(template).bind(TaskParams(output_file=output_file))
+    fs = HostFilesystem(_root=str(tmp_path))
+    prompt = Prompt(template).bind(
+        TaskParams(output_file=output_file),
+        resources={Filesystem: fs},
+    )
     response = adapter.evaluate(prompt, session=session)
 
     # The agent should have created the file
@@ -170,7 +175,8 @@ def test_task_completion_allows_stop_when_complete(
         ),
     )
 
-    prompt = Prompt(template)
+    fs = HostFilesystem(_root=str(tmp_path))
+    prompt = Prompt(template).bind(resources={Filesystem: fs})
     response = adapter.evaluate(prompt, session=session)
 
     # Agent should have responded without being blocked

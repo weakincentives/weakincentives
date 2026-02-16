@@ -27,6 +27,7 @@ from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
+from ...prompt.policy import PolicyDecision
 from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ...runtime.events import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
@@ -278,29 +279,24 @@ class BridgedTool:
             MCP-format result dict.
         """
         try:
-            if self._tool.params_type is type(None):
-                params = None
-            else:
-                params = parse(
-                    self._tool.params_type, args, extra="forbid", coerce=False
-                )
+            params = self._parse_params(args)
+            context = self._make_tool_context()
 
-            # Resources are accessed through prompt.resources
-            # The prompt context must be entered and resources bound before tool calls
-            context = ToolContext(
-                prompt=self._prompt,
-                rendered_prompt=self._rendered_prompt,
-                adapter=cast(Any, self._adapter),
-                session=self._session,
-                deadline=self._deadline,
-                heartbeat=self._heartbeat,
-                run_context=self._run_context,
-            )
+            # Enforce tool policies before handler execution
+            denial = self._check_policies(params, context=context)
+            if denial is not None:
+                self._restore_snapshot(snapshot, reason="policy_denial")
+                return {
+                    "content": [{"type": "text", "text": denial}],
+                    "isError": True,
+                }
 
             result = handler(params, context=context)
 
-            # Restore on tool failure (manual, since we're returning not raising)
-            if not result.success:
+            # Notify policies of successful result
+            if result.success:
+                self._notify_policies(params, result, context=context)
+            else:
                 self._restore_snapshot(snapshot, reason="tool_failure")
 
             return self._format_success_result(args, result, tool_use_id)
@@ -364,6 +360,24 @@ class BridgedTool:
                 "isError": True,
             }
 
+    def _parse_params(self, args: dict[str, Any]) -> object:
+        """Parse tool arguments into the expected params type."""
+        if self._tool.params_type is type(None):
+            return None
+        return parse(self._tool.params_type, args, extra="forbid", coerce=False)
+
+    def _make_tool_context(self) -> ToolContext:
+        """Create a ToolContext for handler execution."""
+        return ToolContext(
+            prompt=self._prompt,
+            rendered_prompt=self._rendered_prompt,
+            adapter=cast(Any, self._adapter),
+            session=self._session,
+            deadline=self._deadline,
+            heartbeat=self._heartbeat,
+            run_context=self._run_context,
+        )
+
     def _restore_snapshot(self, snapshot: CompositeSnapshot, *, reason: str) -> None:
         """Restore from snapshot.
 
@@ -377,6 +391,45 @@ class BridgedTool:
             event=f"bridge.{reason}_restore",
             context={"tool_name": self.name},
         )
+
+    def _check_policies(
+        self,
+        params: object,
+        *,
+        context: ToolContext,
+    ) -> str | None:
+        """Check tool policies before handler execution.
+
+        Returns denial message if any policy denies the call, None otherwise.
+        """
+        policies = self._prompt.policies_for_tool(self.name)
+        for policy in policies:
+            decision: PolicyDecision = policy.check(self._tool, params, context=context)
+            if not decision.allowed:
+                reason = decision.reason or "Denied by policy."
+                logger.info(
+                    "claude_agent_sdk.bridge.policy_denied",
+                    event="bridge.policy_denied",
+                    context={
+                        "tool_name": self.name,
+                        "policy": getattr(policy, "name", "unknown"),
+                        "reason": reason,
+                    },
+                )
+                return reason
+        return None
+
+    def _notify_policies(
+        self,
+        params: object,
+        result: ToolResult[Any],
+        *,
+        context: ToolContext,
+    ) -> None:
+        """Notify policies of successful tool execution."""
+        policies = self._prompt.policies_for_tool(self.name)
+        for policy in policies:
+            policy.on_result(self._tool, params, result, context=context)
 
     def _format_success_result(
         self,
