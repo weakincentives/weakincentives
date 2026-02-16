@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK, AsyncSleeper
@@ -34,6 +34,7 @@ from ._events import (
     extract_token_usage,
     map_codex_error_phase,
 )
+from ._guardrails import append_feedback, check_task_completion
 from ._transcript import CodexTranscriptBridge
 from .client import CodexAppServerClient, CodexClientError
 from .config import (
@@ -42,6 +43,9 @@ from .config import (
     CodexAppServerModelConfig,
     CodexAuthMode,
 )
+
+if TYPE_CHECKING:
+    from ...prompt.protocols import PromptProtocol
 
 
 def deadline_remaining_s(deadline: Deadline | None, prompt_name: str) -> float | None:
@@ -61,7 +65,73 @@ def deadline_remaining_s(deadline: Deadline | None, prompt_name: str) -> float |
     return remaining
 
 
-async def execute_protocol(  # noqa: PLR0913
+def _create_bridge(
+    client_config: CodexAppServerClientConfig,
+    session: SessionProtocol,
+    prompt_name: str,
+) -> CodexTranscriptBridge | None:
+    """Create and start a transcript bridge if transcription is enabled."""
+    if not client_config.transcript:
+        return None
+    session_id = getattr(session, "session_id", None)
+    emitter = TranscriptEmitter(
+        prompt_name=prompt_name,
+        adapter="codex_app_server",
+        session_id=str(session_id) if session_id else None,
+        emit_raw=client_config.transcript_emit_raw,
+    )
+    bridge = CodexTranscriptBridge(emitter)
+    emitter.start()
+    return bridge
+
+
+async def _initialize_session(  # noqa: PLR0913
+    *,
+    client: CodexAppServerClient,
+    client_config: CodexAppServerClientConfig,
+    model_config: CodexAppServerModelConfig,
+    effective_cwd: str,
+    dynamic_tool_specs: list[dict[str, Any]],
+    deadline: Deadline | None,
+    prompt_name: str,
+) -> str:
+    """Run initialize → authenticate → create_thread. Returns thread_id."""
+    _ = await client.send_request(
+        "initialize",
+        {
+            "clientInfo": {
+                "name": client_config.client_name,
+                "title": "WINK Agent",
+                "version": client_config.client_version,
+            },
+            "capabilities": {"experimentalApi": True},
+        },
+        timeout=client_config.startup_timeout_s,
+    )
+    await client.send_notification("initialized")
+
+    try:
+        timeout = deadline_remaining_s(deadline, prompt_name)
+        await authenticate(client, client_config.auth_mode, timeout=timeout)
+
+        timeout = deadline_remaining_s(deadline, prompt_name)
+        return await create_thread(
+            client,
+            effective_cwd,
+            dynamic_tool_specs,
+            client_config=client_config,
+            model_config=model_config,
+            timeout=timeout,
+        )
+    except CodexClientError as error:
+        raise PromptEvaluationError(
+            message=str(error),
+            prompt_name=prompt_name,
+            phase="request",
+        ) from error
+
+
+async def execute_protocol(  # noqa: PLR0913, PLR0914
     *,
     client_config: CodexAppServerClientConfig,
     model_config: CodexAppServerModelConfig,
@@ -79,101 +149,97 @@ async def execute_protocol(  # noqa: PLR0913
     run_context: RunContext | None,
     visibility_signal: VisibilityExpansionSignal,
     async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
+    prompt: PromptProtocol[Any] | None = None,
 ) -> tuple[str | None, TokenUsage | None]:
     """Execute the Codex protocol (init -> thread -> turn -> stream).
 
     Returns (accumulated_text, usage).
     """
     await client.start()
-
-    # Create transcript bridge if enabled.
-    bridge: CodexTranscriptBridge | None = None
-    if client_config.transcript:
-        session_id = getattr(session, "session_id", None)
-        emitter = TranscriptEmitter(
-            prompt_name=prompt_name,
-            adapter="codex_app_server",
-            session_id=str(session_id) if session_id else None,
-            emit_raw=client_config.transcript_emit_raw,
-        )
-        bridge = CodexTranscriptBridge(emitter)
-        emitter.start()
+    bridge = _create_bridge(client_config, session, prompt_name)
 
     try:
-        # 1. Initialize
-        _ = await client.send_request(
-            "initialize",
-            {
-                "clientInfo": {
-                    "name": client_config.client_name,
-                    "title": "WINK Agent",
-                    "version": client_config.client_version,
-                },
-                "capabilities": {"experimentalApi": True},
-            },
-            timeout=client_config.startup_timeout_s,
-        )
-        await client.send_notification("initialized")
-
-        # 2. Authenticate
-        try:
-            timeout = deadline_remaining_s(deadline, prompt_name)
-            await authenticate(client, client_config.auth_mode, timeout=timeout)
-
-            # 3. Thread
-            timeout = deadline_remaining_s(deadline, prompt_name)
-            thread_id = await create_thread(
-                client,
-                effective_cwd,
-                dynamic_tool_specs,
-                client_config=client_config,
-                model_config=model_config,
-                timeout=timeout,
-            )
-
-            # 4. Turn — emit user_message before starting the turn.
-            if bridge is not None:
-                bridge.on_user_message(prompt_text)
-
-            timeout = deadline_remaining_s(deadline, prompt_name)
-            turn_result = await start_turn(
-                client,
-                thread_id,
-                prompt_text,
-                output_schema,
-                model_config=model_config,
-                timeout=timeout,
-            )
-        except CodexClientError as error:
-            raise PromptEvaluationError(
-                message=str(error),
-                prompt_name=prompt_name,
-                phase="request",
-            ) from error
-        turn_id: int = turn_result["turn"]["id"]
-
-        # 5. Stream
-        accumulated_text, usage = await stream_turn(
+        thread_id = await _initialize_session(
             client=client,
-            session=session,
-            adapter_name=adapter_name,
-            prompt_name=prompt_name,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            tool_lookup=tool_lookup,
-            approval_policy=client_config.approval_policy,
+            client_config=client_config,
+            model_config=model_config,
+            effective_cwd=effective_cwd,
+            dynamic_tool_specs=dynamic_tool_specs,
             deadline=deadline,
-            run_context=run_context,
-            bridge=bridge,
-            visibility_signal=visibility_signal,
-            async_sleeper=async_sleeper,
+            prompt_name=prompt_name,
         )
+
+        # Turn + Stream with task completion continuation loop
+        max_continuation_rounds = 10
+        continuation_round = 0
+        current_prompt_text = prompt_text
+        accumulated_text: str | None = None
+        usage: TokenUsage | None = None
+
+        while True:
+            try:
+                if bridge is not None:
+                    bridge.on_user_message(current_prompt_text)
+                current_schema = output_schema if continuation_round == 0 else None
+                timeout = deadline_remaining_s(deadline, prompt_name)
+                turn_result = await start_turn(
+                    client,
+                    thread_id,
+                    current_prompt_text,
+                    current_schema,
+                    model_config=model_config,
+                    timeout=timeout,
+                )
+            except CodexClientError as error:
+                raise PromptEvaluationError(
+                    message=str(error),
+                    prompt_name=prompt_name,
+                    phase="request",
+                ) from error
+            turn_id: int = turn_result["turn"]["id"]
+
+            turn_text, turn_usage = await stream_turn(
+                client=client,
+                session=session,
+                adapter_name=adapter_name,
+                prompt_name=prompt_name,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                tool_lookup=tool_lookup,
+                approval_policy=client_config.approval_policy,
+                deadline=deadline,
+                run_context=run_context,
+                bridge=bridge,
+                visibility_signal=visibility_signal,
+                async_sleeper=async_sleeper,
+                prompt=prompt,
+            )
+            accumulated_text = turn_text
+            if turn_usage is not None:
+                usage = turn_usage
+
+            should_continue, feedback = check_task_completion(
+                prompt=prompt,
+                session=session,
+                accumulated_text=accumulated_text,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+            )
+            if (
+                should_continue
+                and feedback
+                and continuation_round < max_continuation_rounds
+            ):
+                current_prompt_text = feedback
+                continuation_round += 1
+                continue
+            break
     finally:
-        # 6. Stop transcript emitter — must run even on exception.
+        # Stop transcript emitter — must run even on exception.
         if bridge is not None:
             bridge.emitter.stop()
 
-    # 7. Visibility signal
+    # Visibility signal
     stored_exc = visibility_signal.get_and_clear()
     if stored_exc is not None:
         raise stored_exc
@@ -278,6 +344,7 @@ async def stream_turn(  # noqa: PLR0913
     bridge: CodexTranscriptBridge | None = None,
     visibility_signal: VisibilityExpansionSignal | None = None,
     async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
+    prompt: PromptProtocol[Any] | None = None,
 ) -> tuple[str | None, TokenUsage | None]:
     """Stream turn notifications until turn/completed.
 
@@ -303,6 +370,8 @@ async def stream_turn(  # noqa: PLR0913
             usage=usage,
             bridge=bridge,
             visibility_signal=visibility_signal,
+            prompt=prompt,
+            deadline=deadline,
         )
     finally:
         if watchdog_task is not None:
@@ -350,6 +419,8 @@ async def consume_messages(  # noqa: PLR0913
     usage: TokenUsage | None,
     bridge: CodexTranscriptBridge | None = None,
     visibility_signal: VisibilityExpansionSignal | None = None,
+    prompt: PromptProtocol[Any] | None = None,
+    deadline: Deadline | None = None,
 ) -> tuple[str, TokenUsage | None]:
     """Consume messages from the client until turn/completed."""
     turn_completed = False
@@ -361,6 +432,9 @@ async def consume_messages(  # noqa: PLR0913
                 tool_lookup,
                 approval_policy=approval_policy,
                 bridge=bridge,
+                prompt=prompt,
+                session=session,
+                deadline=deadline,
             )
             # Break early if a tool call triggered visibility expansion.
             # The caller will re-raise the stored exception after cleanup.
@@ -521,13 +595,16 @@ def _handle_turn_completed(params: dict[str, Any]) -> tuple[str, str]:
     return ("done", "")
 
 
-async def handle_server_request(
+async def handle_server_request(  # noqa: PLR0913
     client: CodexAppServerClient,
     message: dict[str, Any],
     tool_lookup: dict[str, BridgedTool],
     *,
     approval_policy: str,
     bridge: CodexTranscriptBridge | None = None,
+    prompt: PromptProtocol[Any] | None = None,
+    session: SessionProtocol | None = None,
+    deadline: Deadline | None = None,
 ) -> None:
     """Handle a server-initiated request (tool call or approval)."""
     method: str = message["method"]
@@ -535,7 +612,16 @@ async def handle_server_request(
     request_id: int = message["id"]
 
     if method == "item/tool/call":
-        await handle_tool_call(client, request_id, params, tool_lookup, bridge=bridge)
+        await handle_tool_call(
+            client,
+            request_id,
+            params,
+            tool_lookup,
+            bridge=bridge,
+            prompt=prompt,
+            session=session,
+            deadline=deadline,
+        )
     elif method in {
         "item/commandExecution/requestApproval",
         "item/fileChange/requestApproval",
@@ -548,13 +634,16 @@ async def handle_server_request(
         await client.send_response(request_id, {})
 
 
-async def handle_tool_call(
+async def handle_tool_call(  # noqa: PLR0913
     client: CodexAppServerClient,
     request_id: int,
     params: dict[str, Any],
     tool_lookup: dict[str, BridgedTool],
     *,
     bridge: CodexTranscriptBridge | None = None,
+    prompt: PromptProtocol[Any] | None = None,
+    session: SessionProtocol | None = None,
+    deadline: Deadline | None = None,
 ) -> None:
     """Handle an item/tool/call server request."""
     tool_name: str = params.get("tool", "")
@@ -592,6 +681,15 @@ async def handle_tool_call(
         for c in mcp_content
         if c.get("type") == "text"
     ]
+
+    append_feedback(
+        content_items,
+        is_error=is_error,
+        prompt=prompt,
+        session=session,
+        deadline=deadline,
+    )
+
     response: dict[str, Any] = {
         "success": not is_error,
         "contentItems": content_items,

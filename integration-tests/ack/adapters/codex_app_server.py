@@ -54,6 +54,9 @@ class CodexAppServerFixture:
             network_policy=True,
             sandbox_policy=True,
             skill_installation=True,
+            tool_policies=True,
+            feedback_providers=True,
+            task_completion=True,
         )
 
     def is_available(self) -> bool:

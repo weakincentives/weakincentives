@@ -338,6 +338,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 run_context=run_context,
                 visibility_signal=visibility_signal,
                 async_sleeper=self._async_sleeper,
+                prompt=cast(Any, prompt),
             )
         except VisibilityExpansionRequired:
             raise
