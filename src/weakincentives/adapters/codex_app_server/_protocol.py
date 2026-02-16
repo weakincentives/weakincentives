@@ -131,7 +131,7 @@ async def _initialize_session(  # noqa: PLR0913
         ) from error
 
 
-async def execute_protocol(  # noqa: C901, PLR0913
+async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
     *,
     client_config: CodexAppServerClientConfig,
     model_config: CodexAppServerModelConfig,
