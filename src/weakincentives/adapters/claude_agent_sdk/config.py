@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from claude_agent_sdk import PermissionMode
+
 from ...dataclasses import FrozenDataclass
 from ..config import LLMConfig
 from ._transcript_collector import TranscriptCollectorConfig
@@ -29,14 +31,6 @@ __all__ = [
     "PermissionMode",
     "ReasoningEffort",
 ]
-
-# Re-export PermissionMode from SDK types for backwards compatibility.
-# This is the canonical type - matches SDK's definition exactly.
-PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
-"""Permission handling mode for Claude Agent SDK tool execution.
-
-This type alias matches the SDK's ``claude_agent_sdk.types.PermissionMode`` exactly.
-"""
 
 ReasoningEffort = Literal["low", "medium", "high", "max"]
 """Effort level for adaptive reasoning.
