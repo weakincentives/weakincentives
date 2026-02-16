@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:
-    from .isolation import IsolationConfig
+    from .isolation import IsolationConfig, NetworkPolicy, SandboxConfig
 
 from ...skills import (
     MAX_SKILL_TOTAL_BYTES,
@@ -226,18 +226,61 @@ class EphemeralHome:
         self._write_settings(settings)
 
     def _configure_sandbox_settings(self, settings: dict[str, Any]) -> None:
-        """Configure sandbox and network settings.
+        """Configure sandbox and network settings for settings.json."""
+        from .isolation import NetworkPolicy, SandboxConfig
 
-        Delegates to :func:`._sandbox_conversion.to_settings_json_sandbox` so
-        the field mapping between WINK configs and Claude Code settings is
-        defined in a single place.
-        """
-        from ._sandbox_conversion import to_settings_json_sandbox
+        sandbox = self._isolation.sandbox or SandboxConfig()
+        network = self._isolation.network_policy or NetworkPolicy.no_network()
 
-        settings["sandbox"] = to_settings_json_sandbox(
-            self._isolation.sandbox,
-            self._isolation.network_policy,
-        )
+        section: dict[str, Any] = {
+            "enabled": sandbox.enabled,
+            "autoAllowBashIfSandboxed": sandbox.bash_auto_allow,
+            "allowUnsandboxedCommands": sandbox.allow_unsandboxed_commands,
+        }
+        if sandbox.excluded_commands:
+            section["excludedCommands"] = list(sandbox.excluded_commands)
+        if sandbox.enable_weaker_nested_sandbox:
+            section["enableWeakerNestedSandbox"] = True
+
+        violations: dict[str, list[str]] = {}
+        if sandbox.ignore_file_violations:
+            violations["file"] = list(sandbox.ignore_file_violations)
+        if sandbox.ignore_network_violations:
+            violations["network"] = list(sandbox.ignore_network_violations)
+        if violations:
+            section["ignoreViolations"] = violations
+
+        self._add_sandbox_paths(section, sandbox)
+        section["network"] = self._build_network_section(network)
+        settings["sandbox"] = section
+
+    @staticmethod
+    def _add_sandbox_paths(section: dict[str, Any], sandbox: SandboxConfig) -> None:
+        writable_paths: list[str] = list(sandbox.writable_paths)
+        if sandbox.enabled:
+            claude_temp_dir = f"/tmp/claude-{os.getuid()}"  # nosec B108
+            if claude_temp_dir not in writable_paths:
+                writable_paths.append(claude_temp_dir)
+        if writable_paths:
+            section["writablePaths"] = writable_paths
+        if sandbox.readable_paths:
+            section["readablePaths"] = list(sandbox.readable_paths)
+
+    @staticmethod
+    def _build_network_section(network: NetworkPolicy) -> dict[str, Any]:
+        net: dict[str, Any] = {}
+        if network.allow_unix_sockets:
+            net["allowUnixSockets"] = list(network.allow_unix_sockets)
+        if network.allow_all_unix_sockets:
+            net["allowAllUnixSockets"] = True
+        if network.allow_local_binding:
+            net["allowLocalBinding"] = True
+        if network.http_proxy_port is not None:
+            net["httpProxyPort"] = network.http_proxy_port
+        if network.socks_proxy_port is not None:
+            net["socksProxyPort"] = network.socks_proxy_port
+        net["allowedDomains"] = list(network.allowed_domains)
+        return net
 
     def _configure_auth_settings(self, settings: dict[str, Any]) -> None:
         """Configure env section based on authentication mode."""

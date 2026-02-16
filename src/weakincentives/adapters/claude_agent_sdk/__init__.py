@@ -273,12 +273,6 @@ from ._model_utils import (
     to_anthropic_model_name,
     to_bedrock_model_id,
 )
-from ._sandbox_conversion import (
-    to_sdk_ignore_violations,
-    to_sdk_network_config,
-    to_sdk_sandbox_settings,
-    to_settings_json_sandbox,
-)
 from ._task_completion import (
     CompositeChecker,
     FileOutputChecker,
@@ -333,9 +327,4 @@ __all__ = [
     "get_supported_bedrock_models",
     "to_anthropic_model_name",
     "to_bedrock_model_id",
-    # Conversion helpers (WINK configs → SDK TypedDicts)
-    "to_sdk_ignore_violations",
-    "to_sdk_network_config",
-    "to_sdk_sandbox_settings",
-    "to_settings_json_sandbox",
 ]
