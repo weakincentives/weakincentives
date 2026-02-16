@@ -227,44 +227,69 @@ class EphemeralHome:
 
     def _configure_sandbox_settings(self, settings: dict[str, Any]) -> None:
         """Configure sandbox and network settings."""
-        from .isolation import NetworkPolicy, SandboxConfig
+        from .isolation import SandboxConfig
 
         sandbox = self._isolation.sandbox or SandboxConfig()
         settings["sandbox"] = {
             "enabled": sandbox.enabled,
             "autoAllowBashIfSandboxed": sandbox.bash_auto_allow,
+            "allowUnsandboxedCommands": sandbox.allow_unsandboxed_commands,
         }
 
         if sandbox.excluded_commands:
             settings["sandbox"]["excludedCommands"] = list(sandbox.excluded_commands)
+        if sandbox.enable_weaker_nested_sandbox:
+            settings["sandbox"]["enableWeakerNestedSandbox"] = True
 
-        settings["sandbox"]["allowUnsandboxedCommands"] = (
-            sandbox.allow_unsandboxed_commands
-        )
+        # Ignore violations
+        ignore_violations: dict[str, list[str]] = {}
+        if sandbox.ignore_file_violations:
+            ignore_violations["file"] = list(sandbox.ignore_file_violations)
+        if sandbox.ignore_network_violations:
+            ignore_violations["network"] = list(sandbox.ignore_network_violations)
+        if ignore_violations:
+            settings["sandbox"]["ignoreViolations"] = ignore_violations
 
-        # Build writable paths list, including Claude Code's temp directory
-        writable_paths: list[str] = list(sandbox.writable_paths)
+        self._configure_sandbox_paths(settings, sandbox)
+        self._configure_network_settings(settings)
 
-        # Claude Code creates temp directories under /tmp/claude-{uid}/ for
-        # sandbox operations. When sandbox is enabled, we must allow writing
-        # there or commands will fail with "operation not permitted".
-        # This is Claude Code's internal temp directory, not our temp files.
-        if sandbox.enabled:
+    @staticmethod
+    def _configure_sandbox_paths(settings: dict[str, Any], sandbox: object) -> None:
+        """Configure writable and readable paths for the sandbox."""
+        writable: tuple[str, ...] = getattr(sandbox, "writable_paths", ())
+        readable: tuple[str, ...] = getattr(sandbox, "readable_paths", ())
+
+        writable_paths: list[str] = list(writable)
+        # Claude Code creates temp dirs under /tmp/claude-{uid}/; allow writes.
+        if getattr(sandbox, "enabled", True):
             claude_temp_dir = f"/tmp/claude-{os.getuid()}"  # nosec B108
             if claude_temp_dir not in writable_paths:
                 writable_paths.append(claude_temp_dir)
 
         if writable_paths:
             settings["sandbox"]["writablePaths"] = writable_paths
+        if readable:
+            settings["sandbox"]["readablePaths"] = list(readable)
 
-        if sandbox.readable_paths:
-            settings["sandbox"]["readablePaths"] = list(sandbox.readable_paths)
+    def _configure_network_settings(self, settings: dict[str, Any]) -> None:
+        """Configure network policy settings."""
+        from .isolation import NetworkPolicy
 
-        # Network settings
         network = self._isolation.network_policy or NetworkPolicy.no_network()
-        settings["sandbox"]["network"] = {
+        network_settings: dict[str, Any] = {
             "allowedDomains": list(network.allowed_domains),
         }
+        if network.allow_unix_sockets:
+            network_settings["allowUnixSockets"] = list(network.allow_unix_sockets)
+        if network.allow_all_unix_sockets:
+            network_settings["allowAllUnixSockets"] = True
+        if network.allow_local_binding:
+            network_settings["allowLocalBinding"] = True
+        if network.http_proxy_port is not None:
+            network_settings["httpProxyPort"] = network.http_proxy_port
+        if network.socks_proxy_port is not None:
+            network_settings["socksProxyPort"] = network.socks_proxy_port
+        settings["sandbox"]["network"] = network_settings
 
     def _configure_auth_settings(self, settings: dict[str, Any]) -> None:
         """Configure env section based on authentication mode."""

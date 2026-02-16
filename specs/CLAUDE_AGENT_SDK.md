@@ -89,6 +89,15 @@ where AWS credentials are mounted (e.g., `/mnt/aws` instead of `~/.aws`).
 
 ### NetworkPolicy
 
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `allowed_domains` | `tuple[str, ...]` | `()` | Domains tools can access |
+| `allow_unix_sockets` | `tuple[str, ...]` | `()` | Unix socket paths (macOS) |
+| `allow_all_unix_sockets` | `bool` | `False` | Allow all Unix sockets |
+| `allow_local_binding` | `bool` | `False` | Allow localhost binding (macOS) |
+| `http_proxy_port` | `int \| None` | `None` | Custom HTTP proxy port |
+| `socks_proxy_port` | `int \| None` | `None` | Custom SOCKS5 proxy port |
+
 | Factory | Description |
 |---------|-------------|
 | `NetworkPolicy.no_network()` | No tool network access |
@@ -104,6 +113,9 @@ where AWS credentials are mounted (e.g., `/mnt/aws` instead of `~/.aws`).
 | `excluded_commands` | `tuple[str, ...]` | `()` | Excluded commands |
 | `allow_unsandboxed_commands` | `bool` | `False` | Allow unsandboxed |
 | `bash_auto_allow` | `bool` | `True` | Auto-allow bash |
+| `enable_weaker_nested_sandbox` | `bool` | `False` | Weaker sandbox for Docker (Linux) |
+| `ignore_file_violations` | `tuple[str, ...]` | `()` | File paths to ignore violations |
+| `ignore_network_violations` | `tuple[str, ...]` | `()` | Network hosts to ignore violations |
 
 ## Isolation Behavior
 
