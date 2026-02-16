@@ -181,9 +181,9 @@ def verify_task_completion(  # noqa: PLR0913
 ) -> None:
     """Verify task completion if checker is configured.
 
-    Raises PromptEvaluationError if structured output was produced but
-    tasks are incomplete. Skips verification if deadline or budget is
-    exhausted (partial output is acceptable when resources run out).
+    Resolves the checker from the prompt first, falling back to the client
+    config (with deprecation warning). Skips verification if deadline or
+    budget is exhausted (partial output is acceptable when resources run out).
 
     Args:
         output: The structured output to verify.
@@ -192,11 +192,13 @@ def verify_task_completion(  # noqa: PLR0913
         prompt_name: Name of the prompt for error reporting.
         deadline: Optional deadline to check for exhaustion.
         budget_tracker: Optional budget tracker to check for exhaustion.
-        prompt: Optional prompt for filesystem access.
-        client_config: Client configuration with checker.
+        prompt: Optional prompt for filesystem access and checker resolution.
+        client_config: Client configuration (fallback checker source).
         adapter: The adapter instance (passed through to context).
     """
-    checker = client_config.task_completion_checker
+    from ._task_completion import resolve_checker
+
+    checker = resolve_checker(prompt=prompt, client_config=client_config)
     if output is None or checker is None:
         return
 

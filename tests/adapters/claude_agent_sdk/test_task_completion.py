@@ -41,8 +41,8 @@ from ._hook_helpers import _make_prompt, _make_prompt_with_fs
 class TestTaskCompletionStopHook:
     """Tests for task completion stop hook with FileOutputChecker."""
 
-    def test_allows_stop_when_no_filesystem(self, hook_context: HookContext) -> None:
-        """Stop is allowed when no filesystem is available (fail-open)."""
+    def test_blocks_stop_when_no_filesystem(self, hook_context: HookContext) -> None:
+        """Stop is blocked when no filesystem is available (fail-closed)."""
         hook = create_task_completion_stop_hook(
             hook_context, checker=FileOutputChecker(files=("output.txt",))
         )
@@ -50,7 +50,8 @@ class TestTaskCompletionStopHook:
 
         result = asyncio.run(hook(input_data, None, {"signal": None}))
 
-        assert result == {}
+        assert result.get("continue_") is True
+        assert "No filesystem" in result.get("reason", "")
         assert hook_context.stop_reason == "end_turn"
 
     def test_allows_stop_when_all_files_exist(self, session: Session) -> None:
@@ -205,10 +206,11 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(context, checker=checker)
         input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
-        # Should work with checker protocol (no filesystem -> fail-open)
+        # Should work with checker protocol (no filesystem -> fail-closed)
         result = asyncio.run(hook(input_data, None, {"signal": None}))
 
-        assert result == {}
+        assert result.get("continue_") is True
+        assert "No filesystem" in result.get("reason", "")
         assert context.stop_reason == "end_turn"
 
     def test_skips_check_when_deadline_exceeded(self, session: Session) -> None:

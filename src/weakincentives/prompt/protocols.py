@@ -39,6 +39,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ._prompt_resources import PromptResources
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
+    from .task_completion import TaskCompletionChecker
 
 
 class PromptResponseProtocol[AdapterOutputT](Protocol):
@@ -138,7 +139,7 @@ class PromptProtocol[PromptOutputT](Protocol):
         ...
 
     @property
-    def task_completion_checker(self) -> object | None:
+    def task_completion_checker(self) -> TaskCompletionChecker | None:
         """Return task completion checker if configured."""
         ...
 

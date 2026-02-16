@@ -690,11 +690,16 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             options_type=ClaudeAgentOptions,
         )
 
+        from ._task_completion import resolve_checker
+
         return await run_sdk_query(
             options_kwargs=options_kwargs,
             prompt_text=prompt_text,
             hook_context=hook_context,
             visibility_signal=visibility_signal,
             stderr_buffer=self._stderr_buffer,
-            task_completion_checker=self._client_config.task_completion_checker,
+            task_completion_checker=resolve_checker(
+                prompt=hook_context.prompt,
+                client_config=self._client_config,
+            ),
         )

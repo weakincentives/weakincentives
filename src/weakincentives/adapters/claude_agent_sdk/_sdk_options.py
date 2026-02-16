@@ -223,7 +223,12 @@ def build_hooks_config(
     """Build the hooks configuration for the SDK client."""
     from claude_agent_sdk.types import HookMatcher
 
-    checker = client_config.task_completion_checker
+    from ._task_completion import resolve_checker
+
+    checker = resolve_checker(
+        prompt=hook_context.prompt,
+        client_config=client_config,
+    )
     pre_hook = create_pre_tool_use_hook(hook_context)
     post_hook = create_post_tool_use_hook(
         hook_context,

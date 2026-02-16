@@ -126,8 +126,9 @@ class FileOutputChecker:
     Verifies that required output files exist on the filesystem. Accepts a
     tuple of file paths; returns incomplete if any are missing.
 
-    Fails open when no filesystem is available in the context (cannot verify
-    without filesystem access).
+    Fails closed when no filesystem is available in the context: if the checker
+    cannot verify that required files exist, it reports incomplete. This follows
+    the same fail-closed philosophy as tool policies.
 
     Example:
         >>> checker = FileOutputChecker(files=("report.md", "results.json"))
@@ -149,15 +150,22 @@ class FileOutputChecker:
             context: Context with optional filesystem for existence checks.
 
         Returns:
-            Complete if all files exist or no filesystem available.
-            Incomplete with feedback listing missing files otherwise.
+            Complete if all files exist. Incomplete if filesystem unavailable
+            (fail-closed) or if any required files are missing.
         """
         if context.filesystem is None:
             logger.debug(
                 "task_completion.file_output_checker.no_filesystem",
                 event="file_output_checker.no_filesystem",
             )
-            return TaskCompletionResult.ok("No filesystem; cannot verify outputs.")
+            if not self._files:
+                return TaskCompletionResult.ok(
+                    "No files required; filesystem not needed."
+                )
+            file_count = len(self._files)
+            return TaskCompletionResult.incomplete(
+                f"<blocker>\nNo filesystem available to verify {file_count} required output file(s).\n</blocker>"
+            )
 
         missing = [f for f in self._files if not context.filesystem.exists(f)]
         if not missing:

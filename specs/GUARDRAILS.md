@@ -394,7 +394,8 @@ checker = FileOutputChecker(files=("report.md", "results.json"))
 **Behavior:**
 
 1. Retrieve `filesystem` from `TaskCompletionContext`
-1. If no filesystem available, return ok (cannot verify; fail-open)
+1. If no filesystem available and files are required, return incomplete
+   (fail-closed: cannot verify without filesystem access)
 1. For each path in `files`, call `filesystem.exists(path)`
 1. If all exist, return `TaskCompletionResult.ok()`
 1. If any missing, return `TaskCompletionResult.incomplete(feedback)` listing
@@ -407,7 +408,14 @@ class FileOutputChecker(TaskCompletionChecker):
 
     def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
         if context.filesystem is None:
-            return TaskCompletionResult.ok("No filesystem; cannot verify outputs.")
+            if not self._files:
+                return TaskCompletionResult.ok(
+                    "No files required; filesystem not needed."
+                )
+            return TaskCompletionResult.incomplete(
+                f"<blocker>\nNo filesystem available to verify "
+                f"{len(self._files)} required output file(s).\n</blocker>"
+            )
 
         missing = [f for f in self._files if not context.filesystem.exists(f)]
         if not missing:
@@ -511,7 +519,7 @@ class Prompt[OutputT]:
 class PromptProtocol[PromptOutputT](Protocol):
     ...
     @property
-    def task_completion_checker(self) -> object | None:
+    def task_completion_checker(self) -> TaskCompletionChecker | None:
         """Return task completion checker if configured."""
         ...
 ```
@@ -529,13 +537,20 @@ into their native hook/stop mechanism.
 
 #### Claude Agent SDK
 
+The adapter resolves the checker using `resolve_checker()`:
+
+1. **Prompt-scoped** (`prompt.task_completion_checker`) takes priority
+1. **Adapter-scoped** (`client_config.task_completion_checker`) is used as
+   fallback with a deprecation warning
+
 ```python
-# In build_hooks_config:
-checker = prompt.task_completion_checker
+# In build_hooks_config and verify_task_completion:
+checker = resolve_checker(prompt=prompt, client_config=client_config)
 ```
 
-All hook mechanics remain identical to the current implementation; only the
-source of the checker changes from adapter config to prompt.
+All hook mechanics remain identical to the current implementation; the
+resolution logic ensures backward compatibility while encouraging migration
+to prompt-scoped declaration.
 
 #### Other Adapters
 
@@ -626,8 +641,9 @@ from weakincentives.prompt import (
 - **Default disabled**: Must configure checker on prompt to enable
 - **Budget/deadline bypass**: Skipped when exhausted
 - **Feedback truncation**: File output checker limits to 3 file paths in message
-- **Fail-open on missing filesystem**: If no filesystem in context, checker
-  passes (cannot verify without filesystem access)
+- **Fail-closed on missing filesystem**: If no filesystem in context and files
+  are required, checker returns incomplete (consistent with tool policy
+  fail-closed philosophy)
 
 ______________________________________________________________________
 

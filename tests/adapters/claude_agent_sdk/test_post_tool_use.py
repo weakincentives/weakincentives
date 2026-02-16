@@ -358,11 +358,11 @@ class TestPostToolUseHook:
         # Should stop - all required files exist
         assert result == {"continue_": False}
 
-    def test_stops_when_structured_output_without_filesystem(
+    def test_continues_when_structured_output_without_filesystem(
         self, session: Session
     ) -> None:
-        """PostToolUse stops after StructuredOutput when no filesystem available."""
-        # Prompt has no filesystem bound - checker fails open
+        """PostToolUse continues after StructuredOutput when no filesystem available."""
+        # Prompt has no filesystem bound - checker fails closed
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
@@ -382,8 +382,9 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
-        # Should stop - no filesystem means fail-open
-        assert result == {"continue_": False}
+        # Should continue - no filesystem means fail-closed
+        assert result.get("continue_") is True
+        assert "No filesystem" in result["hookSpecificOutput"]["additionalContext"]
 
     def test_returns_feedback_when_provider_triggers(self, session: Session) -> None:
         """PostToolUse returns additionalContext when feedback provider triggers."""

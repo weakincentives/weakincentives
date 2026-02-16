@@ -24,6 +24,7 @@ from weakincentives.prompt import (
     FeedbackTrigger,
     Prompt,
     PromptTemplate,
+    TaskCompletionChecker,
 )
 
 
@@ -34,9 +35,19 @@ def _make_prompt() -> Prompt[object]:
     return prompt
 
 
-def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
+def _make_prompt_with_fs(
+    fs: InMemoryFilesystem,
+    *,
+    task_completion_checker: TaskCompletionChecker | None = None,
+) -> Prompt[object]:
     """Create a prompt with filesystem bound in active context."""
-    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate(
+            ns="tests",
+            key="hooks-test",
+            task_completion_checker=task_completion_checker,
+        )
+    )
     prompt = prompt.bind(resources={Filesystem: fs})
     prompt.resources.__enter__()
     return prompt

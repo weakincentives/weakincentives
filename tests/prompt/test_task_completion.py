@@ -68,15 +68,26 @@ class TestTaskCompletionResult:
 class TestFileOutputChecker:
     """Tests for the FileOutputChecker built-in implementation."""
 
-    def test_no_filesystem_returns_ok(self, session: Session) -> None:
-        """Fail-open: when no filesystem is available, checker returns ok."""
+    def test_no_filesystem_returns_incomplete(self, session: Session) -> None:
+        """Fail-closed: when no filesystem is available and files required, checker returns incomplete."""
         checker = FileOutputChecker(files=("report.md",))
         context = TaskCompletionContext(session=session, filesystem=None)
 
         result = checker.check(context)
 
-        assert result.complete is True
+        assert result.complete is False
         assert "No filesystem" in result.feedback
+        assert "1 required" in result.feedback
+
+    def test_no_filesystem_empty_files_returns_ok(self, session: Session) -> None:
+        """No filesystem but no files required => ok (vacuously true)."""
+        checker = FileOutputChecker(files=())
+        context = TaskCompletionContext(session=session, filesystem=None)
+
+        result = checker.check(context)
+
+        assert result.complete is True
+        assert "No files required" in result.feedback
 
     def test_all_files_exist(self, session: Session, fs: InMemoryFilesystem) -> None:
         """All required files present => ok."""
