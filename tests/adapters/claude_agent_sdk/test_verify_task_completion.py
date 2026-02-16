@@ -21,16 +21,20 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-)
-from weakincentives.adapters.claude_agent_sdk._task_completion import PlanBasedChecker
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
+from weakincentives.prompt.task_completion import (
+    FileOutputChecker,
+    TaskCompletionChecker,
+    TaskCompletionContext,
+    TaskCompletionResult,
+)
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
-from ._hook_helpers import Plan, PlanStep, _initialize_plan_session
+from ._hook_helpers import _make_prompt_with_fs
 
 
 class TestVerifyTaskCompletion:
@@ -50,9 +54,7 @@ class TestVerifyTaskCompletion:
             verify_task_completion,
         )
 
-        verify_task_completion(
-            **kwargs, client_config=adapter._client_config, adapter=adapter
-        )
+        verify_task_completion(**kwargs, adapter=adapter)
 
     def test_no_checker_configured_does_nothing(
         self, adapter: ClaudeAgentSDKAdapter, session: Session
@@ -68,105 +70,74 @@ class TestVerifyTaskCompletion:
 
     def test_no_output_does_nothing(self, session: Session) -> None:
         """When output is None, verification passes."""
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
-            ),
+        checker = FileOutputChecker(files=("output.txt",))
+        prompt: Prompt[object] = Prompt(
+            PromptTemplate(ns="test", key="test", task_completion_checker=checker)
         )
+        prompt.resources.__enter__()
+        adapter = ClaudeAgentSDKAdapter()
         self._call_verify(
             adapter,
             output=None,
             session=session,
             stop_reason="structured_output",
             prompt_name="test",
+            prompt=prompt,
         )
 
-    def test_logs_warning_when_tasks_incomplete(
+    def test_logs_warning_when_files_missing(
         self, session: Session, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """When tasks are incomplete, logs warning but doesn't raise error."""
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="active",
-                steps=(
-                    PlanStep(step_id=1, title="Done", status="done"),
-                    PlanStep(step_id=2, title="Pending", status="pending"),
-                ),
-            )
-        )
+        """When required files are missing, logs warning but doesn't raise error."""
+        fs = InMemoryFilesystem()
+        # Don't create any files
 
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
-            ),
-        )
+        checker = FileOutputChecker(files=("output.txt",))
+        adapter = ClaudeAgentSDKAdapter()
 
         caplog.set_level(logging.WARNING)
 
+        prompt = _make_prompt_with_fs(fs, task_completion_checker=checker)
         self._call_verify(
             adapter,
             output={"summary": "done"},
             session=session,
             stop_reason="structured_output",
             prompt_name="test_prompt",
+            prompt=prompt,
         )
 
         assert any("incomplete_tasks" in record.message for record in caplog.records), (
             "Should log warning about incomplete tasks"
         )
-        warning_logged = False
-        for record in caplog.records:
-            if "incomplete_tasks" in record.message:
-                warning_logged = True
-                break
-        assert warning_logged, "Should have logged incomplete tasks warning"
 
-    def test_passes_when_tasks_complete(self, session: Session) -> None:
-        """When all tasks are complete, verification passes."""
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="completed",
-                steps=(
-                    PlanStep(step_id=1, title="Task 1", status="done"),
-                    PlanStep(step_id=2, title="Task 2", status="done"),
-                ),
-            )
-        )
+    def test_passes_when_files_exist(self, session: Session) -> None:
+        """When all required files exist, verification passes."""
+        fs = InMemoryFilesystem()
+        fs.write("output.txt", "done")
+        fs.write("summary.md", "# Summary")
 
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
-            ),
-        )
+        checker = FileOutputChecker(files=("output.txt", "summary.md"))
+        adapter = ClaudeAgentSDKAdapter()
 
+        prompt = _make_prompt_with_fs(fs, task_completion_checker=checker)
         self._call_verify(
             adapter,
             output={"summary": "done"},
             session=session,
             stop_reason="structured_output",
             prompt_name="test_prompt",
+            prompt=prompt,
         )
 
     def test_skips_when_deadline_exceeded(self, session: Session) -> None:
         """When deadline is exceeded, verification is skipped."""
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="active",
-                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
-            )
+        checker = FileOutputChecker(files=("output.txt",))
+        prompt: Prompt[object] = Prompt(
+            PromptTemplate(ns="test", key="test", task_completion_checker=checker)
         )
-
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
-            ),
-        )
+        prompt.resources.__enter__()
+        adapter = ClaudeAgentSDKAdapter()
 
         exceeded_deadline = MagicMock()
         exceeded_deadline.remaining.return_value = timedelta(seconds=-1)
@@ -178,6 +149,7 @@ class TestVerifyTaskCompletion:
             stop_reason="structured_output",
             prompt_name="test_prompt",
             deadline=exceeded_deadline,
+            prompt=prompt,
         )
 
     def test_skips_when_budget_exhausted(self, session: Session) -> None:
@@ -185,20 +157,12 @@ class TestVerifyTaskCompletion:
         from weakincentives.budget import Budget, BudgetTracker
         from weakincentives.runtime.events.types import TokenUsage
 
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="active",
-                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
-            )
+        checker = FileOutputChecker(files=("output.txt",))
+        prompt: Prompt[object] = Prompt(
+            PromptTemplate(ns="test", key="test", task_completion_checker=checker)
         )
-
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
-            ),
-        )
+        prompt.resources.__enter__()
+        adapter = ClaudeAgentSDKAdapter()
 
         budget = Budget(max_total_tokens=100)
         tracker = BudgetTracker(budget)
@@ -211,17 +175,11 @@ class TestVerifyTaskCompletion:
             stop_reason="structured_output",
             prompt_name="test_prompt",
             budget_tracker=tracker,
+            prompt=prompt,
         )
 
     def test_passes_filesystem_and_adapter_to_context(self, session: Session) -> None:
         """Filesystem and adapter are passed to TaskCompletionContext."""
-        from weakincentives.adapters.claude_agent_sdk._task_completion import (
-            TaskCompletionChecker,
-            TaskCompletionContext,
-            TaskCompletionResult,
-        )
-        from weakincentives.filesystem import Filesystem
-
         captured_context: list[TaskCompletionContext] = []
 
         class CapturingChecker(TaskCompletionChecker):
@@ -229,17 +187,15 @@ class TestVerifyTaskCompletion:
                 captured_context.append(context)
                 return TaskCompletionResult.ok()
 
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=CapturingChecker(),
-            ),
-        )
+        capturing_checker = CapturingChecker()
+        adapter = ClaudeAgentSDKAdapter()
 
         mock_filesystem = MagicMock(spec=Filesystem)
         mock_resources = MagicMock()
         mock_resources.get.return_value = mock_filesystem
         mock_prompt = MagicMock()
         mock_prompt.resources = mock_resources
+        mock_prompt.task_completion_checker = capturing_checker
 
         self._call_verify(
             adapter,
@@ -257,11 +213,6 @@ class TestVerifyTaskCompletion:
 
     def test_handles_filesystem_lookup_failure(self, session: Session) -> None:
         """When filesystem lookup fails, context still gets adapter but no filesystem."""
-        from weakincentives.adapters.claude_agent_sdk._task_completion import (
-            TaskCompletionChecker,
-            TaskCompletionContext,
-            TaskCompletionResult,
-        )
         from weakincentives.resources.errors import UnboundResourceError
 
         captured_context: list[TaskCompletionContext] = []
@@ -271,16 +222,14 @@ class TestVerifyTaskCompletion:
                 captured_context.append(context)
                 return TaskCompletionResult.ok()
 
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=CapturingChecker(),
-            ),
-        )
+        capturing_checker = CapturingChecker()
+        adapter = ClaudeAgentSDKAdapter()
 
         mock_resources = MagicMock()
         mock_resources.get.side_effect = UnboundResourceError(object)
         mock_prompt = MagicMock()
         mock_prompt.resources = mock_resources
+        mock_prompt.task_completion_checker = capturing_checker
 
         self._call_verify(
             adapter,
@@ -303,20 +252,11 @@ class TestVerifyTaskCompletion:
         from weakincentives.budget import Budget, BudgetTracker
         from weakincentives.runtime.events.types import TokenUsage
 
-        _initialize_plan_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="active",
-                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
-            )
-        )
+        fs = InMemoryFilesystem()
+        # Don't create the required file
 
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=PlanBasedChecker(plan_type=Plan),
-            ),
-        )
+        checker = FileOutputChecker(files=("output.txt",))
+        adapter = ClaudeAgentSDKAdapter()
 
         budget = Budget(max_total_tokens=1000)
         tracker = BudgetTracker(budget)
@@ -324,6 +264,7 @@ class TestVerifyTaskCompletion:
 
         caplog.set_level(logging.WARNING)
 
+        prompt = _make_prompt_with_fs(fs, task_completion_checker=checker)
         self._call_verify(
             adapter,
             output={"summary": "partial"},
@@ -331,6 +272,7 @@ class TestVerifyTaskCompletion:
             stop_reason="structured_output",
             prompt_name="test_prompt",
             budget_tracker=tracker,
+            prompt=prompt,
         )
 
         assert any("incomplete_tasks" in record.message for record in caplog.records), (
@@ -369,3 +311,100 @@ class TestCheckTaskCompletion:
 
         assert result == (False, None)
         checker.check.assert_not_called()
+
+    def test_resolves_filesystem_from_prompt(self, session: Session) -> None:
+        """check_task_completion resolves filesystem from prompt resources."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
+            check_task_completion,
+        )
+
+        fs = InMemoryFilesystem()
+        fs.write("output.txt", "done")
+
+        checker = FileOutputChecker(files=("output.txt",))
+        prompt = _make_prompt_with_fs(fs)
+        constraints = HookConstraints()
+        hook_context = HookContext(
+            prompt=prompt,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+        # Create a mock message with structured_output
+        mock_message = MagicMock()
+        mock_message.structured_output = {"key": "value"}
+
+        result = check_task_completion(checker, [mock_message], hook_context)
+
+        # Files exist => complete => should not continue
+        assert result == (False, None)
+
+    def test_fails_closed_without_filesystem_in_stream(self, session: Session) -> None:
+        """check_task_completion fails closed when prompt has no filesystem."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
+            check_task_completion,
+        )
+
+        checker = FileOutputChecker(files=("output.txt",))
+        template: PromptTemplate[None] = PromptTemplate(
+            ns="test", key="test", name="test"
+        )
+        prompt_obj: Prompt[None] = Prompt(template)
+        prompt_obj.resources.__enter__()
+        constraints = HookConstraints()
+        hook_context = HookContext(
+            prompt=prompt_obj,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+        mock_message = MagicMock()
+        mock_message.structured_output = {"key": "value"}
+
+        result = check_task_completion(checker, [mock_message], hook_context)
+
+        # No filesystem => fail-closed => should continue with feedback
+        should_continue, feedback = result
+        assert should_continue is True
+        assert feedback is not None
+        assert "No filesystem" in feedback
+
+    def test_filesystem_resolution_failure_returns_none(self, session: Session) -> None:
+        """When filesystem lookup raises, context gets filesystem=None."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
+            _resolve_filesystem,
+        )
+
+        # Prompt without resources context entered → resources.get raises RuntimeError
+        template: PromptTemplate[None] = PromptTemplate(
+            ns="test", key="test", name="test"
+        )
+        prompt: Prompt[None] = Prompt(template)
+        constraints = HookConstraints()
+        hook_context = HookContext(
+            prompt=prompt,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+        result = _resolve_filesystem(hook_context)
+
+        assert result is None

@@ -336,10 +336,18 @@ ______________________________________________________________________
 
 ## Task Completion Checking
 
-**Implementation:** `src/weakincentives/adapters/claude_agent_sdk/_task_completion.py`
+**Implementation:** `weakincentives.prompt.task_completion`
 
 Verify agents complete all assigned tasks before stopping. Critical for ensuring
 agents don't prematurely terminate with work incomplete.
+
+### Principles
+
+- **Prompt-scoped declaration**: Bound to prompts alongside tools, policies,
+  and feedback providers
+- **Provider-agnostic**: Same checker works across all adapters
+- **Composable**: Multiple checkers combine via `CompositeChecker`
+- **Constraint-aware**: Checking skipped when deadline or budget exhausted
 
 ### TaskCompletionResult
 
@@ -354,7 +362,7 @@ Factory methods: `TaskCompletionResult.ok()`, `TaskCompletionResult.incomplete(f
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `session` | `Session` | Session containing state |
+| `session` | `SessionProtocol` | Session containing state |
 | `tentative_output` | `Any` | Output being produced |
 | `filesystem` | `Filesystem \| None` | Optional filesystem |
 | `adapter` | `ProviderAdapter \| None` | Optional adapter |
@@ -363,30 +371,69 @@ Factory methods: `TaskCompletionResult.ok()`, `TaskCompletionResult.incomplete(f
 ### TaskCompletionChecker Protocol
 
 ```python
+@runtime_checkable
 class TaskCompletionChecker(Protocol):
     def check(self, context: TaskCompletionContext) -> TaskCompletionResult: ...
 ```
 
 ### Built-in Implementations
 
-#### PlanBasedChecker
+#### FileOutputChecker
 
-Checks session `Plan` state for incomplete steps.
+Verifies that required output files exist on the filesystem. Accepts a list of
+file paths; returns incomplete if any are missing.
 
 ```python
-checker = PlanBasedChecker(plan_type=Plan)
+checker = FileOutputChecker(files=("report.md", "results.json"))
 ```
 
-Returns incomplete if plan steps exist with `status != "done"`.
+| Field | Type | Description |
+|-------|------|-------------|
+| `files` | `tuple[str, ...]` | Paths that must exist for completion |
+
+**Behavior:**
+
+1. Retrieve `filesystem` from `TaskCompletionContext`
+1. If no filesystem available and files are required, return incomplete
+   (fail-closed: cannot verify without filesystem access)
+1. For each path in `files`, call `filesystem.exists(path)`
+1. If all exist, return `TaskCompletionResult.ok()`
+1. If any missing, return `TaskCompletionResult.incomplete(feedback)` listing
+   the missing files
+
+All file existence checks go through the `Filesystem` abstraction.
+`HostFilesystem` resolves both relative and absolute paths (under its root),
+so callers can pass absolute workspace paths without bypassing the abstraction.
+
+```python
+class FileOutputChecker(TaskCompletionChecker):
+    def __init__(self, files: tuple[str, ...]) -> None:
+        self._files = files
+
+    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+        if context.filesystem is None:
+            if not self._files:
+                return TaskCompletionResult.ok(...)
+            return TaskCompletionResult.incomplete(...)
+
+        missing = [f for f in self._files if not context.filesystem.exists(f)]
+        if not missing:
+            return TaskCompletionResult.ok(...)
+
+        return TaskCompletionResult.incomplete(...)
+```
 
 #### CompositeChecker
 
 Combines multiple checkers with configurable logic.
 
 ```python
-# All must pass
+# All must pass (default)
 checker = CompositeChecker(
-    checkers=(PlanBasedChecker(plan_type=Plan), FileExistsChecker(("output.txt",))),
+    checkers=(
+        FileOutputChecker(files=("output.txt", "summary.md")),
+        MyCustomChecker(),
+    ),
     all_must_pass=True,
 )
 
@@ -394,33 +441,206 @@ checker = CompositeChecker(
 checker = CompositeChecker(checkers=(...), all_must_pass=False)
 ```
 
-### Adapter Integration
+| Field | Type | Description |
+|-------|------|-------------|
+| `checkers` | `tuple[TaskCompletionChecker, ...]` | Ordered checker sequence |
+| `all_must_pass` | `bool` | AND (True) vs OR (False) logic |
 
-Configure via `ClaudeAgentSDKClientConfig`:
+Short-circuits: first failure stops evaluation when `all_must_pass=True`;
+first success stops evaluation when `all_must_pass=False`.
+
+### Prompt Integration
+
+Configure via `PromptTemplate`:
 
 ```python
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(plan_type=Plan),
+template = PromptTemplate(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    policies=[ReadBeforeWritePolicy()],
+    feedback_providers=(
+        FeedbackProviderConfig(
+            provider=DeadlineFeedback(),
+            trigger=FeedbackTrigger(every_n_seconds=30),
+        ),
+    ),
+    task_completion_checker=FileOutputChecker(
+        files=("report.md", "results.json"),
     ),
 )
 ```
+
+All three guardrail mechanisms live on the prompt definition:
+
+| Mechanism | PromptTemplate Field | Prompt Property |
+|-----------|---------------------|-----------------|
+| Tool Policies | `policies` | `policies_for_tool(name)` |
+| Feedback Providers | `feedback_providers` | `feedback_providers` |
+| Task Completion | `task_completion_checker` | `task_completion_checker` |
+
+#### PromptTemplate Field
+
+```python
+@FrozenDataclass(slots=False)
+class PromptTemplate[OutputT]:
+    ns: str
+    key: str
+    sections: ...
+    policies: Sequence[ToolPolicy] = ()
+    feedback_providers: Sequence[FeedbackProviderConfig] = ()
+    task_completion_checker: TaskCompletionChecker | None = None
+    ...
+```
+
+#### Prompt Instance Forwarding
+
+```python
+class Prompt[OutputT]:
+    @property
+    def task_completion_checker(self) -> TaskCompletionChecker | None:
+        """Return task completion checker configured on this prompt."""
+        return self.template.task_completion_checker
+```
+
+#### Protocol Update
+
+```python
+class PromptProtocol[PromptOutputT](Protocol):
+    ...
+    @property
+    def task_completion_checker(self) -> TaskCompletionChecker | None:
+        """Return task completion checker if configured."""
+        ...
+```
+
+### Adapter Integration
+
+Adapters read the checker from `prompt.task_completion_checker` and translate it
+into their native hook/stop mechanism.
 
 #### Hook Integration
 
 - **PostToolUse Hook (StructuredOutput)**: If incomplete, adds feedback context
 - **Stop Hook**: Returns `needsMoreTurns: True` if incomplete
-- **Final Verification**: Raises `PromptEvaluationError` if incomplete
+- **Continuation Loop**: Resolves filesystem from prompt resources so
+  file-based checkers can verify output during the message stream
+- **Final Verification**: Logs warning if incomplete after execution
+
+#### Claude Agent SDK
+
+The adapter resolves the checker from the prompt via `resolve_checker()`:
+
+```python
+checker = resolve_checker(prompt=prompt)
+```
+
+The checker is declared on `PromptTemplate.task_completion_checker`. There is
+no adapter-level fallback; the prompt is the single source of truth.
+
+#### Other Adapters
+
+For Codex, ACP, and OpenCode adapters, the checker is read from the prompt and
+translated into the adapter's stop/continuation mechanism. The adapter-agnostic
+protocol ensures each adapter can implement enforcement using its native
+primitives.
+
+### ACK Integration
+
+`AdapterCapabilities` includes a `task_completion` flag:
+
+```python
+@dataclass(slots=True, frozen=True)
+class AdapterCapabilities:
+    ...
+    # Tier 3: Advanced
+    task_completion: bool = True
+    ...
+```
+
+#### ACK Scenario: `test_task_completion.py`
+
+```
+test_task_completion_blocks_early_stop
+    Given a prompt with a FileOutputChecker requiring "output.txt"
+    And the agent has not yet created the file
+    When the agent attempts to stop
+    Then the stop is blocked with feedback listing missing files
+
+test_task_completion_allows_stop_when_complete
+    Given a prompt with a FileOutputChecker requiring "output.txt"
+    And the file exists on the filesystem
+    When the agent attempts to stop
+    Then the stop is allowed
+
+test_task_completion_skipped_on_deadline_exhaustion
+    Given a prompt with a FileOutputChecker and a near-past deadline
+    When adapter.evaluate() is called
+    Then task completion checking is bypassed
+    And the agent stops despite missing output files
+
+test_task_completion_skipped_on_budget_exhaustion
+    Given a prompt with a FileOutputChecker and an exhausted budget
+    When adapter.evaluate() is called
+    Then task completion checking is bypassed
+
+test_composite_checker_all_must_pass
+    Given a prompt with a CompositeChecker (all_must_pass=True)
+    And two checkers where one returns incomplete
+    When the agent attempts to stop
+    Then the stop is blocked with feedback from the failing checker
+
+test_no_checker_allows_free_stop
+    Given a prompt with no task_completion_checker
+    When the agent produces output and attempts to stop
+    Then the stop is allowed without any completion verification
+```
+
+#### Prompt Builder
+
+```python
+# integration-tests/ack/scenarios/__init__.py
+
+def build_task_completion_prompt(
+    ns: str,
+    *,
+    checker: TaskCompletionChecker,
+) -> tuple[PromptTemplate[object], Tool]:
+    """Build a prompt with task completion checking and a file-writing tool."""
+    ...
+```
+
+### Public API
+
+```python
+from weakincentives.prompt import (
+    TaskCompletionChecker,    # Protocol
+    TaskCompletionContext,    # Context dataclass
+    TaskCompletionResult,     # Result dataclass
+    FileOutputChecker,        # Built-in: required file existence
+    CompositeChecker,         # Built-in: combine multiple checkers
+)
+```
 
 ### Operational Notes
 
-- **Default disabled**: Must configure checker to enable
+- **Default disabled**: Must configure checker on prompt to enable
 - **Budget/deadline bypass**: Skipped when exhausted
-- **Feedback truncation**: Plan checker limits to 3 task titles
+- **Feedback truncation**: File output checker limits to 3 file paths in message
+- **Fail-closed on missing filesystem**: If no filesystem in context and files
+  are required, checker returns incomplete (consistent with tool policy
+  fail-closed philosophy)
 
 ______________________________________________________________________
 
 ## Design Rationale
+
+### Definition Owns Constraints
+
+The prompt definition is the single artifact that is versioned, reviewed, tested,
+and ported across adapters. All three guardrail mechanisms -- policies, feedback
+providers, and task completion -- are inherent properties of the agent's goal.
+They belong with the definition, not the harness.
 
 ### Immediate Delivery (Feedback)
 
@@ -447,6 +667,11 @@ When uncertain, deny. Agent reasons about why and adjusts.
 
 Expose reasoning. Denial feedback enables self-correction.
 
+### ACK as Cross-Adapter Verification
+
+With the checker on the prompt, ACK constructs task completion scenarios once and
+verifies enforcement across every adapter.
+
 ______________________________________________________________________
 
 ## Related Specifications
@@ -455,3 +680,4 @@ ______________________________________________________________________
 - `TOOLS.md` - Tool runtime
 - `SESSIONS.md` - Session state, snapshots
 - `CLAUDE_AGENT_SDK.md` - SDK adapter integration
+- `ACK.md` - Adapter Compatibility Kit

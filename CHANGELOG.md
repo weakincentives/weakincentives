@@ -2512,26 +2512,24 @@ Task completion checking verifies that an agent has completed all assigned tasks
 before allowing it to stop or produce final output.
 
 ```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    PlanBasedChecker,
-)
-from weakincentives.contrib.tools.planning import Plan
+from weakincentives.prompt import FileOutputChecker, PromptTemplate
 
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(plan_type=Plan),
+template = PromptTemplate(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    task_completion_checker=FileOutputChecker(
+        files=("report.md", "results.json"),
     ),
 )
 ```
 
 Built-in checkers:
 
-- `PlanBasedChecker`: Verifies all plan steps have `status == "done"`
+- `FileOutputChecker`: Verifies required output files exist on the filesystem
 - `CompositeChecker`: Combines multiple checkers with configurable logic
 
-See `specs/TASK_COMPLETION.md` for the full specification.
+See `specs/GUARDRAILS.md` for the full specification.
 
 ### Automatic Message Lease Extension
 

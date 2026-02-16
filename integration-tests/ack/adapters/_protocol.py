@@ -43,6 +43,11 @@ class AdapterCapabilities:
     deadline_enforcement: bool = False
     budget_enforcement: bool = False
 
+    # Tier 4: Guardrails
+    tool_policies: bool = False
+    feedback_providers: bool = False
+    task_completion: bool = False
+
     # Adapter-specific scenarios
     native_tools: bool = False
     workspace_isolation: bool = False

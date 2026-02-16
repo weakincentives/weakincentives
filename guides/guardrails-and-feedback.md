@@ -211,9 +211,9 @@ feedback." The adapter integrates this at two points:
 
 ### Built-in Checkers
 
-**PlanBasedChecker** looks at a `Plan` slice in the session. If any
-plan steps have a status other than "done," the agent is told to keep
-working. The feedback includes up to three incomplete task titles.
+**FileOutputChecker** verifies that required output files exist on the
+filesystem. If any are missing, the agent is told to keep working.
+The feedback includes up to three missing file paths.
 
 **CompositeChecker** combines multiple checkers. Configure it to
 require all checkers to pass, or allow any single checker to pass:
@@ -221,8 +221,8 @@ require all checkers to pass, or allow any single checker to pass:
 ```python nocheck
 checker = CompositeChecker(
     checkers=(
-        PlanBasedChecker(plan_type=Plan),
-        FileExistsChecker(("output.txt",)),
+        FileOutputChecker(files=("report.md",)),
+        FileOutputChecker(files=("results.json",)),
     ),
     all_must_pass=True,
 )

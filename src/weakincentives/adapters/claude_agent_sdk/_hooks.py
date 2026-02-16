@@ -413,12 +413,12 @@ def create_task_completion_stop_hook(
         An async hook callback that enforces task completion.
 
     Example:
+        >>> from weakincentives.prompt import FileOutputChecker
         >>> from weakincentives.adapters.claude_agent_sdk import (
         ...     create_task_completion_stop_hook,
-        ...     PlanBasedChecker,
         ... )
         >>>
-        >>> checker = PlanBasedChecker()
+        >>> checker = FileOutputChecker(files=("output.txt",))
         >>> hook = create_task_completion_stop_hook(hook_context, checker=checker)
     """
 

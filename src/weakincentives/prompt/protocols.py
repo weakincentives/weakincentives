@@ -39,6 +39,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ._prompt_resources import PromptResources
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
+    from .task_completion import TaskCompletionChecker
 
 
 class PromptResponseProtocol[AdapterOutputT](Protocol):
@@ -135,6 +136,15 @@ class PromptProtocol[PromptOutputT](Protocol):
     @property
     def feedback_providers(self) -> tuple[Any, ...]:
         """Return feedback providers configured on this prompt."""
+        ...
+
+    @property
+    def task_completion_checker(self) -> TaskCompletionChecker | None:
+        """Return task completion checker if configured."""
+        ...
+
+    def policies_for_tool(self, tool_name: str) -> tuple[Any, ...]:
+        """Return policies applicable to the named tool."""
         ...
 
     def bind(

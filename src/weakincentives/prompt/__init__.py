@@ -320,6 +320,13 @@ from .structured_output import (
     StructuredOutputConfig,
     parse_structured_output,
 )
+from .task_completion import (
+    CompositeChecker,
+    FileOutputChecker,
+    TaskCompletionChecker,
+    TaskCompletionContext,
+    TaskCompletionResult,
+)
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
@@ -333,6 +340,7 @@ from .workspace import (
 )
 
 __all__ = [
+    "CompositeChecker",
     "DeadlineFeedback",
     "Feedback",
     "FeedbackContext",
@@ -341,6 +349,7 @@ __all__ = [
     "FeedbackTrigger",
     "FileCreatedTrigger",
     "FileCreatedTriggerState",
+    "FileOutputChecker",
     "HostMount",
     "HostMountPreview",
     "LocalPromptOverridesStore",
@@ -378,6 +387,9 @@ __all__ = [
     "SequentialDependencyPolicy",
     "StaticFeedbackProvider",
     "StructuredOutputConfig",
+    "TaskCompletionChecker",
+    "TaskCompletionContext",
+    "TaskCompletionResult",
     "TaskExample",
     "TaskExamplesSection",
     "TaskStep",

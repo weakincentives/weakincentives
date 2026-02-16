@@ -93,6 +93,16 @@ def update_token_stats(
         )
 
 
+def _resolve_filesystem(hook_context: HookContext) -> object | None:
+    """Resolve filesystem from prompt resources, returning None if unavailable."""
+    try:
+        from ...filesystem import Filesystem
+
+        return hook_context.resources.get(Filesystem)
+    except (LookupError, AttributeError, RuntimeError):
+        return None
+
+
 def check_task_completion(
     checker: Any,  # noqa: ANN401
     round_messages: list[Any],
@@ -111,7 +121,7 @@ def check_task_completion(
         session=hook_context.session,
         tentative_output=tentative_output,
         stop_reason="message_stream_complete",
-        filesystem=None,
+        filesystem=_resolve_filesystem(hook_context),
     )
 
     result = checker.check(completion_context)

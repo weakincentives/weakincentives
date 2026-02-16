@@ -325,15 +325,18 @@ Agents sometimes declare victory prematurely.
 **Task completion checkers** verify goals before allowing termination.
 
 ```python
-from weakincentives.adapters.claude_agent_sdk import (
-    PlanBasedChecker, CompositeChecker,
+from weakincentives.prompt import (
+    FileOutputChecker, CompositeChecker,
 )
 
-PlanBasedChecker(plan_type=MyPlan)
-# -> Blocks termination if plan steps remain incomplete
+FileOutputChecker(files=("report.md", "results.json"))
+# -> Blocks termination if required output files are missing
 
 CompositeChecker(
-    checkers=(PlanBasedChecker(plan_type=MyPlan), FileExistsChecker(...)),
+    checkers=(
+        FileOutputChecker(files=("report.md",)),
+        FileOutputChecker(files=("results.json",)),
+    ),
     all_must_pass=True,
 )
 ```

@@ -17,7 +17,6 @@ from __future__ import annotations
 from typing import Any
 
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import (
     Feedback,
@@ -25,33 +24,8 @@ from weakincentives.prompt import (
     FeedbackTrigger,
     Prompt,
     PromptTemplate,
+    TaskCompletionChecker,
 )
-from weakincentives.runtime.session import Session
-
-
-# Mock Plan types for testing task completion checkers.
-# These replicate the interface of the removed PlanningToolsSection types.
-@FrozenDataclass()
-class PlanStep:
-    """Mock PlanStep for testing."""
-
-    step_id: int
-    title: str
-    status: str = "pending"
-
-
-@FrozenDataclass()
-class Plan:
-    """Mock Plan for testing."""
-
-    objective: str
-    status: str = "active"
-    steps: tuple[PlanStep, ...] = ()
-
-
-def _initialize_plan_session(session: Session) -> None:
-    """Initialize session with Plan slice for testing."""
-    session[Plan].seed(())
 
 
 def _make_prompt() -> Prompt[object]:
@@ -61,9 +35,19 @@ def _make_prompt() -> Prompt[object]:
     return prompt
 
 
-def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
+def _make_prompt_with_fs(
+    fs: InMemoryFilesystem,
+    *,
+    task_completion_checker: TaskCompletionChecker | None = None,
+) -> Prompt[object]:
     """Create a prompt with filesystem bound in active context."""
-    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate(
+            ns="tests",
+            key="hooks-test",
+            task_completion_checker=task_completion_checker,
+        )
+    )
     prompt = prompt.bind(resources={Filesystem: fs})
     prompt.resources.__enter__()
     return prompt

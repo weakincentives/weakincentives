@@ -56,7 +56,7 @@ Key Components
     Hermetic isolation configuration that creates ephemeral environments with
     controlled network access and authentication settings.
 
-**Task Completion** (:class:`TaskCompletionChecker`, :class:`PlanBasedChecker`)
+**Task Completion** (:class:`TaskCompletionChecker`, :class:`FileOutputChecker`)
     Verification protocols for ensuring tasks are complete before allowing the
     agent to stop.
 
@@ -195,22 +195,16 @@ Using workspace sections to mount host files::
 
 Task Completion Example
 -----------------------
-Using task completion checking with a custom plan type::
+Using task completion checking to verify required output files::
 
-    from weakincentives.adapters.claude_agent_sdk import (
-        ClaudeAgentSDKAdapter,
-        ClaudeAgentSDKClientConfig,
-        PlanBasedChecker,
-    )
+    from weakincentives.prompt import FileOutputChecker, PromptTemplate
 
-    # MyPlan must have a `steps` attribute with items that have `status`
-    checker = PlanBasedChecker(plan_type=MyPlan)
-
-    adapter = ClaudeAgentSDKAdapter(
-        model="claude-opus-4-6",
-        client_config=ClaudeAgentSDKClientConfig(
-            task_completion_checker=checker,
-            stop_on_structured_output=True,
+    template = PromptTemplate(
+        ns="my-agent",
+        key="main",
+        sections=[...],
+        task_completion_checker=FileOutputChecker(
+            files=("report.md", "results.json"),
         ),
     )
 
@@ -243,7 +237,7 @@ Isolation:
 
 Task Completion:
     - :class:`TaskCompletionChecker`: Protocol for completion verification
-    - :class:`PlanBasedChecker`: Checker based on Plan state
+    - :class:`FileOutputChecker`: Checker for required file existence
     - :class:`CompositeChecker`: Combines multiple checkers
     - :class:`TaskCompletionContext`: Context for checker evaluation
     - :class:`TaskCompletionResult`: Result of completion check
@@ -281,7 +275,7 @@ from ._model_utils import (
 )
 from ._task_completion import (
     CompositeChecker,
-    PlanBasedChecker,
+    FileOutputChecker,
     TaskCompletionChecker,
     TaskCompletionContext,
     TaskCompletionResult,
@@ -316,11 +310,11 @@ __all__ = [
     "ClaudeAgentSDKModelConfig",
     "CompositeChecker",
     "EphemeralHome",
+    "FileOutputChecker",
     "IsolationAuthError",
     "IsolationConfig",
     "NetworkPolicy",
     "PermissionMode",
-    "PlanBasedChecker",
     "ReasoningEffort",
     "SandboxConfig",
     "TaskCompletionChecker",

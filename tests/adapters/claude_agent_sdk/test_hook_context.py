@@ -28,9 +28,10 @@ from ._hook_helpers import _make_prompt
 
 class TestHookContext:
     def test_basic_construction(self, session: Session) -> None:
+        prompt = _make_prompt()
         context = HookContext(
             session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -41,6 +42,16 @@ class TestHookContext:
         assert context.budget_tracker is None
         assert context.stop_reason is None
         assert context._tool_count == 0
+
+    def test_prompt_property(self, session: Session) -> None:
+        prompt = _make_prompt()
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        assert context.prompt is prompt
 
     def test_with_deadline_and_budget(self, session: Session) -> None:
         from weakincentives.clock import FakeClock

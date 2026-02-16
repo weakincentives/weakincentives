@@ -157,6 +157,11 @@ class HookContext:
         return self._session
 
     @property
+    def prompt(self) -> PromptProtocol[object]:
+        """Get the bound prompt."""
+        return self._prompt
+
+    @property
     def resources(
         self,
     ) -> PromptResources:  # pragma: no cover - tested via integration
