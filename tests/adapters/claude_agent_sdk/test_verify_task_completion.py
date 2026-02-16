@@ -15,17 +15,13 @@
 from __future__ import annotations
 
 import logging
-import warnings
 from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-)
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
@@ -58,9 +54,7 @@ class TestVerifyTaskCompletion:
             verify_task_completion,
         )
 
-        verify_task_completion(
-            **kwargs, client_config=adapter._client_config, adapter=adapter
-        )
+        verify_task_completion(**kwargs, adapter=adapter)
 
     def test_no_checker_configured_does_nothing(
         self, adapter: ClaudeAgentSDKAdapter, session: Session
@@ -284,61 +278,6 @@ class TestVerifyTaskCompletion:
         assert any("incomplete_tasks" in record.message for record in caplog.records), (
             "Should log warning about incomplete tasks when budget remains"
         )
-
-    def test_config_checker_fallback_with_deprecation(self, session: Session) -> None:
-        """Checker on config without prompt checker produces deprecation warning."""
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=FileOutputChecker(files=("output.txt",)),
-            ),
-        )
-
-        prompt: Prompt[object] = Prompt(PromptTemplate(ns="test", key="test"))
-        prompt.resources.__enter__()
-
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            self._call_verify(
-                adapter,
-                output={"summary": "done"},
-                session=session,
-                stop_reason="structured_output",
-                prompt_name="test",
-                prompt=prompt,
-            )
-
-        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
-
-    def test_no_prompt_with_config_checker(self, session: Session) -> None:
-        """Checker resolves from config when prompt is None (no filesystem)."""
-        captured_context: list[TaskCompletionContext] = []
-
-        class CapturingChecker(TaskCompletionChecker):
-            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
-                captured_context.append(context)
-                return TaskCompletionResult.ok()
-
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=CapturingChecker(),
-            ),
-        )
-
-        with warnings.catch_warnings(record=True):
-            warnings.simplefilter("always")
-            self._call_verify(
-                adapter,
-                output={"summary": "done"},
-                session=session,
-                stop_reason="structured_output",
-                prompt_name="test",
-                prompt=None,
-            )
-
-        assert len(captured_context) == 1
-        ctx = captured_context[0]
-        assert ctx.filesystem is None
-        assert ctx.adapter is adapter
 
 
 class TestCheckTaskCompletion:

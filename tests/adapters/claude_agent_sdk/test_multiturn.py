@@ -31,23 +31,35 @@ from tests.adapters.claude_agent_sdk.conftest import (
 )
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
     TaskCompletionChecker,
     TaskCompletionContext,
     TaskCompletionResult,
 )
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import Prompt
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.session import Session
+
+
+def _make_prompt_with_checker(
+    checker: TaskCompletionChecker,
+) -> Prompt[None]:
+    """Create a minimal prompt with a task_completion_checker."""
+    template = PromptTemplate[None](
+        ns="test",
+        key="with-checker",
+        sections=[
+            MarkdownSection(title="Task", key="task", template="Do something"),
+        ],
+        task_completion_checker=checker,
+    )
+    return Prompt(template)
 
 
 class TestMultiturnEdgeCases:
     """Tests for edge cases in multi-turn continuation loop."""
 
-    def test_deadline_exceeded_during_continuation(
-        self, session: Session, untyped_prompt: Prompt[None]
-    ) -> None:
+    def test_deadline_exceeded_during_continuation(self, session: Session) -> None:
         """Test that continuation stops when deadline expires mid-loop."""
         check_count = 0
 
@@ -97,23 +109,20 @@ class TestMultiturnEdgeCases:
                 )
 
         setup_mock_query([])
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=checker,
-            ),
-        )
+        adapter = ClaudeAgentSDKAdapter()
+        prompt = _make_prompt_with_checker(checker)
 
         with sdk_patches():
             with patch("claude_agent_sdk.ClaudeSDKClient", MockClientDeadlineTest):
                 response = adapter.evaluate(
-                    untyped_prompt, session=session, deadline=mock_deadline
+                    prompt, session=session, deadline=mock_deadline
                 )
 
         assert response.text is not None
         assert check_count >= 6
 
     def test_budget_check_raises_exception_during_continuation(
-        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+        self, session: Session
     ) -> None:
         """Test that continuation stops when budget check raises an exception."""
         from weakincentives.budget import Budget, BudgetExceededError, BudgetTracker
@@ -169,16 +178,13 @@ class TestMultiturnEdgeCases:
                 )
 
         setup_mock_query([])
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=checker,
-            ),
-        )
+        adapter = ClaudeAgentSDKAdapter()
+        prompt = _make_prompt_with_checker(checker)
 
         with sdk_patches():
             with patch("claude_agent_sdk.ClaudeSDKClient", MockClientBudgetTest):
                 response = adapter.evaluate(
-                    simple_prompt, session=session, budget_tracker=budget_tracker
+                    prompt, session=session, budget_tracker=budget_tracker
                 )
 
         assert response.text == "Response 1"
@@ -299,7 +305,7 @@ class TestMultiturnEdgeCases:
         assert response.text == "Response with no transport"
 
     def test_structured_output_used_for_completion_check(
-        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+        self, session: Session
     ) -> None:
         """Test that structured_output is used for task completion checking."""
         captured_outputs: list[object] = []
@@ -336,23 +342,18 @@ class TestMultiturnEdgeCases:
                 )
 
         setup_mock_query([])
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=checker,
-            ),
-        )
+        adapter = ClaudeAgentSDKAdapter()
+        prompt = _make_prompt_with_checker(checker)
 
         with sdk_patches():
             with patch("claude_agent_sdk.ClaudeSDKClient", MockClientStructuredOutput):
-                response = adapter.evaluate(simple_prompt, session=session)
+                response = adapter.evaluate(prompt, session=session)
 
         assert len(captured_outputs) == 1
         assert captured_outputs[0] == {"key": "structured_value"}
         assert response.text == "Text result"
 
-    def test_incomplete_without_feedback_exits_loop(
-        self, session: Session, simple_prompt: Prompt[SimpleOutput]
-    ) -> None:
+    def test_incomplete_without_feedback_exits_loop(self, session: Session) -> None:
         """Test that incomplete result without feedback exits the loop."""
 
         class NoFeedbackChecker(TaskCompletionChecker):
@@ -387,14 +388,11 @@ class TestMultiturnEdgeCases:
                 )
 
         setup_mock_query([])
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(
-                task_completion_checker=checker,
-            ),
-        )
+        adapter = ClaudeAgentSDKAdapter()
+        prompt = _make_prompt_with_checker(checker)
 
         with sdk_patches():
             with patch("claude_agent_sdk.ClaudeSDKClient", MockClientNoFeedback):
-                response = adapter.evaluate(simple_prompt, session=session)
+                response = adapter.evaluate(prompt, session=session)
 
         assert response.text == "Response 1"

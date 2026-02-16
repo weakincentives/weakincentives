@@ -31,13 +31,12 @@ from tests.adapters.claude_agent_sdk.conftest import (
 )
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
     TaskCompletionChecker,
     TaskCompletionContext,
     TaskCompletionResult,
 )
 from weakincentives.adapters.core import PromptEvaluationError
-from weakincentives.prompt import Prompt
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.session import Session
 
 
@@ -160,9 +159,7 @@ class TestMessageContentExtraction:
         assert result[0] == {"type": "text", "text": "Hello"}
         assert result[1] == {"type": "text", "text": "World"}
 
-    def test_multiturn_with_task_completion_checker(
-        self, session: Session, simple_prompt: Prompt[SimpleOutput]
-    ) -> None:
+    def test_multiturn_with_task_completion_checker(self, session: Session) -> None:
         """Test multi-turn conversations with task completion checking."""
 
         class TestChecker(TaskCompletionChecker):
@@ -178,11 +175,16 @@ class TestMessageContentExtraction:
                 return TaskCompletionResult.ok("Task complete.")
 
         checker = TestChecker()
-
-        client_config = ClaudeAgentSDKClientConfig(
+        template = PromptTemplate[None](
+            ns="test",
+            key="with-checker",
+            sections=[
+                MarkdownSection(title="Task", key="task", template="Do something"),
+            ],
             task_completion_checker=checker,
         )
-        adapter = ClaudeAgentSDKAdapter(client_config=client_config)
+        prompt = Prompt(template)
+        adapter = ClaudeAgentSDKAdapter()
 
         class MockClient:
             def __init__(
@@ -223,7 +225,7 @@ class TestMessageContentExtraction:
         setup_mock_query([])
         with sdk_patches():
             with patch("claude_agent_sdk.ClaudeSDKClient", MockClient):
-                response = adapter.evaluate(simple_prompt, session=session)
+                response = adapter.evaluate(prompt, session=session)
 
         assert checker.check_count == 2
         assert response.output is None

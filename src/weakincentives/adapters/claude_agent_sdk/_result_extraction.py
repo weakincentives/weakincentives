@@ -33,7 +33,6 @@ from ...serde import parse, schema
 from ..core import PromptEvaluationError
 from ._schema_normalization import _normalize_claude_output_schema
 from ._task_completion import TaskCompletionContext
-from .config import ClaudeAgentSDKClientConfig
 
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "claude_agent_sdk"}
@@ -176,13 +175,11 @@ def verify_task_completion(  # noqa: PLR0913
     deadline: Deadline | None = None,
     budget_tracker: BudgetTracker | None = None,
     prompt: PromptProtocol[Any] | None = None,
-    client_config: ClaudeAgentSDKClientConfig,
     adapter: Any = None,  # noqa: ANN401
 ) -> None:
     """Verify task completion if checker is configured.
 
-    Resolves the checker from the prompt first, falling back to the client
-    config (with deprecation warning). Skips verification if deadline or
+    Resolves the checker from the prompt. Skips verification if deadline or
     budget is exhausted (partial output is acceptable when resources run out).
 
     Args:
@@ -193,12 +190,11 @@ def verify_task_completion(  # noqa: PLR0913
         deadline: Optional deadline to check for exhaustion.
         budget_tracker: Optional budget tracker to check for exhaustion.
         prompt: Optional prompt for filesystem access and checker resolution.
-        client_config: Client configuration (fallback checker source).
         adapter: The adapter instance (passed through to context).
     """
     from ._task_completion import resolve_checker
 
-    checker = resolve_checker(prompt=prompt, client_config=client_config)
+    checker = resolve_checker(prompt=prompt)
     if output is None or checker is None:
         return
 
@@ -227,9 +223,11 @@ def verify_task_completion(  # noqa: PLR0913
             )
             return
 
-    # Get filesystem from prompt resources if available
+    # Get filesystem from prompt resources if available.
+    # checker is resolved from prompt so prompt is always set here,
+    # but guard defensively for type safety.
     filesystem: Filesystem | None = None
-    if prompt is not None:
+    if prompt is not None:  # pragma: no branch - invariant of resolve_checker
         with contextlib.suppress(LookupError, AttributeError):
             filesystem = prompt.resources.get(Filesystem)
 

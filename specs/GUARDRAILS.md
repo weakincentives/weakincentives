@@ -529,20 +529,14 @@ into their native hook/stop mechanism.
 
 #### Claude Agent SDK
 
-The adapter resolves the checker using `resolve_checker()`:
-
-1. **Prompt-scoped** (`prompt.task_completion_checker`) takes priority
-1. **Adapter-scoped** (`client_config.task_completion_checker`) is used as
-   fallback with a deprecation warning
+The adapter resolves the checker from the prompt via `resolve_checker()`:
 
 ```python
-# In build_hooks_config and verify_task_completion:
-checker = resolve_checker(prompt=prompt, client_config=client_config)
+checker = resolve_checker(prompt=prompt)
 ```
 
-All hook mechanics remain identical to the current implementation; the
-resolution logic ensures backward compatibility while encouraging migration
-to prompt-scoped declaration.
+The checker is declared on `PromptTemplate.task_completion_checker`. There is
+no adapter-level fallback; the prompt is the single source of truth.
 
 #### Other Adapters
 

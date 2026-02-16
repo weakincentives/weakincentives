@@ -225,10 +225,7 @@ def build_hooks_config(
 
     from ._task_completion import resolve_checker
 
-    checker = resolve_checker(
-        prompt=hook_context.prompt,
-        client_config=client_config,
-    )
+    checker = resolve_checker(prompt=hook_context.prompt)
     pre_hook = create_pre_tool_use_hook(hook_context)
     post_hook = create_post_tool_use_hook(
         hook_context,
