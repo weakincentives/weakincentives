@@ -629,11 +629,6 @@ class EphemeralHome:
             self._cleaned_up = True
 
     @property
-    def isolation(self) -> IsolationConfig:
-        """The isolation configuration used to create this ephemeral home."""
-        return self._isolation
-
-    @property
     def home_path(self) -> str:
         """Absolute path to the ephemeral home directory."""
         return self._temp_dir
