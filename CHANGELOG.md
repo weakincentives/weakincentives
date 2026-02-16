@@ -216,6 +216,15 @@ Any `import pydantic` or `from pydantic import ...` triggers ruff lint error
 
 ---
 
+### Breaking Changes
+
+- **Codex adapter:** Replace `SandboxMode` string literal with granular
+  `SandboxPolicy` dataclasses (`WorkspaceWritePolicy`, `ReadOnlyPolicy`,
+  `ExternalSandboxPolicy`, `DangerFullAccessPolicy`). The `sandbox_mode` field
+  on `CodexAppServerClientConfig` is replaced by `sandbox_policy` (default:
+  `WorkspaceWritePolicy()` with network disabled). Sandbox policy is now sent as
+  `sandboxPolicy` on `turn/start` instead of `sandbox` on `thread/start`.
+
 ## v0.26.0 — 2026-02-14
 
 *Commits reviewed: 2026-02-07 (b47a2736) through 2026-02-14 (a8da20c4)*
