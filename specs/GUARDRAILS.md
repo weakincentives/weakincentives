@@ -533,6 +533,8 @@ into their native hook/stop mechanism.
 
 - **PostToolUse Hook (StructuredOutput)**: If incomplete, adds feedback context
 - **Stop Hook**: Returns `needsMoreTurns: True` if incomplete
+- **Continuation Loop**: Resolves filesystem from prompt resources so
+  file-based checkers can verify output during the message stream
 - **Final Verification**: Logs warning if incomplete after execution
 
 #### Claude Agent SDK

@@ -372,3 +372,72 @@ class TestCheckTaskCompletion:
 
         assert result == (False, None)
         checker.check.assert_not_called()
+
+    def test_resolves_filesystem_from_prompt(self, session: Session) -> None:
+        """check_task_completion resolves filesystem from prompt resources."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
+            check_task_completion,
+        )
+
+        fs = InMemoryFilesystem()
+        fs.write("output.txt", "done")
+
+        checker = FileOutputChecker(files=("output.txt",))
+        prompt = _make_prompt_with_fs(fs)
+        constraints = HookConstraints()
+        hook_context = HookContext(
+            prompt=prompt,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+        # Create a mock message with structured_output
+        mock_message = MagicMock()
+        mock_message.structured_output = {"key": "value"}
+
+        result = check_task_completion(checker, [mock_message], hook_context)
+
+        # Files exist => complete => should not continue
+        assert result == (False, None)
+
+    def test_fails_closed_without_filesystem_in_stream(self, session: Session) -> None:
+        """check_task_completion fails closed when prompt has no filesystem."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            HookConstraints,
+            HookContext,
+        )
+        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
+            check_task_completion,
+        )
+
+        checker = FileOutputChecker(files=("output.txt",))
+        template: PromptTemplate[None] = PromptTemplate(
+            ns="test", key="test", name="test"
+        )
+        prompt_obj: Prompt[None] = Prompt(template)
+        prompt_obj.resources.__enter__()
+        constraints = HookConstraints()
+        hook_context = HookContext(
+            prompt=prompt_obj,
+            session=session,
+            adapter_name="test",
+            prompt_name="test",
+            constraints=constraints,
+        )
+
+        mock_message = MagicMock()
+        mock_message.structured_output = {"key": "value"}
+
+        result = check_task_completion(checker, [mock_message], hook_context)
+
+        # No filesystem => fail-closed => should continue with feedback
+        should_continue, feedback = result
+        assert should_continue is True
+        assert feedback is not None
+        assert "No filesystem" in feedback

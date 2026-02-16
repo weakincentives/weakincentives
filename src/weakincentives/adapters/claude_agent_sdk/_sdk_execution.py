@@ -19,8 +19,10 @@ managing continuation rounds, and enforcing deadline/budget constraints.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
+from ...filesystem import Filesystem
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ..core import PromptEvaluationError
@@ -107,11 +109,16 @@ def check_task_completion(
     if tentative_output is None:
         tentative_output = getattr(last_message, "result", None)
 
+    # Resolve filesystem from prompt resources so file-based checkers work
+    filesystem: Filesystem | None = None
+    with contextlib.suppress(LookupError, AttributeError):
+        filesystem = hook_context.prompt.resources.get(Filesystem)
+
     completion_context = TaskCompletionContext(
         session=hook_context.session,
         tentative_output=tentative_output,
         stop_reason="message_stream_complete",
-        filesystem=None,
+        filesystem=filesystem,
     )
 
     result = checker.check(completion_context)
