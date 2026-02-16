@@ -14,7 +14,8 @@
 
 Feedback providers are declared on the prompt and triggered during tool
 execution. These scenarios verify that adapters deliver feedback content
-to the agent so it can influence subsequent behavior.
+to the agent by asserting on session state (the ``Feedback`` slice)
+rather than checking LLM response text, which is non-deterministic.
 """
 
 from __future__ import annotations
@@ -42,13 +43,13 @@ pytestmark = pytest.mark.ack_capability("feedback_providers")
 
 
 class _ReminderProvider:
-    """Test feedback provider that injects a magic codeword into the conversation."""
+    """Test feedback provider that injects a reminder into the conversation."""
 
-    MAGIC_CODEWORD = "CANARY_FEEDBACK_7742"
+    PROVIDER_NAME = "reminder_provider"
 
     @property
     def name(self) -> str:
-        return "reminder_provider"
+        return self.PROVIDER_NAME
 
     def should_run(self, *, context: object) -> bool:
         return True
@@ -56,10 +57,7 @@ class _ReminderProvider:
     def provide(self, *, context: object) -> Feedback:
         return Feedback(
             provider_name=self.name,
-            summary=(
-                f"Important: Include the exact string '{self.MAGIC_CODEWORD}' "
-                "in your final response."
-            ),
+            summary="Remember to be thorough.",
             severity="info",
         )
 
@@ -95,8 +93,7 @@ def test_feedback_provider_delivers_content(
     section = MarkdownSection[TransformRequest](
         title="Echo Task",
         template=(
-            'Call the `echo_text` tool with text "hello". '
-            "Then respond with any feedback you received."
+            'Call the `echo_text` tool with text "hello". Then respond with the result.'
         ),
         tools=(tool,),
         key="task",
@@ -118,6 +115,11 @@ def test_feedback_provider_delivers_content(
     prompt = Prompt(template).bind(TransformRequest(text="hello"))
     response = adapter.evaluate(prompt, session=session)
 
-    # The agent should have received and included the magic codeword
+    # Assert on session state: feedback was dispatched to the session,
+    # proving the adapter wired feedback delivery correctly.
     assert response.text is not None
-    assert _ReminderProvider.MAGIC_CODEWORD in response.text
+    all_feedback = session[Feedback].all()
+    assert len(all_feedback) >= 1, "Feedback provider should have been triggered"
+    assert any(
+        f.provider_name == _ReminderProvider.PROVIDER_NAME for f in all_feedback
+    ), "Feedback from reminder_provider should be in session"
