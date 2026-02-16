@@ -84,9 +84,24 @@ class NetworkPolicy:
     Attributes:
         allowed_domains: Domains tools can access. Empty tuple means no
             network access. Use ("*",) for unrestricted access (not recommended).
+        allow_unix_sockets: Unix socket paths accessible within the sandbox
+            (e.g., for SSH agents). macOS only; Linux uses seccomp filters.
+        allow_all_unix_sockets: If True, allow access to all Unix sockets.
+            Less secure than specifying individual paths.
+        allow_local_binding: If True, allow binding to localhost ports.
+            macOS only.
+        http_proxy_port: HTTP proxy port when using a custom proxy. None
+            means no custom HTTP proxy.
+        socks_proxy_port: SOCKS5 proxy port when using a custom proxy. None
+            means no custom SOCKS5 proxy.
     """
 
     allowed_domains: tuple[str, ...] = ()
+    allow_unix_sockets: tuple[str, ...] = ()
+    allow_all_unix_sockets: bool = False
+    allow_local_binding: bool = False
+    http_proxy_port: int | None = None
+    socks_proxy_port: int | None = None
 
     @classmethod
     def no_network(cls) -> NetworkPolicy:
@@ -117,6 +132,17 @@ class SandboxConfig:
             outside the sandbox. Requires excluded_commands to be set.
         bash_auto_allow: If True, auto-approve Bash commands in sandbox mode.
             Only safe when network_policy blocks external access.
+        enable_weaker_nested_sandbox: If True, use a weaker sandbox that works
+            inside unprivileged Docker containers where full bubblewrap
+            isolation is unavailable. This is better than disabling the sandbox
+            entirely (``enabled=False``) because it still enforces some
+            restrictions, but it substantially weakens security compared to
+            the full sandbox. Only use when the container itself provides
+            additional isolation. Linux only.
+        ignore_file_violations: File paths for which sandbox violations should
+            be silently ignored rather than flagged.
+        ignore_network_violations: Network hosts for which sandbox violations
+            should be silently ignored rather than flagged.
     """
 
     enabled: bool = True
@@ -125,6 +151,9 @@ class SandboxConfig:
     excluded_commands: tuple[str, ...] = ()
     allow_unsandboxed_commands: bool = False
     bash_auto_allow: bool = True
+    enable_weaker_nested_sandbox: bool = False
+    ignore_file_violations: tuple[str, ...] = ()
+    ignore_network_violations: tuple[str, ...] = ()
 
 
 class IsolationAuthError(Exception):

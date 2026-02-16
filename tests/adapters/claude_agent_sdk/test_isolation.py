@@ -61,6 +61,11 @@ class TestNetworkPolicy:
     def test_defaults(self) -> None:
         policy = NetworkPolicy()
         assert policy.allowed_domains == ()
+        assert policy.allow_unix_sockets == ()
+        assert policy.allow_all_unix_sockets is False
+        assert policy.allow_local_binding is False
+        assert policy.http_proxy_port is None
+        assert policy.socks_proxy_port is None
 
     def test_no_network_factory(self) -> None:
         policy = NetworkPolicy.no_network()
@@ -69,6 +74,25 @@ class TestNetworkPolicy:
     def test_with_domains_factory(self) -> None:
         policy = NetworkPolicy.with_domains("api.github.com", "pypi.org")
         assert policy.allowed_domains == ("api.github.com", "pypi.org")
+
+    def test_with_unix_sockets(self) -> None:
+        policy = NetworkPolicy(
+            allow_unix_sockets=("/tmp/ssh-agent.sock",),
+        )
+        assert policy.allow_unix_sockets == ("/tmp/ssh-agent.sock",)
+
+    def test_with_all_unix_sockets(self) -> None:
+        policy = NetworkPolicy(allow_all_unix_sockets=True)
+        assert policy.allow_all_unix_sockets is True
+
+    def test_with_local_binding(self) -> None:
+        policy = NetworkPolicy(allow_local_binding=True)
+        assert policy.allow_local_binding is True
+
+    def test_with_proxy_ports(self) -> None:
+        policy = NetworkPolicy(http_proxy_port=8080, socks_proxy_port=1080)
+        assert policy.http_proxy_port == 8080
+        assert policy.socks_proxy_port == 1080
 
 
 class TestSandboxConfig:
@@ -80,6 +104,9 @@ class TestSandboxConfig:
         assert config.excluded_commands == ()
         assert config.allow_unsandboxed_commands is False
         assert config.bash_auto_allow is True
+        assert config.enable_weaker_nested_sandbox is False
+        assert config.ignore_file_violations == ()
+        assert config.ignore_network_violations == ()
 
     def test_with_paths(self) -> None:
         config = SandboxConfig(
@@ -101,6 +128,18 @@ class TestSandboxConfig:
         config = SandboxConfig(enabled=False, bash_auto_allow=False)
         assert config.enabled is False
         assert config.bash_auto_allow is False
+
+    def test_enable_weaker_nested_sandbox(self) -> None:
+        config = SandboxConfig(enable_weaker_nested_sandbox=True)
+        assert config.enable_weaker_nested_sandbox is True
+
+    def test_with_ignore_violations(self) -> None:
+        config = SandboxConfig(
+            ignore_file_violations=("/tmp/noisy",),
+            ignore_network_violations=("localhost",),
+        )
+        assert config.ignore_file_violations == ("/tmp/noisy",)
+        assert config.ignore_network_violations == ("localhost",)
 
 
 class TestIsolationConfig:
@@ -574,6 +613,97 @@ class TestEphemeralHomeSettingsGeneration:
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["readablePaths"] == ["/data/readonly"]
+
+    def test_enable_weaker_nested_sandbox(self) -> None:
+        config = IsolationConfig(
+            sandbox=SandboxConfig(enable_weaker_nested_sandbox=True)
+        )
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert settings["sandbox"]["enableWeakerNestedSandbox"] is True
+
+    def test_enable_weaker_nested_sandbox_default_omitted(self) -> None:
+        """When enable_weaker_nested_sandbox is False, it should be omitted."""
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert "enableWeakerNestedSandbox" not in settings["sandbox"]
+
+    def test_ignore_file_violations(self) -> None:
+        config = IsolationConfig(
+            sandbox=SandboxConfig(ignore_file_violations=("/tmp/noisy", "/var/log"))
+        )
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert settings["sandbox"]["ignoreViolations"]["file"] == [
+                "/tmp/noisy",
+                "/var/log",
+            ]
+
+    def test_ignore_network_violations(self) -> None:
+        config = IsolationConfig(
+            sandbox=SandboxConfig(ignore_network_violations=("localhost", "127.0.0.1"))
+        )
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert settings["sandbox"]["ignoreViolations"]["network"] == [
+                "localhost",
+                "127.0.0.1",
+            ]
+
+    def test_ignore_violations_omitted_when_empty(self) -> None:
+        """When no violations are configured, ignoreViolations is omitted."""
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert "ignoreViolations" not in settings["sandbox"]
+
+    def test_network_allow_unix_sockets(self) -> None:
+        config = IsolationConfig(
+            network_policy=NetworkPolicy(
+                allow_unix_sockets=("/tmp/ssh-agent.sock",),
+            )
+        )
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert settings["sandbox"]["network"]["allowUnixSockets"] == [
+                "/tmp/ssh-agent.sock",
+            ]
+
+    def test_network_allow_all_unix_sockets(self) -> None:
+        config = IsolationConfig(
+            network_policy=NetworkPolicy(allow_all_unix_sockets=True)
+        )
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert settings["sandbox"]["network"]["allowAllUnixSockets"] is True
+
+    def test_network_allow_local_binding(self) -> None:
+        config = IsolationConfig(network_policy=NetworkPolicy(allow_local_binding=True))
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert settings["sandbox"]["network"]["allowLocalBinding"] is True
+
+    def test_network_proxy_ports(self) -> None:
+        config = IsolationConfig(
+            network_policy=NetworkPolicy(http_proxy_port=8080, socks_proxy_port=1080)
+        )
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert settings["sandbox"]["network"]["httpProxyPort"] == 8080
+            assert settings["sandbox"]["network"]["socksProxyPort"] == 1080
+
+    def test_network_optional_fields_omitted_when_default(self) -> None:
+        """Network optional fields should be omitted when using defaults."""
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            network = settings["sandbox"]["network"]
+            assert "allowUnixSockets" not in network
+            assert "allowAllUnixSockets" not in network
+            assert "allowLocalBinding" not in network
+            assert "httpProxyPort" not in network
+            assert "socksProxyPort" not in network
 
     def test_env_section_inherits_host_auth_when_no_api_key(self) -> None:
         """Settings should not disable Bedrock when inheriting host auth.
