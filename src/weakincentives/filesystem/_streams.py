@@ -659,13 +659,14 @@ class HostByteWriter:
         try:
             self._handle.flush()
             os.fsync(self._handle.fileno())
-            self._handle.close()
         except BaseException:
+            self._handle.close()
             if self._temp_path is not None:
                 self._temp_path.unlink(missing_ok=True)
             elif self._final_path is not None:
                 self._final_path.unlink(missing_ok=True)
             raise
+        self._handle.close()
         if self._final_path is not None and self._temp_path is not None:
             _ = self._temp_path.replace(self._final_path)
 

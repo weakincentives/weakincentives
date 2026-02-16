@@ -453,3 +453,18 @@ class TestHostByteWriter:
                 writer.close()
 
         assert writer.closed
+
+    def test_close_flush_failure_closes_handle(self, tmp_path: Path) -> None:
+        """File handle must be closed even when flush/fsync raises."""
+        f = tmp_path / "file.bin"
+        writer = HostByteWriter.open(
+            f, "file.bin", mode="overwrite", create_parents=False
+        )
+        writer.write(b"data")
+        handle = writer._handle
+
+        with patch("os.fsync", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                writer.close()
+
+        assert handle.closed
