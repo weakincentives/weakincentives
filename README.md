@@ -6,7 +6,11 @@ WINK is the agent-definition layer for building unattended/background agents.
 You define the prompt, tools, policies, and feedback that stay stable while
 runtimes change. The planning loop, sandboxing, retries, and orchestration live
 in the execution harness—often a vendor runtime. WINK keeps your agent
-definition portable.
+definition portable across all supported runtimes:
+
+- **Claude Agent SDK** — Claude Code's runtime with native file/shell tools and MCP bridging
+- **Codex** — OpenAI's Codex runtime via the App Server protocol (stdio JSON-RPC)
+- **OpenCode** — via the vendor-neutral Agent Client Protocol (ACP), which also supports Gemini CLI and future ACP agents
 
 > **New to WINK?** If you're like, "I don't want to read, I just want to build!"—point
 > your favorite agent at a clone of https://github.com/weakincentives/starter and prompt
