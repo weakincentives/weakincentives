@@ -172,7 +172,7 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
         # Turn + Stream with task completion continuation loop
         max_continuation_rounds = 10
         continuation_round = 0
-        current_prompt_text = prompt_text
+        current_prompt_text: str = prompt_text
         accumulated_text: str | None = None
         usage: TokenUsage | None = None
 
@@ -230,7 +230,7 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
                 budget_tracker=budget_tracker,
             )
             if should_continue and continuation_round < max_continuation_rounds:
-                current_prompt_text = feedback
+                current_prompt_text = feedback or current_prompt_text
                 continuation_round += 1
                 continue
             break

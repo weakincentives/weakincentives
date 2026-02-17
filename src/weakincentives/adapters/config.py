@@ -18,7 +18,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..dataclasses import FrozenDataclass
-from ._api_types import LLMRequestParams
 
 __all__ = [
     "LLMConfig",
@@ -55,9 +54,9 @@ class LLMConfig:
     stop: tuple[str, ...] | None = None
     seed: int | None = None
 
-    def to_request_params(self) -> LLMRequestParams:
+    def to_request_params(self) -> dict[str, Any]:
         """Convert non-None fields to request parameters."""
-        params: LLMRequestParams = {}
+        params: dict[str, Any] = {}
         if self.temperature is not None:
             params["temperature"] = self.temperature
         if self.max_tokens is not None:
