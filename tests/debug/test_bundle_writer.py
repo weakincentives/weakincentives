@@ -142,6 +142,48 @@ class TestBundleWriter:
         assert bundle.manifest.prompt.ns == "test"
         assert bundle.manifest.prompt.key == "prompt"
 
+    def test_manifest_has_no_duplicate_files(self, tmp_path: Path) -> None:
+        """Manifest files list should contain no duplicates."""
+        run_context = RunContext(worker_id="test-worker")
+
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"test": "input"})
+            # Writing run_context twice should not create duplicate entries
+            writer.write_run_context(run_context)
+            writer.write_run_context(run_context)
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        files = list(bundle.manifest.files)
+        assert len(files) == len(set(files))
+
+    def test_manifest_build_info_populated(self, tmp_path: Path) -> None:
+        """Manifest build info should contain version and commit."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"test": "input"})
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        assert bundle.manifest.build.version != ""
+        assert bundle.manifest.build.commit != ""
+
+    def test_manifest_build_info_handles_git_failure(self, tmp_path: Path) -> None:
+        """Build info falls back to empty commit when git fails."""
+        from subprocess import CompletedProcess
+        from unittest.mock import patch
+
+        failed = CompletedProcess(args=[], returncode=128, stdout="", stderr="")
+        with patch("subprocess.run", return_value=failed):
+            with BundleWriter(tmp_path) as writer:
+                writer.write_request_input({"test": "input"})
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        # Version is still resolved from importlib.metadata
+        assert bundle.manifest.build.version != ""
+        # Commit falls back to empty string
+        assert bundle.manifest.build.commit == ""
+
     def test_writer_captures_logs(self, tmp_path: Path) -> None:
         """Test log capture context manager."""
         import logging
