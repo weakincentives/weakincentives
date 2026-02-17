@@ -80,6 +80,18 @@ The adapter provides:
 covering workspace sections, isolation configuration, tool bridging, skill
 mounting, and production patterns.
 
+## Guardrails
+
+All three adapters support the full guardrails stack:
+
+- **Tool policies**: Gate tool invocations via session-scoped state
+- **Feedback providers**: Inject advisory guidance after tool calls
+- **Task completion**: Verify goals before the agent stops (with continuation
+  loop, max 10 rounds)
+
+Guardrails are declared on the prompt, not configured per-adapter. See the
+[Guardrails guide](guardrails-and-feedback.md) for details.
+
 ## Adapter Events
 
 All adapters publish events to the session's dispatcher:
@@ -87,6 +99,7 @@ All adapters publish events to the session's dispatcher:
 | Event | When | Fields |
 | --- | --- | --- |
 | `PromptRendered` | After prompt render, before API call | `rendered_prompt`, `adapter` |
+| `RenderedTools` | After prompt render, correlated with `PromptRendered` | `tools`, `render_event_id` |
 | `ToolInvoked` | Each tool call (native + bridged) | `name`, `params`, `result`, `usage` |
 | `PromptExecuted` | After evaluation completes | `result`, `usage` (TokenUsage) |
 

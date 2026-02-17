@@ -103,10 +103,22 @@ available to the adapter for mounting.
 - `Section.skills`: Tuple of `SkillMount` attached to the section
 - `RenderedPrompt.skills`: Collected skills from enabled sections
 
-**Adapter (`src/weakincentives/adapters/claude_agent_sdk`):**
+**Adapters:**
 
-- Reads skills from `RenderedPrompt.skills`
-- `EphemeralHome._mount_skills()`: Copies to `$HOME/.claude/skills/`
+All three adapter types support skill installation via ephemeral home
+directories that override `$HOME` for the subprocess:
+
+| Adapter | Class | Skill Discovery Path |
+|---------|-------|---------------------|
+| Claude Agent SDK | `EphemeralHome` (`adapters/claude_agent_sdk`) | `$HOME/.claude/skills/` |
+| Codex App Server | `CodexEphemeralHome` (`adapters/codex_app_server/_ephemeral_home.py`) | `$HOME/.agents/skills/` |
+| OpenCode ACP | `OpenCodeEphemeralHome` (`adapters/opencode_acp/_ephemeral_home.py`) | `$HOME/.claude/skills/` |
+
+Each ephemeral home creates a temporary directory, mounts skills from
+`RenderedPrompt.skills`, and provides environment overrides so the subprocess
+discovers them. Auth data from the real `$HOME` is preserved via adapter-specific
+mechanisms (e.g., `CODEX_HOME` for Codex, copied `~/.local/share/opencode/` and
+`~/.aws/` for OpenCode).
 
 ### Data Model
 
@@ -233,5 +245,7 @@ SkillMount(
 ## Related Specifications
 
 - `specs/PROMPTS.md` - Prompt system, section attachment
-- `specs/CLAUDE_AGENT_SDK.md` - Adapter that mounts skills
+- `specs/CLAUDE_AGENT_SDK.md` - Claude Agent SDK adapter (skill mounting via `EphemeralHome`)
+- `specs/CODEX_APP_SERVER.md` - Codex adapter (skill mounting via `CodexEphemeralHome`)
+- `specs/OPENCODE_ADAPTER.md` - OpenCode adapter (skill mounting via `OpenCodeEphemeralHome`)
 - `specs/WORKSPACE.md` - Workspace and mount patterns

@@ -112,6 +112,8 @@ src/weakincentives/adapters/acp/
   _events.py               # ACP updates → WINK events mapping
   _structured_output.py    # structured_output MCP tool
   _mcp_http.py             # HTTP transport for in-process MCP server
+  _guardrails.py           # Tool policies, feedback, task completion helpers
+  _transcript.py           # ACP transcript bridge
   _async.py                # asyncio helpers (re-export run_async)
 ```
 
@@ -333,8 +335,21 @@ Defined at `src/weakincentives/adapters/acp/_events.py:37`.
 | Event | When |
 |-------|------|
 | `PromptRendered` | After render, before `conn.prompt()` |
+| `RenderedTools` | After render, correlated with `PromptRendered` via `render_event_id` |
 | `ToolInvoked` | Each bridged tool call + each agent-native tool |
 | `PromptExecuted` | After update draining completes (includes `TokenUsage`) |
+
+## Guardrails
+
+The ACP adapter supports the full guardrails stack declared on the prompt:
+
+- **Tool policies**: Enforced in `BridgedTool` before handler execution
+- **Feedback providers**: Injected via `post_call_hook` on the MCP tool server,
+  appending feedback to tool results after successful execution
+- **Task completion**: Continuation loop (`_run_prompt_loop`, max 10 rounds)
+  re-prompts the agent when the checker reports incomplete with feedback
+
+Implementation: `adapters/acp/_guardrails.py`
 
 ## Token Usage
 
@@ -356,13 +371,14 @@ session reuse.
 
 ## Subclass Hooks
 
-`ACPAdapter` exposes three protected methods for agent-specific behavior:
+`ACPAdapter` exposes four protected methods for agent-specific behavior:
 
 | Hook | Location | Default |
 |------|----------|---------|
 | `_validate_model(model_id, available_models)` | `adapter.py:632` | No-op |
 | `_handle_mode_error(error)` | `adapter.py:635` | Log warning |
 | `_detect_empty_response(client, prompt_resp)` | `adapter.py:643` | No-op |
+| `_prepare_execution_env()` | `adapter.py` | Returns empty env dict + no-op cleanup |
 
 Subclasses override these for agent-specific quirks. See
 `specs/OPENCODE_ADAPTER.md` for the OpenCode implementation.

@@ -28,7 +28,6 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 | `max_budget_usd` | `float \| None` | `None` | Maximum budget in USD |
 | `suppress_stderr` | `bool` | `True` | Suppress stderr output |
 | `stop_on_structured_output` | `bool` | `True` | Stop after structured output |
-| `task_completion_checker` | `TaskCompletionChecker \| None` | `None` | Task completion verification |
 | `isolation` | `IsolationConfig \| None` | `None` | Isolation configuration |
 | `betas` | `tuple[str, ...] \| None` | `None` | Beta features to enable |
 | `transcript_collection` | `TranscriptCollectorConfig \| None` | `TranscriptCollectorConfig()` | Transcript collection config (enabled by default) |

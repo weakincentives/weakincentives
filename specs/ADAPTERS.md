@@ -43,6 +43,10 @@ All adapters implement `ProviderAdapter` at `src/weakincentives/adapters/core.py
 | `heartbeat` | Optional heartbeat for liveness monitoring |
 | `run_context` | Optional execution context with correlation identifiers |
 
+| Property | Description |
+| --- | --- |
+| `adapter_name` | Canonical name (e.g., `"claude_agent_sdk"`, `"codex_app_server"`, `"acp"`). Default: `type(self).__name__`. |
+
 Returns `PromptResponse[OutputT]` at `src/weakincentives/adapters/core.py`.
 
 ### Configuration
@@ -129,6 +133,31 @@ Both the Claude Agent SDK adapter and Codex App Server adapter re-export from
 `_shared` via thin compatibility modules (`claude_agent_sdk/_bridge.py`,
 `codex_app_server/_async.py`, etc.).
 
+## Guardrails
+
+All adapters support the full guardrails stack declared on the prompt. See
+[GUARDRAILS.md](GUARDRAILS.md) for the complete specification.
+
+| Mechanism | Integration Point |
+|-----------|------------------|
+| Tool policies | Checked in `BridgedTool` before handler execution |
+| Feedback providers | Collected after successful tool calls and appended to content |
+| Task completion | Continuation loop (max 10 rounds) when checker reports incomplete |
+
+Guardrails are declared on `PromptTemplate` (not adapter config):
+
+```python
+template = PromptTemplate(
+    ns="my-agent", key="main",
+    sections=[...],
+    task_completion_checker=FileOutputChecker(files=("report.md",)),
+)
+```
+
+Each adapter implements guardrails through adapter-specific `_guardrails.py`
+modules that handle protocol-appropriate feedback injection and continuation
+semantics.
+
 ## Rate Limiting and Throttling
 
 ### ThrottlePolicy
@@ -191,7 +220,7 @@ Failed or aborted tools leave no trace in mutable state.
 
 | Exception | Location | Description |
 | --- | --- | --- |
-| `PromptEvaluationError` | `src/weakincentives/adapters/core.py` | Base for evaluation failures |
+| `PromptEvaluationError` | `src/weakincentives/errors.py` | Base for evaluation failures |
 | `ThrottleError` | `src/weakincentives/adapters/throttle.py` | Retryable provider errors |
 | `PromptRenderError` | `prompt/errors.py` | Template/section failures |
 | `OutputParseError` | `prompt/structured_output.py` | Structured output validation |

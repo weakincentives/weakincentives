@@ -87,7 +87,7 @@ AgentLoop receives request
      -> adapter passes to InnerLoop
         -> passes to ToolExecutor
            -> available in tool handlers via ToolContext
-     -> attached to PromptRendered, ToolInvoked, PromptExecuted events
+     -> attached to PromptRendered, RenderedTools, ToolInvoked, PromptExecuted events
   -> attached to AgentLoopResult
 ```
 

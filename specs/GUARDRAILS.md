@@ -282,6 +282,8 @@ At `src/weakincentives/prompt/feedback.py` (`run_feedback_providers`):
 | Adapter | Delivery Method |
 |---------|-----------------|
 | Claude Agent SDK | `PostToolUse` hook `additionalContext` |
+| Codex App Server | `append_feedback()` after successful tool calls in `_guardrails.py` |
+| ACP / OpenCode | `post_call_hook` on MCP tool server in `_guardrails.py` |
 
 ### Built-in Provider: DeadlineFeedback
 
@@ -553,8 +555,10 @@ primitives.
 @dataclass(slots=True, frozen=True)
 class AdapterCapabilities:
     ...
-    # Tier 3: Advanced
-    task_completion: bool = True
+    # Tier 4: Guardrails
+    tool_policies: bool = False
+    feedback_providers: bool = False
+    task_completion: bool = False
     ...
 ```
 
@@ -680,4 +684,6 @@ ______________________________________________________________________
 - `TOOLS.md` - Tool runtime
 - `SESSIONS.md` - Session state, snapshots
 - `CLAUDE_AGENT_SDK.md` - SDK adapter integration
+- `CODEX_APP_SERVER.md` - Codex adapter guardrails
+- `ACP_ADAPTER.md` - ACP/OpenCode adapter guardrails
 - `ACK.md` - Adapter Compatibility Kit

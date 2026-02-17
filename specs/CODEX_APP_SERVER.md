@@ -92,6 +92,8 @@ src/weakincentives/adapters/codex_app_server/
   _events.py                # Codex item/turn notifications → WINK ToolInvoked mapping
   _transcript.py            # Transcript bridging for Codex notifications
   _async.py                 # asyncio helpers for stdio NDJSON processing
+  _guardrails.py            # Feedback providers, task completion checking
+  _ephemeral_home.py        # CodexEphemeralHome (skill installation)
 ```
 
 Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
@@ -615,11 +617,36 @@ Include in payload: stderr tail (bounded, e.g., last 8k), Codex error details,
 
 Tool telemetry errors: log but don't crash.
 
+## Skill Installation
+
+`CodexEphemeralHome` at `src/weakincentives/adapters/codex_app_server/_ephemeral_home.py`
+manages a temporary HOME directory for Codex skill discovery. Skills from
+`RenderedPrompt.skills` are mounted at `$HOME/.agents/skills/<name>/`, which is
+the path Codex scans for user-scoped skills.
+
+The ephemeral home provides environment overrides:
+
+- `HOME` — points to the ephemeral directory (skill discovery)
+- `CODEX_HOME` — points to the original `~/.codex` (auth / config)
+
+## Guardrails
+
+The Codex adapter supports the full guardrails stack declared on the prompt:
+
+- **Tool policies**: Enforced in `BridgedTool` before handler execution
+- **Feedback providers**: Collected after successful tool calls via
+  `append_feedback()` in `_guardrails.py` and appended as additional content
+- **Task completion**: Continuation loop in `execute_protocol` (max 10 rounds)
+  re-prompts the agent when the checker reports incomplete with feedback
+
+Implementation: `adapters/codex_app_server/_guardrails.py`
+
 ## Events
 
 | Event | When |
 |-------|------|
 | `PromptRendered` | After render, before `turn/start` |
+| `RenderedTools` | After render, correlated with `PromptRendered` via `render_event_id` |
 | `ToolInvoked` | Each bridged tool call + each native Codex tool (command, file change) |
 | `PromptExecuted` | After `turn/completed` (includes `TokenUsage` if available) |
 
@@ -803,7 +830,6 @@ summary: Summary = resp.output  # Typed structured output
 ## Non-Goals (v1)
 
 - Full Codex review integration (`review/start`) — can be added later
-- Codex skill invocation — can be added later
 - ChatGPT browser OAuth flow — requires interactive browser
 - Per-turn `sandboxPolicy` overrides — thread-level `SandboxMode` is sufficient
 - Apps/connectors (`app/list`) — can be added later

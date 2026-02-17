@@ -110,6 +110,70 @@ make pip-audit   # Vulnerability scan
 - Use sandboxed adapters for file operations when possible
 - Avoid pickle, eval, or exec on untrusted data
 
+## Custom Checkers
+
+Beyond standard linting and type checking, WINK runs project-specific checkers
+as part of `make check`. These enforce architectural and import conventions that
+generic tools cannot express.
+
+### Banned Time Imports
+
+**Checker:** `BannedTimeImportsChecker` in `toolchain/checkers/banned_time_imports.py`
+
+Production code must not use `import time` or `from time import ...` directly.
+All time-dependent code must go through the clock protocols (`MonotonicClock`,
+`WallClock`, `Sleeper`) from `weakincentives.clock`. The only exception is
+`clock.py` itself, which wraps the stdlib `time` module behind the protocol
+abstraction.
+
+```python nocheck
+# Bad: direct time usage
+import time
+elapsed = time.monotonic()
+
+# Good: inject clock protocol
+from weakincentives.clock import MonotonicClock, SYSTEM_CLOCK
+
+def measure(clock: MonotonicClock = SYSTEM_CLOCK) -> float:
+    return clock.monotonic()
+```
+
+This enables deterministic testing via `FakeClock` (see `specs/TESTING.md`).
+
+### Private Import Checker
+
+**Checker:** `PrivateImportChecker` in `toolchain/checkers/private_imports.py`
+
+Modules with a `_` prefix (e.g., `_scope.py`, `_internal/`) are private to
+their owning package. Importing them from outside that package is an error.
+
+For example, `weakincentives.serde._scope` is owned by `weakincentives.serde`.
+Only modules under `weakincentives.serde` may import from it. Code outside that
+package must use the public API instead.
+
+### Architecture Checker (4-Layer Model)
+
+**Checker:** `ArchitectureChecker` in `toolchain/checkers/architecture.py`
+
+Enforces a four-layer module boundary model:
+
+| Layer | Name | Packages |
+|-------|------|----------|
+| 4 | High-level | `contrib`, `evals`, `cli`, `docs` |
+| 3 | Adapters | `adapters` |
+| 2 | Core | `runtime`, `prompt`, `resources`, `filesystem`, `serde`, `skills`, `formal`, `debug`, `optimizers` |
+| 1 | Foundation | `types`, `errors`, `dataclasses`, `dbc`, `deadlines`, `budget`, `clock`, `experiment` |
+
+A module in layer *N* may import from layers 1..*N* (same or lower). Imports
+inside `if TYPE_CHECKING:` are always allowed. See `specs/MODULE_BOUNDARIES.md`.
+
+### Pydantic Ban (TID251)
+
+Ruff rule `TID251` bans direct pydantic imports. All serialization must use
+`weakincentives.serde` instead. This keeps the codebase free of pydantic's
+runtime overhead and ensures consistent serialization behavior across the
+project.
+
 ## Quality Gates in Practice
 
 All gates are combined in `make check`:

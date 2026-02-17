@@ -6,6 +6,10 @@ The `serde` module provides dataclass serialization and deserialization without
 external dependencies like Pydantic. It uses stdlib dataclasses and
 `typing.Annotated` for constraints.
 
+> **Note:** Direct `import pydantic` / `from pydantic import ...` is banned
+> project-wide via ruff rule `TID251`. Use `weakincentives.serde` for all
+> serialization needs.
+
 ## Core Functions
 
 The module exports four main functions:
