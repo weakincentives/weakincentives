@@ -78,205 +78,58 @@ A debug bundle (`.zip`) contains:
 
 ## Analysis Jobs
 
-### Motivation
-
-Manual inspection of debug bundles is effective for small runs but breaks down
-for production-scale sessions. A 90-minute run with hundreds of tool calls,
-thousands of log entries, and multiple error cascades requires significant human
-effort to triage. Analysis jobs let an agent do the heavy lifting—reading the
-full bundle contents, correlating events across views, and producing a
-structured report—so the human reviewer starts from insight rather than raw
-data.
-
-### Concept
-
-An **analysis job** is an agent execution dispatched from the `wink debug` web
-UI against the currently loaded bundle. The user clicks "Analyze" (or presses a
-keyboard shortcut), the server extracts relevant bundle contents, dispatches an
-`AgentLoop` execution with a dedicated analysis prompt, and streams results back
-to the UI as they become available.
+An **analysis job** dispatches an agent from the `wink debug` web UI to
+produce a structured report for the currently loaded bundle. The user clicks
+"Analyze", the server runs an `AgentLoop` in a background thread, and the UI
+polls until the report is ready.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  wink debug UI                                          │
-│                                                         │
-│  ┌──────────┐   POST /api/analysis                      │
-│  │ Analyze  │──────────────────────┐                    │
-│  └──────────┘                      ▼                    │
-│                           ┌─────────────────┐           │
-│                           │  Debug Server   │           │
-│                           │  (FastAPI)      │           │
-│                           └────────┬────────┘           │
-│                                    │                    │
-│         ┌──────────────────────────┼──────────────┐     │
-│         │  Analysis Job            │              │     │
-│         │                          ▼              │     │
-│         │  ┌──────────────────────────────────┐   │     │
-│         │  │  AgentLoop.execute()             │   │     │
-│         │  │  prompt: AnalysisBundlePrompt    │   │     │
-│         │  │  adapter: configured provider    │   │     │
-│         │  └──────────────────────────────────┘   │     │
-│         │         │                               │     │
-│         │         ▼                               │     │
-│         │  ┌──────────────────────────────────┐   │     │
-│         │  │  Analysis Report (JSON)          │   │     │
-│         │  └──────────────────────────────────┘   │     │
-│         └─────────────────────────────────────────┘     │
-│                           │                             │
-│         GET /api/analysis/status (poll / SSE)           │
-│                           │                             │
-│                           ▼                             │
-│  ┌──────────────────────────────────────────────┐       │
-│  │  Analysis View (new tab)                     │       │
-│  │  - Executive summary                         │       │
-│  │  - Error analysis                            │       │
-│  │  - Timeline of significant events            │       │
-│  │  - Tool call patterns                        │       │
-│  │  - Recommendations                           │       │
-│  └──────────────────────────────────────────────┘       │
-└─────────────────────────────────────────────────────────┘
+UI ──POST /api/analysis──→ Server ──→ AgentLoop.execute()
+                                          │
+UI ──GET /api/analysis/status──→ Server   │  (background thread)
+          ↑ poll                          │
+          └───────────────────────────────┘
+                                          │
+UI ──GET /api/analysis/report──→ Server ◄─┘  report persisted
 ```
 
-### Job Lifecycle
+### Lifecycle
 
-1. **Dispatch**: User triggers analysis from the UI. The server validates that
-   no analysis is already running for this bundle, then starts the job in a
-   background thread.
+1. **Dispatch** — `POST /api/analysis`. Server rejects if a job is already
+   running (409). Otherwise starts the agent in a background thread and returns
+   `202 Accepted` with a `job_id`.
 
-2. **Bundle extraction**: The server reads bundle contents into a structured
-   context payload: manifest, request input/output, session state, logs
-   (sampled if over a size threshold), transcript entries, metrics, error
-   details, and config. Filesystem contents are summarized (file listing with
-   sizes) rather than included verbatim.
+2. **Execution** — Server extracts bundle contents (manifest, request, session
+   state, logs, transcript, metrics, error, config) into a context payload.
+   Logs are sampled if over a size threshold; filesystem contents are summarized
+   as a file listing rather than included verbatim. An `AgentLoop` executes
+   with a purpose-built analysis prompt and read-only bundle tools.
 
-3. **Agent execution**: An `AgentLoop` executes with a purpose-built analysis
-   prompt. The prompt instructs the agent to act as a debugging expert,
-   producing a structured JSON report. The agent has read-only access to bundle
-   contents via tools (no filesystem writes, no network access).
+3. **Completion** — Report persisted alongside the bundle as
+   `{bundle_id}_analysis.json`. Job transitions to `completed`. On agent
+   failure, job transitions to `failed` with error details.
 
-4. **Progress reporting**: The job transitions through states:
-   `pending → running → completed | failed`. The UI polls (or receives SSE
-   events) to track progress and display incremental status updates.
-
-5. **Report delivery**: On completion, the analysis report is persisted
-   alongside the bundle as `{bundle_id}_analysis.json` and returned to the UI
-   for rendering in a dedicated Analysis view.
-
-6. **Caching**: Completed analysis reports are cached. Reopening the same
-   bundle surfaces the existing report without re-running the agent. Users can
-   explicitly re-run analysis to get a fresh report.
+4. **Caching** — Reopening the same bundle serves the cached report. Users can
+   explicitly re-run to get a fresh report.
 
 ### Job States
 
-```
-pending ──→ running ──→ completed
-                  │
-                  └────→ failed
-```
-
 | State | Description |
 |-------|-------------|
-| `pending` | Job accepted, queued for execution |
-| `running` | Agent is executing; progress updates available |
-| `completed` | Report ready; persisted to disk |
+| `running` | Agent is executing |
+| `completed` | Report ready and persisted |
 | `failed` | Agent execution failed; error details available |
 
-### Analysis Report Schema
-
-The agent produces a structured JSON report:
-
-```json
-{
-  "version": "1.0.0",
-  "bundle_id": "uuid",
-  "analyzed_at": "2024-01-15T10:35:00+00:00",
-  "summary": {
-    "outcome": "success | partial_success | failure",
-    "one_liner": "Agent completed code review but missed 2 of 5 files due to budget exhaustion",
-    "duration_assessment": "Run took 47 minutes; 60% of time spent in filesystem operations",
-    "key_findings": [
-      "Budget exhausted at turn 23 of estimated 30 needed",
-      "Repeated file-read failures on locked resources caused 8 retry loops",
-      "Final output was incomplete but structurally valid"
-    ]
-  },
-  "errors": [
-    {
-      "phase": "tool_execution",
-      "event": "filesystem.read_failed",
-      "count": 8,
-      "first_occurrence": "2024-01-15T10:12:00+00:00",
-      "last_occurrence": "2024-01-15T10:18:00+00:00",
-      "description": "Repeated failures reading locked file 'data/report.csv'",
-      "impact": "Agent entered retry loop consuming 15% of total budget",
-      "recommendation": "Add file-lock detection to avoid retry storms"
-    }
-  ],
-  "timeline": [
-    {
-      "timestamp": "2024-01-15T10:05:00+00:00",
-      "phase": "planning",
-      "description": "Agent began task decomposition",
-      "significance": "normal"
-    },
-    {
-      "timestamp": "2024-01-15T10:12:00+00:00",
-      "phase": "tool_execution",
-      "description": "First filesystem read failure; retry loop begins",
-      "significance": "warning"
-    },
-    {
-      "timestamp": "2024-01-15T10:25:00+00:00",
-      "phase": "budget",
-      "description": "Budget exhausted; agent forced to finalize",
-      "significance": "critical"
-    }
-  ],
-  "tool_analysis": {
-    "total_calls": 45,
-    "unique_tools": ["read_file", "write_file", "run_tests", "search"],
-    "failure_rate": 0.18,
-    "patterns": [
-      "read_file called 22 times (49% of all calls); 8 failures (36% failure rate)",
-      "Longest tool execution: run_tests at 12.3 seconds"
-    ]
-  },
-  "budget": {
-    "tokens_used": 48000,
-    "tokens_limit": 50000,
-    "utilization": 0.96,
-    "assessment": "Near-complete budget utilization; task was under-budgeted"
-  },
-  "recommendations": [
-    {
-      "priority": "high",
-      "category": "budget",
-      "title": "Increase token budget for code review tasks",
-      "detail": "This task exhausted 96% of budget before completion. Consider a 50% budget increase for similar tasks."
-    },
-    {
-      "priority": "medium",
-      "category": "tools",
-      "title": "Add file availability check before read operations",
-      "detail": "8 consecutive read failures suggest the agent should probe file availability before committing to a read."
-    }
-  ]
-}
-```
-
-### API Routes
+### API
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/api/analysis` | `POST` | Dispatch a new analysis job for the current bundle |
-| `/api/analysis/status` | `GET` | Current job state, progress, and partial results |
-| `/api/analysis/report` | `GET` | Completed analysis report (404 if not ready) |
-| `/api/analysis/cancel` | `POST` | Cancel a running analysis job |
-| `/api/analysis/events` | `GET` | SSE stream for real-time progress updates |
+| `/api/analysis` | `POST` | Dispatch analysis job for current bundle |
+| `/api/analysis/status` | `GET` | Job state and elapsed time |
+| `/api/analysis/report` | `GET` | Completed report (404 if not ready) |
+| `/api/analysis/cancel` | `POST` | Cancel a running job |
 
-#### POST /api/analysis
-
-Request body (all fields optional):
+**POST /api/analysis** — Request body (all fields optional):
 
 ```json
 {
@@ -286,141 +139,101 @@ Request body (all fields optional):
 }
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `adapter` | `string` | Server default | Which provider adapter to use |
-| `budget` | `object` | Reasonable default | Token/time budget for the analysis agent |
-| `focus` | `string[]` | All sections | Limit analysis to specific report sections |
+Response: `202 Accepted` with `{ "job_id": "uuid", "status": "running" }`
 
-Response: `202 Accepted` with `{ "job_id": "uuid", "status": "pending" }`
-
-#### GET /api/analysis/status
-
-Response:
+**GET /api/analysis/status** — Response:
 
 ```json
 {
   "job_id": "uuid",
   "status": "running",
   "started_at": "2024-01-15T10:35:00+00:00",
-  "progress": "Analyzing tool call patterns...",
   "elapsed_seconds": 12
 }
 ```
 
-#### GET /api/analysis/events (SSE)
+### Analysis Report Schema
 
-Server-Sent Events stream:
-
+```json
+{
+  "version": "1.0.0",
+  "bundle_id": "uuid",
+  "analyzed_at": "2024-01-15T10:35:00+00:00",
+  "summary": {
+    "outcome": "success | partial_success | failure",
+    "one_liner": "Short human-readable assessment",
+    "duration_assessment": "Timing analysis",
+    "key_findings": ["..."]
+  },
+  "errors": [
+    {
+      "phase": "tool_execution",
+      "event": "filesystem.read_failed",
+      "count": 8,
+      "first_occurrence": "...",
+      "last_occurrence": "...",
+      "description": "What happened",
+      "impact": "Effect on the run",
+      "recommendation": "Suggested fix"
+    }
+  ],
+  "timeline": [
+    {
+      "timestamp": "...",
+      "phase": "planning | tool_execution | budget",
+      "description": "What happened",
+      "significance": "normal | warning | critical"
+    }
+  ],
+  "tool_analysis": {
+    "total_calls": 45,
+    "unique_tools": ["..."],
+    "failure_rate": 0.18,
+    "patterns": ["..."]
+  },
+  "budget": {
+    "tokens_used": 48000,
+    "tokens_limit": 50000,
+    "utilization": 0.96,
+    "assessment": "Human-readable budget analysis"
+  },
+  "recommendations": [
+    {
+      "priority": "high | medium | low",
+      "category": "budget | tools | prompt | config",
+      "title": "Short title",
+      "detail": "Actionable detail"
+    }
+  ]
+}
 ```
-event: progress
-data: {"status": "running", "progress": "Reading session state..."}
 
-event: progress
-data: {"status": "running", "progress": "Correlating error patterns..."}
+### Analysis Prompt
 
-event: complete
-data: {"status": "completed", "report_url": "/api/analysis/report"}
-```
+The analysis prompt is a `PromptTemplate[AnalysisReport]` following the
+"prompt is the agent" philosophy:
 
-### Configuration
+- **System context** — Role as a debugging expert. Structured output
+  requirement (the report schema above).
 
-Analysis job configuration is provided when starting the `wink debug` server:
+- **Bundle context section** — Extracted bundle data injected as structured
+  content the agent can reference directly.
 
-```bash
-wink debug <bundle.zip> --analysis-adapter claude_agent_sdk
-wink debug <bundle.zip> --analysis-budget 50000
-wink debug <bundle.zip> --no-analysis    # Disable analysis feature
-```
+- **Read-only tools** — `read_bundle_file(path)`, `query_logs(filter)`,
+  `query_transcript(filter)`, `get_session_slice(type)`. No writes, no
+  network.
 
-| CLI Option | Default | Description |
-|------------|---------|-------------|
-| `--analysis-adapter` | Auto-detect | Provider adapter for analysis agent |
-| `--analysis-budget` | `50000` tokens | Default token budget for analysis jobs |
-| `--no-analysis` | `false` | Disable the analysis job feature entirely |
+- **Policy section** — Declarative constraints:
+  - MUST produce a valid `AnalysisReport` JSON
+  - MUST identify outcome (success/failure/partial)
+  - MUST surface all errors with impact assessment
+  - MUST NOT speculate about external causes without bundle evidence
+  - SHOULD correlate errors with budget/timing impact
+  - SHOULD identify tool call anti-patterns (retry storms, redundant reads)
 
-Programmatic configuration via `DebugServerConfig`:
+### Persistence
 
-```python
-@dataclass(frozen=True, slots=True)
-class AnalysisJobConfig:
-    adapter: str = "claude_agent_sdk"
-    budget: Budget | None = None
-    enabled: bool = True
-
-@dataclass(frozen=True, slots=True)
-class DebugServerConfig:
-    host: str = "127.0.0.1"
-    port: int = 8000
-    open_browser: bool = True
-    analysis: AnalysisJobConfig | None = None
-```
-
-### Analysis Prompt Design
-
-The analysis prompt follows WINK's "prompt is the agent" philosophy. It is a
-`PromptTemplate[AnalysisReport]` with sections that provide:
-
-1. **System context**: Role as a debugging expert analyzing agent execution
-   bundles. Structured output requirement (JSON report schema).
-
-2. **Bundle context section**: Injects the extracted bundle data—manifest,
-   request, session state, logs, metrics, errors—as structured content the
-   agent can reference.
-
-3. **Analysis tools** (read-only):
-   - `read_bundle_file(path)` — Read a specific file from the bundle
-   - `query_logs(filter)` — Query log entries with filters
-   - `query_transcript(filter)` — Query transcript entries
-   - `get_session_slice(type)` — Read a specific session slice
-
-4. **Analysis policy section**: Declarative constraints (not a workflow):
-   - MUST produce a valid `AnalysisReport` JSON
-   - MUST identify the outcome (success/failure/partial)
-   - MUST surface all errors with impact assessment
-   - MUST NOT speculate about external causes without evidence in the bundle
-   - SHOULD correlate errors with budget/timing impact
-   - SHOULD identify tool call anti-patterns (retry storms, redundant reads)
-
-### UI Integration
-
-#### Analysis View (New Tab)
-
-A new **Analysis** tab (keyboard shortcut: `6`) appears in the navigation bar.
-States:
-
-| UI State | Display |
-|----------|---------|
-| No analysis | Prompt with "Analyze Bundle" button and description |
-| Pending/Running | Progress indicator with status text from SSE stream |
-| Completed | Rendered report with expandable sections |
-| Failed | Error message with "Retry" button |
-| Cached | Report with "Re-analyze" option and timestamp of last analysis |
-
-#### Report Rendering
-
-Each report section maps to a collapsible card:
-
-- **Summary** — Outcome badge, one-liner, key findings as bullet list
-- **Errors** — Table with severity indicators, expandable detail rows
-- **Timeline** — Vertical timeline with significance-based color coding
-  (normal/warning/critical)
-- **Tool Analysis** — Bar chart of tool call distribution, failure rate
-  highlights
-- **Budget** — Utilization gauge, assessment text
-- **Recommendations** — Priority-sorted cards with category badges
-
-#### Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `6` | Switch to Analysis view |
-| `A` | Start analysis (when in Analysis view, no job running) |
-| `Esc` | Cancel running analysis |
-
-### Bundle-Side Persistence
-
-Completed analysis reports are saved adjacent to the bundle:
+Reports are saved adjacent to the bundle:
 
 ```
 ./debug/
@@ -428,9 +241,7 @@ Completed analysis reports are saved adjacent to the bundle:
   └── {bundle_id}_{timestamp}_analysis.json
 ```
 
-This allows analysis results to survive server restarts and be shared alongside
-bundles. The report file follows the Analysis Report Schema defined above, with
-an additional `_meta` envelope:
+The file wraps the report with metadata:
 
 ```json
 {
@@ -441,43 +252,39 @@ an additional `_meta` envelope:
     "wall_time_seconds": 18.4,
     "bundle_checksum": "sha256:abc123..."
   },
-  "report": { "...analysis report..." }
+  "report": { ... }
 }
 ```
 
-### Security Considerations
+### UI Integration
 
-- **Read-only tools**: The analysis agent cannot modify the bundle, filesystem,
-  or any external state. Tools are strictly read-only against bundle contents.
-- **No network access**: The analysis prompt does not include network-capable
-  tools. The agent operates exclusively on data already present in the bundle.
-- **Sensitive data**: Bundles may contain secrets. The analysis report may
-  quote bundle contents verbatim. The report inherits the same access controls
-  as the bundle itself.
-- **Local execution**: Analysis runs on the same machine as the debug server.
-  No bundle data leaves the machine unless explicitly configured otherwise.
-- **Budget limits**: Analysis jobs enforce token budgets to prevent runaway
-  costs. The default budget is capped and configurable.
+A new **Analysis** tab (keyboard shortcut: `6`):
 
-### Error Handling
+| UI State | Display |
+|----------|---------|
+| No analysis | "Analyze Bundle" button |
+| Running | Spinner with elapsed time; poll interval 2s |
+| Completed | Rendered report with collapsible sections |
+| Failed | Error message with "Retry" button |
+| Cached | Report with "Re-analyze" option and timestamp |
 
-| Failure Mode | Behavior |
-|--------------|----------|
-| No adapter configured | UI shows setup instructions; "Analyze" button disabled |
-| Adapter authentication failure | Job transitions to `failed`; error includes setup guidance |
-| Agent timeout / budget exhaustion | Partial report returned if available; status shows `failed` |
-| Bundle too large for context | Server pre-filters content; logs sampled; filesystem summarized |
-| Concurrent analysis request | 409 Conflict; UI shows existing job status |
-| Server restart during job | Job state lost; UI detects disconnect and shows retry option |
+Report sections render as collapsible cards: Summary, Errors, Timeline, Tool
+Analysis, Budget, Recommendations.
+
+### Configuration
+
+```bash
+wink debug <bundle.zip> --analysis-adapter claude_agent_sdk
+wink debug <bundle.zip> --no-analysis    # Disable the feature
+```
 
 ### Invariants
 
-1. **At most one analysis job per bundle**: Concurrent dispatch returns 409
-2. **Read-only agent**: Analysis tools never mutate bundle or filesystem state
-3. **Idempotent caching**: Same bundle always serves cached report until explicit re-run
-4. **Budget-bounded**: Analysis agent cannot exceed configured token budget
-5. **Graceful degradation**: Analysis feature is entirely optional; all existing
-   views work without it
+1. At most one analysis job per bundle (concurrent dispatch returns 409)
+2. Analysis tools are read-only—never mutate bundle or filesystem
+3. Cached report served until explicit re-run
+4. Budget-bounded—agent cannot exceed configured token limit
+5. Entirely optional—all existing views work without it
 
 ## Limitations
 
