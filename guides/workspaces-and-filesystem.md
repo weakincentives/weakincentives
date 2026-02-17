@@ -155,14 +155,12 @@ tooling commands (test, lint, format), and known caveats.
 
 ## Filesystem Backends
 
-The `Filesystem` protocol has three backend implementations. Each serves
-a different use case:
+The `Filesystem` protocol has two backend implementations:
 
 | Backend | Storage | Use Case |
 |---------|---------|----------|
 | `InMemoryFilesystem` | Python dicts | Tests, evals, lightweight agents |
 | `HostFilesystem` | Sandboxed host directory | Production workspace access |
-| `PodmanSandboxSection` | Container overlay | Maximum isolation |
 
 ### When to Use InMemoryFilesystem
 
@@ -182,7 +180,7 @@ result = fs.read("analysis.md")
 ```
 
 In-memory filesystems enforce the same limits as host filesystems
-(48,000 chars per write, 16-segment path depth, UTF-8 text only). This
+(32MB per convenience write, 16-segment path depth, UTF-8 text only). This
 means tests exercise the same validation paths as production.
 
 ### When to Use HostFilesystem
@@ -253,21 +251,49 @@ filesystem.restore(fs_snapshot)
 Each snapshot records: a unique ID, creation timestamp, git commit ref
 (for host filesystems), root path, and an optional human-readable tag.
 
+## Streaming API
+
+For large files, the streaming layer provides memory-bounded operations:
+
+```python nocheck
+# Read a file in chunks (O(chunk_size) memory)
+with filesystem.open_read("large-dataset.csv") as reader:
+    for chunk in reader:
+        process(chunk)
+
+# Write large output incrementally
+with filesystem.open_write("results.bin") as writer:
+    for batch in generate_batches():
+        writer.write(batch)
+
+# Line-by-line text reading with lazy UTF-8 decoding
+with filesystem.open_text("logs.txt") as text:
+    for line in text.lines(strip=True):
+        if "ERROR" in line:
+            handle_error(line)
+```
+
+The convenience methods (`read()`, `write()`) are built on top of streaming
+and remain the simplest choice for typical agent operations. Use streaming
+when file sizes may exceed reasonable memory limits.
+
 ## Limits
 
 All filesystem backends enforce consistent limits:
 
 | Limit | Value |
 |-------|-------|
-| Content per write | 48,000 characters |
+| Convenience write limit | 32MB |
+| Default chunk size (streaming) | 64KB |
 | Path depth | 16 segments |
 | Segment length | 80 characters |
 | Default read limit | 2,000 lines |
 | Max grep matches | 1,000 |
-| Encoding | UTF-8 text (binary via `read_bytes`/`write_bytes`) |
+| Encoding | UTF-8 text (binary via `read_bytes`/`write_bytes` or streaming) |
 
 These limits exist to prevent agents from producing unbounded output
 or creating deeply nested directory structures that are hard to inspect.
+For files larger than the convenience limits, use the streaming API.
 
 ## Limitations
 

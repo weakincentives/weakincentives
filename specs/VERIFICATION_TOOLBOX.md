@@ -36,7 +36,11 @@ toolchain/                # Framework (excluded from package)
 ├── utils.py              # Git, AST, markdown utilities
 └── checkers/             # Checker implementations
     ├── __init__.py       # Factory functions for all checkers
-    ├── architecture.py   # Core/contrib separation
+    ├── architecture.py   # Four-layer module boundary model
+    ├── private_imports.py # Cross-package private module import check
+    ├── banned_time_imports.py # Direct time module usage ban
+    ├── code_length.py    # Function/file length limits
+    ├── code_length_baseline.txt # Baseline for grandfathered lengths
     └── docs.py           # Documentation verification
 ```
 
@@ -110,7 +114,9 @@ See `toolchain/checkers/__init__.py` for factory functions and execution order.
 | `bandit` | `SubprocessChecker` | Security | Bandit security scanner |
 | `deptry` | `SubprocessChecker` | Dependencies | Unused/missing dependencies |
 | `pip-audit` | `SubprocessChecker` | Vulnerabilities | Known CVEs in dependencies |
-| `architecture` | `ArchitectureChecker` | Code structure | Core/contrib separation |
+| `architecture` | `ArchitectureChecker` | Code structure | Four-layer module boundary model (Foundation → Core → Adapters → High-level) |
+| `private-imports` | `PrivateImportChecker` | Import boundaries | Cross-package `_`-prefixed module import check |
+| `banned-time-imports` | `BannedTimeImportsChecker` | Import hygiene | Direct `import time` / `from time import` ban (`clock.py` exempt) |
 | `code-length` | `CodeLengthChecker` | Code size | Function/method and file length limits with baseline |
 | `docs` | `DocsChecker` | Documentation | Examples, links, references |
 | `markdown` | `AutoFormatChecker` | Markdown format | `mdformat` (auto-fix locally, check in CI) |

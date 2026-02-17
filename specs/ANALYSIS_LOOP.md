@@ -8,7 +8,7 @@ Debug bundles capture everything about an execution. Evals tell us pass or fail.
 But understanding *why* an agent behaves a certain way requires analyzing the
 data—and that work is labor-intensive. AnalysisLoop automates it.
 
-**Implementation:** `src/weakincentives/analysis/`
+**Implementation:** Not yet implemented (specification only).
 
 ## Core Ideas
 

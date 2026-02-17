@@ -22,15 +22,18 @@ At `src/weakincentives/prompt/prompt.py` (`PromptTemplate` class):
 
 | Field | Description |
 | --- | --- |
-| `ns` | Namespace (required, non-empty) |
-| `key` | Identifier (required, non-empty) |
+| `ns` | Namespace (validated and normalized to lowercase) |
+| `key` | Identifier (validated and normalized to lowercase) |
 | `name` | Optional display name |
 | `sections` | Ordered section tree |
 | `policies` | Prompt-level tool policies |
 | `feedback_providers` | Feedback provider configurations |
+| `task_completion_checker` | Optional `TaskCompletionChecker` for goal verification |
 | `resources` | `ResourceRegistry` for dependencies |
 
-Section keys must match: `^[a-z0-9][a-z0-9._-]{0,63}$`
+Both `ns` and `key` must match: `^[a-z0-9][a-z0-9._-]{0,63}$`. Uppercase input
+is silently normalized to lowercase. Slashes, spaces, and other characters
+outside the regex are rejected at construction time.
 
 ### Prompt
 

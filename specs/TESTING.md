@@ -45,17 +45,19 @@ Test critical rollback correctness:
 ### `make check` Sequence
 
 ```
-format-check    → ruff format --check
-lint            → ruff --preview
-typecheck       → pyright strict + ty
-bandit          → Security scanning
-deptry          → Dependency hygiene
-pip-audit       → Vulnerability scanning
-architecture    → Core/contrib separation
-code-length     → Function/file length limits
-docs            → Documentation verification
-markdown-check  → Doc formatting
-test            → 100% line+branch coverage
+format-check      → ruff format --check
+lint              → ruff --preview (includes TID251 pydantic ban)
+typecheck         → pyright strict + ty
+bandit            → Security scanning
+deptry            → Dependency hygiene
+pip-audit         → Vulnerability scanning
+architecture      → 4-layer module boundary model
+private-imports   → Cross-package private module import check
+banned-time-imports → Direct time module usage ban
+code-length       → Function/file length limits
+docs              → Documentation verification
+markdown-check    → Doc formatting
+test              → 100% line+branch coverage
 ```
 
 ### Gate Enforcement
@@ -92,6 +94,44 @@ tests/
 Integration tests live in a separate `integration-tests/` directory with
 their own timeout defaults (120s per test via `ACK_TIMEOUT` environment
 variable).
+
+## Testing Time-Dependent Code
+
+Production code must not call `time.monotonic()`, `time.time()`, or
+`time.sleep()` directly. Instead, it depends on narrow clock protocols from
+`weakincentives.clock`:
+
+- `MonotonicClock` — elapsed time and deadlines
+- `WallClock` — wall-clock timestamps (`utcnow()`)
+- `Sleeper` — sleeping / delays
+
+Functions accept a `clock` parameter defaulting to `SYSTEM_CLOCK`:
+
+```python nocheck
+from weakincentives.clock import MonotonicClock, SYSTEM_CLOCK
+
+def poll(clock: MonotonicClock = SYSTEM_CLOCK) -> float:
+    return clock.monotonic()
+```
+
+In tests, inject `FakeClock` from `weakincentives.clock` to control time
+deterministically:
+
+```python nocheck
+from weakincentives.clock import FakeClock
+
+def test_deadline_expires():
+    clock = FakeClock()
+    session = create_session(clock=clock)
+    clock.advance(seconds=60)
+    assert session.is_expired()
+```
+
+`FakeClock` implements all four protocols (`MonotonicClock`, `WallClock`,
+`Sleeper`, `AsyncSleeper`) and provides `advance()` to move time forward
+without actual delays.
+This eliminates flaky time-dependent tests and keeps every test under the
+10-second timeout.
 
 ## What This Spec Does NOT Include
 

@@ -145,7 +145,7 @@ class ReferenceParams:
 
 `build_task_prompt` produces `PromptTemplate[ReviewResponse]` with:
 
-- Namespace: `examples/code-review`
+- Namespace: `examples.code-review`
 - Key: `code-review-session`
 - Name: `sunfish_code_review_agent`
 

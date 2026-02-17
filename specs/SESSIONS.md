@@ -170,6 +170,7 @@ At `runtime/events/types.py` and `runtime/events/__init__.py`:
 | Event | When Emitted |
 | --- | --- |
 | `PromptRendered` | After render, before provider call |
+| `RenderedTools` | After render, correlated with `PromptRendered` via `render_event_id` |
 | `PromptExecuted` | After all tools and parsing |
 | `ToolInvoked` | After each tool handler |
 

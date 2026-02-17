@@ -2,29 +2,92 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.27.0 — 2026-02-16
 
-*Commits reviewed: 2026-02-14 (92bc161f) through 2026-02-14 (a1c26f09)*
+*Commits reviewed: 2026-02-14 (92bc161f) through 2026-02-16 (e1a9c529)*
 
 ### TL;DR
 
-All direct `datetime.now(UTC)`, `time.monotonic()`, `time.sleep()`, and
-`asyncio.sleep()` calls are **eliminated from production code** and routed
-through injectable clock protocols (`WallClock`, `MonotonicClock`, `Sleeper`,
-new `AsyncSleeper`), making every timing-dependent code path deterministically
-testable with `FakeClock`. A **full four-layer module boundary model**
-(Foundation → Core → Adapters → High-level) is now enforced by a revamped
-architecture checker, alongside a new **private-module import checker** that
-prevents cross-package `_`-prefixed imports. Prompt `ns` and `key` values are
-now **validated and normalized** to lowercase against the section-key regex.
-**Skill installation** lands for Codex and OpenCode adapters via hermetic
-ephemeral home directories, and **`RenderedTools` event emission** is extended
-to all three adapter families. Direct `pydantic` imports are **banned
-project-wide** via a new lint rule.
+**Guardrails reach parity across all adapters.** Tool policies, feedback
+providers, and task completion checking — previously only in the Claude Agent
+SDK adapter — now work identically in the Codex App Server and ACP/OpenCode
+adapters. Task completion checking **moves from adapter config to prompt-scoped
+definition** via a new `task_completion_checker` field on `PromptTemplate`,
+aligning with how policies and feedback providers are already declared.
+
+A **streaming filesystem API** adds `open_read()`, `open_write()`, and
+`open_text()` with `ByteReader`, `ByteWriter`, and `TextReader` protocols for
+memory-bounded file I/O on arbitrarily large files. All direct
+`datetime.now(UTC)`, `time.monotonic()`, `time.sleep()`, and `asyncio.sleep()`
+calls are **eliminated from production code** and routed through injectable
+clock protocols (`WallClock`, `MonotonicClock`, `Sleeper`, new `AsyncSleeper`).
+
+A **full four-layer module boundary model** (Foundation → Core → Adapters →
+High-level) is now enforced, alongside a **private-module import checker**.
+**Skill installation** lands for Codex and OpenCode adapters. **Network and
+sandbox violation configuration** extends `IsolationConfig` for fine-grained
+control. A new **AnalysisLoop specification** defines agent-driven debug bundle
+analysis. Direct `pydantic` imports are **banned project-wide**.
 
 ---
 
 ### Added
+
+#### Streaming filesystem API
+
+A three-layer filesystem architecture provides memory-bounded file operations:
+
+- **Core layer**: `exists()`, `stat()`, `list()`, `glob()`, `grep()`,
+  `delete()`, `mkdir()`
+- **Streaming layer**: `open_read()`, `open_write()`, `open_text()` for
+  chunk-based byte/text I/O with fixed memory footprint (default 64KB chunks)
+- **Convenience layer**: `read()`, `write()`, `read_bytes()`, `write_bytes()`
+  with 32MB limits
+
+New `ByteReader`, `ByteWriter`, and `TextReader` protocols with full
+implementations: `HostByteReader`/`HostByteWriter` (native file handles),
+`MemoryByteReader`/`MemoryByteWriter` (in-memory buffers), and
+`DefaultTextReader` (lazy UTF-8 decoding over any `ByteReader`). `ByteReader`
+supports `seek()` for random access and is iterable for streaming patterns.
+`TextReader.lines()` provides lazy line-by-line reading with optional stripping.
+(`filesystem/_streams.py`: 1,056 lines; `filesystem/_protocol.py`,
+`filesystem/_host.py`, `contrib/tools/filesystem_memory.py`)
+
+#### Guardrails in Codex App Server adapter
+
+Feedback providers and task completion checking are wired into the Codex App
+Server protocol layer. `prompt`, `session`, and `deadline` are threaded through
+the protocol call chain (`execute_protocol` → `stream_turn` →
+`consume_messages` → `handle_server_request` → `handle_tool_call`). Feedback
+is collected after successful tool calls via `append_feedback()`. A continuation
+loop in `execute_protocol` re-prompts the agent when the task completion checker
+reports incomplete (max 10 rounds). New `_guardrails.py` module with
+`append_feedback()`, `resolve_filesystem()`, `check_task_completion()` helpers.
+(`adapters/codex_app_server/_guardrails.py`,
+`adapters/codex_app_server/_protocol.py`; ~1,100 lines of tests)
+
+#### Guardrails in ACP/OpenCode adapter
+
+Feedback providers and task completion checking ported to the generic ACP
+adapter. `post_call_hook` added to `create_mcp_tool_server` for injecting
+feedback into MCP tool results after successful tool execution. Continuation
+loop (`_run_prompt_loop`, max 10 rounds) re-prompts the agent when task
+completion is incomplete. New `_guardrails.py` module mirrors the Codex adapter
+structure. (`adapters/acp/_guardrails.py`, `adapters/acp/_mcp_http.py`,
+`adapters/acp/adapter.py`; ~1,000 lines of tests)
+
+#### Network and sandbox violation configuration
+
+`NetworkPolicy` gains four new fields: `allow_unix_sockets` (tuple of socket
+paths, macOS only), `allow_all_unix_sockets` (boolean), `allow_local_binding`
+(boolean, macOS only), and `http_proxy_port`/`socks_proxy_port` (optional int
+for custom proxy configuration). `SandboxConfig` gains
+`enable_weaker_nested_sandbox` (boolean for unprivileged Docker containers
+where full bubblewrap isolation is unavailable, Linux only),
+`ignore_file_violations` (tuple of file paths), and `ignore_network_violations`
+(tuple of network hosts). Optional fields are omitted from generated settings
+when using default values. (`adapters/claude_agent_sdk/isolation.py`,
+`adapters/claude_agent_sdk/_ephemeral_home.py`)
 
 #### `AsyncSleeper` protocol for async delay operations
 
@@ -71,6 +134,15 @@ uses a "secret codeword" pattern: a test skill embeds the string
 test asserts the codeword appears in the response. Gated by a new
 `skill_installation` capability flag on `AdapterCapabilities`. Claude Agent SDK
 and Codex adapters opt in. (`integration-tests/ack/scenarios/test_skill_installation.py`)
+
+#### ACK guardrails integration tests
+
+Three new ACK scenarios validate guardrails across all adapters:
+`test_tool_policies.py`, `test_feedback_providers.py`, and
+`test_task_completion.py`. `tool_policies`, `feedback_providers`, and
+`task_completion` capability flags added to `AdapterCapabilities`. All three
+adapter fixtures (Claude Agent SDK, Codex, OpenCode) opt in.
+(`integration-tests/ack/scenarios/`)
 
 #### `RenderedTools` event emission for Codex and ACP adapters
 
@@ -130,9 +202,35 @@ statements, enforcing exclusive use of the `weakincentives.serde` abstraction.
 `^[a-z0-9][a-z0-9._-]{0,63}$` and normalizing to lowercase. Previously only
 empty-string checks were performed. (`prompt/prompt.py`)
 
+#### AnalysisLoop specification
+
+New `specs/ANALYSIS_LOOP.md` (294 lines) defines an agent-driven debug bundle
+analysis system. Key concepts: `CompletionNotification` (emitted by AgentLoop
+and EvalLoop when execution finishes), `AnalysisForwarder` (sampling and budget
+gating), `AnalysisRequest`, `AnalysisReport`, and `AnalysisBundle`. Six
+specialized analysis tools: `bundle_query`, `bundle_compare`, `slice_inspect`,
+`log_search`, `pattern_extract`, `hypothesis_test`. Supports two modes:
+EvalLoop integration (dataset-driven with expected outputs) and AgentLoop
+integration (retrospective trajectory analysis).
+
 ---
 
 ### Changed
+
+#### Task completion checking moved to prompt definition
+
+`TaskCompletionChecker` is now declared on `PromptTemplate` via
+`task_completion_checker` field, aligning with how tool policies and feedback
+providers are already attached to prompts. New `prompt/task_completion.py`
+module with `TaskCompletionChecker` protocol, `TaskCompletionContext`,
+`TaskCompletionResult`, `FileOutputChecker`, and `CompositeChecker`. The Claude
+Agent SDK adapter's `_task_completion.py` is simplified to a thin adapter over
+the prompt-level checker. The shared `_bridge.py` module now handles policy
+enforcement, feedback collection, and task completion checking for MCP-bridged
+tool calls. `ClaudeAgentSDKClientConfig.task_completion` field is removed — use
+`PromptTemplate(task_completion_checker=...)` instead.
+(`prompt/task_completion.py`, `prompt/prompt.py`, `prompt/protocols.py`,
+`adapters/claude_agent_sdk/_task_completion.py`, `adapters/_shared/_bridge.py`)
 
 #### All `datetime.now(UTC)` calls routed through `WallClock`
 
@@ -182,6 +280,30 @@ validation regex.
 
 ### Breaking Changes
 
+#### Task completion checker moved from adapter config to prompt
+
+`ClaudeAgentSDKClientConfig.task_completion` is removed. Task completion
+checkers are now declared on `PromptTemplate`:
+
+```python
+# Old ❌
+config = ClaudeAgentSDKClientConfig(
+    task_completion=TaskCompletionConfig(checker=my_checker),
+)
+
+# New ✅
+template = PromptTemplate(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    task_completion_checker=FileOutputChecker(files=("report.md",)),
+)
+```
+
+The `TaskCompletionChecker` protocol, `FileOutputChecker`, and
+`CompositeChecker` are now in `weakincentives.prompt` instead of
+`weakincentives.adapters.claude_agent_sdk`.
+
 #### `Clock` protocol now includes `AsyncSleeper`
 
 Any class structurally implementing the full `Clock` protocol must now also
@@ -213,6 +335,66 @@ the public API re-exports instead (e.g., `from weakincentives.serde import Serde
 
 Any `import pydantic` or `from pydantic import ...` triggers ruff lint error
 `TID251`. Use `weakincentives.serde` instead.
+
+#### `Filesystem` protocol gains streaming methods
+
+The `Filesystem` protocol (`filesystem/_protocol.py`) now requires three new
+methods: `open_read(path) -> ByteReader`, `open_write(path, ...) -> ByteWriter`,
+and `open_text(path, ...) -> TextReader`. Custom `Filesystem` implementations
+must add these methods. The built-in `HostFilesystem` and
+`InMemoryFilesystem` are updated.
+
+---
+
+### Documentation
+
+#### AnalysisLoop specification
+
+New `specs/ANALYSIS_LOOP.md` (294 lines) defines the architecture for
+agent-driven debug bundle analysis: completion notifications, analysis
+forwarding with sampling and budget control, specialized bundle analysis tools,
+and structured reporting with findings, evidence, and recommendations.
+
+#### Experiments guide section
+
+New section in `guides/evaluation.md` (132 lines) documents the Experiments
+feature for A/B testing: defining experiments with prompt overrides and feature
+flags, `submit_experiments()`, `collect_results()`,
+`compare_experiments()` statistical comparison, and multi-variant testing
+patterns.
+
+#### GUARDRAILS.md expanded for cross-adapter support
+
+`specs/GUARDRAILS.md` expanded (~258 lines added) to document guardrails
+integration across all three adapters. New sections cover: continuation loop
+mechanics (max 10 rounds), feedback injection points for each adapter protocol,
+task completion context fields, and the prompt-scoped declaration model.
+
+#### CLAUDE_AGENT_SDK.md updated for sandbox/network config
+
+New field descriptions for `NetworkPolicy` (`allow_unix_sockets`,
+`allow_all_unix_sockets`, `allow_local_binding`, `http_proxy_port`,
+`socks_proxy_port`) and `SandboxConfig` (`enable_weaker_nested_sandbox`,
+`ignore_file_violations`, `ignore_network_violations`).
+
+#### FILESYSTEM.md expanded for streaming API
+
+`specs/FILESYSTEM.md` expanded (~377 lines added) with the three-layer
+architecture overview, `ByteReader`/`ByteWriter`/`TextReader` protocol
+definitions, streaming patterns, memory guarantees, and migration guide from
+buffered to streaming API.
+
+#### README updated with supported runtimes
+
+README now explicitly documents three supported runtime options: Claude Agent
+SDK, Codex (App Server protocol), and OpenCode (via ACP).
+
+#### CLOCK.md expanded
+
+`specs/CLOCK.md` expanded (~113 lines added) with `AsyncSleeper` protocol
+documentation, updated component-to-protocol mapping table, and the three-tier
+usage rule (inject protocol preferred, `SYSTEM_CLOCK` acceptable,
+`datetime.now(UTC)` prohibited).
 
 ---
 

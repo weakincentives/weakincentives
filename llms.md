@@ -301,12 +301,6 @@ from weakincentives.adapters.claude_agent_sdk import (
     NetworkPolicy,
     SandboxConfig,
     ReasoningEffort,
-    # Task completion
-    TaskCompletionChecker,
-    TaskCompletionContext,
-    TaskCompletionResult,
-    FileOutputChecker,
-    CompositeChecker,
     # Transcript collection
     TranscriptCollector,
     TranscriptCollectorConfig,
@@ -314,6 +308,12 @@ from weakincentives.adapters.claude_agent_sdk import (
 from weakincentives.prompt import (
     WorkspaceSection,
     HostMount,
+    # Task completion (canonical location; also re-exported from adapters.claude_agent_sdk)
+    TaskCompletionChecker,
+    TaskCompletionContext,
+    TaskCompletionResult,
+    FileOutputChecker,
+    CompositeChecker,
 )
 ```
 
@@ -883,6 +883,23 @@ read_result: ReadResult = fs.read("test.txt")
 print(read_result.content)  # "Hello, world!"
 ```
 
+**Streaming API** for memory-bounded operations on large files:
+
+```python nocheck
+from weakincentives.filesystem import ByteReader, ByteWriter, TextReader
+
+# Convenience: read()/write() for files under 32MB
+# Streaming: open_read()/open_write()/open_text() for arbitrarily large files
+
+with fs.open_read("large.bin") as reader:  # ByteReader
+    for chunk in reader:                    # 64KB chunks
+        process(chunk)
+
+with fs.open_text("logs.txt") as text:     # TextReader (lazy UTF-8)
+    for line in text.lines():
+        handle(line)
+```
+
 **Note:** Tool sections for filesystem operations, planning, and shell execution
 are provided by the execution harness (e.g., Claude Agent SDK) rather than
 defined in WINK. This keeps agent definitions portable across runtimes.
@@ -1176,10 +1193,11 @@ ______________________________________________________________________
 
 ```text
 PromptTemplate[OutputT](
-    ns: str,                    # Namespace (required)
-    key: str,                   # Unique key (required)
+    ns: str,                    # Namespace (validated, lowercase)
+    key: str,                   # Unique key (validated, lowercase)
     name: str | None,           # Display name
     sections: tuple[Section],   # Ordered sections
+    task_completion_checker: TaskCompletionChecker | None,  # Goal verification
 )
 ```
 

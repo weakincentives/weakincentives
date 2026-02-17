@@ -54,13 +54,17 @@ template = PromptTemplate(
 
 **Key properties:**
 
-- `ns` (namespace) and `key` uniquely identify a prompt family
+- `ns` (namespace) and `key` uniquely identify a prompt family — both are
+  validated against `^[a-z0-9][a-z0-9._-]{0,63}$` and normalized to lowercase
 - `name` is for human readability and logging
 - `sections` is a tree (technically a forest) of `Section` objects
 - Optional structured output is declared by the type parameter `OutputT`
+- Optional `task_completion_checker` for verifying goals before the agent stops
 
 **Validation rules** (you'll hit these early, and that's the point):
 
+- Namespace and key values must match `^[a-z0-9][a-z0-9._-]{0,63}$` (no
+  slashes, spaces, or uppercase — uppercase is silently normalized)
 - Section keys must be stable identifiers (lowercase alphanumerics + `-`)
 - Placeholders must match fields on a dataclass bound at render time
 - Binding is by dataclass type: you can't bind two instances of the same

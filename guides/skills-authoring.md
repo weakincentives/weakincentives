@@ -314,6 +314,21 @@ SkillMountError: Duplicate skill name: code-review
 Each skill must have a unique name. Use the `name` parameter on `SkillMount` to
 override if needed.
 
+## Adapter Support
+
+All three WINK adapters support skill installation. Each uses an ephemeral home
+directory to make skills discoverable by the subprocess:
+
+| Adapter | Discovery Path | Auth Preservation |
+|---------|---------------|-------------------|
+| Claude Agent SDK | `$HOME/.claude/skills/` | `settings.json` in ephemeral home |
+| Codex App Server | `$HOME/.agents/skills/` | `CODEX_HOME` env var points to real `~/.codex` |
+| OpenCode ACP | `$HOME/.claude/skills/` | Copies `~/.local/share/opencode/` and `~/.aws/` |
+
+Skills are collected from `RenderedPrompt.skills` during prompt rendering and
+mounted automatically by the adapter before spawning the agent subprocess. No
+adapter-specific code is needed in your prompt definition.
+
 ## What's Next
 
 - [Claude Agent SDK](claude-agent-sdk.md): Full adapter configuration

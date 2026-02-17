@@ -136,7 +136,6 @@ adapter = ClaudeAgentSDKAdapter(client_config=config)
 | `max_budget_usd` | `float \| None` | `None` | Maximum budget in USD |
 | `suppress_stderr` | `bool` | `True` | Suppress stderr output |
 | `stop_on_structured_output` | `bool` | `True` | Stop after structured output |
-| `task_completion_checker` | `TaskCompletionChecker \| None` | `None` | Task completion verification |
 | `isolation` | `IsolationConfig \| None` | `None` | Isolation configuration |
 | `betas` | `tuple[str, ...] \| None` | `None` | Beta features to enable |
 
@@ -200,7 +199,6 @@ adapter = ClaudeAgentSDKAdapter(
 | `api_key` | `str \| None` | `None` | Explicit API key (disables Bedrock) |
 | `aws_config_path` | `Path \| str \| None` | `None` | AWS config path for Docker |
 | `include_host_env` | `bool` | `False` | Copy non-sensitive vars |
-| `skills` | `SkillConfig \| None` | `None` | Skills to mount |
 
 **Authentication modes:**
 
@@ -280,6 +278,9 @@ sandbox = SandboxConfig(
 | `excluded_commands` | `tuple[str, ...]` | `()` | Commands to block |
 | `allow_unsandboxed_commands` | `bool` | `False` | Allow unsandboxed execution |
 | `bash_auto_allow` | `bool` | `True` | Auto-allow bash commands |
+| `enable_weaker_nested_sandbox` | `bool` | `False` | Use weaker sandbox for unprivileged Docker (Linux only) |
+| `ignore_file_violations` | `tuple[str, ...]` | `()` | File paths to exclude from sandbox enforcement |
+| `ignore_network_violations` | `tuple[str, ...]` | `()` | Network hosts to exclude from sandbox enforcement |
 
 ### How Isolation Works
 
@@ -459,6 +460,7 @@ All adapter operations publish events to the session's dispatcher:
 | Event | When | Key Fields |
 |-------|------|------------|
 | `PromptRendered` | After prompt render, before API call | `rendered_prompt`, `adapter` |
+| `RenderedTools` | After prompt render, correlated with `PromptRendered` | `tools`, `render_event_id` |
 | `ToolInvoked` | Each tool call (native + bridged) | `name`, `params`, `result`, `usage` |
 | `PromptExecuted` | After evaluation completes | `result`, `usage` (TokenUsage) |
 

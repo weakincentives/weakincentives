@@ -81,7 +81,19 @@ Packages MUST NOT have circular import dependencies. Use protocols or
 
 ## Validation
 
-Module boundary validation is enforced through code review and type checking.
+Module boundary validation is enforced automatically by `make check` via three
+dedicated checkers in the toolchain:
+
+- **`ArchitectureChecker`** (`toolchain/checkers/architecture.py`): Enforces the
+  four-layer boundary model. Runtime imports from a higher layer are flagged;
+  `TYPE_CHECKING`-guarded imports are exempt.
+- **`PrivateImportChecker`** (`toolchain/checkers/private_imports.py`): Scans for
+  cross-package imports of `_`-prefixed private modules. Dunder modules
+  (`__init__`, `__future__`) are exempt.
+- **`BannedTimeImportsChecker`** (`toolchain/checkers/banned_time_imports.py`):
+  Flags any `import time` or `from time import ...` in production code
+  (only `clock.py` is exempt).
+
 Use these violation categories during review:
 
 ### Violation Types

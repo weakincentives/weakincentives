@@ -133,6 +133,9 @@ integration-tests/
 │       ├── test_progressive_disclosure.py  # Tier 3: section expansion, leaf tool access
 │       ├── test_transactional_tools.py # Tier 3: rollback on failure, session + filesystem
 │       ├── test_error_handling.py      # Tier 3: deadline expiry, budget exhaustion, invalid input
+│       ├── test_tool_policies.py      # Tier 4: tool policy enforcement
+│       ├── test_feedback_providers.py # Tier 4: feedback provider delivery
+│       ├── test_task_completion.py    # Tier 4: task completion checking
 │       ├── test_native_tools.py        # Adapter-specific: native tool ToolInvoked events
 │       ├── test_workspace_isolation.py # Adapter-specific: host mounts, env forwarding
 │       ├── test_sandbox_policy.py      # Adapter-specific: sandbox enforcement
@@ -148,6 +151,7 @@ protocol. This is the only adapter-specific code in ACK.
 ```python
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -158,12 +162,7 @@ from weakincentives.runtime.session import Session
 
 @dataclass(slots=True, frozen=True)
 class AdapterCapabilities:
-    """Declares which ACK tiers this adapter supports.
-
-    Adapters that do not support a capability are skipped for tests
-    that require it. New adapters start with conservative declarations
-    and enable capabilities as they mature.
-    """
+    """Declares which ACK capabilities an adapter supports."""
 
     # Tier 1: Basic evaluation
     text_response: bool = True
@@ -173,18 +172,26 @@ class AdapterCapabilities:
     # Tier 2: Observability
     event_emission: bool = True
     transcript: bool = True
+    rendered_tools_event: bool = False
 
-    # Tier 3: Advanced
+    # Tier 3: Advanced behavior
     progressive_disclosure: bool = True
     transactional_tools: bool = True
-    deadline_enforcement: bool = True
-    budget_enforcement: bool = True
+    deadline_enforcement: bool = False
+    budget_enforcement: bool = False
 
-    # Adapter-specific
-    native_tools: bool = False      # Adapter has its own tools (Codex commands, Claude Bash/Read)
+    # Tier 4: Guardrails
+    tool_policies: bool = False
+    feedback_providers: bool = False
+    task_completion: bool = False
+
+    # Adapter-specific scenarios
+    native_tools: bool = False
     workspace_isolation: bool = False
+    custom_env_forwarding: bool = False
     network_policy: bool = False
     sandbox_policy: bool = False
+    skill_installation: bool = False
 
 
 @runtime_checkable
@@ -213,6 +220,35 @@ class AdapterFixture(Protocol):
 
         The adapter MUST use tmp_path as its working directory to
         prevent side effects on the host filesystem.
+        """
+        ...
+
+    def create_adapter_with_sandbox(
+        self,
+        tmp_path: Path,
+        *,
+        sandbox_mode: str,
+    ) -> ProviderAdapter:
+        """Create an adapter with a specific sandbox mode.
+
+        Args:
+            tmp_path: Workspace root directory.
+            sandbox_mode: Sandbox mode string (e.g., "read-only",
+                "workspace-write").
+        """
+        ...
+
+    def create_adapter_with_env(
+        self,
+        tmp_path: Path,
+        *,
+        env: Mapping[str, str],
+    ) -> ProviderAdapter:
+        """Create an adapter that forwards extra environment variables.
+
+        Args:
+            tmp_path: Workspace root directory.
+            env: Additional environment variables to forward.
         """
         ...
 
@@ -381,7 +417,7 @@ test_tool_invoked_event
     And event.params contains the tool input
     And event.result contains the tool output
 
-test_rendered_tools_event
+test_rendered_tools_event  [requires: rendered_tools_event]
     Given a prompt with tools
     When adapter.evaluate() is called
     Then a RenderedTools event is emitted
@@ -687,10 +723,18 @@ class ClaudeAgentSDKFixture:
     adapter_name = "claude_agent_sdk"
 
     capabilities = AdapterCapabilities(
+        rendered_tools_event=True,
+        deadline_enforcement=True,
+        budget_enforcement=True,
+        tool_policies=True,
+        feedback_providers=True,
+        task_completion=True,
         native_tools=True,
         workspace_isolation=True,
+        custom_env_forwarding=True,
         network_policy=True,
         sandbox_policy=True,
+        skill_installation=True,
     )
 
     def is_available(self) -> bool:
@@ -723,9 +767,14 @@ class CodexAppServerFixture:
     adapter_name = "codex_app_server"
 
     capabilities = AdapterCapabilities(
+        rendered_tools_event=True,
+        tool_policies=True,
+        feedback_providers=True,
+        task_completion=True,
         native_tools=True,
         workspace_isolation=True,
         sandbox_policy=True,
+        skill_installation=True,
     )
 
     def is_available(self) -> bool:
@@ -754,10 +803,10 @@ class OpenCodeACPFixture:
     adapter_name = "opencode_acp"
 
     capabilities = AdapterCapabilities(
-        native_tools=False,
-        workspace_isolation=False,
-        network_policy=False,
-        sandbox_policy=False,
+        rendered_tools_event=True,
+        tool_policies=True,
+        feedback_providers=True,
+        task_completion=True,
         # OpenCode supports these but may need tuning:
         progressive_disclosure=True,
         transactional_tools=True,

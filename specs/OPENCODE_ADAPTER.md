@@ -20,9 +20,10 @@ See `specs/ACP_ADAPTER.md` for the generic ACP protocol implementation.
 
 ```
 src/weakincentives/adapters/opencode_acp/
-  __init__.py    # Public exports (re-exports from acp/ + OpenCode classes)
-  adapter.py     # OpenCodeACPAdapter(ACPAdapter)
-  config.py      # OpenCodeACPClientConfig, OpenCodeACPAdapterConfig
+  __init__.py          # Public exports (re-exports from acp/ + OpenCode classes)
+  adapter.py           # OpenCodeACPAdapter(ACPAdapter)
+  config.py            # OpenCodeACPClientConfig, OpenCodeACPAdapterConfig
+  _ephemeral_home.py   # OpenCodeEphemeralHome (skill installation)
 ```
 
 All protocol implementation, client, events, MCP HTTP server, and structured
@@ -235,6 +236,35 @@ Tests at `tests/adapters/opencode_acp/`:
 | `test_adapter.py` | OpenCode hook overrides, defaults, validation |
 | `test_config.py` | OpenCode configuration defaults |
 | `conftest.py` | Imports from `tests/adapters/acp/conftest.py` |
+
+## Skill Installation
+
+`OpenCodeEphemeralHome` at `src/weakincentives/adapters/opencode_acp/_ephemeral_home.py`
+manages a temporary HOME directory for OpenCode skill discovery. Skills from
+`RenderedPrompt.skills` are mounted at `$HOME/.claude/skills/<name>/SKILL.md`,
+which is the Claude-compatible global discovery path that OpenCode natively
+searches.
+
+The ephemeral home preserves auth data from the real HOME:
+
+- `~/.local/share/opencode/` -- stored API credentials (`auth.json`)
+- `~/.aws/` -- AWS credentials for Bedrock provider support
+
+Both copies are best-effort (warn on failure, don't crash) since auth may come
+from environment variables instead.
+
+## Guardrails
+
+The OpenCode adapter inherits the full guardrails stack from the generic
+`ACPAdapter` base class (see `specs/ACP_ADAPTER.md`):
+
+- **Tool policies**: Enforced in `BridgedTool` before handler execution
+- **Feedback providers**: Injected via `post_call_hook` on the MCP tool server,
+  collecting guidance after successful tool calls
+- **Task completion**: Continuation loop (`_run_prompt_loop`, max 10 rounds)
+  re-prompts the agent when the checker reports incomplete with feedback
+
+Implementation: `adapters/acp/_guardrails.py` (shared with all ACP subclasses)
 
 ## Non-Goals (v1)
 

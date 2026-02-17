@@ -172,6 +172,58 @@ def test_tool_invocation_updates_session():
     assert plan.steps == ("step 1", "step 2")
 ```
 
+## Testing Time-Dependent Code
+
+Code that uses deadlines, timeouts, or elapsed-time checks should depend on
+narrow clock protocols (`MonotonicClock`, `WallClock`, `Sleeper`) rather than
+calling `time.monotonic()` or `datetime.now()` directly. In tests, inject
+`FakeClock` to control time deterministically:
+
+```python nocheck
+from weakincentives.clock import FakeClock
+
+def test_timeout_triggers():
+    clock = FakeClock()
+
+    watcher = TimeoutWatcher(clock=clock, timeout_seconds=30)
+    assert not watcher.is_expired()
+
+    clock.advance(31)
+    assert watcher.is_expired()
+```
+
+`FakeClock` advances both monotonic and wall-clock time together. Sleep
+calls (`clock.sleep()`, `await clock.async_sleep()`) advance time instantly
+without blocking, so tests remain fast:
+
+```python nocheck
+from weakincentives.clock import FakeClock
+
+def test_sleep_advances_time():
+    clock = FakeClock()
+    start = clock.monotonic()
+
+    clock.sleep(10)  # No real delay
+
+    assert clock.monotonic() - start == 10
+```
+
+For wall-clock assertions (e.g., verifying timestamps on events), use
+`clock.utcnow()` and `clock.set_wall()`:
+
+```python nocheck
+from datetime import UTC, datetime
+from weakincentives.clock import FakeClock
+
+def test_event_timestamp():
+    clock = FakeClock()
+    clock.set_wall(datetime(2025, 6, 1, tzinfo=UTC))
+
+    event = create_event(clock=clock)
+
+    assert event.timestamp == datetime(2025, 6, 1, tzinfo=UTC)
+```
+
 ## What the WINK Codebase Does
 
 WINK itself enforces:
