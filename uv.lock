@@ -1524,15 +1524,15 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-client-protocol", marker = "extra == 'acp'", specifier = ">=0.8.0" },
-    { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'", specifier = ">=0.1.35" },
+    { name = "agent-client-protocol", marker = "extra == 'acp'", specifier = ">=0.8.1" },
+    { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'", specifier = ">=0.1.37" },
     { name = "fastapi", marker = "extra == 'wink'", specifier = ">=0.129.0" },
     { name = "markdown-it-py", extras = ["linkify"], marker = "extra == 'wink'", specifier = ">=4.0.0" },
     { name = "mcp", marker = "extra == 'acp'", specifier = ">=1.26.0" },
     { name = "pyyaml", marker = "extra == 'skills'", specifier = ">=6.0.3" },
-    { name = "redis", marker = "extra == 'redis'", specifier = ">=7.1.1" },
-    { name = "uvicorn", marker = "extra == 'acp'", specifier = ">=0.40.0" },
-    { name = "uvicorn", marker = "extra == 'wink'", specifier = ">=0.40.0" },
+    { name = "redis", marker = "extra == 'redis'", specifier = ">=7.2.0" },
+    { name = "uvicorn", marker = "extra == 'acp'", specifier = ">=0.41.0" },
+    { name = "uvicorn", marker = "extra == 'wink'", specifier = ">=0.41.0" },
 ]
 provides-extras = ["acp", "claude-agent-sdk", "redis", "skills", "wink"]
 
@@ -1540,7 +1540,7 @@ provides-extras = ["acp", "claude-agent-sdk", "redis", "skills", "wink"]
 dev = [
     { name = "bandit", specifier = ">=1.9.3" },
     { name = "deptry", specifier = ">=0.24.0" },
-    { name = "hypothesis", specifier = ">=6.151.6" },
+    { name = "hypothesis", specifier = ">=6.151.9" },
     { name = "mdformat", specifier = ">=1.0.0" },
     { name = "pip-audit", specifier = ">=2.10.0" },
     { name = "pyright", specifier = ">=1.1.408" },
@@ -1551,7 +1551,7 @@ dev = [
     { name = "pytest-testmon", specifier = ">=2.2.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "ruff", specifier = ">=0.15.1" },
-    { name = "ty", specifier = ">=0.0.16" },
+    { name = "ty", specifier = ">=0.0.17" },
     { name = "vulture", specifier = ">=2.14" },
     { name = "weakincentives", extras = ["skills"] },
 ]
