@@ -857,7 +857,12 @@ class _InMemoryByteWriter:
             self.close()
 
     def _abort(self) -> None:
-        """Discard buffered writes without committing to filesystem."""
+        """Discard buffered writes without committing to filesystem.
+
+        No filesystem cleanup is needed because ``commit_streaming_write``
+        is only called in ``close()``; abort skips the commit so the
+        filesystem is never modified.
+        """
         if self._closed:
             return
         self._closed = True

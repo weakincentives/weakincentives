@@ -649,9 +649,14 @@ class HostByteWriter:
         """Close the writer and commit writes.
 
         ``overwrite``: flushes, fsyncs, then atomically renames the
-        temp file to the target path.
+        temp file to the target path.  On flush/fsync failure the
+        temp file is removed and the original is left untouched.
         ``create``: flushes and fsyncs the file in place.
         ``append``: flushes and fsyncs the file in place.
+
+        For ``create`` and ``append`` modes, if flush/fsync fails
+        the file is **left in place** (data may already be persisted
+        by the OS).  Use ``_abort()`` when the intent is to discard.
         """
         if self._closed:
             return
@@ -662,9 +667,13 @@ class HostByteWriter:
         except BaseException:
             self._handle.close()
             if self._temp_path is not None:
+                # Overwrite mode: discard the temp file; original is untouched.
                 self._temp_path.unlink(missing_ok=True)
-            elif self._final_path is not None:
-                self._final_path.unlink(missing_ok=True)
+            # Create/append modes write directly to the target file.
+            # Data may already be persisted by the OS, so we leave the
+            # file in place rather than destroying potentially-good data.
+            # Callers can inspect or retry; _abort() handles cleanup for
+            # with-block exceptions where the intent is to discard.
             raise
         self._handle.close()
         if self._final_path is not None and self._temp_path is not None:
@@ -856,7 +865,8 @@ class MemoryByteWriter:
     def get_content(self) -> bytes:
         """Get the complete content written to the buffer.
 
-        Can be called before or after close().
+        Must be called **before** ``close()``; after close the
+        underlying buffer is released.
         """
         return self._buffer.getvalue()
 
@@ -874,8 +884,10 @@ class MemoryByteWriter:
         self.close()
 
     def close(self) -> None:
-        """Close the writer."""
-        self._closed = True
+        """Close the writer and release the buffer."""
+        if not self._closed:
+            self._buffer.close()
+            self._closed = True
 
 
 # ---------------------------------------------------------------------------

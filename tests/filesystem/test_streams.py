@@ -175,6 +175,15 @@ class TestMemoryByteWriter:
         writer.close()
         assert writer.closed
 
+    def test_close_idempotent(self) -> None:
+        """close() should be safe to call multiple times."""
+        writer = MemoryByteWriter.create("test.bin", mode="create")
+        writer.write(b"content")
+        writer.close()
+        assert writer.closed
+        writer.close()  # Should not raise
+        assert writer.closed
+
     def test_write_after_close_raises(self) -> None:
         """Writing after close should raise ValueError."""
         writer = MemoryByteWriter.create("test.bin", mode="create")
@@ -426,8 +435,15 @@ class TestHostByteWriter:
 
         assert w.closed
 
-    def test_close_flush_failure_create_mode_cleans_file(self, tmp_path: Path) -> None:
-        """If flush/fsync fails in create mode, the new file should be removed."""
+    def test_close_flush_failure_create_mode_preserves_file(
+        self, tmp_path: Path
+    ) -> None:
+        """If flush/fsync fails in create mode, the file should be left in place.
+
+        Data was written directly to the target and may already be persisted
+        by the OS, so we don't delete it.  The _abort() path (with-block
+        exceptions) handles cleanup when the intent is to discard.
+        """
         f = tmp_path / "new_file.bin"
         writer = HostByteWriter.open(
             f, "new_file.bin", mode="create", create_parents=False
@@ -438,7 +454,8 @@ class TestHostByteWriter:
             with pytest.raises(OSError, match="disk full"):
                 writer.close()
 
-        assert not f.exists()
+        # File should still exist — data may have been persisted
+        assert f.exists()
         assert writer.closed
 
     def test_close_flush_failure_append_mode(self, tmp_path: Path) -> None:
