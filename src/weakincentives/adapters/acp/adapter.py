@@ -46,6 +46,11 @@ from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
 from ._async import run_async
 from ._events import dispatch_tool_invoked, extract_token_usage
+from ._guardrails import (
+    accumulate_usage,
+    append_feedback as _append_feedback,
+    check_task_completion,
+)
 from ._mcp_http import MCPHttpServer, create_mcp_tool_server
 from ._structured_output import create_structured_output_tool
 from ._transcript import ACPTranscriptBridge
@@ -299,7 +304,22 @@ class ACPAdapter(ProviderAdapter[Any]):
             visibility_signal=visibility_signal,
         )
 
-        mcp_server = create_mcp_tool_server(tuple(all_tools))
+        def _feedback_hook(
+            name: str, args: dict[str, Any], result: dict[str, Any]
+        ) -> None:
+            is_error = result.get("isError", False)
+            content = result.get("content", [])
+            _append_feedback(
+                content,
+                is_error=is_error,
+                prompt=prompt,
+                session=session,
+                deadline=deadline,
+            )
+
+        mcp_server = create_mcp_tool_server(
+            tuple(all_tools), post_call_hook=_feedback_hook
+        )
 
         start_time = _utcnow()
         client = ACPClient(
@@ -328,6 +348,8 @@ class ACPAdapter(ProviderAdapter[Any]):
                 rendered=rendered,
                 effective_cwd=effective_cwd,
                 deadline=deadline,
+                budget_tracker=budget_tracker,
+                prompt=prompt,
                 run_context=run_context,
                 visibility_signal=visibility_signal,
                 structured_capture=structured_capture,
@@ -468,6 +490,8 @@ class ACPAdapter(ProviderAdapter[Any]):
         rendered: RenderedPrompt[OutputT],
         effective_cwd: str,
         deadline: Deadline | None,
+        budget_tracker: BudgetTracker | None = None,
+        prompt: Prompt[OutputT] | None = None,
         run_context: RunContext | None,
         visibility_signal: VisibilityExpansionSignal,
         structured_capture: Any,
@@ -525,56 +549,130 @@ class ACPAdapter(ProviderAdapter[Any]):
                     ) from None
                 await self._configure_session(conn, acp_session_id)
 
-                from acp.schema import TextContentBlock
-
-                prompt_coro = conn.prompt(
-                    [TextContentBlock(type="text", text=prompt_text)],
-                    session_id=acp_session_id,
+                return await self._run_prompt_loop(
+                    conn=conn,
+                    acp_session_id=acp_session_id,
+                    client=client,
+                    session=session,
+                    adapter_name=adapter_name,
+                    prompt_name=prompt_name,
+                    prompt_text=prompt_text,
+                    deadline=deadline,
+                    budget_tracker=budget_tracker,
+                    prompt=prompt,
+                    run_context=run_context,
+                    visibility_signal=visibility_signal,
+                    structured_capture=structured_capture,
                 )
-                timeout_s = deadline.remaining().total_seconds() if deadline else None
-                try:
-                    prompt_resp = await asyncio.wait_for(prompt_coro, timeout=timeout_s)
-                except TimeoutError:
-                    raise PromptEvaluationError(
-                        message="ACP prompt timed out (deadline expired)",
-                        prompt_name=prompt_name,
-                        phase="request",
-                    ) from None
-
-                await self._drain_quiet_period(client, deadline)
-
-                # Skip empty response check when the structured output
-                # tool was already called — the model answered via the
-                # tool, not via text chunks.
-                capture_ok = (
-                    structured_capture is not None and structured_capture.called
-                )
-                if not capture_ok:
-                    self._detect_empty_response(client, prompt_resp)
-
-                stored_exc = visibility_signal.get_and_clear()
-                if stored_exc is not None:
-                    raise stored_exc
-
-                for tc_id, tc_data in client.tool_call_tracker.items():
-                    dispatch_tool_invoked(
-                        session=session,
-                        adapter_name=adapter_name,
-                        prompt_name=prompt_name,
-                        run_context=run_context,
-                        tool_call_id=tc_id,
-                        title=tc_data.get("title", ""),
-                        status=tc_data.get("status", "completed"),
-                        rendered_output=tc_data.get("output", ""),
-                    )
-
-                accumulated_text = self._extract_text(client)
-                usage = extract_token_usage(prompt_resp.usage if prompt_resp else None)
-
-                return accumulated_text, usage
         finally:
             await mcp_http.stop()
             env_cleanup()
+
+    async def _run_prompt_loop[OutputT](
+        self,
+        *,
+        conn: Any,
+        acp_session_id: str,
+        client: ACPClient,
+        session: SessionProtocol,
+        adapter_name: str,
+        prompt_name: str,
+        prompt_text: str,
+        deadline: Deadline | None,
+        budget_tracker: BudgetTracker | None,
+        prompt: Prompt[OutputT] | None,
+        run_context: RunContext | None,
+        visibility_signal: VisibilityExpansionSignal,
+        structured_capture: Any,
+    ) -> tuple[str | None, TokenUsage | None]:
+        """Run the prompt turn + task completion continuation loop."""
+        from acp.schema import TextContentBlock
+
+        max_continuation_rounds = 10
+        continuation_round = 0
+        current_prompt_text = prompt_text
+        accumulated_text: str | None = None
+        usage: TokenUsage | None = None
+
+        while True:
+            prompt_resp = await self._send_prompt(
+                conn=conn,
+                acp_session_id=acp_session_id,
+                text=current_prompt_text,
+                prompt_name=prompt_name,
+                deadline=deadline,
+                text_content_block_cls=TextContentBlock,
+            )
+            await self._drain_quiet_period(client, deadline)
+
+            # Skip empty response check on first round only.
+            need_empty_check = continuation_round == 0 and not (
+                structured_capture is not None and structured_capture.called
+            )
+            if need_empty_check:
+                self._detect_empty_response(client, prompt_resp)
+
+            stored_exc = visibility_signal.get_and_clear()
+            if stored_exc is not None:
+                raise stored_exc
+
+            for tc_id, tc_data in client.tool_call_tracker.items():
+                dispatch_tool_invoked(
+                    session=session,
+                    adapter_name=adapter_name,
+                    prompt_name=prompt_name,
+                    run_context=run_context,
+                    tool_call_id=tc_id,
+                    title=tc_data.get("title", ""),
+                    status=tc_data.get("status", "completed"),
+                    rendered_output=tc_data.get("output", ""),
+                )
+
+            accumulated_text = self._extract_text(client)
+            turn_usage = extract_token_usage(prompt_resp.usage if prompt_resp else None)
+            if turn_usage is not None:
+                usage = accumulate_usage(usage, turn_usage)
+
+            should_continue, feedback = check_task_completion(
+                prompt=prompt,
+                session=session,
+                accumulated_text=accumulated_text,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+            )
+            if should_continue and continuation_round < max_continuation_rounds:
+                current_prompt_text = feedback  # type: ignore[assignment]
+                continuation_round += 1
+                client.reset_tracking()
+                continue
+            break
+
+        return accumulated_text, usage
+
+    async def _send_prompt(
+        self,
+        *,
+        conn: Any,
+        acp_session_id: str,
+        text: str,
+        prompt_name: str,
+        deadline: Deadline | None,
+        text_content_block_cls: Any,
+    ) -> Any:
+        """Send a single prompt and return the response."""
+        prompt_coro = conn.prompt(
+            [text_content_block_cls(type="text", text=text)],
+            session_id=acp_session_id,
+        )
+        timeout_s = deadline.remaining().total_seconds() if deadline else None
+        try:
+            return await asyncio.wait_for(prompt_coro, timeout=timeout_s)
+        except TimeoutError:
+            raise PromptEvaluationError(
+                message="ACP prompt timed out (deadline expired)",
+                prompt_name=prompt_name,
+                phase="request",
+            ) from None
 
     def _build_env(self) -> dict[str, str] | None:
         """Build merged environment variables.

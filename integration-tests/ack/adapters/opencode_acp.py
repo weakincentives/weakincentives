@@ -54,6 +54,9 @@ class OpenCodeACPFixture:
             network_policy=False,
             sandbox_policy=False,
             skill_installation=True,
+            tool_policies=True,
+            feedback_providers=True,
+            task_completion=True,
         )
 
     def is_available(self) -> bool:

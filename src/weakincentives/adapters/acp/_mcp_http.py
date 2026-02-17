@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ...runtime.logging import StructuredLogger, get_logger
@@ -84,6 +85,8 @@ def _make_asgi_app(transport: Any, bearer_token: str) -> Any:
 
 def create_mcp_tool_server(
     bridged_tools: tuple[BridgedTool, ...],
+    *,
+    post_call_hook: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None,
 ) -> Any:
     """Create an MCP ``Server`` with tool handlers registered directly.
 
@@ -92,6 +95,10 @@ def create_mcp_tool_server(
 
     Args:
         bridged_tools: Tuple of BridgedTool instances to register.
+        post_call_hook: Optional callback invoked after each successful tool
+            call with ``(name, arguments, result_dict)``.  The hook may mutate
+            ``result_dict["content"]`` in place to inject additional items
+            (e.g. feedback text).
 
     Returns:
         An ``mcp.server.Server`` ready to be passed to ``MCPHttpServer``.
@@ -118,7 +125,10 @@ def create_mcp_tool_server(
         bt = tools_by_name.get(name)
         if bt is None:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
-        result = await asyncio.to_thread(bt, arguments or {})
+        args = arguments or {}
+        result = await asyncio.to_thread(bt, args)
+        if post_call_hook is not None:
+            await asyncio.to_thread(post_call_hook, name, args, result)
         return [
             TextContent(type="text", text=item.get("text", ""))
             for item in result.get("content", [])
