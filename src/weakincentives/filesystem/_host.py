@@ -44,6 +44,12 @@ from ._git_ops import (
     init_git_repo,
     restore_snapshot,
 )
+from ._streams import (
+    DefaultTextReader,
+    HostByteReader,
+    HostByteWriter,
+    TextReader,
+)
 from ._types import (
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,
@@ -563,6 +569,64 @@ class HostFilesystem:
                     f"Parent directory does not exist: {resolved.parent}"
                 )
             resolved.mkdir()
+
+    # --- Streaming Operations ---
+
+    def open_read(self, path: str) -> HostByteReader:
+        """Open a file for streaming byte reads.
+
+        Returns a ByteReader context manager for chunked reading.
+        """
+        normalized = normalize_path(path) or "/"
+        resolved = self._resolve_path(path)
+        return HostByteReader.open(resolved, normalized)
+
+    def open_write(
+        self,
+        path: str,
+        *,
+        mode: Literal["create", "overwrite", "append"] = "overwrite",
+        create_parents: bool = True,
+    ) -> HostByteWriter:
+        """Open a file for streaming byte writes.
+
+        Returns a ByteWriter context manager for chunked writing.
+        """
+        if self._read_only:
+            msg = "Filesystem is read-only"
+            raise PermissionError(msg)
+
+        normalized = normalize_path(path)
+        if not normalized:
+            msg = "Cannot write to root directory"
+            raise ValueError(msg)
+
+        validate_path(normalized)
+        resolved = self._resolve_path(path)
+
+        return HostByteWriter.open(
+            resolved,
+            normalized,
+            mode=mode,
+            create_parents=create_parents,
+        )
+
+    def open_text(
+        self,
+        path: str,
+        *,
+        encoding: str = "utf-8",
+    ) -> TextReader:
+        """Open a file for streaming text reads with lazy decoding.
+
+        Returns a TextReader context manager that decodes bytes lazily.
+        """
+        if encoding != "utf-8":
+            msg = f"Only 'utf-8' encoding is supported, got: {encoding}"
+            raise ValueError(msg)
+
+        byte_reader = self.open_read(path)
+        return DefaultTextReader.wrap(byte_reader, encoding=encoding)
 
     # --- Snapshot Operations ---
 

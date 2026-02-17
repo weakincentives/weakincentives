@@ -232,6 +232,17 @@ from __future__ import annotations
 from ._host import HostFilesystem
 from ._path import strip_mount_point
 from ._protocol import Filesystem, SnapshotableFilesystem
+from ._streams import (
+    DEFAULT_CHUNK_SIZE,
+    ByteReader,
+    ByteWriter,
+    DefaultTextReader,
+    HostByteReader,
+    HostByteWriter,
+    MemoryByteReader,
+    MemoryByteWriter,
+    TextReader,
+)
 from ._types import (
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,
@@ -258,6 +269,7 @@ from ._types import (
 )
 
 __all__ = [
+    "DEFAULT_CHUNK_SIZE",
     "DEFAULT_READ_LIMIT",
     "MAX_GREP_MATCHES",
     "MAX_PATH_DEPTH",
@@ -265,6 +277,9 @@ __all__ = [
     "MAX_WRITE_BYTES",
     "MAX_WRITE_LENGTH",
     "READ_ENTIRE_FILE",
+    "ByteReader",
+    "ByteWriter",
+    "DefaultTextReader",
     "FileEncoding",
     "FileEntry",
     "FileStat",
@@ -272,10 +287,15 @@ __all__ = [
     "FilesystemSnapshot",
     "GlobMatch",
     "GrepMatch",
+    "HostByteReader",
+    "HostByteWriter",
     "HostFilesystem",
+    "MemoryByteReader",
+    "MemoryByteWriter",
     "ReadBytesResult",
     "ReadResult",
     "SnapshotableFilesystem",
+    "TextReader",
     "WriteMode",
     "WriteResult",
     "glob_match",
