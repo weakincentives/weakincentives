@@ -85,5 +85,5 @@ def merge_config_params(
     """
     result = dict(base)
     if config is not None:
-        result.update(config.to_request_params())
+        result.update(dict(config.to_request_params()))
     return result

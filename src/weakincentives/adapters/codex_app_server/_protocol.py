@@ -230,7 +230,7 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
                 budget_tracker=budget_tracker,
             )
             if should_continue and continuation_round < max_continuation_rounds:
-                current_prompt_text = feedback
+                current_prompt_text = cast(str, feedback)
                 continuation_round += 1
                 continue
             break

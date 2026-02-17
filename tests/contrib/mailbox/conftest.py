@@ -34,7 +34,17 @@ def redis_client() -> Generator[Redis[bytes], None, None]:
     except ImportError:
         pytest.skip("redis package not installed")
 
-    client: Redis[bytes] = Redis(host="localhost", port=6379, db=15)
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
+    client: Redis[bytes] = Redis(
+        host="localhost",
+        port=6379,
+        db=15,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+        retry=Retry(NoBackoff(), retries=0),
+    )
     try:
         client.ping()
     except Exception:
