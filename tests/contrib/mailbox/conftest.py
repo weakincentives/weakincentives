@@ -31,10 +31,22 @@ def redis_client() -> Generator[Redis[bytes], None, None]:
     """Fresh Redis connection for each test."""
     try:
         from redis import Redis
+        from redis.backoff import NoBackoff
+        from redis.retry import Retry
     except ImportError:
         pytest.skip("redis package not installed")
 
-    client: Redis[bytes] = Redis(host="localhost", port=6379, db=15)
+    # Use a no-retry, fast-timeout client so the availability probe fails
+    # immediately instead of sleeping through exponential backoff (redis 7.2+).
+    no_retry: Retry = Retry(NoBackoff(), 0, supported_errors=())
+    client: Redis[bytes] = Redis(
+        host="localhost",
+        port=6379,
+        db=15,
+        socket_connect_timeout=1,
+        socket_timeout=1,
+        retry=no_retry,
+    )
     try:
         client.ping()
     except Exception:
