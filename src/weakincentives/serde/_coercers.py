@@ -38,6 +38,7 @@ from ._utils import (
     _UNION_TYPE,
     _AnyType,
     _apply_constraints,
+    _build_item_meta,
     _merge_annotated_meta,
     _ParseConfig,
 )
@@ -146,7 +147,9 @@ def _coerce_union(
                 return _apply_constraints(None, merged_meta, path)
             continue
         try:
-            coerced = _coerce_to_type(value, arg, None, path, config)
+            coerced = _coerce_to_type(
+                value, arg, _build_item_meta(merged_meta, arg), path, config
+            )
         except (TypeError, ValueError) as error:
             last_error = error
             continue
@@ -340,29 +343,37 @@ def _normalize_sequence_value(
     return _normalize_tuple_value(value, path, config)
 
 
-def _coerce_sequence_items(
-    items: list[JSONValue],
+def _resolve_sequence_origin(
+    base_type: object,
+) -> tuple[type[object] | None, bool]:
+    """Return (effective_origin, is_bare) for a potential sequence type."""
+    origin = cast(type[object] | None, get_origin(base_type))
+    if origin is list or origin is Sequence or origin is tuple or origin is set:
+        return origin, False
+    # Also handle bare types (list, tuple, set) which have no origin.
+    # Use identity checks to avoid hashing unhashable generic aliases.
+    if base_type is list:
+        return list, True
+    if base_type is tuple:
+        return tuple, True
+    if base_type is set:
+        return set, True
+    return None, False
+
+
+def _resolve_item_types(
     args: tuple[object, ...],
     origin: type[object] | None,
-    path: str,
-    config: _ParseConfig,
+    count: int,
 ) -> list[object]:
-    if (
-        origin is tuple
-        and args
-        and args[-1] is not Ellipsis
-        and len(args) != len(items)
-    ):
-        raise ValueError(f"{path}: expected {len(args)} items")
-    coerced_items: list[object] = []
-    for index, item in enumerate(items):
-        item_path = f"{path}[{index}]"
-        if origin is tuple and args:
-            item_type = args[0] if args[-1] is Ellipsis else args[index]
-        else:
-            item_type = args[0] if args else object
-        coerced_items.append(_coerce_to_type(item, item_type, None, item_path, config))
-    return coerced_items
+    """Resolve the expected type for each item in a sequence."""
+    if origin is tuple and args and args[-1] is not Ellipsis:
+        if len(args) != count:
+            raise ValueError(f"expected {len(args)} items")
+        return list(args)
+    if origin is tuple and args:
+        return [args[0]] * count
+    return [args[0] if args else object] * count
 
 
 def _coerce_sequence(
@@ -372,15 +383,32 @@ def _coerce_sequence(
     path: str,
     config: _ParseConfig,
 ) -> object:
-    origin = cast(type[object] | None, get_origin(base_type))
-    if origin not in {list, Sequence, tuple, set}:
+    effective_origin, is_bare = _resolve_sequence_origin(base_type)
+    if effective_origin is None:
         return _NOT_HANDLED
-    items = _normalize_sequence_value(value, origin, path, config)
     args = get_args(base_type)
-    coerced_items = _coerce_sequence_items(items, args, origin, path, config)
-    if origin is set:
+    # Reject unparameterized collections (bare list/tuple/set)
+    if not args and is_bare:
+        type_name = getattr(effective_origin, "__name__", "sequence")
+        raise TypeError(
+            f"{path}: bare {type_name} is not allowed; use {type_name}[<element_type>] instead"
+        )
+    items = _normalize_sequence_value(value, effective_origin, path, config)
+    try:
+        item_types = _resolve_item_types(args, effective_origin, len(items))
+    except ValueError as error:
+        raise ValueError(f"{path}: {error}") from error
+    coerced_items: list[object] = []
+    for index, item in enumerate(items):
+        item_path = f"{path}[{index}]"
+        item_type = item_types[index]
+        item_meta = _build_item_meta(merged_meta, item_type)
+        coerced_items.append(
+            _coerce_to_type(item, item_type, item_meta, item_path, config)
+        )
+    if effective_origin is set:
         value_out: object = set(coerced_items)
-    elif origin is tuple:
+    elif effective_origin is tuple:
         value_out = tuple(coerced_items)
     else:
         value_out = list(coerced_items)
@@ -395,19 +423,29 @@ def _coerce_mapping(
     config: _ParseConfig,
 ) -> object:
     origin = get_origin(base_type)
-    if origin is not dict and origin is not Mapping:
+    # Also handle bare dict type which has no origin
+    if origin is not dict and origin is not Mapping and base_type is not dict:
         return _NOT_HANDLED
     if not isinstance(value, Mapping):
         raise TypeError(f"{path}: expected mapping")
-    key_type, value_type = (
-        get_args(base_type) if get_args(base_type) else (object, object)
-    )
+    args = get_args(base_type)
+    if args:
+        key_type, value_type = args
+    elif base_type is dict and origin is None:
+        # Bare dict without type parameters
+        raise TypeError(
+            f"{path}: bare dict is not allowed; use dict[<key_type>, <value_type>] instead"
+        )
+    else:
+        key_type, value_type = (object, object)  # pragma: no cover - defensive
     mapping_value = cast(Mapping[JSONValue, JSONValue], value)
     result_dict: dict[object, object] = {}
+    key_meta = _build_item_meta(merged_meta, key_type)
+    val_meta = _build_item_meta(merged_meta, value_type)
     for key, item in mapping_value.items():
-        coerced_key = _coerce_to_type(key, key_type, None, f"{path} keys", config)
+        coerced_key = _coerce_to_type(key, key_type, key_meta, f"{path} keys", config)
         coerced_value = _coerce_to_type(
-            item, value_type, None, f"{path}[{coerced_key}]", config
+            item, value_type, val_meta, f"{path}[{coerced_key}]", config
         )
         result_dict[coerced_key] = coerced_value
     return _apply_constraints(result_dict, merged_meta, path)
@@ -480,6 +518,10 @@ def _coerce_to_type(
         base_type = config.typevar_map[base_type]
 
     if base_type is object or base_type is _AnyType:
+        if merged_meta.get("untyped", False) is not True:
+            raise TypeError(
+                f'{path}: unbound type (Any/object) requires {{"untyped": True}} in Annotated metadata'
+            )
         return _apply_constraints(value, merged_meta, path)
 
     # Check for unresolved TypeVar - this means the caller didn't provide

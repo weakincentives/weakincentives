@@ -18,7 +18,7 @@ import importlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import cast
+from typing import Annotated, Any, cast
 
 import pytest
 
@@ -563,7 +563,7 @@ def test_merge_annotated_meta_and_bool_parsing() -> None:
 def test_object_type_and_union_handling() -> None:
     @dataclass
     class ObjectModel:
-        payload: object = field(metadata={"strip": True})
+        payload: Annotated[object, {"untyped": True}] = field(metadata={"strip": True})
 
     parsed = parse(ObjectModel, {"payload": "  data  "})
     assert parsed.payload == "data"
@@ -744,3 +744,140 @@ def test_parse_field_alias_from_metadata() -> None:
     # Dump without aliases
     plain = dump(parsed, by_alias=False)
     assert plain == {"api_key": "secret", "max_retries": 3}
+
+
+# =============================================================================
+# Strict Serde Validation for Unbound Types
+# =============================================================================
+
+
+def test_parse_rejects_unbound_any_without_marker() -> None:
+    """Fields typed as Any require {"untyped": True} annotation."""
+
+    @dataclass
+    class UntypedModel:
+        payload: Any
+
+    with pytest.raises(TypeError) as exc:
+        parse(UntypedModel, {"payload": "data"})
+    assert "unbound type" in str(exc.value)
+    assert '{"untyped": True}' in str(exc.value)
+
+
+def test_parse_rejects_unbound_object_without_marker() -> None:
+    """Fields typed as object require {"untyped": True} annotation."""
+
+    @dataclass
+    class UntypedObject:
+        payload: object
+
+    with pytest.raises(TypeError) as exc:
+        parse(UntypedObject, {"payload": 42})
+    assert "unbound type" in str(exc.value)
+
+
+def test_parse_accepts_untyped_marker() -> None:
+    """Fields annotated with {"untyped": True} pass through."""
+
+    @dataclass
+    class TypedAny:
+        payload: Annotated[Any, {"untyped": True}]
+
+    result = parse(TypedAny, {"payload": "data"})
+    assert result.payload == "data"
+
+
+def test_parse_rejects_bare_list() -> None:
+    """Bare list without type parameters is rejected."""
+
+    @dataclass
+    class BareList:
+        items: list  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        parse(BareList, {"items": [1, 2]})
+    assert "bare list" in str(exc.value)
+
+
+def test_parse_rejects_bare_dict() -> None:
+    """Bare dict without type parameters is rejected."""
+
+    @dataclass
+    class BareDict:
+        mapping: dict  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        parse(BareDict, {"mapping": {"a": 1}})
+    assert "bare dict" in str(exc.value)
+
+
+def test_parse_rejects_bare_set() -> None:
+    """Bare set without type parameters is rejected."""
+
+    @dataclass
+    class BareSet:
+        values: set  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        parse(BareSet, {"values": [1, 2]})
+    assert "bare set" in str(exc.value)
+
+
+def test_parse_rejects_bare_tuple() -> None:
+    """Bare tuple without type parameters is rejected."""
+
+    @dataclass
+    class BareTuple:
+        values: tuple  # type: ignore[type-arg]
+
+    with pytest.raises(TypeError) as exc:
+        parse(BareTuple, {"values": [1, 2]})
+    assert "bare tuple" in str(exc.value)
+
+
+def test_parse_union_propagates_untyped_marker() -> None:
+    """Untyped marker propagates to union branches containing Any."""
+
+    @dataclass
+    class OptionalAny:
+        value: Annotated[Any | None, {"untyped": True}]
+
+    result = parse(OptionalAny, {"value": "data"})
+    assert result.value == "data"
+
+    result_none = parse(OptionalAny, {"value": None})
+    assert result_none.value is None
+
+
+def test_parse_union_rejects_untyped_without_marker() -> None:
+    """Union containing Any without marker is rejected."""
+
+    @dataclass
+    class OptionalAnyNoMarker:
+        value: Any | None
+
+    with pytest.raises(TypeError) as exc:
+        parse(OptionalAnyNoMarker, {"value": "data"})
+    assert "unbound type" in str(exc.value)
+
+
+def test_parse_collection_propagates_untyped_marker() -> None:
+    """Untyped marker propagates to collection items when item is Any."""
+
+    @dataclass
+    class UntypedList:
+        items: Annotated[list[Any], {"untyped": True}]
+
+    result = parse(UntypedList, {"items": [1, "two", 3.0]})
+    assert result.items == [1, "two", 3.0]
+
+
+def test_parse_mapping_propagates_untyped_marker() -> None:
+    """Untyped marker propagates to mapping values when value type is Any."""
+
+    @dataclass
+    class UntypedDict:
+        data: Annotated[dict[str, Any], {"untyped": True}]
+
+    result = parse(UntypedDict, {"data": {"key": "value", "num": 42}})
+    assert result.data == {"key": "value", "num": 42}

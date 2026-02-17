@@ -292,6 +292,9 @@ def _schema_for_collection(
     origin: object,
 ) -> dict[str, JSONValue] | None:
     builder = _COLLECTION_BUILDERS.get(origin)
+    # Also handle bare types (list, dict, tuple, set) which have no origin
+    if builder is None:
+        builder = _COLLECTION_BUILDERS.get(base_type)
     if builder is None:
         return None
     return builder(base_type)
