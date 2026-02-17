@@ -57,6 +57,13 @@ class ACPClient:
         self._tool_counter: int = 0
         self._current_tool_id: str = ""
 
+    def reset_tracking(self) -> None:
+        """Reset accumulated tracking state for a new prompt round."""
+        self._message_chunks = []
+        self._thought_chunks = []
+        self._tool_call_tracker = {}
+        self._last_update_time = None
+
     def set_accumulator(self, accumulator: Any) -> None:
         """Set the SessionAccumulator instance."""
         self._accumulator = accumulator

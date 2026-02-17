@@ -180,6 +180,46 @@ class TestEvaluateProtocol:
         assert rendered_events[0].adapter == "acp"
         assert executed_events[0].adapter == "acp"
 
+    def test_feedback_hook_passed_to_mcp_server(self) -> None:
+        """The feedback hook closure is passed to create_mcp_tool_server."""
+        from weakincentives.adapters.acp.adapter import ACPAdapter
+
+        adapter = ACPAdapter(
+            adapter_config=ACPAdapterConfig(quiet_period_ms=0),
+            client_config=ACPClientConfig(cwd="/tmp"),
+        )
+
+        prompt = _make_mock_prompt(text="Hello ACP")
+        session = _make_mock_session()
+
+        mcp_cls_p, create_p = _patch_mcp()
+        with mcp_cls_p as mock_mcp_cls, create_p as mock_create:
+            _make_mcp_mock(mock_mcp_cls)
+            mock_create.return_value = MagicMock()
+            adapter.evaluate(prompt, session=session)
+
+        # Verify post_call_hook was passed
+        _, kwargs = mock_create.call_args
+        hook = kwargs["post_call_hook"]
+        assert hook is not None
+
+        # Exercise the hook closure to cover _feedback_hook body
+        result: dict[str, Any] = {
+            "content": [{"type": "text", "text": "output"}],
+            "isError": False,
+        }
+        with patch(
+            "weakincentives.adapters.acp.adapter._append_feedback",
+        ) as mock_append:
+            hook("tool_name", {"arg": 1}, result)
+            mock_append.assert_called_once_with(
+                result["content"],
+                is_error=False,
+                prompt=prompt,
+                session=session,
+                deadline=None,
+            )
+
     def test_evaluate_with_token_usage(self) -> None:
         from weakincentives.adapters.acp.adapter import ACPAdapter
 

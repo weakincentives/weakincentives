@@ -532,3 +532,142 @@ class TestCreateMcpToolServer:
 
         asyncio.run(registered_handlers["call_tool"]("no_args", None))
         bt.assert_called_once_with({})
+
+    def test_post_call_hook_invoked(self) -> None:
+        """post_call_hook is invoked after successful tool call."""
+        bt = MagicMock()
+        bt.name = "tool_a"
+        bt.description = "Tool A"
+        bt.input_schema = {"type": "object", "properties": {}}
+        bt.return_value = {
+            "content": [{"type": "text", "text": "result"}],
+            "isError": False,
+        }
+
+        hook_calls: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+
+        def _hook(name: str, args: dict[str, Any], result: dict[str, Any]) -> None:
+            hook_calls.append((name, args, result))
+
+        registered_handlers: dict[str, Any] = {}
+        mock_server = MagicMock()
+
+        def _capture_call_tool() -> Any:
+            def decorator(fn: Any) -> Any:
+                registered_handlers["call_tool"] = fn
+                return fn
+
+            return decorator
+
+        mock_server.list_tools = lambda: lambda fn: fn
+        mock_server.call_tool = _capture_call_tool
+
+        mock_text_content_cls = MagicMock(side_effect=lambda **kw: kw)
+
+        with patch.dict(
+            sys.modules,
+            {
+                "mcp": MagicMock(),
+                "mcp.server": MagicMock(Server=MagicMock(return_value=mock_server)),
+                "mcp.types": MagicMock(
+                    Tool=MagicMock(), TextContent=mock_text_content_cls
+                ),
+            },
+        ):
+            create_mcp_tool_server((bt,), post_call_hook=_hook)
+
+        asyncio.run(registered_handlers["call_tool"]("tool_a", {"x": 1}))
+
+        assert len(hook_calls) == 1
+        name, args, result = hook_calls[0]
+        assert name == "tool_a"
+        assert args == {"x": 1}
+        assert result["content"][0]["text"] == "result"
+
+    def test_post_call_hook_not_invoked_when_none(self) -> None:
+        """No hook invoked when post_call_hook is None."""
+        bt = MagicMock()
+        bt.name = "tool_b"
+        bt.description = "Tool B"
+        bt.input_schema = {"type": "object", "properties": {}}
+        bt.return_value = {
+            "content": [{"type": "text", "text": "output"}],
+            "isError": False,
+        }
+
+        registered_handlers: dict[str, Any] = {}
+        mock_server = MagicMock()
+
+        def _capture_call_tool() -> Any:
+            def decorator(fn: Any) -> Any:
+                registered_handlers["call_tool"] = fn
+                return fn
+
+            return decorator
+
+        mock_server.list_tools = lambda: lambda fn: fn
+        mock_server.call_tool = _capture_call_tool
+
+        mock_text_content_cls = MagicMock(side_effect=lambda **kw: kw)
+
+        with patch.dict(
+            sys.modules,
+            {
+                "mcp": MagicMock(),
+                "mcp.server": MagicMock(Server=MagicMock(return_value=mock_server)),
+                "mcp.types": MagicMock(
+                    Tool=MagicMock(), TextContent=mock_text_content_cls
+                ),
+            },
+        ):
+            create_mcp_tool_server((bt,), post_call_hook=None)
+
+        result = asyncio.run(registered_handlers["call_tool"]("tool_b", {}))
+        assert len(result) == 1
+        assert result[0]["text"] == "output"
+
+    def test_post_call_hook_can_modify_content(self) -> None:
+        """Hook can modify the result content list in place."""
+        bt = MagicMock()
+        bt.name = "tool_c"
+        bt.description = "Tool C"
+        bt.input_schema = {"type": "object", "properties": {}}
+        bt.return_value = {
+            "content": [{"type": "text", "text": "original"}],
+            "isError": False,
+        }
+
+        def _hook(name: str, args: dict[str, Any], result: dict[str, Any]) -> None:
+            result["content"].append({"type": "text", "text": "feedback injected"})
+
+        registered_handlers: dict[str, Any] = {}
+        mock_server = MagicMock()
+
+        def _capture_call_tool() -> Any:
+            def decorator(fn: Any) -> Any:
+                registered_handlers["call_tool"] = fn
+                return fn
+
+            return decorator
+
+        mock_server.list_tools = lambda: lambda fn: fn
+        mock_server.call_tool = _capture_call_tool
+
+        mock_text_content_cls = MagicMock(side_effect=lambda **kw: kw)
+
+        with patch.dict(
+            sys.modules,
+            {
+                "mcp": MagicMock(),
+                "mcp.server": MagicMock(Server=MagicMock(return_value=mock_server)),
+                "mcp.types": MagicMock(
+                    Tool=MagicMock(), TextContent=mock_text_content_cls
+                ),
+            },
+        ):
+            create_mcp_tool_server((bt,), post_call_hook=_hook)
+
+        result = asyncio.run(registered_handlers["call_tool"]("tool_c", {}))
+        assert len(result) == 2
+        assert result[0]["text"] == "original"
+        assert result[1]["text"] == "feedback injected"
