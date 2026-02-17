@@ -89,8 +89,10 @@ def _get_compression_type(compression: str) -> int:
 def _resolve_build_info() -> BuildInfo:
     """Resolve build metadata best-effort.
 
-    Returns package version from importlib.metadata and the current git
-    commit SHA.  Falls back to empty strings on any failure.
+    Returns package version from ``importlib.metadata`` and the git
+    commit SHA of the *weakincentives* package source tree (not the
+    process cwd, which may be a different repository).  Falls back to
+    empty strings on any failure.
     """
     import subprocess  # nosec B404 - needed for git introspection
 
@@ -103,8 +105,10 @@ def _resolve_build_info() -> BuildInfo:
     except Exception:  # pragma: no cover
         pass  # nosec B110 - best-effort, non-critical metadata
     try:
+        # Resolve from the package's own repo, not the process cwd.
+        pkg_dir = str(Path(__file__).resolve().parent)
         result = subprocess.run(  # nosec B603 B607 - trusted git command
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", "-C", pkg_dir, "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,

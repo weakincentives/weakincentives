@@ -184,6 +184,31 @@ class TestBundleWriter:
         # Commit falls back to empty string
         assert bundle.manifest.build.commit == ""
 
+    def test_build_commit_resolves_from_package_repo(self, tmp_path: Path) -> None:
+        """Git SHA should come from the package source tree, not process cwd."""
+        from unittest.mock import patch
+
+        calls: list[list[str]] = []
+        original_run = __import__("subprocess").run
+
+        def spy_run(*args: object, **kwargs: object) -> object:
+            if args and isinstance(args[0], list) and "git" in args[0]:
+                calls.append(list(args[0]))
+            return original_run(*args, **kwargs)
+
+        with patch("subprocess.run", side_effect=spy_run):
+            with BundleWriter(tmp_path) as writer:
+                writer.write_request_input({"test": "input"})
+
+        assert len(calls) == 1
+        cmd = calls[0]
+        assert cmd[0] == "git"
+        assert "-C" in cmd
+        # The -C argument should point inside the weakincentives package
+        c_idx = cmd.index("-C")
+        pkg_path = cmd[c_idx + 1]
+        assert "weakincentives" in pkg_path
+
     def test_writer_captures_logs(self, tmp_path: Path) -> None:
         """Test log capture context manager."""
         import logging
