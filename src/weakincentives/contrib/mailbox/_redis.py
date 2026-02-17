@@ -37,7 +37,7 @@ import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field, is_dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, TypeVar, cast, get_args, get_origin, override
+from typing import TYPE_CHECKING, Any, TypeVar, get_args, get_origin, override
 from uuid import uuid4
 
 from weakincentives.clock import SYSTEM_CLOCK, MonotonicClock, Sleeper
@@ -113,7 +113,7 @@ class RedisMailboxFactory[R]:
 
         factory = RedisMailboxFactory(client=redis_client)
         resolver = CompositeResolver(registry={}, factory=factory)
-        requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
+        requests = RedisMailbox[Request, Result](name="requests", client=redis_client, reply_resolver=resolver)
 
         # Worker can now reply to any queue name
         for msg in requests.receive():
@@ -350,13 +350,17 @@ class RedisMailbox[T, R]:
         try:
             json_str = data.decode("utf-8") if isinstance(data, bytes) else data
             json_data = json.loads(json_str)
-            if self._body_type is not None:
-                origin = get_origin(self._body_type)
-                if is_dataclass(origin if origin is not None else self._body_type):
-                    return parse(self._body_type, json_data)
-                body_type: Any = self._body_type
-                return body_type(json_data)
-            return cast(T, json_data)
+            if self._body_type is None:
+                msg = (
+                    f"Cannot deserialize for queue '{self.name}': no body type."
+                    " Use subscript notation: RedisMailbox[BodyType, ReplyType](...)"
+                )
+                raise SerializationError(msg)
+            origin = get_origin(self._body_type)
+            if is_dataclass(origin if origin is not None else self._body_type):
+                return parse(self._body_type, json_data)
+            body_type: Any = self._body_type
+            return body_type(json_data)
         except Exception as e:
             _LOGGER.error(
                 "Deserialization failed for queue '%s': %s", self.name, e, exc_info=True

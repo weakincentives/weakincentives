@@ -99,7 +99,7 @@ from weakincentives.contrib.mailbox import RedisMailbox, RedisMailboxFactory
 
 factory = RedisMailboxFactory(client=redis_client)
 resolver = CompositeResolver(registry={}, factory=factory)
-requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
+requests = RedisMailbox[Request, Result](name="requests", client=redis_client, reply_resolver=resolver)
 
 for msg in requests.receive():
     msg.reply(process(msg.body))  # Resolver reconstructs mailbox from name
@@ -159,7 +159,7 @@ class RedisMailboxFactory[R]:
 
 ```python
 # Client creates unique reply mailbox
-client_responses = RedisMailbox(name=f"client-{uuid4()}", client=client)
+client_responses = RedisMailbox[Response, None](name=f"client-{uuid4()}", client=client)
 requests.send(Request(...), reply_to=client_responses)
 
 # Worker - factory creates mailbox for "client-xxx"
