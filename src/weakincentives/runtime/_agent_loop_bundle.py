@@ -222,11 +222,13 @@ def write_bundle_artifacts(  # noqa: PLR0913
     ended_at: datetime,
     budget_tracker: BudgetTracker | None,
     config: AgentLoopConfig,
-    run_context: RunContext | None = None,
 ) -> None:
     """Write bundle artifacts after execution.
 
     Shared by ``execute_with_bundle`` and ``handle_message_with_bundle``.
+
+    Note: ``run_context`` is written by the caller before execution
+    (not here) to avoid duplicate entries in the manifest files list.
     """
     from ..filesystem import Filesystem
     from .session.visibility_overrides import VisibilityOverrides
@@ -234,9 +236,6 @@ def write_bundle_artifacts(  # noqa: PLR0913
     writer.write_session_after(session)
     writer.write_request_output(response)
     writer.write_config(config)
-
-    if run_context is not None:
-        writer.write_run_context(run_context)
 
     writer.write_metrics(
         collect_bundle_metrics(
@@ -415,7 +414,6 @@ def handle_message_with_bundle(  # noqa: PLR0913, PLR0917
                 ended_at=ended_at,
                 budget_tracker=budget_tracker,
                 config=loop._config,
-                run_context=run_context,
             )
 
             prompt_cleaned_up = True

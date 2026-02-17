@@ -86,6 +86,40 @@ def _get_compression_type(compression: str) -> int:
     return zipfile.ZIP_DEFLATED
 
 
+def _resolve_build_info() -> BuildInfo:
+    """Resolve build metadata best-effort.
+
+    Returns package version from ``importlib.metadata`` and the git
+    commit SHA of the *weakincentives* package source tree (not the
+    process cwd, which may be a different repository).  Falls back to
+    empty strings on any failure.
+    """
+    import subprocess  # nosec B404 - needed for git introspection
+
+    version = ""
+    commit = ""
+    try:
+        from importlib.metadata import version as pkg_version
+
+        version = pkg_version("weakincentives")
+    except Exception:  # pragma: no cover
+        pass  # nosec B110 - best-effort, non-critical metadata
+    try:
+        # Resolve from the package's own repo, not the process cwd.
+        pkg_dir = str(Path(__file__).resolve().parent)
+        result = subprocess.run(  # nosec B603 B607 - trusted git command
+            ["git", "-C", pkg_dir, "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            commit = result.stdout.strip()
+    except Exception:  # pragma: no cover
+        pass  # nosec B110 - best-effort, non-critical metadata
+    return BuildInfo(version=version, commit=commit)
+
+
 class BundleWriter:
     """Context manager for streaming bundle creation.
 
@@ -216,7 +250,8 @@ class BundleWriter:
         content_bytes = content.encode("utf-8") if isinstance(content, str) else content
 
         _ = full_path.write_bytes(content_bytes)
-        self._files.append(rel_path)
+        if rel_path not in self._checksums:
+            self._files.append(rel_path)
         self._checksums[rel_path] = compute_checksum(content_bytes)
 
     def write_request_input(self, request: object) -> None:
@@ -601,7 +636,7 @@ class BundleWriter:
                 algorithm="sha256",
                 checksums=self._checksums,
             ),
-            build=BuildInfo(),
+            build=_resolve_build_info(),
         )
 
         # Write README
