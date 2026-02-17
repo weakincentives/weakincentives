@@ -76,12 +76,15 @@ applyTheme(state.theme);
 themeToggle.addEventListener("click", toggleTheme);
 
 // ============================================================================
-// SIDEBAR
+// SIDEBAR (collapsible + resizable)
 // ============================================================================
 
 function applySidebarState() {
   document.querySelectorAll(".view-container").forEach((view) => {
     view.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+    if (!state.sidebarCollapsed) {
+      view.style.gridTemplateColumns = `${state.sidebarWidth}px 1fr`;
+    }
   });
 }
 
@@ -93,6 +96,244 @@ function toggleSidebar() {
 }
 
 applySidebarState();
+
+// Resizable sidebar drag
+function initSidebarResize() {
+  let resizing = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  document.addEventListener("mousedown", (e) => {
+    // Check if clicking on the sidebar resize handle (::after pseudo-element area)
+    const sidebar = e.target.closest(".sidebar");
+    if (!sidebar) {
+      return;
+    }
+    const rect = sidebar.getBoundingClientRect();
+    if (e.clientX < rect.right - 6 || e.clientX > rect.right + 6) {
+      return;
+    }
+
+    resizing = true;
+    startX = e.clientX;
+    startWidth = state.sidebarWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!resizing) {
+      return;
+    }
+    const delta = e.clientX - startX;
+    const newWidth = Math.max(180, Math.min(500, startWidth + delta));
+    state.sidebarWidth = newWidth;
+    document.querySelectorAll(".view-container:not(.sidebar-collapsed)").forEach((view) => {
+      view.style.gridTemplateColumns = `${newWidth}px 1fr`;
+    });
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!resizing) {
+      return;
+    }
+    resizing = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    localStorage.setItem("wink-sidebar-width", state.sidebarWidth);
+  });
+}
+
+initSidebarResize();
+
+// ============================================================================
+// COMMAND PALETTE
+// ============================================================================
+
+const commandPaletteOverlay = document.getElementById("command-palette-overlay");
+const commandPaletteInput = document.getElementById("command-palette-input");
+const commandPaletteResults = document.getElementById("command-palette-results");
+
+function openCommandPalette() {
+  state.commandPaletteOpen = true;
+  commandPaletteOverlay.classList.remove("hidden");
+  commandPaletteInput.value = "";
+  commandPaletteInput.focus();
+  renderCommandResults("");
+}
+
+function closeCommandPalette() {
+  state.commandPaletteOpen = false;
+  commandPaletteOverlay.classList.add("hidden");
+}
+
+function getCommandItems(query) {
+  const items = [];
+  const q = query.toLowerCase();
+
+  // Static commands
+  const commands = [
+    {
+      title: "Sessions",
+      subtitle: "Switch to sessions view",
+      action: () => switchView("sessions"),
+      shortcut: "1",
+    },
+    {
+      title: "Transcript",
+      subtitle: "Switch to transcript view",
+      action: () => switchView("transcript"),
+      shortcut: "2",
+    },
+    {
+      title: "Logs",
+      subtitle: "Switch to logs view",
+      action: () => switchView("logs"),
+      shortcut: "3",
+    },
+    {
+      title: "Filesystem",
+      subtitle: "Switch to filesystem view",
+      action: () => switchView("filesystem"),
+      shortcut: "4",
+    },
+    {
+      title: "Environment",
+      subtitle: "Switch to environment view",
+      action: () => switchView("environment"),
+      shortcut: "5",
+    },
+    {
+      title: "Reload Bundle",
+      subtitle: "Reload current debug bundle",
+      action: reloadBundle,
+      shortcut: "R",
+    },
+    {
+      title: "Toggle Theme",
+      subtitle: "Switch between dark and light",
+      action: toggleTheme,
+      shortcut: "D",
+    },
+    {
+      title: "Toggle Sidebar",
+      subtitle: "Show or hide the sidebar",
+      action: toggleSidebar,
+      shortcut: "[",
+    },
+  ];
+
+  commands.forEach((cmd) => {
+    if (!q || cmd.title.toLowerCase().includes(q) || cmd.subtitle.toLowerCase().includes(q)) {
+      items.push({ type: "command", ...cmd });
+    }
+  });
+
+  // Search slices
+  if (state.meta?.slices && q) {
+    state.meta.slices.forEach((slice) => {
+      const name = slice.display_name || slice.slice_type;
+      if (name.toLowerCase().includes(q)) {
+        items.push({
+          type: "slice",
+          title: name,
+          subtitle: `Slice (${slice.count || 0} items)`,
+          action: () => {
+            switchView("sessions"); /* slice will be selected via existing flow */
+          },
+        });
+      }
+    });
+  }
+
+  // Search files
+  if (state.filesystemFiles.length > 0 && q) {
+    state.filesystemFiles.forEach((file) => {
+      if (file.toLowerCase().includes(q)) {
+        items.push({
+          type: "file",
+          title: file,
+          subtitle: "File",
+          action: () => switchView("filesystem"),
+        });
+      }
+    });
+  }
+
+  return items.slice(0, 12);
+}
+
+let selectedCommandIndex = 0;
+
+function renderCommandResults(query) {
+  const items = getCommandItems(query);
+  selectedCommandIndex = 0;
+
+  if (items.length === 0) {
+    commandPaletteResults.innerHTML = '<div class="command-palette-empty">No results found</div>';
+    return;
+  }
+
+  commandPaletteResults.innerHTML = "";
+  items.forEach((item, index) => {
+    const el = document.createElement("div");
+    el.className = `command-result${index === 0 ? " selected" : ""}`;
+    el.innerHTML = `
+      <div class="command-result-text">
+        <div class="command-result-title">${escapeCommandHtml(item.title)}</div>
+        <div class="command-result-subtitle">${escapeCommandHtml(item.subtitle)}</div>
+      </div>
+      ${item.shortcut ? `<div class="command-result-shortcut"><kbd>${item.shortcut}</kbd></div>` : ""}
+    `;
+    el.addEventListener("click", () => {
+      closeCommandPalette();
+      item.action();
+    });
+    el.addEventListener("mouseenter", () => {
+      commandPaletteResults.querySelectorAll(".command-result").forEach((r, i) => {
+        r.classList.toggle("selected", i === index);
+      });
+      selectedCommandIndex = index;
+    });
+    commandPaletteResults.appendChild(el);
+  });
+}
+
+function escapeCommandHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+commandPaletteInput.addEventListener("input", () => {
+  renderCommandResults(commandPaletteInput.value);
+});
+
+commandPaletteInput.addEventListener("keydown", (e) => {
+  const results = commandPaletteResults.querySelectorAll(".command-result");
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    selectedCommandIndex = Math.min(selectedCommandIndex + 1, results.length - 1);
+    results.forEach((r, i) => r.classList.toggle("selected", i === selectedCommandIndex));
+    results[selectedCommandIndex]?.scrollIntoView({ block: "nearest" });
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    selectedCommandIndex = Math.max(selectedCommandIndex - 1, 0);
+    results.forEach((r, i) => r.classList.toggle("selected", i === selectedCommandIndex));
+    results[selectedCommandIndex]?.scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    results[selectedCommandIndex]?.click();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeCommandPalette();
+  }
+});
+
+commandPaletteOverlay
+  .querySelector(".command-palette-backdrop")
+  .addEventListener("click", closeCommandPalette);
 
 // ============================================================================
 // VIEW SWITCHING
@@ -334,6 +575,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       toggleTheme,
       toggleSidebar,
       navigateBundle,
+      openCommandPalette,
+      closeCommandPalette,
     });
 
     logsView.initVirtualScroller();

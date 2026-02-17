@@ -102,11 +102,49 @@ export function initFilesystemView({ state, fetchJSON, showToast }) {
     state.fileContent = null;
   }
 
+  function highlightJson(text) {
+    return escapeHtml(text)
+      .replace(/&quot;([^&]*)&quot;\s*:/g, '<span class="syntax-key">&quot;$1&quot;</span>:')
+      .replace(/:\s*&quot;([^&]*)&quot;/g, ': <span class="syntax-string">&quot;$1&quot;</span>')
+      .replace(/:\s*(\d+\.?\d*)/g, ': <span class="syntax-number">$1</span>')
+      .replace(/:\s*(true|false)/g, ': <span class="syntax-boolean">$1</span>')
+      .replace(/:\s*(null)/g, ': <span class="syntax-null">$1</span>');
+  }
+
+  function highlightPython(text) {
+    const keywords =
+      /\b(def|class|import|from|return|if|elif|else|for|while|try|except|finally|with|as|yield|raise|pass|break|continue|and|or|not|in|is|lambda|None|True|False|self)\b/g;
+    let escaped = escapeHtml(text);
+    escaped = escaped.replace(/#.*$/gm, (m) => `<span class="syntax-comment">${m}</span>`);
+    escaped = escaped.replace(keywords, '<span class="syntax-keyword">$&</span>');
+    return escaped;
+  }
+
+  function renderWithLineNumbers(content, isJson, isPython) {
+    const lines = content.split("\n");
+    const lineNums = lines.map((_, i) => i + 1).join("\n");
+
+    let highlighted;
+    if (isJson) {
+      highlighted = highlightJson(content);
+    } else if (isPython) {
+      highlighted = highlightPython(content);
+    } else {
+      highlighted = escapeHtml(content);
+    }
+
+    return `<div class="file-content-with-lines"><div class="line-numbers">${lineNums}</div><div class="line-content">${highlighted}</div></div>`;
+  }
+
   function renderTextFile(result) {
     const content =
       result.type === "json" ? JSON.stringify(result.content, null, 2) : result.content;
     state.fileContent = content;
-    els.viewer.innerHTML = `<pre class="file-content">${escapeHtml(content)}</pre>`;
+
+    const isJson = result.type === "json" || state.selectedFile?.endsWith(".json");
+    const isPython = state.selectedFile?.endsWith(".py");
+
+    els.viewer.innerHTML = renderWithLineNumbers(content, isJson, isPython);
   }
 
   function renderMarkdownFile(result) {

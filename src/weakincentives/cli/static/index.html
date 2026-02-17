@@ -15,6 +15,23 @@
     <!-- Toast container -->
     <div id="toast-container" class="toast-container"></div>
 
+    <!-- Command palette -->
+    <div id="command-palette-overlay" class="command-palette-overlay hidden" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div class="command-palette-backdrop"></div>
+      <div class="command-palette">
+        <div class="command-palette-input-wrapper">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input id="command-palette-input" class="command-palette-input" type="text" placeholder="Search slices, logs, files, commands..." autocomplete="off" />
+        </div>
+        <div id="command-palette-results" class="command-palette-results">
+          <div class="command-palette-empty">Type to search across all views</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Keyboard shortcuts help overlay -->
     <div id="shortcuts-overlay" class="shortcuts-overlay hidden" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
       <div class="shortcuts-backdrop"></div>
@@ -33,14 +50,19 @@
             <h3>Navigation</h3>
             <div class="shortcut-row"><kbd>J</kbd> / <kbd>↓</kbd><span>Next item</span></div>
             <div class="shortcut-row"><kbd>K</kbd> / <kbd>↑</kbd><span>Previous item</span></div>
+            <div class="shortcut-row"><kbd>G</kbd><span>Jump to end</span></div>
+            <div class="shortcut-row"><kbd>g</kbd> <kbd>g</kbd><span>Jump to start</span></div>
             <div class="shortcut-row"><kbd>←</kbd><span>Previous bundle</span></div>
             <div class="shortcut-row"><kbd>→</kbd><span>Next bundle</span></div>
           </div>
           <div class="shortcuts-section">
             <h3>Actions</h3>
+            <div class="shortcut-row"><kbd>⌘</kbd><kbd>K</kbd><span>Command palette</span></div>
             <div class="shortcut-row"><kbd>/</kbd><span>Focus search</span></div>
+            <div class="shortcut-row"><kbd>Enter</kbd><span>Expand focused</span></div>
+            <div class="shortcut-row"><kbd>Space</kbd><span>Toggle collapse</span></div>
             <div class="shortcut-row"><kbd>R</kbd><span>Reload bundle</span></div>
-            <div class="shortcut-row"><kbd>D</kbd><span>Toggle dark mode</span></div>
+            <div class="shortcut-row"><kbd>D</kbd><span>Toggle theme</span></div>
           </div>
           <div class="shortcuts-section">
             <h3>View</h3>
@@ -141,7 +163,7 @@
           <path d="M12 1v6m0 6v6m5.2-14.2l-4.2 4.2m0 6l4.2 4.2M23 12h-6m-6 0H1m20.2 5.2l-4.2-4.2m0-6l4.2-4.2"></path>
         </svg>
         Environment
-        <kbd>6</kbd>
+        <kbd>5</kbd>
       </button>
     </nav>
 
@@ -150,7 +172,6 @@
       <aside class="sidebar">
         <div class="panel">
           <div class="panel-header">
-            <h2>Slices</h2>
             <input
               id="slice-filter"
               type="search"
@@ -279,12 +300,14 @@
         </div>
       </aside>
       <section class="content logs-content">
+        <div id="transcript-minimap" class="transcript-minimap">
+          <div id="transcript-minimap-bar" class="transcript-minimap-bar"></div>
+        </div>
         <div class="logs-toolbar">
           <div class="logs-toolbar-left">
             <span id="transcript-showing"></span>
           </div>
           <div class="logs-toolbar-right">
-            <button id="transcript-copy" class="ghost" type="button">Copy filtered</button>
             <button id="transcript-scroll-bottom" class="ghost" type="button">Scroll to bottom</button>
           </div>
         </div>
@@ -368,7 +391,6 @@
             <span id="logs-showing"></span>
           </div>
           <div class="logs-toolbar-right">
-            <button id="logs-copy" class="ghost" type="button">Copy filtered</button>
             <button id="logs-scroll-bottom" class="ghost" type="button">Scroll to bottom</button>
           </div>
         </div>
@@ -381,7 +403,6 @@
       <aside class="sidebar">
         <div class="panel">
           <div class="panel-header">
-            <h2>Workspace Snapshot</h2>
             <input
               id="filesystem-filter"
               type="search"
