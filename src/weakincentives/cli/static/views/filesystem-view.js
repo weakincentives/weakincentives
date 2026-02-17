@@ -114,10 +114,23 @@ export function initFilesystemView({ state, fetchJSON, showToast }) {
   function highlightPython(text) {
     const keywords =
       /\b(def|class|import|from|return|if|elif|else|for|while|try|except|finally|with|as|yield|raise|pass|break|continue|and|or|not|in|is|lambda|None|True|False|self)\b/g;
-    let escaped = escapeHtml(text);
-    escaped = escaped.replace(/#.*$/gm, (m) => `<span class="syntax-comment">${m}</span>`);
-    escaped = escaped.replace(keywords, '<span class="syntax-keyword">$&</span>');
-    return escaped;
+    // Process line-by-line: apply keywords only to code (not comments)
+    // to avoid mangling class attributes inside comment <span> tags.
+    return escapeHtml(text)
+      .split("\n")
+      .map((line) => {
+        const commentIdx = line.indexOf("#");
+        if (commentIdx === -1) {
+          return line.replace(keywords, '<span class="syntax-keyword">$&</span>');
+        }
+        const code = line.slice(0, commentIdx);
+        const comment = line.slice(commentIdx);
+        return (
+          code.replace(keywords, '<span class="syntax-keyword">$&</span>') +
+          `<span class="syntax-comment">${comment}</span>`
+        );
+      })
+      .join("\n");
   }
 
   function renderWithLineNumbers(content, isJson, isPython) {

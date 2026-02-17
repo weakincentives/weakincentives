@@ -82,7 +82,9 @@ themeToggle.addEventListener("click", toggleTheme);
 function applySidebarState() {
   document.querySelectorAll(".view-container").forEach((view) => {
     view.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
-    if (!state.sidebarCollapsed) {
+    if (state.sidebarCollapsed) {
+      view.style.gridTemplateColumns = "";
+    } else {
       view.style.gridTemplateColumns = `${state.sidebarWidth}px 1fr`;
     }
   });
