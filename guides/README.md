@@ -27,6 +27,7 @@ debug issues when they arise.
 1. [Skills Authoring](skills-authoring.md) - Create and mount custom skills
 1. [Orchestration](orchestration.md) - Handle requests at scale
 1. [Lifecycle](lifecycle.md) - Health checks, shutdown, watchdogs
+1. [Guardrails](guardrails.md) - Feedback, task completion, and lease extension
 1. [Debugging](debugging.md) - Inspect and troubleshoot sessions
 
 ### For Advanced Users
@@ -69,6 +70,7 @@ debug issues when they arise.
 | [Orchestration](orchestration.md) | Use MainLoop for request handling |
 | [Evaluation](evaluation.md) | Test agents with datasets and evaluators |
 | [Lifecycle](lifecycle.md) | Manage shutdown, health checks, and watchdogs |
+| [Guardrails](guardrails.md) | Feedback providers, task completion, and lease extension |
 
 ## Advanced Topics
 

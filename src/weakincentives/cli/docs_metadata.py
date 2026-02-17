@@ -71,6 +71,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "orchestration": "Use MainLoop for request handling",
     "evaluation": "Test agents with datasets and evaluators",
     "lifecycle": "Manage shutdown, health checks, and watchdogs",
+    "guardrails": "Feedback providers, task completion, and lease extension",
     "resources": "Dependency injection, scopes, and lifecycle management",
     "progressive-disclosure": "Control context size with summaries",
     "prompt-overrides": "Iterate on prompts without code changes",
