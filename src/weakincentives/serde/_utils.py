@@ -12,6 +12,9 @@
 
 """Shared helpers for dataclass serde operations."""
 
+# pyright: reportPrivateUsage=false
+# pyright: reportUnusedFunction=false
+
 from __future__ import annotations
 
 import re
@@ -40,6 +43,31 @@ def _ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
     if isinstance(values, (set, frozenset)):
         return sorted(items, key=repr)
     return items
+
+
+def _is_unbound_type(typ: object) -> bool:
+    """Check if a type is unbound (Any, object, or TypeVar).
+
+    Unbound types require the {"untyped": True} marker to be valid for
+    parsing and schema generation.
+    """
+    from ._generics import _is_typevar
+
+    return typ is _AnyType or typ is object or _is_typevar(typ)
+
+
+def _build_item_meta(
+    merged_meta: Mapping[str, object], item_type: object
+) -> dict[str, object] | None:
+    """Build metadata to propagate to a collection item or union branch.
+
+    Only propagates the untyped marker if the item_type is actually unbound
+    (Any, object, or TypeVar). This ensures that ``dict[Any, str]`` with
+    ``{"untyped": True}`` allows untyped keys but still validates string values.
+    """
+    if merged_meta.get("untyped", False) is True and _is_unbound_type(item_type):
+        return {"untyped": True}
+    return None
 
 
 @FrozenDataclass()

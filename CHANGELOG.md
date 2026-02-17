@@ -4,6 +4,39 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Breaking Changes
+
+#### Strict serde validation for unbound types
+
+`serde.parse()` now **rejects** fields typed as `Any`, `object`, or unresolved
+`TypeVar` unless explicitly opted out with `Annotated[Any, {"untyped": True}]`.
+Bare (unparameterized) collections (`list`, `dict`, `set`, `tuple`) are also
+rejected — use parameterized forms like `list[str]` instead. The `{"untyped":
+True}` marker propagates through union branches and collection items when the
+element type is itself unbound. (`serde/_coercers.py`, `serde/_utils.py`,
+`serde/schema.py`)
+
+#### PromptRendered.descriptor uses direct import
+
+`PromptRendered.descriptor` now imports `PromptDescriptor` directly instead of
+using a `TYPE_CHECKING` / `Any` alias, ensuring the serde system sees the
+correct type at runtime. (`runtime/events/__init__.py`)
+
+#### Experiment.flags annotated with untyped marker
+
+`Experiment.flags` is now `Annotated[Mapping[str, object], {"untyped": True}]`
+to satisfy strict serde validation while preserving its heterogeneous value
+type. (`experiment.py`)
+
+#### Event fields annotated with untyped markers
+
+`ToolInvoked.params`, `ToolInvoked.result`, `PromptExecuted.result`, and
+`PromptRendered.render_inputs` are now `Annotated[Any, {"untyped": True}]` to
+satisfy strict serde validation. (`runtime/events/__init__.py`,
+`runtime/events/types.py`)
+
+---
+
 *Commits reviewed: 2026-02-14 (92bc161f) through 2026-02-14 (a1c26f09)*
 
 ### TL;DR

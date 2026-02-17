@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol, cast, override
+from typing import Annotated, Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...budget import TokenUsage
@@ -115,8 +115,8 @@ class ToolInvoked:
     prompt_name: str
     adapter: AdapterName
     name: str
-    params: Any
-    result: Any
+    params: Annotated[Any, {"untyped": True}]
+    result: Annotated[Any, {"untyped": True}]
     session_id: UUID | None
     created_at: datetime
     usage: TokenUsage | None = None

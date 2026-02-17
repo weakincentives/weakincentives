@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import field, replace
-from typing import TypeVar, overload
+from typing import Annotated, TypeVar, overload
 
 from .dataclasses import FrozenDataclass
 
@@ -58,7 +58,9 @@ class Experiment:
 
     name: str
     overrides_tag: str = "latest"
-    flags: Mapping[str, object] = field(default_factory=lambda: {})
+    flags: Annotated[Mapping[str, object], {"untyped": True}] = field(
+        default_factory=lambda: {}
+    )
     owner: str | None = None
     description: str | None = None
 
