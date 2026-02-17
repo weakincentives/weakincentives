@@ -198,6 +198,14 @@ class TestMemoryByteWriter:
         with pytest.raises(ValueError, match="closed"):
             writer.write_all([b"content"])
 
+    def test_get_content_after_close_raises(self) -> None:
+        """get_content after close should raise ValueError."""
+        writer = MemoryByteWriter.create("test.bin", mode="create")
+        writer.write(b"content")
+        writer.close()
+        with pytest.raises(ValueError, match="closed"):
+            writer.get_content()
+
 
 class TestDefaultTextReader:
     """Tests for DefaultTextReader implementation."""

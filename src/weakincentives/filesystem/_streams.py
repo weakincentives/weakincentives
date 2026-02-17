@@ -528,12 +528,10 @@ class HostByteWriter:
         """
         parent_dir = resolved_path.parent
 
-        if not parent_dir.exists():
-            if not create_parents:
-                raise FileNotFoundError(
-                    f"Parent directory does not exist: {parent_dir}"
-                )
+        if create_parents:
             parent_dir.mkdir(parents=True, exist_ok=True)
+        elif not parent_dir.exists():
+            raise FileNotFoundError(f"Parent directory does not exist: {parent_dir}")
 
         if mode == "append":
             handle = resolved_path.open("ab")
@@ -865,9 +863,10 @@ class MemoryByteWriter:
     def get_content(self) -> bytes:
         """Get the complete content written to the buffer.
 
-        Must be called **before** ``close()``; after close the
-        underlying buffer is released.
+        Raises:
+            ValueError: If the writer has been closed.
         """
+        self._check_closed()
         return self._buffer.getvalue()
 
     def __enter__(self) -> Self:
