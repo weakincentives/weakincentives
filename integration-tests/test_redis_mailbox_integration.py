@@ -73,9 +73,7 @@ class TestRedisMailboxStandalone:
     def test_send_returns_message_id(self) -> None:
         """send() returns a unique message ID."""
         with redis_standalone() as client:
-            mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test", client=client, body_type=str
-            )
+            mailbox: RedisMailbox[str, None] = RedisMailbox(name="test", client=client)
             try:
                 msg_id = mailbox.send("hello")
                 assert isinstance(msg_id, str)
@@ -86,9 +84,7 @@ class TestRedisMailboxStandalone:
     def test_send_and_receive_basic(self) -> None:
         """Basic send and receive workflow."""
         with redis_standalone() as client:
-            mailbox: RedisMailbox[_Event, None] = RedisMailbox(
-                name="test", client=client, body_type=_Event
-            )
+            mailbox = RedisMailbox[_Event, None](name="test", client=client)
             try:
                 event = _Event(data="test-data", count=42)
                 mailbox.send(event)
@@ -104,7 +100,7 @@ class TestRedisMailboxStandalone:
         """receive() returns empty list when queue is empty."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-empty", client=client, body_type=str
+                name="test-empty", client=client
             )
             try:
                 messages = mailbox.receive(max_messages=1)
@@ -116,7 +112,7 @@ class TestRedisMailboxStandalone:
         """receive() respects max_messages limit."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[int, None] = RedisMailbox(
-                name="test-max", client=client, body_type=int
+                name="test-max", client=client
             )
             try:
                 for i in range(5):
@@ -133,7 +129,7 @@ class TestRedisMailboxStandalone:
         """Messages are received in FIFO order."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[int, None] = RedisMailbox(
-                name="test-fifo", client=client, body_type=int
+                name="test-fifo", client=client
             )
             try:
                 for i in range(3):
@@ -148,7 +144,7 @@ class TestRedisMailboxStandalone:
         """acknowledge() removes message from queue."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-ack", client=client, body_type=str
+                name="test-ack", client=client
             )
             try:
                 mailbox.send("hello")
@@ -164,7 +160,7 @@ class TestRedisMailboxStandalone:
         """acknowledge() raises ReceiptHandleExpiredError for invalid handle."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-ack-expired", client=client, body_type=str
+                name="test-ack-expired", client=client
             )
             try:
                 mailbox.send("hello")
@@ -180,7 +176,7 @@ class TestRedisMailboxStandalone:
         """nack() returns message to queue for redelivery."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-nack", client=client, body_type=str
+                name="test-nack", client=client
             )
             try:
                 mailbox.send("hello")
@@ -199,7 +195,7 @@ class TestRedisMailboxStandalone:
         """nack() raises ReceiptHandleExpiredError for invalid handle."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-nack-expired", client=client, body_type=str
+                name="test-nack-expired", client=client
             )
             try:
                 mailbox.send("hello")
@@ -215,7 +211,7 @@ class TestRedisMailboxStandalone:
         """extend_visibility() raises ReceiptHandleExpiredError for invalid handle."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-extend-expired", client=client, body_type=str
+                name="test-extend-expired", client=client
             )
             try:
                 mailbox.send("hello")
@@ -233,7 +229,6 @@ class TestRedisMailboxStandalone:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
                 name="test-visibility",
                 client=client,
-                body_type=str,
                 reaper_interval=0.1,
             )
             try:
@@ -264,7 +259,6 @@ class TestRedisMailboxStandalone:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
                 name="test-stale-handle",
                 client=client,
-                body_type=str,
                 reaper_interval=0.1,
             )
             try:
@@ -300,7 +294,6 @@ class TestRedisMailboxStandalone:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
                 name="test-stale-nack",
                 client=client,
-                body_type=str,
                 reaper_interval=0.1,
             )
             try:
@@ -332,7 +325,6 @@ class TestRedisMailboxStandalone:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
                 name="test-stale-extend",
                 client=client,
-                body_type=str,
                 reaper_interval=0.1,
             )
             try:
@@ -362,7 +354,7 @@ class TestRedisMailboxStandalone:
         """purge() removes all messages from queue."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[int, None] = RedisMailbox(
-                name="test-purge", client=client, body_type=int
+                name="test-purge", client=client
             )
             try:
                 for i in range(5):
@@ -378,7 +370,7 @@ class TestRedisMailboxStandalone:
         """approximate_count() returns correct message count."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[int, None] = RedisMailbox(
-                name="test-count", client=client, body_type=int
+                name="test-count", client=client
             )
             try:
                 assert mailbox.approximate_count() == 0
@@ -396,7 +388,7 @@ class TestRedisMailboxStandalone:
         """MailboxFullError raised when max_size exceeded."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[int, None] = RedisMailbox(
-                name="test-maxsize", client=client, body_type=int, max_size=2
+                name="test-maxsize", client=client, max_size=2
             )
             try:
                 mailbox.send(1)
@@ -411,7 +403,7 @@ class TestRedisMailboxStandalone:
         """send() serializes reply_to mailbox name; default resolver resolves it."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-reply-to", client=client, body_type=str
+                name="test-reply-to", client=client
             )
             responses: RedisMailbox[None, None] = RedisMailbox(
                 name="responses", client=client
@@ -435,7 +427,7 @@ class TestRedisMailboxStandalone:
         with redis_standalone() as client:
             # Create response mailbox first
             responses: RedisMailbox[str, None] = RedisMailbox(
-                name="responses", client=client, body_type=str
+                name="responses", client=client
             )
             # Create resolver that knows about the responses mailbox
             resolver = CompositeResolver[str](
@@ -446,7 +438,6 @@ class TestRedisMailboxStandalone:
             requests: RedisMailbox[str, str] = RedisMailbox(
                 name="test-reply-roundtrip",
                 client=client,
-                body_type=str,
                 reply_resolver=resolver,
             )
             try:
@@ -472,7 +463,7 @@ class TestRedisMailboxStandalone:
         """wait_time_seconds blocks until message arrives."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-longpoll", client=client, body_type=str
+                name="test-longpoll", client=client
             )
             try:
 
@@ -499,7 +490,7 @@ class TestRedisMailboxStandalone:
         """wait_time_seconds returns empty on timeout."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-longpoll-timeout", client=client, body_type=str
+                name="test-longpoll-timeout", client=client
             )
             try:
                 start = time.monotonic()
@@ -515,7 +506,7 @@ class TestRedisMailboxStandalone:
         """Mailbox is thread-safe for concurrent access."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[int, None] = RedisMailbox(
-                name="test-threadsafe", client=client, body_type=int
+                name="test-threadsafe", client=client
             )
             try:
                 num_messages = 100
@@ -556,7 +547,7 @@ class TestRedisMailboxStandalone:
         """Message enqueued_at is set correctly."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-enqueued", client=client, body_type=str
+                name="test-enqueued", client=client
             )
             try:
                 mailbox.send("hello")
@@ -569,7 +560,7 @@ class TestRedisMailboxStandalone:
         """extend_visibility() extends timeout for valid handle."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-extend", client=client, body_type=str, reaper_interval=0.1
+                name="test-extend", client=client, reaper_interval=0.1
             )
             try:
                 mailbox.send("hello")
@@ -598,7 +589,6 @@ class TestRedisMailboxStandalone:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
                 name="test-nack-delay",
                 client=client,
-                body_type=str,
                 reaper_interval=0.1,
             )
             try:
@@ -624,7 +614,7 @@ class TestRedisMailboxStandalone:
         """RedisMailbox implements Mailbox protocol."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-protocol", client=client, body_type=str
+                name="test-protocol", client=client
             )
             try:
                 assert isinstance(mailbox, Mailbox)
@@ -635,7 +625,7 @@ class TestRedisMailboxStandalone:
         """RedisMailbox.closed is False initially."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-closed", client=client, body_type=str
+                name="test-closed", client=client
             )
             try:
                 assert mailbox.closed is False
@@ -646,7 +636,7 @@ class TestRedisMailboxStandalone:
         """RedisMailbox.closed is True after close()."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-closed-after", client=client, body_type=str
+                name="test-closed-after", client=client
             )
             mailbox.close()
             assert mailbox.closed is True
@@ -655,7 +645,7 @@ class TestRedisMailboxStandalone:
         """RedisMailbox.receive() returns empty when closed."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
-                name="test-closed-receive", client=client, body_type=str
+                name="test-closed-receive", client=client
             )
             mailbox.send("test")
             mailbox.close()
@@ -668,10 +658,10 @@ class TestRedisMailboxStandalone:
         """Messages in different queues are isolated."""
         with redis_standalone() as client:
             mailbox1: RedisMailbox[str, None] = RedisMailbox(
-                name="queue1", client=client, body_type=str
+                name="queue1", client=client
             )
             mailbox2: RedisMailbox[str, None] = RedisMailbox(
-                name="queue2", client=client, body_type=str
+                name="queue2", client=client
             )
             try:
                 mailbox1.send("message1")
@@ -709,9 +699,7 @@ class TestRedisMailboxCluster:
     def test_send_and_receive_cluster(self) -> None:
         """Basic send and receive workflow on cluster."""
         with redis_cluster() as client:
-            mailbox: RedisMailbox[_Event, None] = RedisMailbox(
-                name="test-cluster", client=client, body_type=_Event
-            )
+            mailbox = RedisMailbox[_Event, None](name="test-cluster", client=client)
             try:
                 event = _Event(data="cluster-test", count=123)
                 mailbox.send(event)
@@ -728,7 +716,7 @@ class TestRedisMailboxCluster:
             # Send multiple messages - if hash tags don't work,
             # Lua scripts would fail with CROSSSLOT error
             mailbox: RedisMailbox[int, None] = RedisMailbox(
-                name="test-hashtag", client=client, body_type=int
+                name="test-hashtag", client=client
             )
             try:
                 for i in range(10):
@@ -751,7 +739,6 @@ class TestRedisMailboxCluster:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
                 name="test-cluster-vis",
                 client=client,
-                body_type=str,
                 reaper_interval=0.1,
             )
             try:
@@ -773,7 +760,7 @@ class TestRedisMailboxCluster:
         """purge() works on cluster."""
         with redis_cluster() as client:
             mailbox: RedisMailbox[int, None] = RedisMailbox(
-                name="test-cluster-purge", client=client, body_type=int
+                name="test-cluster-purge", client=client
             )
             try:
                 for i in range(5):
