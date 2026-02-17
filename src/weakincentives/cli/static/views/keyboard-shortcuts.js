@@ -15,6 +15,8 @@
  * @param {function} deps.toggleTheme - Theme toggle function
  * @param {function} deps.toggleSidebar - Sidebar toggle function
  * @param {function} deps.navigateBundle - Bundle navigation function
+ * @param {function} deps.openCommandPalette - Command palette open function
+ * @param {function} deps.closeCommandPalette - Command palette close function
  */
 export function initKeyboardShortcuts({
   state,
@@ -26,6 +28,8 @@ export function initKeyboardShortcuts({
   toggleTheme,
   toggleSidebar,
   navigateBundle,
+  openCommandPalette,
+  closeCommandPalette,
 }) {
   const els = {
     shortcutsOverlay: document.getElementById("shortcuts-overlay"),
@@ -90,9 +94,64 @@ export function initKeyboardShortcuts({
     }
   }
 
+  // Jump to start/end
+
+  function scrollListToEnd(id) {
+    const list = document.getElementById(id);
+    if (list) {
+      list.scrollTop = list.scrollHeight;
+    }
+  }
+
+  function scrollListToStart(id) {
+    const list = document.getElementById(id);
+    if (list) {
+      list.scrollTop = 0;
+    }
+  }
+
+  const JUMP_END_HANDLERS = {
+    sessions: () => {
+      const items = document.querySelectorAll("#json-viewer .item-card");
+      if (items.length > 0) {
+        sessionsView.focusItem(items.length - 1);
+      }
+    },
+    transcript: () => scrollListToEnd("transcript-list"),
+    logs: () => scrollListToEnd("logs-list"),
+  };
+
+  const JUMP_START_HANDLERS = {
+    sessions: () => sessionsView.focusItem(0),
+    transcript: () => scrollListToStart("transcript-list"),
+    logs: () => scrollListToStart("logs-list"),
+  };
+
+  function jumpToEnd() {
+    const handler = JUMP_END_HANDLERS[state.activeView];
+    if (handler) {
+      handler();
+    }
+  }
+
+  function jumpToStart() {
+    const handler = JUMP_START_HANDLERS[state.activeView];
+    if (handler) {
+      handler();
+    }
+  }
+
+  // -- gg (double-g) detection --
+  let lastGTime = 0;
+
   // -- Key handler helpers --
 
   function handleEscapeKey(e) {
+    if (state.commandPaletteOpen) {
+      e.preventDefault();
+      closeCommandPalette();
+      return true;
+    }
     if (state.shortcutsOpen) {
       e.preventDefault();
       closeShortcuts();
@@ -150,40 +209,96 @@ export function initKeyboardShortcuts({
     return false;
   }
 
-  function handleGlobalShortcuts(e) {
-    const key = e.key;
-
-    if (handleTabShortcut(e, key)) {
-      return true;
+  function toggleCommandPalette(e) {
+    e.preventDefault();
+    if (state.commandPaletteOpen) {
+      closeCommandPalette();
+    } else {
+      openCommandPalette();
     }
+  }
 
-    if (KEYBOARD_SHORTCUTS[key]) {
+  function isCommandPaletteKey(e) {
+    return (e.metaKey || e.ctrlKey) && e.key === "k";
+  }
+
+  function handleDoubleG(e) {
+    const now = Date.now();
+    if (now - lastGTime < 400) {
       e.preventDefault();
-      KEYBOARD_SHORTCUTS[key]();
+      jumpToStart();
+      lastGTime = 0;
       return true;
     }
+    lastGTime = now;
+    return false;
+  }
 
+  function handleJumpEnd(e) {
+    e.preventDefault();
+    jumpToEnd();
+    return true;
+  }
+
+  function handleJumpShortcut(e, key) {
+    if (key === "G") {
+      return handleJumpEnd(e);
+    }
+    if (key === "g" && !e.shiftKey) {
+      return handleDoubleG(e);
+    }
+    return false;
+  }
+
+  function handleHelpShortcut(e, key) {
     if (key === "?" || (e.shiftKey && key === "/")) {
       e.preventDefault();
       openShortcuts();
       return true;
     }
+    return false;
+  }
 
-    return handleArrowShortcut(e, key);
+  function handleMappedShortcut(e, key) {
+    if (KEYBOARD_SHORTCUTS[key]) {
+      e.preventDefault();
+      KEYBOARD_SHORTCUTS[key]();
+      return true;
+    }
+    return false;
+  }
+
+  const SHORTCUT_CHAIN = [
+    (e, key) => handleTabShortcut(e, key),
+    (e, key) => handleJumpShortcut(e, key),
+    (e, key) => handleMappedShortcut(e, key),
+    (e, key) => handleHelpShortcut(e, key),
+    (e, key) => handleArrowShortcut(e, key),
+  ];
+
+  function handleGlobalShortcuts(e) {
+    if (isCommandPaletteKey(e)) {
+      toggleCommandPalette(e);
+      return true;
+    }
+    const key = e.key;
+    return SHORTCUT_CHAIN.some((handler) => handler(e, key));
   }
 
   // -- Global keydown handler --
 
   function handleKeydown(e) {
+    if (isCommandPaletteKey(e)) {
+      toggleCommandPalette(e);
+      return;
+    }
     if (e.key === "Escape") {
       handleEscapeKey(e);
       return;
     }
-
-    if (state.shortcutsOpen || isInputElement(e.target)) {
+    if (state.shortcutsOpen || state.commandPaletteOpen || isInputElement(e.target)) {
       return;
     }
-
     handleGlobalShortcuts(e);
   }
 

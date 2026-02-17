@@ -294,7 +294,6 @@ export function initTranscriptView({ state, fetchJSON, showToast }) {
     search: document.getElementById("transcript-search"),
     clearFilters: document.getElementById("transcript-clear-filters"),
     showing: document.getElementById("transcript-showing"),
-    copy: document.getElementById("transcript-copy"),
     scrollBottom: document.getElementById("transcript-scroll-bottom"),
     list: document.getElementById("transcript-list"),
     sourceFilter: document.getElementById("transcript-source-filter"),
@@ -303,6 +302,7 @@ export function initTranscriptView({ state, fetchJSON, showToast }) {
     typeChips: document.getElementById("transcript-type-chips"),
     activeFilters: document.getElementById("transcript-active-filters"),
     activeFiltersGroup: document.getElementById("transcript-active-filters-group"),
+    minimapBar: document.getElementById("transcript-minimap-bar"),
   };
 
   let searchTimeout = null;
@@ -319,6 +319,38 @@ export function initTranscriptView({ state, fetchJSON, showToast }) {
     return preprocessTranscriptEntries(entries);
   }
 
+  function renderMinimap() {
+    if (!els.minimapBar) {
+      return;
+    }
+    els.minimapBar.innerHTML = "";
+    const entries = state.transcriptEntries;
+    if (entries.length === 0) {
+      return;
+    }
+
+    function scrollToEntry(index) {
+      if (state.transcriptScroller) {
+        state.transcriptScroller.scrollToIndex(index);
+      } else {
+        const entryEls = els.list.querySelectorAll(".transcript-entry");
+        if (entryEls[index]) {
+          entryEls[index].scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+    }
+
+    entries.forEach((entry, index) => {
+      const tick = document.createElement("div");
+      const entryType = entry.entry_type || "unknown";
+      const role = entry.role || "";
+      tick.className = `transcript-minimap-tick ${role ? `role-${role}` : `type-${entryType}`}`;
+      tick.title = `#${index + 1} ${role || entryType}`;
+      tick.addEventListener("click", () => scrollToEntry(index));
+      els.minimapBar.appendChild(tick);
+    });
+  }
+
   function updateDisplay() {
     if (state.transcriptScroller) {
       state.transcriptScroller.setData(
@@ -331,6 +363,7 @@ export function initTranscriptView({ state, fetchJSON, showToast }) {
       renderTranscript();
     }
     updateStats();
+    renderMinimap();
   }
 
   function showError(message) {
@@ -657,16 +690,6 @@ export function initTranscriptView({ state, fetchJSON, showToast }) {
 
     renderFilterChips();
     loadTranscript(false);
-  });
-
-  els.copy.addEventListener("click", async () => {
-    const text = JSON.stringify(state.transcriptEntries, null, 2);
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast("Copied transcript entries", "success");
-    } catch {
-      showToast("Failed to copy", "error");
-    }
   });
 
   els.scrollBottom.addEventListener("click", () => {

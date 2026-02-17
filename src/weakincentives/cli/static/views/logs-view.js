@@ -99,7 +99,6 @@ export function initLogsView({ state, fetchJSON, showToast }) {
     search: document.getElementById("logs-search"),
     clearFilters: document.getElementById("logs-clear-filters"),
     showing: document.getElementById("logs-showing"),
-    copy: document.getElementById("logs-copy"),
     scrollBottom: document.getElementById("logs-scroll-bottom"),
     list: document.getElementById("logs-list"),
     loggerFilter: document.getElementById("logs-logger-filter"),
@@ -450,16 +449,6 @@ export function initLogsView({ state, fetchJSON, showToast }) {
 
     renderFilterChips();
     loadLogs(false);
-  });
-
-  els.copy.addEventListener("click", async () => {
-    const text = JSON.stringify(state.filteredLogs, null, 2);
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast("Copied filtered logs", "success");
-    } catch {
-      showToast("Failed to copy", "error");
-    }
   });
 
   els.scrollBottom.addEventListener("click", () => {

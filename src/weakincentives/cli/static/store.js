@@ -16,7 +16,7 @@ export function createInitialState() {
     meta: null,
     bundles: [],
     activeView: "sessions",
-    theme: localStorage.getItem("wink-theme") || "light",
+    theme: localStorage.getItem("wink-theme") || "dark",
     sidebarCollapsed: localStorage.getItem("wink-sidebar-collapsed") === "true",
     // Sessions (slices) state
     selectedSlice: null,
@@ -80,6 +80,10 @@ export function createInitialState() {
     hasEnvironmentData: false,
     // Shortcuts overlay
     shortcutsOpen: false,
+    // Command palette
+    commandPaletteOpen: false,
+    // Sidebar resize
+    sidebarWidth: Number.parseInt(localStorage.getItem("wink-sidebar-width"), 10) || 280,
     // Virtual scrollers (initialized after DOM ready)
     logsScroller: null,
     transcriptScroller: null,
