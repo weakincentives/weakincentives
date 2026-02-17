@@ -20,6 +20,7 @@ from __future__ import annotations
 SPEC_DESCRIPTIONS: dict[str, str] = {
     "ACK": "Adapter Compatibility Kit, unified integration testing for all adapters",
     "ADAPTERS": "Provider integrations, structured output, throttling",
+    "ANALYSIS_LOOP": "Background analysis agent, wink query, analysis bundles, sampling",
     "CLAUDE_AGENT_SDK": "Claude Agent SDK adapter, MCP tool bridging, skill mounting",
     "CODEX_APP_SERVER": "Codex App Server adapter, stdio JSON-RPC, thread/turn lifecycle",
     "CLOCK": "Controllable time abstractions, clock injection, testing patterns",
