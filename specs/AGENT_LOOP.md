@@ -171,6 +171,20 @@ with loop.execute_with_bundle(request, bundle_target=Path("./bundles")) as ctx:
 - No mid-execution cancellation
 - Events local to process
 
+## Consumers
+
+### EvalLoop
+
+`EvalLoop` wraps `AgentLoop` for evaluation datasets. See `specs/EVALS.md`.
+
+### Wink Debug Analysis Jobs
+
+The `wink debug` web UI dispatches an `AgentLoop.execute()` call to produce a
+structured analysis report for a loaded debug bundle. The analysis loop uses a
+dedicated `PromptTemplate[AnalysisReport]` with read-only bundle tools and runs
+in a background thread on the debug server. See `specs/WINK_DEBUG.md` §Analysis
+Jobs.
+
 ## Related Specifications
 
 - `specs/DLQ.md` - Dead letter queue configuration
@@ -178,3 +192,4 @@ with loop.execute_with_bundle(request, bundle_target=Path("./bundles")) as ctx:
 - `specs/LIFECYCLE.md` - LoopGroup coordination
 - `specs/EVALS.md` - EvalLoop wrapping AgentLoop
 - `specs/DEBUG_BUNDLE.md` - Bundle creation and artifacts
+- `specs/WINK_DEBUG.md` - Debug bundle explorer and analysis jobs

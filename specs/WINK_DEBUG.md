@@ -102,8 +102,10 @@ UI ──GET /api/analysis/report──→ Server ◄─┘  report persisted
 2. **Execution** — Server extracts bundle contents (manifest, request, session
    state, logs, transcript, metrics, error, config) into a context payload.
    Logs are sampled if over a size threshold; filesystem contents are summarized
-   as a file listing rather than included verbatim. An `AgentLoop` executes
-   with a purpose-built analysis prompt and read-only bundle tools.
+   as a file listing rather than included verbatim. A concrete `AgentLoop`
+   subclass (`BundleAnalysisLoop`) calls `execute()` with a purpose-built
+   analysis prompt and read-only bundle tools. This follows the same
+   prepare → evaluate → finalize flow described in `specs/AGENT_LOOP.md`.
 
 3. **Completion** — Report persisted alongside the bundle as
    `{bundle_id}_analysis.json`. Job transitions to `completed`. On agent
