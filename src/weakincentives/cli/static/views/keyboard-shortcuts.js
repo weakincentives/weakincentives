@@ -241,7 +241,7 @@ export function initKeyboardShortcuts({
   }
 
   function handleJumpShortcut(e, key) {
-    if (key === "G" && !e.shiftKey) {
+    if (key === "G") {
       return handleJumpEnd(e);
     }
     if (key === "g" && !e.shiftKey) {
