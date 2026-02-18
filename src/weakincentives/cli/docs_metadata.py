@@ -44,6 +44,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "ACP_ADAPTER": "Generic ACP adapter, protocol flow, MCP HTTP bridging",
     "OPENCODE_ACP_ADAPTER": "Superseded — see ACP_ADAPTER and OPENCODE_ADAPTER",
     "OPENCODE_ADAPTER": "OpenCode ACP adapter, model validation, quirk handling",
+    "GEMINI_ACP": "Gemini CLI ACP adapter, protocol compatibility, authentication",
     "POLICIES_OVER_WORKFLOWS": "Philosophy of declarative policies vs rigid workflows",
     "PROMPTS": "Prompt system, composition, overrides, structured output, resources",
     "RESOURCE_REGISTRY": "Dependency injection, resource scopes, transactional snapshots",
