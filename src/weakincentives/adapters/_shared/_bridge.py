@@ -29,7 +29,7 @@ from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.policy import PolicyDecision
 from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
-from ...runtime.events import ToolInvoked
+from ...runtime.events import PolicyChecked, ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
 from ...runtime.transactions import (
@@ -403,18 +403,35 @@ class BridgedTool:
         """Check tool policies before handler execution.
 
         Returns denial message if any policy denies the call, None otherwise.
+        Dispatches a :class:`PolicyChecked` telemetry event for every check.
         """
         policies = self._prompt.policies_for_tool(self.name)
         for policy in policies:
             decision: PolicyDecision = policy.check(self._tool, params, context=context)
+            policy_name = getattr(policy, "name", "unknown")
+
+            # Dispatch telemetry for every policy evaluation
+            _ = self._session.dispatcher.dispatch(
+                PolicyChecked(
+                    policy_name=policy_name,
+                    tool_name=self.name,
+                    allowed=decision.allowed,
+                    created_at=SYSTEM_CLOCK.utcnow(),
+                    reason=decision.reason,
+                    suggestions=decision.suggestions,
+                )
+            )
+
             if not decision.allowed:
                 reason = decision.reason or "Denied by policy."
+                if decision.suggestions:
+                    reason = f"{reason} Suggestions: {'; '.join(decision.suggestions)}"
                 logger.info(
                     "claude_agent_sdk.bridge.policy_denied",
                     event="bridge.policy_denied",
                     context={
                         "tool_name": self.name,
-                        "policy": getattr(policy, "name", "unknown"),
+                        "policy": policy_name,
                         "reason": reason,
                     },
                 )

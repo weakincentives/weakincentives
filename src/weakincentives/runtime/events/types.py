@@ -126,12 +126,30 @@ class ToolInvoked:
     event_id: UUID = field(default_factory=uuid4)
 
 
+@FrozenDataclass()
+class PolicyChecked:
+    """Event emitted when a tool policy is evaluated.
+
+    Dispatched for every policy check (both allow and deny), providing
+    full observability into policy enforcement decisions.
+    """
+
+    policy_name: str
+    tool_name: str
+    allowed: bool
+    created_at: datetime
+    reason: str | None = None
+    suggestions: tuple[str, ...] = ()
+    event_id: UUID = field(default_factory=uuid4)
+
+
 __all__ = [
     "ControlDispatcher",
     "DispatchResult",
     "Dispatcher",
     "EventHandler",
     "HandlerFailure",
+    "PolicyChecked",
     "TelemetryDispatcher",
     "TokenUsage",
     "ToolInvoked",
