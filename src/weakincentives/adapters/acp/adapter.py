@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -30,7 +29,6 @@ from ...deadlines import Deadline
 from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
-from ...prompt.structured_output import OutputParseError, parse_structured_output
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
@@ -46,6 +44,15 @@ from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
 from ._async import run_async
 from ._events import dispatch_tool_invoked, extract_token_usage
+from ._execution import (
+    build_env,
+    configure_session,
+    drain_quiet_period,
+    extract_client_text,
+    handshake,
+    resolve_structured_output,
+    send_prompt,
+)
 from ._guardrails import (
     accumulate_usage,
     append_feedback as _append_feedback,
@@ -68,25 +75,6 @@ def _noop() -> None:
 
 def _utcnow() -> datetime:
     return SYSTEM_CLOCK.utcnow()
-
-
-def _extract_chunk_text(chunk: Any) -> str:
-    """Extract text content from an ACP update chunk.
-
-    The ``content`` attribute may be a plain string, a ``TextContentBlock``
-    with a ``.text`` attribute, or a list of content blocks.
-    """
-    raw = getattr(chunk, "content", "")
-    if isinstance(raw, str):
-        return raw
-    # TextContentBlock or similar pydantic model
-    text = getattr(raw, "text", None)
-    if isinstance(text, str):
-        return text
-    # List of content blocks
-    if isinstance(raw, list):
-        return "".join(getattr(b, "text", str(b)) for b in raw if b)
-    return str(raw) if raw else ""
 
 
 class ACPAdapter(ProviderAdapter[Any]):
@@ -441,7 +429,7 @@ class ACPAdapter(ProviderAdapter[Any]):
 
         output: OutputT | None = None
         if rendered.output_type is not None:
-            output = self._resolve_structured_output(
+            output = resolve_structured_output(
                 accumulated_text, rendered, prompt_name, structured_capture
             )
 
@@ -534,8 +522,13 @@ class ACPAdapter(ProviderAdapter[Any]):
                 transport_kwargs={"limit": stdio_limit},
             ) as (conn, _proc):
                 try:
-                    acp_session_id = await asyncio.wait_for(
-                        self._handshake(conn, effective_cwd, mcp_servers),
+                    acp_session_id, available_models = await asyncio.wait_for(
+                        handshake(
+                            conn,
+                            effective_cwd,
+                            mcp_servers,
+                            client_config=self._client_config,
+                        ),
                         timeout=self._client_config.startup_timeout_s,
                     )
                 except TimeoutError:
@@ -547,7 +540,17 @@ class ACPAdapter(ProviderAdapter[Any]):
                         prompt_name=prompt_name,
                         phase="request",
                     ) from None
-                await self._configure_session(conn, acp_session_id)
+
+                if self._adapter_config.model_id:
+                    self._validate_model(
+                        self._adapter_config.model_id, available_models
+                    )
+
+                mode_error = await configure_session(
+                    conn, acp_session_id, adapter_config=self._adapter_config
+                )
+                if mode_error is not None:
+                    self._handle_mode_error(mode_error)
 
                 return await self._run_prompt_loop(
                     conn=conn,
@@ -586,8 +589,6 @@ class ACPAdapter(ProviderAdapter[Any]):
         structured_capture: Any,
     ) -> tuple[str | None, TokenUsage | None]:
         """Run the prompt turn + task completion continuation loop."""
-        from acp.schema import TextContentBlock
-
         max_continuation_rounds = 10
         continuation_round = 0
         current_prompt_text = prompt_text
@@ -595,15 +596,20 @@ class ACPAdapter(ProviderAdapter[Any]):
         usage: TokenUsage | None = None
 
         while True:
-            prompt_resp = await self._send_prompt(
+            prompt_resp = await send_prompt(
                 conn=conn,
                 acp_session_id=acp_session_id,
                 text=current_prompt_text,
                 prompt_name=prompt_name,
                 deadline=deadline,
-                text_content_block_cls=TextContentBlock,
             )
-            await self._drain_quiet_period(client, deadline)
+            await drain_quiet_period(
+                client,
+                deadline,
+                quiet_period_ms=self._adapter_config.quiet_period_ms,
+                clock=self._clock,
+                async_sleeper=self._async_sleeper,
+            )
 
             # Skip empty response check on first round only.
             need_empty_check = continuation_round == 0 and not (
@@ -628,7 +634,10 @@ class ACPAdapter(ProviderAdapter[Any]):
                     rendered_output=tc_data.get("output", ""),
                 )
 
-            accumulated_text = self._extract_text(client)
+            accumulated_text = extract_client_text(
+                client,
+                emit_thought_chunks=self._adapter_config.emit_thought_chunks,
+            )
             turn_usage = extract_token_usage(prompt_resp.usage if prompt_resp else None)
             if turn_usage is not None:
                 usage = accumulate_usage(usage, turn_usage)
@@ -648,223 +657,6 @@ class ACPAdapter(ProviderAdapter[Any]):
             break
 
         return accumulated_text, usage
-
-    async def _send_prompt(
-        self,
-        *,
-        conn: Any,
-        acp_session_id: str,
-        text: str,
-        prompt_name: str,
-        deadline: Deadline | None,
-        text_content_block_cls: Any,
-    ) -> Any:
-        """Send a single prompt and return the response."""
-        prompt_coro = conn.prompt(
-            [text_content_block_cls(type="text", text=text)],
-            session_id=acp_session_id,
-        )
-        timeout_s = deadline.remaining().total_seconds() if deadline else None
-        try:
-            return await asyncio.wait_for(prompt_coro, timeout=timeout_s)
-        except TimeoutError:
-            raise PromptEvaluationError(
-                message="ACP prompt timed out (deadline expired)",
-                prompt_name=prompt_name,
-                phase="request",
-            ) from None
-
-    def _build_env(self) -> dict[str, str] | None:
-        """Build merged environment variables.
-
-        When ``config.env`` is set, the full ``os.environ`` is forwarded with
-        config entries taking precedence.  This mirrors stdlib
-        ``subprocess.Popen`` behaviour where ``env=None`` inherits the parent
-        environment.  Returning ``None`` (no config env) lets the subprocess
-        inherit the parent env via the stdlib default.
-        """
-        if not self._client_config.env:
-            return None
-        import os
-
-        return {**os.environ, **self._client_config.env}
-
-    async def _handshake(
-        self,
-        conn: Any,
-        effective_cwd: str,
-        mcp_servers: list[Any],
-    ) -> str:
-        """Initialize and create session. Returns session ID."""
-        from acp import PROTOCOL_VERSION
-        from acp.schema import (
-            ClientCapabilities,
-            FileSystemCapability,
-            Implementation,
-        )
-
-        _ = await conn.initialize(
-            protocol_version=PROTOCOL_VERSION,
-            client_capabilities=ClientCapabilities(
-                fs=FileSystemCapability(
-                    read_text_file=self._client_config.allow_file_reads,
-                    write_text_file=self._client_config.allow_file_writes,
-                ),
-                terminal=False,
-            ),
-            client_info=Implementation(
-                name="wink",
-                title="WINK",
-                version="0.1.0",
-            ),
-        )
-
-        new_session_resp = await conn.new_session(
-            cwd=effective_cwd,
-            mcp_servers=mcp_servers,
-        )
-        acp_session_id: str = new_session_resp.session_id
-
-        # Validate model against available models
-        available_models = (
-            new_session_resp.models.available_models if new_session_resp.models else []
-        )
-        if self._adapter_config.model_id:
-            self._validate_model(self._adapter_config.model_id, available_models)
-
-        return acp_session_id
-
-    async def _configure_session(self, conn: Any, session_id: str) -> None:
-        """Configure model and mode on the session (best-effort)."""
-        if self._adapter_config.model_id:
-            try:
-                await conn.set_session_model(
-                    session_id=session_id,
-                    model_id=self._adapter_config.model_id,
-                )
-            except Exception as err:
-                logger.warning(
-                    "acp.set_model.failed",
-                    event="set_model.failed",
-                    context={"error": str(err)},
-                )
-
-        if self._adapter_config.mode_id:
-            try:
-                await conn.set_session_mode(
-                    session_id=session_id,
-                    mode_id=self._adapter_config.mode_id,
-                )
-            except Exception as err:
-                self._handle_mode_error(err)
-
-    _MAX_DRAIN_S: float = 30.0
-
-    async def _drain_quiet_period(
-        self,
-        client: ACPClient,
-        deadline: Deadline | None,
-    ) -> None:
-        """Wait until no new updates arrive for quiet_period_ms.
-
-        If no updates have been received (``client.last_update_time is None``),
-        the drain exits immediately.  A hard cap of ``_MAX_DRAIN_S`` prevents
-        unbounded waiting when no deadline is set.
-        """
-        if client.last_update_time is None:
-            return
-
-        quiet_s = self._adapter_config.quiet_period_ms / 1000.0
-        now = self._clock.monotonic()
-        hard_cap = now + self._MAX_DRAIN_S
-        deadline_time = (
-            self._clock.monotonic() + deadline.remaining().total_seconds()
-            if deadline
-            else None
-        )
-        if deadline_time is not None:
-            effective_deadline = min(deadline_time, hard_cap)
-        else:
-            effective_deadline = hard_cap
-
-        while True:
-            now = self._clock.monotonic()
-            if now >= effective_deadline:
-                break
-
-            snapshot = client.last_update_time
-            if snapshot is None:
-                break
-
-            elapsed = now - snapshot
-            if elapsed >= quiet_s:
-                break
-
-            wait_s = quiet_s - elapsed
-            wait_s = min(wait_s, effective_deadline - now)
-            await self._async_sleeper.async_sleep(wait_s)
-
-    def _extract_text(self, client: ACPClient) -> str | None:
-        """Extract accumulated text from client message chunks."""
-        if not client.message_chunks:
-            return None
-
-        parts: list[str] = []
-
-        if self._adapter_config.emit_thought_chunks and client.thought_chunks:
-            for chunk in client.thought_chunks:
-                text = _extract_chunk_text(chunk)
-                if text:
-                    parts.append(text)
-
-        for chunk in client.message_chunks:
-            text = _extract_chunk_text(chunk)
-            if text:
-                parts.append(text)
-
-        return "".join(parts) if parts else None
-
-    def _resolve_structured_output[OutputT](
-        self,
-        accumulated_text: str | None,
-        rendered: RenderedPrompt[OutputT],
-        prompt_name: str,
-        structured_capture: Any,
-    ) -> OutputT | None:
-        """Resolve structured output from capture or text."""
-        if structured_capture is not None and structured_capture.called:
-            try:
-                return cast(
-                    OutputT,
-                    parse_structured_output(
-                        json.dumps(structured_capture.data), rendered
-                    ),
-                )
-            except (OutputParseError, TypeError, ValueError) as error:
-                raise PromptEvaluationError(
-                    message=f"Failed to parse structured output: {error}",
-                    prompt_name=prompt_name,
-                    phase="response",
-                ) from error
-
-        if accumulated_text:
-            try:
-                return cast(
-                    OutputT, parse_structured_output(accumulated_text, rendered)
-                )
-            except (OutputParseError, TypeError, ValueError) as error:
-                raise PromptEvaluationError(
-                    message=f"Failed to parse structured output: {error}",
-                    prompt_name=prompt_name,
-                    phase="response",
-                    provider_payload={"raw_text": accumulated_text[:2000]},
-                ) from error
-
-        raise PromptEvaluationError(
-            message="Structured output required but model did not produce output",
-            prompt_name=prompt_name,
-            phase="response",
-        )
 
     # -- Subclass hooks --
 
@@ -893,4 +685,4 @@ class ACPAdapter(ProviderAdapter[Any]):
         Returns:
             Tuple of (env dict or None to inherit parent, cleanup callable).
         """
-        return self._build_env(), _noop
+        return build_env(self._client_config), _noop

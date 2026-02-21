@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import re
 import types
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -46,14 +46,12 @@ from weakincentives.filesystem import (
     MAX_WRITE_BYTES,
     MAX_WRITE_LENGTH,
     READ_ENTIRE_FILE,
-    DefaultTextReader,
     FileEntry,
     FileStat,
     FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
     MemoryByteReader,
-    MemoryByteWriter,
     ReadBytesResult,
     ReadResult,
     TextReader,
@@ -63,6 +61,13 @@ from weakincentives.filesystem import (
     normalize_path,
     now,
     validate_path,
+)
+
+from ._memory_writer import (
+    InMemoryByteWriter,
+    open_read_memory,
+    open_text_memory,
+    open_write_memory,
 )
 
 # Re-export READ_ENTIRE_FILE for direct imports from this module
@@ -632,23 +637,10 @@ class InMemoryFilesystem:
     # --- Snapshot Operations ---
 
     def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
-        """Capture current filesystem state via structural sharing.
-
-        Creates an immutable snapshot by freezing references to the current
-        file and directory state. File content strings are shared between
-        the active filesystem and snapshots - only modified files allocate
-        new memory.
-
-        Args:
-            tag: Optional human-readable label for the snapshot.
-
-        Returns:
-            Immutable snapshot that can be stored in session state.
-        """
+        """Capture current filesystem state via structural sharing."""
         self._version += 1
         commit_ref = f"mem-{self._version}"
 
-        # Freeze current state (O(n) dict copy, but values are shared refs)
         frozen_state = _InMemoryState(
             files=types.MappingProxyType(dict(self._files)),
             directories=frozenset(self._directories),
@@ -664,46 +656,21 @@ class InMemoryFilesystem:
         )
 
     def restore(self, snapshot: FilesystemSnapshot) -> None:
-        """Restore filesystem state from a snapshot.
-
-        Restores the filesystem state by copying the frozen references
-        back to mutable containers. File content strings remain shared.
-
-        Args:
-            snapshot: The snapshot to restore.
-
-        Raises:
-            SnapshotRestoreError: If the snapshot's commit_ref is not found.
-        """
+        """Restore filesystem state from a snapshot."""
         if snapshot.commit_ref not in self._snapshots:
             msg = f"Unknown snapshot: {snapshot.commit_ref}"
             raise SnapshotRestoreError(msg)
 
         frozen = self._snapshots[snapshot.commit_ref]
-        self._files = dict(frozen.files)  # Mutable copy, shared values
+        self._files = dict(frozen.files)
         self._directories = set(frozen.directories)
-        # Ensure root directory exists
         self._directories.add("")
 
-    # --- Streaming Operations ---
+    # --- Streaming Operations (delegated to _memory_writer) ---
 
     def open_read(self, path: str) -> MemoryByteReader:
-        """Open a file for streaming byte reads.
-
-        Returns a ByteReader context manager for chunked reading.
-        """
-        normalized = normalize_path(path)
-        validate_path(normalized)
-
-        if normalized in self._directories:
-            msg = f"Is a directory: {path}"
-            raise IsADirectoryError(msg)
-
-        if normalized not in self._files:
-            raise FileNotFoundError(path)
-
-        file = self._files[normalized]
-        return MemoryByteReader.from_bytes(normalized or "/", file.content)
+        """Open a file for streaming byte reads."""
+        return open_read_memory(self, path)
 
     def open_write(
         self,
@@ -711,40 +678,10 @@ class InMemoryFilesystem:
         *,
         mode: Literal["create", "overwrite", "append"] = "overwrite",
         create_parents: bool = True,
-    ) -> _InMemoryByteWriter:
-        """Open a file for streaming byte writes.
-
-        Returns a ByteWriter context manager for chunked writing.
-        """
-        if self._read_only:
-            msg = "Filesystem is read-only"
-            raise PermissionError(msg)
-
-        normalized = normalize_path(path)
-        if not normalized:
-            msg = "Cannot write to root directory"
-            raise ValueError(msg)
-
-        validate_path(normalized)
-
-        parent = "/".join(normalized.split("/")[:-1])
-        if parent and parent not in self._directories:
-            if not create_parents:
-                raise FileNotFoundError(f"Parent directory does not exist: {parent}")
-            self._ensure_parents(parent)
-
-        if mode == "create" and normalized in self._files:
-            raise FileExistsError(f"File already exists: {path}")
-
-        existing_content = None
-        if mode == "append" and normalized in self._files:
-            existing_content = self._files[normalized].content
-
-        return _InMemoryByteWriter(
-            filesystem=self,
-            path=normalized,
-            mode=mode,
-            existing_content=existing_content,
+    ) -> InMemoryByteWriter:
+        """Open a file for streaming byte writes."""
+        return open_write_memory(
+            self, path, mode=mode, create_parents=create_parents
         )
 
     def open_text(
@@ -753,130 +690,5 @@ class InMemoryFilesystem:
         *,
         encoding: str = "utf-8",
     ) -> TextReader:
-        """Open a file for streaming text reads with lazy decoding.
-
-        Returns a TextReader context manager that decodes bytes lazily.
-        """
-        if encoding != "utf-8":
-            msg = f"Only 'utf-8' encoding is supported, got: {encoding}"
-            raise ValueError(msg)
-
-        byte_reader = self.open_read(path)
-        return DefaultTextReader.wrap(byte_reader, encoding=encoding)
-
-    def commit_streaming_write(
-        self,
-        path: str,
-        content: bytes,
-        mode: Literal["create", "overwrite", "append"],
-    ) -> None:
-        """Internal method to commit written bytes to storage.
-
-        Called by _InMemoryByteWriter when the writer is closed.
-        """
-        timestamp = now()
-        if path in self._files:
-            created_at = self._files[path].created_at
-        else:
-            created_at = timestamp
-
-        self._files[path] = _InMemoryFile(
-            content=content,
-            created_at=created_at,
-            modified_at=timestamp,
-        )
-
-
-@dataclass(slots=True)
-class _InMemoryByteWriter:
-    """ByteWriter that commits to InMemoryFilesystem on close.
-
-    This writer collects bytes in a MemoryByteWriter and commits
-    the content to the filesystem when closed.
-    """
-
-    filesystem: InMemoryFilesystem
-    path: str
-    mode: Literal["create", "overwrite", "append"]
-    existing_content: bytes | None = None
-    _writer: MemoryByteWriter = field(init=False)
-    _closed: bool = field(default=False, init=False)
-
-    def __post_init__(self) -> None:
-        self._writer = MemoryByteWriter.create(
-            self.path,
-            mode=self.mode,
-            existing_content=self.existing_content,
-        )
-
-    @property
-    def bytes_written(self) -> int:
-        """Total bytes written (excluding initial append content)."""
-        return self._writer.bytes_written
-
-    @property
-    def closed(self) -> bool:
-        """True if the writer has been closed."""
-        return self._closed
-
-    def _check_closed(self) -> None:
-        """Raise ValueError if closed."""
-        if self._closed:
-            msg = "I/O operation on closed file"
-            raise ValueError(msg)
-
-    def write(self, data: bytes) -> int:
-        """Write bytes to the buffer."""
-        self._check_closed()
-        return self._writer.write(data)
-
-    def write_all(self, chunks: Iterable[bytes]) -> int:
-        """Write all chunks from an iterable."""
-        self._check_closed()
-        return self._writer.write_all(chunks)
-
-    def __enter__(self) -> _InMemoryByteWriter:
-        """Enter context manager."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> None:
-        """Exit context manager.
-
-        On error, discards buffered writes without committing (matching
-        the HostByteWriter abort-on-error contract). On success, commits
-        the content to the filesystem.
-        """
-        if exc_type is not None:
-            self._abort()
-        else:
-            self.close()
-
-    def _abort(self) -> None:
-        """Discard buffered writes without committing to filesystem.
-
-        No filesystem cleanup is needed because ``commit_streaming_write``
-        is only called in ``close()``; abort skips the commit so the
-        filesystem is never modified.
-        """
-        if self._closed:
-            return
-        self._closed = True
-        self._writer.close()
-
-    def close(self) -> None:
-        """Close the writer and commit content to filesystem."""
-        if self._closed:
-            return
-        self._closed = True
-
-        try:
-            # Commit the written content to the filesystem
-            content = self._writer.get_content()
-            self.filesystem.commit_streaming_write(self.path, content, self.mode)
-        finally:
-            self._writer.close()
+        """Open a file for streaming text reads with lazy decoding."""
+        return open_text_memory(self, path, encoding=encoding)

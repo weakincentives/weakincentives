@@ -23,13 +23,9 @@ from unittest.mock import patch
 
 import pytest
 
-from weakincentives.filesystem._streams import (
-    DefaultTextReader,
-    HostByteReader,
-    HostByteWriter,
-    MemoryByteReader,
-    MemoryByteWriter,
-)
+from weakincentives.filesystem._host_streams import HostByteReader, HostByteWriter
+from weakincentives.filesystem._memory_streams import MemoryByteReader, MemoryByteWriter
+from weakincentives.filesystem._streams import DefaultTextReader
 
 
 class TestMemoryByteReader:

@@ -30,8 +30,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from threading import RLock
-from types import MappingProxyType
-from typing import Any, Final, cast, override
+from typing import Any, cast, override
 from uuid import UUID, uuid4
 
 from ...clock import SYSTEM_CLOCK
@@ -45,6 +44,16 @@ from ..events import (
     ToolInvoked,
 )
 from ..logging import StructuredLogger, get_logger
+from ._session_helpers import (
+    PROMPT_EXECUTED_TYPE,
+    PROMPT_RENDERED_TYPE,
+    RENDERED_TOOLS_TYPE,
+    TOOL_INVOKED_TYPE,
+    created_at_has_tz,
+    created_at_is_utc,
+    normalize_tags,
+    session_id_is_well_formed,
+)
 from ._slice_types import SessionSliceType
 from ._types import ReducerEvent, TypedReducer
 from .protocols import SessionProtocol, SnapshotProtocol
@@ -81,81 +90,10 @@ from .slices import (
 logger: StructuredLogger = get_logger(__name__, context={"component": "session"})
 
 
-type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
-
-
-SESSION_ID_BYTE_LENGTH: Final[int] = 16
-
-
-def iter_sessions_bottom_up(root: Session) -> Iterator[Session]:
-    """Yield sessions from the leaves up to the provided root session."""
-
-    visited: set[Session] = set()
-
-    def _walk(node: Session) -> Iterator[Session]:
-        if node in visited:
-            return
-        visited.add(node)
-        children = node.children
-        if children:
-            for child in children:
-                yield from _walk(child)
-        yield node
-
-    yield from _walk(root)
-
-
-# Type casts for telemetry event types used in slice policy initialization
-_PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
-    type[SupportsDataclass], PromptRendered
-)
-_TOOL_INVOKED_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolInvoked)
-_PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
-    type[SupportsDataclass], PromptExecuted
-)
-_RENDERED_TOOLS_TYPE: type[SupportsDataclass] = cast(
-    type[SupportsDataclass], RenderedTools
-)
-
-
-def _session_id_is_well_formed(session: Session) -> bool:
-    return len(session.session_id.bytes) == SESSION_ID_BYTE_LENGTH
-
-
-def _created_at_has_tz(session: Session) -> bool:
-    return session.created_at.tzinfo is not None
-
-
-def _created_at_is_utc(session: Session) -> bool:
-    return session.created_at.tzinfo == UTC
-
-
-def _normalize_tags(
-    tags: Mapping[object, object] | None,
-    *,
-    session_id: UUID,
-    parent: Session | None,
-) -> Mapping[str, str]:
-    normalized: dict[str, str] = {}
-
-    if tags is not None:
-        for key, value in tags.items():
-            if not isinstance(key, str) or not isinstance(value, str):
-                msg = "Session tags must be string key/value pairs."
-                raise TypeError(msg)
-            normalized[key] = value
-
-    normalized["session_id"] = str(session_id)
-    if parent is not None:
-        _ = normalized.setdefault("parent_session_id", str(parent.session_id))
-
-    return MappingProxyType(normalized)
-
-
 @invariant(
-    _session_id_is_well_formed,
-    _created_at_has_tz,
-    _created_at_is_utc,
+    session_id_is_well_formed,
+    created_at_has_tz,
+    created_at_is_utc,
 )
 class Session(SessionProtocol):
     """Collect dataclass payloads from prompt executions and tool invocations.
@@ -230,15 +168,15 @@ class Session(SessionProtocol):
         self._lock = RLock()
         self._parent = parent
         self._children: list[Session] = []
-        self._tags = _normalize_tags(tags, session_id=self.session_id, parent=parent)
+        self._tags = normalize_tags(tags, session_id=self.session_id, parent=parent)
         self._subscriptions_attached = False
 
         # Initialize subsystems
         initial_policies: dict[SessionSliceType, SlicePolicy] = {
-            _PROMPT_RENDERED_TYPE: SlicePolicy.LOG,
-            _PROMPT_EXECUTED_TYPE: SlicePolicy.LOG,
-            _TOOL_INVOKED_TYPE: SlicePolicy.LOG,
-            _RENDERED_TOOLS_TYPE: SlicePolicy.LOG,
+            PROMPT_RENDERED_TYPE: SlicePolicy.LOG,
+            PROMPT_EXECUTED_TYPE: SlicePolicy.LOG,
+            TOOL_INVOKED_TYPE: SlicePolicy.LOG,
+            RENDERED_TOOLS_TYPE: SlicePolicy.LOG,
         }
         self._store = SliceStore(slice_config, initial_policies=initial_policies)
         self._registry = ReducerRegistry()
@@ -287,31 +225,7 @@ class Session(SessionProtocol):
     def __getitem__[S: SupportsDataclass](
         self, slice_type: type[S]
     ) -> SliceAccessor[S]:
-        """Access a slice for querying and mutation operations.
-
-        This is the primary API for working with session state. All slice
-        operations are available through the returned accessor.
-
-        Usage::
-
-            # Query operations
-            session[Plan].latest()
-            session[Plan].all()
-            session[Plan].where(lambda p: p.active)
-
-            # Direct mutations (bypass reducers)
-            session[Plan].seed(initial_plan)
-            session[Plan].clear()
-            session[Plan].append(new_plan)
-
-            # Reducer registration
-            session[Plan].register(AddStep, add_step_reducer)
-
-        For dispatch (routes to all reducers for the event type)::
-
-            session.dispatch(AddStep(step="x"))
-
-        """
+        """Access a slice for querying and mutation operations."""
         return SliceAccessor(self, slice_type)
 
     @override
@@ -324,29 +238,7 @@ class Session(SessionProtocol):
         """Install a declarative state slice.
 
         Auto-registers all reducers defined with ``@reducer`` decorators
-        on the slice class. The ``@state_slice`` decorator is optional.
-
-        Args:
-            slice_type: A frozen dataclass with ``@reducer`` decorated methods.
-            initial: Optional factory function to create initial state when empty.
-
-        Raises:
-            TypeError: If the class is not a frozen dataclass.
-            ValueError: If no @reducer methods are found.
-
-        Example::
-
-            @dataclass(frozen=True)
-            class AgentPlan:
-                steps: tuple[str, ...]
-
-                @reducer(on=AddStep)
-                def add_step(self, event: AddStep) -> "AgentPlan":
-                    return replace(self, steps=(*self.steps, event.step))
-
-            session.install(AgentPlan)
-            session[AgentPlan].latest()
-
+        on the slice class.
         """
         # Lazy import to avoid import cycle
         from .state_slice import install_state_slice
@@ -359,25 +251,7 @@ class Session(SessionProtocol):
 
     @override
     def dispatch(self, event: SupportsDataclass) -> DispatchResult:
-        """Dispatch an event to all reducers registered for its type.
-
-        This routes by event type and runs all registrations for that type,
-        regardless of which slice they target. Use this for cross-cutting
-        events that affect multiple slices.
-
-        Args:
-            event: The event to dispatch. All reducers registered for
-                ``type(event)`` will be executed.
-
-        Returns:
-            DispatchResult containing dispatch outcome and any handler errors.
-
-        Example::
-
-            # Dispatches to ALL reducers registered for AddStep
-            result = session.dispatch(AddStep(step="implement feature"))
-
-        """
+        """Dispatch an event to all reducers registered for its type."""
         event_type = type(event)
         logger.debug(
             "session.dispatch",
@@ -396,16 +270,7 @@ class Session(SessionProtocol):
 
     @override
     def reset(self) -> None:
-        """Clear all stored slices while preserving reducer registrations.
-
-        This is useful for resetting session state between operations while
-        keeping the same reducer configuration.
-
-        Example::
-
-            session.reset()  # All slices are now empty
-
-        """
+        """Clear all stored slices while preserving reducer registrations."""
         with self._lock:
             slice_types = self._store.all_slice_types()
             slice_types.update(self._registry.all_target_slice_types())
@@ -424,24 +289,7 @@ class Session(SessionProtocol):
     def restore(
         self, snapshot: SnapshotProtocol, *, preserve_logs: bool = True
     ) -> None:
-        """Restore session slices from the provided snapshot.
-
-        All slice types in the snapshot must be registered in the session.
-
-        Args:
-            snapshot: A snapshot previously captured via ``session.snapshot()``.
-            preserve_logs: If True, slices marked as LOG are not modified.
-
-        Raises:
-            SnapshotRestoreError: If the snapshot contains unregistered slice types.
-
-        Example::
-
-            snapshot = session.snapshot()
-            # ... operations that modify state ...
-            session.restore(snapshot)  # Restore previous state
-
-        """
+        """Restore session slices from the provided snapshot."""
         logger.debug(
             "session.restore",
             event="session.restore",
@@ -505,28 +353,24 @@ class Session(SessionProtocol):
     @override
     def dispatcher(self) -> TelemetryDispatcher:
         """Return the dispatcher backing this session."""
-
         return self._dispatcher
 
     @property
     @override
     def parent(self) -> Session | None:
         """Return the parent session if one was provided."""
-
         return self._parent
 
     @property
     @override
     def tags(self) -> Mapping[str, str]:
         """Return immutable tags associated with this session."""
-
         return self._tags
 
     @property
     @override
     def children(self) -> tuple[Session, ...]:
         """Return direct child sessions in registration order."""
-
         with self.locked():
             return tuple(self._children)
 
@@ -538,16 +382,9 @@ class Session(SessionProtocol):
         policies: frozenset[SlicePolicy] = DEFAULT_SNAPSHOT_POLICIES,
         include_all: bool = False,
     ) -> SnapshotProtocol:
-        """Capture an immutable snapshot of the current session state.
-
-        Args:
-            tag: Optional label for the snapshot (unused, reserved for future use).
-            policies: Slice policies to include when include_all is False.
-            include_all: If True, snapshot all slices regardless of policy.
-        """
+        """Capture an immutable snapshot of the current session state."""
         del tag
         with self._lock:
-            # Capture all state under lock to prevent concurrent modifications
             parent_id = self._parent.session_id if self._parent is not None else None
             children_ids = tuple(child.session_id for child in self._children)
             tags_snapshot = self.tags
@@ -604,17 +441,8 @@ class Session(SessionProtocol):
             self._children.append(child)
 
     def _handle_system_mutation_event(self, event: ReducerEvent) -> bool:
-        """Handle system mutation events (InitializeSlice, ClearSlice).
-
-        These events bypass normal reducer dispatch and directly mutate state,
-        ensuring consistent behavior regardless of registered reducers.
-
-        Returns:
-            True if the event was a system mutation event and was handled,
-            False otherwise.
-        """
+        """Handle system mutation events (InitializeSlice, ClearSlice)."""
         if isinstance(event, InitializeSlice):
-            # Use cast to work around generic type parameter inference
             init_event = cast("InitializeSlice[Any]", event)
             slice_type: SessionSliceType = init_event.slice_type
             values = init_event.values
@@ -633,7 +461,6 @@ class Session(SessionProtocol):
             return True
 
         if isinstance(event, ClearSlice):
-            # Use cast to work around generic type parameter inference
             clear_event = cast("ClearSlice[Any]", event)
             slice_type = clear_event.slice_type
             predicate: Callable[[Any], bool] | None = clear_event.predicate
@@ -659,7 +486,6 @@ class Session(SessionProtocol):
         event: ReducerEvent,
     ) -> None:
         """Dispatch a data event to registered reducers."""
-        # Handle system mutation events specially
         if self._handle_system_mutation_event(event):
             return
 
@@ -670,7 +496,6 @@ class Session(SessionProtocol):
             registrations = list(self._registry.get_registrations(data_type))
 
             if not registrations:
-                # Default: ledger semantics (always append)
                 registrations = [
                     ReducerRegistration(
                         reducer=cast(TypedReducer[Any], append_all),
@@ -701,21 +526,9 @@ class Session(SessionProtocol):
                 slice_view = slice_instance.view()
             try:
                 op = registration.reducer(slice_view, event, context=context)
-                op_type = type(op).__name__
-                logger.debug(
-                    "session.reducer_applied",
-                    event="session.reducer_applied",
-                    context={
-                        "session_id": str(self.session_id),
-                        "reducer": reducer_name,
-                        "slice_type": slice_type.__qualname__,
-                        "operation": op_type,
-                    },
-                )
-                # Apply the slice operation
                 with self.locked():
                     apply_slice_op(op, slice_instance)
-            except Exception:  # log and continue
+            except Exception:
                 logger.exception(
                     "Reducer application failed.",
                     event="session_reducer_failed",
@@ -755,76 +568,20 @@ class Session(SessionProtocol):
             dispatcher.subscribe(RenderedTools, self._on_rendered_tools)
 
     def _register_builtin_reducers(self) -> None:
-        """Register built-in reducers for prompt visibility overrides.
-
-        Called once during Session initialization. Safe to call multiple times
-        as it guards against re-registration.
-        """
+        """Register built-in reducers for prompt visibility overrides."""
         from .visibility_overrides import (
             SetVisibilityOverride,
             register_visibility_reducers,
         )
 
-        # Guard against re-registration (e.g., during clone)
         with self.locked():
             if self._registry.has_registrations(SetVisibilityOverride):
                 return
 
         register_visibility_reducers(self)
 
-    # ──────────────────────────────────────────────────────────────────────
-    # Backward Compatibility Attributes (Internal Use Only)
-    # ──────────────────────────────────────────────────────────────────────
-
-    @property
-    def _slices(self) -> dict[SessionSliceType, Slice[Any]]:
-        """Access internal slices dict for backward compatibility.
-
-        WARNING: Caller MUST hold Session's lock (via locked() context manager).
-        Returns a direct mutable reference - not a defensive copy.
-
-        This property is for internal use by session_cloning module only.
-        """
-        return self._store._slices  # pyright: ignore[reportPrivateUsage]
-
-    @property
-    def _slice_policies(self) -> dict[SessionSliceType, SlicePolicy]:
-        """Access internal policies dict for backward compatibility.
-
-        WARNING: Caller MUST hold Session's lock (via locked() context manager).
-        Returns a direct mutable reference - not a defensive copy.
-
-        This property is for internal use by session_cloning module only.
-        """
-        return self._store._slice_policies  # pyright: ignore[reportPrivateUsage]
-
-    @_slice_policies.setter
-    def _slice_policies(self, value: dict[SessionSliceType, SlicePolicy]) -> None:
-        """Set internal policies dict for backward compatibility.
-
-        WARNING: Caller MUST hold Session's lock (via locked() context manager).
-        """
-        self._store._slice_policies = value  # pyright: ignore[reportPrivateUsage]
-
-    @property
-    def _reducers(self) -> dict[SessionSliceType, list[ReducerRegistration]]:
-        """Access internal reducers dict for backward compatibility.
-
-        WARNING: Caller MUST hold Session's lock (via locked() context manager).
-        Returns a direct mutable reference - not a defensive copy.
-
-        This property is for internal use by session_cloning module only.
-        """
-        return self._registry._reducers  # pyright: ignore[reportPrivateUsage]
-
-    @property
-    def _slice_config(self) -> SliceFactoryConfig:
-        """Access internal slice config for backward compatibility."""
-        return self._store.config
-
 
 __all__ = [
-    "DataEvent",
     "Session",
     "SliceAccessor",
     "TypedReducer",

@@ -22,6 +22,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from weakincentives.adapters.acp._execution import (
+    build_env,
+    drain_quiet_period,
+    extract_chunk_text,
+    extract_client_text,
+    resolve_structured_output,
+)
 from weakincentives.adapters.acp.config import ACPAdapterConfig, ACPClientConfig
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.runtime.events import InProcessDispatcher
@@ -192,125 +199,95 @@ class TestResolveCwd:
 
 class TestExtractText:
     def test_no_message_chunks(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         client = MagicMock()
         client.message_chunks = []
         client.thought_chunks = []
-        assert adapter._extract_text(client) is None
+        assert extract_client_text(client, emit_thought_chunks=False) is None
 
     def test_message_chunks(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         client = MagicMock()
         client.message_chunks = [
             AgentMessageChunk("Hello "),
             AgentMessageChunk("world"),
         ]
         client.thought_chunks = []
-        assert adapter._extract_text(client) == "Hello world"
+        assert extract_client_text(client, emit_thought_chunks=False) == "Hello world"
 
     def test_with_thoughts_enabled(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(emit_thought_chunks=True))
         client = MagicMock()
         client.message_chunks = [AgentMessageChunk("answer")]
         client.thought_chunks = [AgentThoughtChunk("thinking...")]
-        result = adapter._extract_text(client)
+        result = extract_client_text(client, emit_thought_chunks=True)
         assert result == "thinking...answer"
 
     def test_with_thoughts_disabled(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(emit_thought_chunks=False))
         client = MagicMock()
         client.message_chunks = [AgentMessageChunk("answer")]
         client.thought_chunks = [AgentThoughtChunk("thinking...")]
-        result = adapter._extract_text(client)
+        result = extract_client_text(client, emit_thought_chunks=False)
         assert result == "answer"
 
     def test_empty_thought_content_skipped(self) -> None:
         """Covers branch where thought chunk content is empty."""
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(emit_thought_chunks=True))
         client = MagicMock()
         client.message_chunks = [AgentMessageChunk("answer")]
         client.thought_chunks = [AgentThoughtChunk(""), AgentThoughtChunk("ok")]
-        result = adapter._extract_text(client)
+        result = extract_client_text(client, emit_thought_chunks=True)
         assert result == "okanswer"
 
     def test_empty_message_content_skipped(self) -> None:
         """Covers branch where message chunk content is empty."""
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         client = MagicMock()
         client.message_chunks = [
             AgentMessageChunk(""),
             AgentMessageChunk("text"),
         ]
         client.thought_chunks = []
-        result = adapter._extract_text(client)
+        result = extract_client_text(client, emit_thought_chunks=False)
         assert result == "text"
 
 
 class TestExtractChunkTextListContent:
     def test_list_of_content_blocks(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
-
         block1 = MagicMock()
         block1.text = "hello "
         block2 = MagicMock()
         block2.text = "world"
         chunk = MagicMock()
         chunk.content = [block1, block2]
-        assert _extract_chunk_text(chunk) == "hello world"
+        assert extract_chunk_text(chunk) == "hello world"
 
     def test_list_with_non_text_blocks(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
-
         class PlainBlock:
             def __str__(self) -> str:
                 return "fallback"
 
         chunk = MagicMock()
         chunk.content = [PlainBlock()]
-        assert _extract_chunk_text(chunk) == "fallback"
+        assert extract_chunk_text(chunk) == "fallback"
 
     def test_list_skips_falsy_blocks(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
-
         block = MagicMock()
         block.text = "kept"
         chunk = MagicMock()
         chunk.content = [None, block, 0, False]
-        assert _extract_chunk_text(chunk) == "kept"
+        assert extract_chunk_text(chunk) == "kept"
 
     def test_text_content_block(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
-
         inner = type("TextContentBlock", (), {"text": "hello"})()
         chunk = MagicMock()
         chunk.content = inner
-        assert _extract_chunk_text(chunk) == "hello"
+        assert extract_chunk_text(chunk) == "hello"
 
     def test_non_string_non_list_fallback(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
-
         chunk = MagicMock()
         chunk.content = 42
-        assert _extract_chunk_text(chunk) == "42"
+        assert extract_chunk_text(chunk) == "42"
 
     def test_falsy_non_string_content(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
-
         chunk = MagicMock()
         chunk.content = None
-        assert _extract_chunk_text(chunk) == ""
+        assert extract_chunk_text(chunk) == ""
 
 
 class TestSubclassHooks:
@@ -341,19 +318,13 @@ class TestStructuredOutputResolution:
     """Test structured output edge cases."""
 
     def test_missing_output_raises(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         rendered = MagicMock()
         rendered.output_type = str
 
         with pytest.raises(PromptEvaluationError, match="Structured output required"):
-            adapter._resolve_structured_output(None, rendered, "p", None)
+            resolve_structured_output(None, rendered, "p", None)
 
     def test_capture_parse_error_raises(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         rendered = MagicMock()
         rendered.output_type = str
 
@@ -363,17 +334,14 @@ class TestStructuredOutputResolution:
 
         with (
             patch(
-                "weakincentives.adapters.acp.adapter.parse_structured_output",
+                "weakincentives.adapters.acp._execution.parse_structured_output",
                 side_effect=ValueError("bad"),
             ),
             pytest.raises(PromptEvaluationError, match="Failed to parse"),
         ):
-            adapter._resolve_structured_output("text", rendered, "p", capture)
+            resolve_structured_output("text", rendered, "p", capture)
 
     def test_text_parse_error_raises(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         rendered = MagicMock()
         rendered.output_type = str
 
@@ -382,17 +350,14 @@ class TestStructuredOutputResolution:
 
         with (
             patch(
-                "weakincentives.adapters.acp.adapter.parse_structured_output",
+                "weakincentives.adapters.acp._execution.parse_structured_output",
                 side_effect=ValueError("bad text"),
             ),
             pytest.raises(PromptEvaluationError, match="Failed to parse"),
         ):
-            adapter._resolve_structured_output("raw text", rendered, "p", capture)
+            resolve_structured_output("raw text", rendered, "p", capture)
 
     def test_capture_succeeds(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         rendered = MagicMock()
         rendered.output_type = str
 
@@ -401,10 +366,10 @@ class TestStructuredOutputResolution:
         capture.data = {"key": "value"}
 
         with patch(
-            "weakincentives.adapters.acp.adapter.parse_structured_output",
+            "weakincentives.adapters.acp._execution.parse_structured_output",
             return_value="parsed",
         ) as mock_parse:
-            result = adapter._resolve_structured_output("text", rendered, "p", capture)
+            result = resolve_structured_output("text", rendered, "p", capture)
 
         assert result == "parsed"
         # Verify capture data is JSON-serialized before parsing
@@ -413,16 +378,12 @@ class TestStructuredOutputResolution:
 
 class TestBuildEnv:
     def test_returns_none_when_no_env(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(client_config=ACPClientConfig(env=None))
-        assert adapter._build_env() is None
+        client_config = ACPClientConfig(env=None)
+        assert build_env(client_config) is None
 
     def test_merges_with_os_environ(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(client_config=ACPClientConfig(env={"MY_VAR": "my_val"}))
-        result = adapter._build_env()
+        client_config = ACPClientConfig(env={"MY_VAR": "my_val"})
+        result = build_env(client_config)
         assert result is not None
         assert result["MY_VAR"] == "my_val"
         # os.environ keys should also be present
@@ -580,7 +541,7 @@ class TestFinalizeResponse:
         capture.data = "parsed_data"
 
         with patch(
-            "weakincentives.adapters.acp.adapter.parse_structured_output",
+            "weakincentives.adapters.acp._execution.parse_structured_output",
             return_value="parsed_result",
         ):
             response = adapter._finalize_response(
@@ -600,32 +561,53 @@ class TestFinalizeResponse:
 
 class TestDrainQuietPeriod:
     def test_immediate_drain_when_zero_quiet_period(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
+        from weakincentives.clock import SYSTEM_CLOCK
 
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(quiet_period_ms=0))
         client = MagicMock()
         client.last_update_time = 0.0
 
         # Should return immediately
-        asyncio.run(adapter._drain_quiet_period(client, None))
+        asyncio.run(
+            drain_quiet_period(
+                client,
+                None,
+                quiet_period_ms=0,
+                clock=SYSTEM_CLOCK,
+                async_sleeper=SYSTEM_CLOCK,
+            )
+        )
 
     def test_drain_with_deadline(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
+        from weakincentives.clock import SYSTEM_CLOCK
 
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(quiet_period_ms=50))
         client = MagicMock()
         client.last_update_time = time.monotonic()
 
         deadline = _make_mock_deadline(remaining_s=0.001)
 
-        asyncio.run(adapter._drain_quiet_period(client, deadline))
+        asyncio.run(
+            drain_quiet_period(
+                client,
+                deadline,
+                quiet_period_ms=50,
+                clock=SYSTEM_CLOCK,
+                async_sleeper=SYSTEM_CLOCK,
+            )
+        )
 
     def test_drain_waits_for_quiet(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
+        from weakincentives.clock import SYSTEM_CLOCK
 
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(quiet_period_ms=10))
         client = MagicMock()
         # Recent update — should wait
         client.last_update_time = time.monotonic()
 
-        asyncio.run(adapter._drain_quiet_period(client, None))
+        asyncio.run(
+            drain_quiet_period(
+                client,
+                None,
+                quiet_period_ms=10,
+                clock=SYSTEM_CLOCK,
+                async_sleeper=SYSTEM_CLOCK,
+            )
+        )

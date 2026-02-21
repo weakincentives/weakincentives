@@ -290,6 +290,7 @@ Exports
     - :class:`ClearSlice` - System event to clear slice
 """
 
+from ._session_helpers import DataEvent, iter_sessions_bottom_up
 from ._types import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -307,7 +308,7 @@ from .rendered_tools import (
     RenderedTools,
     ToolSchema,
 )
-from .session import DataEvent, Session, iter_sessions_bottom_up
+from .session import Session
 from .session_view import SessionView, as_view
 from .slice_accessor import ReadOnlySliceAccessor, SliceAccessor
 from .slice_mutations import ClearSlice, InitializeSlice

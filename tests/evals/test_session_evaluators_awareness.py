@@ -1,0 +1,305 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for adapt, combinators, and is_session_aware detection."""
+
+from __future__ import annotations
+
+from tests.evals.conftest import (
+    make_mock_session,
+    make_prompt_executed,
+    make_tool_invoked,
+)
+from weakincentives.evals import (
+    adapt,
+    all_of,
+    all_tools_succeeded,
+    any_of,
+    exact_match,
+    token_usage_under,
+    tool_called,
+)
+
+# =============================================================================
+# adapt Tests
+# =============================================================================
+
+
+def test_adapt_converts_standard_evaluator() -> None:
+    """adapt converts standard evaluator to session-aware."""
+    session = make_mock_session()
+
+    # Standard evaluator doesn't take session
+    adapted = adapt(exact_match)
+
+    # Can now call with session
+    score = adapted("hello", "hello", session)
+    assert score.passed is True
+    assert score.value == 1.0
+
+
+def test_adapt_ignores_session() -> None:
+    """adapt ignores session parameter for standard evaluators."""
+    session = make_mock_session(tool_invocations=[make_tool_invoked("important_tool")])
+
+    # Adapted evaluator doesn't care about session state
+    adapted = adapt(exact_match)
+    score = adapted("foo", "bar", session)
+    assert score.passed is False  # Only checks output vs expected
+
+
+# =============================================================================
+# Combinator Tests with Session Evaluators
+# =============================================================================
+
+
+def test_all_of_mixed_evaluators() -> None:
+    """all_of works with both standard and session-aware evaluators."""
+    session = make_mock_session(
+        tool_invocations=[make_tool_invoked("search")],
+    )
+
+    evaluator = all_of(
+        exact_match,  # Standard evaluator
+        tool_called("search"),  # Session-aware evaluator
+    )
+
+    # Both pass
+    score = evaluator("hello", "hello", session)
+    assert score.passed is True
+
+    # exact_match fails
+    score = evaluator("hello", "world", session)
+    assert score.passed is False
+
+
+def test_any_of_mixed_evaluators() -> None:
+    """any_of works with both standard and session-aware evaluators."""
+    session = make_mock_session(
+        tool_invocations=[make_tool_invoked("search")],
+    )
+
+    evaluator = any_of(
+        exact_match,  # Standard evaluator
+        tool_called("search"),  # Session-aware evaluator
+    )
+
+    # Both pass
+    score = evaluator("hello", "hello", session)
+    assert score.passed is True
+
+    # exact_match fails but tool_called passes
+    score = evaluator("hello", "world", session)
+    assert score.passed is True
+
+
+def test_nested_session_evaluators() -> None:
+    """Session evaluators can be nested in combinators."""
+    session = make_mock_session(
+        tool_invocations=[
+            make_tool_invoked("search", result={"success": True}),
+        ],
+        prompt_executions=[
+            make_prompt_executed(input_tokens=100, output_tokens=50),
+        ],
+    )
+
+    # Complex composed evaluator
+    evaluator = all_of(
+        exact_match,
+        all_of(
+            tool_called("search"),
+            all_tools_succeeded(),
+        ),
+        token_usage_under(200),
+    )
+
+    score = evaluator("hello", "hello", session)
+    assert score.passed is True
+
+
+def test_combinator_collects_session_evaluator_reasons() -> None:
+    """Combinators collect reasons from session evaluators."""
+    session = make_mock_session(tool_invocations=[])
+
+    evaluator = all_of(
+        tool_called("search"),
+        tool_called("fetch"),
+    )
+
+    score = evaluator(None, None, session)
+    assert score.passed is False
+    assert "search" in score.reason
+    assert "fetch" in score.reason
+
+
+# =============================================================================
+# is_session_aware Tests
+# =============================================================================
+
+
+def test_is_session_aware_detects_session_protocol() -> None:
+    """is_session_aware detects SessionProtocol type hint."""
+    from weakincentives.evals import Score, is_session_aware
+    from weakincentives.runtime.session import SessionProtocol
+
+    def session_evaluator(
+        output: object, expected: object, session: SessionProtocol
+    ) -> Score:
+        return Score(value=1.0, passed=True)
+
+    assert is_session_aware(session_evaluator) is True
+
+
+def test_is_session_aware_detects_session_view_protocol() -> None:
+    """is_session_aware detects SessionViewProtocol type hint."""
+    from weakincentives.evals import Score, is_session_aware
+    from weakincentives.runtime.session import SessionViewProtocol
+
+    def session_evaluator(
+        output: object, expected: object, session: SessionViewProtocol
+    ) -> Score:
+        return Score(value=1.0, passed=True)
+
+    assert is_session_aware(session_evaluator) is True
+
+
+def test_is_session_aware_detects_union_type() -> None:
+    """is_session_aware detects union of session protocols."""
+    from weakincentives.evals import Score, is_session_aware
+    from weakincentives.runtime.session import SessionProtocol, SessionViewProtocol
+
+    def session_evaluator(
+        output: object,
+        expected: object,
+        session: SessionProtocol | SessionViewProtocol,
+    ) -> Score:
+        return Score(value=1.0, passed=True)
+
+    assert is_session_aware(session_evaluator) is True
+
+
+def test_is_session_aware_rejects_standard_evaluator() -> None:
+    """is_session_aware returns False for 2-param evaluators."""
+    from weakincentives.evals import Score, is_session_aware
+
+    def standard_evaluator(output: object, expected: object) -> Score:
+        return Score(value=1.0, passed=True)
+
+    assert is_session_aware(standard_evaluator) is False
+
+
+def test_is_session_aware_rejects_non_session_third_param() -> None:
+    """is_session_aware returns False when third param is not a session type."""
+    from weakincentives.evals import Score, is_session_aware
+
+    def not_session_evaluator(output: object, expected: object, context: str) -> Score:
+        return Score(value=1.0, passed=True)
+
+    assert is_session_aware(not_session_evaluator) is False
+
+
+def test_is_session_aware_with_builtin_evaluators() -> None:
+    """is_session_aware correctly identifies built-in evaluators."""
+    from weakincentives.evals import (
+        exact_match,
+        is_session_aware,
+        tool_called,
+    )
+
+    # exact_match is a standard 2-param evaluator
+    assert is_session_aware(exact_match) is False
+
+    # tool_called returns a session-aware evaluator
+    assert is_session_aware(tool_called("search")) is True
+
+
+def test_is_session_aware_rejects_unannotated_third_param() -> None:
+    """is_session_aware returns False for unannotated 3+ param functions."""
+    from collections.abc import Callable
+
+    from weakincentives.evals import is_session_aware
+
+    # Create a function with 3 params but no type annotations dynamically
+    # This avoids ruff's ANN rules while testing the behavior
+    def make_unannotated() -> Callable[..., None]:
+        exec(
+            """
+def unannotated_evaluator(output, expected, session):
+    pass
+""",
+            {},
+            (result := {}),
+        )
+        return result["unannotated_evaluator"]  # type: ignore[return-value]
+
+    evaluator = make_unannotated()
+    # Requires explicit type hints - unannotated functions are not session-aware
+    assert is_session_aware(evaluator) is False
+
+
+def test_is_session_aware_handles_non_session_type_object() -> None:
+    """is_session_aware returns False when raw annotation is a non-session type object."""
+    from weakincentives.evals._evaluators import _is_session_type
+
+    # Test _is_session_type with a plain type (not a session protocol)
+    assert _is_session_type(str) is False
+    assert _is_session_type(int) is False
+    assert _is_session_type(object) is False
+
+
+def test_check_string_annotation_resolves_from_globals() -> None:
+    """_check_string_annotation resolves aliases from function globals."""
+    from weakincentives.evals._evaluators import _check_string_annotation
+    from weakincentives.runtime.session import SessionViewProtocol
+
+    # Test with a globals dict containing the alias
+    fn_globals: dict[str, object] = {"SVP": SessionViewProtocol}
+    assert _check_string_annotation("SVP", fn_globals) is True
+
+    # Test with unresolved alias (not in globals)
+    assert _check_string_annotation("UnknownType", {}) is False
+
+
+def test_is_session_aware_with_raw_type_annotation() -> None:
+    """is_session_aware handles raw type annotations when get_type_hints fails."""
+    from collections.abc import Callable
+
+    from weakincentives.evals import is_session_aware
+
+    # Create a function where get_type_hints fails due to undefined forward ref
+    # but __annotations__ contains actual type objects (not strings)
+    def make_evaluator() -> Callable[..., None]:
+        # Include an undefined forward reference in return type to make get_type_hints fail
+        # But keep the session parameter as an actual type object
+        exec(
+            """
+def raw_type_evaluator(output, expected, session):
+    pass
+# Mix: string forward ref (undefined) and actual types
+# This causes get_type_hints to fail but annotations['session'] is type object
+raw_type_evaluator.__annotations__ = {
+    'output': object,
+    'expected': object,
+    'session': str,
+    'return': 'UndefinedForwardRef'  # This makes get_type_hints fail
+}
+""",
+            {},
+            (result := {}),
+        )
+        return result["raw_type_evaluator"]  # type: ignore[return-value]
+
+    evaluator = make_evaluator()
+    # get_type_hints fails due to undefined return type, falls back to raw annotations
+    # session annotation is actual str type (not string), tests line 161
+    assert is_session_aware(evaluator) is False

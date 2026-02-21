@@ -179,7 +179,7 @@ class TestRenderedToolsSession:
         session = Session(dispatcher=dispatcher)
 
         # Check the policy is LOG
-        assert session._slice_policies.get(RenderedTools) == SlicePolicy.LOG
+        assert session._store._slice_policies.get(RenderedTools) == SlicePolicy.LOG
 
     def test_rendered_tools_appends_on_dispatch(
         self, session_factory: SessionFactory

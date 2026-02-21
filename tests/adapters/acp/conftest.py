@@ -14,13 +14,17 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from weakincentives.runtime.events import InProcessDispatcher
 
 
 class MockRequestError(Exception):
@@ -295,3 +299,109 @@ def mock_proc() -> MagicMock:
 @pytest.fixture
 def mock_accumulator() -> MockSessionAccumulator:
     return MockSessionAccumulator()
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for protocol-level tests (split from test_adapter_protocol.py)
+# ---------------------------------------------------------------------------
+
+
+def make_mock_session() -> MagicMock:
+    """Create a mock session with dispatcher."""
+    dispatcher = InProcessDispatcher()
+    session = MagicMock()
+    session.dispatcher = dispatcher
+    session.session_id = "test-session"
+    return session
+
+
+def make_mock_prompt(
+    *,
+    text: str = "Hello",
+    output_type: type[Any] | None = None,
+    container: str | None = None,
+) -> MagicMock:
+    """Create a mock prompt."""
+    prompt = MagicMock()
+    prompt.ns = "test"
+    prompt.key = "prompt"
+    prompt.name = "test-prompt"
+
+    rendered = MagicMock()
+    rendered.text = text
+    rendered.tools = ()
+    rendered.output_type = output_type
+    rendered.container = container
+    rendered.allow_extra_keys = False
+
+    prompt.render.return_value = rendered
+    prompt.filesystem.return_value = None
+    prompt.bind.return_value = prompt
+    prompt.resources = MagicMock()
+    prompt.resources.__enter__ = MagicMock(return_value=None)
+    prompt.resources.__exit__ = MagicMock(return_value=False)
+    return prompt
+
+
+def make_mock_deadline(*, remaining_s: float = 60.0) -> MagicMock:
+    """Create a mock deadline with remaining time."""
+    deadline = MagicMock()
+    deadline.remaining.return_value = timedelta(seconds=remaining_s)
+    return deadline
+
+
+def setup_acp_mocks() -> dict[str, Any]:
+    """Set up mock ACP modules in sys.modules."""
+    mock_acp = MagicMock()
+
+    mock_acp.PROTOCOL_VERSION = 1
+
+    @asynccontextmanager
+    async def _spawn(*args: Any, **kwargs: Any) -> Any:
+        conn = make_mock_connection()
+        proc = make_mock_process()
+        conn.new_session = AsyncMock(return_value=MockNewSessionResponse())
+        conn.prompt = AsyncMock(return_value=MockPromptResponse())
+        yield conn, proc
+
+    mock_acp.spawn_agent_process = _spawn
+
+    mock_schema = MagicMock()
+    mock_schema.ClientCapabilities = MagicMock
+    mock_schema.FileSystemCapability = MagicMock
+    mock_schema.Implementation = MagicMock
+    mock_schema.HttpMcpServer = MagicMock
+    mock_schema.TextBlock = MagicMock(side_effect=lambda **kw: kw)
+
+    mock_acp.schema = mock_schema
+
+    sys.modules["acp"] = mock_acp
+    sys.modules["acp.schema"] = mock_schema
+
+    return {"acp": mock_acp, "acp.schema": mock_schema}
+
+
+def cleanup_acp_mocks() -> None:
+    """Remove mock ACP modules from sys.modules."""
+    for key in ["acp", "acp.schema", "acp.contrib", "acp.contrib.session_state"]:
+        sys.modules.pop(key, None)
+
+
+def patch_mcp() -> tuple[Any, Any]:
+    """Return (mock_mcp_cls_patch, mock_create_patch) context managers."""
+    return (
+        patch("weakincentives.adapters.acp.adapter.MCPHttpServer"),
+        patch("weakincentives.adapters.acp.adapter.create_mcp_tool_server"),
+    )
+
+
+def make_mcp_mock(cls_mock: MagicMock) -> MagicMock:
+    """Configure the MCPHttpServer class mock and return the instance mock."""
+    mock_mcp = MagicMock()
+    mock_mcp.start = AsyncMock()
+    mock_mcp.stop = AsyncMock()
+    mock_mcp.url = "http://127.0.0.1:9999/mcp"
+    mock_mcp.server_name = "wink-tools"
+    mock_mcp.to_http_mcp_server.return_value = MagicMock()
+    cls_mock.return_value = mock_mcp
+    return mock_mcp

@@ -44,12 +44,8 @@ from ._git_ops import (
     init_git_repo,
     restore_snapshot,
 )
-from ._streams import (
-    DefaultTextReader,
-    HostByteReader,
-    HostByteWriter,
-    TextReader,
-)
+from ._host_streams import HostByteReader, HostByteWriter
+from ._streams import DefaultTextReader, TextReader
 from ._types import (
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,

@@ -22,10 +22,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from ._slice_types import SessionSlice, SessionSliceType
+from .reducer_registry import ReducerRegistration
 from .slice_policy import SlicePolicy
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
 def snapshot_reducers_and_state(
     session: Session,
 ) -> tuple[
-    list[tuple[SessionSliceType, tuple[Any, ...]]],
+    list[tuple[SessionSliceType, tuple[ReducerRegistration, ...]]],
     dict[SessionSliceType, SessionSlice],
     dict[SessionSliceType, SlicePolicy],
 ]:
@@ -48,22 +49,17 @@ def snapshot_reducers_and_state(
         A tuple of (reducer_snapshot, state_snapshot, policy_snapshot).
     """
     with session.locked():
-        reducer_snapshot = [
-            (data_type, tuple(registrations))
-            for data_type, registrations in session._reducers.items()
-        ]
-        # Convert slices to tuples for snapshot
-        state_snapshot = {
-            slice_type: slice_instance.snapshot()
-            for slice_type, slice_instance in session._slices.items()
-        }
-        policy_snapshot = dict(session._slice_policies)
+        reducer_snapshot = session._registry.snapshot()
+        state_snapshot = session._store.snapshot_slices()
+        registered = session._store.all_slice_types()
+        registered.update(session._registry.all_target_slice_types())
+        policy_snapshot = session._store.snapshot_policies(registered)
     return reducer_snapshot, state_snapshot, policy_snapshot
 
 
 def copy_reducers_to_clone(
     clone: Session,
-    reducer_snapshot: list[tuple[SessionSliceType, tuple[Any, ...]]],
+    reducer_snapshot: list[tuple[SessionSliceType, tuple[ReducerRegistration, ...]]],
 ) -> None:
     """Copy non-builtin reducers from snapshot to clone.
 
@@ -73,7 +69,7 @@ def copy_reducers_to_clone(
     """
     with clone.locked():
         for data_type, registrations in reducer_snapshot:
-            if data_type in clone._reducers:
+            if clone._registry.has_registrations(data_type):
                 continue
             for registration in registrations:
                 clone._mutation_register_reducer(
@@ -110,7 +106,7 @@ def apply_policies_to_clone(
         policy_snapshot: Dict mapping slice types to their policies.
     """
     with clone.locked():
-        clone._slice_policies = dict(policy_snapshot)
+        clone._store.apply_policies(policy_snapshot)
 
 
 def resolve_clone_parent(session: Session, parent: Session | None) -> Session | None:

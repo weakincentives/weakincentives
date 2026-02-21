@@ -29,13 +29,13 @@ from weakincentives.dbc import (
     require,
     skip_invariant,
 )
-from weakincentives.runtime.session.session import (
+from weakincentives.runtime.session._session_helpers import (
     SESSION_ID_BYTE_LENGTH,
-    Session,
-    _created_at_has_tz,
-    _created_at_is_utc,
-    _session_id_is_well_formed,
+    created_at_has_tz as _created_at_has_tz,
+    created_at_is_utc as _created_at_is_utc,
+    session_id_is_well_formed as _session_id_is_well_formed,
 )
+from weakincentives.runtime.session.session import Session
 
 pytestmark = pytest.mark.core
 

@@ -14,16 +14,29 @@
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import AsyncGenerator, AsyncIterable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from weakincentives.adapters.claude_agent_sdk._hooks import HookContext
-from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.adapters.claude_agent_sdk._transcript_collector import (
+    TranscriptCollector,
+    TranscriptCollectorConfig,
+)
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    Tool,
+    ToolContext,
+    ToolResult,
+)
 from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
@@ -339,3 +352,121 @@ def nullable_prompt() -> Prompt[NullableOutput]:
         ],
     )
     return Prompt(template)
+
+
+# ---------------------------------------------------------------------------
+# Bridge test fixtures and shared helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True, frozen=True)
+class SearchParams:
+    query: str
+
+
+@dataclass(slots=True, frozen=True)
+class SearchResult:
+    matches: int
+
+    def render(self) -> str:
+        return f"Found {self.matches} matches"
+
+
+@dataclass(slots=True, frozen=True)
+class EmptyRenderResult:
+    """Result with empty render()."""
+
+    def render(self) -> str:
+        return ""
+
+
+def search_handler(
+    params: SearchParams, *, context: ToolContext
+) -> ToolResult[SearchResult]:
+    del context
+    return ToolResult.ok(
+        SearchResult(matches=5), message=f"Found matches for {params.query}"
+    )
+
+
+def failing_handler(
+    params: SearchParams, *, context: ToolContext
+) -> ToolResult[SearchResult]:
+    del context
+    raise RuntimeError("Handler failed")
+
+
+search_tool = Tool[SearchParams, SearchResult](
+    name="search",
+    description="Search for content",
+    handler=search_handler,
+)
+
+failing_tool = Tool[SearchParams, SearchResult](
+    name="failing",
+    description="A tool that fails",
+    handler=failing_handler,
+)
+
+no_handler_tool = Tool[SearchParams, SearchResult](
+    name="no_handler",
+    description="A tool without handler",
+    handler=None,
+)
+
+
+def _make_prompt_with_resources(
+    resources: dict[type[object], object],
+) -> Prompt[object]:
+    """Create a prompt with resources bound in active context."""
+    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
+    prompt = prompt.bind(resources=resources)
+    prompt.resources.__enter__()
+    return prompt
+
+
+@pytest.fixture
+def bridge_prompt() -> Prompt[object]:
+    """Create a prompt in active context for bridge tests."""
+    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
+    prompt.resources.__enter__()
+    return prompt
+
+
+@pytest.fixture
+def mock_adapter() -> MagicMock:
+    return MagicMock()
+
+
+# ---------------------------------------------------------------------------
+# Transcript collector test fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def transcript_temp_dir() -> Generator[Path, None, None]:
+    """Create a temporary directory for test transcripts."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
+
+
+@pytest.fixture
+def transcript_config() -> TranscriptCollectorConfig:
+    """Create a test configuration."""
+    return TranscriptCollectorConfig(
+        poll_interval=0.01,  # Fast polling for tests
+        subagent_discovery_interval=0.02,
+        max_read_bytes=1024,
+        emit_raw=True,
+    )
+
+
+@pytest.fixture
+def transcript_collector(
+    transcript_config: TranscriptCollectorConfig,
+) -> TranscriptCollector:
+    """Create a test collector."""
+    return TranscriptCollector(
+        prompt_name="test-prompt",
+        config=transcript_config,
+    )

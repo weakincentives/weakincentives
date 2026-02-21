@@ -230,6 +230,8 @@ Writing filesystem-agnostic tools::
 from __future__ import annotations
 
 from ._host import HostFilesystem
+from ._host_streams import HostByteReader, HostByteWriter
+from ._memory_streams import MemoryByteReader, MemoryByteWriter
 from ._path import strip_mount_point
 from ._protocol import Filesystem, SnapshotableFilesystem
 from ._streams import (
@@ -237,10 +239,6 @@ from ._streams import (
     ByteReader,
     ByteWriter,
     DefaultTextReader,
-    HostByteReader,
-    HostByteWriter,
-    MemoryByteReader,
-    MemoryByteWriter,
     TextReader,
 )
 from ._types import (

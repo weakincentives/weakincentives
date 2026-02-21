@@ -130,7 +130,7 @@ class TestSDKConfigOptions:
 
     def test_creates_mcp_server_for_prompt_tools(self, session: Session) -> None:
         """Test that prompts with tools create an MCP server."""
-        from tests.adapters.claude_agent_sdk.test_bridge import search_tool
+        from tests.adapters.claude_agent_sdk.conftest import search_tool
 
         template_with_tools = PromptTemplate[SimpleOutput](
             ns="test",

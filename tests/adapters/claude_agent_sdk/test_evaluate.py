@@ -118,7 +118,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
         self, session: Session
     ) -> None:
         """Test that RenderedTools event has matching render_event_id with PromptRendered."""
-        from tests.adapters.claude_agent_sdk.test_bridge import search_tool
+        from tests.adapters.claude_agent_sdk.conftest import search_tool
         from weakincentives.runtime.session.rendered_tools import RenderedTools
 
         template_with_tools = PromptTemplate[SimpleOutput](
@@ -168,7 +168,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
 
     def test_rendered_tools_extracts_correct_schemas(self, session: Session) -> None:
         """Test that tool schemas are correctly extracted from rendered tools."""
-        from tests.adapters.claude_agent_sdk.test_bridge import search_tool
+        from tests.adapters.claude_agent_sdk.conftest import search_tool
         from weakincentives.runtime.session.rendered_tools import RenderedTools
 
         template_with_tools = PromptTemplate[SimpleOutput](
