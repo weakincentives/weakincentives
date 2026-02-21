@@ -172,6 +172,7 @@ combine-as-imports = true
 "src/weakincentives/adapters/acp/client.py" = ["ANN401", "PLR6301"]
 "src/weakincentives/adapters/acp/_mcp_http.py" = ["ANN401"]
 "src/weakincentives/adapters/acp/_structured_output.py" = ["ANN401"]
+"src/weakincentives/adapters/acp/_prompt_loop.py" = ["PLR0913", "PLR0917", "ANN401"]
 "src/weakincentives/adapters/acp/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
 "src/weakincentives/adapters/opencode_acp/adapter.py" = ["PLR0913", "ANN401", "PLR6301"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0904", "PLR0913"]

@@ -29,13 +29,12 @@ from weakincentives.dbc import (
     require,
     skip_invariant,
 )
-from weakincentives.runtime.session.session import (
-    SESSION_ID_BYTE_LENGTH,
-    Session,
-    _created_at_has_tz,
-    _created_at_is_utc,
-    _session_id_is_well_formed,
+from weakincentives.runtime.session._session_helpers import (
+    created_at_has_tz,
+    created_at_is_utc,
+    session_id_is_well_formed,
 )
+from weakincentives.runtime.session.session import SESSION_ID_BYTE_LENGTH, Session
 
 pytestmark = pytest.mark.core
 
@@ -298,10 +297,10 @@ def test_session_invariant_helpers_cover_basics() -> None:
 
     typed_session = cast(Session, session)
 
-    assert _session_id_is_well_formed(typed_session)
+    assert session_id_is_well_formed(typed_session)
     assert len(typed_session.session_id.bytes) == SESSION_ID_BYTE_LENGTH
-    assert _created_at_has_tz(typed_session)
-    assert _created_at_is_utc(typed_session)
+    assert created_at_has_tz(typed_session)
+    assert created_at_is_utc(typed_session)
 
 
 def test_require_skips_when_suspended() -> None:

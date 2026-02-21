@@ -25,8 +25,9 @@ from uuid import UUID
 
 import pytest
 
-from tests.helpers.filesystem import (
-    FilesystemValidationSuite,
+from tests.helpers.filesystem import FilesystemValidationSuite
+from tests.helpers.filesystem_streaming import (
+    FilesystemStreamingValidationSuite,
     ReadOnlyFilesystemValidationSuite,
     SnapshotableFilesystemValidationSuite,
 )
@@ -48,7 +49,9 @@ from weakincentives.filesystem import (
 # =============================================================================
 
 
-class TestInMemoryFilesystemProtocol(FilesystemValidationSuite):
+class TestInMemoryFilesystemProtocol(
+    FilesystemValidationSuite, FilesystemStreamingValidationSuite
+):
     """Test InMemoryFilesystem against the generic Filesystem protocol suite."""
 
     @pytest.fixture
@@ -155,7 +158,9 @@ class TestInMemoryFilesystemSpecific:
 # =============================================================================
 
 
-class TestHostFilesystemProtocol(FilesystemValidationSuite):
+class TestHostFilesystemProtocol(
+    FilesystemValidationSuite, FilesystemStreamingValidationSuite
+):
     """Test HostFilesystem against the generic Filesystem protocol suite."""
 
     @pytest.fixture

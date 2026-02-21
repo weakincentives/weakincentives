@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import re
 import types
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -53,7 +53,6 @@ from weakincentives.filesystem import (
     GlobMatch,
     GrepMatch,
     MemoryByteReader,
-    MemoryByteWriter,
     ReadBytesResult,
     ReadResult,
     TextReader,
@@ -65,46 +64,19 @@ from weakincentives.filesystem import (
     validate_path,
 )
 
+from ._memory_types import (
+    InMemoryFile,
+    InMemoryState,
+    collect_explicit_dir_entries,
+    collect_file_entries,
+    empty_directories_set,
+    empty_files_dict,
+    empty_snapshots_dict,
+)
+from ._memory_writer import InMemoryByteWriter
+
 # Re-export READ_ENTIRE_FILE for direct imports from this module
 __all__ = ["InMemoryFilesystem"]
-
-
-# ---------------------------------------------------------------------------
-# Internal Types
-# ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class _InMemoryFile:
-    """Internal representation of a file in memory.
-
-    Files are stored as raw bytes internally. Text operations encode/decode
-    using UTF-8, while byte operations work directly with the stored content.
-    """
-
-    content: bytes
-    created_at: datetime
-    modified_at: datetime
-
-
-@dataclass(slots=True, frozen=True)
-class _InMemoryState:
-    """Frozen snapshot of in-memory filesystem state."""
-
-    files: Mapping[str, _InMemoryFile]
-    directories: frozenset[str]
-
-
-def _empty_files_dict() -> dict[str, _InMemoryFile]:
-    return {}
-
-
-def _empty_directories_set() -> set[str]:
-    return set()
-
-
-def _empty_snapshots_dict() -> dict[str, _InMemoryState]:
-    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -121,10 +93,10 @@ class InMemoryFilesystem:
     Supports snapshot and restore operations via structural sharing.
     """
 
-    _files: dict[str, _InMemoryFile] = field(default_factory=_empty_files_dict)
-    _directories: set[str] = field(default_factory=_empty_directories_set)
+    _files: dict[str, InMemoryFile] = field(default_factory=empty_files_dict)
+    _directories: set[str] = field(default_factory=empty_directories_set)
     _read_only: bool = False
-    _snapshots: dict[str, _InMemoryState] = field(default_factory=_empty_snapshots_dict)
+    _snapshots: dict[str, InMemoryState] = field(default_factory=empty_snapshots_dict)
     _version: int = 0
 
     def __post_init__(self) -> None:
@@ -277,53 +249,6 @@ class InMemoryFilesystem:
             modified_at=file.modified_at,
         )
 
-    def _collect_file_entries(
-        self, normalized: str, prefix: str, seen: set[str]
-    ) -> list[FileEntry]:
-        """Collect file entries and implicit directories from files."""
-        entries: list[FileEntry] = []
-        for file_path in self._files:
-            if not is_path_under(file_path, normalized):
-                continue
-            relative = file_path[len(prefix) :] if prefix else file_path
-            if "/" in relative:
-                child_dir = relative.split("/")[0]
-                if child_dir not in seen:
-                    seen.add(child_dir)
-                    entries.append(
-                        FileEntry(
-                            name=child_dir,
-                            path=f"{prefix}{child_dir}" if prefix else child_dir,
-                            is_file=False,
-                            is_directory=True,
-                        )
-                    )
-            else:
-                entries.append(
-                    FileEntry(
-                        name=relative, path=file_path, is_file=True, is_directory=False
-                    )
-                )
-        return entries
-
-    def _collect_explicit_dir_entries(
-        self, normalized: str, prefix: str, seen: set[str]
-    ) -> list[FileEntry]:
-        """Collect explicit directory entries not already seen."""
-        entries: list[FileEntry] = []
-        for dir_path in self._directories:
-            if not is_path_under(dir_path, normalized) or dir_path == normalized:
-                continue
-            relative = dir_path[len(prefix) :] if prefix else dir_path
-            if "/" not in relative and relative not in seen:
-                seen.add(relative)
-                entries.append(
-                    FileEntry(
-                        name=relative, path=dir_path, is_file=False, is_directory=True
-                    )
-                )
-        return entries
-
     def list(self, path: str = ".") -> Sequence[FileEntry]:
         """List directory contents."""
         normalized = normalize_path(path)
@@ -338,8 +263,10 @@ class InMemoryFilesystem:
 
         seen: set[str] = set()
         prefix = f"{normalized}/" if normalized else ""
-        entries = self._collect_file_entries(normalized, prefix, seen)
-        entries.extend(self._collect_explicit_dir_entries(normalized, prefix, seen))
+        entries = collect_file_entries(self._files, normalized, prefix, seen)
+        entries.extend(
+            collect_explicit_dir_entries(self._directories, normalized, prefix, seen)
+        )
         entries.sort(key=lambda e: e.name)
         return entries
 
@@ -470,7 +397,7 @@ class InMemoryFilesystem:
             normalized, content_bytes, mode, timestamp
         )
 
-        self._files[normalized] = _InMemoryFile(
+        self._files[normalized] = InMemoryFile(
             content=final_content,
             created_at=created_at,
             modified_at=timestamp,
@@ -520,7 +447,7 @@ class InMemoryFilesystem:
             normalized, content, mode, timestamp
         )
 
-        self._files[normalized] = _InMemoryFile(
+        self._files[normalized] = InMemoryFile(
             content=final_content,
             created_at=created_at,
             modified_at=timestamp,
@@ -649,7 +576,7 @@ class InMemoryFilesystem:
         commit_ref = f"mem-{self._version}"
 
         # Freeze current state (O(n) dict copy, but values are shared refs)
-        frozen_state = _InMemoryState(
+        frozen_state = InMemoryState(
             files=types.MappingProxyType(dict(self._files)),
             directories=frozenset(self._directories),
         )
@@ -711,7 +638,7 @@ class InMemoryFilesystem:
         *,
         mode: Literal["create", "overwrite", "append"] = "overwrite",
         create_parents: bool = True,
-    ) -> _InMemoryByteWriter:
+    ) -> InMemoryByteWriter:
         """Open a file for streaming byte writes.
 
         Returns a ByteWriter context manager for chunked writing.
@@ -740,7 +667,7 @@ class InMemoryFilesystem:
         if mode == "append" and normalized in self._files:
             existing_content = self._files[normalized].content
 
-        return _InMemoryByteWriter(
+        return InMemoryByteWriter(
             filesystem=self,
             path=normalized,
             mode=mode,
@@ -772,7 +699,7 @@ class InMemoryFilesystem:
     ) -> None:
         """Internal method to commit written bytes to storage.
 
-        Called by _InMemoryByteWriter when the writer is closed.
+        Called by InMemoryByteWriter when the writer is closed.
         """
         timestamp = now()
         if path in self._files:
@@ -780,103 +707,8 @@ class InMemoryFilesystem:
         else:
             created_at = timestamp
 
-        self._files[path] = _InMemoryFile(
+        self._files[path] = InMemoryFile(
             content=content,
             created_at=created_at,
             modified_at=timestamp,
         )
-
-
-@dataclass(slots=True)
-class _InMemoryByteWriter:
-    """ByteWriter that commits to InMemoryFilesystem on close.
-
-    This writer collects bytes in a MemoryByteWriter and commits
-    the content to the filesystem when closed.
-    """
-
-    filesystem: InMemoryFilesystem
-    path: str
-    mode: Literal["create", "overwrite", "append"]
-    existing_content: bytes | None = None
-    _writer: MemoryByteWriter = field(init=False)
-    _closed: bool = field(default=False, init=False)
-
-    def __post_init__(self) -> None:
-        self._writer = MemoryByteWriter.create(
-            self.path,
-            mode=self.mode,
-            existing_content=self.existing_content,
-        )
-
-    @property
-    def bytes_written(self) -> int:
-        """Total bytes written (excluding initial append content)."""
-        return self._writer.bytes_written
-
-    @property
-    def closed(self) -> bool:
-        """True if the writer has been closed."""
-        return self._closed
-
-    def _check_closed(self) -> None:
-        """Raise ValueError if closed."""
-        if self._closed:
-            msg = "I/O operation on closed file"
-            raise ValueError(msg)
-
-    def write(self, data: bytes) -> int:
-        """Write bytes to the buffer."""
-        self._check_closed()
-        return self._writer.write(data)
-
-    def write_all(self, chunks: Iterable[bytes]) -> int:
-        """Write all chunks from an iterable."""
-        self._check_closed()
-        return self._writer.write_all(chunks)
-
-    def __enter__(self) -> _InMemoryByteWriter:
-        """Enter context manager."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> None:
-        """Exit context manager.
-
-        On error, discards buffered writes without committing (matching
-        the HostByteWriter abort-on-error contract). On success, commits
-        the content to the filesystem.
-        """
-        if exc_type is not None:
-            self._abort()
-        else:
-            self.close()
-
-    def _abort(self) -> None:
-        """Discard buffered writes without committing to filesystem.
-
-        No filesystem cleanup is needed because ``commit_streaming_write``
-        is only called in ``close()``; abort skips the commit so the
-        filesystem is never modified.
-        """
-        if self._closed:
-            return
-        self._closed = True
-        self._writer.close()
-
-    def close(self) -> None:
-        """Close the writer and commit content to filesystem."""
-        if self._closed:
-            return
-        self._closed = True
-
-        try:
-            # Commit the written content to the filesystem
-            content = self._writer.get_content()
-            self.filesystem.commit_streaming_write(self.path, content, self.mode)
-        finally:
-            self._writer.close()

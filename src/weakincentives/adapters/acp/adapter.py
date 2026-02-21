@@ -45,13 +45,10 @@ from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
 from ._async import run_async
-from ._events import dispatch_tool_invoked, extract_token_usage
-from ._guardrails import (
-    accumulate_usage,
-    append_feedback as _append_feedback,
-    check_task_completion,
-)
+from ._env import build_env
+from ._guardrails import append_feedback as _append_feedback
 from ._mcp_http import MCPHttpServer, create_mcp_tool_server
+from ._prompt_loop import run_prompt_loop
 from ._structured_output import create_structured_output_tool
 from ._transcript import ACPTranscriptBridge
 from .client import ACPClient
@@ -68,25 +65,6 @@ def _noop() -> None:
 
 def _utcnow() -> datetime:
     return SYSTEM_CLOCK.utcnow()
-
-
-def _extract_chunk_text(chunk: Any) -> str:
-    """Extract text content from an ACP update chunk.
-
-    The ``content`` attribute may be a plain string, a ``TextContentBlock``
-    with a ``.text`` attribute, or a list of content blocks.
-    """
-    raw = getattr(chunk, "content", "")
-    if isinstance(raw, str):
-        return raw
-    # TextContentBlock or similar pydantic model
-    text = getattr(raw, "text", None)
-    if isinstance(text, str):
-        return text
-    # List of content blocks
-    if isinstance(raw, list):
-        return "".join(getattr(b, "text", str(b)) for b in raw if b)
-    return str(raw) if raw else ""
 
 
 class ACPAdapter(ProviderAdapter[Any]):
@@ -549,7 +527,7 @@ class ACPAdapter(ProviderAdapter[Any]):
                     ) from None
                 await self._configure_session(conn, acp_session_id)
 
-                return await self._run_prompt_loop(
+                return await run_prompt_loop(
                     conn=conn,
                     acp_session_id=acp_session_id,
                     client=client,
@@ -563,131 +541,15 @@ class ACPAdapter(ProviderAdapter[Any]):
                     run_context=run_context,
                     visibility_signal=visibility_signal,
                     structured_capture=structured_capture,
+                    emit_thought_chunks=self._adapter_config.emit_thought_chunks,
+                    quiet_period_ms=self._adapter_config.quiet_period_ms,
+                    clock=self._clock,
+                    async_sleeper=self._async_sleeper,
+                    detect_empty_response=self._detect_empty_response,
                 )
         finally:
             await mcp_http.stop()
             env_cleanup()
-
-    async def _run_prompt_loop[OutputT](
-        self,
-        *,
-        conn: Any,
-        acp_session_id: str,
-        client: ACPClient,
-        session: SessionProtocol,
-        adapter_name: str,
-        prompt_name: str,
-        prompt_text: str,
-        deadline: Deadline | None,
-        budget_tracker: BudgetTracker | None,
-        prompt: Prompt[OutputT] | None,
-        run_context: RunContext | None,
-        visibility_signal: VisibilityExpansionSignal,
-        structured_capture: Any,
-    ) -> tuple[str | None, TokenUsage | None]:
-        """Run the prompt turn + task completion continuation loop."""
-        from acp.schema import TextContentBlock
-
-        max_continuation_rounds = 10
-        continuation_round = 0
-        current_prompt_text = prompt_text
-        accumulated_text: str | None = None
-        usage: TokenUsage | None = None
-
-        while True:
-            prompt_resp = await self._send_prompt(
-                conn=conn,
-                acp_session_id=acp_session_id,
-                text=current_prompt_text,
-                prompt_name=prompt_name,
-                deadline=deadline,
-                text_content_block_cls=TextContentBlock,
-            )
-            await self._drain_quiet_period(client, deadline)
-
-            # Skip empty response check on first round only.
-            need_empty_check = continuation_round == 0 and not (
-                structured_capture is not None and structured_capture.called
-            )
-            if need_empty_check:
-                self._detect_empty_response(client, prompt_resp)
-
-            stored_exc = visibility_signal.get_and_clear()
-            if stored_exc is not None:
-                raise stored_exc
-
-            for tc_id, tc_data in client.tool_call_tracker.items():
-                dispatch_tool_invoked(
-                    session=session,
-                    adapter_name=adapter_name,
-                    prompt_name=prompt_name,
-                    run_context=run_context,
-                    tool_call_id=tc_id,
-                    title=tc_data.get("title", ""),
-                    status=tc_data.get("status", "completed"),
-                    rendered_output=tc_data.get("output", ""),
-                )
-
-            accumulated_text = self._extract_text(client)
-            turn_usage = extract_token_usage(prompt_resp.usage if prompt_resp else None)
-            if turn_usage is not None:
-                usage = accumulate_usage(usage, turn_usage)
-
-            should_continue, feedback = check_task_completion(
-                prompt=prompt,
-                session=session,
-                accumulated_text=accumulated_text,
-                deadline=deadline,
-                budget_tracker=budget_tracker,
-            )
-            if should_continue and continuation_round < max_continuation_rounds:
-                current_prompt_text = feedback  # type: ignore[assignment]
-                continuation_round += 1
-                client.reset_tracking()
-                continue
-            break
-
-        return accumulated_text, usage
-
-    async def _send_prompt(
-        self,
-        *,
-        conn: Any,
-        acp_session_id: str,
-        text: str,
-        prompt_name: str,
-        deadline: Deadline | None,
-        text_content_block_cls: Any,
-    ) -> Any:
-        """Send a single prompt and return the response."""
-        prompt_coro = conn.prompt(
-            [text_content_block_cls(type="text", text=text)],
-            session_id=acp_session_id,
-        )
-        timeout_s = deadline.remaining().total_seconds() if deadline else None
-        try:
-            return await asyncio.wait_for(prompt_coro, timeout=timeout_s)
-        except TimeoutError:
-            raise PromptEvaluationError(
-                message="ACP prompt timed out (deadline expired)",
-                prompt_name=prompt_name,
-                phase="request",
-            ) from None
-
-    def _build_env(self) -> dict[str, str] | None:
-        """Build merged environment variables.
-
-        When ``config.env`` is set, the full ``os.environ`` is forwarded with
-        config entries taking precedence.  This mirrors stdlib
-        ``subprocess.Popen`` behaviour where ``env=None`` inherits the parent
-        environment.  Returning ``None`` (no config env) lets the subprocess
-        inherit the parent env via the stdlib default.
-        """
-        if not self._client_config.env:
-            return None
-        import os
-
-        return {**os.environ, **self._client_config.env}
 
     async def _handshake(
         self,
@@ -758,72 +620,6 @@ class ACPAdapter(ProviderAdapter[Any]):
             except Exception as err:
                 self._handle_mode_error(err)
 
-    _MAX_DRAIN_S: float = 30.0
-
-    async def _drain_quiet_period(
-        self,
-        client: ACPClient,
-        deadline: Deadline | None,
-    ) -> None:
-        """Wait until no new updates arrive for quiet_period_ms.
-
-        If no updates have been received (``client.last_update_time is None``),
-        the drain exits immediately.  A hard cap of ``_MAX_DRAIN_S`` prevents
-        unbounded waiting when no deadline is set.
-        """
-        if client.last_update_time is None:
-            return
-
-        quiet_s = self._adapter_config.quiet_period_ms / 1000.0
-        now = self._clock.monotonic()
-        hard_cap = now + self._MAX_DRAIN_S
-        deadline_time = (
-            self._clock.monotonic() + deadline.remaining().total_seconds()
-            if deadline
-            else None
-        )
-        if deadline_time is not None:
-            effective_deadline = min(deadline_time, hard_cap)
-        else:
-            effective_deadline = hard_cap
-
-        while True:
-            now = self._clock.monotonic()
-            if now >= effective_deadline:
-                break
-
-            snapshot = client.last_update_time
-            if snapshot is None:
-                break
-
-            elapsed = now - snapshot
-            if elapsed >= quiet_s:
-                break
-
-            wait_s = quiet_s - elapsed
-            wait_s = min(wait_s, effective_deadline - now)
-            await self._async_sleeper.async_sleep(wait_s)
-
-    def _extract_text(self, client: ACPClient) -> str | None:
-        """Extract accumulated text from client message chunks."""
-        if not client.message_chunks:
-            return None
-
-        parts: list[str] = []
-
-        if self._adapter_config.emit_thought_chunks and client.thought_chunks:
-            for chunk in client.thought_chunks:
-                text = _extract_chunk_text(chunk)
-                if text:
-                    parts.append(text)
-
-        for chunk in client.message_chunks:
-            text = _extract_chunk_text(chunk)
-            if text:
-                parts.append(text)
-
-        return "".join(parts) if parts else None
-
     def _resolve_structured_output[OutputT](
         self,
         accumulated_text: str | None,
@@ -893,4 +689,4 @@ class ACPAdapter(ProviderAdapter[Any]):
         Returns:
             Tuple of (env dict or None to inherit parent, cleanup callable).
         """
-        return self._build_env(), _noop
+        return build_env(self._client_config.env), _noop
