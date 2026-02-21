@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
@@ -48,11 +48,11 @@ def redis_client() -> Generator[Redis[bytes], None, None]:
 @pytest.fixture
 def mailbox(
     redis_client: Redis[bytes],
-) -> Generator[RedisMailbox[Any], None, None]:
+) -> Generator[RedisMailbox[str, None], None, None]:
     """Fresh RedisMailbox for each test."""
     from weakincentives.contrib.mailbox import RedisMailbox
 
-    mb: RedisMailbox[Any] = RedisMailbox(
+    mb = RedisMailbox[str, None](
         name=f"test-{uuid4().hex[:8]}",
         client=redis_client,
         reaper_interval=0.1,  # Fast reaper for testing

@@ -23,7 +23,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
@@ -54,7 +54,9 @@ class _TestEvent:
 class TestReceiptHandleFreshness:
     """Tests for INV-2: Receipt Handle Freshness."""
 
-    def test_redelivery_generates_new_handle(self, mailbox: RedisMailbox[Any]) -> None:
+    def test_redelivery_generates_new_handle(
+        self, mailbox: RedisMailbox[str, None]
+    ) -> None:
         """Each delivery of the same message gets a unique handle."""
         mailbox.send("test")
 
@@ -73,7 +75,7 @@ class TestReceiptHandleFreshness:
         assert msgs1[0].id == msgs2[0].id, "Same message ID"
 
     def test_old_handle_rejected_after_redelivery(
-        self, mailbox: RedisMailbox[Any]
+        self, mailbox: RedisMailbox[str, None]
     ) -> None:
         """Stale handles from previous delivery are rejected."""
         from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
@@ -113,7 +115,7 @@ class TestReceiptHandleFreshness:
         """Handles are unique across N deliveries of the same message."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mailbox: RedisMailbox[Any] = RedisMailbox(
+        mailbox = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             reaper_interval=0.05,
@@ -142,7 +144,7 @@ class TestMessageStateExclusivity:
     """Tests for INV-1: Message State Exclusivity."""
 
     def test_receive_atomic_transition(
-        self, mailbox: RedisMailbox[Any], redis_client: Redis[bytes]
+        self, mailbox: RedisMailbox[str, None], redis_client: Redis[bytes]
     ) -> None:
         """Receive atomically moves message from pending to invisible."""
         mailbox.send("test")
@@ -158,7 +160,9 @@ class TestMessageStateExclusivity:
         assert msg_id.encode() not in in_pending
         assert in_invisible is not None
 
-    def test_concurrent_receive_no_duplicates(self, mailbox: RedisMailbox[Any]) -> None:
+    def test_concurrent_receive_no_duplicates(
+        self, mailbox: RedisMailbox[str, None]
+    ) -> None:
         """Parallel receives never return the same message twice."""
         # Send 100 messages
         for i in range(100):
@@ -187,7 +191,7 @@ class TestMessageStateExclusivity:
         assert len(received) == len(set(received)), "Duplicate messages received"
 
     def test_reap_and_receive_race(
-        self, mailbox: RedisMailbox[Any], redis_client: Redis[bytes]
+        self, mailbox: RedisMailbox[str, None], redis_client: Redis[bytes]
     ) -> None:
         """
         Reaper and receive don't cause duplicate state.
@@ -234,7 +238,7 @@ class TestNoMessageLoss:
         """Every sent message is acked or remains in queue."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mailbox: RedisMailbox[Any] = RedisMailbox(
+        mailbox = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             reaper_interval=0.1,
@@ -269,13 +273,13 @@ class TestNoMessageLoss:
         name = f"test-{uuid4().hex[:8]}"
 
         # First mailbox instance sends messages
-        mb1: RedisMailbox[Any] = RedisMailbox(name=name, client=redis_client)
+        mb1: RedisMailbox[str, None] = RedisMailbox(name=name, client=redis_client)
         for i in range(10):
             mb1.send(f"msg-{i}")
         mb1.close()
 
         # Second instance sees all messages
-        mb2: RedisMailbox[Any] = RedisMailbox(name=name, client=redis_client)
+        mb2: RedisMailbox[str, None] = RedisMailbox(name=name, client=redis_client)
         try:
             assert mb2.approximate_count() == 10
         finally:
@@ -286,7 +290,7 @@ class TestNoMessageLoss:
 class TestDeliveryCountMonotonicity:
     """Tests for INV-4: Delivery Count Monotonicity."""
 
-    def test_delivery_count_increments(self, mailbox: RedisMailbox[Any]) -> None:
+    def test_delivery_count_increments(self, mailbox: RedisMailbox[str, None]) -> None:
         """Each delivery increments the count."""
         mailbox.send("test")
 
@@ -302,7 +306,7 @@ class TestDeliveryCountMonotonicity:
         assert len(set(counts)) == len(counts), f"Duplicate counts: {counts}"
 
     def test_delivery_count_survives_redelivery(
-        self, mailbox: RedisMailbox[Any]
+        self, mailbox: RedisMailbox[str, None]
     ) -> None:
         """Delivery count persists across timeout and requeue."""
         mailbox.send("test")
@@ -327,7 +331,9 @@ class TestDeliveryCountMonotonicity:
             "Delivery count was reset after second requeue!"
         )
 
-    def test_delivery_count_survives_nack(self, mailbox: RedisMailbox[Any]) -> None:
+    def test_delivery_count_survives_nack(
+        self, mailbox: RedisMailbox[str, None]
+    ) -> None:
         """Delivery count persists across nack and requeue."""
         mailbox.send("test")
 
@@ -344,7 +350,9 @@ class TestDeliveryCountMonotonicity:
 class TestVisibilityTimeout:
     """Tests for INV-6: Visibility Timeout Correctness."""
 
-    def test_message_requeued_after_timeout(self, mailbox: RedisMailbox[Any]) -> None:
+    def test_message_requeued_after_timeout(
+        self, mailbox: RedisMailbox[str, None]
+    ) -> None:
         """Expired messages return to pending."""
         mailbox.send("test")
 
@@ -364,7 +372,7 @@ class TestVisibilityTimeout:
         assert len(msgs3) == 1
         assert msgs3[0].id == msgs[0].id
 
-    def test_extend_prevents_requeue(self, mailbox: RedisMailbox[Any]) -> None:
+    def test_extend_prevents_requeue(self, mailbox: RedisMailbox[str, None]) -> None:
         """Extended visibility prevents timeout requeue."""
         mailbox.send("test")
 
@@ -396,7 +404,7 @@ class TestEventualRequeue:
     """
 
     def test_expired_message_eventually_requeued(
-        self, mailbox: RedisMailbox[Any]
+        self, mailbox: RedisMailbox[str, None]
     ) -> None:
         """Expired messages eventually return to pending (liveness)."""
         mailbox.send("test")
@@ -435,7 +443,7 @@ class TestEventualRequeue:
         """All expired messages eventually return to pending."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
-        mailbox: RedisMailbox[Any] = RedisMailbox(
+        mailbox = RedisMailbox[str, None](
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             reaper_interval=0.1,  # Fast reaper for testing
@@ -546,10 +554,9 @@ class TestDecodeResponsesCompatibility:
         except Exception:
             pytest.skip("Redis not available")
 
-        mailbox: RedisMailbox[_TestEvent] = RedisMailbox(
+        mailbox = RedisMailbox[_TestEvent, None](
             name=f"test-decode-dataclass-{uuid4().hex[:8]}",
             client=str_client,  # type: ignore[arg-type]
-            body_type=_TestEvent,
             reaper_interval=0.1,
         )
 
@@ -572,7 +579,9 @@ class TestDecodeResponsesCompatibility:
 class TestFIFOOrdering:
     """Tests for FIFO ordering (structural property of Redis LIST)."""
 
-    def test_messages_received_in_send_order(self, mailbox: RedisMailbox[Any]) -> None:
+    def test_messages_received_in_send_order(
+        self, mailbox: RedisMailbox[str, None]
+    ) -> None:
         """Messages are delivered in FIFO order."""
         # Send in order
         ids = []

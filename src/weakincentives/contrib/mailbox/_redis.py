@@ -37,7 +37,7 @@ import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field, is_dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast, get_origin
+from typing import TYPE_CHECKING, Any, TypeVar, get_args, get_origin, override
 from uuid import uuid4
 
 from weakincentives.clock import SYSTEM_CLOCK, MonotonicClock, Sleeper
@@ -113,7 +113,7 @@ class RedisMailboxFactory[R]:
 
         factory = RedisMailboxFactory(client=redis_client)
         resolver = CompositeResolver(registry={}, factory=factory)
-        requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
+        requests = RedisMailbox[Request, Result](name="requests", client=redis_client, reply_resolver=resolver)
 
         # Worker can now reply to any queue name
         for msg in requests.receive():
@@ -121,13 +121,10 @@ class RedisMailboxFactory[R]:
             msg.acknowledge()
     """
 
-    __slots__ = ("body_type", "client", "default_ttl")
+    __slots__ = ("__orig_class__", "client", "default_ttl")
 
     client: Redis[bytes] | RedisCluster[bytes]
     """Redis client to use for all created mailboxes."""
-
-    body_type: type[R] | None
-    """Optional type hint for message body deserialization."""
 
     default_ttl: int
     """Default TTL in seconds for all Redis keys."""
@@ -136,42 +133,28 @@ class RedisMailboxFactory[R]:
         self,
         client: Redis[bytes] | RedisCluster[bytes],
         *,
-        body_type: type[R] | None = None,
         default_ttl: int = DEFAULT_TTL_SECONDS,
     ) -> None:
-        """Initialize factory with shared Redis client.
-
-        Args:
-            client: Redis client to use for all created mailboxes.
-            body_type: Optional type hint for message body deserialization.
-            default_ttl: Default TTL in seconds for Redis keys (default: 3 days).
-        """
         super().__init__()
         self.client = client
-        self.body_type = body_type
         self.default_ttl = default_ttl
+        self.__orig_class__: type | None = None
 
     def create(self, identifier: str) -> Mailbox[R, None]:
-        """Create a RedisMailbox for the given identifier.
-
-        Args:
-            identifier: Queue name for the new mailbox.
-
-        Returns:
-            A new RedisMailbox connected to the shared client.
-
-        Note:
-            Created mailboxes are send-only: they do not start reaper threads
-            and do not support nested reply resolution. This prevents resource
-            leaks when creating ephemeral reply mailboxes.
-        """
-        return RedisMailbox(
+        """Create a send-only RedisMailbox for *identifier*."""
+        mb: RedisMailbox[R, None] = RedisMailbox(
             name=identifier,
             client=self.client,
-            body_type=self.body_type,
             default_ttl=self.default_ttl,
-            _send_only=True,  # Send-only: no reaper thread, no nested resolution
+            _send_only=True,
         )
+        # Propagate body type from factory's generic parameter (R)
+        orig = getattr(self, "__orig_class__", None)
+        if orig is not None:
+            args = get_args(orig)
+            if args:
+                object.__setattr__(mb, "_body_type", args[0])
+        return mb
 
 
 @dataclass(slots=True)
@@ -220,9 +203,6 @@ class RedisMailbox[T, R]:
     client: Redis[bytes] | RedisCluster[bytes]
     """Redis client instance. Can be standalone Redis or RedisCluster."""
 
-    body_type: type[T] | None = None
-    """Optional type hint for message body deserialization."""
-
     max_size: int | None = None
     """Maximum queue capacity. None for unlimited (subject to Redis maxmemory)."""
 
@@ -245,6 +225,7 @@ class RedisMailbox[T, R]:
     sleeper: Sleeper = field(default=SYSTEM_CLOCK, repr=False)
     """Sleeper for delay operations. Defaults to system clock."""
 
+    _body_type: type[T] | None = field(init=False, default=None, repr=False)
     _keys: _QueueKeys = field(init=False, repr=False)
     _scripts: dict[str, Any] = field(init=False, default_factory=dict, repr=False)
     _reaper_thread: threading.Thread | None = field(
@@ -259,6 +240,21 @@ class RedisMailbox[T, R]:
     """Internal flag for send-only mailboxes. Send-only mailboxes don't start
     reaper threads and don't support reply resolution. Used by RedisMailboxFactory
     to prevent resource leaks when creating ephemeral reply mailboxes."""
+
+    @override
+    def __setattr__(self, name: str, value: object) -> None:
+        """Capture ``__orig_class__`` from typing to resolve ``_body_type``."""
+        if name == "__orig_class__":
+            args = get_args(value)
+            if args and (
+                isinstance(args[0], type)
+                or (
+                    not isinstance(args[0], TypeVar) and get_origin(args[0]) is not None
+                )
+            ):
+                object.__setattr__(self, "_body_type", args[0])
+            return
+        object.__setattr__(self, name, value)
 
     def __post_init__(self) -> None:
         """Initialize keys, register Lua scripts, and optionally start reaper thread.
@@ -330,32 +326,37 @@ class RedisMailbox[T, R]:
     def _serialize(self, body: T) -> str:
         """Serialize message body to JSON string."""
         try:
-            # dump() works with dataclasses, for primitives use json.dumps
             if hasattr(body, "__dataclass_fields__"):
                 return json.dumps(dump(body))
             return json.dumps(body)
         except Exception as e:
+            _LOGGER.error(
+                "Serialization failed for queue '%s': %s", self.name, e, exc_info=True
+            )
             raise SerializationError(f"Failed to serialize message body: {e}") from e
 
     def _deserialize(self, data: bytes | str) -> T:
-        """Deserialize message body from JSON bytes or string.
-
-        Handles both bytes (default Redis client) and str (decode_responses=True).
-        """
+        """Deserialize message body from JSON bytes or string."""
         try:
             json_str = data.decode("utf-8") if isinstance(data, bytes) else data
             json_data = json.loads(json_str)
-            if self.body_type is not None:
-                # Use parse() for dataclass types (including generic aliases)
-                origin = get_origin(self.body_type)
-                if is_dataclass(origin if origin is not None else self.body_type):
-                    return parse(self.body_type, json_data)
-                # For primitive types (str, int, etc.), construct directly
-                body_type: Any = self.body_type
-                return body_type(json_data)
-            # Without a type hint, return raw JSON data
-            return cast(T, json_data)
+            if self._body_type is None:
+                msg = (
+                    f"Cannot deserialize for queue '{self.name}': no body type."
+                    " Use subscript notation: RedisMailbox[BodyType, ReplyType](...)"
+                )
+                raise SerializationError(msg)
+            origin = get_origin(self._body_type)
+            if is_dataclass(origin if origin is not None else self._body_type):
+                return parse(self._body_type, json_data)
+            body_type: Any = self._body_type
+            return body_type(json_data)
+        except SerializationError:
+            raise
         except Exception as e:
+            _LOGGER.error(
+                "Deserialization failed for queue '%s': %s", self.name, e, exc_info=True
+            )
             raise SerializationError(f"Failed to deserialize message body: {e}") from e
 
     def send(self, body: T, *, reply_to: Mailbox[R, None] | None = None) -> str:

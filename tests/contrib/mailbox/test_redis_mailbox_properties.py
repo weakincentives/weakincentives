@@ -236,7 +236,7 @@ if HAS_HYPOTHESIS:
 
             self.client.flushdb()
 
-            self.mailbox = RedisMailbox(
+            self.mailbox = RedisMailbox[str, None](
                 name=f"test-{uuid4().hex[:8]}",
                 client=self.client,
                 reaper_interval=0.05,  # 50ms for fast testing

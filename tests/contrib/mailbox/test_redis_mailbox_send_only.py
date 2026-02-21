@@ -153,7 +153,7 @@ class TestRedisMailboxFactory:
         )
 
         send_only = factory.create("reply-queue")
-        receiver: RedisMailbox[str, None] = RedisMailbox(
+        receiver = RedisMailbox[str, None](
             name="reply-queue",
             client=redis_client,
         )
