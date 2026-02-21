@@ -1622,6 +1622,93 @@ class TestBridgedToolPolicyEnforcement:
         assert "Blocked by test policy" in result["content"][0]["text"]
         assert calls == []  # Handler never called
 
+    def test_denying_policy_with_suggestions_includes_them_in_output(
+        self,
+        session: Session,
+        mock_adapter: MagicMock,
+    ) -> None:
+        """A denial with suggestions appends them to the error message."""
+        from weakincentives.prompt import MarkdownSection, PolicyDecision
+
+        def dummy_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            return ToolResult.ok(SearchResult(matches=0), message="ok")
+
+        recording_tool = Tool[SearchParams, SearchResult](
+            name="search",
+            description="Search",
+            handler=dummy_handler,
+        )
+
+        @dataclass(frozen=True)
+        class DenySuggestPolicy:
+            @property
+            def name(self) -> str:
+                return "deny_suggest"
+
+            def check(
+                self,
+                tool: Tool[object, object],
+                params: object,
+                *,
+                context: ToolContext,
+            ) -> PolicyDecision:
+                del tool, params, context
+                return PolicyDecision.deny(
+                    "Missing prerequisite.",
+                    suggestions=("Run lint first.",),
+                )
+
+            def on_result(
+                self,
+                tool: Tool[object, object],
+                params: object,
+                result: ToolResult[object],
+                *,
+                context: ToolContext,
+            ) -> None:
+                del tool, params, result, context
+
+        section = MarkdownSection[SearchParams](
+            title="Task",
+            template="Search for ${query}",
+            tools=(recording_tool,),
+            key="task",
+        )
+        template = PromptTemplate(
+            ns="tests",
+            key="policy-deny-suggest",
+            sections=[section],
+            policies=[DenySuggestPolicy()],
+        )
+        prompt_with_policy: Prompt[object] = Prompt(template)
+        prompt_with_policy.resources.__enter__()
+
+        bridged = BridgedTool(
+            name="search",
+            description="Search",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=recording_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=cast("PromptProtocol[object]", prompt_with_policy),
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        result = bridged({"query": "test"})
+
+        assert result["isError"] is True
+        text = result["content"][0]["text"]
+        assert "Missing prerequisite" in text
+        assert "Suggestions:" in text
+        assert "Run lint first" in text
+
     def test_allowing_policy_lets_handler_execute(
         self,
         session: Session,

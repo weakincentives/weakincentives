@@ -150,6 +150,7 @@ combine-as-imports = true
 "src/weakincentives/dbc/__init__.py" = ["PLR0913"]
 "src/weakincentives/prompt/_enabled_predicate.py" = ["PLR6201"]
 "src/weakincentives/prompt/composition.py" = ["PLR6301"]
+"src/weakincentives/prompt/policy.py" = ["PLR6301"]
 "src/weakincentives/prompt/markdown.py" = ["PLR0913"]
 "src/weakincentives/prompt/feedback_providers.py" = ["PLR6301"]
 "src/weakincentives/prompt/overrides/local_store.py" = ["PLR6301"]
