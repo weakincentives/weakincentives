@@ -234,7 +234,7 @@ class InMemoryMailbox[T, R]:
                 "mailbox": self.name,
                 "message_id": msg_id,
                 "reply_to": reply_to.name if reply_to else None,
-                "message_type": type(body).__qualname__,
+                "body_type": type(body).__qualname__,
             },
         )
         return msg_id

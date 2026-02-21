@@ -121,7 +121,7 @@ class RedisMailboxFactory[R]:
             msg.acknowledge()
     """
 
-    __slots__ = ("client", "default_ttl")
+    __slots__ = ("__orig_class__", "client", "default_ttl")
 
     client: Redis[bytes] | RedisCluster[bytes]
     """Redis client to use for all created mailboxes."""
@@ -135,36 +135,26 @@ class RedisMailboxFactory[R]:
         *,
         default_ttl: int = DEFAULT_TTL_SECONDS,
     ) -> None:
-        """Initialize factory with shared Redis client.
-
-        Args:
-            client: Redis client to use for all created mailboxes.
-            default_ttl: Default TTL in seconds for Redis keys (default: 3 days).
-        """
         super().__init__()
         self.client = client
         self.default_ttl = default_ttl
+        self.__orig_class__: type | None = None
 
     def create(self, identifier: str) -> Mailbox[R, None]:
-        """Create a RedisMailbox for the given identifier.
-
-        Args:
-            identifier: Queue name for the new mailbox.
-
-        Returns:
-            A new RedisMailbox connected to the shared client.
-
-        Note:
-            Created mailboxes are send-only: they do not start reaper threads
-            and do not support nested reply resolution. This prevents resource
-            leaks when creating ephemeral reply mailboxes.
-        """
-        return RedisMailbox(
+        """Create a send-only RedisMailbox for *identifier*."""
+        mb: RedisMailbox[R, None] = RedisMailbox(
             name=identifier,
             client=self.client,
             default_ttl=self.default_ttl,
-            _send_only=True,  # Send-only: no reaper thread, no nested resolution
+            _send_only=True,
         )
+        # Propagate body type from factory's generic parameter (R)
+        orig = getattr(self, "__orig_class__", None)
+        if orig is not None:
+            args = get_args(orig)
+            if args:
+                object.__setattr__(mb, "_body_type", args[0])
+        return mb
 
 
 @dataclass(slots=True)
@@ -361,6 +351,8 @@ class RedisMailbox[T, R]:
                 return parse(self._body_type, json_data)
             body_type: Any = self._body_type
             return body_type(json_data)
+        except SerializationError:
+            raise
         except Exception as e:
             _LOGGER.error(
                 "Deserialization failed for queue '%s': %s", self.name, e, exc_info=True
