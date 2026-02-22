@@ -61,6 +61,9 @@ debug_bundle/
   eval.json               # Eval metadata (EvalLoop only)
   filesystem/             # Workspace snapshot (if captured)
     ...
+  filesystem_history/     # Full filesystem change history (if captured)
+    history.bundle        # Git bundle containing all snapshot commits
+    manifest.json         # Snapshot metadata index
 ```
 
 ### Artifact Requirements
@@ -83,6 +86,7 @@ debug_bundle/
 | `error.json` | No | Exception type, phase, traceback, context |
 | `eval.json` | No | Sample ID, experiment, score, judge output |
 | `filesystem/` | No | Workspace files preserving directory structure |
+| `filesystem_history/` | No | Full filesystem change history from transactional git repo |
 
 ### Manifest Schema
 
@@ -101,7 +105,8 @@ debug_bundle/
   "capture": {
     "mode": "full",
     "trigger": "config|env|request",
-    "limits_applied": { "filesystem_truncated": false }
+    "limits_applied": { "filesystem_truncated": false },
+    "filesystem_history": true
   },
   "prompt": { "ns": "...", "key": "...", "adapter": "..." },
   "files": ["manifest.json", "..."],
@@ -195,8 +200,9 @@ Context manager for streaming bundle creation. See
 
 Key methods: `write_session_before()`, `write_session_after()`,
 `write_request_input()`, `write_request_output()`, `capture_logs()` (context
-manager), `write_environment()`, `write_filesystem()`, `write_config()`,
-`write_run_context()`, `write_metrics()`, `write_error()`, `write_metadata()`,
+manager), `write_environment()`, `write_filesystem()`,
+`write_filesystem_history()`, `write_config()`, `write_run_context()`,
+`write_metrics()`, `write_error()`, `write_metadata()`,
 `write_prompt_overrides()`, `set_prompt_info()`.
 
 The `write_metadata(name, data)` method provides a generic mechanism for adding
@@ -212,6 +218,7 @@ with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
     writer.write_request_output(response)
     writer.write_environment()  # Capture reproducibility envelope
     writer.write_filesystem(fs)
+    writer.write_filesystem_history(fs)  # Capture full git history
     writer.write_config(config)
     writer.write_run_context(run_context)
     writer.write_metrics(metrics)
@@ -270,6 +277,7 @@ AgentLoop._handle_message()
   │    ├─ write_session_after()
   │    ├─ write_environment()
   │    ├─ write_filesystem()
+  │    ├─ write_filesystem_history()  # git bundle of snapshot repo
   │    ├─ write_config(), write_run_context(), write_metrics()
   │    ├─ write_error()  # if failed
   │    └─ __exit__() finalizes bundle:
@@ -381,6 +389,7 @@ Options:
 | Slices | `session/*.jsonl` | Session state browser by slice type |
 | Logs | `logs/app.jsonl` | Searchable, filterable log viewer |
 | Files | `filesystem/` | File tree with content |
+| File History | `filesystem_history/` | Timeline of filesystem changes across tool calls |
 | Config | `config.json` | Configuration inspector |
 | Metrics | `metrics.json` | Performance dashboard |
 | Error | `error.json` | Error details (if present) |
@@ -397,6 +406,10 @@ Options:
 | `/api/logs` | Log entries (paginated, filterable by level) |
 | `/api/files` | Filesystem listing |
 | `/api/files/{path}` | File content |
+| `/api/history/snapshots` | List all filesystem snapshots (timeline) |
+| `/api/history/snapshot/{ref}` | Files at a specific snapshot |
+| `/api/history/diff/{from_ref}/{to_ref}` | Diff between two snapshots |
+| `/api/history/file/{path}` | Full history of a single file across snapshots |
 | `/api/config` | Configuration |
 | `/api/metrics` | Metrics |
 | `/api/error` | Error details |
@@ -409,6 +422,253 @@ Options:
 Standard: `{bundle_id}_{timestamp}.zip`
 
 EvalLoop: `{request_id}/{bundle_id}_{timestamp}.zip`
+
+## Filesystem History
+
+### Background
+
+Tool calls in WINK are transactional. Before each tool execution, the runtime
+takes a snapshot of the workspace filesystem by committing all changes to an
+external git repository (see `FILESYSTEM.md` and `TOOLS.md`). On tool failure,
+the filesystem is restored to the pre-tool snapshot via `git reset --hard`.
+
+This means the external git repository accumulates a commit-per-snapshot history
+that records **every filesystem mutation** the agent made during execution.
+Each commit is tagged with the tool name and tool-call ID, providing a complete
+timeline of how the workspace evolved.
+
+### Capturing History in Bundles
+
+When `BundleWriter.write_filesystem_history(fs)` is called with a
+`HostFilesystem` that has an initialized git directory, the writer:
+
+1. **Creates a git bundle** from the external snapshot repository using
+   `git bundle create`, capturing the full commit graph.
+1. **Generates a snapshot manifest** (`manifest.json`) listing each snapshot
+   with metadata: commit ref, timestamp, tag (tool name), and whether the
+   snapshot was rolled back or persisted.
+1. **Writes both artifacts** to `filesystem_history/` in the debug bundle.
+
+The git bundle format is a standard portable git archive. It can be cloned
+locally for full `git log`, `git diff`, and `git show` access without needing
+the original repository.
+
+```python
+# BundleWriter API
+def write_filesystem_history(self, fs: Filesystem) -> None:
+    """Write full filesystem change history from transactional git repo.
+
+    Captures the git repository used for tool-call snapshots as a
+    portable git bundle. Only applies to HostFilesystem with an
+    initialized git directory; no-op for in-memory filesystems.
+
+    Args:
+        fs: The filesystem whose snapshot history to capture.
+    """
+```
+
+### filesystem_history/manifest.json Schema
+
+```json
+{
+  "format_version": "1.0.0",
+  "snapshot_count": 12,
+  "snapshots": [
+    {
+      "commit_ref": "abc123...",
+      "created_at": "2024-01-15T10:30:00+00:00",
+      "tag": "pre:write_file:call_001",
+      "parent_ref": "def456...",
+      "message": "pre:write_file:call_001",
+      "files_changed": 3,
+      "insertions": 45,
+      "deletions": 12
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `commit_ref` | `str` | Git commit hash |
+| `created_at` | `str` | ISO-8601 UTC timestamp |
+| `tag` | `str \| null` | Snapshot tag (typically `"pre:{tool}:{id}"`) |
+| `parent_ref` | `str \| null` | Parent commit hash (null for initial) |
+| `message` | `str` | Git commit message |
+| `files_changed` | `int` | Number of files changed in this snapshot |
+| `insertions` | `int` | Lines added |
+| `deletions` | `int` | Lines removed |
+
+### Size Control
+
+The git bundle uses git's content-addressed storage, so identical files across
+snapshots share storage automatically (copy-on-write). Typical bundle sizes are
+much smaller than the sum of all snapshot states.
+
+`BundleConfig` gains a `max_history_size` field (default 100MB) to cap the git
+bundle size. If the history exceeds this limit, older commits are pruned using
+`git bundle create --since` to keep the most recent history.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_history_size` | `int` | `104_857_600` | Max git bundle size (100MB) |
+| `include_history` | `bool` | `True` | Whether to capture filesystem history |
+
+### CLI: wink debug File History
+
+The `wink debug` web UI adds a **File History** panel that provides:
+
+#### Snapshot Timeline
+
+A chronological list of all snapshots showing:
+
+- **Timestamp** and **tag** (tool name and call ID)
+- **Diff summary**: files changed, insertions, deletions
+- **Rollback indicator**: whether this snapshot was later rolled back (its
+  changes were reverted by a subsequent restore)
+
+This lets developers see exactly which tool calls modified the filesystem and
+in what order, including tool calls whose changes were undone.
+
+#### File-Level History
+
+Selecting a file shows its full change history across snapshots:
+
+- Each version with the snapshot that introduced the change
+- Inline diff between consecutive versions
+- Ability to view the file content at any snapshot
+
+#### Snapshot Diff View
+
+Selecting two snapshots shows the full diff between them:
+
+- Added, modified, and deleted files
+- Unified diff for each changed file
+
+### History API Routes
+
+| Route | Method | Query Params | Description |
+|-------|--------|-------------|-------------|
+| `/api/history/snapshots` | GET | `offset`, `limit` | Paginated snapshot timeline |
+| `/api/history/snapshot/{ref}` | GET | | File tree at a specific snapshot |
+| `/api/history/diff/{from_ref}/{to_ref}` | GET | `path` (optional) | Diff between two snapshots, optionally scoped to one file |
+| `/api/history/file/{path}` | GET | `offset`, `limit` | Change history for a single file across all snapshots |
+
+#### Example Responses
+
+**GET /api/history/snapshots**
+
+```json
+{
+  "total": 12,
+  "offset": 0,
+  "limit": 50,
+  "items": [
+    {
+      "commit_ref": "abc123",
+      "created_at": "2024-01-15T10:30:00+00:00",
+      "tag": "pre:write_file:call_001",
+      "files_changed": 1,
+      "insertions": 20,
+      "deletions": 0,
+      "rolled_back": false
+    },
+    {
+      "commit_ref": "def456",
+      "created_at": "2024-01-15T10:30:05+00:00",
+      "tag": "pre:patch_file:call_002",
+      "files_changed": 1,
+      "insertions": 5,
+      "deletions": 3,
+      "rolled_back": true
+    }
+  ]
+}
+```
+
+**GET /api/history/file/src/main.py**
+
+```json
+{
+  "path": "src/main.py",
+  "versions": [
+    {
+      "commit_ref": "abc123",
+      "created_at": "2024-01-15T10:30:00+00:00",
+      "tag": "pre:write_file:call_001",
+      "action": "added",
+      "diff": "@@ -0,0 +1,20 @@\n+def main():\n+    ..."
+    },
+    {
+      "commit_ref": "ghi789",
+      "created_at": "2024-01-15T10:31:00+00:00",
+      "tag": "pre:refactor:call_003",
+      "action": "modified",
+      "diff": "@@ -5,3 +5,5 @@\n-    old_line\n+    new_line\n+    added_line"
+    }
+  ]
+}
+```
+
+### Extracting History from a Bundle
+
+The `DebugBundle` class gains a `filesystem_history` property and helper
+methods for working with the captured git history:
+
+```python
+bundle = DebugBundle.load("./debug/bundle.zip")
+
+# Check if history is available
+if bundle.filesystem_history is not None:
+    history = bundle.filesystem_history
+
+    # List all snapshots
+    for snapshot in history["snapshots"]:
+        print(f"{snapshot['created_at']} {snapshot['tag']} "
+              f"({snapshot['files_changed']} files)")
+
+# Extract the git bundle for local inspection
+bundle.extract_filesystem_history(target=Path("./history_repo/"))
+# Now use standard git commands:
+#   cd ./history_repo && git log --oneline
+#   git diff <ref1> <ref2>
+#   git show <ref>:path/to/file
+```
+
+### DebugBundle Extensions
+
+| Property/Method | Returns | Description |
+|----------------|---------|-------------|
+| `filesystem_history` | `dict \| None` | Parsed `filesystem_history/manifest.json` |
+| `has_filesystem_history` | `bool` | Whether history was captured |
+| `extract_filesystem_history(target)` | `Path` | Clone git bundle to local repo for inspection |
+
+### Manual Inspection
+
+Since the captured history is a standard git bundle, advanced users can extract
+and inspect it directly:
+
+```bash
+# Extract the bundle
+unzip debug_bundle.zip
+cd debug_bundle/filesystem_history/
+
+# Clone from the git bundle into a local repo
+git clone history.bundle ./workspace_history
+
+# Browse the full timeline
+cd workspace_history
+git log --oneline --stat
+
+# See what a specific tool call changed
+git show <commit-ref>
+
+# Diff between two points in time
+git diff <earlier-ref> <later-ref>
+
+# View a file at a specific point
+git show <ref>:path/to/file.py
+```
 
 ## Public API
 
@@ -458,6 +718,10 @@ filesystem snapshots, PII in inputs. Recommendations:
 ## Limitations
 
 - **Filesystem size**: Large workspaces produce large bundles
+- **Filesystem history**: History requires HostFilesystem with git; in-memory
+  filesystems have no commit history to capture
+- **History size**: Long sessions with many tool calls accumulate large git
+  histories; use `max_history_size` to cap
 - **Memory**: Log capture buffers before writing
 - **Concurrency**: One bundle per AgentLoop execution
 - **No automatic redaction**: Manual review required for sensitive data
@@ -468,5 +732,6 @@ filesystem snapshots, PII in inputs. Recommendations:
 - `specs/SESSIONS.md` - Session snapshots
 - `specs/LOGGING.md` - Log record format
 - `specs/RUN_CONTEXT.md` - Execution metadata
-- `specs/FILESYSTEM.md` - Workspace abstraction
+- `specs/FILESYSTEM.md` - Workspace abstraction, snapshot history export
+- `specs/TOOLS.md` - Tool transactions, snapshot lifecycle
 - `specs/EVALS.md` - Evaluation framework

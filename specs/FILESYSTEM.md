@@ -421,6 +421,78 @@ session[FilesystemSnapshot].append(fs_snapshot)
 filesystem.restore(snapshots[-1])
 ```
 
+### Snapshot History
+
+The git-backed `HostFilesystem` accumulates a full commit history across all
+`snapshot()` calls. Each call creates a git commit tagged with the snapshot
+label (typically the tool name and call ID). This history is preserved in the
+external git directory for the lifetime of the filesystem instance.
+
+#### History as Debug Artifact
+
+The snapshot history serves as a complete audit trail of every filesystem
+mutation during an agent session. It records:
+
+- **What changed**: Full file diffs at each snapshot point
+- **When**: Timestamps on each commit
+- **Why**: Tags identifying the tool call that triggered the snapshot
+- **Rollbacks**: Restore operations appear as `git reset --hard` to earlier
+  commits, making reverted changes visible in the reflog
+
+This history is captured into debug bundles via
+`BundleWriter.write_filesystem_history()`. See `DEBUG_BUNDLE.md` for the
+bundle format and `wink debug` integration.
+
+#### Querying History
+
+`HostFilesystem` exposes the snapshot history through its git directory:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `snapshot_history()` | `list[SnapshotHistoryEntry]` | Ordered list of all snapshots |
+| `export_history_bundle(target)` | `Path` | Create portable git bundle file |
+
+```python
+@dataclass(slots=True, frozen=True)
+class SnapshotHistoryEntry:
+    """Single entry in the filesystem snapshot history."""
+    commit_ref: str
+    created_at: datetime
+    tag: str | None
+    parent_ref: str | None
+    message: str
+    files_changed: int
+    insertions: int
+    deletions: int
+```
+
+**Listing history:**
+
+```python
+fs = HostFilesystem(root="/workspace", git_dir="/tmp/wink-git-xxx")
+
+# After several tool calls with snapshots...
+for entry in fs.snapshot_history():
+    print(f"{entry.created_at} [{entry.tag}] "
+          f"{entry.files_changed} files, "
+          f"+{entry.insertions}/-{entry.deletions}")
+```
+
+**Exporting for debug bundles:**
+
+```python
+# Create a portable git bundle containing the full history
+bundle_path = fs.export_history_bundle(target=Path("/tmp/history.bundle"))
+# This file can be cloned: git clone history.bundle ./repo
+```
+
+#### In-Memory Filesystem
+
+`InMemoryFilesystem` does not maintain a git repository, so
+`snapshot_history()` returns an empty list and `export_history_bundle()` is a
+no-op. Snapshot/restore still works via structural sharing, but no persistent
+history is recorded.
+
 ## Binary File Support
 
 - `open_read()` / `open_write()`: Streaming bytes (primary)
@@ -496,6 +568,8 @@ with filesystem.open_text(path) as reader:
 - **No permissions model**: Beyond read-only flag
 - **Single-threaded**: Not thread-safe; one per session
 - **Path normalization**: Original casing may not be preserved
-- **Git dependency**: Disk snapshots require git
+- **Git dependency**: Disk snapshots and history require git
 - **No partial restore**: All-or-nothing
 - **UTF-8 only**: Text operations support only UTF-8 encoding
+- **History availability**: Only `HostFilesystem` records commit history;
+  in-memory backends do not persist snapshot history
