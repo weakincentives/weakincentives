@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import inspect
-import re
 import types
 from collections.abc import Callable, Sequence as SequenceABC
 from dataclasses import dataclass, field
@@ -39,20 +38,18 @@ from ..types.dataclass import (
     SupportsToolResult,
     is_dataclass_instance,
 )
+from ._validation import (
+    EXAMPLE_DESCRIPTION_VALIDATOR,
+    TOOL_DESCRIPTION_VALIDATOR,
+    TOOL_NAME_VALIDATOR,
+)
 from .errors import PromptValidationError
 from .tool_result import ToolResult
 
-_NAME_MIN_LENGTH: Final = 1
-_NAME_MAX_LENGTH: Final = 64
-_DESCRIPTION_MAX_LENGTH: Final = 200
 _EXPECTED_TYPE_ARGUMENTS: Final = 2
 _HANDLER_PARAMETER_COUNT: Final = 2
 _VARIADIC_TUPLE_LENGTH: Final = 2
 _NONE_TYPE: Final = type(None)
-
-_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
-    rf"^[a-z0-9_-]{{{_NAME_MIN_LENGTH},{_NAME_MAX_LENGTH}}}$"
-)
 
 
 if TYPE_CHECKING:
@@ -280,71 +277,55 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         return params_type, cast(ResultT, raw_result_annotation)
 
     def _validate_name(self, params_type: ParamsType) -> str:
-        raw_name = self.name
-        stripped_name = raw_name.strip()
-        if raw_name != stripped_name:
-            normalized_name = stripped_name
+        error = TOOL_NAME_VALIDATOR.validate(self.name)
+        if error:
+            # Provide context-specific message for name validation
+            if "whitespace" in error.message:
+                message = "Tool name must not contain surrounding whitespace."
+                # Use stripped name as placeholder (original behavior)
+                placeholder = self.name.strip()
+            elif "pattern" in error.message:
+                message = f"Tool name must match the OpenAI function name constraints (pattern: {TOOL_NAME_VALIDATOR.pattern.pattern if TOOL_NAME_VALIDATOR.pattern else ''})."
+                placeholder = self.name
+            else:
+                message = "Tool name must match the OpenAI function name constraints (1-64 lowercase ASCII letters, digits, underscores, or hyphens)."
+                placeholder = self.name.strip()
             raise PromptValidationError(
-                "Tool name must not contain surrounding whitespace.",
+                message,
                 dataclass_type=params_type,
-                placeholder=normalized_name,
+                placeholder=placeholder,
             )
-
-        name_clean = raw_name
-        if not name_clean:
-            raise PromptValidationError(
-                "Tool name must match the OpenAI function name constraints (1-64 lowercase ASCII letters, digits, underscores, or hyphens).",
-                dataclass_type=params_type,
-                placeholder=stripped_name,
-            )
-        if len(name_clean) > _NAME_MAX_LENGTH or not _NAME_PATTERN.fullmatch(
-            name_clean
-        ):
-            raise PromptValidationError(
-                f"Tool name must match the OpenAI function name constraints (pattern: {_NAME_PATTERN.pattern}).",
-                dataclass_type=params_type,
-                placeholder=name_clean,
-            )
-
-        return name_clean
+        return self.name.strip()
 
     def _validate_description(self, params_type: ParamsType) -> str:
-        description_clean = self.description.strip()
-        if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
+        error = TOOL_DESCRIPTION_VALIDATOR.validate(self.description)
+        if error:
+            if "ASCII" in error.message:
+                message = "Tool description must be ASCII."
+            else:
+                message = "Tool description must be 1-200 ASCII characters."
             raise PromptValidationError(
-                "Tool description must be 1-200 ASCII characters.",
+                message,
                 dataclass_type=params_type,
                 placeholder="description",
             )
-        try:
-            _ = description_clean.encode("ascii")
-        except UnicodeEncodeError as error:
-            raise PromptValidationError(
-                "Tool description must be ASCII.",
-                dataclass_type=params_type,
-                placeholder="description",
-            ) from error
-        return description_clean
+        return self.description.strip()
 
     @staticmethod
     def _validate_example_description(
         description: str, params_type: ParamsType
     ) -> None:
-        description_clean = description.strip()
-        if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
+        error = EXAMPLE_DESCRIPTION_VALIDATOR.validate(description)
+        if error:
+            if "ASCII" in error.message:
+                message = "Tool example description must be ASCII."
+            else:
+                message = "Tool example description must be 1-200 ASCII characters."
             raise PromptValidationError(
-                "Tool example description must be 1-200 ASCII characters.",
+                message,
                 dataclass_type=params_type,
                 placeholder="description",
             )
-        try:
-            _ = description_clean.encode("ascii")
-        except UnicodeEncodeError as error:
-            raise PromptValidationError(
-                "Tool example description must be ASCII.",
-                dataclass_type=params_type,
-                placeholder="description",
-            ) from error
 
     @staticmethod
     def _validate_example_input(
