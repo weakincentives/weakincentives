@@ -148,8 +148,7 @@ def is_session_aware(fn: Callable[..., Score]) -> bool:
         hints = get_type_hints(fn)
         if third_param in hints:
             return _is_session_type(hints[third_param])
-    except Exception:  # nosec B110
-        # get_type_hints can fail with nested functions due to unresolved forward refs
+    except Exception:  # noqa: S110 - get_type_hints can fail with unresolved forward refs  # nosec B110
         # Fall back to raw annotations
         pass
 
