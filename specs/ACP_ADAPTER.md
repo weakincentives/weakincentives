@@ -437,10 +437,52 @@ Tests at `tests/adapters/acp/`:
 | `test_state.py` | `ACPSessionState` tests |
 | `conftest.py` | Mock ACP types and fixtures |
 
+## Agent-Specific Behaviors
+
+The generic `ACPAdapter` is designed to handle differences between ACP agents
+via subclass hooks. Key behavioral differences discovered through probing:
+
+### Wire Format
+
+| Behavior | OpenCode | Gemini CLI |
+|----------|----------|------------|
+| `jsonrpc` field | Present | Present |
+| `initialized` notification | Handled | Not handled (logs error, harmless) |
+| Double initialize | Unknown | Accepted (returns result) |
+
+### Session/Model/Mode
+
+| Behavior | OpenCode | Gemini CLI |
+|----------|----------|------------|
+| `session/new` models | Returns model list | No model list |
+| `session/new` modes | Returns mode list | No mode list |
+| `session/setModel` | Supported | Not supported (-32601) |
+| `session/setMode` | Supported (errors) | Not supported (-32601) |
+| Model selection | Via ACP protocol | Via CLI `--model` flag |
+
+### Token Usage
+
+| Behavior | OpenCode | Gemini CLI |
+|----------|----------|------------|
+| `PromptResponse.usage` | Present | Not reported |
+| `UsageUpdate` notifications | Yes | No |
+| Budget tracking | Works | Not available |
+
+### MCP Support
+
+| Transport | OpenCode | Gemini CLI |
+|-----------|----------|------------|
+| HTTP | Yes | Yes |
+| SSE | Unknown | Yes |
+| Stdio | Yes | No |
+
+The adapter must use HTTP MCP for maximum compatibility across agents.
+
 ## Related Specifications
 
 - `specs/ADAPTERS.md` — Provider adapter protocol
 - `specs/OPENCODE_ADAPTER.md` — OpenCode-specific subclass
+- `specs/GEMINI_ACP_ADAPTER.md` — Gemini CLI-specific subclass
 - `specs/CLAUDE_AGENT_SDK.md` — Reference adapter architecture (shared bridge)
 - `specs/CODEX_APP_SERVER.md` — Sibling adapter using shared bridge
 - `specs/TOOLS.md` — Tool registration and policies

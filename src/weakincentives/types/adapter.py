@@ -31,10 +31,14 @@ ACP_ADAPTER_NAME: Final[AdapterName] = "acp"
 OPENCODE_ACP_ADAPTER_NAME: Final[AdapterName] = "opencode_acp"
 """Canonical label for the OpenCode ACP adapter."""
 
+GEMINI_ACP_ADAPTER_NAME: Final[AdapterName] = "gemini_acp"
+"""Canonical label for the Gemini CLI ACP adapter."""
+
 __all__ = [
     "ACP_ADAPTER_NAME",
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
     "CODEX_APP_SERVER_ADAPTER_NAME",
+    "GEMINI_ACP_ADAPTER_NAME",
     "OPENCODE_ACP_ADAPTER_NAME",
     "AdapterName",
 ]

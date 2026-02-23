@@ -71,6 +71,11 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
 )
+from weakincentives.adapters.gemini_acp import (
+    GeminiACPAdapter,
+    GeminiACPAdapterConfig,
+    GeminiACPClientConfig,
+)
 from weakincentives.adapters.opencode_acp import (
     OpenCodeACPAdapter,
     OpenCodeACPAdapterConfig,
@@ -105,6 +110,7 @@ if TYPE_CHECKING:
 # Adapter name constants
 ADAPTER_CLAUDE = "claude"
 ADAPTER_CODEX = "codex"
+ADAPTER_GEMINI = "gemini"
 ADAPTER_OPENCODE = "opencode"
 
 _LOGGER = logging.getLogger(__name__)
@@ -381,6 +387,18 @@ def create_adapter(
             model_config=CodexAppServerModelConfig(),
             client_config=CodexAppServerClientConfig(approval_policy="never"),
         )
+    if adapter_name == ADAPTER_GEMINI:
+        return GeminiACPAdapter(
+            adapter_config=GeminiACPAdapterConfig(
+                model_id=model_id or "gemini-2.5-flash",
+                approval_mode="yolo",
+            ),
+            client_config=GeminiACPClientConfig(
+                permission_mode="auto",
+                allow_file_reads=True,
+                allow_file_writes=False,
+            ),
+        )
     if adapter_name == ADAPTER_OPENCODE:
         return OpenCodeACPAdapter(
             adapter_config=OpenCodeACPAdapterConfig(model_id=model_id),
@@ -550,7 +568,7 @@ def _create_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--adapter",
-        choices=[ADAPTER_CLAUDE, ADAPTER_CODEX, ADAPTER_OPENCODE],
+        choices=[ADAPTER_CLAUDE, ADAPTER_CODEX, ADAPTER_GEMINI, ADAPTER_OPENCODE],
         default=ADAPTER_CLAUDE,
         help=f"Which adapter to use (default: {ADAPTER_CLAUDE})",
     )

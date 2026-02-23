@@ -42,6 +42,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "AGENT_LOOP": "Agent loop orchestration, visibility handling, event-driven execution",
     "MODULE_BOUNDARIES": "Module organization and import boundaries",
     "ACP_ADAPTER": "Generic ACP adapter, protocol flow, MCP HTTP bridging",
+    "GEMINI_ACP_ADAPTER": "Gemini CLI ACP adapter, CLI flag injection, quirk handling",
     "OPENCODE_ACP_ADAPTER": "Superseded — see ACP_ADAPTER and OPENCODE_ADAPTER",
     "OPENCODE_ADAPTER": "OpenCode ACP adapter, model validation, quirk handling",
     "POLICIES_OVER_WORKFLOWS": "Philosophy of declarative policies vs rigid workflows",
