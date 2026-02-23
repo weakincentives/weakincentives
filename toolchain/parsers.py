@@ -536,6 +536,25 @@ def parse_bun_test(output: str, code: int) -> tuple[Diagnostic, ...]:
     return tuple(diagnostics)
 
 
+def parse_vulture(output: str, _code: int) -> tuple[Diagnostic, ...]:
+    """Parse vulture output: file:line: message.
+
+    Vulture outputs one line per unused item:
+        src/module.py:42: unused variable 'x' (80% confidence)
+    """
+    diagnostics = []
+    pattern = re.compile(r"^(.+?):(\d+): (.+)$", re.MULTILINE)
+    for match in pattern.finditer(output):
+        file, line, message = match.groups()
+        diagnostics.append(
+            Diagnostic(
+                message=message,
+                location=Location(file=file, line=int(line)),
+            )
+        )
+    return tuple(diagnostics)
+
+
 def parse_mdformat(output: str, code: int) -> tuple[Diagnostic, ...]:
     """Parse mdformat --check output."""
     if code == 0:

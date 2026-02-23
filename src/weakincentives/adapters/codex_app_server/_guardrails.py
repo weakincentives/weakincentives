@@ -17,23 +17,29 @@ Provides feedback collection after tool calls and task completion checking.
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING, Any
 
-from ...budget import BudgetTracker, TokenUsage
+from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...prompt.feedback import collect_feedback
 from ...prompt.task_completion import TaskCompletionContext
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
+from .._shared._guardrails import accumulate_usage, resolve_filesystem
 
 if TYPE_CHECKING:
-    from ...filesystem import Filesystem
     from ...prompt.protocols import PromptProtocol
 
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "codex_app_server"}
 )
+
+__all__ = [
+    "accumulate_usage",
+    "append_feedback",
+    "check_task_completion",
+    "resolve_filesystem",
+]
 
 
 def append_feedback(
@@ -50,28 +56,6 @@ def append_feedback(
     feedback_text = collect_feedback(prompt=prompt, session=session, deadline=deadline)
     if feedback_text:
         content_items.append({"type": "inputText", "text": feedback_text})
-
-
-def accumulate_usage(current: TokenUsage | None, new: TokenUsage) -> TokenUsage:
-    """Sum token usage across continuation rounds."""
-    if current is None:
-        return new
-    return TokenUsage(
-        input_tokens=(current.input_tokens or 0) + (new.input_tokens or 0),
-        output_tokens=(current.output_tokens or 0) + (new.output_tokens or 0),
-        cached_tokens=(current.cached_tokens or 0) + (new.cached_tokens or 0),
-    )
-
-
-def resolve_filesystem(prompt: PromptProtocol[Any] | None) -> Filesystem | None:
-    """Extract filesystem from prompt resources if available."""
-    if prompt is None:
-        return None
-    from ...filesystem import Filesystem as FsType
-
-    with contextlib.suppress(Exception):
-        return prompt.resources.get_optional(FsType)
-    return None
 
 
 def check_task_completion(  # noqa: PLR0911
