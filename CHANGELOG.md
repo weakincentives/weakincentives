@@ -2,6 +2,191 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+*Commits reviewed: 2026-02-17 (898b799e) through 2026-02-22 (128079d4)*
+
+### TL;DR
+
+**Gemini CLI joins the adapter family.** A new `GeminiACPAdapter` wraps the
+generic `ACPAdapter` to run agents against Google's Gemini CLI
+(`gemini --experimental-acp`), defaulting to `gemini-2.5-flash` with thought
+chunk emission enabled. It follows the same thin-wrapper pattern as
+`OpenCodeACPAdapter` and hooks into the ACK integration suite.
+
+**`wink debug` gets a complete UI overhaul.** The oscilloscope-inspired redesign
+replaces glassmorphism with flat dark surfaces, adds a `Cmd+K` command palette
+for cross-view search, a transcript minimap for jump-to-position navigation,
+resizable sidebar with `localStorage` persistence, line-number gutters and
+basic syntax highlighting in the filesystem view, and vim-style `G`/`gg`
+jump shortcuts.
+
+**Toolchain check output becomes self-diagnosing.** Check failures that lack
+structured diagnostics now always surface their raw output inline — no more
+re-running with `--verbose` — and include an exact `Reproduce:` command so the
+fix is one paste away.
+
+**Filesystem streaming and multiple large test suites are decomposed** into
+single-responsibility modules, cutting individual files from 1,000+ to a few
+hundred lines each while preserving all public APIs through re-exports.
+
+---
+
+### Added
+
+#### Gemini CLI ACP adapter (`adapters/gemini_acp`)
+
+A new `GeminiACPAdapter` integrates Google's Gemini CLI as a fourth supported
+runtime. It is a thin subclass of `ACPAdapter` (the same pattern as
+`OpenCodeACPAdapter`) with the following Gemini-specific behavior:
+
+- **Config defaults**: `agent_bin="gemini"`, startup args
+  `("--experimental-acp",)`, `startup_timeout_s=15.0`,
+  `model_id="gemini-2.5-flash"`, `quiet_period_ms=200`,
+  `emit_thought_chunks=True`.
+- **CLI flag injection**: overrides the new `_agent_spawn_args()` hook on
+  `ACPAdapter` to append `--model`, `--approval-mode`, and `--sandbox`
+  flags from config fields.
+- **Empty response detection**: raises `PromptEvaluationError` when Gemini
+  returns zero `AgentMessageChunk` objects (invalid model or configuration).
+- **Session setup no-op**: `_configure_session()` is a no-op because Gemini
+  does not implement `session/setModel` or `session/setMode`.
+- **Model validation no-op**: `_validate_model()` is a no-op because Gemini
+  does not return available model lists.
+- **Seatbelt sandbox support**: `_prepare_execution_env()` injects the
+  `SEATBELT_PROFILE` environment variable when `sandbox_profile` is set,
+  enabling macOS seatbelt profile selection.
+- **Sandbox+ACP incompatibility documented**: `--sandbox` re-launches
+  `gemini` via `sandbox-exec`, breaking ACP's stdio pipe protocol.
+  Experimentally verified on Gemini CLI v0.29.5; the `GeminiACPAdapterConfig`
+  docstring and `GEMINI_ACP_ADAPTER.md` warn against using both flags together.
+
+`ACPAdapter` gains a new `_agent_spawn_args()` override point that returns
+`self._client_config.agent_args` by default; subclasses can replace it to
+inject additional CLI arguments without touching spawn logic.
+
+New files: `src/weakincentives/adapters/gemini_acp/__init__.py`,
+`adapter.py`, `config.py`; 31 unit tests in `tests/adapters/gemini_acp/`;
+`specs/GEMINI_ACP_ADAPTER.md` (509 lines); ACK fixture in
+`integration-tests/ack/adapters/gemini_acp.py`; `make demo-gemini` target;
+Gemini option added to `code_reviewer_example.py`.
+(`src/weakincentives/adapters/gemini_acp/`, `specs/GEMINI_ACP_ADAPTER.md`,
+`specs/ADAPTERS.md`, `specs/ACP_ADAPTER.md`, `Makefile`)
+
+---
+
+### Changed
+
+#### `wink debug` UI redesign — oscilloscope aesthetic (#1108)
+
+The debug viewer's entire visual layer is replaced. Changes affect
+`cli/static/{app.js,index.html,store.js,style.css}` and all view modules
+(~2,500 line net change):
+
+- **Dark-first theme**: signal-color palette (cyan/green/amber/red/violet),
+  IBM Plex Mono + DM Sans typography, tighter spacing, flat surfaces —
+  glassmorphism card shadows and frosted-glass panels are removed.
+- **Command palette** (`Cmd+K`): full-text search across slices, files, and
+  navigation commands. Items are ranked and keyboard-navigable; pressing Enter
+  executes the selected action and closes the overlay.
+- **Transcript minimap**: a horizontal colored scrubber rendered below the
+  transcript pane shows entry types as colored ticks. Clicking a tick scrolls
+  the transcript to that position.
+- **Resizable sidebar**: a drag handle on the right edge of the sidebar lets
+  users resize it between 180 px and 500 px. The chosen width is stored in
+  `localStorage` under `wink-sidebar-width` and restored on next open.
+- **Filesystem enhancements**: line-number gutter added to file content view;
+  basic syntax highlighting for `.json` files (key/value coloring) and `.py`
+  files (keyword coloring); `.md` files expand to full panel height.
+- **Keyboard shortcuts**: `G` jumps to end of transcript/logs; `gg` (double
+  keystroke) jumps to start. The `?` shortcuts modal is updated to include all
+  new bindings.
+- **UI polish**: redundant panel headings removed; "Copy filtered" buttons
+  dropped; Environment tab shortcut fixed.
+
+#### Toolchain: check failures surface raw output and reproduce commands (#1116)
+
+Previously, understanding why a check failed without structured diagnostics
+required re-running `python check.py <name> -v`. Now the output formatters
+always show the root cause inline:
+
+- `CheckResult` gains a `command: tuple[str, ...]` field (defaults to empty
+  tuple for backward compatibility) populated by `SubprocessChecker` and
+  `AutoFormatChecker` across all exit paths (success, failure, timeout,
+  `FileNotFoundError`).
+- `ConsoleFormatter`: when `result.diagnostics` is empty and `result.output`
+  is non-empty, displays up to 50 lines of raw output followed by a count of
+  remaining lines and a `Reproduce: <command>` line (using `shlex.join`).
+- `QuietFormatter`: same behavior, but truncates at 30 lines.
+- Structured diagnostics continue to take priority; the raw-output path is
+  only reached when `diagnostics` is empty.
+(`toolchain/checker.py`, `toolchain/output.py`, `toolchain/result.py`)
+
+---
+
+### Internal / Refactoring
+
+#### Filesystem streaming decomposed into four modules (#1112)
+
+`src/weakincentives/filesystem/_streams.py` (previously ~1,034 lines) is
+split into focused single-responsibility modules while `_streams.py` becomes a
+thin re-export layer for backward compatibility:
+
+- `_stream_protocols.py`: `ByteReader`, `ByteWriter`, `TextReader` protocol
+  definitions.
+- `_stream_host.py`: `HostByteReader`, `HostByteWriter` — native file-handle
+  implementations.
+- `_stream_memory.py`: `MemoryByteReader`, `MemoryByteWriter` — in-memory
+  buffer implementations.
+- `_stream_text.py`: `DefaultTextReader` — lazy UTF-8 decoding over any
+  `ByteReader`.
+
+#### ACP adapter helpers extracted (#1112)
+
+Two helper modules are extracted from the monolithic `adapters/acp/adapter.py`
+and exported through `adapters/acp/__init__.py`:
+
+- `adapters/acp/_env.py`: `build_env()` helper for subprocess environment
+  construction (also used by the new `GeminiACPAdapter`).
+- `adapters/acp/_prompt_loop.py`: `drain_quiet_period()` and related prompt
+  loop helpers.
+
+#### Additional source decompositions (#1112)
+
+- `runtime/session/_session_helpers.py` extracted from `session.py` /
+  `session_dispatch.py` with session-level constants and helpers.
+- `contrib/tools/_memory_types.py` and `_memory_writer.py` extracted from
+  `filesystem_memory.py`.
+
+#### Comprehensive test suite reorganization (#1112)
+
+~30 large monolithic test files are split into focused modules (each ~300–700
+lines) across every major subsystem. Representative decompositions:
+
+- **Codex App Server**: `test_adapter.py` → `test_adapter_schema.py`,
+  `test_adapter_session.py`, `test_adapter_loop.py`, `test_client_io.py`,
+  `test_protocol_and_skills.py`.
+- **Claude Agent SDK bridge**: `test_bridge.py` → `test_bridge_session.py`,
+  `test_bridge_mcp.py`, `test_bridge_resources.py`.
+- **Claude Agent SDK isolation**: `test_isolation.py` → six focused modules
+  (`test_isolation_ephemeral.py`, `test_isolation_auth.py`,
+  `test_isolation_aws.py`, `test_isolation_skills.py`, `test_isolation_2.py`,
+  `test_isolation_3.py`).
+- **Transcript collector**: `test_transcript_collector.py` →
+  `test_transcript_collector_pending.py`, `test_transcript_fallback.py`,
+  `test_transcript_text_extraction.py`.
+- **ACP adapter**: `test_adapter_protocol.py` → `test_adapter_session.py`.
+- **CLI debug app**: `test_wink_debug_app.py` → `test_wink_debug_environment.py`,
+  `test_wink_debug_logs.py`, `test_wink_debug_transcript.py`.
+- **Evals loop**: `test_loop.py` → `test_loop_bundles.py`, `test_loop_dlq.py`,
+  `test_session_evaluator_combinators.py`.
+- Multiple other suites (runtime lifecycle, mailbox, serde, prompts, resources,
+  toolchain parsers/checkers) receive the same treatment.
+
+No behavior changes; all public APIs are preserved through re-exports.
+
+---
+
 ## v0.27.0 — 2026-02-16
 
 *Commits reviewed: 2026-02-14 (92bc161f) through 2026-02-16 (e1a9c529)*
