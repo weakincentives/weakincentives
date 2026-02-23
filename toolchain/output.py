@@ -152,10 +152,17 @@ class ConsoleFormatter:
                 if remaining > 0:
                     lines.append(f"  ... and {remaining} more")
                     lines.append(f"  Run: python check.py {result.name} -v")
-            elif self.verbose and result.output:  # pragma: no cover
-                # Show raw output if no structured diagnostics
-                for line in result.output.split("\n")[:20]:
+            elif result.output:
+                # No structured diagnostics: always show raw output so the
+                # root cause is immediately visible without re-running with -v.
+                output_lines = result.output.split("\n")
+                for line in output_lines[:50]:
                     lines.append(f"  {line}")
+                if len(output_lines) > 50:
+                    lines.append(f"  ... ({len(output_lines) - 50} more lines)")
+                if result.command:
+                    cmd_str = " ".join(result.command)
+                    lines.append(f"  Reproduce: {cmd_str}")
 
         return lines
 
@@ -261,11 +268,23 @@ class QuietFormatter:
             else:
                 lines.append(f"✗ {result.name}")
 
-            for diag in result.diagnostics[:10]:
-                lines.append(f"  {diag}")
+            if result.diagnostics:
+                for diag in result.diagnostics[:10]:
+                    lines.append(f"  {diag}")
 
-            if len(result.diagnostics) > 10:
-                lines.append(f"  ... and {len(result.diagnostics) - 10} more")
-                lines.append(f"  Run: python check.py {result.name} -v")
+                if len(result.diagnostics) > 10:
+                    lines.append(f"  ... and {len(result.diagnostics) - 10} more")
+                    lines.append(f"  Run: python check.py {result.name} -v")
+            elif result.output:
+                # No structured diagnostics: always show raw output so the
+                # root cause is immediately visible without re-running with -v.
+                output_lines = result.output.split("\n")
+                for line in output_lines[:30]:
+                    lines.append(f"  {line}")
+                if len(output_lines) > 30:
+                    lines.append(f"  ... ({len(output_lines) - 30} more lines)")
+                if result.command:
+                    cmd_str = " ".join(result.command)
+                    lines.append(f"  Reproduce: {cmd_str}")
 
         return "\n".join(lines)

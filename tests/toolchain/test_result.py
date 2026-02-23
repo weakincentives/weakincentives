@@ -152,6 +152,19 @@ class TestCheckResult:
         result = CheckResult(name="lint", status="passed", duration_ms=100)
         assert result.output == ""
 
+    def test_default_command_empty(self) -> None:
+        result = CheckResult(name="lint", status="passed", duration_ms=100)
+        assert result.command == ()
+
+    def test_command_stored(self) -> None:
+        result = CheckResult(
+            name="lint",
+            status="failed",
+            duration_ms=100,
+            command=("uv", "run", "ruff", "check", "."),
+        )
+        assert result.command == ("uv", "run", "ruff", "check", ".")
+
     def test_frozen(self) -> None:
         result = CheckResult(name="lint", status="passed", duration_ms=100)
         with pytest.raises(AttributeError):

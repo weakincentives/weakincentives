@@ -112,23 +112,60 @@ class TestConsoleFormatter:
         output = formatter.format(_make_skipped_report())
         assert "\033[33m" in output  # Yellow color code for skipped
 
-    def test_verbose_shows_output(self) -> None:
+    def test_raw_output_surfaced_when_no_diagnostics(self) -> None:
+        """Raw output and reproduce command are shown when no structured diagnostics.
+
+        This ensures root-cause visibility without needing --verbose: raw output
+        is always shown for failures with no parsed diagnostics, together with the
+        exact command needed to reproduce the failure. When diagnostics ARE available
+        they take priority and the raw output / reproduce hint is suppressed.
+        Empty output is handled gracefully (no spurious reproduce line).
+        """
+        formatter = ConsoleFormatter(color=False)
+
+        # Raw output shown without verbose flag
+        result = CheckResult(
+            name="lint", status="failed", duration_ms=100, diagnostics=(),
+            output="crash: unexpected null\nsecond line",
+            command=("uv", "run", "ruff", "."),
+        )
+        out = formatter.format(Report(results=(result,), total_duration_ms=100))
+        assert "crash: unexpected null" in out
+        assert "Reproduce: uv run ruff ." in out
+
+        # No reproduce line when structured diagnostics are present
+        result2 = CheckResult(
+            name="lint", status="failed", duration_ms=100,
+            diagnostics=(Diagnostic(message="Type error"),),
+            output="raw", command=("uv", "run", "ruff", "."),
+        )
+        out2 = formatter.format(Report(results=(result2,), total_duration_ms=100))
+        assert "Reproduce:" not in out2
+
+        # No reproduce line when output is empty (e.g. timeout already in diagnostics)
+        result3 = CheckResult(name="lint", status="failed", duration_ms=100, diagnostics=(), output="")
+        out3 = formatter.format(Report(results=(result3,), total_duration_ms=100))
+        assert "✗ lint" in out3
+        assert "Reproduce:" not in out3
+
+    def test_raw_output_truncated_at_50_lines(self) -> None:
+        """Raw output is truncated at 50 lines with a count of remaining lines."""
+        long_output = "\n".join(f"line {i}" for i in range(60))
         report = Report(
             results=(
                 CheckResult(
-                    name="test",
-                    status="failed",
-                    duration_ms=100,
-                    diagnostics=(),
-                    output="Some raw\noutput here",
+                    name="test", status="failed", duration_ms=100,
+                    diagnostics=(), output=long_output,
                 ),
             ),
             total_duration_ms=100,
         )
-        formatter = ConsoleFormatter(verbose=True, color=False)
+        formatter = ConsoleFormatter(color=False)
         output = formatter.format(report)
-        assert "Some raw" in output
-        assert "output here" in output
+        assert "line 0" in output
+        assert "line 49" in output
+        assert "line 50" not in output
+        assert "10 more lines" in output
 
     def test_max_diagnostics_truncation(self) -> None:
         diagnostics = tuple(Diagnostic(message=f"Error {i}") for i in range(15))
@@ -574,3 +611,54 @@ class TestQuietFormatter:
         assert "Info msg" in output
         assert "Warn msg" in output
         assert "Err msg" not in output
+
+    def test_raw_output_surfaced_when_no_diagnostics(self) -> None:
+        """Raw output and reproduce command shown when no structured diagnostics.
+
+        Same guarantee as ConsoleFormatter: root cause is immediately visible,
+        structured diagnostics take priority, and empty output is handled safely.
+        """
+        formatter = QuietFormatter(color=False)
+
+        # Raw output + command shown
+        result = CheckResult(
+            name="lint", status="failed", duration_ms=100, diagnostics=(),
+            output="crash: null\nsecond line",
+            command=("uv", "run", "ruff", "."),
+        )
+        out = formatter.format(Report(results=(result,), total_duration_ms=100))
+        assert "crash: null" in out
+        assert "Reproduce: uv run ruff ." in out
+
+        # No reproduce when diagnostics present
+        result2 = CheckResult(
+            name="lint", status="failed", duration_ms=100,
+            diagnostics=(Diagnostic(message="Type error"),),
+            command=("uv", "run", "ruff", "."),
+        )
+        assert "Reproduce:" not in formatter.format(Report(results=(result2,), total_duration_ms=100))
+
+        # No reproduce when output empty
+        result3 = CheckResult(name="lint", status="failed", duration_ms=100, diagnostics=(), output="")
+        out3 = formatter.format(Report(results=(result3,), total_duration_ms=100))
+        assert "✗ lint" in out3
+        assert "Reproduce:" not in out3
+
+    def test_raw_output_truncated_at_30_lines(self) -> None:
+        """Raw output is truncated at 30 lines with a count of remaining lines."""
+        long_output = "\n".join(f"line {i}" for i in range(40))
+        report = Report(
+            results=(
+                CheckResult(
+                    name="test", status="failed", duration_ms=100,
+                    diagnostics=(), output=long_output,
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = QuietFormatter(color=False)
+        output = formatter.format(report)
+        assert "line 0" in output
+        assert "line 29" in output
+        assert "line 30" not in output
+        assert "10 more lines" in output

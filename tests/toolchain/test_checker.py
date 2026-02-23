@@ -134,6 +134,24 @@ class TestSubprocessChecker:
         # Output should be stripped
         assert result.output == "hello"
 
+    def test_command_stored_in_result(self) -> None:
+        """Command args are stored in result for reproduction hints (all exit paths)."""
+        # Passing command
+        checker = SubprocessChecker(name="echo", description="Echo", command=["echo", "hi"])
+        assert checker.run().command == ("echo", "hi")
+
+        # Failing command
+        checker = SubprocessChecker(name="false", description="Fails", command=["false"])
+        assert checker.run().command == ("false",)
+
+        # Timeout
+        checker = SubprocessChecker(name="slow", description="Slow", command=["sleep", "10"], timeout=1)
+        assert checker.run().command == ("sleep", "10")
+
+        # FileNotFoundError
+        checker = SubprocessChecker(name="missing", description="Missing", command=["nonexistent_xyz"])
+        assert checker.run().command == ("nonexistent_xyz",)
+
 
 class TestIsCiEnvironment:
     """Tests for is_ci_environment detection."""
@@ -624,6 +642,56 @@ class TestAutoFormatChecker:
         info_diags = [d for d in result.diagnostics if d.severity == "info"]
         assert len(info_diags) == 1
         assert "1 file" in info_diags[0].message
+
+
+    def test_command_stored_in_result(self) -> None:
+        """Command is stored in result for all exit paths (CI and local)."""
+        # CI: check_command stored on pass
+        checker = AutoFormatChecker(
+            name="format", description="Test format",
+            check_command=["uv", "run", "ruff", "format", "--check", "."],
+            fix_command=["uv", "run", "ruff", "format", "."],
+        )
+        with mock.patch.dict(os.environ, {"CI": "true"}, clear=True):
+            assert checker.run().command == ("uv", "run", "ruff", "format", "--check", ".")
+
+        # CI: check_command stored on timeout
+        checker = AutoFormatChecker(
+            name="f", description="f", check_command=["sleep", "10"], fix_command=["true"], timeout=1
+        )
+        with mock.patch.dict(os.environ, {"CI": "true"}, clear=True):
+            assert checker.run().command == ("sleep", "10")
+
+        # CI: check_command stored on FileNotFoundError
+        checker = AutoFormatChecker(
+            name="f", description="f", check_command=["nonexistent_cmd_abc"], fix_command=["true"]
+        )
+        with mock.patch.dict(os.environ, {"CI": "true"}, clear=True):
+            assert checker.run().command == ("nonexistent_cmd_abc",)
+
+        # Local: fix_command stored on fix failure
+        json_output = '[{"filename": "test.py"}]'
+        checker = AutoFormatChecker(
+            name="f", description="f", check_command=["true"],
+            fix_command=["bash", "-c", "exit 1"],
+            json_check_command=["bash", "-c", f"echo '{json_output}'; exit 1"],
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            assert checker.run().command == ("bash", "-c", "exit 1")
+
+        # Local: fix_command stored on timeout
+        checker = AutoFormatChecker(
+            name="f", description="f", check_command=["true"], fix_command=["sleep", "10"], timeout=1
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            assert checker.run().command == ("sleep", "10")
+
+        # Local: fix_command stored on FileNotFoundError
+        checker = AutoFormatChecker(
+            name="f", description="f", check_command=["true"], fix_command=["nonexistent_cmd_xyz"]
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            assert checker.run().command == ("nonexistent_cmd_xyz",)
 
 
 class TestNoFileListParse:
