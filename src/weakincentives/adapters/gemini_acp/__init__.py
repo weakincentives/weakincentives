@@ -10,21 +10,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ACK adapter fixture exports."""
+"""Gemini CLI ACP adapter for weakincentives."""
 
 from __future__ import annotations
 
-from ._protocol import AdapterCapabilities, AdapterFixture
-from .claude_agent_sdk import ClaudeAgentSDKFixture
-from .codex_app_server import CodexAppServerFixture
-from .gemini_acp import GeminiACPFixture
-from .opencode_acp import OpenCodeACPFixture
+from ..acp import ACPClient, ACPSessionState, McpServerConfig
+from .adapter import GeminiACPAdapter
+from .config import GeminiACPAdapterConfig, GeminiACPClientConfig
 
 __all__ = [
-    "AdapterCapabilities",
-    "AdapterFixture",
-    "ClaudeAgentSDKFixture",
-    "CodexAppServerFixture",
-    "GeminiACPFixture",
-    "OpenCodeACPFixture",
+    "ACPClient",
+    "ACPSessionState",
+    "GeminiACPAdapter",
+    "GeminiACPAdapterConfig",
+    "GeminiACPClientConfig",
+    "McpServerConfig",
 ]

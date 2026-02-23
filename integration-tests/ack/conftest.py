@@ -27,6 +27,7 @@ from .adapters import (
     AdapterFixture,
     ClaudeAgentSDKFixture,
     CodexAppServerFixture,
+    GeminiACPFixture,
     OpenCodeACPFixture,
 )
 
@@ -36,6 +37,7 @@ _ACK_ADAPTERS_ENV = "ACK_ADAPTERS"
 _ALL_FIXTURES: tuple[AdapterFixture, ...] = (
     ClaudeAgentSDKFixture(),
     CodexAppServerFixture(),
+    GeminiACPFixture(),
     OpenCodeACPFixture(),
 )
 

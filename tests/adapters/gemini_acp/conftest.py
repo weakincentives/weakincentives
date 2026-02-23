@@ -10,21 +10,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ACK adapter fixture exports."""
+"""Shared test fixtures for Gemini CLI ACP adapter tests.
+
+Reuses fixtures from the generic acp/ test conftest.
+"""
 
 from __future__ import annotations
-
-from ._protocol import AdapterCapabilities, AdapterFixture
-from .claude_agent_sdk import ClaudeAgentSDKFixture
-from .codex_app_server import CodexAppServerFixture
-from .gemini_acp import GeminiACPFixture
-from .opencode_acp import OpenCodeACPFixture
-
-__all__ = [
-    "AdapterCapabilities",
-    "AdapterFixture",
-    "ClaudeAgentSDKFixture",
-    "CodexAppServerFixture",
-    "GeminiACPFixture",
-    "OpenCodeACPFixture",
-]

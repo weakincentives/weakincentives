@@ -506,7 +506,7 @@ class ACPAdapter(ProviderAdapter[Any]):
             async with spawn_agent_process(
                 client,
                 self._client_config.agent_bin,
-                *self._client_config.agent_args,
+                *self._agent_spawn_args(),
                 cwd=effective_cwd,
                 env=merged_env,
                 transport_kwargs={"limit": stdio_limit},
@@ -663,6 +663,10 @@ class ACPAdapter(ProviderAdapter[Any]):
         )
 
     # -- Subclass hooks --
+
+    def _agent_spawn_args(self) -> tuple[str, ...]:
+        """Return CLI arguments for the agent binary. Override in subclasses."""
+        return self._client_config.agent_args
 
     def _validate_model(self, model_id: str, available_models: list[Any]) -> None:
         """Validate model_id against available models. Override in subclasses."""

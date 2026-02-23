@@ -112,6 +112,17 @@ At `src/weakincentives/adapters/opencode_acp/`:
 
 See [OPENCODE_ACP_ADAPTER.md](OPENCODE_ACP_ADAPTER.md) for complete documentation.
 
+### Gemini CLI ACP Adapter
+
+At `src/weakincentives/adapters/gemini_acp/` (planned):
+
+- ACP adapter specialized for Gemini CLI harness
+- Model selection via CLI `--model` flag (not ACP protocol)
+- No token usage reporting
+- HTTP/SSE MCP only (no stdio)
+
+See [GEMINI_ACP_ADAPTER.md](GEMINI_ACP_ADAPTER.md) for complete documentation.
+
 ## Shared Adapter Module
 
 At `src/weakincentives/adapters/_shared/`:
