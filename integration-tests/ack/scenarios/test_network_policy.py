@@ -39,7 +39,7 @@ def test_network_denied_by_default(
 
     prompt = Prompt(
         PromptTemplate(
-            ns="integration/ack/network",
+            ns="integration.ack.network",
             key="blocked",
             name="ack_network_blocked",
             sections=[
@@ -85,7 +85,7 @@ def test_network_allowed_for_listed_domains(
 
     prompt = Prompt(
         PromptTemplate(
-            ns="integration/ack/network",
+            ns="integration.ack.network",
             key="allowed",
             name="ack_network_allowed",
             sections=[

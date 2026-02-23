@@ -31,6 +31,7 @@ from ..events import PromptExecuted, PromptRendered, ToolInvoked
 from ._types import ReducerEvent
 from .dataclasses import is_dataclass_instance
 from .rendered_tools import RenderedTools
+from .session_dispatch import dispatch_data_event
 
 if TYPE_CHECKING:
     from .session import Session
@@ -59,7 +60,8 @@ def handle_tool_invoked(session: Session, event: ToolInvoked) -> None:
         event: The ToolInvoked telemetry event.
     """
     # Dispatch ToolInvoked to any reducers registered for ToolInvoked events
-    session._dispatch_data_event(
+    dispatch_data_event(
+        session,
         _TOOL_INVOKED_TYPE,
         cast(ReducerEvent, event),
     )
@@ -79,7 +81,7 @@ def handle_tool_invoked(session: Session, event: ToolInvoked) -> None:
     if is_dataclass_instance(payload):
         # Narrow for ty: payload is SupportsDataclass after TypeGuard
         narrowed = cast(SupportsDataclass, payload)  # pyright: ignore[reportUnnecessaryCast]
-        session._dispatch_data_event(type(narrowed), narrowed)
+        dispatch_data_event(session, type(narrowed), narrowed)
 
 
 def handle_prompt_executed(session: Session, event: PromptExecuted) -> None:
@@ -94,7 +96,8 @@ def handle_prompt_executed(session: Session, event: PromptExecuted) -> None:
         event: The PromptExecuted telemetry event.
     """
     # Dispatch PromptExecuted to any reducers registered for PromptExecuted events
-    session._dispatch_data_event(
+    dispatch_data_event(
+        session,
         _PROMPT_EXECUTED_TYPE,
         cast(ReducerEvent, event),
     )
@@ -102,7 +105,7 @@ def handle_prompt_executed(session: Session, event: PromptExecuted) -> None:
     # Dispatch output directly to slice reducers
     output = event.result.output
     if is_dataclass_instance(output):
-        session._dispatch_data_event(type(output), output)
+        dispatch_data_event(session, type(output), output)
         return
 
     # Handle iterable outputs (dispatch each item directly)
@@ -111,7 +114,7 @@ def handle_prompt_executed(session: Session, event: PromptExecuted) -> None:
             if is_dataclass_instance(item):
                 # Narrow for ty: item is SupportsDataclass after TypeGuard
                 narrowed_item = cast(SupportsDataclass, item)  # pyright: ignore[reportUnnecessaryCast]
-                session._dispatch_data_event(type(narrowed_item), narrowed_item)
+                dispatch_data_event(session, type(narrowed_item), narrowed_item)
 
 
 def handle_prompt_rendered(session: Session, event: PromptRendered) -> None:
@@ -123,7 +126,8 @@ def handle_prompt_rendered(session: Session, event: PromptRendered) -> None:
         session: The session to dispatch to.
         event: The PromptRendered telemetry event.
     """
-    session._dispatch_data_event(
+    dispatch_data_event(
+        session,
         _PROMPT_RENDERED_TYPE,
         cast(ReducerEvent, event),
     )
@@ -140,7 +144,8 @@ def handle_rendered_tools(session: Session, event: RenderedTools) -> None:
         session: The session to dispatch to.
         event: The RenderedTools telemetry event.
     """
-    session._dispatch_data_event(
+    dispatch_data_event(
+        session,
         _RENDERED_TOOLS_TYPE,
         cast(ReducerEvent, event),
     )

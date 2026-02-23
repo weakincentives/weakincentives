@@ -47,7 +47,7 @@ def test_sandbox_restricts_writes_outside_workspace(
 
     prompt = Prompt(
         PromptTemplate(
-            ns="integration/ack/sandbox",
+            ns="integration.ack.sandbox",
             key="outside-write",
             name="ack_sandbox_outside",
             sections=[
@@ -81,7 +81,7 @@ def test_sandbox_allows_writes_inside_workspace(
 
     prompt = Prompt(
         PromptTemplate(
-            ns="integration/ack/sandbox",
+            ns="integration.ack.sandbox",
             key="inside-write",
             name="ack_sandbox_inside",
             sections=[

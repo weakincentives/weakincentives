@@ -20,6 +20,7 @@ from typing import Any, override
 
 from ...prompt import RenderedPrompt
 from ...types import OPENCODE_ACP_ADAPTER_NAME, AdapterName
+from ..acp import build_env
 from ..acp.adapter import ACPAdapter
 from ..acp.client import ACPClient
 from ..core import PromptEvaluationError
@@ -113,7 +114,7 @@ class OpenCodeACPAdapter(ACPAdapter):
             home.cleanup()
             raise
 
-        base_env = self._build_env()
+        base_env = build_env(self._client_config.env)
         if base_env is None:
             base_env = dict(os.environ)
         base_env["HOME"] = home.home_path

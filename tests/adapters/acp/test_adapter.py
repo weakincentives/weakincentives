@@ -22,8 +22,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from weakincentives.adapters.acp._env import build_env
+from weakincentives.adapters.acp._prompt_loop import drain_quiet_period, extract_text
 from weakincentives.adapters.acp.config import ACPAdapterConfig, ACPClientConfig
 from weakincentives.adapters.core import PromptEvaluationError
+from weakincentives.clock import SYSTEM_CLOCK
 from weakincentives.runtime.events import InProcessDispatcher
 
 from .conftest import (
@@ -192,75 +195,57 @@ class TestResolveCwd:
 
 class TestExtractText:
     def test_no_message_chunks(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         client = MagicMock()
         client.message_chunks = []
         client.thought_chunks = []
-        assert adapter._extract_text(client) is None
+        assert extract_text(client, emit_thought_chunks=False) is None
 
     def test_message_chunks(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         client = MagicMock()
         client.message_chunks = [
             AgentMessageChunk("Hello "),
             AgentMessageChunk("world"),
         ]
         client.thought_chunks = []
-        assert adapter._extract_text(client) == "Hello world"
+        assert extract_text(client, emit_thought_chunks=False) == "Hello world"
 
     def test_with_thoughts_enabled(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(emit_thought_chunks=True))
         client = MagicMock()
         client.message_chunks = [AgentMessageChunk("answer")]
         client.thought_chunks = [AgentThoughtChunk("thinking...")]
-        result = adapter._extract_text(client)
+        result = extract_text(client, emit_thought_chunks=True)
         assert result == "thinking...answer"
 
     def test_with_thoughts_disabled(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(emit_thought_chunks=False))
         client = MagicMock()
         client.message_chunks = [AgentMessageChunk("answer")]
         client.thought_chunks = [AgentThoughtChunk("thinking...")]
-        result = adapter._extract_text(client)
+        result = extract_text(client, emit_thought_chunks=False)
         assert result == "answer"
 
     def test_empty_thought_content_skipped(self) -> None:
         """Covers branch where thought chunk content is empty."""
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(emit_thought_chunks=True))
         client = MagicMock()
         client.message_chunks = [AgentMessageChunk("answer")]
         client.thought_chunks = [AgentThoughtChunk(""), AgentThoughtChunk("ok")]
-        result = adapter._extract_text(client)
+        result = extract_text(client, emit_thought_chunks=True)
         assert result == "okanswer"
 
     def test_empty_message_content_skipped(self) -> None:
         """Covers branch where message chunk content is empty."""
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
         client = MagicMock()
         client.message_chunks = [
             AgentMessageChunk(""),
             AgentMessageChunk("text"),
         ]
         client.thought_chunks = []
-        result = adapter._extract_text(client)
+        result = extract_text(client, emit_thought_chunks=False)
         assert result == "text"
 
 
 class TestExtractChunkTextListContent:
     def test_list_of_content_blocks(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
+        from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         block1 = MagicMock()
         block1.text = "hello "
@@ -271,7 +256,7 @@ class TestExtractChunkTextListContent:
         assert _extract_chunk_text(chunk) == "hello world"
 
     def test_list_with_non_text_blocks(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
+        from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         class PlainBlock:
             def __str__(self) -> str:
@@ -282,7 +267,7 @@ class TestExtractChunkTextListContent:
         assert _extract_chunk_text(chunk) == "fallback"
 
     def test_list_skips_falsy_blocks(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
+        from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         block = MagicMock()
         block.text = "kept"
@@ -291,7 +276,7 @@ class TestExtractChunkTextListContent:
         assert _extract_chunk_text(chunk) == "kept"
 
     def test_text_content_block(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
+        from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         inner = type("TextContentBlock", (), {"text": "hello"})()
         chunk = MagicMock()
@@ -299,14 +284,14 @@ class TestExtractChunkTextListContent:
         assert _extract_chunk_text(chunk) == "hello"
 
     def test_non_string_non_list_fallback(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
+        from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         chunk = MagicMock()
         chunk.content = 42
         assert _extract_chunk_text(chunk) == "42"
 
     def test_falsy_non_string_content(self) -> None:
-        from weakincentives.adapters.acp.adapter import _extract_chunk_text
+        from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         chunk = MagicMock()
         chunk.content = None
@@ -416,13 +401,13 @@ class TestBuildEnv:
         from weakincentives.adapters.acp.adapter import ACPAdapter
 
         adapter = ACPAdapter(client_config=ACPClientConfig(env=None))
-        assert adapter._build_env() is None
+        assert build_env(adapter._client_config.env) is None
 
     def test_merges_with_os_environ(self) -> None:
         from weakincentives.adapters.acp.adapter import ACPAdapter
 
         adapter = ACPAdapter(client_config=ACPClientConfig(env={"MY_VAR": "my_val"}))
-        result = adapter._build_env()
+        result = build_env(adapter._client_config.env)
         assert result is not None
         assert result["MY_VAR"] == "my_val"
         # os.environ keys should also be present
@@ -600,32 +585,47 @@ class TestFinalizeResponse:
 
 class TestDrainQuietPeriod:
     def test_immediate_drain_when_zero_quiet_period(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(quiet_period_ms=0))
         client = MagicMock()
         client.last_update_time = 0.0
 
         # Should return immediately
-        asyncio.run(adapter._drain_quiet_period(client, None))
+        asyncio.run(
+            drain_quiet_period(
+                client,
+                None,
+                quiet_period_ms=0,
+                clock=SYSTEM_CLOCK,
+                async_sleeper=SYSTEM_CLOCK,
+            )
+        )
 
     def test_drain_with_deadline(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(quiet_period_ms=50))
         client = MagicMock()
         client.last_update_time = time.monotonic()
 
         deadline = _make_mock_deadline(remaining_s=0.001)
 
-        asyncio.run(adapter._drain_quiet_period(client, deadline))
+        asyncio.run(
+            drain_quiet_period(
+                client,
+                deadline,
+                quiet_period_ms=50,
+                clock=SYSTEM_CLOCK,
+                async_sleeper=SYSTEM_CLOCK,
+            )
+        )
 
     def test_drain_waits_for_quiet(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(adapter_config=ACPAdapterConfig(quiet_period_ms=10))
         client = MagicMock()
         # Recent update — should wait
         client.last_update_time = time.monotonic()
 
-        asyncio.run(adapter._drain_quiet_period(client, None))
+        asyncio.run(
+            drain_quiet_period(
+                client,
+                None,
+                quiet_period_ms=10,
+                clock=SYSTEM_CLOCK,
+                async_sleeper=SYSTEM_CLOCK,
+            )
+        )

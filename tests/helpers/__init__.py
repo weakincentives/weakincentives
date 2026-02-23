@@ -19,6 +19,7 @@ specific submodules.
 Core helpers available here:
     - NullDispatcher: No-op event dispatcher for isolated testing
     - FilesystemValidationSuite: Validation suite for Filesystem implementations
+    - FilesystemStreamingValidationSuite: Streaming I/O tests (open_write, open_text)
     - ReadOnlyFilesystemValidationSuite: Validation for read-only filesystems
     - SnapshotableFilesystemValidationSuite: Validation for snapshotable filesystems
 
@@ -52,13 +53,15 @@ Example::
 """
 
 from .events import NullDispatcher
-from .filesystem import (
-    FilesystemValidationSuite,
+from .filesystem import FilesystemValidationSuite
+from .filesystem_streaming import (
+    FilesystemStreamingValidationSuite,
     ReadOnlyFilesystemValidationSuite,
     SnapshotableFilesystemValidationSuite,
 )
 
 __all__ = [
+    "FilesystemStreamingValidationSuite",
     "FilesystemValidationSuite",
     "NullDispatcher",
     "ReadOnlyFilesystemValidationSuite",
