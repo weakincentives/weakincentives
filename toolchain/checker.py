@@ -119,6 +119,7 @@ class SubprocessChecker:
                 duration_ms=duration_ms,
                 diagnostics=diagnostics,
                 output=output.strip(),
+                command=tuple(self.command),
             )
         except subprocess.TimeoutExpired:
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -135,6 +136,7 @@ class SubprocessChecker:
                 duration_ms=duration_ms,
                 diagnostics=(Diagnostic(msg),),
                 output="",
+                command=tuple(self.command),
             )
         except FileNotFoundError as e:
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -151,6 +153,7 @@ class SubprocessChecker:
                 duration_ms=duration_ms,
                 diagnostics=(Diagnostic(msg),),
                 output="",
+                command=tuple(self.command),
             )
 
 
@@ -214,6 +217,7 @@ class AutoFormatChecker:
                 duration_ms=duration_ms,
                 diagnostics=diagnostics,
                 output=output.strip(),
+                command=tuple(self.check_command),
             )
         except subprocess.TimeoutExpired:
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -223,6 +227,7 @@ class AutoFormatChecker:
                 duration_ms=duration_ms,
                 diagnostics=(Diagnostic(f"Timed out after {self.timeout}s"),),
                 output="",
+                command=tuple(self.check_command),
             )
         except FileNotFoundError as e:
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -239,6 +244,7 @@ class AutoFormatChecker:
                 duration_ms=duration_ms,
                 diagnostics=(Diagnostic(msg),),
                 output="",
+                command=tuple(self.check_command),
             )
 
     def _run_with_autofix(self, start: float) -> CheckResult:
@@ -322,6 +328,7 @@ class AutoFormatChecker:
                     duration_ms=duration_ms,
                     diagnostics=(Diagnostic("Auto-fix command failed"),),
                     output=output.strip(),
+                    command=tuple(self.fix_command),
                 )
 
             # Report which files were reformatted
@@ -372,6 +379,7 @@ class AutoFormatChecker:
                 duration_ms=duration_ms,
                 diagnostics=(Diagnostic(f"Timed out after {self.timeout}s"),),
                 output="",
+                command=tuple(self.fix_command),
             )
         except FileNotFoundError as e:
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -388,6 +396,7 @@ class AutoFormatChecker:
                 duration_ms=duration_ms,
                 diagnostics=(Diagnostic(msg),),
                 output="",
+                command=tuple(self.fix_command),
             )
 
     def _parse_json_output(self, output: str) -> list[str]:

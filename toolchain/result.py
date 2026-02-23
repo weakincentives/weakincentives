@@ -93,6 +93,7 @@ class CheckResult:
     duration_ms: int
     diagnostics: tuple[Diagnostic, ...] = ()
     output: str = ""  # Raw output for debugging
+    command: tuple[str, ...] = ()  # Command used, for reproduction hints
 
     @property
     def passed(self) -> bool:
