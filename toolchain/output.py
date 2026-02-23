@@ -20,6 +20,7 @@ Provides formatters for rendering Reports to different outputs:
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from dataclasses import asdict, dataclass
 from typing import IO, ClassVar, Protocol
@@ -161,7 +162,7 @@ class ConsoleFormatter:
                 if len(output_lines) > 50:
                     lines.append(f"  ... ({len(output_lines) - 50} more lines)")
                 if result.command:
-                    cmd_str = " ".join(result.command)
+                    cmd_str = shlex.join(result.command)
                     lines.append(f"  Reproduce: {cmd_str}")
 
         return lines
@@ -284,7 +285,7 @@ class QuietFormatter:
                 if len(output_lines) > 30:
                     lines.append(f"  ... ({len(output_lines) - 30} more lines)")
                 if result.command:
-                    cmd_str = " ".join(result.command)
+                    cmd_str = shlex.join(result.command)
                     lines.append(f"  Reproduce: {cmd_str}")
 
         return "\n".join(lines)
