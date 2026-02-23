@@ -276,6 +276,62 @@ class DebugBundle:  # noqa: PLR0904
 
         return result
 
+    @property
+    def has_filesystem_history(self) -> bool:
+        """Whether filesystem history was captured in this bundle."""
+        return "filesystem_history/manifest.json" in self._manifest.files
+
+    @property
+    def filesystem_history(self) -> dict[str, Any] | None:
+        """Return parsed filesystem_history/manifest.json, or None if absent."""
+        if not self.has_filesystem_history:
+            return None
+        try:
+            content = self._read_artifact("filesystem_history/manifest.json")
+            parsed: object = json.loads(content.decode("utf-8"))
+        except (BundleValidationError, json.JSONDecodeError):
+            return None
+        else:
+            if isinstance(parsed, dict):
+                return cast("dict[str, Any]", parsed)
+            return None  # pragma: no cover
+
+    def extract_filesystem_history(self, target: Path | str) -> Path | None:
+        """Extract and clone the git bundle to a local repository.
+
+        Args:
+            target: Directory where the repository will be cloned.
+
+        Returns:
+            Path to the cloned repository, or None if no history bundle.
+        """
+        import subprocess  # nosec B404
+
+        if not self.has_filesystem_history:
+            return None
+
+        try:
+            bundle_content = self._read_artifact("filesystem_history/history.bundle")
+        except BundleValidationError:
+            return None
+
+        target_path = Path(target)
+        target_path.mkdir(parents=True, exist_ok=True)
+
+        bundle_file = target_path / "history.bundle"
+        _ = bundle_file.write_bytes(bundle_content)
+
+        repo_dir = target_path / "repo"
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "clone", str(bundle_file), str(repo_dir)],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+
+        return repo_dir
+
     def list_files(self) -> list[str]:
         """Return list of files in the bundle."""
         with zipfile.ZipFile(self._zip_path, "r") as zf:

@@ -236,6 +236,17 @@ def _parse_transcript_row(row: sqlite3.Row) -> Mapping[str, JSONValue]:
     return entry
 
 
+def _infer_action(snapshot: Mapping[str, Any], path: str) -> str:
+    """Infer file action (added/modified/deleted) from snapshot data."""
+    deletions = snapshot.get("deletions", 0)
+    insertions = snapshot.get("insertions", 0)
+    if insertions > 0 and deletions == 0:
+        return "added"
+    if insertions == 0 and deletions > 0:
+        return "deleted"
+    return "modified"
+
+
 class BundleLoadError(WinkError, RuntimeError):
     """Raised when a bundle cannot be loaded or validated."""
 
@@ -695,6 +706,68 @@ class BundleStore:
             context={"path": str(self._path)},
         )
         return self.get_meta()
+
+    def get_file_history(self, path: str) -> Mapping[str, JSONValue]:
+        """Return mutation history for a specific file path."""
+        history = self.bundle.filesystem_history
+        if history is None:
+            return {"path": path, "mutations": []}
+
+        snapshots = history.get("snapshots", [])
+        mutations: list[Mapping[str, JSONValue]] = []
+        for snap in snapshots:
+            files_changed = snap.get("files_changed", [])
+            if path not in files_changed:
+                continue
+            mutations.append(
+                {
+                    "tool_call_id": snap.get("tool_call_id"),
+                    "tool_name": snap.get("tool_name"),
+                    "created_at": snap.get("created_at"),
+                    "action": _infer_action(snap, path),
+                    "insertions": snap.get("insertions", 0),
+                    "deletions": snap.get("deletions", 0),
+                    "rolled_back": snap.get("rolled_back", False),
+                }
+            )
+        return {"path": path, "mutations": mutations}
+
+    def get_tool_call_files(self, tool_call_id: str) -> Mapping[str, JSONValue]:
+        """Return files changed by a specific tool call."""
+        history = self.bundle.filesystem_history
+        if history is None:
+            return {
+                "tool_call_id": tool_call_id,
+                "tool_name": None,
+                "rolled_back": False,
+                "files": [],
+            }
+
+        snapshots = history.get("snapshots", [])
+        for snap in snapshots:
+            if snap.get("tool_call_id") == tool_call_id:
+                files: list[Mapping[str, JSONValue]] = [
+                    {
+                        "path": f,
+                        "insertions": snap.get("insertions", 0),
+                        "deletions": snap.get("deletions", 0),
+                        "action": _infer_action(snap, f),
+                    }
+                    for f in snap.get("files_changed", [])
+                ]
+                return {
+                    "tool_call_id": tool_call_id,
+                    "tool_name": snap.get("tool_name"),
+                    "rolled_back": snap.get("rolled_back", False),
+                    "files": files,
+                }
+
+        return {
+            "tool_call_id": tool_call_id,
+            "tool_name": None,
+            "rolled_back": False,
+            "files": [],
+        }
 
     def close(self) -> None:
         """Close the database connection."""

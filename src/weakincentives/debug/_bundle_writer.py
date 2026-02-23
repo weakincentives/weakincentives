@@ -509,6 +509,75 @@ class BundleWriter:
                 extra={"bundle_id": str(self._bundle_id)},
             )
 
+    def write_filesystem_history(self, fs: Filesystem) -> None:
+        """Write filesystem snapshot history to the bundle.
+
+        Creates ``filesystem_history/history.bundle`` (portable git bundle)
+        and ``filesystem_history/manifest.json`` (snapshot index with metadata).
+
+        No-op for filesystems without git history (e.g., InMemoryFilesystem).
+        """
+        try:
+            self._archive_filesystem_history(fs)
+        except Exception:
+            _logger.exception(
+                "Failed to write filesystem history",
+                extra={"bundle_id": str(self._bundle_id)},
+            )
+
+    def _archive_filesystem_history(self, fs: Filesystem) -> None:
+        """Archive filesystem history into the bundle."""
+        if self._temp_dir is None:  # pragma: no cover
+            return
+
+        # Only HostFilesystem has git-backed history
+        from ..filesystem import HostFilesystem
+
+        if not isinstance(fs, HostFilesystem):
+            return
+
+        # snapshot_history() returns [] if git is not initialized
+        entries = fs.snapshot_history()
+        if not entries:
+            return
+
+        # Create the filesystem_history directory
+        history_dir = self._temp_dir / BUNDLE_ROOT_DIR / "filesystem_history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        # Export git bundle (returns None if no history)
+        bundle_path = fs.export_history_bundle(history_dir)
+        if bundle_path is not None and bundle_path.exists():
+            bundle_content = bundle_path.read_bytes()
+            self._files.append("filesystem_history/history.bundle")
+            self._checksums["filesystem_history/history.bundle"] = compute_checksum(
+                bundle_content
+            )
+
+        # Build manifest
+        manifest: dict[str, Any] = {
+            "format_version": "1.0.0",
+            "snapshot_count": len(entries),
+            "snapshots": [
+                {
+                    "commit_ref": e.commit_ref,
+                    "created_at": e.created_at,
+                    "tag": e.tag,
+                    "parent_ref": e.parent_ref,
+                    "tool_call_id": e.tool_call_id,
+                    "tool_name": e.tool_name,
+                    "files_changed": list(e.files_changed),
+                    "insertions": e.insertions,
+                    "deletions": e.deletions,
+                    "rolled_back": e.rolled_back,
+                }
+                for e in entries
+            ],
+        }
+
+        manifest_content = json.dumps(manifest, indent=2)
+        self._write_artifact("filesystem_history/manifest.json", manifest_content)
+
     def _archive_filesystem(self, fs: Filesystem, root_path: str) -> None:
         """Archive filesystem contents to bundle."""
         if self._temp_dir is None:  # pragma: no cover
