@@ -36,17 +36,17 @@ from weakincentives.runtime.transactions import (
 
 
 def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
-    """Create a prompt with filesystem bound in active context."""
+    """Create a prompt with filesystem bound in active resource scope."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="transactions-test"))
     prompt = prompt.bind(resources={Filesystem: fs})
-    prompt.resources.__enter__()
+    prompt._activate_scope()
     return prompt
 
 
 def _make_prompt() -> Prompt[object]:
-    """Create a prompt in active context."""
+    """Create a prompt in active resource scope."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="transactions-test"))
-    prompt.resources.__enter__()
+    prompt._activate_scope()
     return prompt
 
 
@@ -339,7 +339,7 @@ class TestRestoreSnapshotErrors:
             PromptTemplate(ns="tests", key="failing-fs-test")
         )
         prompt = prompt.bind(resources={Filesystem: FailingFilesystem()})
-        prompt.resources.__enter__()
+        prompt._activate_scope()
 
         snapshot = create_snapshot(session, prompt.resources.context, tag="test")
 
@@ -570,7 +570,7 @@ class TestRestoreSnapshotEdgeCases:
             PromptTemplate(ns="tests", key="non-snapshotable-test")
         )
         prompt = prompt.bind(resources={SimpleResource: resource})
-        prompt.resources.__enter__()
+        prompt._activate_scope()
 
         # Create snapshot (won't include non-snapshotable resource)
         snapshot = create_snapshot(session, prompt.resources.context, tag="test")

@@ -393,28 +393,38 @@ def handle_message_with_bundle(  # noqa: PLR0913, PLR0917
                 adapter=get_adapter_name(loop._adapter),
             )
 
-            # Resolve effective settings and execute
-            response, budget_tracker = _execute_with_bundled_settings(
-                loop,
-                request_event=request_event,
-                prompt=prompt,
-                session=session,
-                run_context=run_context,
-                writer=writer,
+            # Resolve settings (bind resources) before entering scope
+            prompt, budget_tracker, eff_deadline = loop._resolve_settings(
+                prompt,
+                budget=request_event.budget,
+                deadline=request_event.deadline,
+                resources=request_event.resources,
             )
 
-            ended_at = SYSTEM_CLOCK.utcnow()
+            # Enter resource scope for execution and bundle writing
+            with prompt.resource_scope():
+                with writer.capture_logs():
+                    response = loop._evaluate_with_retries(
+                        prompt=prompt,
+                        session=session,
+                        deadline=eff_deadline,
+                        budget_tracker=budget_tracker,
+                        heartbeat=loop._heartbeat,
+                        run_context=run_context,
+                    )
 
-            write_bundle_artifacts(
-                writer=writer,
-                response=response,
-                session=session,
-                prompt=prompt,
-                started_at=started_at,
-                ended_at=ended_at,
-                budget_tracker=budget_tracker,
-                config=loop._config,
-            )
+                ended_at = SYSTEM_CLOCK.utcnow()
+
+                write_bundle_artifacts(
+                    writer=writer,
+                    response=response,
+                    session=session,
+                    prompt=prompt,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    budget_tracker=budget_tracker,
+                    config=loop._config,
+                )
 
             prompt_cleaned_up = True
             prompt.cleanup()
@@ -427,33 +437,3 @@ def handle_message_with_bundle(  # noqa: PLR0913, PLR0917
         _handle_bundle_error(
             loop, msg, exc, prompt, writer, prompt_cleaned_up, run_context, log
         )
-
-
-def _execute_with_bundled_settings(  # noqa: PLR0913
-    loop: _LoopLike,
-    *,
-    request_event: AgentLoopRequest[Any],
-    prompt: Prompt[Any],
-    session: Session,
-    run_context: RunContext,
-    writer: object,  # BundleWriter, but avoid import for typing
-) -> tuple[PromptResponse[Any], BudgetTracker | None]:
-    """Execute prompt with settings resolved and log capture enabled."""
-    prompt, budget_tracker, eff_deadline = loop._resolve_settings(
-        prompt,
-        budget=request_event.budget,
-        deadline=request_event.deadline,
-        resources=request_event.resources,
-    )
-
-    with writer.capture_logs():  # type: ignore[union-attr]
-        response = loop._evaluate_with_retries(
-            prompt=prompt,
-            session=session,
-            deadline=eff_deadline,
-            budget_tracker=budget_tracker,
-            heartbeat=loop._heartbeat,
-            run_context=run_context,
-        )
-
-    return response, budget_tracker

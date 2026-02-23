@@ -455,7 +455,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         )
 
         try:
-            with prompt.resources:
+            with prompt.resource_scope():
                 return await self._run_with_prompt_context(
                     sdk=sdk,
                     prompt=prompt,

@@ -264,6 +264,7 @@ Module Structure
 from __future__ import annotations
 
 from .binding import Binding, Provider
+from .builder import RegistryBuilder
 from .context import ScopedResourceContext
 from .errors import (
     CircularDependencyError,
@@ -272,6 +273,7 @@ from .errors import (
     ResourceError,
     UnboundResourceError,
 )
+from .module import ResourceModule
 from .protocols import Closeable, PostConstruct, ResourceResolver, Snapshotable
 from .registry import ResourceRegistry
 from .scope import Scope
@@ -284,7 +286,9 @@ __all__ = [
     "PostConstruct",
     "Provider",
     "ProviderError",
+    "RegistryBuilder",
     "ResourceError",
+    "ResourceModule",
     "ResourceRegistry",
     "ResourceResolver",
     "Scope",

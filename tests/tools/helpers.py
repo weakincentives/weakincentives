@@ -71,7 +71,7 @@ def build_tool_context(
         prompt = prompt.bind(resources={Filesystem: filesystem})
 
     # Enter resource context for resource access
-    prompt.resources.__enter__()
+    prompt._activate_scope()
 
     return ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),

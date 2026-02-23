@@ -321,7 +321,7 @@ class TestReadBeforeWritePolicy:
             prompt = Prompt(template)
 
         # Always enter resource context
-        prompt.resources.__enter__()
+        prompt._activate_scope()
 
         return ToolContext(
             prompt=prompt,

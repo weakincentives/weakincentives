@@ -69,8 +69,7 @@ def _make_mock_prompt(
     prompt.filesystem.return_value = None
     prompt.bind.return_value = prompt
     prompt.resources = MagicMock()
-    prompt.resources.__enter__ = MagicMock(return_value=None)
-    prompt.resources.__exit__ = MagicMock(return_value=False)
+    prompt.resource_scope = MagicMock(return_value=MagicMock())
     prompt.task_completion_checker = checker
     prompt.resources.get_optional.return_value = None
     return prompt

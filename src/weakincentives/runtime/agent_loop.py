@@ -314,21 +314,7 @@ class AgentLoop[UserRequestT, OutputT](
             bundle_dir = Path("./bundles")
             with loop.execute_with_bundle(request, bundle_target=bundle_dir) as ctx:
                 score = compute_score(ctx.response.output)
-                ctx.write_metadata("eval", {
-                    "sample_id": "sample-1",
-                    "score": {"value": score.value, "passed": score.passed},
-                })
-            # Bundle is now finalized
-            print(f"Bundle at: {ctx.bundle_path}")
-
-            # With storage handler for external upload:
-            config = BundleConfig(
-                target=bundle_dir,
-                storage_handler=S3StorageHandler(bucket="my-bucket"),
-            )
-            with loop.execute_with_bundle(request, bundle_target=bundle_dir,
-                                          bundle_config=config) as ctx:
-                ...  # Bundle will be uploaded to S3 after finalization
+                ctx.write_metadata("eval", {"score": score.value})
         """
         from ..debug import BundleWriter
         from .agent_loop_types import BundleContext
@@ -366,28 +352,31 @@ class AgentLoop[UserRequestT, OutputT](
 
             ended_at = SYSTEM_CLOCK.utcnow()
 
-            # Create context for caller to access results and add metadata
-            ctx: BundleContext[OutputT] = BundleContext(
-                writer=writer,
-                response=response,
-                session=session,
-                latency_ms=int((self._clock.monotonic() - start_mono) * 1000),
-            )
+            # Enter resource scope for bundle artifact writing
+            # (reentrant if adapter already entered)
+            with prompt.resource_scope():
+                # Create context for caller to access results and add metadata
+                ctx: BundleContext[OutputT] = BundleContext(
+                    writer=writer,
+                    response=response,
+                    session=session,
+                    latency_ms=int((self._clock.monotonic() - start_mono) * 1000),
+                )
 
-            # Yield to allow caller to compute score and add eval metadata
-            yield ctx
+                # Yield to allow caller to compute score and add metadata
+                yield ctx
 
-            # Write remaining artifacts after caller has added metadata
-            _write_bundle_artifacts_fn(
-                writer=writer,
-                response=response,
-                session=session,
-                prompt=prompt,
-                started_at=started_at,
-                ended_at=ended_at,
-                budget_tracker=budget_tracker,
-                config=self._config,
-            )
+                # Write remaining artifacts after caller has added metadata
+                _write_bundle_artifacts_fn(
+                    writer=writer,
+                    response=response,
+                    session=session,
+                    prompt=prompt,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    budget_tracker=budget_tracker,
+                    config=self._config,
+                )
 
             prompt.cleanup()
 

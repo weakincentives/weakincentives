@@ -74,7 +74,7 @@ class TestVerifyTaskCompletion:
         prompt: Prompt[object] = Prompt(
             PromptTemplate(ns="test", key="test", task_completion_checker=checker)
         )
-        prompt.resources.__enter__()
+        prompt._activate_scope()
         adapter = ClaudeAgentSDKAdapter()
         self._call_verify(
             adapter,
@@ -136,7 +136,7 @@ class TestVerifyTaskCompletion:
         prompt: Prompt[object] = Prompt(
             PromptTemplate(ns="test", key="test", task_completion_checker=checker)
         )
-        prompt.resources.__enter__()
+        prompt._activate_scope()
         adapter = ClaudeAgentSDKAdapter()
 
         exceeded_deadline = MagicMock()
@@ -161,7 +161,7 @@ class TestVerifyTaskCompletion:
         prompt: Prompt[object] = Prompt(
             PromptTemplate(ns="test", key="test", task_completion_checker=checker)
         )
-        prompt.resources.__enter__()
+        prompt._activate_scope()
         adapter = ClaudeAgentSDKAdapter()
 
         budget = Budget(max_total_tokens=100)
@@ -360,7 +360,7 @@ class TestCheckTaskCompletion:
             ns="test", key="test", name="test"
         )
         prompt_obj: Prompt[None] = Prompt(template)
-        prompt_obj.resources.__enter__()
+        prompt_obj._activate_scope()
         constraints = HookConstraints()
         hook_context = HookContext(
             prompt=prompt_obj,

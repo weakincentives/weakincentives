@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
-    from ..resources import ResourceRegistry
+    from ..resources.builder import RegistryBuilder
     from ..runtime.session.protocols import SessionProtocol
     from ..skills import SkillMount
     from .policy import ToolPolicy
@@ -301,20 +301,21 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
         return self.summary
 
-    def resources(self) -> ResourceRegistry:
-        """Return resources required by this section.
+    def configure(self, builder: RegistryBuilder) -> None:
+        """Contribute resource bindings for this section.
 
-        Override to contribute resources. Default returns empty registry.
-        The prompt collects resources from all sections automatically.
+        Override to register resources with the builder. The default
+        is a no-op. The prompt collects resources from all sections
+        automatically by calling ``configure`` on each.
+
+        Sections implement the ``ResourceModule`` protocol, so they
+        can be used anywhere a module is expected.
 
         Example::
 
-            def resources(self) -> ResourceRegistry:
-                return ResourceRegistry.build({Filesystem: self.filesystem})
+            def configure(self, builder: RegistryBuilder) -> None:
+                builder.bind_instance(Filesystem, self._filesystem)
         """
-        from ..resources import ResourceRegistry
-
-        return ResourceRegistry()
 
     def cleanup(self) -> None:
         """Release resources held by this section.

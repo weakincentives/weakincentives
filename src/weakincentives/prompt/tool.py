@@ -134,7 +134,7 @@ class ToolContext:
         """Access resources from the prompt's resource context.
 
         Returns the active resource context from the prompt. The caller
-        must be within ``with prompt.resources:`` for resources to be available.
+        must be within ``with prompt.resource_scope():`` for resources to be available.
         """
         return self.prompt.resources
 

@@ -74,7 +74,7 @@ def test_invalid_tool_params_returns_error(
         build_tool_prompt(make_adapter_ns(adapter_fixture.adapter_name), tool)
     ).bind(TransformRequest(text="hello"))
 
-    with prompt.resources:
+    with prompt.resource_scope():
         adapter = adapter_fixture.create_adapter(tmp_path)
         bridged = create_bridged_tools(
             (tool,),

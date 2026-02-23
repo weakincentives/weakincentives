@@ -103,7 +103,7 @@ Resources are managed via the prompt's resource context::
 
     prompt = Prompt(template).bind(params, resources={Filesystem: fs})
 
-    with prompt.resources:
+    with prompt.resource_scope():
         rendered = prompt.render()
         filesystem = prompt.resources.get(Filesystem)
     # Resources cleaned up
@@ -194,7 +194,7 @@ Rendering a prompt::
     prompt = Prompt(template)
     prompt.bind(TaskParams(objective="Write tests", deadline="Friday"))
 
-    with prompt.resources:
+    with prompt.resource_scope():
         rendered = prompt.render()
         print(rendered.text)
         print(f"Tools: {[t.name for t in rendered.tools]}")

@@ -104,8 +104,8 @@ class PromptTemplateProtocol[TemplateOutputT](Protocol):
 class PromptProtocol[PromptOutputT](Protocol):
     """Interface describing the bound prompt wrapper used at runtime.
 
-    Resource lifecycle is managed via ``prompt.resources``:
-    - Use ``with prompt.resources:`` to manage lifecycle
+    Resource lifecycle is managed via ``prompt.resource_scope()``:
+    - Use ``with prompt.resource_scope():`` to manage lifecycle
     - Access resources via ``prompt.resources.get(Protocol)``
     """
 

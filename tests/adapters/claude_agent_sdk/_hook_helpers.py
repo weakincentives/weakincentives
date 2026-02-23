@@ -31,7 +31,7 @@ from weakincentives.prompt import (
 def _make_prompt() -> Prompt[object]:
     """Create a prompt in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
-    prompt.resources.__enter__()
+    prompt._activate_scope()
     return prompt
 
 
@@ -49,7 +49,7 @@ def _make_prompt_with_fs(
         )
     )
     prompt = prompt.bind(resources={Filesystem: fs})
-    prompt.resources.__enter__()
+    prompt._activate_scope()
     return prompt
 
 
@@ -93,5 +93,5 @@ def _make_prompt_with_feedback_provider() -> Prompt[object]:
         feedback_providers=(config,),
     )
     prompt: Prompt[object] = Prompt(template)
-    prompt.resources.__enter__()
+    prompt._activate_scope()
     return prompt

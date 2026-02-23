@@ -266,7 +266,7 @@ class TestFeedbackContext:
         prompt = make_prompt()
         context = FeedbackContext(session=session, prompt=prompt)
 
-        with prompt.resources:
+        with prompt.resource_scope():
             assert context.filesystem is None
 
     def test_last_feedback_returns_none_when_empty(self) -> None:
@@ -1202,8 +1202,7 @@ class TestShouldTriggerWithFileCreated:
         prompt: Prompt[None] = Prompt(template)
         prompt = prompt.bind(resources={Filesystem: fs})
 
-        # We need to enter the resource context for the filesystem to be available
-        prompt.resources.__enter__()
+        prompt._activate_scope()
 
         return FeedbackContext(session=session, prompt=prompt)
 
@@ -1251,7 +1250,7 @@ class TestShouldTriggerWithFileCreated:
         prompt = make_prompt()
         context = FeedbackContext(session=session, prompt=prompt)
 
-        with prompt.resources:
+        with prompt.resource_scope():
             assert _should_trigger(trigger, context, "TestProvider") is False
 
 
@@ -1279,7 +1278,7 @@ class TestRunFeedbackProvidersWithFileCreated:
         )
         prompt: Prompt[None] = Prompt(template)
         prompt = prompt.bind(resources={Filesystem: fs})
-        prompt.resources.__enter__()
+        prompt._activate_scope()
 
         return FeedbackContext(session=session, prompt=prompt)
 

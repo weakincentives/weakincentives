@@ -330,8 +330,8 @@ def test_prompt_missing_key_raises_type_error() -> None:
 class TestPromptResourceLifecycle:
     """Tests for prompt-bound resource lifecycle."""
 
-    def test_accessing_resources_outside_context_raises_runtime_error(self) -> None:
-        """Calling get() outside context manager raises RuntimeError."""
+    def test_accessing_resources_outside_scope_raises_runtime_error(self) -> None:
+        """Calling get() outside resource_scope() raises RuntimeError."""
         template = PromptTemplate(ns="tests", key="resource-test")
         prompt = Prompt(template).bind(resources={})
 
@@ -339,21 +339,22 @@ class TestPromptResourceLifecycle:
         resources = prompt.resources
         assert resources is not None
 
-        # But calling get() outside context raises
+        # But calling get() outside scope raises
         with pytest.raises(
             RuntimeError,
-            match="Resources accessed outside context",
+            match="Resources accessed outside scope",
         ):
             resources.get(object)
 
-    def test_entering_context_twice_raises_runtime_error(self) -> None:
-        """Entering resource context twice raises RuntimeError."""
+    def test_resource_scope_is_reentrant(self) -> None:
+        """Entering resource scope twice reuses existing context."""
         template = PromptTemplate(ns="tests", key="resource-test")
         prompt = Prompt(template)
 
-        with prompt.resources:
-            with pytest.raises(RuntimeError, match="context already entered"):
-                prompt.resources.__enter__()
+        with prompt.resource_scope() as outer_ctx:
+            with prompt.resource_scope() as inner_ctx:
+                # Reentrant: same context object
+                assert inner_ctx is outer_ctx
 
     def test_binding_resources_multiple_times_merges_them(self) -> None:
         """Binding resources multiple times should merge the registries."""
@@ -372,12 +373,12 @@ class TestPromptResourceLifecycle:
         prompt = prompt.bind(resources={Resource1: res1})
         prompt = prompt.bind(resources={Resource2: res2})
 
-        with prompt.resources:
+        with prompt.resource_scope():
             assert prompt.resources.get(Resource1) is res1
             assert prompt.resources.get(Resource2) is res2
 
-    def test_resources_property_available_within_context(self) -> None:
-        """Resources are available within the context manager."""
+    def test_resources_property_available_within_scope(self) -> None:
+        """Resources are available within resource_scope()."""
         from weakincentives.prompt import PromptResources
 
         template = PromptTemplate(ns="tests", key="resource-test")
@@ -386,23 +387,23 @@ class TestPromptResourceLifecycle:
         # prompt.resources returns PromptResources
         assert isinstance(prompt.resources, PromptResources)
 
-        # get() works inside context
-        with prompt.resources:
-            # Should not raise - context is active
+        # get() works inside scope
+        with prompt.resource_scope():
+            # Should not raise - scope is active
             prompt.resources.get_optional(object)
 
     def test_child_section_resources_collected(self) -> None:
         """Resources from child sections are collected into prompt resources."""
         from typing import Self
 
-        from weakincentives.resources import ResourceRegistry
+        from weakincentives.resources.builder import RegistryBuilder
 
         class ChildResource:
             pass
 
         child_res = ChildResource()
 
-        # Create a section that provides resources
+        # Create a section that contributes resources via configure()
         class SectionWithResources(Section[RootParams]):
             def render(
                 self,
@@ -412,8 +413,8 @@ class TestPromptResourceLifecycle:
             ) -> str:
                 return "content"
 
-            def resources(self) -> ResourceRegistry:
-                return ResourceRegistry.build({ChildResource: child_res})
+            def configure(self, builder: RegistryBuilder) -> None:
+                builder.bind_instance(ChildResource, child_res)
 
             def clone(self, **kwargs: object) -> Self:
                 return cast(Self, self)
@@ -435,20 +436,12 @@ class TestPromptResourceLifecycle:
         )
         prompt = Prompt(template).bind(RootParams(title="test"))
 
-        with prompt.resources:
+        with prompt.resource_scope():
             # Child section resources should be accessible
             assert prompt.resources.get(ChildResource) is child_res
 
-    def test_exit_before_enter_is_safe(self) -> None:
-        """Calling __exit__ without __enter__ is a no-op."""
-        template = PromptTemplate(ns="tests", key="resource-test")
-        prompt = Prompt(template)
-
-        # Calling __exit__ without entering should be safe (no-op)
-        prompt.resources.__exit__(None, None, None)
-
     def test_tool_scope_provides_resolver(self) -> None:
-        """tool_scope() provides a ResourceResolver within context."""
+        """tool_scope() provides a ResourceResolver within scope."""
 
         class ToolScopedResource:
             pass
@@ -457,26 +450,35 @@ class TestPromptResourceLifecycle:
         template = PromptTemplate(ns="tests", key="resource-test")
         prompt = Prompt(template).bind(resources={ToolScopedResource: instance})
 
-        with prompt.resources:
+        with prompt.resource_scope():
             with prompt.resources.tool_scope() as resolver:
                 # Should be able to resolve resources within tool scope
                 assert resolver.get(ToolScopedResource) is instance
 
-    def test_get_optional_factory_binding_within_context(self) -> None:
-        """get_optional() resolves factory-constructed resources within context."""
+    def test_get_optional_factory_binding_within_scope(self) -> None:
+        """get_optional() resolves factory-constructed resources within scope."""
         from weakincentives.resources import Binding
 
         class FactoryResource:
             pass
 
         created_instance = FactoryResource()
-        # Factory binding (not pre-provided) - passed via dict
+        # Factory binding - passed via dict
         binding = Binding(FactoryResource, provider=lambda _: created_instance)
 
         template = PromptTemplate(ns="tests", key="factory-test")
         prompt = Prompt(template).bind(resources={FactoryResource: binding})
 
-        with prompt.resources:
+        with prompt.resource_scope():
             # get_optional should resolve via context for factory bindings
             resolved = prompt.resources.get_optional(FactoryResource)
             assert resolved is created_instance
+
+    def test_activate_scope_twice_raises(self) -> None:
+        """_activate_scope raises when scope is already entered."""
+        template = PromptTemplate(ns="tests", key="resource-test")
+        prompt = Prompt(template)
+        prompt._activate_scope()
+
+        with pytest.raises(RuntimeError, match="Resource scope already entered"):
+            prompt._activate_scope()

@@ -127,8 +127,8 @@ class MockAdapter(ProviderAdapter[SampleOutput]):
         self._last_prompt = prompt
         self._prompts.append(prompt)
 
-        # Enter resource context (like real adapters do)
-        with prompt.resources:
+        # Enter resource scope (like real adapters do)
+        with prompt.resource_scope():
             # Capture resource during evaluate while context is active
             try:
                 self._last_custom_resource = prompt.resources.get(CustomResource)

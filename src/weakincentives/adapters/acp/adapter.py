@@ -233,7 +233,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         effective_cwd, temp_workspace_dir, prompt = self._resolve_cwd(prompt)
 
         try:
-            with prompt.resources:
+            with prompt.resource_scope():
                 return await self._run_acp(
                     prompt=prompt,
                     prompt_name=prompt_name,

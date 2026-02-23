@@ -25,6 +25,8 @@ from weakincentives.resources import (
     CircularDependencyError,
     DuplicateBindingError,
     ProviderError,
+    RegistryBuilder,
+    ResourceModule,
     ResourceRegistry,
     ResourceResolver,
     Scope,
@@ -1226,3 +1228,88 @@ class TestIntegration:
         assert constructed == []
         with registry.open():
             assert constructed == ["config"]
+
+
+class TestRegistryBuilder:
+    """Tests for RegistryBuilder and ResourceModule."""
+
+    def test_bind_instance(self) -> None:
+        """bind_instance creates eager singleton binding."""
+        builder = RegistryBuilder()
+        instance = ConcreteConfig(value=10)
+        builder.bind_instance(Config, instance)
+        registry = builder.build()
+
+        with registry.open() as ctx:
+            assert ctx.get(Config) is instance
+
+    def test_bind_factory(self) -> None:
+        """bind creates factory binding with specified scope."""
+        builder = RegistryBuilder()
+        builder.bind(Config, lambda r: ConcreteConfig(value=42), scope=Scope.SINGLETON)
+        registry = builder.build()
+
+        with registry.open() as ctx:
+            cfg = ctx.get(Config)
+            assert cfg.value == 42
+
+    def test_install_module(self) -> None:
+        """install calls module.configure() with this builder."""
+
+        class MyModule:
+            def configure(self, b: RegistryBuilder) -> None:
+                b.bind_instance(Config, ConcreteConfig(value=99))
+
+        builder = RegistryBuilder()
+        builder.install(MyModule())
+        registry = builder.build()
+
+        with registry.open() as ctx:
+            assert ctx.get(Config).value == 99
+
+    def test_from_modules_factory(self) -> None:
+        """from_modules creates registry from multiple modules."""
+
+        class Module1:
+            def configure(self, b: RegistryBuilder) -> None:
+                b.bind_instance(Config, ConcreteConfig(value=1))
+
+        class Module2:
+            def configure(self, b: RegistryBuilder) -> None:
+                b.bind(
+                    HTTPClient,
+                    lambda r: ConcreteHTTPClient(config=r.get(Config)),
+                )
+
+        registry = RegistryBuilder.from_modules(Module1(), Module2())
+
+        with registry.open() as ctx:
+            assert ctx.get(Config).value == 1
+            assert isinstance(ctx.get(HTTPClient), ConcreteHTTPClient)
+
+    def test_last_write_wins(self) -> None:
+        """Later bindings override earlier ones."""
+        builder = RegistryBuilder()
+        builder.bind_instance(Config, ConcreteConfig(value=1))
+        builder.bind_instance(Config, ConcreteConfig(value=2))
+        registry = builder.build()
+
+        with registry.open() as ctx:
+            assert ctx.get(Config).value == 2
+
+    def test_strict_mode_raises_on_duplicate(self) -> None:
+        """Strict mode raises DuplicateBindingError on conflict."""
+        builder = RegistryBuilder(strict=True)
+        builder.bind_instance(Config, ConcreteConfig(value=1))
+
+        with pytest.raises(DuplicateBindingError):
+            builder.bind_instance(Config, ConcreteConfig(value=2))
+
+    def test_resource_module_protocol(self) -> None:
+        """Objects with configure() satisfy ResourceModule protocol."""
+
+        class MyModule:
+            def configure(self, builder: RegistryBuilder) -> None:
+                pass
+
+        assert isinstance(MyModule(), ResourceModule)

@@ -52,7 +52,7 @@ def _make_prompt_with_resources(
     """Create a prompt with resources bound in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
     prompt = prompt.bind(resources=resources)
-    prompt.resources.__enter__()
+    prompt._activate_scope()
     return prompt
 
 
@@ -122,7 +122,7 @@ def session() -> Session:
 def prompt() -> Prompt[object]:
     """Create a prompt in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
-    prompt.resources.__enter__()
+    prompt._activate_scope()
     return prompt
 
 
@@ -1255,7 +1255,7 @@ class TestBridgedToolTransactionalExecution:
 
         # Create prompt without filesystem in resources
         prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="no-fs-test"))
-        prompt.resources.__enter__()
+        prompt._activate_scope()
 
         bridged = BridgedTool(
             name="capture_tool",
@@ -1598,7 +1598,7 @@ class TestBridgedToolPolicyEnforcement:
             policies=[DenyPolicy()],
         )
         prompt_with_policy: Prompt[object] = Prompt(template)
-        prompt_with_policy.resources.__enter__()
+        prompt_with_policy._activate_scope()
 
         bridged = BridgedTool(
             name="search",
@@ -1683,7 +1683,7 @@ class TestBridgedToolPolicyEnforcement:
             policies=[AllowPolicy()],
         )
         prompt_with_policy: Prompt[object] = Prompt(template)
-        prompt_with_policy.resources.__enter__()
+        prompt_with_policy._activate_scope()
 
         bridged = BridgedTool(
             name="search",
@@ -1756,7 +1756,7 @@ class TestBridgedToolPolicyEnforcement:
             policies=[TrackingPolicy()],
         )
         prompt_with_policy: Prompt[object] = Prompt(template)
-        prompt_with_policy.resources.__enter__()
+        prompt_with_policy._activate_scope()
 
         bridged = BridgedTool(
             name="search",
@@ -1828,7 +1828,7 @@ class TestBridgedToolPolicyEnforcement:
             policies=[DenyAndTrackPolicy()],
         )
         prompt_with_policy: Prompt[object] = Prompt(template)
-        prompt_with_policy.resources.__enter__()
+        prompt_with_policy._activate_scope()
 
         bridged = BridgedTool(
             name="search",
@@ -1899,7 +1899,7 @@ class TestBridgedToolPolicyEnforcement:
             policies=[DenyPolicy()],
         )
         prompt_with_policy: Prompt[object] = Prompt(template)
-        prompt_with_policy.resources.__enter__()
+        prompt_with_policy._activate_scope()
 
         events: list[ToolInvoked] = []
         session.dispatcher.subscribe(ToolInvoked, events.append)

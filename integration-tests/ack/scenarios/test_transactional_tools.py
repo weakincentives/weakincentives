@@ -250,7 +250,7 @@ def _run_tool_sequence(
         )
     ).bind(TransactionPromptParams())
 
-    with prompt.resources:
+    with prompt.resource_scope():
         adapter = adapter_fixture.create_adapter(workspace.temp_dir)
         bridged = create_bridged_tools(
             (write_succeed_tool, write_fail_tool),
@@ -303,7 +303,7 @@ def _run_mixed_tool_sequence(
         )
     ).bind(TransactionPromptParams())
 
-    with prompt.resources:
+    with prompt.resource_scope():
         adapter = adapter_fixture.create_adapter(workspace.temp_dir)
         bridged = create_bridged_tools(
             (write_succeed_tool, write_fail_tool),

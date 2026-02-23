@@ -140,7 +140,7 @@ Applying overrides at render time::
     prompt = Prompt(template, overrides_store=store, overrides_tag="latest")
     prompt.bind(params)
 
-    with prompt.resources:
+    with prompt.resource_scope():
         rendered = prompt.render()  # Applies matching overrides
 
 Override File Format

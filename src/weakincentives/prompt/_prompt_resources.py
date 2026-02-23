@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""PromptResources: context manager + proxy for prompt resource lifecycle.
+"""PromptResources: accessor proxy for active resource context.
 
 This module is intentionally separate from prompt.py to avoid import cycles.
 Tool modules need access to PromptResources for type annotations, but prompt.py
@@ -21,10 +21,8 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from types import TracebackType
-from typing import TYPE_CHECKING, Protocol, Self
+from typing import TYPE_CHECKING, Protocol
 
-from ..resources import ResourceRegistry
 from ..resources.protocols import ResourceResolver
 
 if TYPE_CHECKING:
@@ -39,36 +37,21 @@ class _PromptForResources(Protocol):
 
     _resource_context: ScopedResourceContext | None
 
-    def _collected_resources(self) -> ResourceRegistry: ...
-
 
 class PromptResources:
-    """Resource accessor: context manager for lifecycle + proxy to active context.
+    """Resource accessor: proxy to the active resource context.
 
-    This class provides dual functionality:
+    Provides access to resources within an active ``resource_scope()``::
 
-    1. **Context manager**: Use ``with prompt.resources:`` to manage resource
-       lifecycle (construction and cleanup).
-
-    2. **Resource proxy**: Access resources via ``prompt.resources.get(Protocol)``
-       within the context.
-
-    Example::
-
-        prompt = Prompt(template).bind(resources={Config: config})
-
-        # As context manager
-        with prompt.resources as ctx:
-            service = ctx.get(MyService)
-            # or directly via the proxy
+        with prompt.resource_scope():
             service = prompt.resources.get(MyService)
 
-        # Outside context, accessing resources fails fast
-        prompt.resources.get(MyService)  # Raises RuntimeError
+    Lifecycle management (construction and cleanup) is handled by
+    ``Prompt.resource_scope()``, not by this class.
 
     Note:
-        This class intentionally accesses Prompt internals (_resource_context,
-        _collected_resources) as it manages the prompt's resource lifecycle.
+        This class intentionally accesses Prompt internals (_resource_context)
+        as it proxies the prompt's active resource context.
     """
 
     __slots__ = ("_prompt",)
@@ -79,48 +62,22 @@ class PromptResources:
     ) -> None:
         self._prompt = prompt
 
-    def __enter__(self) -> Self:
-        """Enter resource context; initialize resources."""
-        # Access prompt internals - PromptResources manages prompt's lifecycle
-        ctx = self._prompt._resource_context  # pyright: ignore[reportPrivateUsage]
-        if ctx is not None:
-            raise RuntimeError("Resource context already entered")
-
-        registry = self._prompt._collected_resources()  # pyright: ignore[reportPrivateUsage]
-        new_ctx = registry._create_context()  # pyright: ignore[reportPrivateUsage]
-        new_ctx.start()
-        self._prompt._resource_context = new_ctx  # pyright: ignore[reportPrivateUsage]
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        """Exit resource context; cleanup resources."""
-        # Access prompt internals - PromptResources manages prompt's lifecycle
-        ctx = self._prompt._resource_context  # pyright: ignore[reportPrivateUsage]
-        if ctx is not None:
-            ctx.close()
-            self._prompt._resource_context = None  # pyright: ignore[reportPrivateUsage]
-
     @property
     def context(self) -> ScopedResourceContext:
-        """Return active resource context, or raise if not in context.
+        """Return active resource context, or raise if not in scope.
 
         This provides access to the underlying ScopedResourceContext for
         framework internals that need direct context access (e.g., transactions).
 
         Raises:
-            RuntimeError: If called outside resource context.
+            RuntimeError: If called outside resource_scope().
         """
-        # Access prompt internals - PromptResources manages prompt's lifecycle
+        # Access prompt internals - PromptResources proxies prompt's context
         ctx = self._prompt._resource_context  # pyright: ignore[reportPrivateUsage]
         if ctx is None:
             msg = (
-                "Resources accessed outside context. "
-                "Use 'with prompt.resources:' to enter the resource lifecycle."
+                "Resources accessed outside scope. "
+                "Use 'with prompt.resource_scope():' to enter the resource lifecycle."
             )
             raise RuntimeError(msg)
         return ctx
@@ -128,48 +85,24 @@ class PromptResources:
     def get[T](self, protocol: type[T]) -> T:
         """Resolve and return resource for protocol.
 
-        For pre-provided instances (created via ``Binding.instance()`` or
-        ``resources={Protocol: instance}``), returns the instance directly
-        without requiring the resource context.
-
-        For factory-constructed resources, requires being inside
-        ``with prompt.resources:``.
+        Requires being inside ``with prompt.resource_scope():``.
 
         Raises:
-            RuntimeError: If called outside resource context for non-provided resources.
+            RuntimeError: If called outside resource scope.
             UnboundResourceError: No binding exists.
             CircularDependencyError: Dependency cycle detected.
             ProviderError: Provider raised an exception.
         """
-        # Check for pre-provided instance first (no context needed)
-        registry = self._prompt._collected_resources()  # pyright: ignore[reportPrivateUsage]
-        binding = registry.binding_for(protocol)
-        if binding is not None and binding.provided is not None:
-            return binding.provided
-        # Fall back to context-based resolution
         return self.context.get(protocol)
 
     def get_optional[T](self, protocol: type[T]) -> T | None:
         """Resolve if bound, return None otherwise.
 
-        For pre-provided instances (created via ``Binding.instance()`` or
-        ``resources={Protocol: instance}``), returns the instance directly
-        without requiring the resource context.
-
-        For factory-constructed resources, requires being inside
-        ``with prompt.resources:``.
+        Requires being inside ``with prompt.resource_scope():``.
 
         Raises:
-            RuntimeError: If called outside resource context for non-provided resources.
+            RuntimeError: If called outside resource scope.
         """
-        # Check for pre-provided instance first (no context needed)
-        registry = self._prompt._collected_resources()  # pyright: ignore[reportPrivateUsage]
-        binding = registry.binding_for(protocol)
-        if binding is None:
-            return None  # No binding exists, return None without context
-        if binding.provided is not None:
-            return binding.provided
-        # Fall back to context-based resolution
         return self.context.get_optional(protocol)
 
     @contextmanager
@@ -180,11 +113,11 @@ class PromptResources:
         and disposed on exit.
 
         Raises:
-            RuntimeError: If called outside resource context.
+            RuntimeError: If called outside resource scope.
 
         Example::
 
-            with prompt.resources:
+            with prompt.resource_scope():
                 with prompt.resources.tool_scope() as resolver:
                     tracer = resolver.get(Tracer)  # Fresh instance
                 # tracer.close() called automatically

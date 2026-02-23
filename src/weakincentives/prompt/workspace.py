@@ -37,7 +37,7 @@ from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
 from ..filesystem import Filesystem, HostFilesystem
-from ..resources import ResourceRegistry
+from ..resources.builder import RegistryBuilder
 from ..runtime.session import Session
 from .markdown import MarkdownSection
 
@@ -474,9 +474,9 @@ class WorkspaceSection(MarkdownSection[_WorkspaceSectionParams]):
             self._filesystem.cleanup()
 
     @override
-    def resources(self) -> ResourceRegistry:
-        """Return resources contributed by this workspace section."""
-        return ResourceRegistry.build({Filesystem: self._filesystem})
+    def configure(self, builder: RegistryBuilder) -> None:
+        """Contribute workspace resources (Filesystem binding)."""
+        builder.bind_instance(Filesystem, self._filesystem)
 
     @override
     def clone(self, **kwargs: Any) -> WorkspaceSection:

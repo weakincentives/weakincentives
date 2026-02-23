@@ -573,10 +573,10 @@ class TestWorkspaceSectionSecurity:
 
 
 class TestWorkspaceSectionResources:
-    """Tests for WorkspaceSection.resources() method."""
+    """Tests for WorkspaceSection.configure() method."""
 
-    def test_resources_returns_filesystem(self, session: Session) -> None:
-        from weakincentives.resources import ResourceRegistry
+    def test_configure_registers_filesystem(self, session: Session) -> None:
+        from weakincentives.resources.builder import RegistryBuilder
 
         with tempfile.TemporaryDirectory() as temp_dir:
             section = WorkspaceSection(
@@ -585,8 +585,9 @@ class TestWorkspaceSectionResources:
             )
 
             try:
-                registry = section.resources()
-                assert isinstance(registry, ResourceRegistry)
+                builder = RegistryBuilder()
+                section.configure(builder)
+                registry = builder.build()
 
                 with registry.open() as context:
                     fs = context.get(Filesystem)

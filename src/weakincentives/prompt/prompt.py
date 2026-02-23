@@ -12,7 +12,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import MISSING, field, is_dataclass
 from functools import cached_property
 from typing import (
@@ -27,6 +28,7 @@ from typing import (
 
 from ..dataclasses import FrozenDataclass
 from ..resources import ResourceRegistry
+from ..resources.builder import RegistryBuilder
 from ._normalization import normalize_component_key
 from ._overrides_protocols import PromptOverridesStore
 from ._prompt_resources import PromptResources
@@ -295,11 +297,11 @@ class Prompt[OutputT]:
     configuration (overrides store, tag, params) and performs all rendering
     and override resolution.
 
-    Resource lifecycle is managed via ``prompt.resources``::
+    Resource lifecycle is managed via ``prompt.resource_scope()``::
 
         prompt = Prompt(template).bind(params, resources={Filesystem: fs})
 
-        with prompt.resources:  # Resources initialized
+        with prompt.resource_scope():  # Resources initialized
             rendered = prompt.render()
             filesystem = prompt.resources.get(Filesystem)
         # Resources cleaned up
@@ -321,6 +323,7 @@ class Prompt[OutputT]:
         self._params: tuple[SupportsDataclass, ...] = ()
         self._bound_resources: ResourceRegistry | None = None
         self._resource_context: ScopedResourceContext | None = None
+        self._cached_registry: ResourceRegistry | None = None
 
     @property
     def params(self) -> tuple[SupportsDataclass, ...]:
@@ -440,6 +443,7 @@ class Prompt[OutputT]:
                 self._bound_resources = self._bound_resources.merge(
                     new_registry, strict=False
                 )
+            self._cached_registry = None  # Invalidate cache
 
         return self
 
@@ -534,54 +538,117 @@ class Prompt[OutputT]:
             node.section.cleanup()
 
     def _collected_resources(self) -> ResourceRegistry:
-        """Collect resources from template and all sections.
+        """Collect resources from template, sections, and bind-time.
 
-        Resources are collected in order:
+        Resources are collected in order (later overrides earlier):
         1. Template-level resources
-        2. Section resources (depth-first)
+        2. Section configure() contributions (depth-first)
         3. Bind-time resources
 
-        Later sources override earlier on conflicts.
+        Results are cached and invalidated when ``bind(resources=...)``
+        is called.
         """
-        result = self.template.resources
+        if self._cached_registry is not None:
+            return self._cached_registry
 
-        # Collect from sections
-        def collect_from_section(section: Section[SupportsDataclass]) -> None:
-            nonlocal result
-            section_resources = section.resources()
-            if len(section_resources) > 0:
-                result = result.merge(section_resources, strict=False)
-            for child in section.children:
-                collect_from_section(child)
+        builder = RegistryBuilder()
+        self._configure_template_resources(builder)
+        self._configure_section_resources(builder)
+        result = builder.build()
 
-        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
-        if snapshot is not None:  # pragma: no branch - tested separately
-            for node in snapshot.sections:
-                collect_from_section(node.section)
-
-        # Merge bind-time resources
+        # Merge bind-time resources (these override everything)
         if self._bound_resources is not None:
             result = result.merge(self._bound_resources, strict=False)
 
+        self._cached_registry = result
         return result
+
+    def _configure_template_resources(self, builder: RegistryBuilder) -> None:
+        """Add template-level resources to the builder."""
+        for protocol in self.template.resources:
+            b = self.template.resources.binding_for(protocol)
+            if b is not None:  # pragma: no branch — always true for own keys
+                builder._add(b)  # pyright: ignore[reportPrivateUsage]
+
+    def _configure_section_resources(self, builder: RegistryBuilder) -> None:
+        """Recursively configure section resources (depth-first)."""
+        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
+        if snapshot is None:  # pragma: no cover
+            return
+        for node in snapshot.sections:
+            self._configure_section(node.section, builder)
+
+    def _configure_section(
+        self,
+        section: Section[SupportsDataclass],
+        builder: RegistryBuilder,
+    ) -> None:
+        """Configure a single section and its children."""
+        section.configure(builder)
+        for child in section.children:
+            self._configure_section(child, builder)
+
+    @contextmanager
+    def resource_scope(self) -> Iterator[ScopedResourceContext]:
+        """Enter the resource lifecycle scope.
+
+        Creates and manages a ``ScopedResourceContext`` for this prompt's
+        resources. Eager singletons are initialized on entry; all
+        ``Closeable`` resources are disposed on exit.
+
+        Reentrant: if a scope is already active, yields the existing
+        context without creating a new one. Only the outermost scope
+        performs cleanup on exit.
+
+        Example::
+
+            with prompt.resource_scope() as ctx:
+                fs = ctx.get(Filesystem)
+                result = adapter.evaluate(prompt, session=session)
+            # Resources cleaned up
+
+        Yields:
+            Started ``ScopedResourceContext`` for resolving resources.
+        """
+        if self._resource_context is not None:
+            # Reentrant: yield existing context, don't manage lifecycle
+            yield self._resource_context
+            return
+
+        registry = self._collected_resources()
+        ctx = registry._create_context()  # pyright: ignore[reportPrivateUsage]
+        ctx.start()
+        self._resource_context = ctx
+        try:
+            yield ctx
+        finally:
+            ctx.close()
+            self._resource_context = None
+
+    def _activate_scope(self) -> None:
+        """Enter resource scope without context manager (for tests only).
+
+        This is equivalent to the entry half of ``resource_scope()`` but
+        without automatic cleanup. Use only in test setups where
+        ``resource_scope()`` context manager is impractical.
+        """
+        if self._resource_context is not None:
+            raise RuntimeError("Resource scope already entered")
+        registry = self._collected_resources()
+        ctx = registry._create_context()  # pyright: ignore[reportPrivateUsage]
+        ctx.start()
+        self._resource_context = ctx
 
     @property
     def resources(self) -> PromptResources:
-        """Resource accessor for lifecycle management and dependency resolution.
+        """Resource accessor for dependency resolution.
 
-        Returns a dual-purpose object that:
+        Provides access to resources within an active ``resource_scope()``::
 
-        1. Acts as a context manager for resource lifecycle::
-
-            with prompt.resources:
+            with prompt.resource_scope():
                 service = prompt.resources.get(MyService)
 
-        2. Provides direct access to resources within the context::
-
-            with prompt.resources as ctx:
-                service = ctx.get(MyService)
-
-        Accessing resources outside the context raises RuntimeError.
+        Accessing resources outside a scope raises ``RuntimeError``.
         """
         return PromptResources(self)
 
