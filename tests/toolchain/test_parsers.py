@@ -18,6 +18,7 @@ from toolchain.parsers import (
     parse_pyright,
     parse_ruff,
     parse_ty,
+    parse_vulture,
 )
 
 
@@ -114,3 +115,42 @@ class TestParseTy:
     def test_empty_output(self) -> None:
         diagnostics = parse_ty("", 0)
         assert len(diagnostics) == 0
+
+
+class TestParseVulture:
+    """Tests for parse_vulture."""
+
+    def test_parses_single_item(self) -> None:
+        output = "src/foo.py:42: unused function 'bar' (80% confidence)"
+        diagnostics = parse_vulture(output, 1)
+        assert len(diagnostics) == 1
+        assert diagnostics[0].message == "unused function 'bar' (80% confidence)"
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "src/foo.py"
+        assert diagnostics[0].location.line == 42
+
+    def test_parses_multiple_items(self) -> None:
+        output = (
+            "src/foo.py:10: unused variable 'x' (80% confidence)\n"
+            "src/bar.py:20: unused class 'MyClass' (90% confidence)\n"
+            "src/baz.py:30: unused import 'os' (100% confidence)"
+        )
+        diagnostics = parse_vulture(output, 1)
+        assert len(diagnostics) == 3
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "src/foo.py"
+        assert diagnostics[1].location is not None
+        assert diagnostics[1].location.file == "src/bar.py"
+        assert diagnostics[2].location is not None
+        assert diagnostics[2].location.file == "src/baz.py"
+
+    def test_empty_output_no_issues(self) -> None:
+        diagnostics = parse_vulture("", 0)
+        assert len(diagnostics) == 0
+
+    def test_exit_code_ignored(self) -> None:
+        """Exit code does not affect parsing; only output content matters."""
+        output = "src/foo.py:1: unused attribute 'x' (80% confidence)"
+        diagnostics_fail = parse_vulture(output, 1)
+        diagnostics_pass = parse_vulture(output, 0)
+        assert len(diagnostics_fail) == len(diagnostics_pass) == 1

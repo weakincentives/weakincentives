@@ -29,6 +29,7 @@ from ..parsers import (
     parse_pytest,
     parse_ruff,
     parse_ty,
+    parse_vulture,
 )
 from .architecture import ArchitectureChecker
 from .banned_time_imports import BannedTimeImportsChecker
@@ -274,6 +275,21 @@ def create_private_imports_checker() -> PrivateImportChecker:
     return PrivateImportChecker()
 
 
+def create_dead_code_checker() -> SubprocessChecker:
+    """Create the dead code checker (vulture).
+
+    Detects unused code (functions, classes, variables, imports) at the
+    configured minimum confidence level. Configuration is read from the
+    ``[tool.vulture]`` section of ``pyproject.toml``.
+    """
+    return SubprocessChecker(
+        name="dead-code",
+        description="Detect unused code with vulture",
+        command=["uv", "run", "vulture"],
+        parser=parse_vulture,
+    )
+
+
 def create_all_checkers() -> list[Checker]:
     """Create all standard checkers in recommended execution order."""
     return [
@@ -287,6 +303,7 @@ def create_all_checkers() -> list[Checker]:
         create_private_imports_checker(),
         create_banned_time_imports_checker(),
         create_code_length_checker(),
+        create_dead_code_checker(),
         create_docs_checker(),
         create_markdown_checker(),
         create_bun_test_checker(),
@@ -309,5 +326,6 @@ __all__ = [
     "create_private_imports_checker",
     "create_banned_time_imports_checker",
     "create_code_length_checker",
+    "create_dead_code_checker",
     "create_docs_checker",
 ]

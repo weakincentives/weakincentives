@@ -22,6 +22,7 @@ from toolchain.checkers import (
     create_architecture_checker,
     create_bandit_checker,
     create_banned_time_imports_checker,
+    create_dead_code_checker,
     create_deptry_checker,
     create_docs_checker,
     create_format_checker,
@@ -370,6 +371,11 @@ class TestFactoryFunctions:
         assert checker.name == "banned-time-imports"
         assert isinstance(checker, BannedTimeImportsChecker)
 
+    def test_create_dead_code_checker(self) -> None:
+        checker = create_dead_code_checker()
+        assert checker.name == "dead-code"
+        assert "vulture" in checker.command
+
     def test_create_all_checkers(self) -> None:
         checkers = create_all_checkers()
         assert len(checkers) >= 10  # At least 10 checkers
@@ -382,6 +388,7 @@ class TestFactoryFunctions:
         assert "private-imports" in names
         assert "banned-time-imports" in names
         assert "docs" in names
+        assert "dead-code" in names
 
 
 class TestParseMdformatFileList:
