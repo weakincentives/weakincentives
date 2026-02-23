@@ -151,7 +151,6 @@ extend-ignore = [
     "PYI041",   # Use float instead of int | float
     "PYI055",   # Combine type[X] | type[Y] into type[X | Y]
     "PYI061",   # Redundant None literal
-    "RUF100",   # Unused noqa directive
     "TC005",    # Empty type-checking block
 ]
 fixable = ["I001", "F401"]
