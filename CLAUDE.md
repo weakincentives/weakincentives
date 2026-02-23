@@ -179,7 +179,7 @@ src/weakincentives/
 - `PromptTemplate[OutputType]` with `ns`, `key`, `sections`
 - Section keys: `^[a-z0-9][a-z0-9._-]{0,63}$`
 - Tools declared on sections in `tools=(...)` tuple
-- Resources accessed via `with prompt.resources:` context
+- Resources accessed via `with prompt.resource_scope():` context
 
 ### Sessions & Reducers
 

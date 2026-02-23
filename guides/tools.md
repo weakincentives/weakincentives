@@ -94,14 +94,14 @@ prompt = Prompt(template).bind(params, resources={
     Tracer: Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
 })
 
-# Use prompt.resources context manager for lifecycle management
-with prompt.resources:
+# Use prompt.resource_scope() context manager for lifecycle management
+with prompt.resource_scope():
     response = adapter.evaluate(prompt, session=session)
 ```
 
 **Scopes control instance lifetime:**
 
-- `Scope.SINGLETON`: One instance per active resource context (default, i.e., per `with prompt.resources:` block)
+- `Scope.SINGLETON`: One instance per active resource context (default, i.e., per `with prompt.resource_scope():` block)
 - `Scope.TOOL_CALL`: Fresh instance per tool invocation
 - `Scope.PROTOTYPE`: Fresh instance on every access
 

@@ -26,7 +26,7 @@ Pre-provided instances bypass the context entirely (can be accessed outside `wit
 factory-constructed resources require being inside `with`. This special-casing leaks into
 `PromptResources.get()` which has to check `provided` before delegating to context.
 
-**P4: Section `resources()` returns full `ResourceRegistry`.**
+**P4: Section `configure(builder)` returns full `ResourceRegistry`.**
 Every section that wants to contribute a single binding creates an entire `ResourceRegistry`.
 The typical pattern is just `ResourceRegistry.build({Filesystem: self._filesystem})` — heavy
 for a single instance binding.
@@ -43,7 +43,7 @@ an ad-hoc merge chain. There's no way to express "this set of bindings goes toge
 
 **P7: Context lifecycle is tangled with Prompt.**
 The `_resource_context` field lives on `Prompt`, but it's only set/read by `PromptResources`.
-Adapters do `with prompt.resources:` but the real owner of the lifecycle should be more
+Adapters do `with prompt.resource_scope():` but the real owner of the lifecycle should be more
 explicit.
 
 ---
@@ -165,11 +165,11 @@ Fix P1/P5:
 - Add `Prompt.open_resources()` as the lifecycle context manager
 - Remove `_PromptForResources` protocol (no longer needed if we clean up the interface)
 
-### Step 4: Migrate Section.resources() to modules
+### Step 4: Migrate Section.configure(builder) to modules
 
 Fix P4/P6:
 - Add `Section.modules()` returning `Sequence[ResourceModule]`
-- Deprecate or keep `Section.resources()` as a compatibility shim
+- Deprecate or keep `Section.configure(builder)` as a compatibility shim
 - Update `WorkspaceSection` to return a module
 
 ### Step 5: Remove `Binding.provided`
@@ -182,7 +182,7 @@ Fix P3:
 
 ### Step 6: Update adapters and tests
 
-- Update all adapter `with prompt.resources:` → `with prompt.open_resources():`
+- Update all adapter `with prompt.resource_scope():` → `with prompt.open_resources():`
 - Update guardrail code that accesses resources outside context
 - Update all tests
 
@@ -192,8 +192,8 @@ Fix P3:
 
 This can be done incrementally:
 1. Steps 1-2 are additive (no breaking changes)
-2. Step 3 can introduce `open_resources()` alongside existing `with prompt.resources:`
-3. Step 4 is additive (modules + existing resources() coexist)
+2. Step 3 can introduce `open_resources()` alongside existing `with prompt.resource_scope():`
+3. Step 4 is additive (modules + existing configure(builder) coexist)
 4. Step 5 requires coordinated update of callsites
 5. Step 6 follows naturally
 
@@ -204,8 +204,8 @@ This can be done incrementally:
 1. **Should `ResourceModule` be a Protocol or an ABC?** Protocol is lighter and more
    Pythonic, but ABC allows `install()` helper method.
 
-2. **Should we keep `Section.resources()` alongside `modules()`?** Having both is
-   redundant. Could treat `resources()` as sugar that wraps a simple module.
+2. **Should we keep `Section.configure(builder)` alongside `modules()`?** Having both is
+   redundant. Could treat `configure(builder)` as sugar that wraps a simple module.
 
 3. **Is `Binding.provided` removal worth the churn?** The alternative is to just
    fix the caching issue (Step 2) and live with two-track resolution.

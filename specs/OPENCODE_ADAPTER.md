@@ -157,7 +157,7 @@ adapter = OpenCodeACPAdapter(
     ),
 )
 
-with prompt.resources:
+with prompt.resource_scope():
     resp = adapter.evaluate(prompt, session=session)
 
 print(resp.text)
@@ -187,7 +187,7 @@ template = PromptTemplate[Summary](
 )
 
 prompt = Prompt(template)
-with prompt.resources:
+with prompt.resource_scope():
     resp = adapter.evaluate(prompt, session=session)
 
 summary: Summary = resp.output  # Typed structured output

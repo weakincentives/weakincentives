@@ -94,7 +94,7 @@ Provides filesystem access, contributes to prompt resources via `resources()` me
 Resources collected from (lowest to highest precedence):
 
 1. `PromptTemplate.resources`
-1. Section `resources()` methods (depth-first)
+1. Section `configure(builder)` methods (depth-first)
 1. `bind(resources=...)` at bind time
 
 ### Context Manager Protocol
@@ -102,13 +102,14 @@ Resources collected from (lowest to highest precedence):
 At `src/weakincentives/prompt/prompt.py` via `PromptResources`:
 
 ```python
-with prompt.resources:
+with prompt.resource_scope():
     fs = prompt.resources.get(Filesystem)
     response = adapter.evaluate(prompt, session=session)
 # Resources cleaned up automatically
 ```
 
-**Key:** `prompt.resources` serves as both context manager and resource accessor.
+**Key:** `prompt.resource_scope()` manages resource lifecycle; `prompt.resources`
+provides access to resources within the active scope.
 Accessing outside context raises `RuntimeError`.
 
 ### Cleanup

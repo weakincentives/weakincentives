@@ -243,7 +243,7 @@ prompt = Prompt(template).bind(
 )
 
 # Enter resource context for lifecycle management
-with prompt.resources:
+with prompt.resource_scope():
     fs = prompt.resources.get(Filesystem)
     result = adapter.evaluate(prompt, session=session)
 # Resources cleaned up
@@ -252,7 +252,7 @@ with prompt.resources:
 Resources are collected from multiple sources (lowest to highest precedence):
 
 1. `PromptTemplate.resources` — base resources from template
-1. Section `resources()` methods — resources declared by sections
+1. Section `configure(builder)` methods — resources declared by sections
 1. `bind(resources=...)` — resources provided at bind time
 
 ## Error Handling

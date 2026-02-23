@@ -105,10 +105,10 @@ Workspaces follow a predictable lifecycle:
 1. **Cleanup**: Last reference deletes the temp directory
 
 The workspace section implements context manager protocol. When used
-with `Prompt.resources`, cleanup is automatic:
+with `Prompt.resource_scope()`, cleanup is automatic:
 
 ```python nocheck
-with prompt.resources:
+with prompt.resource_scope():
     response = adapter.evaluate(prompt, session=session)
 # Workspace temp dir cleaned up here
 ```

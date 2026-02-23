@@ -1067,7 +1067,7 @@ ______________________________________________________________________
 1. **Tool handler signature** - must be `(params, *, context: ToolContext)`
 1. **ToolResult return** - use `.ok()` or `.error()`, not raw constructor
 1. **Session mutations** - all go through `dispatch()`, use accessor methods
-1. **Resource access outside context** - use `with prompt.resources:` block
+1. **Resource access outside context** - use `with prompt.resource_scope():` block
 1. **Duplicate tool names** - raises `PromptValidationError`
 1. **Hash mismatch in overrides** - stale overrides silently filtered
 

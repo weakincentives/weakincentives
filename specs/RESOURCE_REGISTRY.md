@@ -145,7 +145,7 @@ Failures prevent caching, wrapped in `ProviderError`.
 Resources collected from (lowest to highest precedence):
 
 1. `PromptTemplate.resources`
-1. Section `resources()` methods (depth-first)
+1. Section `configure(builder)` methods (depth-first)
 1. `bind(resources=...)` at bind time
 
 ### Usage
@@ -156,7 +156,7 @@ prompt = Prompt(template).bind(
     resources={Clock: SystemClock()},  # Pass mapping
 )
 
-with prompt.resources:
+with prompt.resource_scope():
     fs = prompt.resources.get(Filesystem)
     result = adapter.evaluate(prompt, session=session)
 ```
