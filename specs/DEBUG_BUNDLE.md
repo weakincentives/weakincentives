@@ -388,8 +388,7 @@ Options:
 | Request | `request/*.json` | Input/output inspector |
 | Slices | `session/*.jsonl` | Session state browser by slice type |
 | Logs | `logs/app.jsonl` | Searchable, filterable log viewer |
-| Files | `filesystem/` | File tree with content |
-| File History | `filesystem_history/` | Timeline of filesystem changes across tool calls |
+| Files | `filesystem/` | File tree with content and per-file mutation history |
 | Config | `config.json` | Configuration inspector |
 | Metrics | `metrics.json` | Performance dashboard |
 | Error | `error.json` | Error details (if present) |
@@ -406,10 +405,9 @@ Options:
 | `/api/logs` | Log entries (paginated, filterable by level) |
 | `/api/files` | Filesystem listing |
 | `/api/files/{path}` | File content |
-| `/api/history/snapshots` | List all filesystem snapshots (timeline) |
-| `/api/history/snapshot/{ref}` | Files at a specific snapshot |
-| `/api/history/diff/{from_ref}/{to_ref}` | Diff between two snapshots |
-| `/api/history/file/{path}` | Full history of a single file across snapshots |
+| `/api/files/{path}/history` | Tool calls that mutated this file (from filesystem history) |
+| `/api/transcript` | Transcript entries (paginated, filterable) |
+| `/api/transcript/{tool_call_id}/files` | Files mutated by a specific tool call |
 | `/api/config` | Configuration |
 | `/api/metrics` | Metrics |
 | `/api/error` | Error details |
@@ -432,40 +430,28 @@ takes a snapshot of the workspace filesystem by committing all changes to an
 external git repository (see `FILESYSTEM.md` and `TOOLS.md`). On tool failure,
 the filesystem is restored to the pre-tool snapshot via `git reset --hard`.
 
-This means the external git repository accumulates a commit-per-snapshot history
-that records **every filesystem mutation** the agent made during execution.
-Each commit is tagged with the tool name and tool-call ID, providing a complete
-timeline of how the workspace evolved.
+This external git repository accumulates a commit-per-snapshot history that
+records **every filesystem mutation** the agent made during execution. Each
+commit message contains the tool name and tool-call ID (e.g.,
+`"pre:write_file:call_001"`), providing a complete timeline of how the
+workspace evolved.
 
-### Capturing History in Bundles
+### Always Captured
 
-When `BundleWriter.write_filesystem_history(fs)` is called with a
-`HostFilesystem` that has an initialized git directory, the writer:
+When a `HostFilesystem` with an initialized git directory is present, the
+bundle writer **always** captures the full filesystem history. There are no
+configuration knobs — if history exists, it goes into the bundle.
+
+`BundleWriter.write_filesystem_history(fs)`:
 
 1. **Creates a git bundle** from the external snapshot repository using
    `git bundle create`, capturing the full commit graph.
-1. **Generates a snapshot manifest** (`manifest.json`) listing each snapshot
-   with metadata: commit ref, timestamp, tag (tool name), and whether the
-   snapshot was rolled back or persisted.
+1. **Generates a snapshot manifest** (`filesystem_history/manifest.json`)
+   listing each snapshot with metadata: commit ref, timestamp, tag, diffstat,
+   and the list of files mutated.
 1. **Writes both artifacts** to `filesystem_history/` in the debug bundle.
 
-The git bundle format is a standard portable git archive. It can be cloned
-locally for full `git log`, `git diff`, and `git show` access without needing
-the original repository.
-
-```python
-# BundleWriter API
-def write_filesystem_history(self, fs: Filesystem) -> None:
-    """Write full filesystem change history from transactional git repo.
-
-    Captures the git repository used for tool-call snapshots as a
-    portable git bundle. Only applies to HostFilesystem with an
-    initialized git directory; no-op for in-memory filesystems.
-
-    Args:
-        fs: The filesystem whose snapshot history to capture.
-    """
-```
+No-op for in-memory filesystems (they have no git history).
 
 ### filesystem_history/manifest.json Schema
 
@@ -479,10 +465,12 @@ def write_filesystem_history(self, fs: Filesystem) -> None:
       "created_at": "2024-01-15T10:30:00+00:00",
       "tag": "pre:write_file:call_001",
       "parent_ref": "def456...",
-      "message": "pre:write_file:call_001",
-      "files_changed": 3,
+      "tool_call_id": "call_001",
+      "tool_name": "write_file",
+      "files_changed": ["src/main.py"],
       "insertions": 45,
-      "deletions": 12
+      "deletions": 12,
+      "rolled_back": false
     }
   ]
 }
@@ -492,147 +480,97 @@ def write_filesystem_history(self, fs: Filesystem) -> None:
 |-------|------|-------------|
 | `commit_ref` | `str` | Git commit hash |
 | `created_at` | `str` | ISO-8601 UTC timestamp |
-| `tag` | `str \| null` | Snapshot tag (typically `"pre:{tool}:{id}"`) |
+| `tag` | `str \| null` | Raw snapshot tag |
 | `parent_ref` | `str \| null` | Parent commit hash (null for initial) |
-| `message` | `str` | Git commit message |
-| `files_changed` | `int` | Number of files changed in this snapshot |
+| `tool_call_id` | `str \| null` | Tool call ID extracted from tag |
+| `tool_name` | `str \| null` | Tool name extracted from tag |
+| `files_changed` | `list[str]` | Paths of files added, modified, or deleted |
 | `insertions` | `int` | Lines added |
 | `deletions` | `int` | Lines removed |
+| `rolled_back` | `bool` | Whether this snapshot was later reverted |
 
-### Size Control
+### Surfacing History in wink debug
 
-The git bundle uses git's content-addressed storage, so identical files across
-snapshots share storage automatically (copy-on-write). Typical bundle sizes are
-much smaller than the sum of all snapshot states.
+The filesystem history is not a standalone view. Instead, it creates
+**bidirectional links** between the two existing panels that matter most:
 
-`BundleConfig` gains a `max_history_size` field (default 100MB) to cap the git
-bundle size. If the history exceeds this limit, older commits are pruned using
-`git bundle create --since` to keep the most recent history.
+#### Transcript → Files
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `max_history_size` | `int` | `104_857_600` | Max git bundle size (100MB) |
-| `include_history` | `bool` | `True` | Whether to capture filesystem history |
+Each tool call entry in the **Transcript** panel annotates the files that were
+mutated during that tool's transaction. When filesystem history is available:
 
-### CLI: wink debug File History
+- Tool call entries display a **"Files changed"** badge with the count of
+  mutated files.
+- Expanding the badge shows the list of changed file paths with per-file
+  diffstats (+insertions/-deletions).
+- Each file path is a link that navigates to that file in the **Files** panel.
+- If the tool call was rolled back (the tool failed and the transaction was
+  reverted), the file list is shown with a **"rolled back"** indicator.
 
-The `wink debug` web UI adds a **File History** panel that provides:
-
-#### Snapshot Timeline
-
-A chronological list of all snapshots showing:
-
-- **Timestamp** and **tag** (tool name and call ID)
-- **Diff summary**: files changed, insertions, deletions
-- **Rollback indicator**: whether this snapshot was later rolled back (its
-  changes were reverted by a subsequent restore)
-
-This lets developers see exactly which tool calls modified the filesystem and
-in what order, including tool calls whose changes were undone.
-
-#### File-Level History
-
-Selecting a file shows its full change history across snapshots:
-
-- Each version with the snapshot that introduced the change
-- Inline diff between consecutive versions
-- Ability to view the file content at any snapshot
-
-#### Snapshot Diff View
-
-Selecting two snapshots shows the full diff between them:
-
-- Added, modified, and deleted files
-- Unified diff for each changed file
-
-### History API Routes
-
-| Route | Method | Query Params | Description |
-|-------|--------|-------------|-------------|
-| `/api/history/snapshots` | GET | `offset`, `limit` | Paginated snapshot timeline |
-| `/api/history/snapshot/{ref}` | GET | | File tree at a specific snapshot |
-| `/api/history/diff/{from_ref}/{to_ref}` | GET | `path` (optional) | Diff between two snapshots, optionally scoped to one file |
-| `/api/history/file/{path}` | GET | `offset`, `limit` | Change history for a single file across all snapshots |
-
-#### Example Responses
-
-**GET /api/history/snapshots**
+**API:** `GET /api/transcript/{tool_call_id}/files`
 
 ```json
 {
-  "total": 12,
-  "offset": 0,
-  "limit": 50,
-  "items": [
+  "tool_call_id": "call_001",
+  "tool_name": "write_file",
+  "rolled_back": false,
+  "files": [
     {
-      "commit_ref": "abc123",
+      "path": "src/main.py",
+      "insertions": 20,
+      "deletions": 0,
+      "action": "added"
+    },
+    {
+      "path": "src/utils.py",
+      "insertions": 5,
+      "deletions": 3,
+      "action": "modified"
+    }
+  ]
+}
+```
+
+#### Files → Transcript
+
+Each file in the **Files** panel annotates the tool calls that mutated it. When
+filesystem history is available:
+
+- The file detail view displays a **"Mutation history"** section listing every
+  tool call that touched this file, in chronological order.
+- Each entry shows the tool name, tool call ID, timestamp, action
+  (added/modified/deleted), and diffstat.
+- Each entry is a link that navigates to that tool call in the **Transcript**
+  panel.
+- Rolled-back mutations are shown with a visual indicator so the user can see
+  changes that were attempted but reverted.
+
+**API:** `GET /api/files/{path}/history`
+
+```json
+{
+  "path": "src/main.py",
+  "mutations": [
+    {
+      "tool_call_id": "call_001",
+      "tool_name": "write_file",
       "created_at": "2024-01-15T10:30:00+00:00",
-      "tag": "pre:write_file:call_001",
-      "files_changed": 1,
+      "action": "added",
       "insertions": 20,
       "deletions": 0,
       "rolled_back": false
     },
     {
-      "commit_ref": "def456",
-      "created_at": "2024-01-15T10:30:05+00:00",
-      "tag": "pre:patch_file:call_002",
-      "files_changed": 1,
+      "tool_call_id": "call_003",
+      "tool_name": "patch_file",
+      "created_at": "2024-01-15T10:31:00+00:00",
+      "action": "modified",
       "insertions": 5,
       "deletions": 3,
-      "rolled_back": true
+      "rolled_back": false
     }
   ]
 }
-```
-
-**GET /api/history/file/src/main.py**
-
-```json
-{
-  "path": "src/main.py",
-  "versions": [
-    {
-      "commit_ref": "abc123",
-      "created_at": "2024-01-15T10:30:00+00:00",
-      "tag": "pre:write_file:call_001",
-      "action": "added",
-      "diff": "@@ -0,0 +1,20 @@\n+def main():\n+    ..."
-    },
-    {
-      "commit_ref": "ghi789",
-      "created_at": "2024-01-15T10:31:00+00:00",
-      "tag": "pre:refactor:call_003",
-      "action": "modified",
-      "diff": "@@ -5,3 +5,5 @@\n-    old_line\n+    new_line\n+    added_line"
-    }
-  ]
-}
-```
-
-### Extracting History from a Bundle
-
-The `DebugBundle` class gains a `filesystem_history` property and helper
-methods for working with the captured git history:
-
-```python
-bundle = DebugBundle.load("./debug/bundle.zip")
-
-# Check if history is available
-if bundle.filesystem_history is not None:
-    history = bundle.filesystem_history
-
-    # List all snapshots
-    for snapshot in history["snapshots"]:
-        print(f"{snapshot['created_at']} {snapshot['tag']} "
-              f"({snapshot['files_changed']} files)")
-
-# Extract the git bundle for local inspection
-bundle.extract_filesystem_history(target=Path("./history_repo/"))
-# Now use standard git commands:
-#   cd ./history_repo && git log --oneline
-#   git diff <ref1> <ref2>
-#   git show <ref>:path/to/file
 ```
 
 ### DebugBundle Extensions
@@ -641,34 +579,7 @@ bundle.extract_filesystem_history(target=Path("./history_repo/"))
 |----------------|---------|-------------|
 | `filesystem_history` | `dict \| None` | Parsed `filesystem_history/manifest.json` |
 | `has_filesystem_history` | `bool` | Whether history was captured |
-| `extract_filesystem_history(target)` | `Path` | Clone git bundle to local repo for inspection |
-
-### Manual Inspection
-
-Since the captured history is a standard git bundle, advanced users can extract
-and inspect it directly:
-
-```bash
-# Extract the bundle
-unzip debug_bundle.zip
-cd debug_bundle/filesystem_history/
-
-# Clone from the git bundle into a local repo
-git clone history.bundle ./workspace_history
-
-# Browse the full timeline
-cd workspace_history
-git log --oneline --stat
-
-# See what a specific tool call changed
-git show <commit-ref>
-
-# Diff between two points in time
-git diff <earlier-ref> <later-ref>
-
-# View a file at a specific point
-git show <ref>:path/to/file.py
-```
+| `extract_filesystem_history(target)` | `Path` | Clone git bundle to local repo for full git access |
 
 ## Public API
 
@@ -718,10 +629,9 @@ filesystem snapshots, PII in inputs. Recommendations:
 ## Limitations
 
 - **Filesystem size**: Large workspaces produce large bundles
-- **Filesystem history**: History requires HostFilesystem with git; in-memory
-  filesystems have no commit history to capture
-- **History size**: Long sessions with many tool calls accumulate large git
-  histories; use `max_history_size` to cap
+- **Filesystem history**: Requires HostFilesystem with git; in-memory
+  filesystems have no commit history to capture. Long sessions with many tool
+  calls produce larger git bundles, though content-addressed storage mitigates this
 - **Memory**: Log capture buffers before writing
 - **Concurrency**: One bundle per AgentLoop execution
 - **No automatic redaction**: Manual review required for sensitive data
