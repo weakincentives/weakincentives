@@ -19,7 +19,6 @@ particularly the bundled documentation for the wink docs CLI command.
 from __future__ import annotations
 
 import subprocess
-import sys
 import zipfile
 from pathlib import Path
 
@@ -43,18 +42,10 @@ def wheel_path(tmp_path_factory: pytest.TempPathFactory, project_root: Path) -> 
     """
     output_dir = tmp_path_factory.mktemp("dist")
 
-    # Build wheel using uv/pip from the project root
+    # Build wheel using uv (avoids inheriting pip's global index config
+    # which may contain expired credentials for private registries).
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "wheel",
-            "--no-deps",
-            "--wheel-dir",
-            str(output_dir),
-            str(project_root),
-        ],
+        ["uv", "build", "--wheel", "--out-dir", str(output_dir), str(project_root)],
         capture_output=True,
         text=True,
         check=False,
