@@ -2,9 +2,10 @@
 
 This document describes the architecture of WINK (Weak Incentives), the
 agent-definition layer for building unattended agents. It covers guiding
-principles, system-level decomposition, module boundaries, data flow, and key
-design invariants. Cross-references point to detailed specs in `specs/` for
-deeper treatment.
+principles, system-level decomposition, data flow, and key design invariants.
+
+For implementation details, see the specs in `specs/` and the API reference in
+`llms.md`. For terminology, see `GLOSSARY.md`.
 
 ______________________________________________________________________
 
@@ -145,26 +146,23 @@ type-only imports are permitted).
 ```
 ┌─────────────────────────────────────┐
 │       HIGH-LEVEL (Layer 4)          │  User-facing features
-│  contrib, evals, cli, debug         │
+│  evals, contrib, cli, debug         │
 └──────────────┬──────────────────────┘
                │ depends on
 ┌──────────────┴──────────────────────┐
 │       ADAPTERS (Layer 3)            │  Provider integrations
-│  adapters                           │
 └──────────────┬──────────────────────┘
                │ depends on
 ┌──────────────┴──────────────────────┐
 │       CORE (Layer 2)                │  Library primitives
-│  runtime, prompt, resources,        │
-│  filesystem, serde, skills,         │
-│  formal, debug, optimizers          │
+│  prompt, runtime, resources,        │
+│  filesystem, serde, skills          │
 └──────────────┬──────────────────────┘
                │ depends on
 ┌──────────────┴──────────────────────┐
 │       FOUNDATION (Layer 1)          │  Base types & utilities
-│  types, errors, dataclasses, dbc,   │
-│  deadlines, budget, clock,          │
-│  experiment                         │
+│  types, errors, dbc, clock,         │
+│  budget, deadlines                  │
 └─────────────────────────────────────┘
 ```
 
@@ -179,91 +177,13 @@ Additional rules:
 
 - Private modules (`_foo.py`) must not be imported outside their package.
 - Circular dependencies are broken via protocols or `TYPE_CHECKING`.
-- `import time` is banned in production code (only `clock.py` is exempt); all
-  time access goes through injected `Clock` protocols.
+- `import time` is banned in production code; all time access goes through
+  injected `Clock` protocols.
 
-Enforcement is automated by three checkers that run as part of `make check`:
-`ArchitectureChecker`, `PrivateImportChecker`, `BannedTimeImportsChecker`.
+Layer discipline is enforced by automated checkers that run on every
+`make check`.
 
 Spec: `specs/MODULE_BOUNDARIES.md`
-
-______________________________________________________________________
-
-## Source Layout
-
-```
-src/weakincentives/
-├── adapters/              # Layer 3: Provider integrations
-│   ├── _shared/           #   Cross-adapter shared code (bridge, signals)
-│   ├── claude_agent_sdk/  #   Claude Agent SDK adapter
-│   ├── codex_app_server/  #   Codex App Server adapter (stdio JSON-RPC)
-│   ├── acp/               #   Generic ACP adapter
-│   ├── opencode_acp/      #   OpenCode-specific ACP adapter
-│   ├── gemini_acp/        #   Gemini CLI ACP adapter
-│   ├── core.py            #   ProviderAdapter protocol, PromptResponse
-│   ├── config.py          #   LLMConfig base
-│   └── throttle.py        #   Reactive rate limiting
-│
-├── prompt/                # Layer 2: Prompt system
-│   ├── prompt.py          #   PromptTemplate, Prompt
-│   ├── section.py         #   Section base class
-│   ├── markdown.py        #   MarkdownSection
-│   ├── workspace.py       #   WorkspaceSection, HostMount
-│   ├── tool.py            #   Tool, ToolContext, ToolExample
-│   ├── tool_result.py     #   ToolResult
-│   ├── policy.py          #   ToolPolicy protocol, built-in policies
-│   ├── feedback.py        #   FeedbackProvider, FeedbackTrigger
-│   ├── task_completion.py #   TaskCompletionChecker protocol
-│   └── overrides.py       #   Hash-based prompt overrides
-│
-├── runtime/               # Layer 2: Session & orchestration
-│   ├── session/           #   Session, SliceStore, ReducerRegistry
-│   │   ├── session.py     #     Session facade
-│   │   ├── slice_store.py #     Typed slice storage
-│   │   ├── reducer_registry.py  # Event-to-reducer routing
-│   │   ├── reducers.py    #     Built-in reducers (append_all, upsert_by, etc.)
-│   │   ├── state_slice.py #     @reducer decorator for declarative slices
-│   │   ├── slices/        #     Slice backends (memory, JSONL)
-│   │   └── ...
-│   ├── agent_loop.py      #   AgentLoop orchestration
-│   ├── lifecycle.py       #   ShutdownCoordinator, LoopGroup
-│   ├── transcript.py      #   TranscriptEmitter, TranscriptEntry
-│   ├── mailbox/           #   Mailbox protocol (SQS-compatible)
-│   └── events/            #   InProcessDispatcher
-│
-├── resources/             # Layer 2: Dependency injection
-│   ├── binding.py         #   Binding (protocol + provider + scope)
-│   ├── registry.py        #   ResourceRegistry (immutable)
-│   ├── context.py         #   ScopedResourceContext (mutable cache)
-│   └── scope.py           #   SINGLETON, TOOL_CALL, PROTOTYPE
-│
-├── filesystem/            # Layer 2: Filesystem abstraction
-│                          #   Streaming byte-first protocol
-│
-├── serde/                 # Layer 2: Dataclass serialization
-│   ├── parse.py           #   serde.parse(cls, data)
-│   ├── dump.py            #   serde.dump(obj)
-│   └── schema.py          #   JSON Schema generation
-│
-├── skills/                # Layer 2: Agent Skills (SKILL.md format)
-│
-├── evals/                 # Layer 4: Evaluation framework
-│                          #   Dataset, EvalLoop, Sample, Score
-│
-├── contrib/               # Layer 4: Contributed tools
-│   └── tools/             #   WorkspaceDigestSection, in-memory FS
-│
-├── debug/                 # Layer 4: Debug bundles, wink debug UI
-│
-├── dbc/                   # Layer 1: Design-by-contract decorators
-│
-├── types/                 # Layer 1: Base type definitions
-├── clock.py               # Layer 1: Clock protocols, FakeClock
-├── budget.py              # Layer 1: Budget tracking
-├── deadlines.py           # Layer 1: Deadline utilities
-├── experiment.py          # Layer 1: Experiment for A/B testing
-└── errors.py              # Layer 1: Error hierarchy
-```
 
 ______________________________________________________________________
 
@@ -286,48 +206,42 @@ for dynamic visibility.
 **RenderedPrompt** is the final artifact sent to the adapter — deterministic
 markdown plus a tool manifest.
 
-Key invariants:
+Key design decisions:
 
-- Section keys match `^[a-z0-9][a-z0-9._-]{0,63}$`
-- Tool names match `^[a-z0-9_-]{1,64}$`; descriptions 1-200 chars
 - Duplicate tool names within a prompt are rejected at render time
 - Prompt overrides are hash-validated — when source changes, stale overrides
   stop applying until explicitly updated
+- Resources are collected from template, sections, and bind-time sources with
+  clear precedence
 
 Spec: `specs/PROMPTS.md`
 
 ### Session State
 
-Sessions are deterministic, side-effect-free state containers. The `Session`
-class is a thin facade coordinating three subsystems:
-
-| Subsystem | Responsibility |
-|-----------|----------------|
-| `SliceStore` | Typed slice storage with policy-based factories |
-| `ReducerRegistry` | Event-to-reducer routing (multiple reducers per event) |
-| `SessionSnapshotter` | Snapshot/restore for transaction rollback |
+Sessions are deterministic, side-effect-free state containers. A `Session` is a
+thin facade coordinating typed slice storage, event-to-reducer routing, and
+snapshot/restore for transaction rollback.
 
 **Dispatch model.** All mutations flow through `session.dispatch(event)`. Events
 are routed by concrete dataclass type to registered reducers. Reducers are pure
-functions that return `SliceOp` values (`Append`, `Extend`, `Replace`, `Clear`)
-— they never mutate state directly.
+functions that return algebraic `SliceOp` values (Append, Extend, Replace,
+Clear) — they never mutate state directly.
 
 **Slice storage.** Slices are typed containers partitioned by policy:
 
 | Policy | Behavior |
 |--------|----------|
-| STATE | Rolled back on tool failure; snapshot/restore participates |
+| STATE | Rolled back on tool failure; participates in snapshot/restore |
 | LOG | Preserved during restore; audit trail |
 
-Two backends: `MemorySlice` (in-memory tuples) and `JsonlSlice` (JSONL
-file-backed with append-optimized I/O). Factory config selects the backend per
-policy.
+Backends include in-memory (tuple-backed) and file-backed (JSONL with
+append-optimized I/O). Factory config selects the backend per policy.
 
-**Query API.** Typed accessors: `session[Plan].latest()`, `.all()`,
+**Query API.** Typed accessors: `session[T].latest()`, `.all()`,
 `.where(predicate)`.
 
-**Thread safety.** Session uses a single `RLock`. All subsystems are accessed
-while holding the lock. Reads return immutable tuples; snapshots are consistent.
+**Thread safety.** Session uses a single `RLock`. Reads return immutable tuples;
+snapshots are consistent.
 
 Specs: `specs/SESSIONS.md`, `specs/SLICES.md`, `specs/THREAD_SAFETY.md`
 
@@ -337,20 +251,15 @@ Tools are the side-effect boundary. Every capability that modifies the
 environment — file writes, API calls, shell commands — is expressed as a tool
 with a typed handler.
 
-**Handler signature:**
-
 ```python
 def handler(params: P, *, context: ToolContext) -> ToolResult[R]:
 ```
 
 `ToolContext` provides access to the active prompt, session, adapter, resources,
-deadline, and heartbeat. `ToolResult` has two factories: `ToolResult.ok(value)`
-and `ToolResult.error(message)`. Failed tools return errors, never abort
-evaluation.
+deadline, and heartbeat. Failed tools return errors, never abort evaluation.
 
 **Transactional execution.** Before each tool call, the adapter takes a session
-snapshot. On failure, state rolls back. On success, `policy.on_result()` is
-called to update policy state.
+snapshot. On failure, state rolls back. On success, policy state is updated.
 
 **Policy enforcement.** Policies are checked before every tool execution. If any
 policy denies the call, the tool returns an error to the LLM explaining why.
@@ -369,22 +278,19 @@ reasoning autonomy:
 | **Feedback Providers** | Soft guidance over time | Advisory (agent decides) |
 | **Task Completion** | Verify goals before stopping | Block early termination |
 
-**Tool Policies** enforce sequential dependencies. Built-in examples:
-`SequentialDependencyPolicy` (tool B requires tool A) and
-`ReadBeforeWritePolicy` (existing files must be read before overwritten).
-Policies are composable — multiple policies can govern the same tool, and all
-must allow.
+**Tool Policies** enforce sequential dependencies between tools. Policies are
+composable — multiple policies can govern the same tool, and all must allow.
+Examples: "tool B requires tool A", "existing files must be read before
+overwritten."
 
 **Feedback Providers** observe agent trajectory and inject guidance. They are
 trigger-based (every N calls, every N seconds, on file creation), non-blocking,
 and all matching providers run concurrently. Delivery is immediate via adapter
-hooks. Examples: `DeadlineFeedback` (remaining time warnings),
-`StaticFeedbackProvider` (one-time guidance on file detection).
+hooks.
 
 **Task Completion Checkers** verify that required outputs exist before allowing
-the agent to stop. `FileOutputChecker` validates required file existence.
-`CompositeChecker` combines multiple checkers with AND/OR logic. Checking is
-skipped when deadline or budget is exhausted.
+the agent to stop. Checkers compose with AND/OR logic. Checking is skipped when
+deadline or budget is exhausted.
 
 All three mechanisms are declared on the prompt definition — they are properties
 of the agent's goal, not the harness.
@@ -397,39 +303,32 @@ Adapters bridge agent definitions to execution harnesses. WINK only integrates
 with **agentic harnesses** — runtimes that provide planning loops, sandboxing,
 and tool orchestration. Direct API calls to model providers are too low-level.
 
-All adapters implement the `ProviderAdapter` protocol:
-
-```python
-adapter.evaluate(prompt, session=session, deadline=deadline, budget=budget)
-  → PromptResponse[OutputT]
-```
+All adapters implement the `ProviderAdapter` protocol with a single `evaluate()`
+entry point that accepts a prompt, session, optional deadline, and optional
+budget, and returns a typed `PromptResponse`.
 
 **Adapter lifecycle:**
 
-1. Validate prompt context — verify within resource context manager
-2. Render — `prompt.render()` produces `RenderedPrompt`
-3. Format — convert to provider wire format
-4. Call — issue request with throttle protection and deadline checks
-5. Parse — extract content, dispatch tool calls transactionally
-6. Emit — publish lifecycle events (`PromptRendered`, `PromptExecuted`)
+1. Validate prompt context
+2. Render prompt into markdown + tool manifest
+3. Format for provider wire protocol
+4. Execute with throttle protection and deadline checks
+5. Parse response, dispatch tool calls transactionally
+6. Emit lifecycle events for observability
 
 **Supported harnesses:**
 
-| Harness | Protocol | Native Tools | Custom Tool Bridge |
-|---------|----------|--------------|-------------------|
-| Claude Agent SDK | Claude Code SDK | Read, Write, Edit, Bash, Glob, Grep | MCP server |
-| Codex App Server | stdio JSON-RPC (NDJSON) | Commands, file changes, web search | Dynamic tools |
-| ACP (OpenCode, Gemini CLI) | JSON-RPC over stdio | Commands, file changes, web search | MCP HTTP server |
+| Harness | Protocol | Custom Tool Bridge |
+|---------|----------|--------------------|
+| Claude Agent SDK | Claude Code SDK | MCP server |
+| Codex App Server | stdio NDJSON | Dynamic tools |
+| ACP (OpenCode, Gemini CLI) | JSON-RPC over stdio | MCP HTTP server |
 
-**Shared adapter code** lives in `adapters/_shared/`: `BridgedTool`
-(transactional tool wrapper), `MCPToolExecutionState` (call_id correlation),
-`VisibilityExpansionSignal` (progressive disclosure), `run_async()`
-(async/sync bridge).
+Each adapter has access to the harness's native tools (file ops, shell, search)
+while WINK bridges custom tools through the appropriate mechanism.
 
-**Adapter Compatibility Kit (ACK)** is a unified integration test suite that
-validates any adapter against the behavioral contract: prompt evaluation, tool
-bridging, event emission, transcript logging, transactional semantics, and
-guardrail enforcement.
+The **Adapter Compatibility Kit (ACK)** is a unified integration test suite
+that validates any adapter against the behavioral contract.
 
 Specs: `specs/ADAPTERS.md`, `specs/CLAUDE_AGENT_SDK.md`,
 `specs/CODEX_APP_SERVER.md`, `specs/ACP_ADAPTER.md`
@@ -437,51 +336,40 @@ Specs: `specs/ADAPTERS.md`, `specs/CLAUDE_AGENT_SDK.md`,
 ### Resource Registry
 
 Dependency injection with scope-aware lifecycle management. Resources are
-declared via `Binding` (protocol + provider function + scope) and collected
-into an immutable `ResourceRegistry`.
+declared as bindings (protocol + provider function + scope) collected into an
+immutable registry.
 
-| Scope | Lifetime | Example |
-|-------|----------|---------|
-| `SINGLETON` | One instance per prompt context | HTTP clients, config |
-| `TOOL_CALL` | Fresh per tool invocation | Request tracers |
-| `PROTOTYPE` | Fresh every access | Builders, buffers |
+| Scope | Lifetime |
+|-------|----------|
+| SINGLETON | One instance per prompt context |
+| TOOL_CALL | Fresh per tool invocation |
+| PROTOTYPE | Fresh every access |
 
-Resource lifecycle is owned by the prompt. `prompt.resources` serves as both
-context manager and accessor:
-
-```python
-with prompt.resources:
-    fs = prompt.resources.get(Filesystem)
-    response = adapter.evaluate(prompt, session=session)
-# Resources cleaned up automatically
-```
-
-Resources are collected from three sources in precedence order:
-`PromptTemplate.resources` → Section `resources()` methods (depth-first) →
-`bind(resources=...)` at bind time.
+Resource lifecycle is owned by the prompt via a context manager. Resources are
+collected from template-level, section-level, and bind-time sources with clear
+precedence.
 
 Spec: `specs/RESOURCE_REGISTRY.md`
 
 ### AgentLoop
 
 `AgentLoop` standardizes the end-to-end agent workflow: receive request, build
-prompt, evaluate within resource context, handle visibility expansion, publish
+prompt, evaluate within resource context, handle visibility expansion, return
 result.
 
 **Execution flow:**
 
-1. Receive `AgentLoopRequest` (or direct `execute()` call)
+1. Receive request (via mailbox or direct `execute()` call)
 2. `prepare(request)` → `(Prompt, Session)`
 3. Resolve effective settings (budget, deadline, resources)
 4. Enter prompt resource context
 5. Evaluate with adapter
-6. On `VisibilityExpansionRequired`: apply overrides, retry (up to 10 times)
-7. `finalize(prompt, session, output)` → post-processed `OutputT`
-8. `prompt.cleanup()` — release section resources
-9. Return `AgentLoopResult`
+6. On visibility expansion request: apply overrides, retry (bounded)
+7. `finalize()` → post-processed output
+8. Clean up prompt resources
+9. Return result
 
-`AgentLoop` is mailbox-driven: requests arrive via `Mailbox`, results return
-via `msg.reply()`. This supports durable, at-least-once message delivery.
+The loop is mailbox-driven, supporting durable at-least-once message delivery.
 
 Specs: `specs/AGENT_LOOP.md`, `specs/LIFECYCLE.md`
 
@@ -499,7 +387,7 @@ A single evaluation pass follows this path:
        │  builds Prompt + Session
        ▼
   Prompt.render()
-       │  section tree → RenderedPrompt (markdown + tool manifest)
+       │  section tree → markdown + tool manifest
        ▼
   Adapter.evaluate()
        │  formats for provider, sends to LLM
@@ -509,10 +397,10 @@ A single evaluation pass follows this path:
   │  text response      │  tool_call request
   │       │             │       │
   │       ▼             │       ▼
-  │  Parse output       │  Policy check (all policies must allow)
+  │  Parse output       │  Policy check (all must allow)
   │                     │       │
   │                     │  ┌────┴────┐
-  │                     │  │ DENIED  │  → error result to LLM → retry
+  │                     │  │ DENIED  │  → error to LLM → retry
   │                     │  └─────────┘
   │                     │       │ ALLOWED
   │                     │       ▼
@@ -539,9 +427,6 @@ A single evaluation pass follows this path:
   Task completion check (if configured)
        │
        ▼
-  AgentLoop.finalize()
-       │
-       ▼
   AgentLoopResult (typed output or error)
 ```
 
@@ -549,38 +434,22 @@ ______________________________________________________________________
 
 ## Observability
 
-### Event System
+**Event system.** An in-process dispatcher provides publish/subscribe for
+lifecycle events. Sessions subscribe to collect prompt renders, tool
+invocations, and execution telemetry.
 
-The `InProcessDispatcher` provides publish/subscribe for lifecycle events.
-Sessions subscribe to collect prompt renders, tool invocations, and execution
-telemetry. Adapter-emitted events include:
-
-- `PromptRendered` — rendered prompt content and metadata
-- `RenderedTools` — tools sent to provider
-- `PromptExecuted` — response, token usage, timing
-- `ToolInvoked` — individual tool call record
-- `Feedback` — feedback provider outputs
-
-### Transcripts
-
-A unified, adapter-agnostic log of everything that happens during `evaluate()`.
-Chronological entries share a common envelope (`TranscriptEntry`) with canonical
+**Transcripts.** A unified, adapter-agnostic log of everything that happens
+during evaluation. Chronological entries share a common envelope with canonical
 types (assistant message, tool call, tool result, reasoning, system, error).
-Entries are emitted as structured log records, consumed by debug bundles and
-`wink query`.
+Emitted as structured log records.
 
-### Debug Bundles
+**Debug bundles.** Self-contained zip archives capturing session state, logs,
+filesystem snapshots, configuration, transcript, and environment metadata.
+Automatic capture during agent loop execution.
 
-Self-contained zip archives capturing session state, logs, filesystem snapshots,
-configuration, transcript, and environment metadata. Zero-configuration:
-`AgentLoop` captures them automatically when configured. Readable with standard
-tools (unzip, jq, text editor).
-
-### Session Snapshots
-
-Sessions can be snapshotted at any point and serialized to JSONL. Snapshots
-capture all slice contents, reducer registrations, and metadata. They can be
-restored for replay, debugging, or crash recovery.
+**Session snapshots.** Sessions can be snapshotted at any point and serialized.
+Snapshots capture all slice contents and metadata. They can be restored for
+replay, debugging, or crash recovery.
 
 Specs: `specs/TRANSCRIPT.md`, `specs/DEBUG_BUNDLE.md`
 
@@ -588,24 +457,16 @@ ______________________________________________________________________
 
 ## Lifecycle & Operations
 
-### Graceful Shutdown
+**Graceful shutdown.** A shutdown coordinator installs SIGTERM/SIGINT handlers
+and invokes registered callbacks. Multiple loops run in dedicated threads with
+coordinated shutdown — in-flight work completes, queued messages are nacked for
+redelivery.
 
-`ShutdownCoordinator` installs SIGTERM/SIGINT handlers and invokes registered
-callbacks. `LoopGroup` runs multiple loops (agent, eval) in dedicated threads
-with coordinated shutdown. In-flight work completes; queued messages are nacked
-for redelivery.
+**Health & watchdog.** Optional HTTP health endpoints for Kubernetes probes. A
+watchdog daemon monitors heartbeat timestamps and terminates stuck workers.
 
-### Health & Watchdog
-
-`LoopGroup` optionally exposes HTTP health endpoints (`/health/live`,
-`/health/ready`) for Kubernetes probes. A `Watchdog` daemon thread monitors
-`Heartbeat` timestamps and terminates stuck workers via SIGKILL.
-
-### Mailbox
-
-SQS-compatible protocol for durable, at-least-once message delivery.
-`InMemoryMailbox` for testing; `RedisMailbox` for distributed deployments.
-Messages have visibility timeouts; expired messages are redelivered.
+**Mailbox.** SQS-compatible protocol for durable, at-least-once message
+delivery with visibility timeouts and explicit acknowledgment.
 
 Specs: `specs/LIFECYCLE.md`, `specs/HEALTH.md`, `specs/MAILBOX.md`
 
@@ -613,79 +474,45 @@ ______________________________________________________________________
 
 ## Cross-Cutting Concerns
 
-### Time
+**Time.** All time-dependent code uses injected `Clock` protocols. Monotonic
+time for elapsed measurements; wall-clock time (UTC) for timestamps and
+deadlines. Production uses system clock; tests use a fake clock that advances
+instantly.
 
-All time-dependent code uses injected `Clock` protocols. Two domains:
+**Serialization.** Custom dataclass serde (`parse`/`dump`) with no third-party
+dependencies. Constraint validation via `Annotated` metadata. Polymorphic unions
+use a `__type__` discriminator.
 
-- **Monotonic time** (`float` seconds) — elapsed time, timeouts, rate limiting
-- **Wall-clock time** (UTC `datetime`) — timestamps, deadlines, event recording
+**Design by contract.** `@require`, `@ensure`, and `@invariant` decorators.
+Always enabled. Preconditions validate inputs; postconditions validate results;
+invariants check before/after public methods.
 
-`SystemClock` for production; `FakeClock` for deterministic testing. Direct
-`import time` is banned in production code.
+**Filesystem.** A unified protocol accessed through tool context and prompt
+resources. Three layers: core operations (exists, stat, glob) → streaming
+(byte readers/writers) → convenience (text read/write). Backend-agnostic.
 
-Spec: `specs/CLOCK.md`
+**Skills.** Lightweight, open format for extending agent capabilities. A skill
+is a directory with a `SKILL.md` file. Skills attach to sections and follow the
+same progressive disclosure rules as tools.
 
-### Serialization
-
-`serde.parse(cls, data)` and `serde.dump(obj)` handle dataclass
-serialization without third-party dependencies. Constraints via `Annotated`
-metadata (`ge`, `le`, `pattern`, etc.). Polymorphic unions use a `__type__`
-discriminator field.
-
-Spec: `specs/DATACLASSES.md`
-
-### Design by Contract
-
-`@require`, `@ensure`, and `@invariant` decorators from `weakincentives.dbc`.
-Always enabled by default. Preconditions validate inputs; postconditions
-validate results; invariants check before/after public methods. Local opt-out
-via `dbc_suspended()` context manager.
-
-Spec: `specs/DBC.md`
-
-### Filesystem
-
-Unified `Filesystem` protocol accessed through `ToolContext`. Three-layer
-architecture: core operations (exists, stat, glob, grep) → streaming layer
-(byte readers/writers) → convenience layer (text read/write). Backend-agnostic:
-in-memory VFS, host filesystem, or container-mounted.
-
-Spec: `specs/FILESYSTEM.md`
-
-### Skills
-
-Lightweight, open format for extending agent capabilities. A skill is a
-directory containing `SKILL.md` (YAML frontmatter + Markdown instructions).
-Skills attach to sections and follow the same progressive disclosure rules as
-tools. See [agentskills.io](https://agentskills.io).
-
-Spec: `specs/SKILLS.md`
+Specs: `specs/CLOCK.md`, `specs/DATACLASSES.md`, `specs/DBC.md`,
+`specs/FILESYSTEM.md`, `specs/SKILLS.md`
 
 ______________________________________________________________________
 
 ## Evaluation & Experimentation
 
-### Evaluation Framework
+**Evaluation framework.** A minimal framework built on `AgentLoop`. Adds
+datasets (JSONL-backed) and scoring. Evaluators are pure functions
+`(output, expected) → Score`. Session evaluators can inspect tool usage and
+budget compliance.
 
-Minimal framework built on `AgentLoop`. `EvalLoop` wraps `AgentLoop` and adds
-datasets and scoring. `Dataset` loads samples from JSONL. Evaluators are pure
-functions `(output, expected) → Score`. Session evaluators can inspect tool
-usage and budget compliance. Built-in evaluators: `exact_match`, `contains`,
-`all_of`, `any_of`, `llm_judge`.
+**Experiments.** Named bundles pairing prompt override tags with feature flags
+for A/B testing and optimization runs.
 
-### Experiments
-
-Named experiment bundles that pair prompt overrides tags with feature flags.
-Enable A/B testing by routing requests through different override tags.
-`EvalReport.compare_experiments()` computes pass-rate deltas and relative
-improvements.
-
-### Prompt Overrides
-
-Hash-addressed override files let optimizers or humans replace prompt section
-text or tool descriptions without editing source code. Overrides live in
-`.weakincentives/prompts/overrides/` and match by namespace, key, and tag.
-When source changes, existing overrides stop applying until explicitly updated.
+**Prompt overrides.** Hash-addressed override files that replace prompt section
+text or tool descriptions without editing source code. When source changes,
+stale overrides stop applying until explicitly updated.
 
 Specs: `specs/EVALS.md`, `specs/EXPERIMENTS.md`, `specs/PROMPTS.md`
 
@@ -693,30 +520,27 @@ ______________________________________________________________________
 
 ## Key Invariants
 
-These invariants hold throughout the system and are enforced by tests, type
-checkers, and automated validators:
+These hold throughout the system and are enforced by tests, type checkers, and
+automated validators:
 
 1. **Layer discipline.** Lower layers never import higher layers at runtime.
-   Automated checker runs on every `make check`.
 
-2. **Pure reducers.** Reducers return `SliceOp` values. They never mutate state,
-   perform I/O, or dispatch events.
+2. **Pure reducers.** Reducers return `SliceOp` values. They never mutate
+   state, perform I/O, or dispatch events.
 
 3. **Transactional tools.** A failed tool call leaves session state unchanged.
-   Snapshot-restore wraps every tool execution.
 
-4. **Fail-closed policies.** When a policy cannot determine whether to allow a
-   tool call, it denies. The agent receives an explanation and can adapt.
+4. **Fail-closed policies.** When uncertain, deny. The agent receives an
+   explanation and can adapt.
 
-5. **Typed prompts.** All placeholders resolve to dataclass fields. Missing or
-   mistyped parameters fail at construction time, not at LLM request time.
+5. **Typed prompts.** All placeholders resolve to dataclass fields. Mismatches
+   fail at construction time, not at LLM request time.
 
-6. **Hash-validated overrides.** Prompt overrides carry content hashes. Stale
-   overrides are silently skipped, never applied to the wrong version.
+6. **Hash-validated overrides.** Stale overrides are silently skipped, never
+   applied to the wrong version.
 
-7. **No global mutable state.** Dependencies are injected explicitly. Time goes
-   through `Clock`. Filesystem goes through `Filesystem`. State goes through
-   `Session`.
+7. **No global mutable state.** Dependencies are injected explicitly — time,
+   filesystem, and state all flow through explicit protocols.
 
 8. **100% test coverage.** Enforced on every build. Design-by-contract
    decorators supplement tests with runtime assertions.
@@ -731,8 +555,8 @@ ______________________________________________________________________
 | `IDENTITY.md` | WINK's thesis and positioning |
 | `llms.md` | Agent-friendly API reference |
 | `GLOSSARY.md` | Canonical definitions for all key terms |
-| `CLAUDE.md` | Contributor instructions (style, commands, checklist) |
-| `specs/` | Design specifications (44 documents) |
-| `guides/` | How-to material (34 guides) |
+| `CLAUDE.md` | Contributor instructions |
+| `specs/` | Design specifications |
+| `guides/` | How-to material |
 | `ROADMAP.md` | Upcoming features |
 | `CHANGELOG.md` | Version history |
