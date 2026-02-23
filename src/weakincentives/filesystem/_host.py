@@ -41,8 +41,10 @@ from typing import Literal
 from ._git_ops import (
     cleanup_git_dir,
     create_snapshot,
+    export_history_bundle as _export_history_bundle,
     init_git_repo,
     restore_snapshot,
+    snapshot_history as _snapshot_history,
 )
 from ._streams import (
     DefaultTextReader,
@@ -63,6 +65,7 @@ from ._types import (
     GrepMatch,
     ReadBytesResult,
     ReadResult,
+    SnapshotHistoryEntry,
     WriteResult,
     glob_match,
     normalize_path,
@@ -688,3 +691,25 @@ class HostFilesystem:
     def git_dir(self) -> str | None:
         """External git directory path, if initialized."""
         return self._git_dir
+
+    def snapshot_history(self) -> list[SnapshotHistoryEntry]:  # ty: ignore[invalid-type-form]
+        """Return ordered list of all snapshots with per-file diffstats.
+
+        Returns an empty list if git is not initialized or has no commits.
+        """
+        if not self._git_initialized or self._git_dir is None:
+            return []
+        return _snapshot_history(self._root, self._git_dir)
+
+    def export_history_bundle(self, target: Path) -> Path | None:
+        """Create a portable git bundle file from the snapshot repository.
+
+        Args:
+            target: Directory where the bundle file will be written.
+
+        Returns:
+            Path to the created git bundle file, or None if no history.
+        """
+        if not self._git_initialized or self._git_dir is None:
+            return None
+        return _export_history_bundle(self._root, self._git_dir, target)

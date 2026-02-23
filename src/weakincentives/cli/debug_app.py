@@ -230,6 +230,20 @@ class _DebugAppHandlers:
         except BundleValidationError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
+    def get_file_history(self, file_path: str) -> Mapping[str, JSONValue]:
+        """Return mutation history for a specific file."""
+        from urllib.parse import unquote
+
+        decoded_path = unquote(file_path)
+        return self._store.get_file_history(decoded_path)
+
+    def get_transcript_files(self, tool_call_id: str) -> Mapping[str, JSONValue]:
+        """Return files changed by a specific tool call."""
+        from urllib.parse import unquote
+
+        decoded_id = unquote(tool_call_id)
+        return self._store.get_tool_call_files(decoded_id)
+
     def reload(self) -> Mapping[str, JSONValue]:
         try:
             return self._store.reload()
@@ -299,7 +313,9 @@ def build_debug_app(store: BundleStore, logger: StructuredLogger) -> FastAPI:
     _ = app.get("/api/metrics")(handlers.get_metrics)
     _ = app.get("/api/error")(handlers.get_error)
     _ = app.get("/api/files")(handlers.list_files)
+    _ = app.get("/api/files/{file_path:path}/history")(handlers.get_file_history)
     _ = app.get("/api/files/{file_path:path}")(handlers.get_file)
+    _ = app.get("/api/transcript/{tool_call_id}/files")(handlers.get_transcript_files)
     _ = app.post("/api/reload")(handlers.reload)
     _ = app.get("/api/bundles")(handlers.list_bundles)
     _ = app.post("/api/switch")(handlers.switch)

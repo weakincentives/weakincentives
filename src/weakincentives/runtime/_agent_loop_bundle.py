@@ -255,6 +255,7 @@ def write_bundle_artifacts(  # noqa: PLR0913
     fs = prompt.resources.get_optional(Filesystem)
     if fs is not None:
         writer.write_filesystem(fs)
+        writer.write_filesystem_history(fs)
 
     writer.write_environment()
 

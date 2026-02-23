@@ -711,3 +711,89 @@ def test_reload_without_existing_cache(tmp_path: Path) -> None:
     # Reload should still work (it should handle missing cache)
     result = store.reload()
     assert result["bundle_id"]
+
+
+# ---------------------------------------------------------------------------
+# Filesystem history API tests
+# ---------------------------------------------------------------------------
+
+
+def _create_bundle_with_history(target_dir: Path) -> Path:
+    """Create a bundle with filesystem history from real HostFilesystem."""
+    from weakincentives.filesystem import HostFilesystem
+
+    workspace = target_dir / "workspace"
+    workspace.mkdir()
+    fs = HostFilesystem(_root=str(workspace))
+
+    _ = fs.snapshot(tag="pre:write_file:call_001")
+    (workspace / "hello.txt").write_text("Hello World")
+    _ = fs.snapshot(tag="pre:read_file:call_002")
+
+    bundle_dir = target_dir / "bundles"
+    with BundleWriter(bundle_dir) as writer:
+        writer.write_filesystem(fs)
+        writer.write_filesystem_history(fs)
+
+    assert writer.path is not None
+    return writer.path
+
+
+def test_api_file_history_with_history(tmp_path: Path) -> None:
+    """Test /api/files/{path}/history returns mutations when history exists."""
+    bundle_path = _create_bundle_with_history(tmp_path)
+    logger = debug_app.get_logger("test.history")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files/hello.txt/history")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["path"] == "hello.txt"
+    assert isinstance(data["mutations"], list)
+
+
+def test_api_file_history_without_history(tmp_path: Path) -> None:
+    """Test /api/files/{path}/history returns empty mutations when no history."""
+    bundle_path = _create_test_bundle(tmp_path, ["a"])
+    logger = debug_app.get_logger("test.history")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files/nonexistent.txt/history")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["path"] == "nonexistent.txt"
+    assert data["mutations"] == []
+
+
+def test_api_transcript_files_with_history(tmp_path: Path) -> None:
+    """Test /api/transcript/{tool_call_id}/files returns file list."""
+    bundle_path = _create_bundle_with_history(tmp_path)
+    logger = debug_app.get_logger("test.history")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/transcript/call_002/files")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tool_call_id"] == "call_002"
+    assert isinstance(data["files"], list)
+
+
+def test_api_transcript_files_unknown_tool_call(tmp_path: Path) -> None:
+    """Test /api/transcript/{tool_call_id}/files returns empty for unknown id."""
+    bundle_path = _create_test_bundle(tmp_path, ["a"])
+    logger = debug_app.get_logger("test.history")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/transcript/unknown_call/files")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tool_call_id"] == "unknown_call"
+    assert data["files"] == []

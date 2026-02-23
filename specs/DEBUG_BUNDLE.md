@@ -61,6 +61,9 @@ debug_bundle/
   eval.json               # Eval metadata (EvalLoop only)
   filesystem/             # Workspace snapshot (if captured)
     ...
+  filesystem_history/     # Full filesystem change history (if captured)
+    history.bundle        # Git bundle containing all snapshot commits
+    manifest.json         # Snapshot metadata index
 ```
 
 ### Artifact Requirements
@@ -83,6 +86,7 @@ debug_bundle/
 | `error.json` | No | Exception type, phase, traceback, context |
 | `eval.json` | No | Sample ID, experiment, score, judge output |
 | `filesystem/` | No | Workspace files preserving directory structure |
+| `filesystem_history/` | No | Full filesystem change history from transactional git repo |
 
 ### Manifest Schema
 
@@ -101,7 +105,8 @@ debug_bundle/
   "capture": {
     "mode": "full",
     "trigger": "config|env|request",
-    "limits_applied": { "filesystem_truncated": false }
+    "limits_applied": { "filesystem_truncated": false },
+    "filesystem_history": true
   },
   "prompt": { "ns": "...", "key": "...", "adapter": "..." },
   "files": ["manifest.json", "..."],
@@ -195,8 +200,9 @@ Context manager for streaming bundle creation. See
 
 Key methods: `write_session_before()`, `write_session_after()`,
 `write_request_input()`, `write_request_output()`, `capture_logs()` (context
-manager), `write_environment()`, `write_filesystem()`, `write_config()`,
-`write_run_context()`, `write_metrics()`, `write_error()`, `write_metadata()`,
+manager), `write_environment()`, `write_filesystem()`,
+`write_filesystem_history()`, `write_config()`, `write_run_context()`,
+`write_metrics()`, `write_error()`, `write_metadata()`,
 `write_prompt_overrides()`, `set_prompt_info()`.
 
 The `write_metadata(name, data)` method provides a generic mechanism for adding
@@ -212,6 +218,7 @@ with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
     writer.write_request_output(response)
     writer.write_environment()  # Capture reproducibility envelope
     writer.write_filesystem(fs)
+    writer.write_filesystem_history(fs)  # Capture full git history
     writer.write_config(config)
     writer.write_run_context(run_context)
     writer.write_metrics(metrics)
@@ -270,6 +277,7 @@ AgentLoop._handle_message()
   │    ├─ write_session_after()
   │    ├─ write_environment()
   │    ├─ write_filesystem()
+  │    ├─ write_filesystem_history()  # git bundle of snapshot repo
   │    ├─ write_config(), write_run_context(), write_metrics()
   │    ├─ write_error()  # if failed
   │    └─ __exit__() finalizes bundle:
@@ -380,7 +388,7 @@ Options:
 | Request | `request/*.json` | Input/output inspector |
 | Slices | `session/*.jsonl` | Session state browser by slice type |
 | Logs | `logs/app.jsonl` | Searchable, filterable log viewer |
-| Files | `filesystem/` | File tree with content |
+| Files | `filesystem/` | File tree with content and per-file mutation history |
 | Config | `config.json` | Configuration inspector |
 | Metrics | `metrics.json` | Performance dashboard |
 | Error | `error.json` | Error details (if present) |
@@ -397,6 +405,9 @@ Options:
 | `/api/logs` | Log entries (paginated, filterable by level) |
 | `/api/files` | Filesystem listing |
 | `/api/files/{path}` | File content |
+| `/api/files/{path}/history` | Tool calls that mutated this file (from filesystem history) |
+| `/api/transcript` | Transcript entries (paginated, filterable) |
+| `/api/transcript/{tool_call_id}/files` | Files mutated by a specific tool call |
 | `/api/config` | Configuration |
 | `/api/metrics` | Metrics |
 | `/api/error` | Error details |
@@ -409,6 +420,166 @@ Options:
 Standard: `{bundle_id}_{timestamp}.zip`
 
 EvalLoop: `{request_id}/{bundle_id}_{timestamp}.zip`
+
+## Filesystem History
+
+### Background
+
+Tool calls in WINK are transactional. Before each tool execution, the runtime
+takes a snapshot of the workspace filesystem by committing all changes to an
+external git repository (see `FILESYSTEM.md` and `TOOLS.md`). On tool failure,
+the filesystem is restored to the pre-tool snapshot via `git reset --hard`.
+
+This external git repository accumulates a commit-per-snapshot history that
+records **every filesystem mutation** the agent made during execution. Each
+commit message contains the tool name and tool-call ID (e.g.,
+`"pre:write_file:call_001"`), providing a complete timeline of how the
+workspace evolved.
+
+### Always Captured
+
+When a `HostFilesystem` with an initialized git directory is present, the
+bundle writer **always** captures the full filesystem history. There are no
+configuration knobs — if history exists, it goes into the bundle.
+
+`BundleWriter.write_filesystem_history(fs)`:
+
+1. **Creates a git bundle** from the external snapshot repository using
+   `git bundle create`, capturing the full commit graph.
+1. **Generates a snapshot manifest** (`filesystem_history/manifest.json`)
+   listing each snapshot with metadata: commit ref, timestamp, tag, diffstat,
+   and the list of files mutated.
+1. **Writes both artifacts** to `filesystem_history/` in the debug bundle.
+
+No-op for in-memory filesystems (they have no git history).
+
+### filesystem_history/manifest.json Schema
+
+```json
+{
+  "format_version": "1.0.0",
+  "snapshot_count": 12,
+  "snapshots": [
+    {
+      "commit_ref": "abc123...",
+      "created_at": "2024-01-15T10:30:00+00:00",
+      "tag": "pre:write_file:call_001",
+      "parent_ref": "def456...",
+      "tool_call_id": "call_001",
+      "tool_name": "write_file",
+      "files_changed": ["src/main.py"],
+      "insertions": 45,
+      "deletions": 12,
+      "rolled_back": false
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `commit_ref` | `str` | Git commit hash |
+| `created_at` | `str` | ISO-8601 UTC timestamp |
+| `tag` | `str \| null` | Raw snapshot tag |
+| `parent_ref` | `str \| null` | Parent commit hash (null for initial) |
+| `tool_call_id` | `str \| null` | Tool call ID extracted from tag |
+| `tool_name` | `str \| null` | Tool name extracted from tag |
+| `files_changed` | `list[str]` | Paths of files added, modified, or deleted |
+| `insertions` | `int` | Lines added |
+| `deletions` | `int` | Lines removed |
+| `rolled_back` | `bool` | Whether this snapshot was later reverted |
+
+### Surfacing History in wink debug
+
+The filesystem history is not a standalone view. Instead, it creates
+**bidirectional links** between the two existing panels that matter most:
+
+#### Transcript → Files
+
+Each tool call entry in the **Transcript** panel annotates the files that were
+mutated during that tool's transaction. When filesystem history is available:
+
+- Tool call entries display a **"Files changed"** badge with the count of
+  mutated files.
+- Expanding the badge shows the list of changed file paths with per-file
+  diffstats (+insertions/-deletions).
+- Each file path is a link that navigates to that file in the **Files** panel.
+- If the tool call was rolled back (the tool failed and the transaction was
+  reverted), the file list is shown with a **"rolled back"** indicator.
+
+**API:** `GET /api/transcript/{tool_call_id}/files`
+
+```json
+{
+  "tool_call_id": "call_001",
+  "tool_name": "write_file",
+  "rolled_back": false,
+  "files": [
+    {
+      "path": "src/main.py",
+      "insertions": 20,
+      "deletions": 0,
+      "action": "added"
+    },
+    {
+      "path": "src/utils.py",
+      "insertions": 5,
+      "deletions": 3,
+      "action": "modified"
+    }
+  ]
+}
+```
+
+#### Files → Transcript
+
+Each file in the **Files** panel annotates the tool calls that mutated it. When
+filesystem history is available:
+
+- The file detail view displays a **"Mutation history"** section listing every
+  tool call that touched this file, in chronological order.
+- Each entry shows the tool name, tool call ID, timestamp, action
+  (added/modified/deleted), and diffstat.
+- Each entry is a link that navigates to that tool call in the **Transcript**
+  panel.
+- Rolled-back mutations are shown with a visual indicator so the user can see
+  changes that were attempted but reverted.
+
+**API:** `GET /api/files/{path}/history`
+
+```json
+{
+  "path": "src/main.py",
+  "mutations": [
+    {
+      "tool_call_id": "call_001",
+      "tool_name": "write_file",
+      "created_at": "2024-01-15T10:30:00+00:00",
+      "action": "added",
+      "insertions": 20,
+      "deletions": 0,
+      "rolled_back": false
+    },
+    {
+      "tool_call_id": "call_003",
+      "tool_name": "patch_file",
+      "created_at": "2024-01-15T10:31:00+00:00",
+      "action": "modified",
+      "insertions": 5,
+      "deletions": 3,
+      "rolled_back": false
+    }
+  ]
+}
+```
+
+### DebugBundle Extensions
+
+| Property/Method | Returns | Description |
+|----------------|---------|-------------|
+| `filesystem_history` | `dict \| None` | Parsed `filesystem_history/manifest.json` |
+| `has_filesystem_history` | `bool` | Whether history was captured |
+| `extract_filesystem_history(target)` | `Path` | Clone git bundle to local repo for full git access |
 
 ## Public API
 
@@ -458,6 +629,9 @@ filesystem snapshots, PII in inputs. Recommendations:
 ## Limitations
 
 - **Filesystem size**: Large workspaces produce large bundles
+- **Filesystem history**: Requires HostFilesystem with git; in-memory
+  filesystems have no commit history to capture. Long sessions with many tool
+  calls produce larger git bundles, though content-addressed storage mitigates this
 - **Memory**: Log capture buffers before writing
 - **Concurrency**: One bundle per AgentLoop execution
 - **No automatic redaction**: Manual review required for sensitive data
@@ -468,5 +642,6 @@ filesystem snapshots, PII in inputs. Recommendations:
 - `specs/SESSIONS.md` - Session snapshots
 - `specs/LOGGING.md` - Log record format
 - `specs/RUN_CONTEXT.md` - Execution metadata
-- `specs/FILESYSTEM.md` - Workspace abstraction
+- `specs/FILESYSTEM.md` - Workspace abstraction, snapshot history export
+- `specs/TOOLS.md` - Tool transactions, snapshot lifecycle
 - `specs/EVALS.md` - Evaluation framework

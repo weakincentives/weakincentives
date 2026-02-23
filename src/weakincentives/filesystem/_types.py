@@ -146,6 +146,28 @@ class FilesystemSnapshot:
     tag: str | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class SnapshotHistoryEntry:
+    """Metadata for a single snapshot in the filesystem history.
+
+    Each entry corresponds to a git commit created by ``snapshot()``.
+    The ``tag`` field encodes the tool call context using the format
+    ``"pre:{tool_name}:{tool_call_id}"``, from which ``tool_call_id``
+    and ``tool_name`` are extracted.
+    """
+
+    commit_ref: str
+    created_at: str
+    tag: str | None = None
+    parent_ref: str | None = None
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    files_changed: tuple[str, ...] = ()
+    insertions: int = 0
+    deletions: int = 0
+    rolled_back: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Shared Utility Functions
 # ---------------------------------------------------------------------------
@@ -200,6 +222,7 @@ __all__ = [
     "GrepMatch",
     "ReadBytesResult",
     "ReadResult",
+    "SnapshotHistoryEntry",
     "WriteMode",
     "WriteResult",
     "glob_match",

@@ -10,3 +10,9 @@
 #   path/to/file.py                        – file-length violation
 #   path/to/file.py:Class.method           – function-length violation
 
+# ── src/ file-length ────────────────────────────────────────────────
+src/weakincentives/cli/_bundle_store.py
+src/weakincentives/debug/_bundle_writer.py
+
+# ── tests/ file-length ────────────────────────────────────────────────
+tests/cli/test_wink_debug_app.py

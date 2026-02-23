@@ -31,7 +31,7 @@ from uuid import uuid4
 from weakincentives.clock import SYSTEM_CLOCK
 from weakincentives.errors import SnapshotError, SnapshotRestoreError
 
-from ._types import FilesystemSnapshot
+from ._types import FilesystemSnapshot, SnapshotHistoryEntry
 
 __all__: list[str] = []
 
@@ -271,3 +271,241 @@ def cleanup_git_dir(git_dir: str | None) -> bool:
         shutil.rmtree(git_dir)
         return True
     return False
+
+
+def _parse_snapshot_tag(tag: str | None) -> tuple[str | None, str | None]:
+    """Extract tool_name and tool_call_id from a snapshot tag.
+
+    Tags follow the format ``"pre:{tool_name}:{tool_call_id}"``.
+
+    Returns:
+        Tuple of (tool_name, tool_call_id), both None if tag is unparseable.
+    """
+    if not tag or not tag.startswith("pre:"):
+        return None, None
+    parts = tag.split(":", 2)
+    if len(parts) == 3:  # noqa: PLR2004
+        return parts[1], parts[2]
+    return None, None
+
+
+def _parse_numstat_line(line: str) -> tuple[int, int, str]:
+    """Parse a single line of ``git diff --numstat`` output.
+
+    Returns:
+        Tuple of (insertions, deletions, file_path).
+    """
+    parts = line.split("\t", 2)
+    if len(parts) != 3:  # noqa: PLR2004
+        return 0, 0, ""
+    ins_str, del_str, path = parts
+    ins = int(ins_str) if ins_str != "-" else 0
+    dels = int(del_str) if del_str != "-" else 0
+    return ins, dels, path
+
+
+def _parse_reflog(lines: list[str]) -> list[tuple[str, str]]:
+    """Parse reflog output into (commit_hash, action) tuples.
+
+    Reflog format is 3 lines per entry: hash, action, selector.
+    Returns events in chronological order (oldest first).
+    """
+    events: list[tuple[str, str]] = []
+    i = 0
+    while i + 2 < len(lines):
+        commit_hash = lines[i].strip()
+        action = lines[i + 1].strip()
+        i += 3
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+        events.append((commit_hash, action))
+    events.reverse()
+    return events
+
+
+def _detect_rollbacks(
+    events: list[tuple[str, str]],
+) -> tuple[list[str], set[str]]:
+    """Walk reflog events to collect commits and detect rolled-back refs.
+
+    Returns:
+        Tuple of (commit_refs in order, rolled_back_refs set).
+    """
+    commit_refs: list[str] = []
+    rolled_back_refs: set[str] = set()
+
+    for commit_hash, action in events:
+        if action.startswith("commit"):
+            commit_refs.append(commit_hash)
+        elif action.startswith("reset:") and commit_refs:
+            try:
+                target_idx = commit_refs.index(commit_hash)
+            except ValueError:
+                continue
+            for ref in commit_refs[target_idx + 1 :]:
+                rolled_back_refs.add(ref)
+
+    return commit_refs, rolled_back_refs
+
+
+def snapshot_history(root: str, git_dir: str) -> list[SnapshotHistoryEntry]:
+    """Build an ordered list of snapshot history entries from git reflog.
+
+    Uses ``git reflog`` to reconstruct the complete history including
+    rolled-back commits. Commit entries become snapshot entries, and
+    reset entries mark the preceding commits as rolled back.
+
+    Args:
+        root: Workspace root path.
+        git_dir: External git directory path (must be initialized).
+
+    Returns:
+        List of history entries ordered oldest-first.
+    """
+    head_check = run_git(
+        ["rev-parse", "--verify", "HEAD"],
+        git_dir=git_dir,
+        root=root,
+        check=False,
+        text=True,
+    )
+    if head_check.returncode != 0:
+        return []
+
+    reflog_result = run_git(
+        ["reflog", "--format=%H%n%gs%n%gd"],
+        git_dir=git_dir,
+        root=root,
+        check=False,
+        text=True,
+    )
+    if reflog_result.returncode != 0:
+        return []
+
+    raw = str(reflog_result.stdout).strip()
+    if not raw:
+        return []
+
+    events = _parse_reflog(raw.split("\n"))
+    commit_refs, rolled_back_refs = _detect_rollbacks(events)
+
+    seen: set[str] = set()
+    entries: list[SnapshotHistoryEntry] = []
+    for commit_ref in commit_refs:
+        if commit_ref in seen:
+            continue
+        seen.add(commit_ref)
+        entry = _build_entry(root, git_dir, commit_ref, commit_ref in rolled_back_refs)
+        if entry is not None:
+            entries.append(entry)
+
+    return entries
+
+
+def _commit_diffstat(
+    root: str, git_dir: str, commit_ref: str, parent_ref: str | None
+) -> tuple[list[str], int, int]:
+    """Compute diffstat for a single commit.
+
+    Returns:
+        Tuple of (files_changed, total_insertions, total_deletions).
+    """
+    diff_args = ["diff", "--numstat", commit_ref + "^", commit_ref]
+    if parent_ref is None:
+        diff_args = ["diff", "--numstat", "--root", commit_ref]
+
+    result = run_git(diff_args, git_dir=git_dir, root=root, check=False, text=True)
+    files: list[str] = []
+    ins_total = 0
+    del_total = 0
+    if result.returncode == 0:
+        for line in str(result.stdout).strip().split("\n"):
+            if not line.strip():
+                continue
+            ins, dels, path = _parse_numstat_line(line)
+            if path:
+                files.append(path)
+            ins_total += ins
+            del_total += dels
+    return files, ins_total, del_total
+
+
+def _build_entry(
+    root: str, git_dir: str, commit_ref: str, rolled_back: bool
+) -> SnapshotHistoryEntry | None:
+    """Build a single history entry from a git commit."""
+    show_result = run_git(
+        ["log", "-1", "--format=%P%n%aI%n%s", commit_ref],
+        git_dir=git_dir,
+        root=root,
+        check=False,
+        text=True,
+    )
+    if show_result.returncode != 0:
+        return None
+
+    # Root commits have an empty %P (parent), so the first line is empty.
+    # We must not strip() the full output before splitting, or we lose it.
+    meta_lines = str(show_result.stdout).rstrip("\n").split("\n")
+    if len(meta_lines) < 3:  # noqa: PLR2004
+        return None
+
+    parent_ref = meta_lines[0].strip() or None
+    created_at = meta_lines[1].strip()
+    tag = meta_lines[2].strip() or None
+
+    files_changed, total_ins, total_dels = _commit_diffstat(
+        root, git_dir, commit_ref, parent_ref
+    )
+    tool_name, tool_call_id = _parse_snapshot_tag(tag)
+
+    return SnapshotHistoryEntry(
+        commit_ref=commit_ref,
+        created_at=created_at,
+        tag=tag,
+        parent_ref=parent_ref,
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        files_changed=tuple(files_changed),
+        insertions=total_ins,
+        deletions=total_dels,
+        rolled_back=rolled_back,
+    )
+
+
+def export_history_bundle(root: str, git_dir: str, target: Path) -> Path | None:
+    """Create a portable git bundle file from the snapshot repository.
+
+    Args:
+        root: Workspace root path.
+        git_dir: External git directory path (must be initialized).
+        target: Directory where the bundle file will be written.
+
+    Returns:
+        Path to the created git bundle file, or None if no history exists.
+    """
+    # Check that HEAD exists
+    head_check = run_git(
+        ["rev-parse", "--verify", "HEAD"],
+        git_dir=git_dir,
+        root=root,
+        check=False,
+        text=True,
+    )
+    if head_check.returncode != 0:
+        return None
+
+    target.mkdir(parents=True, exist_ok=True)
+    bundle_path = target / "history.bundle"
+
+    result = run_git(
+        ["bundle", "create", str(bundle_path), "--all"],
+        git_dir=git_dir,
+        root=root,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    return bundle_path
