@@ -267,17 +267,18 @@ clean-extracted:
 # Code reviewer demo
 # Usage: make demo-claude    [PROJECT=...] [FOCUS="..."]
 #        make demo-codex     [PROJECT=...] [FOCUS="..."]
-#        make demo-gemini    [PROJECT=...] [FOCUS="..."] [MODEL=...]
+#        make demo-gemini    [PROJECT=...] [FOCUS="..."] [GEMINI_MODEL=...]
 #        make demo-opencode  [PROJECT=...] [FOCUS="..."] [MODEL=...]
 PROJECT ?= test-repositories/sunfish
 FOCUS ?= Review how the UCI implementation is handled via the packaging scripts
 MODEL ?= openai/gpt-5.3-codex
+GEMINI_MODEL ?= gemini-2.5-flash
 demo-claude:
 	@uv run --all-extras python code_reviewer_example.py --adapter claude "$(PROJECT)" "$(FOCUS)"
 demo-codex:
 	@uv run --all-extras python code_reviewer_example.py --adapter codex "$(PROJECT)" "$(FOCUS)"
 demo-gemini:
-	@uv run --all-extras python code_reviewer_example.py --adapter gemini "$(PROJECT)" "$(FOCUS)"
+	@uv run --all-extras python code_reviewer_example.py --adapter gemini --model "$(GEMINI_MODEL)" "$(PROJECT)" "$(FOCUS)"
 demo-opencode:
 	@uv run --all-extras python code_reviewer_example.py --adapter opencode --model "$(MODEL)" "$(PROJECT)" "$(FOCUS)"
 demo: demo-claude
