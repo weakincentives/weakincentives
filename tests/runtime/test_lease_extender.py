@@ -48,7 +48,7 @@ def test_heartbeat_callback_removed() -> None:
     """Verify callbacks can be removed."""
     calls: list[str] = []
     heartbeat = Heartbeat()
-    callback = lambda: calls.append("callback")  # noqa: E731
+    callback = lambda: calls.append("callback")
     heartbeat.add_callback(callback)
 
     heartbeat.beat()

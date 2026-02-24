@@ -179,13 +179,13 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
         while True:
             try:
                 if bridge is not None:
-                    bridge.on_user_message(current_prompt_text)
+                    bridge.on_user_message(current_prompt_text)  # ty: ignore[invalid-argument-type]
                 current_schema = output_schema
                 timeout = deadline_remaining_s(deadline, prompt_name)
                 turn_result = await start_turn(
                     client,
                     thread_id,
-                    current_prompt_text,
+                    current_prompt_text,  # ty: ignore[invalid-argument-type]
                     current_schema,
                     model_config=model_config,
                     timeout=timeout,

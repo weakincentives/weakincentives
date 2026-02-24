@@ -253,7 +253,7 @@ def _apply_converter(
     if not callable(converter):
         return candidate  # pragma: no cover - defensive
     try:
-        return converter(candidate)
+        return converter(candidate)  # ty: ignore[call-top-callable]
     except (TypeError, ValueError) as error:
         raise type(error)(f"{path}: {error}") from error
     except Exception as error:  # pragma: no cover - defensive
