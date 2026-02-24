@@ -167,6 +167,7 @@ weakincentives.adapters.claude_agent_sdk  # ClaudeAgentSDKAdapter
 weakincentives.adapters.codex_app_server  # CodexAppServerAdapter
 weakincentives.adapters.acp              # ACPAdapter (generic ACP protocol)
 weakincentives.adapters.opencode_acp     # OpenCodeACPAdapter
+weakincentives.adapters.gemini_acp       # GeminiACPAdapter
 weakincentives.adapters._shared   # Shared adapter utilities (MCP bridge)
 weakincentives.contrib.tools      # Workspace digest tools
 weakincentives.contrib.optimizers # WorkspaceDigestOptimizer
@@ -358,6 +359,18 @@ from weakincentives.adapters.opencode_acp import (
     OpenCodeACPAdapter,
     OpenCodeACPAdapterConfig,
     OpenCodeACPClientConfig,
+)
+```
+
+### Gemini CLI ACP Adapter
+
+Requires `pip install weakincentives[acp]`.
+
+```python
+from weakincentives.adapters.gemini_acp import (
+    GeminiACPAdapter,
+    GeminiACPAdapterConfig,
+    GeminiACPClientConfig,
 )
 ```
 
@@ -621,12 +634,13 @@ session.restore(snapshot)
 
 ### 6. Adapters
 
-Provider-agnostic evaluation interface. Four adapters are available:
+Provider-agnostic evaluation interface. Five adapters are available:
 
 - **ClaudeAgentSDKAdapter** - Claude Code capabilities via claude-code-sdk (recommended)
 - **CodexAppServerAdapter** - Codex via its app-server stdio protocol
 - **ACPAdapter** - Generic ACP (Agent Communication Protocol) adapter
 - **OpenCodeACPAdapter** - OpenCode-specific ACP adapter with quirk handling
+- **GeminiACPAdapter** - Gemini CLI ACP adapter, defaults to `gemini-2.5-flash`
 
 ```python nocheck
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
@@ -1027,8 +1041,9 @@ ______________________________________________________________________
 ```text
 Claude Code SDK available?     → ClaudeAgentSDKAdapter (recommended)
 Codex CLI on PATH?             → CodexAppServerAdapter
-Generic ACP agent binary?      → ACPAdapter
 OpenCode ACP agent?            → OpenCodeACPAdapter
+Gemini CLI available?          → GeminiACPAdapter
+Generic ACP agent binary?      → ACPAdapter
 ```
 
 ### Which Workspace Tool?
@@ -1175,6 +1190,7 @@ Read before modifying related code:
 | `specs/CODEX_APP_SERVER.md` | Codex App Server adapter, stdio JSON-RPC |
 | `specs/ACP_ADAPTER.md` | Generic ACP adapter, protocol flow |
 | `specs/OPENCODE_ACP_ADAPTER.md` | OpenCode ACP adapter, quirk handling |
+| `specs/GEMINI_ACP_ADAPTER.md` | Gemini CLI ACP adapter, CLI flag injection |
 | `specs/WORKSPACE.md` | Workspace sections, host mounts |
 | `specs/TRANSCRIPT.md` | Unified transcript format, adapter mapping |
 | `specs/DEBUG_BUNDLE.md` | Debug bundle format, BundleConfig |

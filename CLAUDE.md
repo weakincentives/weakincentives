@@ -13,8 +13,9 @@ live in the prompt definition.
 **Event-driven state.** All mutations flow through pure reducers processing
 typed events. State is immutable and inspectable via snapshots.
 
-**Provider-agnostic.** Same agent definition works across OpenAI, LiteLLM, and
-Claude Agent SDK via adapter abstraction.
+**Provider-agnostic.** Same agent definition works across Claude Agent SDK,
+Codex App Server, and ACP adapters (OpenCode, Gemini CLI) via adapter
+abstraction.
 
 ______________________________________________________________________
 
@@ -148,7 +149,7 @@ This dramatically reduces iteration time when working on focused changes.
 
 ```
 src/weakincentives/
-├── adapters/     # OpenAI, LiteLLM, Claude Agent SDK
+├── adapters/     # Claude Agent SDK, Codex App Server, ACP, Gemini CLI
 ├── contrib/      # Mailbox, optimizers
 ├── dbc/          # Design-by-contract decorators
 ├── evals/        # Evaluation framework
@@ -260,6 +261,7 @@ Read before modifying related code:
 | `CODEX_APP_SERVER.md` | Codex App Server adapter, stdio JSON-RPC |
 | `ACP_ADAPTER.md` | Generic ACP adapter, protocol flow |
 | `OPENCODE_ADAPTER.md` | OpenCode ACP adapter, quirk handling |
+| `GEMINI_ACP_ADAPTER.md` | Gemini CLI ACP adapter, CLI flag injection |
 | `AGENT_LOOP.md` | AgentLoop orchestration |
 | `POLICIES_OVER_WORKFLOWS.md` | Design philosophy |
 | `MODULE_BOUNDARIES.md` | Layer architecture |
