@@ -135,17 +135,9 @@ qualified class name.
 
 ## Session Integration
 
-Session uses `SliceFactoryConfig` to create slices on demand:
-
-```python
-session = Session(
-    dispatcher=dispatcher,
-    slice_config=SliceFactoryConfig(
-        state_factory=MemorySliceFactory(),
-        log_factory=JsonlSliceFactory(base_dir=Path("./logs")),
-    ),
-)
-```
+Session uses `SliceFactoryConfig` to create slices on demand, mapping
+`SlicePolicy` to the appropriate factory. See
+`src/weakincentives/runtime/session/session.py` for configuration.
 
 ## Snapshot and Restore
 

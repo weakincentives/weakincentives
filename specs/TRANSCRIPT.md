@@ -7,9 +7,6 @@ during a single `evaluate()` call. It provides a chronological record of
 conversation turns, tool invocations, reasoning, and system events in a common
 format regardless of which adapter produced it.
 
-This spec is the single source of truth for transcript format and emission.
-It **replaces** `specs/TRANSCRIPT_COLLECTION.md`, which is deleted.
-
 **Implementation:**
 
 - Transcript types and emitter: `src/weakincentives/runtime/transcript.py`
@@ -54,9 +51,6 @@ Every transcript entry is emitted as a structured log record with
 
 ### Canonical Entry Types
 
-These entry types form the common vocabulary. Both adapters map their
-native events to these types.
-
 | Entry Type | Description | Emitted By |
 |------------|-------------|------------|
 | `user_message` | User/system prompt delivered to the model | Both |
@@ -88,14 +82,10 @@ each line, maps the SDK `type` to a canonical `entry_type`, and emits through
 | `system` | `system_event` | SDK-level events |
 | (other) | `unknown` | Forward compatibility |
 
-**Source mapping:**
-
-- Main transcript (`{sessionId}.jsonl`) -> `source: "main"`
-- Subagent transcripts (`{sessionId}/subagents/agent-{id}.jsonl`) -> `source: "subagent:{id}"`
-
-**Detail payload** includes the full parsed JSON entry from the JSONL line,
-keyed under `detail.sdk_entry`. The raw JSONL line is in `raw` (when
-`emit_raw=True`).
+- Main transcript (`{sessionId}.jsonl`) → `source: "main"`
+- Subagent transcripts → `source: "subagent:{id}"`
+- `detail.sdk_entry` contains the full parsed JSON entry; `raw` contains the
+  raw JSONL line (when `emit_raw=True`).
 
 ### Codex App Server
 
@@ -108,7 +98,7 @@ notification is processed — no file tailing required.
 | Input text sent before `turn/start` | `user_message` | The rendered prompt text |
 | `item/agentMessage/delta` (accumulated, emitted on `item/completed`) | `assistant_message` | Full accumulated text |
 | `item/started` (`commandExecution`, `fileChange`, `mcpToolCall`, `webSearch`) | `tool_use` | Model decided to use a tool |
-| `item/completed` (`commandExecution`, `fileChange`, `mcpToolCall`, `webSearch`) | `tool_result` | Tool finished with result |
+| `item/completed` (same types) | `tool_result` | Tool finished with result |
 | `item/tool/call` (server request for bridged tool) | `tool_use` | WINK bridged tool call request |
 | Bridged tool response sent | `tool_result` | WINK bridged tool result |
 | `item/reasoning/completed` | `thinking` | Reasoning summary text |
@@ -117,31 +107,10 @@ notification is processed — no file tailing required.
 | `item/completed` for `contextCompaction` | `system_event` | `detail.subtype = "compaction"` |
 | (other `item/*`, `turn/*`) | `unknown` | Forward compatibility |
 
-**Source mapping:**
-
-- All Codex notifications -> `source: "main"` (Codex does not expose subagent
-  boundaries through the app-server protocol)
-
-**Detail payload** includes the full notification `params` dict, keyed under
-`detail.notification`. The raw JSON notification is in `raw` (when
-`emit_raw=True`).
-
-### Entry Emission Points (Codex)
-
-1. **Before `turn/start`:** Emit `user_message` with the rendered prompt text.
-1. **On `item/started`:** Emit `tool_use` with tool name and parameters.
-1. **On `item/completed` for tool items:** Emit `tool_result` with outcome.
-1. **On `item/completed` for `agentMessage`:** Emit `assistant_message` with
-   accumulated text.
-1. **On `item/tool/call`:** Emit `tool_use` for WINK bridged tool.
-1. **After bridged tool execution:** Emit `tool_result` for WINK bridged tool.
-1. **On `item/reasoning/completed`:** Emit `thinking` with summary text.
-1. **On `thread/tokenUsage/updated`:** Emit `token_usage`.
-1. **On `turn/completed` with failure:** Emit `error`.
+All Codex notifications → `source: "main"`. `detail.notification` contains
+the full notification `params` dict.
 
 ## Log Event Taxonomy
-
-All transcript-related log events use the `transcript.*` prefix.
 
 | Event | Level | Description |
 |-------|-------|-------------|
@@ -156,11 +125,7 @@ All transcript-related log events use the `transcript.*` prefix.
 
 ```json
 {
-  "timestamp": "2024-01-15T10:30:00.123+00:00",
-  "level": "DEBUG",
-  "logger": "weakincentives.runtime.transcript",
   "event": "transcript.entry",
-  "message": "transcript entry: assistant_message",
   "context": {
     "prompt_name": "code-review",
     "adapter": "claude_agent_sdk",
@@ -179,110 +144,41 @@ All transcript-related log events use the `transcript.*` prefix.
 }
 ```
 
-### Example: `transcript.entry` (Codex)
-
-```json
-{
-  "timestamp": "2024-01-15T10:30:01.456+00:00",
-  "level": "DEBUG",
-  "logger": "weakincentives.runtime.transcript",
-  "event": "transcript.entry",
-  "message": "transcript entry: tool_result",
-  "context": {
-    "prompt_name": "code-review",
-    "adapter": "codex_app_server",
-    "entry_type": "tool_result",
-    "sequence_number": 7,
-    "source": "main",
-    "timestamp": "2024-01-15T10:30:01.456+00:00",
-    "session_id": "660e8400-e29b-41d4-a716-446655440001",
-    "detail": {
-      "notification": {
-        "type": "commandExecution",
-        "status": "completed",
-        "command": "ls -la",
-        "aggregatedOutput": "total 42\ndrwxr-xr-x ..."
-      }
-    }
-  }
-}
-```
-
 ## TranscriptEmitter
 
-Shared helper that both adapters use to construct and emit entries. Lives in
-the runtime layer so adapters don't duplicate envelope logic. Not a public
-API — internal to the framework.
-
-```python
-class TranscriptEmitter:
-    """Emit transcript entries as structured DEBUG logs."""
-
-    def __init__(
-        self,
-        *,
-        prompt_name: str,
-        adapter: str,
-        session_id: str | None = None,
-        emit_raw: bool = True,
-    ) -> None: ...
-
-    def emit(
-        self,
-        entry_type: str,
-        *,
-        source: str = "main",
-        detail: dict[str, Any] | None = None,
-        raw: str | None = None,
-    ) -> None:
-        """Emit a transcript entry. Thread-safe, never raises."""
-        ...
-
-    def start(self) -> None:
-        """Emit transcript.start event."""
-        ...
-
-    def stop(self) -> None:
-        """Emit transcript.stop event with summary statistics."""
-        ...
-```
-
-The emitter:
-
-- Assigns monotonically increasing `sequence_number` per source
-- Captures `timestamp` at emit time (UTC)
-- Logs at DEBUG level with `event="transcript.entry"`
-- Catches and logs any emission errors (never propagates)
-- Tracks per-source entry counts for summary statistics
+Shared helper at `src/weakincentives/runtime/transcript.py` that both adapters
+use to construct and emit entries. Not a public API — internal to the framework.
+It assigns monotonically increasing `sequence_number` per source, captures
+`timestamp` at emit time, logs at DEBUG level, catches emission errors (never
+propagates), and tracks per-source entry counts for summary statistics.
 
 ### Claude Adapter Integration
 
-`TranscriptCollector` uses `TranscriptEmitter` internally:
-
-1. On entry parsed from JSONL, maps SDK `type` to canonical `entry_type`
-1. Calls `emitter.emit()` with the mapped type and `detail.sdk_entry`
-1. Collector still owns file tailing, rotation detection, and subagent
-   discovery — emitter only handles entry formatting and logging
+`TranscriptCollector` uses `TranscriptEmitter` internally. The collector owns
+file tailing, rotation detection, and subagent discovery; the emitter handles
+entry formatting and logging.
 
 ### Codex Adapter Integration
 
-A `CodexTranscriptBridge` wraps `TranscriptEmitter` with Codex-specific
-mapping logic. Called from `_process_notification()` and
-`_handle_server_request()`:
+`CodexTranscriptBridge` at `src/weakincentives/adapters/codex_app_server/_transcript.py`
+wraps `TranscriptEmitter` with Codex-specific mapping logic, called from
+`_process_notification()` and `_handle_server_request()`.
 
-1. `bridge.on_notification(method, params)` — maps notification to entry type,
-   emits via `TranscriptEmitter`
-1. `bridge.on_tool_call(params)` — emits `tool_use` before bridged tool
-   execution
-1. `bridge.on_tool_result(params, result)` — emits `tool_result` after bridged
-   tool execution
-1. `bridge.on_user_message(text)` — emits `user_message` before turn start
+## Transcript Types
+
+At `src/weakincentives/runtime/transcript.py`:
+
+- `TranscriptEntry` — frozen dataclass with all envelope fields plus `detail`
+  and `raw`
+- `TranscriptSummary` — aggregate statistics: `total_entries`,
+  `entries_by_type`, `entries_by_source`, `sources`, timestamps
+- `reconstruct_transcript(records)` — builds a typed transcript from log records
 
 ## Configuration
 
 ### Claude Adapter
 
-`TranscriptCollectorConfig` controls transcript behavior:
+`TranscriptCollectorConfig` at `src/weakincentives/adapters/claude_agent_sdk/config.py`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -295,161 +191,45 @@ Set `ClaudeAgentSDKClientConfig.transcript_collection = None` to disable.
 
 ### Codex Adapter
 
-`CodexAppServerClientConfig` gains transcript fields:
-
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `transcript` | `bool` | `True` | Emit transcript entries |
 | `transcript_emit_raw` | `bool` | `True` | Include raw notification JSON in `raw` field |
 
-Set `transcript=False` to disable.
-
 ## Debug Bundle Integration
 
-Debug bundles capture all structured logs in `logs/app.jsonl`. Transcript
-entries are DEBUG logs, so they appear there automatically.
-
-Additionally, bundles gain a `transcript.jsonl` file that contains only
-transcript entries, extracted from the log stream for direct access:
+Transcript entries are DEBUG logs, so they appear in `logs/app.jsonl`
+automatically. Bundles also include a dedicated `transcript.jsonl` extracted
+from the log stream during finalization:
 
 ```
 debug_bundle/
-  ...
   transcript.jsonl    # transcript.entry records only, ordered
   logs/
     app.jsonl         # all logs (including transcript entries)
 ```
 
-`BundleWriter` extracts entries where `event == "transcript.entry"` from the
-captured logs and writes them to `transcript.jsonl` during finalization.
-
-### Querying
-
-```python
-# From debug bundle
-for entry in bundle.transcript:
-    print(f"[{entry['context']['source']}:{entry['context']['sequence_number']}] "
-          f"{entry['context']['entry_type']}")
-```
+Query with `wink query`:
 
 ```sql
-SELECT context->>'entry_type', context->>'source', context->>'detail'
+SELECT context->>'entry_type', context->>'source'
 FROM transcript
 ORDER BY context->>'sequence_number'
 ```
 
-## Transcript Reconstruction
-
-Reconstruct a typed transcript from log records:
-
-```python
-from weakincentives.runtime.transcript import reconstruct_transcript
-
-transcript = reconstruct_transcript(bundle.transcript)
-
-for entry in transcript:
-    print(f"[{entry.source}:{entry.sequence_number}] {entry.entry_type}")
-```
-
-### TranscriptEntry
-
-```python
-@dataclass(slots=True, frozen=True)
-class TranscriptEntry:
-    """A single entry in a reconstructed transcript."""
-
-    prompt_name: str
-    adapter: str
-    entry_type: str
-    sequence_number: int
-    source: str
-    timestamp: datetime
-    session_id: str | None = None
-    detail: Mapping[str, Any] = field(default_factory=dict)
-    raw: str | None = None
-```
-
-### TranscriptSummary
-
-```python
-@dataclass(slots=True, frozen=True)
-class TranscriptSummary:
-    """Summary statistics for a transcript."""
-
-    total_entries: int
-    entries_by_type: Mapping[str, int]
-    entries_by_source: Mapping[str, int]
-    sources: tuple[str, ...]
-    adapter: str
-    prompt_name: str
-    first_timestamp: datetime | None
-    last_timestamp: datetime | None
-```
-
-## What Gets Deleted
-
-This is a clean break. The following are removed entirely:
-
-| Removed | Replacement |
-|---------|-------------|
-| `specs/TRANSCRIPT_COLLECTION.md` | This spec |
-| `transcript.collector.entry` event name | `transcript.entry` |
-| `transcript.collector.start` event name | `transcript.start` |
-| `transcript.collector.stop` event name | `transcript.stop` |
-| `transcript.collector.error` event name | `transcript.error` |
-| `transcript.collector.path_discovered` event name | `transcript.path_discovered` |
-| `transcript.collector.subagent_discovered` event name | `transcript.subagent_discovered` |
-| `TranscriptCollectorConfig.emit_raw_json` field | `emit_raw` (renamed) |
-| `TranscriptCollectorConfig.parse_entries` field | Removed — entries are always parsed |
-| Context key `transcript_source` | `source` |
-| Context key `raw_json` | `raw` |
-| Context key `parsed` | `detail.sdk_entry` |
-| Log context without `adapter` or `timestamp` | Always present in new envelope |
-
-No shims, no aliases, no deprecation warnings. Old event names and context
-keys stop existing.
-
-## What Gets Added
-
-| Added | Where |
-|-------|-------|
-| `TranscriptEmitter` class | `src/weakincentives/runtime/transcript.py` |
-| `TranscriptEntry` dataclass | `src/weakincentives/runtime/transcript.py` |
-| `TranscriptSummary` dataclass | `src/weakincentives/runtime/transcript.py` |
-| `reconstruct_transcript()` function | `src/weakincentives/runtime/transcript.py` |
-| `CodexTranscriptBridge` class | `src/weakincentives/adapters/codex_app_server/_transcript.py` |
-| `transcript` config field | `CodexAppServerClientConfig` |
-| `transcript_emit_raw` config field | `CodexAppServerClientConfig` |
-| `transcript.jsonl` bundle artifact | `src/weakincentives/debug/bundle.py` |
-| `bundle.transcript` property | `DebugBundle` |
-
-## What Gets Modified
-
-| Modified | Change |
-|----------|--------|
-| `TranscriptCollector._emit_entry()` | Uses `TranscriptEmitter` instead of direct logging |
-| `TranscriptCollector._emit_entries()` | Maps SDK types to canonical types |
-| `TranscriptCollectorConfig` | `emit_raw_json` -> `emit_raw`, `parse_entries` removed |
-| All `transcript.collector.*` log events in collector | Renamed to `transcript.*` |
-| Codex `_process_notification()` | Calls `CodexTranscriptBridge` for each notification |
-| Codex `_handle_tool_call()` | Calls bridge before/after tool execution |
-| `BundleWriter` finalization | Extracts `transcript.jsonl` from captured logs |
-| `DebugBundle` | Adds `transcript` property |
-
 ## Invariants
 
-1. **Envelope completeness**: Every `transcript.entry` log record contains all
-   required envelope keys (`prompt_name`, `adapter`, `entry_type`,
-   `sequence_number`, `source`, `timestamp`).
+1. **Envelope completeness**: Every `transcript.entry` contains all required
+   envelope keys.
 
 1. **Sequence monotonicity**: Within a `(prompt_name, source)` pair,
    `sequence_number` is strictly increasing with no gaps.
 
-1. **Type vocabulary**: `entry_type` is always one of the canonical types
-   listed above. Unrecognized source entries map to `"unknown"`.
+1. **Type vocabulary**: `entry_type` is always one of the canonical types.
+   Unrecognized source entries map to `"unknown"`.
 
 1. **Non-blocking emission**: Transcript emission never raises exceptions to
-   the adapter's evaluation path. Errors are logged and the entry is skipped.
+   the evaluation path. Errors are logged and the entry is skipped.
 
 1. **Adapter labeling**: `adapter` field always matches the adapter's
    registered name.
@@ -457,24 +237,14 @@ keys stop existing.
 1. **Source consistency**: Claude adapter may produce multiple sources (main +
    subagents). Codex adapter produces `"main"` only.
 
-1. **Timestamp ordering**: Within a source, entries are emitted in
-   chronological order. Across sources, timestamps reflect wall-clock capture
-   time (not causal ordering).
-
 ## Testing
 
 - `TranscriptEmitter`: correct envelope, sequence numbering, error suppression
 - `entry_type` mapping from SDK transcript types (Claude)
 - `entry_type` mapping from Codex notifications (Codex)
-- `raw` field presence controlled by `emit_raw` configuration
 - `reconstruct_transcript()` round-trip from log records to `TranscriptEntry`
-- Claude adapter `evaluate()` produces `transcript.entry` logs with correct
-  envelope
-- Codex adapter `evaluate()` produces `transcript.entry` logs with correct
-  envelope
 - Debug bundle `transcript.jsonl` contains exactly the transcript entries
-- Cross-adapter: same logical operation (tool call) produces same `entry_type`
-  sequence (`tool_use` then `tool_result`) from both adapters
+- Cross-adapter: same logical operation produces same `entry_type` sequence
 
 ## Related Specifications
 
@@ -482,5 +252,5 @@ keys stop existing.
 - `specs/CODEX_APP_SERVER.md` — Codex adapter
 - `specs/LOGGING.md` — Structured logging format
 - `specs/DEBUG_BUNDLE.md` — Debug bundle format
-- `specs/SESSIONS.md` — Session events (PromptRendered, ToolInvoked, PromptExecuted)
+- `specs/SESSIONS.md` — Session events
 - `specs/ADAPTERS.md` — Provider adapter protocol

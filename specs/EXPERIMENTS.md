@@ -61,22 +61,8 @@ Returned by `EvalReport.compare_experiments(baseline, treatment)`:
 
 ## Request Integration
 
-### AgentLoopRequest
-
-```python
-request = AgentLoopRequest(
-    request=my_request,
-    experiment=Experiment(name="v2-prompts", overrides_tag="v2"),
-)
-```
-
-### EvalRequest
-
-Experiment is **required** for evaluation requests:
-
-```python
-request = EvalRequest(sample=sample, experiment=experiment)
-```
+`AgentLoopRequest` accepts an optional `experiment` field; `EvalRequest` requires
+one. Both are at `src/weakincentives/evals/_types.py`.
 
 ### EvalResult
 
@@ -103,46 +89,14 @@ Includes `experiment_name` for downstream aggregation.
 
 ## A/B Testing Workflow
 
-### 1. Define Experiments
+1. Define a `BASELINE` experiment and one or more treatment `Experiment` instances
+   with distinct names and `overrides_tag`/`flags`.
+2. Submit `EvalRequest(sample=sample, experiment=experiment)` for each
+   (sample, experiment) pair to the mailbox.
+3. Collect results into an `EvalReport` and call `compare_experiments(baseline_name,
+   treatment_name)` for a statistical comparison.
 
-```python
-from weakincentives.evals import BASELINE, Experiment
-
-baseline = BASELINE  # or Experiment(name="baseline")
-treatment = Experiment(
-    name="v2-concise",
-    overrides_tag="v2",
-    flags={"max_tokens": 2000},
-    description="Test shorter prompts with token limit",
-)
-```
-
-### 2. Submit Dataset for Both
-
-```python
-experiments = [baseline, treatment]
-for experiment in experiments:
-    for sample in dataset:
-        mailbox.send(EvalRequest(sample=sample, experiment=experiment))
-```
-
-### 3. Analyze Results
-
-```python
-report = await collect_results(mailbox, expected=len(dataset) * 2)
-
-# Per-experiment metrics
-for name, rate in report.pass_rate_by_experiment().items():
-    print(f"{name}: {rate:.1%}")
-
-# Statistical comparison
-comparison = report.compare_experiments("baseline", "v2-concise")
-print(f"Baseline: {comparison.baseline_pass_rate:.1%}")
-print(f"Treatment: {comparison.treatment_pass_rate:.1%}")
-print(f"Delta: {comparison.pass_rate_delta:+.1%}")
-if comparison.relative_improvement:
-    print(f"Relative: {comparison.relative_improvement:+.1%}")
-```
+See `src/weakincentives/evals/_types.py` for `EvalReport` and `ExperimentComparison`.
 
 ## Result Aggregation
 

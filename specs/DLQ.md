@@ -43,13 +43,8 @@ custom logic.
 
 ## AgentLoop Integration
 
-```python
-agent_loop = AgentLoop(
-    adapter=adapter,
-    requests=requests,
-    dlq=DLQPolicy(mailbox=dead_letters, max_delivery_count=5),
-)
-```
+Pass `dlq=DLQPolicy(mailbox=..., max_delivery_count=5)` to `AgentLoop` or
+`EvalLoop`. See `src/weakincentives/runtime/agent_loop.py`.
 
 ### Execution Flow
 
@@ -70,71 +65,27 @@ Same pattern as AgentLoop, wrapping `EvalRequest` in `DeadLetter`.
 
 ## Usage Examples
 
-### Basic Setup
+**Common patterns** at `src/weakincentives/runtime/dlq.py`:
 
-```python
-dlq = DLQPolicy(mailbox=dead_letters, max_delivery_count=5)
-```
-
-### Immediate Dead-Lettering
-
-```python
-dlq = DLQPolicy(
-    mailbox=dead_letters,
-    include_errors=frozenset({ValidationError, ContentPolicyViolation}),
-)
-```
-
-### Exclude Transient Errors
-
-```python
-dlq = DLQPolicy(
-    mailbox=dead_letters,
-    exclude_errors=frozenset({RateLimitError, TimeoutError}),
-)
-```
-
-### Custom Policy
-
-```python
-@dataclass(frozen=True)
-class ErrorBudgetPolicy[T, R](DLQPolicy[T, R]):
-    error_budget: float = 0.5
-
-    def should_dead_letter(self, message, error) -> bool:
-        if message.delivery_count >= self.max_delivery_count:
-            return True
-        return get_error_rate(message.body) > self.error_budget
-```
+- **Basic**: `DLQPolicy(mailbox=dead_letters, max_delivery_count=5)`
+- **Immediate dead-lettering**: Use `include_errors` for errors that should
+  never be retried (e.g., `ValidationError`, `ContentPolicyViolation`)
+- **Exclude transient errors**: Use `exclude_errors` to prevent retryable
+  errors (e.g., `RateLimitError`, `TimeoutError`) from dead-lettering
+- **Custom policy**: Subclass `DLQPolicy` and override `should_dead_letter()`
+  for error budget or context-aware logic
 
 ## Processing Dead Letters
 
-### DLQ Consumer
+**DLQ Consumer**: Poll the dead letter mailbox, invoke a handler per message,
+acknowledge on success, nack with long backoff (e.g., 1 hour) on failure.
 
-```python
-def process_dead_letters(dlq, handler):
-    for msg in dlq.receive(wait_time_seconds=20):
-        try:
-            handler(msg.body)
-            msg.acknowledge()
-        except Exception:
-            msg.nack(visibility_timeout=3600)  # 1 hour backoff
-```
+**Replay to Source**: Resolve the original `reply_to` mailbox from the
+`DeadLetter.reply_to` name (if present) via a `MailboxResolver`, then
+re-send `dead_letter.body` to the source mailbox.
 
-### Replay to Source
-
-```python
-def replay_handler(dead_letter, source, reply_resolver):
-    reply_to = reply_resolver.resolve(dead_letter.reply_to) if dead_letter.reply_to else None
-    source.send(dead_letter.body, reply_to=reply_to)
-```
-
-## LoopGroup Integration
-
-```python
-dlq_consumer = DLQConsumer(mailbox=dead_letters, handler=alert_handler)
-group = LoopGroup(loops=[agent_loop, dlq_consumer], health_port=8080)
-```
+**LoopGroup**: Run a `DLQConsumer` alongside `AgentLoop` within the same
+`LoopGroup` to alert on dead-lettered messages.
 
 ## Error Classification
 

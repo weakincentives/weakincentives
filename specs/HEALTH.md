@@ -137,48 +137,16 @@ readinessProbe:
   failureThreshold: 2
 ```
 
-## Usage Examples
+## Usage
 
-### Default (Recommended)
+Configure via `LoopGroup` parameters. Key patterns:
 
-```python
-group = LoopGroup(loops=[agent_loop], health_port=8080)
-group.run()
-```
-
-### Watchdog Only
-
-```python
-group = LoopGroup(loops=[agent_loop])  # No health_port
-group.run()
-```
-
-### Disable Watchdog
-
-```python
-group = LoopGroup(loops=[agent_loop], health_port=8080, watchdog_threshold=None)
-```
-
-### Shorter Deadlines (2-Minute Evaluations)
-
-```python
-group = LoopGroup(
-    loops=[agent_loop],
-    health_port=8080,
-    watchdog_threshold=180.0,  # 3 minutes
-    watchdog_interval=30.0,
-)
-```
-
-### Longer Deadlines (30-Minute Batch Jobs)
-
-```python
-group = LoopGroup(
-    loops=[batch_processor],
-    watchdog_threshold=2100.0,  # 35 minutes
-    watchdog_interval=120.0,
-)
-```
+- **Default**: `LoopGroup(loops=[...], health_port=8080)` — enables both watchdog and health endpoints
+- **Watchdog only**: Omit `health_port` to disable HTTP but keep watchdog
+- **Disable watchdog**: Set `watchdog_threshold=None`
+- **Calibrate for workload**: Scale `watchdog_threshold` and `watchdog_interval`
+  to match actual processing times (e.g., 3 min for 2-min evals, 35 min for
+  30-min batch jobs)
 
 ## Observability
 

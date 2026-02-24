@@ -77,34 +77,15 @@ replies allowed before finalization. After `acknowledge()` or `nack()`,
 
 ### In-Memory Implementation
 
-Direct reference stored—no resolution needed:
-
-```python
-requests = InMemoryMailbox(name="requests")
-responses = InMemoryMailbox(name="responses")
-requests.send(Request(...), reply_to=responses)  # Direct reference
-
-for msg in requests.receive():
-    msg.reply(process(msg.body))  # Direct call to responses
-    msg.acknowledge()
-```
+Direct reference stored—no resolution needed. `reply_to` receives a direct
+reference to the responses mailbox. See
+`src/weakincentives/runtime/mailbox/_in_memory.py`.
 
 ### Redis Implementation
 
-`reply_to` serializes to mailbox name. `MailboxResolver` reconstructs instance.
-RedisMailbox is in `contrib`: `from weakincentives.contrib.mailbox import RedisMailbox, RedisMailboxFactory`
-
-```python
-from weakincentives.contrib.mailbox import RedisMailbox, RedisMailboxFactory
-
-factory = RedisMailboxFactory(client=redis_client)
-resolver = CompositeResolver(registry={}, factory=factory)
-requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
-
-for msg in requests.receive():
-    msg.reply(process(msg.body))  # Resolver reconstructs mailbox from name
-    msg.acknowledge()
-```
+`reply_to` serializes to mailbox name. `MailboxResolver` reconstructs the
+instance on the worker side. RedisMailbox is in `contrib`:
+`from weakincentives.contrib.mailbox import RedisMailbox, RedisMailboxFactory`.
 
 ## Service Discovery: MailboxResolver
 
@@ -129,53 +110,27 @@ for msg in requests.receive():
 
 ### MailboxFactory Protocol
 
-```python
-def create(self, identifier: str) -> Mailbox[R, None]:
-    """Create new mailbox for identifier."""
-```
-
-### Backend Factories
+`create(identifier: str) -> Mailbox[R, None]` — creates a new mailbox for the
+given identifier.
 
 **InMemoryMailboxFactory** at `src/weakincentives/runtime/mailbox/_in_memory.py`:
-
-```python
-class InMemoryMailboxFactory[R]:
-    def create(self, identifier: str) -> Mailbox[R, None]:
-        return InMemoryMailbox(name=identifier)
-```
+returns `InMemoryMailbox(name=identifier)`.
 
 **RedisMailboxFactory** at `src/weakincentives/contrib/mailbox/_redis.py`:
-
-```python
-class RedisMailboxFactory[R]:
-    client: Redis[bytes] | RedisCluster[bytes]
-    body_type: type[R] | None = None
-    default_ttl: int = 259200  # 3 days
-
-    def create(self, identifier: str) -> Mailbox[R, None]:
-        return RedisMailbox(name=identifier, client=self.client, ...)
-```
+accepts `client`, `body_type`, and `default_ttl` (3 days); returns a configured
+`RedisMailbox`.
 
 ### Dynamic Reply Queues
 
-```python
-# Client creates unique reply mailbox
-client_responses = RedisMailbox(name=f"client-{uuid4()}", client=client)
-requests.send(Request(...), reply_to=client_responses)
-
-# Worker - factory creates mailbox for "client-xxx"
-```
+Clients create a unique per-request reply mailbox (e.g., `f"client-{uuid4()}"`),
+pass it as `reply_to` on send, and the resolver factory creates the matching
+mailbox on the worker side.
 
 ### Multi-Tenant
 
-```python
-def tenant_resolver(tenant_id: str, client: Redis) -> CompositeResolver:
-    return CompositeResolver(
-        registry={},
-        factory=RedisMailboxFactory(client=client),
-    )
-# Use queue naming convention for tenant isolation: f"tenant-{tenant_id}:requests"
-```
+Use queue naming conventions for tenant isolation (e.g.,
+`f"tenant-{tenant_id}:requests"`) with a shared `CompositeResolver` and
+`RedisMailboxFactory`.
 
 ### Comparison with ResourceResolver
 
@@ -197,29 +152,12 @@ AgentLoop receives requests mailbox; response routing derives from `reply_to`.
 | `AgentLoopRequest[T]` | request, budget, deadline, request_id, created_at |
 | `AgentLoopResult[T]` | request_id, output, error, session_id, completed_at |
 
-### Execution Pattern
-
-```python
-def _handle_message(self, msg):
-    result = self._execute(msg.body)
-    msg.reply(result)
-    msg.acknowledge()
-```
-
 ### Error Handling Guidelines
 
 1. `visibility_timeout` > max execution time
 1. Send response before acknowledging
 1. Use `delivery_count` for backoff: `min(60 * delivery_count, 900)`
 1. Dead-letter after N retries: `delivery_count > 5` → log and acknowledge
-
-### ResourceRegistry Integration
-
-```python
-registry = ResourceRegistry.of(
-    Binding(MailboxResolver, lambda r: CompositeResolver(...)),
-)
-```
 
 ## Implementations
 

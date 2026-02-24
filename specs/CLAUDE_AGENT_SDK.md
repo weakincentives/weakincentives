@@ -225,85 +225,19 @@ At `src/weakincentives/adapters/claude_agent_sdk/_errors.py`.
 
 ## Usage Patterns
 
-### Structured Output
+- **Structured output**: `PromptTemplate[OutputType]` — adapter returns a typed
+  instance deserialized from the SDK's `StructuredOutput` tool result.
+- **Secure code review**: combine `WorkspaceSection` with
+  `IsolationConfig(network_policy=NetworkPolicy.no_network(), sandbox=SandboxConfig(...))`.
+- **Domain allowlist**: `NetworkPolicy.with_domains("docs.python.org", ...)` —
+  restricts tool network access while leaving the API connection unrestricted.
+- **AWS Bedrock**: set `model` to a Bedrock model ID and use `IsolationConfig()`
+  (no `api_key`) to inherit host auth. Auth detection checks shell environment
+  then `~/.claude/settings.json`. In Docker, set `aws_config_path` to the
+  mounted credentials path (e.g., `/mnt/aws`).
 
-```python
-template = PromptTemplate[Hello](
-    ns="demo", key="hello",
-    sections=[MarkdownSection(title="Task", key="task", template="Say hello.")],
-)
-response = ClaudeAgentSDKAdapter().evaluate(Prompt(template), session=session)
-```
-
-### Secure Code Review (No Tool Network)
-
-```python
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(HostMount(host_path="/abs/path/to/repo", mount_path="repo"),),
-    allowed_host_roots=("/abs/path/to",),
-)
-
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        cwd=str(workspace.temp_dir),
-        isolation=IsolationConfig(
-            network_policy=NetworkPolicy.no_network(),
-            sandbox=SandboxConfig(readable_paths=(str(workspace.temp_dir),)),
-        ),
-    ),
-)
-```
-
-### Domain Allowlist
-
-```python
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        isolation=IsolationConfig(
-            network_policy=NetworkPolicy.with_domains("docs.python.org", "pypi.org"),
-            sandbox=SandboxConfig(enabled=True),
-        ),
-    ),
-)
-```
-
-### AWS Bedrock Authentication
-
-When Bedrock is configured, isolation automatically inherits authentication.
-Auth detection checks both shell environment and host `~/.claude/settings.json`:
-
-**Priority order for auth vars:**
-
-1. Shell environment variables (highest priority)
-1. Host `~/.claude/settings.json` env section (fallback)
-
-This ensures that if `claude` works on the host, WINK agents will too.
-
-```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    IsolationConfig,
-)
-
-# Inherits host auth (works with Bedrock or Anthropic API)
-# Uses AWS credential chain: env vars, ~/.aws/credentials, instance profile, etc.
-adapter = ClaudeAgentSDKAdapter(
-    model="us.anthropic.claude-opus-4-6-v1",  # Bedrock model ID
-    client_config=ClaudeAgentSDKClientConfig(
-        isolation=IsolationConfig(),  # No api_key = inherit host auth
-    ),
-)
-
-# Docker: specify where AWS config is mounted
-adapter = ClaudeAgentSDKAdapter(
-    model="us.anthropic.claude-opus-4-6-v1",
-    client_config=ClaudeAgentSDKClientConfig(
-        isolation=IsolationConfig(aws_config_path="/mnt/aws"),
-    ),
-)
-```
+**Auth priority order:** shell environment variables → `~/.claude/settings.json`
+env section. If `claude` works on the host, WINK agents will too.
 
 **Bedrock model ID format:** `us.anthropic.claude-opus-4-6-v1` (no `:0` suffix
 for Opus 4.6). Older models retain the `:0` suffix (e.g.,

@@ -76,13 +76,8 @@ Tool handlers publish events via `context.session.dispatcher`.
 
 ### Resource Access
 
-Tools access resources through prompt:
-
-```python
-def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
-    fs = context.resources.get(Filesystem)
-    # Or shorthand: fs = context.filesystem
-```
+Tools access resources via `context.resources.get(Protocol)` or the
+`context.filesystem` / `context.budget_tracker` shorthands.
 
 ### ToolExample
 
@@ -98,17 +93,8 @@ At `src/weakincentives/prompt/tool.py` (`ToolExample` class):
 
 ### Section Integration
 
-Tools declared on sections:
-
-```python
-section = MarkdownSection[Params](
-    title="Guidance",
-    key="guidance",
-    template="Use tools when needed.",
-    tools=[lookup_tool, search_tool],
-    policies=[ReadBeforeWritePolicy()],
-)
-```
+Tools are declared on sections via the `tools=[...]` tuple and policies via
+`policies=[...]`. See `src/weakincentives/prompt/markdown.py` for `MarkdownSection`.
 
 ### Prompt Rendering
 

@@ -191,19 +191,9 @@ At `runtime/events/types.py`:
 
 At `src/weakincentives/runtime/snapshotable.py`:
 
-Generic protocol for state containers that support snapshot and restore:
-
-```python
-@runtime_checkable
-class Snapshotable[SnapshotT](Protocol):
-    def snapshot(self, *, tag: str | None = None) -> SnapshotT: ...
-    def restore(self, snapshot: SnapshotT) -> None: ...
-```
-
-Implementations include:
-
-- `Session` implements `Snapshotable[Snapshot]`
-- `InMemoryFilesystem` implements `Snapshotable[FilesystemSnapshot]`
+Generic protocol for state containers that support snapshot and restore.
+Implementations include `Session` (`Snapshotable[Snapshot]`) and
+`InMemoryFilesystem` (`Snapshotable[FilesystemSnapshot]`).
 
 ## Snapshots
 
