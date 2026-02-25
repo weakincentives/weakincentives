@@ -107,10 +107,13 @@ with the host's `~/.claude` configuration.
 | `IsolationConfig.for_anthropic_api()` | Require `ANTHROPIC_API_KEY` from env |
 | `IsolationConfig.for_bedrock()` | Require AWS Bedrock, fail if not configured |
 
-**Default behavior:** When `isolation` is `None` on the client config, no
-isolation is applied — the SDK uses the host environment directly. When
-`IsolationConfig` is provided with defaults, sandbox is enabled and network
-is blocked.
+**Default behavior:** When `isolation` is `None` on the client config, the
+adapter creates a default `IsolationConfig()` automatically — it does **not**
+run against the host environment. The default `IsolationConfig()` creates an
+ephemeral HOME, enables the sandbox (`SandboxConfig(enabled=True)`), and
+blocks all tool network access (`NetworkPolicy.no_network()`). To opt out of
+isolation entirely, callers must bypass `_setup_ephemeral_home` at the adapter
+level; there is no `IsolationConfig` setting that disables isolation.
 
 ### Isolation Lifecycle
 
