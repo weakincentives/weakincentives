@@ -98,16 +98,6 @@ WEAKINCENTIVES_LOG_LEVEL=DEBUG
 WEAKINCENTIVES_LOG_FORMAT=json
 ```
 
-## Usage Pattern
-
-```python
-logger.info(
-    "Tool execution completed",
-    event="tool.run",
-    context={"prompt_name": prompt.name, "tool": tool.name},
-)
-```
-
 ## Related Specifications
 
 - `specs/DEBUG_BUNDLE.md` - Debug bundle specification

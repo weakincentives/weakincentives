@@ -86,39 +86,13 @@ Returns True if stopped cleanly, False on timeout.
 
 ## Usage Patterns
 
-### Single Loop
-
-```python
-coordinator = ShutdownCoordinator.install()
-coordinator.register(loop.shutdown)
-loop.run()
-```
-
-### Multiple Loops
-
-```python
-group = LoopGroup(loops=[agent_loop, eval_loop])
-group.run()  # Blocks until SIGTERM/SIGINT
-```
-
-### With Health and Watchdog
-
-```python
-group = LoopGroup(
-    loops=[agent_loop],
-    health_port=8080,
-    watchdog_threshold=720.0,
-)
-group.run()
-```
-
-### Context Manager
-
-```python
-with LoopGroup(loops=[agent_loop, eval_loop]) as group:
-    group.run()
-# Shutdown triggered on exit
-```
+- **Single loop**: Install `ShutdownCoordinator`, register `loop.shutdown` as a
+  callback, call `loop.run()`.
+- **Multiple loops**: `LoopGroup(loops=[...]).run()` — blocks until SIGTERM/SIGINT.
+- **With health/watchdog**: add `health_port=8080` and `watchdog_threshold=720.0`
+  to `LoopGroup`.
+- **Context manager**: `LoopGroup` supports `with` syntax; shutdown triggers on
+  `__exit__`.
 
 ## Message Recovery
 

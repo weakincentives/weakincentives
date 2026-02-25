@@ -50,17 +50,10 @@ full context with execution-specific values.
 
 ### Logger Binding
 
-The `bind_run_context` helper binds RunContext fields to a structured logger,
-enabling consistent tracing across the entire request lifecycle:
-
-```python
-from weakincentives.runtime.logging import bind_run_context, get_logger
-
-logger = get_logger(__name__)
-log = bind_run_context(logger, run_context)
-log.info("Processing request", event="request.start", context={...})
-# Log output includes: run_id, request_id, attempt, worker_id, trace_id
-```
+The `bind_run_context` helper (at `src/weakincentives/runtime/logging.py`) binds
+RunContext fields to a structured logger, enabling consistent tracing across
+the entire request lifecycle. All downstream logging inherits the run context
+fields automatically.
 
 **Adapter Integration**: Adapters bind run_context to `logger_override` when
 creating `InnerLoopConfig`. All downstream logging (InnerLoop, ToolExecutor,
@@ -68,13 +61,8 @@ tool handlers) automatically inherits the run context fields.
 
 ### ToolContext
 
-Tool handlers access via `context.run_context`:
-
-```python
-def my_handler(params, *, context: ToolContext) -> ToolResult:
-    if context.run_context:
-        log = logger.bind(**context.run_context.to_log_context())
-```
+Tool handlers access `context.run_context` and bind it to their logger via
+`run_context.to_log_context()` for consistent tracing.
 
 ### Telemetry Events
 
@@ -90,14 +78,9 @@ All events include optional `run_context`: `PromptRendered`, `ToolInvoked`,
 
 ## OpenTelemetry Integration
 
-```python
-with tracer.start_as_current_span("process_request") as span:
-    ctx = trace.get_current_span().get_span_context()
-    run_context = RunContext(
-        trace_id=format(ctx.trace_id, "032x"),
-        span_id=format(ctx.span_id, "016x"),
-    )
-```
+Populate `RunContext.trace_id` and `span_id` from the active OTel span context
+(format as 32-hex and 16-hex strings respectively) to correlate WINK logs with
+distributed traces.
 
 ## Invariants
 

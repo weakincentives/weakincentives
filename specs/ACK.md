@@ -33,8 +33,7 @@ every adapter must pass.
   structure, entry types, and ordering — the strongest evidence that an adapter
   works correctly end-to-end.
 - **Clean break.** ACK replaces all per-adapter integration test files in a
-  single step. No coexistence period, no gradual porting. The old files are
-  deleted and ACK is the sole integration test suite from day one.
+  single step. No coexistence period, no gradual porting.
 - **Capability gating over phasing.** New or immature adapters declare
   conservative capabilities; tests they cannot pass yet are skipped, not
   missing. This replaces incremental migration phases with a static suite
@@ -62,46 +61,14 @@ Integration tests live in `integration-tests/` as flat files:
 | `test_codex_sandbox_integration.py` | Codex | Sandbox policy verification |
 | `test_codex_network_policy_integration.py` | Codex | Network restrictions |
 
-**Problems:**
-
-1. **Duplication.** Progressive disclosure, transactional tools, and evals are
-   nearly identical between Claude and Codex — differing only in adapter
-   construction and skip conditions.
-1. **Coverage gaps.** Claude SDK has isolation tests that Codex lacks (and vice
-   versa). No ACP/OpenCode integration tests exist at all.
-1. **Drift.** When a new scenario is added to one adapter's tests, the other
-   adapter often doesn't receive it.
-1. **No transcript validation.** Existing tests check events
-   (`PromptRendered`, `ToolInvoked`, `PromptExecuted`) but not transcript
-   entries, missing an entire dimension of adapter correctness.
+**Problems:** Duplication, coverage gaps, drift when new scenarios are added
+to one adapter but not the other, and no transcript validation.
 
 ### Migration
 
 ACK replaces all per-adapter integration test files in a single changeset.
-Every scenario that exists today — greeting, tool invocation, structured
-output, events, progressive disclosure, transactional tools, isolation,
-sandbox, network policy — is ported to ACK or absorbed into adapter-specific
-scenario files within the ACK directory. The old flat files are deleted.
-
-**What ships in the ACK changeset:**
-
-1. The `integration-tests/ack/` directory with the full scenario suite
-   (Tier 1 through Tier 3), adapter-specific scenario files, fixture modules
-   for Claude SDK, Codex, and ACP/OpenCode, and all shared helpers.
-
-1. Deletion of every per-adapter integration test file that ACK subsumes
-   (see [What Gets Deleted](#what-gets-deleted) below).
-
-1. Fixture modules for ACP/OpenCode with conservative capability declarations
-   (capabilities they haven't been validated against are set to `False` and
-   will produce `SKIPPED` rather than `FAILED`).
-
-**After the changeset, `integration-tests/` contains:**
-
-- `ack/` — the unified suite (all adapter integration tests)
-- `test_redis_mailbox_integration.py` — infrastructure, not adapter-specific
-- `test_package_structure.py` — module structure verification
-- `conftest.py` — shared configuration
+Every scenario is ported to ACK or absorbed into adapter-specific scenario files.
+The old flat files are deleted (see [What Gets Deleted](#what-gets-deleted)).
 
 ## Architecture
 
@@ -145,252 +112,86 @@ integration-tests/
 
 ### AdapterFixture Protocol
 
-Every adapter provides a fixture module that implements the `AdapterFixture`
-protocol. This is the only adapter-specific code in ACK.
+Every adapter provides a fixture module implementing the `AdapterFixture`
+protocol at `integration-tests/ack/adapters/_protocol.py`. This is the only
+adapter-specific code in ACK. Each fixture implements:
 
-```python
-from __future__ import annotations
+- `adapter_name` — canonical name (e.g., `"claude_agent_sdk"`)
+- `capabilities: AdapterCapabilities` — declared capability set
+- `is_available()` — checks credentials/CLI presence
+- `create_adapter(tmp_path)` — creates a configured adapter instance
+- `create_adapter_with_sandbox(tmp_path, *, sandbox_mode)` — adapter with sandbox
+- `create_adapter_with_env(tmp_path, *, env)` — adapter with custom env vars
+- `create_session()` — session configured for integration testing
+- `get_model()` — model name (respects env var overrides)
 
-from collections.abc import Mapping
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Protocol, runtime_checkable
+Fixture implementations at `integration-tests/ack/adapters/claude_agent_sdk.py`,
+`codex_app_server.py`, `acp.py`, and `opencode_acp.py`.
 
-from weakincentives.adapters.core import ProviderAdapter
-from weakincentives.runtime.session import Session
+### AdapterCapabilities
 
+Declared by each fixture; drives capability gating for all tests:
 
-@dataclass(slots=True, frozen=True)
-class AdapterCapabilities:
-    """Declares which ACK capabilities an adapter supports."""
+| Capability | Tier | Description |
+|-----------|------|-------------|
+| `text_response` | 1 | Basic text evaluation |
+| `tool_invocation` | 1 | Bridged tool execution |
+| `structured_output` | 1 | Typed output parsing |
+| `event_emission` | 2 | PromptRendered/ToolInvoked/PromptExecuted events |
+| `transcript` | 2 | Transcript entry types, ordering, envelope |
+| `rendered_tools_event` | 2 | RenderedTools event emission |
+| `progressive_disclosure` | 3 | Section expansion, leaf tool access |
+| `transactional_tools` | 3 | Rollback on failure |
+| `deadline_enforcement` | 3 | Deadline expiry behavior |
+| `budget_enforcement` | 3 | Budget exhaustion behavior |
+| `tool_policies` | 4 | Tool policy enforcement |
+| `feedback_providers` | 4 | Feedback provider delivery |
+| `task_completion` | 4 | Task completion checking |
+| `native_tools` | Adapter-specific | Native tool ToolInvoked events |
+| `workspace_isolation` | Adapter-specific | Host mounts, env forwarding |
+| `network_policy` | Adapter-specific | Network restrictions |
+| `sandbox_policy` | Adapter-specific | Sandbox enforcement |
+| `skill_installation` | Adapter-specific | Skill mounting |
 
-    # Tier 1: Basic evaluation
-    text_response: bool = True
-    tool_invocation: bool = True
-    structured_output: bool = True
-
-    # Tier 2: Observability
-    event_emission: bool = True
-    transcript: bool = True
-    rendered_tools_event: bool = False
-
-    # Tier 3: Advanced behavior
-    progressive_disclosure: bool = True
-    transactional_tools: bool = True
-    deadline_enforcement: bool = False
-    budget_enforcement: bool = False
-
-    # Tier 4: Guardrails
-    tool_policies: bool = False
-    feedback_providers: bool = False
-    task_completion: bool = False
-
-    # Adapter-specific scenarios
-    native_tools: bool = False
-    workspace_isolation: bool = False
-    custom_env_forwarding: bool = False
-    network_policy: bool = False
-    sandbox_policy: bool = False
-    skill_installation: bool = False
-
-
-@runtime_checkable
-class AdapterFixture(Protocol):
-    """Protocol that each adapter's fixture module must implement."""
-
-    @property
-    def adapter_name(self) -> str:
-        """Canonical adapter name (e.g., 'claude_agent_sdk', 'codex_app_server')."""
-        ...
-
-    @property
-    def capabilities(self) -> AdapterCapabilities:
-        """Declare which ACK tiers this adapter supports."""
-        ...
-
-    def is_available(self) -> bool:
-        """Check if the adapter's provider is available (credentials, CLI, etc.).
-
-        Returns False to skip all tests for this adapter.
-        """
-        ...
-
-    def create_adapter(self, tmp_path: Path) -> ProviderAdapter:
-        """Create a configured adapter instance for testing.
-
-        The adapter MUST use tmp_path as its working directory to
-        prevent side effects on the host filesystem.
-        """
-        ...
-
-    def create_adapter_with_sandbox(
-        self,
-        tmp_path: Path,
-        *,
-        sandbox_mode: str,
-    ) -> ProviderAdapter:
-        """Create an adapter with a specific sandbox mode.
-
-        Args:
-            tmp_path: Workspace root directory.
-            sandbox_mode: Sandbox mode string (e.g., "read-only",
-                "workspace-write").
-        """
-        ...
-
-    def create_adapter_with_env(
-        self,
-        tmp_path: Path,
-        *,
-        env: Mapping[str, str],
-    ) -> ProviderAdapter:
-        """Create an adapter that forwards extra environment variables.
-
-        Args:
-            tmp_path: Workspace root directory.
-            env: Additional environment variables to forward.
-        """
-        ...
-
-    def create_session(self) -> Session:
-        """Create a session configured for integration testing."""
-        ...
-
-    def get_model(self) -> str:
-        """Return the model name to use for tests.
-
-        Should respect environment variable overrides for CI flexibility.
-        """
-        ...
-```
+All capabilities default to `True` for Tiers 1-3 and `False` for Tier 4 and
+adapter-specific scenarios, so new adapters can start conservative and expand.
 
 ### Parameterization
 
-The ACK `conftest.py` discovers all adapter fixtures, filters by availability,
-and provides them as pytest parameters:
-
-```python
-import pytest
-
-from .adapters.claude_agent_sdk import ClaudeAgentSDKFixture
-from .adapters.codex_app_server import CodexAppServerFixture
-from .adapters.acp import ACPFixture
-from .adapters.opencode_acp import OpenCodeACPFixture
-
-_ALL_FIXTURES = [
-    ClaudeAgentSDKFixture(),
-    CodexAppServerFixture(),
-    ACPFixture(),
-    OpenCodeACPFixture(),
-]
-
-
-def _available_fixtures() -> list[AdapterFixture]:
-    return [f for f in _ALL_FIXTURES if f.is_available()]
-
-
-@pytest.fixture(params=_available_fixtures(), ids=lambda f: f.adapter_name)
-def adapter_fixture(request: pytest.FixtureRequest) -> AdapterFixture:
-    """Parameterized fixture providing each available adapter."""
-    return request.param
-
-
-@pytest.fixture
-def adapter(adapter_fixture: AdapterFixture, tmp_path: Path) -> ProviderAdapter:
-    """Create an adapter instance from the current fixture."""
-    return adapter_fixture.create_adapter(tmp_path)
-
-
-@pytest.fixture
-def session(adapter_fixture: AdapterFixture) -> Session:
-    """Create a session from the current fixture."""
-    return adapter_fixture.create_session()
-```
-
-### Capability Gating
-
-Tests declare required capabilities via markers. Tests are skipped when the
-current adapter does not support the required capability:
-
-```python
-import pytest
-
-def requires_capability(capability: str):
-    """Skip test if the adapter does not support the named capability."""
-    return pytest.mark.ack_capability(capability)
-
-
-# In conftest.py:
-def pytest_runtest_setup(item: pytest.Item) -> None:
-    for marker in item.iter_markers("ack_capability"):
-        capability = marker.args[0]
-        fixture = item.funcargs.get("adapter_fixture")
-        if fixture and not getattr(fixture.capabilities, capability, False):
-            pytest.skip(
-                f"{fixture.adapter_name} does not support {capability}"
-            )
-```
+`integration-tests/ack/conftest.py` discovers all adapter fixtures, filters by
+availability, and provides them as pytest parameters so every scenario file runs
+once per available adapter. Tests declare required capabilities via
+`@pytest.mark.ack_capability(capability)` markers; tests are skipped when the
+current adapter does not support the named capability.
 
 ## Test Tiers
 
 ### Tier 1: Basic Evaluation
 
-The minimum bar for any adapter. These tests verify that the adapter can
-evaluate prompts, invoke bridged tools, and parse structured output.
-
-#### `test_basic_evaluation.py`
+The minimum bar for any adapter. Verifies prompt evaluation, bridged tool
+invocation, and structured output parsing.
 
 ```
 test_returns_text_response
     Given a simple greeting prompt
     When adapter.evaluate() is called
     Then response.text is non-empty
-    And response.prompt_name matches the prompt
 
-test_prompt_name_propagation
-    Given a prompt with name "ack_greeting"
-    When adapter.evaluate() is called
-    Then response.prompt_name == "ack_greeting"
-```
-
-#### `test_tool_invocation.py`
-
-```
 test_bridged_tool_is_called
     Given a prompt with a single uppercase_text tool
     And the prompt instructs the model to call the tool
     When adapter.evaluate() is called
     Then at least one ToolInvoked event is emitted for "uppercase_text"
 
-test_tool_result_is_correct
-    Given a prompt instructing uppercase_text(text="hello")
-    When the tool is invoked
-    Then the tool receives params.text == "hello"
-    And the tool returns TransformResult(text="HELLO")
-```
-
-#### `test_structured_output.py`
-
-```
 test_structured_output_parsing
     Given a PromptTemplate[ReviewAnalysis] with summary and sentiment fields
     When adapter.evaluate() is called
     Then response.output is a ReviewAnalysis instance
-    And response.output.summary is non-empty
-    And response.output.sentiment is non-empty
-
-test_structured_output_type_fidelity
-    Given a PromptTemplate[T] for a frozen dataclass T
-    When adapter.evaluate() is called
-    Then type(response.output) is T
 ```
 
 ### Tier 2: Observability
 
-These tests verify that adapters emit the correct telemetry events and
-transcript entries, enabling debugging and auditing.
-
-#### `test_event_emission.py`
+Verifies that adapters emit correct telemetry events and transcript entries.
 
 ```
 test_prompt_rendered_event
@@ -398,435 +199,70 @@ test_prompt_rendered_event
     When adapter.evaluate() is called
     Then exactly one PromptRendered event is emitted
     And event.prompt_name matches the prompt
-    And event.adapter matches adapter_fixture.adapter_name
-    And event.rendered_prompt contains the prompt text
 
-test_prompt_executed_event
-    Given any prompt
-    When adapter.evaluate() is called
-    Then exactly one PromptExecuted event is emitted
-    And event.prompt_name matches the prompt
-    And event.adapter matches adapter_fixture.adapter_name
-
-test_tool_invoked_event
-    Given a prompt with a tool
-    When the tool is called by the model
-    Then a ToolInvoked event is emitted
-    And event.name == tool_name
-    And event.adapter matches adapter_fixture.adapter_name
-    And event.params contains the tool input
-    And event.result contains the tool output
-
-test_rendered_tools_event  [requires: rendered_tools_event]
-    Given a prompt with tools
-    When adapter.evaluate() is called
-    Then a RenderedTools event is emitted
-    And event.tools contains schemas for all declared tools
-    And event.render_event_id correlates with the PromptRendered event
-```
-
-#### `test_transcript.py`
-
-Transcript tests are the distinguishing feature of ACK. They verify that
-adapters produce a correct chronological record via the `TranscriptEmitter`
-system defined in `specs/TRANSCRIPT.md`.
-
-```
 test_transcript_contains_user_message
     Given a prompt with known text
     When adapter.evaluate() is called
     Then at least one transcript entry has entry_type == "user_message"
-    And the entry's detail or raw contains the prompt text
-
-test_transcript_contains_assistant_message
-    Given a prompt that produces a text response
-    When adapter.evaluate() is called
-    Then at least one transcript entry has entry_type == "assistant_message"
 
 test_transcript_tool_use_before_tool_result
     Given a prompt that invokes a tool
     When adapter.evaluate() is called
     Then a "tool_use" entry appears before the corresponding "tool_result" entry
-    And both share the same source
 
 test_transcript_envelope_completeness
     For every transcript entry emitted during evaluation:
-    Then entry has prompt_name (non-empty string)
-    And entry has adapter (matches adapter_fixture.adapter_name)
-    And entry has entry_type (one of the canonical types)
-    And entry has sequence_number (non-negative integer)
-    And entry has source (non-empty string)
-    And entry has timestamp (valid ISO-8601)
+    Then entry has prompt_name, adapter, entry_type, sequence_number, source, timestamp
 
 test_transcript_sequence_monotonicity
     Given all transcript entries for a single source
     Then sequence_numbers are strictly increasing with no gaps
-
-test_transcript_canonical_types_only
-    For every transcript entry:
-    Then entry_type is one of: user_message, assistant_message, tool_use,
-         tool_result, thinking, system_event, token_usage, error, unknown
-
-test_transcript_adapter_label
-    For every transcript entry:
-    Then entry.adapter == adapter_fixture.adapter_name
-
-test_transcript_start_stop_events
-    When adapter.evaluate() is called
-    Then a transcript.start log event is emitted before any transcript.entry
-    And a transcript.stop log event is emitted after all transcript.entry events
-    And transcript.stop contains summary statistics (entry counts)
-
-test_transcript_in_debug_bundle
-    Given a debug bundle captured during evaluation
-    Then bundle contains transcript.jsonl
-    And transcript.jsonl contains exactly the transcript entries from the evaluation
-    And entries are ordered by sequence_number
 ```
 
 ### Tier 3: Advanced Behavior
 
-These tests exercise complex adapter interactions that stress transactional
-semantics, multi-turn loops, and resource enforcement.
-
-#### `test_progressive_disclosure.py`
-
-```
-test_two_level_hierarchy_expansion
-    Given a prompt with a two-level summarized section hierarchy
-    And a leaf section containing a verify_result tool
-    When adapter.evaluate() is called in an expansion loop
-    Then at least one VisibilityExpansionRequired is raised
-    And the model eventually calls the leaf tool
-    And session VisibilityOverrides contain FULL for both parent and child
-
-test_direct_leaf_expansion
-    Given the same hierarchy
-    When the model requests expansion of parent and child together
-    Then the framework handles it correctly
-    And the leaf section's tool becomes available
-```
-
-#### `test_transactional_tools.py`
+Exercises transactional semantics, multi-turn loops, and resource enforcement.
 
 ```
 test_tool_failure_rolls_back_filesystem
     Given a workspace with a write_and_fail tool
     When the tool writes a file then returns failure
     Then the file does not exist after evaluation
-    And any file written by a prior successful tool still exists
 
 test_tool_failure_rolls_back_session_state
     Given a session with a ToolOperationLog slice
-    When write_and_fail dispatches a RecordToolOperation then fails
+    When write_and_fail dispatches an event then fails
     Then the operation is not present in the session
-    And operations from prior successful tools are present
 
-test_sequential_operations_isolation
-    Given three sequential tool calls: success, failure, success
-    Then the first and third operations persist
-    And the second operation is rolled back
-    And filesystem and session state are consistent
-
-test_rollback_verified_in_debug_bundle
-    Given a debug bundle captured after mixed success/failure tool calls
-    Then bundle filesystem matches expected state
-    And bundle session snapshot matches expected state
-```
-
-#### `test_error_handling.py`
-
-```
 test_deadline_enforcement
     Given a prompt with a deadline in the near past
     When adapter.evaluate() is called
     Then a PromptEvaluationError is raised
-    And error.phase == "request" or "budget"
-
-test_invalid_tool_params_returns_error
-    Given a tool that expects {text: str}
-    When the model sends {text: 123}
-    Then the tool returns an error result (not an exception)
-    And evaluation continues (adapter does not abort)
 ```
 
 ### Adapter-Specific Scenarios
 
-These tests exercise capabilities that only some adapters support. They use
-capability gating — adapters that do not declare the relevant capability are
-skipped.
-
-#### `test_native_tools.py`
-
-Requires: `native_tools`
+Tests for capabilities only some adapters support. Skipped when the capability
+flag is `False`.
 
 ```
-test_native_tool_emits_tool_invoked
-    Given a prompt that triggers a native tool (file read, command execution)
-    When adapter.evaluate() is called
-    Then at least one ToolInvoked event is emitted for the native tool
-    And event.adapter matches adapter_fixture.adapter_name
+test_sandbox_restricts_writes_outside_workspace  [requires: sandbox_policy]
+test_network_denied_by_default                   [requires: network_policy]
+test_workspace_section_mounts_host_files         [requires: workspace_isolation]
+test_skill_knowledge_available                   [requires: skill_installation]
+test_native_tool_emits_tool_invoked             [requires: native_tools]
 ```
 
-#### `test_workspace_isolation.py`
+## Shared Helpers
 
-Requires: `workspace_isolation`
-
-```
-test_workspace_section_mounts_host_files
-    Given a WorkspaceSection with a HostMount pointing to a directory with files
-    When adapter.evaluate() is called with a prompt referencing those files
-    Then the model can read the mounted files
-    And the response references the file content
-
-test_workspace_uses_temp_dir_as_cwd
-    Given a WorkspaceSection
-    When adapter.evaluate() is called
-    Then the adapter's effective cwd is the workspace temp_dir
-
-test_custom_env_forwarded
-    Given a custom environment variable set in the adapter config
-    When the model runs a command that echoes the variable
-    Then the variable's value appears in the output
-```
-
-#### `test_sandbox_policy.py`
-
-Requires: `sandbox_policy`
-
-```
-test_sandbox_restricts_writes_outside_workspace
-    Given a sandboxed adapter configuration
-    When the model attempts to write outside the workspace
-    Then the write is denied or has no effect
-
-test_sandbox_allows_writes_inside_workspace
-    Given a sandboxed adapter configuration
-    When the model writes a file inside the workspace
-    Then the file is created successfully
-```
-
-#### `test_network_policy.py`
-
-Requires: `network_policy`
-
-```
-test_network_denied_by_default
-    Given an adapter with network_policy = no_network()
-    When the model attempts a network request
-    Then the request fails or is blocked
-
-test_network_allowed_for_listed_domains
-    Given an adapter with network_policy = with_domains("example.com")
-    When the model makes a request to example.com
-    Then the request succeeds
-```
-
-#### `test_skill_installation.py`
-
-Requires: `skill_installation`
-
-```
-test_skill_knowledge_available
-    Given a prompt with a SkillMount pointing to a test skill directory
-    And the skill contains a secret codeword in its SKILL.md
-    When adapter.evaluate() is called with a question about the codeword
-    Then the response contains the exact secret codeword
-    And this verifies skills are automatically copied to the agent environment
-```
-
-## Shared Scenarios
-
-To avoid duplication within ACK itself, test scenarios are built from shared
-prompt builders and assertion helpers.
-
-### Prompt Builders
-
-```python
-# integration-tests/ack/scenarios/__init__.py
-
-def build_greeting_prompt(ns: str) -> PromptTemplate[object]:
-    """Build a simple greeting prompt for basic evaluation tests."""
-    ...
-
-def build_tool_prompt(ns: str) -> tuple[PromptTemplate[object], Tool]:
-    """Build a prompt with an uppercase_text tool."""
-    ...
-
-def build_structured_prompt(ns: str) -> PromptTemplate[ReviewAnalysis]:
-    """Build a prompt expecting structured ReviewAnalysis output."""
-    ...
-
-def build_progressive_disclosure_prompt(ns: str) -> tuple[PromptTemplate[object], Tool]:
-    """Build a two-level hierarchy prompt with a verify_result leaf tool."""
-    ...
-
-def build_transactional_prompt(ns: str) -> tuple[PromptTemplate[object], Tool, Tool, type]:
-    """Build a prompt with write_and_succeed and write_and_fail tools."""
-    ...
-```
-
-### Transcript Assertion Helpers
-
-```python
-# integration-tests/ack/scenarios/_transcript_helpers.py
-
-def collect_transcript_entries(caplog) -> list[dict]:
-    """Extract transcript entries from pytest log capture."""
-    ...
-
-def assert_envelope_complete(entry: dict) -> None:
-    """Assert all required envelope keys are present and valid."""
-    ...
-
-def assert_sequence_monotonic(entries: list[dict], source: str) -> None:
-    """Assert sequence numbers are strictly increasing for a source."""
-    ...
-
-def assert_entry_order(entries: list[dict], *expected_types: str) -> None:
-    """Assert that entry_types appear in the given order (subsequence match)."""
-    ...
-
-def assert_tool_use_before_result(entries: list[dict], tool_name: str) -> None:
-    """Assert tool_use entry precedes tool_result for the named tool."""
-    ...
-```
-
-### Event Assertion Helpers
-
-```python
-# integration-tests/ack/scenarios/_event_helpers.py
-
-def capture_events(session: Session, *event_types: type) -> dict[type, list]:
-    """Subscribe to event types and return a dict of captured events."""
-    ...
-
-def assert_prompt_rendered(events: list, adapter_name: str, prompt_name: str) -> None:
-    """Assert exactly one PromptRendered with correct fields."""
-    ...
-
-def assert_prompt_executed(events: list, adapter_name: str, prompt_name: str) -> None:
-    """Assert exactly one PromptExecuted with correct fields."""
-    ...
-
-def assert_tool_invoked(events: list, tool_name: str, adapter_name: str) -> None:
-    """Assert at least one ToolInvoked for the named tool."""
-    ...
-```
-
-## Adapter Fixture Examples
-
-### Claude Agent SDK Fixture
-
-```python
-class ClaudeAgentSDKFixture:
-    adapter_name = "claude_agent_sdk"
-
-    capabilities = AdapterCapabilities(
-        rendered_tools_event=True,
-        deadline_enforcement=True,
-        budget_enforcement=True,
-        tool_policies=True,
-        feedback_providers=True,
-        task_completion=True,
-        native_tools=True,
-        workspace_isolation=True,
-        custom_env_forwarding=True,
-        network_policy=True,
-        sandbox_policy=True,
-        skill_installation=True,
-    )
-
-    def is_available(self) -> bool:
-        try:
-            import claude_agent_sdk  # noqa: F401
-        except ImportError:
-            return False
-        return _is_bedrock_mode() or "ANTHROPIC_API_KEY" in os.environ
-
-    def create_adapter(self, tmp_path: Path) -> ClaudeAgentSDKAdapter:
-        return ClaudeAgentSDKAdapter(
-            model=self.get_model(),
-            client_config=ClaudeAgentSDKClientConfig(
-                permission_mode="bypassPermissions",
-                cwd=str(tmp_path),
-            ),
-        )
-
-    def create_session(self) -> Session:
-        return Session(tags={"suite": "ack"})
-
-    def get_model(self) -> str:
-        return os.environ.get("CLAUDE_AGENT_SDK_TEST_MODEL", get_default_model())
-```
-
-### Codex App Server Fixture
-
-```python
-class CodexAppServerFixture:
-    adapter_name = "codex_app_server"
-
-    capabilities = AdapterCapabilities(
-        rendered_tools_event=True,
-        tool_policies=True,
-        feedback_providers=True,
-        task_completion=True,
-        native_tools=True,
-        workspace_isolation=True,
-        sandbox_policy=True,
-        skill_installation=True,
-    )
-
-    def is_available(self) -> bool:
-        return shutil.which("codex") is not None
-
-    def create_adapter(self, tmp_path: Path) -> CodexAppServerAdapter:
-        return CodexAppServerAdapter(
-            model_config=CodexAppServerModelConfig(model=self.get_model()),
-            client_config=CodexAppServerClientConfig(
-                cwd=str(tmp_path),
-                approval_policy="never",
-            ),
-        )
-
-    def create_session(self) -> Session:
-        return Session(tags={"suite": "ack"})
-
-    def get_model(self) -> str:
-        return os.environ.get("CODEX_APP_SERVER_TEST_MODEL", "gpt-5.3-codex")
-```
-
-### ACP / OpenCode Fixture
-
-```python
-class OpenCodeACPFixture:
-    adapter_name = "opencode_acp"
-
-    capabilities = AdapterCapabilities(
-        rendered_tools_event=True,
-        tool_policies=True,
-        feedback_providers=True,
-        task_completion=True,
-        # OpenCode supports these but may need tuning:
-        progressive_disclosure=True,
-        transactional_tools=True,
-    )
-
-    def is_available(self) -> bool:
-        return shutil.which("opencode") is not None
-
-    def create_adapter(self, tmp_path: Path) -> OpenCodeACPAdapter:
-        return OpenCodeACPAdapter(
-            adapter_config=OpenCodeACPAdapterConfig(model=self.get_model()),
-            client_config=OpenCodeACPClientConfig(cwd=str(tmp_path)),
-        )
-
-    def create_session(self) -> Session:
-        return Session(tags={"suite": "ack"})
-
-    def get_model(self) -> str:
-        return os.environ.get("OPENCODE_ACP_TEST_MODEL", "gpt-5.3")
-```
+- **Prompt builders** at `integration-tests/ack/scenarios/__init__.py`: shared
+  factories for greeting, tool, structured output, progressive disclosure, and
+  transactional prompts.
+- **Transcript helpers** at `integration-tests/ack/scenarios/_transcript_helpers.py`:
+  `collect_transcript_entries`, `assert_envelope_complete`,
+  `assert_sequence_monotonic`, `assert_entry_order`.
+- **Event helpers** at `integration-tests/ack/scenarios/_event_helpers.py`:
+  `capture_events`, `assert_prompt_rendered`, `assert_tool_invoked`.
 
 ## Transcript Validation Strategy
 
@@ -850,16 +286,11 @@ log viewers) depend on.
 ### What ACK Does NOT Validate
 
 - **Content correctness** of model responses (that's evals, not ACK).
-- **Exact transcript length** (adapters may emit different numbers of entries
-  for the same logical operation).
+- **Exact transcript length** (adapters may emit different numbers of entries).
 - **`detail` payload structure** (adapter-specific, opaque to ACK).
-- **`raw` field content** (depends on `emit_raw` configuration).
-- **Subagent transcript entries** (only Claude SDK produces these; validated
-  in adapter-specific tests, not in the shared ACK suite).
+- **Subagent transcript entries** (only Claude SDK produces these).
 
 ## Running ACK
-
-### Local Execution
 
 ```bash
 # Run ACK for all available adapters
@@ -870,38 +301,20 @@ uv run pytest integration-tests/ack/ -v -k "claude_agent_sdk"
 
 # Run a specific tier
 uv run pytest integration-tests/ack/scenarios/test_basic_evaluation.py -v
-
-# Run with transcript debug logging visible
-uv run pytest integration-tests/ack/ -v --log-level=DEBUG -k "test_transcript"
 ```
-
-### CI Configuration
 
 ACK tests are marked `@pytest.mark.integration` and excluded from `make check`
-(which runs unit tests only). CI pipelines run ACK as a separate job with
-provider credentials available:
-
-```yaml
-ack:
-  strategy:
-    matrix:
-      adapter: [claude_agent_sdk, codex_app_server, opencode_acp]
-  env:
-    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  steps:
-    - run: uv run pytest integration-tests/ack/ -v -k "${{ matrix.adapter }}"
-```
+(unit tests only). CI runs ACK as a separate job per adapter matrix with
+provider credentials injected.
 
 ### Environment Variables
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `CLAUDE_AGENT_SDK_TEST_MODEL` | Claude SDK model override | `get_default_model()` (Sonnet 4.5) |
+| `CLAUDE_AGENT_SDK_TEST_MODEL` | Claude SDK model override | `get_default_model()` (Opus 4.6) |
 | `CODEX_APP_SERVER_TEST_MODEL` | Codex model override | `gpt-5.3-codex` |
 | `OPENCODE_ACP_TEST_MODEL` | OpenCode model override | `gpt-5.3` |
 | `ACK_TIMEOUT` | Per-test timeout seconds | `120` |
-| `ACK_ADAPTERS` | Comma-separated adapter filter | all available |
 
 ## Invariants
 
@@ -912,13 +325,11 @@ ack:
    `FAILED`. A capability the adapter does not declare produces `SKIPPED`.
 
 1. **Adapter-agnostic assertions.** No test in `scenarios/` imports from
-   `weakincentives.adapters.claude_agent_sdk`, `.codex_app_server`, or any
-   specific adapter package. Tests use only `ProviderAdapter`, session events,
-   and transcript entries.
+   any specific adapter package. Tests use only `ProviderAdapter`, session
+   events, and transcript entries.
 
-1. **Prompt determinism.** ACK prompts are designed to minimize model
-   non-determinism. They use explicit instructions ("call this tool exactly
-   once"), constrained output schemas, and short expected responses.
+1. **Prompt determinism.** ACK prompts use explicit instructions, constrained
+   output schemas, and short expected responses to minimize non-determinism.
 
 1. **Transcript contract.** Every adapter that declares
    `capabilities.transcript = True` must emit transcript entries conforming to
@@ -927,36 +338,26 @@ ack:
 
 1. **Event contract.** Every adapter must emit `PromptRendered` before
    evaluation, `ToolInvoked` for each tool call, and `PromptExecuted` after
-   completion. These are verified against the `ProviderAdapter` contract in
-   `specs/ADAPTERS.md`.
+   completion.
 
 1. **Transactional contract.** Adapters that declare
    `capabilities.transactional_tools = True` must restore session and
-   filesystem state to the pre-call snapshot when a tool returns
-   `ToolResult(success=False)`.
+   filesystem state to the pre-call snapshot when a tool returns failure.
 
 ## Adding a New Adapter to ACK
 
-To onboard a new adapter:
-
-1. **Create a fixture module** in `integration-tests/ack/adapters/` implementing
+1. Create a fixture module in `integration-tests/ack/adapters/` implementing
    `AdapterFixture`. Declare capabilities honestly — set `False` for anything
-   the adapter does not yet support. Tests for unsupported capabilities produce
-   `SKIPPED`, not `FAILED`.
+   the adapter does not yet support.
 
-1. **Register the fixture** in `integration-tests/ack/conftest.py` by adding it
+1. Register the fixture in `integration-tests/ack/conftest.py` by adding it
    to `_ALL_FIXTURES`.
 
-1. **Run the full suite.** All scenarios execute; unsupported capabilities are
-   skipped. Fix failures — these are almost always real adapter bugs.
+1. Run the full suite. Fix failures — these are almost always real adapter bugs.
 
-1. **Expand capabilities.** As the adapter matures, flip capability flags from
-   `False` to `True`. The corresponding tests automatically start running.
+1. Expand capabilities over time by flipping flags from `False` to `True`.
 
 ## What Gets Deleted
-
-Every per-adapter integration test file is deleted in the ACK changeset. No
-coexistence, no forwarding shims.
 
 | Deleted | Replaced By |
 |---------|-------------|
@@ -969,16 +370,11 @@ coexistence, no forwarding shims.
 | `test_codex_isolation_integration.py` | `ack/scenarios/test_workspace_isolation.py` |
 | `test_codex_sandbox_integration.py` | `ack/scenarios/test_sandbox_policy.py` |
 | `test_codex_network_policy_integration.py` | `ack/scenarios/test_network_policy.py` |
-| `test_evals_math_integration.py` | `ack/scenarios/test_basic_evaluation.py` (core eval scenarios absorbed; benchmark-specific evals remain in `evals/`) |
+| `test_evals_math_integration.py` | `ack/scenarios/test_basic_evaluation.py` |
 | `test_codex_evals_math_integration.py` | Same ACK scenario |
-| `redis_utils.py` | Stays — used by `test_redis_mailbox_integration.py` |
 
-**Not deleted (not adapter tests):**
-
-- `test_redis_mailbox_integration.py` — infrastructure, not adapter-specific
-- `test_package_structure.py` — module structure verification
-- `conftest.py` — shared hooks
-- `redis_utils.py` — shared Redis test utilities
+**Not deleted:** `test_redis_mailbox_integration.py`, `test_package_structure.py`,
+`conftest.py`, `redis_utils.py` — infrastructure and shared utilities.
 
 ## Related Specifications
 

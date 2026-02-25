@@ -22,12 +22,9 @@ LeaseExtenderConfig); `agent_loop.py` for integration
 
 ### LeaseExtender
 
-Uses context manager pattern to attach/detach from heartbeat:
-
-```python
-with lease_extender.attach(msg, heartbeat):
-    adapter.evaluate(prompt, session=session, heartbeat=heartbeat)
-```
+Context manager pattern — `lease_extender.attach(msg, heartbeat)` registers
+the heartbeat callback for the duration of the evaluation block. See
+`src/weakincentives/runtime/lease_extender.py`.
 
 ## Heartbeat Propagation
 
@@ -60,15 +57,8 @@ add additional beats during long operations.
 
 ## AgentLoop Integration
 
-```python
-loop = AgentLoop(
-    adapter=adapter,
-    requests=mailbox,
-    config=AgentLoopConfig(
-        lease_extender=LeaseExtenderConfig(interval=60, extension=300),
-    ),
-)
-```
+Configure via `AgentLoopConfig.lease_extender = LeaseExtenderConfig(interval=60, extension=300)`.
+See `src/weakincentives/runtime/lease_extender.py` and `agent_loop_types.py`.
 
 ## EvalLoop Integration
 

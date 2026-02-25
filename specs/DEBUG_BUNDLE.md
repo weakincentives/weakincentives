@@ -149,18 +149,6 @@ limits are configured, all are enforced (most restrictive wins). Bundle age is
 determined from the `created_at` field in the manifest. Deletion uses TOCTOU
 protection via inode/device verification to prevent race conditions.
 
-```python
-from weakincentives.debug import BundleConfig, BundleRetentionPolicy
-
-config = BundleConfig(
-    target=Path("./debug/"),
-    retention=BundleRetentionPolicy(
-        max_bundles=10,           # Keep last 10 bundles
-        max_age_seconds=86400,    # Delete bundles older than 24 hours
-    ),
-)
-```
-
 ### BundleStorageHandler
 
 Runtime-checkable protocol for copying bundles to external storage after creation.
@@ -169,24 +157,6 @@ See `src/weakincentives/debug/bundle.py` for the protocol definition.
 The handler receives `(bundle_path: Path, manifest: BundleManifest)` and is called
 **after** retention policy is applied, so only bundles that survive cleanup are
 passed to the handler. Errors are logged but do not propagate (non-blocking).
-
-Example S3 handler:
-
-```python
-@dataclass
-class S3StorageHandler:
-    bucket: str
-    prefix: str = "debug-bundles/"
-
-    def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
-        key = f"{self.prefix}{manifest.bundle_id}.zip"
-        s3_client.upload_file(str(bundle_path), self.bucket, key)
-
-config = BundleConfig(
-    target=Path("./debug/"),
-    storage_handler=S3StorageHandler(bucket="my-bucket"),
-)
-```
 
 ### BundleWriter
 
@@ -201,24 +171,8 @@ manager), `write_environment()`, `write_filesystem()`, `write_config()`,
 
 The `write_metadata(name, data)` method provides a generic mechanism for adding
 domain-specific metadata (e.g., `eval.json`) without coupling the bundle layer.
-
-```python
-with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
-    writer.write_session_before(session)
-    writer.write_request_input(request)
-    with writer.capture_logs():
-        response = adapter.evaluate(prompt, session=session)
-    writer.write_session_after(session)
-    writer.write_request_output(response)
-    writer.write_environment()  # Capture reproducibility envelope
-    writer.write_filesystem(fs)
-    writer.write_config(config)
-    writer.write_run_context(run_context)
-    writer.write_metrics(metrics)
-    if error:
-        writer.write_error(error)
-# Bundle finalized on exit: README generated, checksums computed, zip created
-```
+Bundle is finalized on context exit: README generated, checksums computed, zip
+created atomically.
 
 ### DebugBundle
 
@@ -232,31 +186,13 @@ Properties: `manifest`, `path`, `request_input`, `request_output`,
 Methods: `load()` (classmethod), `read_file()`, `list_files()`, `extract()`,
 `verify_integrity()`.
 
-```python
-bundle = DebugBundle.load("./debug/bundle.zip")
-print(bundle.manifest)
-print(bundle.metrics)
-print(bundle.session_after)
-```
-
 ## AgentLoop Integration
 
 ### Configuration
 
-`AgentLoopConfig` gains a `debug_bundle` field. When set, AgentLoop automatically
-creates a bundle for each execution:
-
-```python
-loop = CodeReviewLoop(
-    adapter=adapter,
-    requests=requests,
-    config=AgentLoopConfig(
-        debug_bundle=BundleConfig(target=Path("./debug/")),
-    ),
-)
-```
-
-Per-request override via `AgentLoopRequest.debug_bundle`.
+`AgentLoopConfig.debug_bundle` enables automatic bundling for each execution.
+Per-request override via `AgentLoopRequest.debug_bundle`. See
+`src/weakincentives/runtime/agent_loop.py`.
 
 ### Execution Flow
 
@@ -337,22 +273,6 @@ eval-specific metadata:
 See `src/weakincentives/evals/_loop.py` for the full `EvalLoopConfig` and `EvalLoop`
 implementation.
 
-### Example
-
-```python
-eval_loop = EvalLoop(
-    loop=agent_loop,
-    evaluator=exact_match,
-    requests=requests_mailbox,
-    config=EvalLoopConfig(
-        debug_bundle=BundleConfig(target=Path("./eval_bundles/")),
-    ),
-)
-
-# After evaluation:
-# result.bundle_path == Path("./eval_bundles/{request_id}/{bundle_id}_{timestamp}.zip")
-```
-
 ## CLI
 
 ### Commands
@@ -412,28 +332,10 @@ EvalLoop: `{request_id}/{bundle_id}_{timestamp}.zip`
 
 ## Public API
 
-```python
-from weakincentives.debug import (
-    # Bundle creation and inspection
-    BundleWriter,
-    BundleConfig,
-    DebugBundle,
-    BundleManifest,
-    BundleError,
-    BundleValidationError,
-    # Retention and storage
-    BundleRetentionPolicy,
-    BundleStorageHandler,
-    # Environment capture
-    capture_environment,
-    EnvironmentCapture,
-    SystemInfo,
-    PythonInfo,
-    GitInfo,
-    CommandInfo,
-    ContainerInfo,
-)
-```
+Public types at `src/weakincentives/debug/__init__.py`: `BundleWriter`,
+`BundleConfig`, `DebugBundle`, `BundleManifest`, `BundleError`,
+`BundleValidationError`, `BundleRetentionPolicy`, `BundleStorageHandler`,
+`capture_environment`, `EnvironmentCapture`.
 
 ## Invariants
 

@@ -16,14 +16,19 @@ task completion checking--enforce invariants, provide guidance, and verify goals
 | Feedback Providers | Soft guidance over time | Advisory (agent decides) |
 | Task Completion | Verify goals before stopping | Block early termination |
 
-______________________________________________________________________
+All three mechanisms are declared on `PromptTemplate` alongside the tools they
+govern. This makes constraints a first-class part of the agent definition—
+versionable, reviewable, and portable across adapters.
+
+---
 
 ## Tool Policies
 
 **Implementation:** `src/weakincentives/prompt/policy.py`
 
-Policies enforce sequential dependencies between tool invocations. Declares
-that tool B requires tool A first--unconditionally or keyed by parameter.
+Policies enforce sequential dependencies between tool invocations—tool B
+requires tool A first, unconditionally or keyed by parameter. Denied calls
+return an error result without executing; the agent must reason about why.
 
 ### Principles
 
@@ -57,60 +62,21 @@ that tool B requires tool A first--unconditionally or keyed by parameter.
 
 ### Built-in Policies
 
-#### SequentialDependencyPolicy
+**`SequentialDependencyPolicy`** — Unconditional ordering: tool B requires tool
+A to have succeeded first. Configured with a `dependencies` dict mapping each
+gated tool to the set of tools that must have succeeded before it.
 
-Unconditional tool ordering: tool B requires tool A to have succeeded.
+**`ReadBeforeWritePolicy`** — Parameter-keyed dependency for filesystem tools.
+Existing files must be read before overwritten; new files can be created freely.
+Tracks read paths in session so the policy persists across tool calls.
 
-```python
-policy = SequentialDependencyPolicy(
-    dependencies={
-        "deploy": frozenset({"test", "build"}),
-        "build": frozenset({"lint"}),
-    }
-)
-```
-
-#### ReadBeforeWritePolicy
-
-Parameter-keyed dependency for filesystem tools. Existing files must be read
-before overwritten. New files can be created freely.
-
-```python
-policy = ReadBeforeWritePolicy()
-# write_file("new.txt")      -> OK (doesn't exist)
-# write_file("config.yaml")  -> DENIED (exists, not read)
-# read_file("config.yaml")   -> OK (records path)
-# write_file("config.yaml")  -> OK (was read)
-```
-
-### Policy Integration
-
-```python
-template = PromptTemplate(
-    sections=[
-        MarkdownSection(
-            tools=[read_file, write_file],
-            policies=[ReadBeforeWritePolicy()],
-        ),
-        MarkdownSection(
-            tools=[lint, test, build, deploy],
-            policies=[SequentialDependencyPolicy(dependencies={...})],
-        ),
-    ],
-    policies=[...],  # Prompt-level policies
-)
-```
+Policies attach to sections or prompts via the `policies=` parameter on
+`PromptTemplate`. See `src/weakincentives/prompt/policy.py` for full usage.
 
 ### Execution Flow
 
-Policy enforcement happens in the adapter's tool execution hooks.
+Policy enforcement happens in `BridgedTool` before handler execution.
 See `TOOLS.md` (Runtime Dispatch section) for the full dispatch sequence.
-
-### Policy State Management
-
-- **Snapshot/restore**: State captured with session snapshots
-- **Reset**: `session.reset()` clears policy state
-- **Isolation**: Each session has independent state
 
 ### Limitations
 
@@ -118,7 +84,7 @@ See `TOOLS.md` (Runtime Dispatch section) for the full dispatch sequence.
 - **Session-scoped**: No cross-session persistence
 - **No rollback notification**: Policies not notified on restore
 
-______________________________________________________________________
+---
 
 ## Feedback Providers
 
@@ -140,71 +106,33 @@ produce contextual feedback delivered immediately after tool execution.
 
 ### FeedbackTrigger
 
-At `src/weakincentives/prompt/feedback.py`:
-
 | Field | Type | Description |
 |-------|------|-------------|
 | `every_n_calls` | `int \| None` | Run after N tool calls since last feedback from this provider |
 | `every_n_seconds` | `float \| None` | Run after N seconds since last feedback from this provider |
 | `on_file_created` | `FileCreatedTrigger \| None` | Run once when file created |
 
-Conditions are OR'd together. Trigger state is tracked per-provider to ensure
-each provider maintains independent trigger cadences.
+Conditions are OR'd together. Each provider maintains independent trigger state.
 
 ### FileCreatedTrigger
 
-At `src/weakincentives/prompt/feedback.py`:
+Triggers when a specified file (`filename` field) is created on the filesystem.
+Fires exactly once per session—after initial detection, subsequent tool calls
+will not re-trigger even if the file is deleted and recreated. Trigger state
+persists in session via `FileCreatedTriggerState` slice; reset clears it.
 
-Triggers when a specified file is created on the filesystem. Fires exactly once
-per session--after initial detection, subsequent tool calls will not re-trigger
-even if the file is deleted and recreated.
+### Built-in Providers
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `filename` | `str` | Path to watch for creation |
-
-#### Behavior
-
-1. After tool execution completes, check if `filename` exists
-1. If file exists and trigger has not fired -> fire, mark as fired
-1. If file does not exist or trigger already fired -> skip
-1. Trigger state persists in session via `FileCreatedTriggerState` slice; reset clears it
-
-### StaticFeedbackProvider
-
-At `src/weakincentives/prompt/feedback_providers.py`:
-
-A built-in provider that delivers a fixed feedback message. Useful with
+**`StaticFeedbackProvider`** — Delivers a fixed feedback message. Useful with
 `FileCreatedTrigger` for one-time guidance when specific files are detected.
+Field: `feedback: str`.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `feedback` | `str` | Feedback content to deliver |
+**`DeadlineFeedback`** — Reports remaining time until deadline. Provides
+increasingly urgent suggestions as the deadline approaches. Field:
+`warning_threshold_seconds` (default 120s; below this threshold, suggestions
+are added to the feedback).
 
-```python
-config = FeedbackProviderConfig(
-    provider=StaticFeedbackProvider(
-        feedback="AGENTS.md detected. Follow the conventions defined within.",
-    ),
-    trigger=FeedbackTrigger(
-        on_file_created=FileCreatedTrigger(filename="AGENTS.md"),
-    ),
-)
-```
-
-### FeedbackProviderConfig
-
-```python
-template = PromptTemplate(
-    ...,
-    feedback_providers=(
-        FeedbackProviderConfig(
-            provider=DeadlineFeedback(),
-            trigger=FeedbackTrigger(every_n_seconds=30),
-        ),
-    ),
-)
-```
+Both at `src/weakincentives/prompt/feedback_providers.py`.
 
 ### FeedbackProvider Protocol
 
@@ -214,22 +142,7 @@ template = PromptTemplate(
 | `should_run(context)` | Additional filtering beyond trigger |
 | `provide(context)` | Produce feedback |
 
-### Feedback
-
-At `src/weakincentives/prompt/feedback.py`:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `provider_name` | `str` | Source provider |
-| `summary` | `str` | Main message |
-| `observations` | `tuple[Observation, ...]` | Detailed observations |
-| `suggestions` | `tuple[str, ...]` | Recommendations |
-| `severity` | `Literal["info", "caution", "warning"]` | Urgency level |
-| `timestamp` | `datetime` | When produced |
-| `call_index` | `int` | Tool call count when produced |
-| `prompt_name` | `str` | Prompt that produced this feedback |
-
-### XML-Style Feedback Rendering
+### Feedback Output
 
 `Feedback.render()` produces XML-tagged output for structured context injection:
 
@@ -244,8 +157,6 @@ The work so far took 5 minutes. You have 3 minutes remaining.
 Multiple providers produce separate `<feedback>` blocks, joined by blank lines.
 
 ### FeedbackContext
-
-At `src/weakincentives/prompt/feedback.py`:
 
 | Property/Method | Description |
 |-----------------|-------------|
@@ -263,19 +174,13 @@ At `src/weakincentives/prompt/feedback.py`:
 
 At `src/weakincentives/prompt/feedback.py` (`run_feedback_providers`):
 
-1. Tool call completes
-1. `ToolInvoked` dispatched
-1. For each configured provider:
-   a. Check trigger conditions (using provider-scoped state)
-   b. Call `provider.should_run()`
-1. Collect all triggered providers
-1. Call `provider.provide()` for each
-1. Store all feedback in session
-1. Mark file creation triggers as fired
-1. Render and combine all feedback blocks
-1. Return combined text
+1. Tool call completes, `ToolInvoked` dispatched
+1. For each provider: check trigger conditions, call `provider.should_run()`
+1. Collect all triggered providers, call `provider.provide()` for each
+1. Store all feedback in session; mark file creation triggers as fired
+1. Render and combine all feedback blocks; return combined text
 
-**All matching providers are evaluated concurrently** (not first-match-wins).
+**All matching providers are evaluated**—not first-match-wins.
 
 ### Adapter Integration
 
@@ -285,21 +190,6 @@ At `src/weakincentives/prompt/feedback.py` (`run_feedback_providers`):
 | Codex App Server | `append_feedback()` after successful tool calls in `_guardrails.py` |
 | ACP / OpenCode | `post_call_hook` on MCP tool server in `_guardrails.py` |
 
-### Built-in Provider: DeadlineFeedback
-
-At `src/weakincentives/prompt/feedback_providers.py`:
-
-Reports remaining time until deadline.
-
-```python
-config = FeedbackProviderConfig(
-    provider=DeadlineFeedback(warning_threshold_seconds=120),
-    trigger=FeedbackTrigger(every_n_seconds=30),
-)
-```
-
-Output varies by remaining time. Below threshold adds suggestions.
-
 ### State Management
 
 | Slice | Purpose |
@@ -308,37 +198,19 @@ Output varies by remaining time. Below threshold adds suggestions.
 | `Feedback` | Feedback history |
 | `FileCreatedTriggerState` | Tracks which file creation triggers have fired |
 
-Feedback stored via `session.dispatch(feedback)` with `append_all` reducer.
-
-When sessions reused across prompts, feedback/counts scoped to current prompt
-via `prompt_name` field.
-
-### Public API
-
-```python
-from weakincentives.prompt import (
-    DeadlineFeedback,        # Built-in provider
-    Feedback,                # Dataclass
-    FeedbackContext,         # Context
-    FeedbackProvider,        # Protocol
-    FeedbackProviderConfig,  # Config
-    FeedbackTrigger,         # Trigger
-    FileCreatedTrigger,      # File creation trigger
-    StaticFeedbackProvider,  # Built-in provider
-    collect_feedback,        # Primary entry point
-)
-```
+When sessions are reused across prompts, feedback and counts are scoped to the
+current prompt via the `prompt_name` field.
 
 ### Limitations
 
 - **Synchronous**: Providers block tool completion briefly
 - **Text-based**: Agent interprets natural language
 
-______________________________________________________________________
+---
 
 ## Task Completion Checking
 
-**Implementation:** `weakincentives.prompt.task_completion`
+**Implementation:** `src/weakincentives/prompt/task_completion.py`
 
 Verify agents complete all assigned tasks before stopping. Critical for ensuring
 agents don't prematurely terminate with work incomplete.
@@ -353,11 +225,6 @@ agents don't prematurely terminate with work incomplete.
 
 ### TaskCompletionResult
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `complete` | `bool` | Whether tasks are complete |
-| `feedback` | `str \| None` | Explanation for incomplete |
-
 Factory methods: `TaskCompletionResult.ok()`, `TaskCompletionResult.incomplete(feedback)`
 
 ### TaskCompletionContext
@@ -370,108 +237,21 @@ Factory methods: `TaskCompletionResult.ok()`, `TaskCompletionResult.incomplete(f
 | `adapter` | `ProviderAdapter \| None` | Optional adapter |
 | `stop_reason` | `str \| None` | Why agent is stopping |
 
-### TaskCompletionChecker Protocol
-
-```python
-@runtime_checkable
-class TaskCompletionChecker(Protocol):
-    def check(self, context: TaskCompletionContext) -> TaskCompletionResult: ...
-```
-
 ### Built-in Implementations
 
-#### FileOutputChecker
+**`FileOutputChecker`** — Verifies that required output files exist on the
+filesystem. Returns incomplete if any are missing. Fail-closed: if no filesystem
+is available and files are required, returns incomplete (cannot verify).
 
-Verifies that required output files exist on the filesystem. Accepts a list of
-file paths; returns incomplete if any are missing.
+Field: `files: tuple[str, ...]` — paths that must exist for completion.
 
-```python
-checker = FileOutputChecker(files=("report.md", "results.json"))
-```
+**`CompositeChecker`** — Combines multiple checkers with configurable logic.
+Fields: `checkers: tuple[TaskCompletionChecker, ...]` and `all_must_pass: bool`
+(AND vs OR). Short-circuits on first failure/success.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `files` | `tuple[str, ...]` | Paths that must exist for completion |
-
-**Behavior:**
-
-1. Retrieve `filesystem` from `TaskCompletionContext`
-1. If no filesystem available and files are required, return incomplete
-   (fail-closed: cannot verify without filesystem access)
-1. For each path in `files`, call `filesystem.exists(path)`
-1. If all exist, return `TaskCompletionResult.ok()`
-1. If any missing, return `TaskCompletionResult.incomplete(feedback)` listing
-   the missing files
-
-All file existence checks go through the `Filesystem` abstraction.
-`HostFilesystem` resolves both relative and absolute paths (under its root),
-so callers can pass absolute workspace paths without bypassing the abstraction.
-
-```python
-class FileOutputChecker(TaskCompletionChecker):
-    def __init__(self, files: tuple[str, ...]) -> None:
-        self._files = files
-
-    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
-        if context.filesystem is None:
-            if not self._files:
-                return TaskCompletionResult.ok(...)
-            return TaskCompletionResult.incomplete(...)
-
-        missing = [f for f in self._files if not context.filesystem.exists(f)]
-        if not missing:
-            return TaskCompletionResult.ok(...)
-
-        return TaskCompletionResult.incomplete(...)
-```
-
-#### CompositeChecker
-
-Combines multiple checkers with configurable logic.
-
-```python
-# All must pass (default)
-checker = CompositeChecker(
-    checkers=(
-        FileOutputChecker(files=("output.txt", "summary.md")),
-        MyCustomChecker(),
-    ),
-    all_must_pass=True,
-)
-
-# Any can pass
-checker = CompositeChecker(checkers=(...), all_must_pass=False)
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `checkers` | `tuple[TaskCompletionChecker, ...]` | Ordered checker sequence |
-| `all_must_pass` | `bool` | AND (True) vs OR (False) logic |
-
-Short-circuits: first failure stops evaluation when `all_must_pass=True`;
-first success stops evaluation when `all_must_pass=False`.
+Both at `src/weakincentives/prompt/task_completion.py`.
 
 ### Prompt Integration
-
-Configure via `PromptTemplate`:
-
-```python
-template = PromptTemplate(
-    ns="my-agent",
-    key="main",
-    sections=[...],
-    policies=[ReadBeforeWritePolicy()],
-    feedback_providers=(
-        FeedbackProviderConfig(
-            provider=DeadlineFeedback(),
-            trigger=FeedbackTrigger(every_n_seconds=30),
-        ),
-    ),
-    task_completion_checker=FileOutputChecker(
-        files=("report.md", "results.json"),
-    ),
-)
-```
 
 All three guardrail mechanisms live on the prompt definition:
 
@@ -481,150 +261,23 @@ All three guardrail mechanisms live on the prompt definition:
 | Feedback Providers | `feedback_providers` | `feedback_providers` |
 | Task Completion | `task_completion_checker` | `task_completion_checker` |
 
-#### PromptTemplate Field
-
-```python
-@FrozenDataclass(slots=False)
-class PromptTemplate[OutputT]:
-    ns: str
-    key: str
-    sections: ...
-    policies: Sequence[ToolPolicy] = ()
-    feedback_providers: Sequence[FeedbackProviderConfig] = ()
-    task_completion_checker: TaskCompletionChecker | None = None
-    ...
-```
-
-#### Prompt Instance Forwarding
-
-```python
-class Prompt[OutputT]:
-    @property
-    def task_completion_checker(self) -> TaskCompletionChecker | None:
-        """Return task completion checker configured on this prompt."""
-        return self.template.task_completion_checker
-```
-
-#### Protocol Update
-
-```python
-class PromptProtocol[PromptOutputT](Protocol):
-    ...
-    @property
-    def task_completion_checker(self) -> TaskCompletionChecker | None:
-        """Return task completion checker if configured."""
-        ...
-```
-
 ### Adapter Integration
 
 Adapters read the checker from `prompt.task_completion_checker` and translate it
-into their native hook/stop mechanism.
+into their native hook/stop mechanism:
 
-#### Hook Integration
-
-- **PostToolUse Hook (StructuredOutput)**: If incomplete, adds feedback context
+- **PostToolUse Hook**: If incomplete, adds feedback context
 - **Stop Hook**: Returns `needsMoreTurns: True` if incomplete
 - **Continuation Loop**: Resolves filesystem from prompt resources so
   file-based checkers can verify output during the message stream
 - **Final Verification**: Logs warning if incomplete after execution
 
-#### Claude Agent SDK
-
-The adapter resolves the checker from the prompt via `resolve_checker()`:
-
-```python
-checker = resolve_checker(prompt=prompt)
-```
-
-The checker is declared on `PromptTemplate.task_completion_checker`. There is
-no adapter-level fallback; the prompt is the single source of truth.
-
-#### Other Adapters
-
-For Codex, ACP, and OpenCode adapters, the checker is read from the prompt and
-translated into the adapter's stop/continuation mechanism. The adapter-agnostic
-protocol ensures each adapter can implement enforcement using its native
-primitives.
-
 ### ACK Integration
 
-`AdapterCapabilities` includes a `task_completion` flag:
-
-```python
-@dataclass(slots=True, frozen=True)
-class AdapterCapabilities:
-    ...
-    # Tier 4: Guardrails
-    tool_policies: bool = False
-    feedback_providers: bool = False
-    task_completion: bool = False
-    ...
-```
-
-#### ACK Scenario: `test_task_completion.py`
-
-```
-test_task_completion_blocks_early_stop
-    Given a prompt with a FileOutputChecker requiring "output.txt"
-    And the agent has not yet created the file
-    When the agent attempts to stop
-    Then the stop is blocked with feedback listing missing files
-
-test_task_completion_allows_stop_when_complete
-    Given a prompt with a FileOutputChecker requiring "output.txt"
-    And the file exists on the filesystem
-    When the agent attempts to stop
-    Then the stop is allowed
-
-test_task_completion_skipped_on_deadline_exhaustion
-    Given a prompt with a FileOutputChecker and a near-past deadline
-    When adapter.evaluate() is called
-    Then task completion checking is bypassed
-    And the agent stops despite missing output files
-
-test_task_completion_skipped_on_budget_exhaustion
-    Given a prompt with a FileOutputChecker and an exhausted budget
-    When adapter.evaluate() is called
-    Then task completion checking is bypassed
-
-test_composite_checker_all_must_pass
-    Given a prompt with a CompositeChecker (all_must_pass=True)
-    And two checkers where one returns incomplete
-    When the agent attempts to stop
-    Then the stop is blocked with feedback from the failing checker
-
-test_no_checker_allows_free_stop
-    Given a prompt with no task_completion_checker
-    When the agent produces output and attempts to stop
-    Then the stop is allowed without any completion verification
-```
-
-#### Prompt Builder
-
-```python
-# integration-tests/ack/scenarios/__init__.py
-
-def build_task_completion_prompt(
-    ns: str,
-    *,
-    checker: TaskCompletionChecker,
-) -> tuple[PromptTemplate[object], Tool]:
-    """Build a prompt with task completion checking and a file-writing tool."""
-    ...
-```
-
-### Public API
-
-```python
-from weakincentives.prompt import (
-    TaskCompletionChecker,    # Protocol
-    TaskCompletionContext,    # Context dataclass
-    TaskCompletionResult,     # Result dataclass
-    FileOutputChecker,        # Built-in: required file existence
-    CompositeChecker,         # Built-in: combine multiple checkers
-)
-```
+`AdapterCapabilities.task_completion` gates the `test_task_completion.py`
+scenario suite in ACK. Verified behaviors include: blocking early stops when
+files are missing, allowing stops when files exist, bypassing checks on deadline
+or budget exhaustion, and composite checker logic (AND/OR). See `specs/ACK.md`.
 
 ### Operational Notes
 
@@ -632,51 +285,40 @@ from weakincentives.prompt import (
 - **Budget/deadline bypass**: Skipped when exhausted
 - **Feedback truncation**: File output checker limits to 3 file paths in message
 - **Fail-closed on missing filesystem**: If no filesystem in context and files
-  are required, checker returns incomplete (consistent with tool policy
-  fail-closed philosophy)
+  are required, checker returns incomplete
 
-______________________________________________________________________
+---
 
 ## Design Rationale
 
 ### Definition Owns Constraints
 
 The prompt definition is the single artifact that is versioned, reviewed, tested,
-and ported across adapters. All three guardrail mechanisms -- policies, feedback
-providers, and task completion -- are inherent properties of the agent's goal.
+and ported across adapters. All three guardrail mechanisms—policies, feedback
+providers, and task completion—are inherent properties of the agent's goal.
 They belong with the definition, not the harness.
 
 ### Immediate Delivery (Feedback)
 
-No outer workflow; hooks inject into current turn.
+No outer workflow loop; hooks inject guidance into the current turn so the agent
+can self-correct without waiting for the next prompt render.
 
 ### Store If Delivered
 
-Need history for trigger state and debugging.
+Feedback is stored in session to enable trigger state tracking and debugging via
+debug bundles. History also enables per-provider trigger cadence tracking.
 
 ### All Matching Providers
 
 All triggered providers run and their feedback is combined, ensuring no guidance
 is silently dropped when multiple conditions are met simultaneously.
 
-### No Escalation
-
-Budget provides backstop; feedback is soft guidance.
-
 ### Fail-Closed (Policies)
 
-When uncertain, deny. Agent reasons about why and adjusts.
+When uncertain, deny. Agent reasons about why and adjusts. This prevents
+undetected violations of invariants and makes constraint enforcement observable.
 
-### Observable and Debuggable
-
-Expose reasoning. Denial feedback enables self-correction.
-
-### ACK as Cross-Adapter Verification
-
-With the checker on the prompt, ACK constructs task completion scenarios once and
-verifies enforcement across every adapter.
-
-______________________________________________________________________
+---
 
 ## Related Specifications
 

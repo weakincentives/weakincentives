@@ -158,18 +158,9 @@ thread-level `SandboxMode` string is sufficient.
 
 #### CodexAuthMode
 
-```python
-CodexAuthMode = ApiKeyAuth | ExternalTokenAuth
-
-@FrozenDataclass()
-class ApiKeyAuth:
-    api_key: str
-
-@FrozenDataclass()
-class ExternalTokenAuth:
-    id_token: str
-    access_token: str
-```
+`CodexAuthMode = ApiKeyAuth | ExternalTokenAuth`. `ApiKeyAuth(api_key: str)` uses
+an API key; `ExternalTokenAuth(id_token: str, access_token: str)` uses ChatGPT
+OAuth tokens. At `src/weakincentives/adapters/codex_app_server/config.py`.
 
 Authentication is performed after `initialize` via `account/login/start`. When
 `auth_mode` is `None`, the adapter skips authentication and assumes the Codex
@@ -398,22 +389,7 @@ At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
 ### External MCP Servers
 
 User-provided MCP servers (not WINK tools) are passed to Codex via
-`config.mcp_servers` on `thread/start`. These can be subprocess-based or
-URL-based:
-
-```python
-"config": {
-    "mcp_servers": {
-        "user-stdio-server": {
-            "command": "/path/to/server",
-            "args": ["--flag"],
-        },
-        "user-http-server": {
-            "url": "http://localhost:8080/mcp",
-        },
-    },
-}
-```
+`config.mcp_servers` on `thread/start` as stdio or HTTP entries.
 
 Tool calls to external MCP servers appear as `mcpToolCall` items (not
 `item/tool/call`) and are mapped to `ToolInvoked` events.
@@ -716,117 +692,6 @@ Skip unless `codex` on PATH:
 - `allowed_host_roots` enforced
 - Sandbox policy correctly propagated
 
-## Usage Example
-
-```python
-from weakincentives import Prompt, PromptTemplate, MarkdownSection
-from weakincentives.runtime import Session, InProcessDispatcher
-from weakincentives.adapters.codex_app_server import (
-    CodexAppServerAdapter,
-    CodexAppServerClientConfig,
-    CodexAppServerModelConfig,
-)
-
-bus = InProcessDispatcher()
-session = Session(dispatcher=bus)
-
-template = PromptTemplate(
-    ns="demo",
-    key="codex",
-    sections=(
-        MarkdownSection(
-            title="Task",
-            key="task",
-            template="List the files in the repo and summarize.",
-        ),
-    ),
-)
-prompt = Prompt(template)
-
-adapter = CodexAppServerAdapter(
-    model_config=CodexAppServerModelConfig(
-        model="gpt-5.3-codex",
-        effort="medium",
-    ),
-    client_config=CodexAppServerClientConfig(
-        cwd="/absolute/path/to/workspace",
-        approval_policy="never",
-        sandbox_mode="workspace-write",
-    ),
-)
-
-with prompt.resources:
-    resp = adapter.evaluate(prompt, session=session)
-
-print(resp.text)
-```
-
-### With Authentication
-
-```python
-from weakincentives.adapters.codex_app_server import ApiKeyAuth
-
-adapter = CodexAppServerAdapter(
-    client_config=CodexAppServerClientConfig(
-        auth_mode=ApiKeyAuth(api_key="sk-..."),
-        cwd="/absolute/path/to/workspace",
-    ),
-)
-```
-
-### With Workspace Isolation
-
-```python
-from weakincentives.adapters.codex_app_server import (
-    CodexAppServerAdapter,
-    CodexAppServerClientConfig,
-)
-from weakincentives.prompt import WorkspaceSection, HostMount
-
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(HostMount(host_path="/abs/path/to/repo", mount_path="repo"),),
-    allowed_host_roots=("/abs/path/to",),
-)
-
-adapter = CodexAppServerAdapter(
-    client_config=CodexAppServerClientConfig(
-        cwd=str(workspace.temp_dir),
-        sandbox_mode="workspace-write",
-    ),
-)
-```
-
-### Structured Output
-
-```python
-from dataclasses import dataclass
-
-@dataclass(frozen=True)
-class Summary:
-    title: str
-    files: list[str]
-    line_count: int
-
-template = PromptTemplate[Summary](
-    ns="demo",
-    key="summarize",
-    sections=(
-        MarkdownSection(
-            title="Task",
-            key="task",
-            template="Summarize the repository structure.",
-        ),
-    ),
-)
-
-prompt = Prompt(template)
-with prompt.resources:
-    resp = adapter.evaluate(prompt, session=session)
-
-summary: Summary = resp.output  # Typed structured output
-```
-
 ## Non-Goals (v1)
 
 - Full Codex review integration (`review/start`) — can be added later
@@ -903,17 +768,9 @@ turn/completed.
 
 ### MCP Server Config Formats
 
-Codex supports two MCP server transport types on `config.mcp_servers`:
-
-```python
-# Subprocess (stdio)
-{"command": "/path/to/server", "args": ["--flag"]}
-
-# HTTP (streamable)
-{"url": "http://localhost:8080/mcp"}
-```
-
-Both are passed via `thread/start` → `config.mcp_servers`.
+Codex supports subprocess (`{"command": "...", "args": [...]}`) and HTTP
+(`{"url": "http://..."}`) transports on `config.mcp_servers`, passed via
+`thread/start`.
 
 ## Related Specifications
 

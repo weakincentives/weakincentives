@@ -36,164 +36,18 @@ The filesystem is structured in three layers:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+Streaming is the primary API. Convenience methods buffer bounded reads/writes
+for callers that don't need chunk-level control.
+
 ## Protocol Definition
 
-### Stream Types
+Streaming type protocols at `src/weakincentives/filesystem/_types.py`:
 
 | Type | Description |
 |------|-------------|
-| `ByteReader` | Context manager yielding byte chunks via iteration |
-| `ByteWriter` | Context manager accepting byte chunks via `write()` |
-| `TextReader` | Wrapper over `ByteReader` with lazy UTF-8 decoding |
-
-### ByteReader Protocol
-
-```python
-@runtime_checkable
-class ByteReader(Protocol):
-    """Streaming byte reader with fixed memory footprint."""
-
-    @property
-    def path(self) -> str:
-        """Path being read."""
-        ...
-
-    @property
-    def size(self) -> int:
-        """Total file size in bytes."""
-        ...
-
-    @property
-    def position(self) -> int:
-        """Current read position in bytes."""
-        ...
-
-    @property
-    def closed(self) -> bool:
-        """True if the reader has been closed."""
-        ...
-
-    def read(self, size: int = -1) -> bytes:
-        """Read up to size bytes. Returns empty bytes at EOF.
-
-        Args:
-            size: Maximum bytes to read. -1 means read to EOF.
-        """
-        ...
-
-    def seek(self, offset: int, whence: int = 0) -> int:
-        """Seek to position. Returns new absolute position.
-
-        Args:
-            offset: Offset relative to whence.
-            whence: 0=start, 1=current, 2=end.
-        """
-        ...
-
-    def __iter__(self) -> Iterator[bytes]:
-        """Iterate over chunks of default size (64KB)."""
-        ...
-
-    def chunks(self, size: int) -> Iterator[bytes]:
-        """Iterate over chunks of specified size."""
-        ...
-
-    def __enter__(self) -> ByteReader: ...
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
-
-    def close(self) -> None:
-        """Close the reader and release resources."""
-        ...
-```
-
-### ByteWriter Protocol
-
-```python
-@runtime_checkable
-class ByteWriter(Protocol):
-    """Streaming byte writer with fixed memory footprint."""
-
-    @property
-    def path(self) -> str:
-        """Path being written."""
-        ...
-
-    @property
-    def bytes_written(self) -> int:
-        """Total bytes written so far."""
-        ...
-
-    @property
-    def closed(self) -> bool:
-        """True if the writer has been closed."""
-        ...
-
-    def write(self, data: bytes) -> int:
-        """Write bytes, returns number of bytes written."""
-        ...
-
-    def write_all(self, chunks: Iterable[bytes]) -> int:
-        """Write all chunks, returns total bytes written."""
-        ...
-
-    def __enter__(self) -> ByteWriter: ...
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
-
-    def close(self) -> None:
-        """Close the writer and flush any buffered data."""
-        ...
-```
-
-### TextReader Protocol
-
-```python
-@runtime_checkable
-class TextReader(Protocol):
-    """Line-oriented text reader with lazy UTF-8 decoding."""
-
-    @property
-    def path(self) -> str:
-        """Path being read."""
-        ...
-
-    @property
-    def encoding(self) -> str:
-        """Text encoding (always 'utf-8')."""
-        ...
-
-    @property
-    def line_number(self) -> int:
-        """Current 0-indexed line number."""
-        ...
-
-    @property
-    def closed(self) -> bool:
-        """True if the reader has been closed."""
-        ...
-
-    def readline(self) -> str:
-        """Read next line including newline. Empty string at EOF."""
-        ...
-
-    def read(self, size: int = -1) -> str:
-        """Read up to size characters. Empty string at EOF."""
-        ...
-
-    def __iter__(self) -> Iterator[str]:
-        """Iterate over lines (including newlines)."""
-        ...
-
-    def lines(self, *, strip: bool = False) -> Iterator[str]:
-        """Iterate over lines with optional stripping."""
-        ...
-
-    def __enter__(self) -> TextReader: ...
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
-
-    def close(self) -> None:
-        """Close the reader and release resources."""
-        ...
-```
+| `ByteReader` | Context manager yielding byte chunks via iteration; supports `seek()`, `position`, `size` |
+| `ByteWriter` | Context manager accepting byte chunks via `write()`; tracks `bytes_written` |
+| `TextReader` | Wrapper over `ByteReader` with lazy UTF-8 decoding; line-oriented iteration |
 
 ### Result Types
 
@@ -248,54 +102,6 @@ class TextReader(Protocol):
 - `root`: Workspace root path
 - `read_only`: Whether writes disabled
 
-## Streaming Usage Patterns
-
-### Reading Large Files (Bytes)
-
-```python
-# Stream processing with fixed memory
-with filesystem.open_read("large_file.bin") as reader:
-    for chunk in reader.chunks(size=65536):  # 64KB chunks
-        process(chunk)
-
-# Random access
-with filesystem.open_read("data.bin") as reader:
-    reader.seek(1024)  # Skip first 1KB
-    header = reader.read(256)  # Read 256 bytes
-```
-
-### Reading Large Files (Text)
-
-```python
-# Line-by-line processing (lazy UTF-8 decode)
-with filesystem.open_text("log.txt") as reader:
-    for line in reader.lines(strip=True):
-        if "ERROR" in line:
-            print(f"Line {reader.line_number}: {line}")
-```
-
-### Writing Large Files
-
-```python
-# Stream writing
-with filesystem.open_write("output.bin", mode="create") as writer:
-    for chunk in data_source:
-        writer.write(chunk)
-
-# Write from iterator
-with filesystem.open_write("output.bin") as writer:
-    writer.write_all(generate_chunks())
-```
-
-### Copying Files (Any Size)
-
-```python
-# Zero-copy streaming copy
-with filesystem.open_read("source.bin") as src:
-    with filesystem.open_write("dest.bin") as dst:
-        dst.write_all(src)  # ByteReader is iterable
-```
-
 ## Memory Guarantees
 
 | Operation | Memory Usage |
@@ -307,20 +113,16 @@ with filesystem.open_read("source.bin") as src:
 | `read(limit=N)` | O(N × avg_line_length) |
 
 Backends MUST NOT buffer entire files in memory for streaming operations.
+Streaming operations have no inherent size limits. Convenience methods cap at
+32MB to prevent accidental memory exhaustion.
 
 ## ToolContext Integration
 
 `ToolContext` includes `filesystem: Filesystem | None`. Handlers access via
-`context.filesystem.*`.
+`context.filesystem.*`. The filesystem is scoped to the current tool call and
+backed by whatever workspace section is active.
 
-## Section Ownership
-
-`WorkspaceSection` protocol exposes `filesystem` property. Sections create and
-manage their filesystem instance.
-
-## Prompt Integration
-
-`Prompt.filesystem()` locates workspace section and returns its filesystem.
+`Prompt.filesystem()` locates the workspace section and returns its filesystem.
 Adapters construct `ToolContext` with filesystem from prompt.
 
 ## Backend Implementations
@@ -331,16 +133,8 @@ Adapters construct `ToolContext` with filesystem from prompt.
 | `HostFilesystem` | Sandboxed host directory with path validation, git snapshots | `src/weakincentives/filesystem/_host.py` |
 | `PodmanSandboxSection` | Containerized workspace using overlay + HostFilesystem | `contrib/tools/podman.py` |
 
-### Design Characteristics
-
-All backends share:
-
-- **Exception mapping**: Standard Python exceptions
-- **Path normalization**: Validated relative to root
-- **Streaming support**: Chunk-based iteration for large files
-- **Read-only mode**: Prevent modifications
-
-### Backend-Specific Streaming
+All backends share: standard Python exception mapping, path normalization
+relative to root, streaming support, and read-only mode.
 
 | Backend | Streaming Implementation |
 |---------|-------------------------|
@@ -359,9 +153,6 @@ All backends share:
 | Max convenience read | 32MB | For `read_bytes()`/`read()` |
 | Max convenience write | 32MB | For `write_bytes()`/`write()` |
 
-**Note:** Streaming operations have no inherent size limits. Convenience methods
-have size limits to prevent accidental memory exhaustion.
-
 ## Error Handling
 
 | Backend Error | Python Exception |
@@ -375,8 +166,6 @@ have size limits to prevent accidental memory exhaustion.
 | Backend unavailable | `RuntimeError` |
 | Decode error | `UnicodeDecodeError` |
 
-### Stream-Specific Errors
-
 | Error Condition | Behavior |
 |-----------------|----------|
 | Read after close | `ValueError: I/O operation on closed file` |
@@ -387,108 +176,28 @@ have size limits to prevent accidental memory exhaustion.
 ## Filesystem Snapshots
 
 Capture workspace state for rollback after failed tools or exploratory changes.
+`FilesystemSnapshot` at `src/weakincentives/filesystem/_types.py` records
+`snapshot_id`, `created_at`, `commit_ref`, `root_path`, `git_dir`, and `tag`.
 
-### FilesystemSnapshot
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `snapshot_id` | `UUID` | Unique identifier |
-| `created_at` | `datetime` | Creation time |
-| `commit_ref` | `str` | Git commit or version ID |
-| `root_path` | `str` | Root at snapshot time |
-| `git_dir` | `str \| None` | External git directory |
-| `tag` | `str \| None` | Human-readable label |
-
-### SnapshotableFilesystem Protocol
+`SnapshotableFilesystem` protocol extends `Filesystem` with:
 
 | Method | Description |
 |--------|-------------|
 | `snapshot(tag)` | Capture current state |
 | `restore(snapshot)` | Restore to previous state |
 
-### Implementation Strategies
+Implementation strategies:
 
 - **InMemoryFilesystem**: Structural sharing via frozen dictionaries
 - **HostFilesystem**: Git commits with external `--git-dir`
 - **PodmanSandboxSection**: Delegates to internal HostFilesystem
 
-### Session Integration
-
-```python
-session[FilesystemSnapshot].register(FilesystemSnapshot, append_all)
-fs_snapshot = filesystem.snapshot(tag="before-refactor")
-session[FilesystemSnapshot].append(fs_snapshot)
-filesystem.restore(snapshots[-1])
-```
-
-## Binary File Support
-
-- `open_read()` / `open_write()`: Streaming bytes (primary)
-- `open_text()`: Streaming text with lazy decode
-- `read_bytes()` / `write_bytes()`: Convenience for bounded reads/writes
-- `read()` / `write()`: Text convenience (uses UTF-8)
-
-For copying or processing large files, always use streaming operations.
-
 ## Testing
 
-### Protocol Compliance
-
-`FilesystemValidationSuite` validates all protocol methods including streaming.
-Uses abstract factory for concrete backend testing.
-
-**Test categories:**
-
-- Streaming read/write operations
-- Memory usage bounds (no full-file buffering)
-- Seek and position tracking
-- Text decoding with various encodings
-- Error handling on closed streams
-
-**Test suite:** `tests/tools/test_filesystem.py`
-
-### Test Helpers
-
-Test fixtures and utilities for filesystem testing.
-
-**Implementation:** `tests/helpers/filesystem.py`
-
-## Migration Guide
-
-### From Buffered to Streaming
-
-Old (loads entire file):
-
-```python
-result = filesystem.read_bytes(path)
-process(result.content)
-```
-
-New (fixed memory):
-
-```python
-with filesystem.open_read(path) as reader:
-    for chunk in reader:
-        process(chunk)
-```
-
-### From Eager Text to Lazy Decode
-
-Old (decodes all at once):
-
-```python
-result = filesystem.read(path)
-for line in result.content.splitlines():
-    process(line)
-```
-
-New (decodes lazily per line):
-
-```python
-with filesystem.open_text(path) as reader:
-    for line in reader.lines(strip=True):
-        process(line)
-```
+`FilesystemValidationSuite` at `tests/filesystem/` validates all protocol
+methods including streaming, memory bounds, seek/position tracking, text
+decoding, and error handling on closed streams. Test fixtures at
+`tests/helpers/filesystem.py`.
 
 ## Limitations
 

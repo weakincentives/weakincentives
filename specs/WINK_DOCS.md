@@ -163,39 +163,18 @@ src/weakincentives/cli/
 
 ### Document Metadata
 
-The `cli/docs_metadata.py` module provides document descriptions:
-
-```python
-SPEC_DESCRIPTIONS: dict[str, str] = {
-    "ADAPTERS": "Provider integrations, structured output, throttling",
-    "CLAUDE_AGENT_SDK": "Claude Agent SDK adapter, MCP tool bridging, skill mounting",
-    # ... maintained manually, descriptions sourced from CLAUDE.md spec table
-}
-
-GUIDE_DESCRIPTIONS: dict[str, str] = {
-    "quickstart": "Get a working agent running quickly",
-    "philosophy": "The 'weak incentives' approach and why WINK exists",
-    # ... maintained manually, descriptions sourced from guides/README.md tables
-}
-```
-
-This metadata is maintained in the CLI module (not the docs package) to keep
-it separate from the generated documentation files. Descriptions should be
-kept in sync with CLAUDE.md and guides/README.md when documents are added or
-updated.
+`src/weakincentives/cli/docs_metadata.py` provides `SPEC_DESCRIPTIONS` and
+`GUIDE_DESCRIPTIONS` dicts mapping document names to one-line descriptions.
+Maintained manually; kept in sync with `CLAUDE.md` and `guides/README.md`
+when documents are added or updated.
 
 ## Build-Time Synchronization
 
-Hatch build hook synchronizes docs from repository root into package:
-
-```python
-class DocsSyncHook(BuildHookInterface):
-    def initialize(self, version, build_data):
-        # Copy llms.md, CHANGELOG.md, code_reviewer_example.py
-        # Copy guides/*.md, specs/*.md
-        # Create __init__.py if needed
-        # Use force_include to bypass .gitignore exclusion
-```
+Hatch build hook (`hatch_build.py`) synchronizes docs from repository root into
+the package at build time: copies `llms.md`, `CHANGELOG.md`, guide files, and
+spec files into `src/weakincentives/docs/`. Uses `force_include` to bypass
+`.gitignore` exclusion. The `src/weakincentives/docs/` directory is generated
+at build time and is not committed.
 
 **Note:** Document descriptions in `cli/docs_metadata.py` are maintained
 manually and must be updated when adding new specs or guides.

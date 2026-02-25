@@ -99,17 +99,9 @@ Resources collected from (lowest to highest precedence):
 
 ### Context Manager Protocol
 
-At `src/weakincentives/prompt/prompt.py` via `PromptResources`:
-
-```python
-with prompt.resources:
-    fs = prompt.resources.get(Filesystem)
-    response = adapter.evaluate(prompt, session=session)
-# Resources cleaned up automatically
-```
-
-**Key:** `prompt.resources` serves as both context manager and resource accessor.
-Accessing outside context raises `RuntimeError`.
+At `src/weakincentives/prompt/prompt.py` via `PromptResources`. `prompt.resources`
+serves as both context manager and resource accessor. Accessing outside the `with`
+block raises `RuntimeError`.
 
 ### Cleanup
 

@@ -98,37 +98,19 @@ At `src/weakincentives/resources/context.py`:
 
 ### Snapshotable
 
-At `src/weakincentives/resources/protocols.py`:
-
-```python
-class Snapshotable(Protocol[SnapshotT]):
-    def snapshot(self, *, tag: str | None = None) -> SnapshotT: ...
-    def restore(self, snapshot: SnapshotT) -> None: ...
-```
-
-Used by `InMemoryFilesystem` (structural sharing) and `HostFilesystem` (git commits).
+At `src/weakincentives/resources/protocols.py`. `snapshot(tag=)` / `restore(snapshot)`
+for rollback. Used by `InMemoryFilesystem` (structural sharing) and `HostFilesystem`
+(git commits).
 
 ### Closeable
 
-Resources requiring cleanup:
-
-```python
-class Closeable(Protocol):
-    def close(self) -> None: ...
-```
-
-Closed in reverse instantiation order.
+Resources requiring cleanup implement `close() -> None`; closed in reverse
+instantiation order.
 
 ### PostConstruct
 
-Initialization after construction:
-
-```python
-class PostConstruct(Protocol):
-    def post_construct(self) -> None: ...
-```
-
-Failures prevent caching, wrapped in `ProviderError`.
+Resources needing post-construction initialization implement `post_construct() -> None`.
+Failures prevent caching and are wrapped in `ProviderError`.
 
 ## Error Hierarchy
 
@@ -150,42 +132,20 @@ Resources collected from (lowest to highest precedence):
 
 ### Usage
 
-```python
-prompt = Prompt(template).bind(
-    Params(...),
-    resources={Clock: SystemClock()},  # Pass mapping
-)
-
-with prompt.resources:
-    fs = prompt.resources.get(Filesystem)
-    result = adapter.evaluate(prompt, session=session)
-```
+Use `prompt.resources` as a context manager; access resources via `.get(Protocol)`.
+Pass extra bindings at bind time via `bind(resources={Protocol: instance})`.
+See `src/weakincentives/prompt/prompt.py` for `PromptResources`.
 
 ## Transaction Patterns
 
-Via `runtime/transactions.py`:
-
-```python
-with tool_transaction(session, prompt.resources.context, tag="my_tool") as snapshot:
-    result = execute_tool(...)
-    # Restores on failure
-```
+`tool_transaction(session, resource_context, tag)` from `runtime/transactions.py`
+provides a context manager that snapshots session and resource state on entry and
+restores it on failure.
 
 ## Testing Patterns
 
-```python
-# Replace implementations
-test_registry = ResourceRegistry.build({
-    HTTPClient: MockHTTPClient(),
-    Filesystem: InMemoryFilesystem(),
-})
-
-# Verify caching
-assert Service in ctx.singleton_cache
-
-# Verify cleanup
-assert resource.closed
-```
+Build test registries via `ResourceRegistry.build({Protocol: mock_instance})` to
+replace implementations. Verify cleanup via resource `.closed` attribute.
 
 ## Limitations
 

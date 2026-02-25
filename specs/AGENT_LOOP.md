@@ -97,35 +97,14 @@ cleaned up on context exit. Adapters access via `prompt.resources`.
 
 ## Implementation Pattern
 
-```python
-class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResult]):
-    def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
-        prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-        session = Session()
-        return prompt, session
-```
+Subclass `AgentLoop` and implement `prepare()` to construct the prompt and
+session for each request. Optionally override `finalize()` to post-process
+output (e.g., populate `HiddenInStructuredOutput` fields). Inject resources
+via `Prompt.bind(resources={...})` and register reducers on the session before
+returning.
 
-### With Resources
-
-```python
-def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
-    prompt = Prompt(self._template).bind(
-        ReviewParams.from_request(request),
-        resources={GitClient: GitClient(repo=request.repo_path)},
-    )
-    session = Session()
-    return prompt, session
-```
-
-### With Reducers
-
-```python
-session[Plan].register(SetupPlan, plan_reducer)
-```
-
-### With Progressive Disclosure
-
-Use `visibility=SectionVisibility.SUMMARY` on sections with `summary` text.
+Use `visibility=SectionVisibility.SUMMARY` on sections with `summary` text
+for progressive disclosure.
 
 ## Error Handling
 
@@ -136,33 +115,15 @@ Use `visibility=SectionVisibility.SUMMARY` on sections with `summary` text.
 
 ## Usage
 
-### Mailbox-Driven
+AgentLoop supports three execution modes:
 
-```python
-requests = InMemoryMailbox[AgentLoopRequest[MyRequest], AgentLoopResult](name="requests")
-loop = MyAgentLoop(adapter=adapter, requests=requests)
-
-# Client sends request
-requests.send(AgentLoopRequest(request=MyRequest(...)), reply_to=responses)
-
-# Start processing (blocking)
-loop.run()
-```
-
-### Direct
-
-```python
-response, session = loop.execute(MyRequest(...))
-```
-
-### With Debug Bundle
-
-```python
-with loop.execute_with_bundle(request, bundle_target=Path("./bundles")) as ctx:
-    score = compute_score(ctx.response.output)
-    ctx.write_metadata("eval", {"score": score})
-# Bundle is finalized on context exit
-```
+- **Mailbox-driven** (`loop.run()`): Long-running worker processing requests
+  from a `Mailbox`. Results sent via `msg.reply()`. See `MAILBOX.md`.
+- **Direct** (`loop.execute(request)`): Single synchronous execution returning
+  `(PromptResponse, Session)`.
+- **Bundled** (`loop.execute_with_bundle(...)`): Wraps execution with debug
+  bundle creation. The context manager provides `ctx.response` and
+  `ctx.write_metadata()` before the bundle is finalized on exit.
 
 ## Limitations
 

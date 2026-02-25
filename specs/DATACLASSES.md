@@ -33,13 +33,10 @@ For generic dataclasses, use generic alias syntax: `parse(Wrapper[Data], data)`.
 | `exclude_none` | `False` | Exclude None values |
 | `computed` | `False` | Include `__computed__` props |
 
-### clone
+### clone / schema
 
-Wraps `dataclasses.replace` with validation re-run.
-
-### schema
-
-Emits JSON Schema (inlined, no `$ref`).
+- `clone` — wraps `dataclasses.replace` with validation re-run
+- `schema` — emits JSON Schema (inlined, no `$ref`)
 
 ## Supported Types
 
@@ -63,17 +60,11 @@ Via `Annotated[..., {...}]` or `field(metadata=...)`:
 
 ## FrozenDataclass Decorator
 
-```python
-from weakincentives.dataclasses import FrozenDataclass
+`@FrozenDataclass()` at `src/weakincentives/dataclasses/__init__.py` applies
+`frozen=True, slots=True` by default.
 
-@FrozenDataclass()
-class User:
-    name: str
-```
-
-Defaults: `frozen=True`, `slots=True`
-
-### Pre-Construction Hook
+**`__pre_init__` hook** — a `@classmethod` that transforms raw kwargs before
+the frozen dataclass constructor runs. Useful for computing derived fields:
 
 ```python
 @FrozenDataclass()
@@ -88,7 +79,7 @@ class Order:
         return {"subtotal": subtotal, "tax": tax, "total": subtotal + tax}
 ```
 
-### Copy Helpers
+**Copy helpers** (all return new instances):
 
 | Method | Description |
 |--------|-------------|
@@ -96,33 +87,12 @@ class Order:
 | `merge(mapping)` | Merge from dict/object |
 | `map(transform)` | Transform via callable |
 
-All return new instances (immutable).
-
 ## Generic Dataclass Serialization
 
-Generic dataclasses like `Wrapper[T]` are parsed using **generic alias** syntax.
-The type arguments resolve TypeVar fields during parsing.
-
-```python
-@dataclass
-class Wrapper[T]:
-    payload: T
-
-@dataclass
-class Data:
-    value: int
-
-# Serialize - standard dump
-data = dump(Wrapper(payload=Data(1)))
-# {"payload": {"value": 1}}
-
-# Parse with generic alias to specify type parameter
-restored = parse(Wrapper[Data], data)
-assert isinstance(restored.payload, Data)
-```
-
-When parsing, TypeVar fields are resolved from the generic alias type arguments.
-Parsing without type arguments raises a helpful error guiding usage.
+Generic dataclasses are parsed using **generic alias** syntax so TypeVars
+resolve at parse time. `parse(Wrapper[Data], data)` correctly creates a
+`Wrapper` whose `payload` is typed as `Data`. Parsing without type arguments
+raises a helpful error.
 
 ## Scoped Field Visibility
 
@@ -130,74 +100,37 @@ Fields can be hidden from schema generation and parsing in specific contexts
 using scope-aware annotations. This enables post-processing patterns where
 certain fields are populated after LLM evaluation (e.g., in `finalize()`).
 
-### SerdeScope Enum
+### Why This Matters
+
+LLMs should not know about implementation fields like `processing_time_ms` or
+`model_version`. Without scoped visibility, these fields would appear in the
+JSON schema sent to the LLM, confusing it and wasting context. With scoped
+visibility, the LLM sees a clean schema while the full object (with populated
+hidden fields) is stored and logged.
+
+### SerdeScope
+
+Two scopes at `src/weakincentives/serde/_scope.py`:
+
+- `SerdeScope.DEFAULT` — standard serde, all fields visible
+- `SerdeScope.STRUCTURED_OUTPUT` — LLM schema/parsing context; hidden fields excluded
+
+### HiddenInStructuredOutput
+
+`Annotated[type, HiddenInStructuredOutput()]` excludes a field from schema
+generation and parsing when `scope=STRUCTURED_OUTPUT`. Hidden fields **must**
+have a default value since the LLM cannot provide them.
 
 ```python
-from weakincentives.serde import SerdeScope
-
-class SerdeScope(Enum):
-    DEFAULT = "default"                    # Standard serde, all fields visible
-    STRUCTURED_OUTPUT = "structured_output" # LLM schema/parsing context
-```
-
-### HiddenInStructuredOutput Marker
-
-Excludes a field from schema generation and parsing when `scope=STRUCTURED_OUTPUT`:
-
-```python
-from dataclasses import dataclass
-from typing import Annotated
-from weakincentives.serde import HiddenInStructuredOutput
-
 @dataclass
 class AnalysisResult:
     summary: str                                              # LLM generates
     confidence: float                                         # LLM generates
-
-    # Hidden from LLM schema - populated in finalize()
     processing_time_ms: Annotated[int, HiddenInStructuredOutput()] = 0
     model_version: Annotated[str, HiddenInStructuredOutput()] = ""
 ```
 
-**Marker definition:**
-
-```python
-@dataclass(frozen=True, slots=True)
-class HiddenInStructuredOutput:
-    """Exclude field from schema/parsing when scope is STRUCTURED_OUTPUT."""
-    pass
-```
-
-### Scope Parameter on schema() and parse()
-
-Both functions accept an optional `scope` parameter:
-
-```python
-# Schema generation with scope
-schema(AnalysisResult, scope=SerdeScope.STRUCTURED_OUTPUT)
-# Returns schema WITHOUT processing_time_ms and model_version
-
-schema(AnalysisResult, scope=SerdeScope.DEFAULT)
-# Returns schema WITH all fields (default behavior)
-
-# Parsing with scope
-parse(AnalysisResult, data, scope=SerdeScope.STRUCTURED_OUTPUT)
-# Ignores processing_time_ms and model_version in data, uses defaults
-
-parse(AnalysisResult, data, scope=SerdeScope.DEFAULT)
-# Parses all fields normally (default behavior)
-```
-
-| Function | Scope Parameter | Default |
-|----------|-----------------|---------|
-| `schema()` | `scope: SerdeScope` | `SerdeScope.DEFAULT` |
-| `parse()` | `scope: SerdeScope` | `SerdeScope.DEFAULT` |
-| `dump()` | None | Always includes all fields |
-| `clone()` | None | Uses `SerdeScope.DEFAULT` internally |
-
 ### Integration with Structured Output Pipeline
-
-The response parser uses `STRUCTURED_OUTPUT` scope automatically:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -221,62 +154,9 @@ The response parser uses `STRUCTURED_OUTPUT` scope automatically:
 
 ### finalize() Pattern
 
-Override `AgentLoop.finalize()` to populate hidden fields:
-
-```python
-from dataclasses import replace
-
-class MyAgentLoop(AgentLoop):
-    def finalize(
-        self,
-        prompt: Prompt[AnalysisResult],
-        session: Session,
-        output: AnalysisResult | None,
-    ) -> AnalysisResult | None:
-        if output is None:
-            return None
-
-        return replace(
-            output,
-            processing_time_ms=self._calculate_processing_time(),
-            model_version=self._get_model_version(),
-        )
-```
-
-### Default Value Requirements
-
-Hidden fields MUST have a default value or `default_factory` since the LLM
-cannot provide them:
-
-```python
-# ✓ Correct: has default
-processing_time_ms: Annotated[int, HiddenInStructuredOutput()] = 0
-
-# ✓ Correct: has default_factory
-metadata: Annotated[dict[str, str], HiddenInStructuredOutput()] = field(
-    default_factory=dict
-)
-
-# ✓ Correct: Optional with None default
-parent_id: Annotated[str | None, HiddenInStructuredOutput()] = None
-
-# ✗ Error: no default - would fail at parse time
-timestamp: Annotated[datetime, HiddenInStructuredOutput()]  # Missing required!
-```
-
-### Composability with Other Annotations
-
-`HiddenInStructuredOutput` composes with constraint metadata:
-
-```python
-@dataclass
-class Result:
-    # Hidden AND has constraints (constraints apply in finalize/manual parsing)
-    score: Annotated[int, HiddenInStructuredOutput(), {"ge": 0, "le": 100}] = 0
-
-    # Hidden AND has alias (alias used in DEFAULT scope parsing/dump)
-    internal_id: Annotated[str, HiddenInStructuredOutput(), {"alias": "id"}] = ""
-```
+Override `AgentLoop.finalize()` to populate hidden fields after LLM evaluation.
+See `src/weakincentives/runtime/agent_loop.py` for the base class and
+`AGENT_LOOP.md` for usage patterns.
 
 ### Serialization Behavior
 
@@ -289,68 +169,13 @@ class Result:
 | `dump()` | **Always included** |
 | `clone()` | Included (uses DEFAULT) |
 
-**Key:** `dump()` always serializes hidden fields. This ensures:
+`dump()` always serializes hidden fields to ensure logging and storage capture
+complete state.
 
-- Logging captures complete state
-- Storage/persistence includes all data
-- API responses can include computed fields
-
-### Nested Dataclass Handling
-
-Hidden fields with nested dataclass types exclude the entire subtree:
-
-```python
-@dataclass
-class Metadata:
-    timestamp: datetime
-    source: str
-
-@dataclass
-class Result:
-    content: str
-    # Entire Metadata schema excluded from STRUCTURED_OUTPUT
-    meta: Annotated[Metadata, HiddenInStructuredOutput()] = field(
-        default_factory=lambda: Metadata(datetime.now(), "system")
-    )
-```
-
-### Validation Considerations
-
-Validation hooks run after parsing. Hidden fields have defaults at parse time:
-
-```python
-@dataclass
-class Result:
-    value: int
-    computed: Annotated[int, HiddenInStructuredOutput()] = 0
-
-    def __post_validate__(self) -> None:
-        # At parse time (STRUCTURED_OUTPUT): computed == 0 (default)
-        # After finalize(): computed has real value
-        # Consider: validate in finalize() for hidden field constraints
-        pass
-```
-
-### Future Extensibility
-
-The scope mechanism supports future expansion:
-
-```python
-class SerdeScope(Enum):
-    DEFAULT = "default"
-    STRUCTURED_OUTPUT = "structured_output"
-    # Future scopes:
-    # API = "api"              # Public API serialization
-    # STORAGE = "storage"      # Database persistence
-    # DEBUG = "debug"          # Verbose debug output
-```
-
-A more general marker could support multiple scopes:
-
-```python
-# Future: hide in multiple specific scopes
-field: Annotated[T, HiddenInScope(SerdeScope.STRUCTURED_OUTPUT, SerdeScope.API)]
-```
+`HiddenInStructuredOutput` composes with other constraint annotations. Hidden
+fields with nested dataclass types exclude the entire subtree from
+`STRUCTURED_OUTPUT` scope. Validation hooks run after parsing; hidden fields
+have defaults at parse time and receive real values in `finalize()`.
 
 ## Limitations
 
@@ -358,5 +183,4 @@ field: Annotated[T, HiddenInScope(SerdeScope.STRUCTURED_OUTPUT, SerdeScope.API)]
 - No assignment-time validation
 - No external parsers
 - **No backward compatibility guarantee for persisted data.** This is alpha
-  software; serialization format may change between versions. Rehydrating
-  previously persisted snapshots after schema or serde changes is not supported.
+  software; serialization format may change between versions.

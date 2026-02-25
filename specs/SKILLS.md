@@ -148,87 +148,23 @@ mechanisms (e.g., `CODEX_HOME` for Codex, copied `~/.local/share/opencode/` and
 | `SkillValidationError` | Missing SKILL.md, invalid frontmatter, constraint violation |
 | `SkillMountError` | Invalid name format, duplicate names, I/O error, size exceeded |
 
-## Usage Examples
+## Usage
 
-### Attaching Skills to Sections
+Attach skills to sections via the `skills=` parameter (same pattern as tools):
 
 ```python
-from pathlib import Path
-from weakincentives.prompt import MarkdownSection, PromptTemplate
-from weakincentives.skills import SkillMount
-
-# Section with skills
-review_section = MarkdownSection(
+section = MarkdownSection(
     title="Code Review",
     key="code-review",
-    template="Review the following code for issues.",
-    skills=(
-        SkillMount(Path("./skills/code-review")),
-        SkillMount(Path("./skills/testing")),
-    ),
-)
-
-# Create prompt with the section
-template = PromptTemplate(
-    ns="demo",
-    key="reviewer",
-    sections=[review_section],
+    template="Review the code for issues.",
+    skills=(SkillMount(Path("./skills/code-review")),),
 )
 ```
 
-### Conditional Skills via Section Visibility
-
-Skills follow section visibility rules. Attach skills to sections with
-`visibility=SUMMARY` to defer skill loading until the section is expanded:
-
-```python
-from weakincentives.prompt import MarkdownSection, SectionVisibility
-from weakincentives.skills import SkillMount
-
-# Skills only loaded when section is expanded
-advanced_section = MarkdownSection(
-    title="Advanced Analysis",
-    key="advanced",
-    template="Perform deep code analysis.",
-    summary="Advanced analysis capabilities available on request.",
-    visibility=SectionVisibility.SUMMARY,
-    skills=(
-        SkillMount(Path("./skills/deep-analysis")),
-        SkillMount(Path("./skills/performance-profiling")),
-    ),
-)
-```
-
-### Auto-Discovery from Directory
-
-```python
-from pathlib import Path
-from weakincentives.skills import SkillMount
-
-SKILLS_ROOT = Path("./skills")
-
-skill_mounts = tuple(
-    SkillMount(source=skill_dir)
-    for skill_dir in SKILLS_ROOT.iterdir()
-    if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()
-)
-
-section = MarkdownSection(
-    title="Tasks",
-    key="tasks",
-    template="Complete the assigned tasks.",
-    skills=skill_mounts,
-)
-```
-
-### Name Override
-
-```python
-SkillMount(
-    source=Path("./internal/review-v2"),
-    name="code-review",  # Override derived name
-)
-```
+Skills follow section visibility rules — skills on `SUMMARY` sections are not
+collected until the section is expanded via progressive disclosure. An optional
+`name` parameter on `SkillMount` overrides the skill name derived from the
+directory or file stem.
 
 ## Security Considerations
 
