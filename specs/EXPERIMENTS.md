@@ -91,10 +91,9 @@ Includes `experiment_name` for downstream aggregation.
 
 1. Define a `BASELINE` experiment and one or more treatment `Experiment` instances
    with distinct names and `overrides_tag`/`flags`.
-2. Submit `EvalRequest(sample=sample, experiment=experiment)` for each
+1. Submit `EvalRequest(sample=sample, experiment=experiment)` for each
    (sample, experiment) pair to the mailbox.
-3. Collect results into an `EvalReport` and call `compare_experiments(baseline_name,
-   treatment_name)` for a statistical comparison.
+1. Collect results into an `EvalReport` and call `compare_experiments(baseline_name, treatment_name)` for a statistical comparison.
 
 See `src/weakincentives/evals/_types.py` for `EvalReport` and `ExperimentComparison`.
 

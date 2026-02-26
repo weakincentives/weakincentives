@@ -19,7 +19,7 @@ import re
 # discovery.
 import subprocess  # nosec B404
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
@@ -44,10 +44,12 @@ class OverrideFilesystem:
         *,
         explicit_root: Path | None,
         overrides_relative_path: Path,
+        _git_toplevel_fn: Callable[[], Path | None] | None = None,
     ) -> None:
         super().__init__()
         self._explicit_root = explicit_root
         self._overrides_relative_path = overrides_relative_path
+        self._git_toplevel_fn = _git_toplevel_fn
         self._root_lock = RLock()
         self._resolved_overrides_dir: Path | None = None
         self._path_locks: dict[Path, RLock] = {}
@@ -148,8 +150,9 @@ class OverrideFilesystem:
             for segment in segments
         )
 
-    @staticmethod
-    def _git_toplevel() -> Path | None:
+    def _git_toplevel(self) -> Path | None:
+        if self._git_toplevel_fn is not None:
+            return self._git_toplevel_fn()
         try:
             # Bandit false positive: git invocation uses explicit arguments.
             result = subprocess.run(  # nosec B603 B607

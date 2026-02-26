@@ -30,17 +30,16 @@ from weakincentives.adapters.throttle import (
 )
 
 
-def test_jittered_backoff_returns_retry_after(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "weakincentives.adapters.throttle.random.uniform", lambda _a, _b: 0.0
-    )
-
+def test_jittered_backoff_returns_retry_after() -> None:
     policy = new_throttle_policy(base_delay=timedelta(milliseconds=10))
     retry_after = timedelta(milliseconds=30)
 
-    delay = jittered_backoff(policy=policy, attempt=1, retry_after=retry_after)
+    delay = jittered_backoff(
+        policy=policy,
+        attempt=1,
+        retry_after=retry_after,
+        _uniform=lambda _a, _b: 0.0,
+    )
 
     assert delay == retry_after
 
@@ -56,34 +55,36 @@ def test_throttle_policy_validation() -> None:
         new_throttle_policy(max_total_delay=timedelta(0))
 
 
-def test_jittered_backoff_respects_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_jittered_backoff_respects_retry_after() -> None:
     policy = new_throttle_policy(
         base_delay=timedelta(seconds=1),
         max_delay=timedelta(seconds=4),
         max_total_delay=timedelta(seconds=10),
     )
-    monkeypatch.setattr(
-        "weakincentives.adapters.throttle.random.uniform", lambda _a, b: b
-    )
 
-    delay = jittered_backoff(policy=policy, attempt=2, retry_after=timedelta(seconds=2))
+    delay = jittered_backoff(
+        policy=policy,
+        attempt=2,
+        retry_after=timedelta(seconds=2),
+        _uniform=lambda _a, b: b,
+    )
 
     assert delay == timedelta(seconds=2)
 
 
-def test_jittered_backoff_clamps_to_retry_after(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_jittered_backoff_clamps_to_retry_after() -> None:
     policy = new_throttle_policy(
         base_delay=timedelta(seconds=1),
         max_delay=timedelta(seconds=4),
         max_total_delay=timedelta(seconds=10),
     )
-    monkeypatch.setattr(
-        "weakincentives.adapters.throttle.random.uniform", lambda _a, _b: 0
-    )
 
-    delay = jittered_backoff(policy=policy, attempt=2, retry_after=timedelta(seconds=1))
+    delay = jittered_backoff(
+        policy=policy,
+        attempt=2,
+        retry_after=timedelta(seconds=1),
+        _uniform=lambda _a, _b: 0,
+    )
 
     assert delay == timedelta(seconds=1)
 

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast, override
 
@@ -61,6 +62,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         *,
         root_path: str | Path | None = None,
         overrides_relative_path: str | Path = _DEFAULT_RELATIVE_PATH,
+        _git_toplevel_fn: Callable[[], Path | None] | None = None,
     ) -> None:
         super().__init__()
         explicit_root = Path(root_path).resolve() if root_path else None
@@ -68,6 +70,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         self._filesystem = OverrideFilesystem(
             explicit_root=explicit_root,
             overrides_relative_path=overrides_relative,
+            _git_toplevel_fn=_git_toplevel_fn,
         )
 
     @override
