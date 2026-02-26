@@ -30,7 +30,6 @@ from weakincentives.prompt.overrides import (
     SectionOverride,
     ToolOverride,
 )
-from weakincentives.prompt.overrides._fs import OverrideFilesystem
 from weakincentives.prompt.overrides.validation import (
     load_sections,
     load_tools,
@@ -193,10 +192,9 @@ def test_root_detection_manual_traversal(
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    monkeypatch.setattr(OverrideFilesystem, "_git_toplevel", lambda _self: None)
     monkeypatch.chdir(nested)
 
-    store = LocalPromptOverridesStore()
+    store = LocalPromptOverridesStore(_git_toplevel_fn=lambda: None)
     override = store.seed(prompt)
 
     section = descriptor.sections[0]

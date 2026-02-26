@@ -31,7 +31,6 @@ from weakincentives.prompt.overrides import (
     TaskExampleOverride,
     ToolOverride,
 )
-from weakincentives.prompt.overrides._fs import OverrideFilesystem
 from weakincentives.prompt.overrides.validation import (
     load_sections,
     seed_sections,
@@ -154,14 +153,9 @@ def test_root_detection_git_command_success(
 
     prompt = _build_prompt()
 
-    monkeypatch.setattr(
-        OverrideFilesystem,
-        "_git_toplevel",
-        lambda _self: repo_root,
-    )
     monkeypatch.chdir(nested)
 
-    store = LocalPromptOverridesStore()
+    store = LocalPromptOverridesStore(_git_toplevel_fn=lambda: repo_root)
     override = store.seed(prompt)
 
     assert override.sections
@@ -177,10 +171,9 @@ def test_root_detection_without_git_raises(
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    monkeypatch.setattr(OverrideFilesystem, "_git_toplevel", lambda _self: None)
     monkeypatch.chdir(nested)
 
-    store = LocalPromptOverridesStore()
+    store = LocalPromptOverridesStore(_git_toplevel_fn=lambda: None)
 
     with pytest.raises(PromptOverridesError):
         store.resolve(descriptor)
@@ -197,10 +190,9 @@ def test_git_toplevel_empty_output_falls_back(
 
     prompt = _build_prompt()
 
-    monkeypatch.setattr(OverrideFilesystem, "_git_toplevel", lambda _self: None)
     monkeypatch.chdir(nested)
 
-    store = LocalPromptOverridesStore()
+    store = LocalPromptOverridesStore(_git_toplevel_fn=lambda: None)
     store.seed(prompt)
 
     assert (repo_root / ".weakincentives" / "prompts").exists()

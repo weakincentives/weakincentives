@@ -89,9 +89,7 @@ def test_render_tool_payload_handles_bytes_and_sequences() -> None:
     assert "raw" in fallback_sequence
 
 
-def test_render_tool_payload_renders_nested_mappings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_render_tool_payload_renders_nested_mappings() -> None:
     nested = {
         "data": RenderableData(value="nested"),
         "bytes": b"blob",

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any, Literal
 
@@ -165,6 +166,7 @@ def jittered_backoff(
     policy: ThrottlePolicy,
     attempt: int,
     retry_after: timedelta | None,
+    _uniform: Callable[[float, float], float] = random.uniform,
 ) -> timedelta:
     """Calculate a jittered backoff delay based on policy and attempt number."""
     capped = min(policy.max_delay, policy.base_delay * 2 ** max(attempt - 1, 0))
@@ -172,7 +174,7 @@ def jittered_backoff(
     if base <= timedelta(0):
         return policy.base_delay
 
-    jitter_seconds = random.uniform(0, base.total_seconds())  # nosec B311
+    jitter_seconds = _uniform(0, base.total_seconds())  # nosec B311
     delay = timedelta(seconds=jitter_seconds)
     delay = max(delay, policy.base_delay)
     if retry_after is not None and delay < retry_after:
