@@ -20,7 +20,7 @@ All three mechanisms are declared on `PromptTemplate` alongside the tools they
 govern. This makes constraints a first-class part of the agent definition—
 versionable, reviewable, and portable across adapters.
 
----
+______________________________________________________________________
 
 ## Tool Policies
 
@@ -84,7 +84,7 @@ See `TOOLS.md` (Runtime Dispatch section) for the full dispatch sequence.
 - **Session-scoped**: No cross-session persistence
 - **No rollback notification**: Policies not notified on restore
 
----
+______________________________________________________________________
 
 ## Feedback Providers
 
@@ -206,7 +206,7 @@ current prompt via the `prompt_name` field.
 - **Synchronous**: Providers block tool completion briefly
 - **Text-based**: Agent interprets natural language
 
----
+______________________________________________________________________
 
 ## Task Completion Checking
 
@@ -287,7 +287,7 @@ or budget exhaustion, and composite checker logic (AND/OR). See `specs/ACK.md`.
 - **Fail-closed on missing filesystem**: If no filesystem in context and files
   are required, checker returns incomplete
 
----
+______________________________________________________________________
 
 ## Design Rationale
 
@@ -318,7 +318,7 @@ is silently dropped when multiple conditions are met simultaneously.
 When uncertain, deny. Agent reasons about why and adjusts. This prevents
 undetected violations of invariants and makes constraint enforcement observable.
 
----
+______________________________________________________________________
 
 ## Related Specifications
 
