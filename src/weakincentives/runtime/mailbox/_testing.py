@@ -167,7 +167,7 @@ class CollectingMailbox[T, R]:
         self._closed = True
 
 
-@dataclass
+@dataclass(slots=True)
 class FakeMailbox[T, R]:
     """Full in-memory implementation with controllable behavior for testing edge cases.
 

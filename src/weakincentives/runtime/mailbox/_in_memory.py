@@ -35,7 +35,7 @@ from ._types import (
 logger: StructuredLogger = get_logger(__name__, context={"component": "mailbox"})
 
 
-@dataclass
+@dataclass(slots=True)
 class _InFlightMessage[T, R]:
     """Internal tracking for messages that have been received but not acknowledged."""
 

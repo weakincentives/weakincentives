@@ -103,7 +103,7 @@ class BudgetExceededError(WinkError, RuntimeError):
         return f"Budget exceeded: {self.exceeded_dimension}"
 
 
-@dataclass
+@dataclass(slots=True)
 class BudgetTracker:
     """Tracks cumulative TokenUsage per evaluation against a Budget.
 

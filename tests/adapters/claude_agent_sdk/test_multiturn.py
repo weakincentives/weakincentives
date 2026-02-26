@@ -128,19 +128,17 @@ class TestMultiturnEdgeCases:
         from weakincentives.budget import Budget, BudgetExceededError, BudgetTracker
 
         budget = Budget(max_total_tokens=1000)
-        budget_tracker = BudgetTracker(budget)
-
         check_count = 0
-        original_check = budget_tracker.check
 
-        def mock_check() -> None:
-            nonlocal check_count
-            check_count += 1
-            if check_count > 1:
-                raise BudgetExceededError("Budget exceeded during continuation")
-            original_check()
+        class _CountingBudgetTracker(BudgetTracker):
+            def check(self) -> None:
+                nonlocal check_count
+                check_count += 1
+                if check_count > 1:
+                    raise BudgetExceededError("Budget exceeded during continuation")
+                super().check()
 
-        budget_tracker.check = mock_check  # type: ignore[method-assign]
+        budget_tracker = _CountingBudgetTracker(budget)
 
         class ForceContinuationChecker(TaskCompletionChecker):
             def __init__(self) -> None:

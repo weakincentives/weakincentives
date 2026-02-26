@@ -181,7 +181,7 @@ Tests can inject FakeClock instead for deterministic behavior.
 """
 
 
-@dataclass
+@dataclass(slots=True)
 class FakeClock:
     """Controllable clock for deterministic testing.
 
