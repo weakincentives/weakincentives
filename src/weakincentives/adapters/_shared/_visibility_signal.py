@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from threading import Lock
 
-from weakincentives.prompt import VisibilityExpansionRequired
+from ...prompt import VisibilityExpansionRequired
 
 
 @dataclass(slots=True)
