@@ -19,12 +19,13 @@ These types are used throughout the codebase for filesystem operations.
 from __future__ import annotations
 
 import fnmatch
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, Literal
 from uuid import UUID
 
 from ..clock import SYSTEM_CLOCK
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ._path import (
     MAX_PATH_DEPTH,
     MAX_SEGMENT_LENGTH,
@@ -49,8 +50,8 @@ WriteMode = Literal["create", "overwrite", "append"]
 # ---------------------------------------------------------------------------
 
 
-@FrozenDataclass()
-class FileStat:
+@dataclass(slots=True, frozen=True)
+class FileStat(FrozenDataclassMixin):
     """Metadata for a file or directory."""
 
     path: str
@@ -61,8 +62,8 @@ class FileStat:
     modified_at: datetime | None = None
 
 
-@FrozenDataclass()
-class FileEntry:
+@dataclass(slots=True, frozen=True)
+class FileEntry(FrozenDataclassMixin):
     """Directory listing entry."""
 
     name: str
@@ -71,16 +72,16 @@ class FileEntry:
     is_directory: bool
 
 
-@FrozenDataclass()
-class GlobMatch:
+@dataclass(slots=True, frozen=True)
+class GlobMatch(FrozenDataclassMixin):
     """Result from glob operations."""
 
     path: str
     is_file: bool
 
 
-@FrozenDataclass()
-class GrepMatch:
+@dataclass(slots=True, frozen=True)
+class GrepMatch(FrozenDataclassMixin):
     """Result from grep operations."""
 
     path: str
@@ -90,8 +91,8 @@ class GrepMatch:
     match_end: int
 
 
-@FrozenDataclass()
-class ReadResult:
+@dataclass(slots=True, frozen=True)
+class ReadResult(FrozenDataclassMixin):
     """Content returned from text read operations."""
 
     content: str
@@ -102,8 +103,8 @@ class ReadResult:
     truncated: bool
 
 
-@FrozenDataclass()
-class ReadBytesResult:
+@dataclass(slots=True, frozen=True)
+class ReadBytesResult(FrozenDataclassMixin):
     """Content returned from binary read operations."""
 
     content: bytes
@@ -114,8 +115,8 @@ class ReadBytesResult:
     truncated: bool
 
 
-@FrozenDataclass()
-class WriteResult:
+@dataclass(slots=True, frozen=True)
+class WriteResult(FrozenDataclassMixin):
     """Confirmation of a write operation."""
 
     path: str
@@ -123,8 +124,8 @@ class WriteResult:
     mode: WriteMode
 
 
-@FrozenDataclass()
-class FilesystemSnapshot:
+@dataclass(slots=True, frozen=True)
+class FilesystemSnapshot(FrozenDataclassMixin):
     """Immutable capture of filesystem state, storable in session.
 
     Snapshots capture the state of a workspace at a point in time, enabling

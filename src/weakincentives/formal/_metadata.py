@@ -17,13 +17,13 @@ Pure data types with no dependencies beyond the standard library.
 
 from __future__ import annotations
 
-from dataclasses import field
+from dataclasses import dataclass, field
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 
 
-@FrozenDataclass()
-class StateVar:
+@dataclass(slots=True, frozen=True)
+class StateVar(FrozenDataclassMixin):
     """TLA+ state variable metadata.
 
     Attributes:
@@ -39,8 +39,8 @@ class StateVar:
     initial_value: str | None = None
 
 
-@FrozenDataclass()
-class ActionParameter:
+@dataclass(slots=True, frozen=True)
+class ActionParameter(FrozenDataclassMixin):
     """TLA+ action parameter with domain.
 
     Attributes:
@@ -52,8 +52,8 @@ class ActionParameter:
     domain: str
 
 
-@FrozenDataclass()
-class Action:
+@dataclass(slots=True, frozen=True)
+class Action(FrozenDataclassMixin):
     """TLA+ action metadata.
 
     Attributes:
@@ -71,8 +71,8 @@ class Action:
     description: str = ""
 
 
-@FrozenDataclass()
-class Invariant:
+@dataclass(slots=True, frozen=True)
+class Invariant(FrozenDataclassMixin):
     """TLA+ invariant metadata.
 
     Attributes:

@@ -17,12 +17,12 @@ from __future__ import annotations
 import json
 import types
 from collections.abc import Mapping
-from dataclasses import field, is_dataclass
+from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from typing import TypeGuard, cast, override
 from uuid import UUID
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...errors import WinkError
 from ...serde import dump, parse, resolve_type_identifier, type_identifier
 from ...types import JSONValue
@@ -279,8 +279,8 @@ def _is_dataclass_type(value: object) -> TypeGuard[type[SupportsDataclass]]:
     return isinstance(value, type) and is_dataclass(value)
 
 
-@FrozenDataclass()
-class SnapshotSlicePayload:
+@dataclass(slots=True, frozen=True)
+class SnapshotSlicePayload(FrozenDataclassMixin):
     """Typed representation of a serialized snapshot slice entry."""
 
     slice_type: str
@@ -319,8 +319,8 @@ class SnapshotSlicePayload:
         )
 
 
-@FrozenDataclass()
-class SnapshotPayload:
+@dataclass(slots=True, frozen=True)
+class SnapshotPayload(FrozenDataclassMixin):
     """Typed representation of the serialized snapshot envelope."""
 
     version: str
@@ -344,8 +344,8 @@ class SnapshotPayload:
         return _construct_snapshot_payload(cls, payload)
 
 
-@FrozenDataclass()
-class Snapshot:
+@dataclass(slots=True, frozen=True)
+class Snapshot(FrozenDataclassMixin):
     """Frozen value object representing session slice state."""
 
     created_at: datetime

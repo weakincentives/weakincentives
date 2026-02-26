@@ -56,7 +56,7 @@ import logging
 import sys
 import textwrap
 import threading
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -81,7 +81,7 @@ from weakincentives.adapters.opencode_acp import (
     OpenCodeACPAdapterConfig,
     OpenCodeACPClientConfig,
 )
-from weakincentives.dataclasses import FrozenDataclass
+from weakincentives.dataclasses import FrozenDataclassMixin
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import BundleConfig
 from weakincentives.prompt import (
@@ -164,8 +164,8 @@ MAILBOX_VISIBILITY_TIMEOUT = 300
 # =============================================================================
 
 
-@FrozenDataclass()
-class ReviewRequest:
+@dataclass(slots=True, frozen=True)
+class ReviewRequest(FrozenDataclassMixin):
     """Input parameters for a code review request."""
 
     project_path: str = field(
@@ -177,8 +177,8 @@ class ReviewRequest:
     )
 
 
-@FrozenDataclass()
-class ReviewResponse:
+@dataclass(slots=True, frozen=True)
+class ReviewResponse(FrozenDataclassMixin):
     """Structured response from the code review agent."""
 
     summary: str = field(
@@ -198,8 +198,8 @@ class ReviewResponse:
     )
 
 
-@FrozenDataclass()
-class ReviewParams:
+@dataclass(slots=True, frozen=True)
+class ReviewParams(FrozenDataclassMixin):
     """Parameters for the review prompt template."""
 
     focus: str = field(metadata={"description": "What to focus on in the review."})

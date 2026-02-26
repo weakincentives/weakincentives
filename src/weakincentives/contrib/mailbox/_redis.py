@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any, cast, get_origin
 from uuid import uuid4
 
 from weakincentives.clock import SYSTEM_CLOCK, MonotonicClock, Sleeper
-from weakincentives.dataclasses import FrozenDataclass
+from weakincentives.dataclasses import FrozenDataclassMixin
 from weakincentives.formal import formal_spec
 from weakincentives.runtime.mailbox import (
     CompositeResolver,
@@ -82,8 +82,8 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_TTL_SECONDS: int = 259200  # 3 days = 3 * 24 * 60 * 60
 
 
-@FrozenDataclass()
-class _QueueKeys:
+@dataclass(slots=True, frozen=True)
+class _QueueKeys(FrozenDataclassMixin):
     """Redis keys for a named queue with hash tags for cluster compatibility."""
 
     pending: str

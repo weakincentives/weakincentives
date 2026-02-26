@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...budget import TokenUsage
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...types import AdapterName
 from ..run_context import RunContext
 
@@ -64,8 +64,8 @@ type TelemetryDispatcher = Dispatcher
 """Dispatcher used for session telemetry and adapter observability events."""
 
 
-@FrozenDataclass()
-class HandlerFailure:
+@dataclass(slots=True, frozen=True)
+class HandlerFailure(FrozenDataclassMixin):
     """Container describing a handler error captured during dispatch."""
 
     handler: EventHandler
@@ -76,8 +76,8 @@ class HandlerFailure:
         return f"{self.handler!r} -> {self.error!r}"
 
 
-@FrozenDataclass()
-class DispatchResult:
+@dataclass(slots=True, frozen=True)
+class DispatchResult(FrozenDataclassMixin):
     """Summary of an event dispatch invocation."""
 
     event: object
@@ -108,8 +108,8 @@ class DispatchResult:
         )
 
 
-@FrozenDataclass()
-class ToolInvoked:
+@dataclass(slots=True, frozen=True)
+class ToolInvoked(FrozenDataclassMixin):
     """Event emitted after an adapter executes a tool handler."""
 
     prompt_name: str

@@ -14,10 +14,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 from typing import Annotated, get_args, get_origin
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 
 
 class SerdeScope(Enum):
@@ -34,8 +35,8 @@ class SerdeScope(Enum):
     """LLM structured output context - hidden fields excluded."""
 
 
-@FrozenDataclass()
-class HiddenInStructuredOutput:
+@dataclass(slots=True, frozen=True)
+class HiddenInStructuredOutput(FrozenDataclassMixin):
     """Marker to exclude a field from schema/parsing in STRUCTURED_OUTPUT scope.
 
     Use with ``Annotated`` to mark fields that should not be included in

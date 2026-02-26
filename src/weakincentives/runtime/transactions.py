@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID, uuid4
 
 from ..clock import SYSTEM_CLOCK
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..errors import RestoreFailedError
 from ..serde import dump, parse, resolve_type_identifier, type_identifier
 from ..types import JSONValue
@@ -64,8 +64,8 @@ if TYPE_CHECKING:
 COMPOSITE_SNAPSHOT_SCHEMA_VERSION = "1"
 
 
-@FrozenDataclass()
-class SnapshotMetadata:
+@dataclass(slots=True, frozen=True)
+class SnapshotMetadata(FrozenDataclassMixin):
     """Context for when and why a snapshot was taken.
 
     SnapshotMetadata captures the circumstances around a snapshot creation,
@@ -85,8 +85,8 @@ class SnapshotMetadata:
     phase: Literal["pre_tool", "post_tool", "manual"] = "manual"
 
 
-@FrozenDataclass()
-class CompositeSnapshot:
+@dataclass(slots=True, frozen=True)
+class CompositeSnapshot(FrozenDataclassMixin):
     """Consistent snapshot of session and snapshotable resources.
 
     CompositeSnapshot captures a point-in-time view of session slices and all
@@ -334,8 +334,8 @@ def _parse_snapshot_metadata(
     )
 
 
-@FrozenDataclass()
-class PendingToolExecution:
+@dataclass(slots=True, frozen=True)
+class PendingToolExecution(FrozenDataclassMixin):
     """Metadata for an in-flight native tool execution.
 
     Stored by PendingToolTracker between begin_tool_execution()

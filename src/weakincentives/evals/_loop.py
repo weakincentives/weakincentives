@@ -20,10 +20,11 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, override
 
 from ..clock import SYSTEM_CLOCK, MonotonicClock
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..debug.bundle import BundleConfig
 from ..runtime.dlq import DeadLetter, DLQPolicy
 from ..runtime.lease_extender import LeaseExtenderConfig
@@ -43,8 +44,8 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-@FrozenDataclass()
-class EvalLoopConfig:
+@dataclass(slots=True, frozen=True)
+class EvalLoopConfig(FrozenDataclassMixin):
     """Configuration for EvalLoop execution defaults.
 
     The ``lease_extender`` field controls automatic message visibility extension

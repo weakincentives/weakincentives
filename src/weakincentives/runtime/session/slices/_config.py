@@ -14,14 +14,16 @@
 
 from __future__ import annotations
 
-from ....dataclasses import FrozenDataclass
+from dataclasses import dataclass
+
+from ....dataclasses import FrozenDataclassMixin
 from ..slice_policy import SlicePolicy
 from ._memory import MemorySliceFactory
 from ._protocols import SliceFactory
 
 
-@FrozenDataclass()
-class SliceFactoryConfig:
+@dataclass(slots=True, frozen=True)
+class SliceFactoryConfig(FrozenDataclassMixin):
     """Configuration mapping slice policies to factories.
 
     Allows different storage backends for STATE vs LOG slices:

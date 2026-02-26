@@ -54,10 +54,10 @@ Example::
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import is_dataclass
+from dataclasses import dataclass, is_dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...types.dataclass import SupportsDataclass
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .slices import Replace, SliceOp, SliceView
@@ -69,8 +69,8 @@ if TYPE_CHECKING:
 _REDUCER_META = "__wink_reducer_meta__"
 
 
-@FrozenDataclass()
-class ReducerMeta:
+@dataclass(slots=True, frozen=True)
+class ReducerMeta(FrozenDataclassMixin):
     """Metadata for a reducer method."""
 
     event_type: type[SupportsDataclass]

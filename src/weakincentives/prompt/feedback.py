@@ -47,12 +47,12 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import field, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from ..clock import SYSTEM_CLOCK
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 
 if TYPE_CHECKING:
     from ..deadlines import Deadline
@@ -78,8 +78,8 @@ def _utcnow() -> datetime:
 # ---------------------------------------------------------------------------
 
 
-@FrozenDataclass()
-class Observation:
+@dataclass(slots=True, frozen=True)
+class Observation(FrozenDataclassMixin):
     """A single observation about the agent's behavior or trajectory.
 
     Observations provide structured evidence for feedback. Each observation
@@ -97,8 +97,8 @@ class Observation:
     evidence: str | None = None
 
 
-@FrozenDataclass()
-class Feedback:
+@dataclass(slots=True, frozen=True)
+class Feedback(FrozenDataclassMixin):
     """Structured feedback produced by a feedback provider.
 
     Feedback is delivered immediately to the agent via the adapter's hook
@@ -154,8 +154,8 @@ class Feedback:
 # ---------------------------------------------------------------------------
 
 
-@FrozenDataclass()
-class FeedbackContext:
+@dataclass(slots=True, frozen=True)
+class FeedbackContext(FrozenDataclassMixin):
     """Context provided to feedback providers.
 
     Provides access to session state, prompt resources, and helper methods
@@ -371,8 +371,8 @@ class FeedbackProvider(Protocol):
 # ---------------------------------------------------------------------------
 
 
-@FrozenDataclass()
-class FileCreatedTrigger:
+@dataclass(slots=True, frozen=True)
+class FileCreatedTrigger(FrozenDataclassMixin):
     """Trigger that fires once when a specified file is created.
 
     Checks filesystem state after each tool call. When the file exists and
@@ -391,8 +391,8 @@ class FileCreatedTrigger:
     filename: str
 
 
-@FrozenDataclass()
-class FileCreatedTriggerState:
+@dataclass(slots=True, frozen=True)
+class FileCreatedTriggerState(FrozenDataclassMixin):
     """Tracks which file creation triggers have fired.
 
     This dataclass is stored in a session slice to track trigger state
@@ -402,8 +402,8 @@ class FileCreatedTriggerState:
     fired_filenames: frozenset[str] = frozenset()
 
 
-@FrozenDataclass()
-class FeedbackTrigger:
+@dataclass(slots=True, frozen=True)
+class FeedbackTrigger(FrozenDataclassMixin):
     """Conditions that determine when a feedback provider runs.
 
     Trigger conditions are OR'd together: if any condition is met, the
@@ -430,8 +430,8 @@ class FeedbackTrigger:
     on_file_created: FileCreatedTrigger | None = None
 
 
-@FrozenDataclass()
-class FeedbackProviderConfig:
+@dataclass(slots=True, frozen=True)
+class FeedbackProviderConfig(FrozenDataclassMixin):
     """Configuration pairing a feedback provider with its trigger.
 
     Attributes:

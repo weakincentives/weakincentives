@@ -15,12 +15,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import _MISSING_TYPE, MISSING, FrozenInstanceError, field
+from dataclasses import _MISSING_TYPE, MISSING, FrozenInstanceError, dataclass, field
 from typing import ClassVar, Protocol, Self, cast
 
 import pytest
 
-from weakincentives.dataclasses import FrozenDataclass
+from weakincentives.dataclasses import FrozenDataclassMixin, pre_init
 
 pytestmark = pytest.mark.core
 
@@ -40,8 +40,9 @@ class HasFrozenOps(Protocol):
 
 
 def test_pre_init_shapes_inputs_and_runs_post_init() -> None:
-    @FrozenDataclass()
-    class Invoice:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class Invoice(FrozenDataclassMixin):
         total_cents: int
         tax_rate: float
         tax_cents: int | None = None
@@ -99,8 +100,9 @@ def test_pre_init_shapes_inputs_and_runs_post_init() -> None:
 
 
 def test_pre_init_validates_field_coverage() -> None:
-    @FrozenDataclass()
-    class Example:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class Example(FrozenDataclassMixin):
         value: int
 
         @classmethod
@@ -110,8 +112,9 @@ def test_pre_init_validates_field_coverage() -> None:
     with pytest.raises(TypeError):
         Example(value=1)
 
-    @FrozenDataclass()
-    class Extra:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class Extra(FrozenDataclassMixin):
         value: int
 
         @classmethod
@@ -123,8 +126,9 @@ def test_pre_init_validates_field_coverage() -> None:
 
 
 def test_copy_helpers_skip_pre_init_and_support_mapping_and_objects() -> None:
-    @FrozenDataclass()
-    class Tracker:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class Tracker(FrozenDataclassMixin):
         calls: ClassVar[list[str]] = []
         value: int
         label: str = field(default="base")
@@ -166,8 +170,9 @@ def test_copy_helpers_skip_pre_init_and_support_mapping_and_objects() -> None:
 
 
 def test_pre_init_validates_inputs_and_defaults() -> None:
-    @FrozenDataclass()
-    class Sample:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class Sample(FrozenDataclassMixin):
         value: int
 
         @classmethod
@@ -180,8 +185,9 @@ def test_pre_init_validates_inputs_and_defaults() -> None:
     with pytest.raises(TypeError):
         Sample(value=1, extra=2)  # type: ignore[call-arg]
 
-    @FrozenDataclass()
-    class WithDefaults:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class WithDefaults(FrozenDataclassMixin):
         items: list[int] = field(default_factory=lambda: [1])
 
         @classmethod
@@ -191,8 +197,9 @@ def test_pre_init_validates_inputs_and_defaults() -> None:
     with_defaults = WithDefaults()
     assert with_defaults.items == [1]
 
-    @FrozenDataclass()
-    class BadReturn:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class BadReturn(FrozenDataclassMixin):
         value: int
 
         @classmethod
@@ -202,8 +209,9 @@ def test_pre_init_validates_inputs_and_defaults() -> None:
     with pytest.raises(TypeError):
         BadReturn(value=1)
 
-    @FrozenDataclass()
-    class Partial:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class Partial(FrozenDataclassMixin):
         required: int
         derived: int
 
@@ -223,8 +231,9 @@ def test_pre_init_validates_inputs_and_defaults() -> None:
 
 
 def test_merge_requires_source_fields() -> None:
-    @FrozenDataclass()
-    class Target:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class Target(FrozenDataclassMixin):
         value: int
 
         @classmethod
@@ -240,8 +249,8 @@ def test_merge_requires_source_fields() -> None:
 def test_merge_with_partial_object_attributes() -> None:
     """Objects only need matching attributes, not all fields."""
 
-    @FrozenDataclass()
-    class Multi:
+    @dataclass(slots=True, frozen=True)
+    class Multi(FrozenDataclassMixin):
         a: int
         b: int
         c: int
@@ -260,8 +269,8 @@ def test_merge_with_partial_object_attributes() -> None:
 def test_frozen_dataclass_without_pre_init() -> None:
     """Classes without __pre_init__ work normally."""
 
-    @FrozenDataclass()
-    class Simple:
+    @dataclass(slots=True, frozen=True)
+    class Simple(FrozenDataclassMixin):
         value: int
         label: str = "default"
 
@@ -281,8 +290,8 @@ def test_frozen_dataclass_without_pre_init() -> None:
 
 
 def test_update_rejects_unknown_fields() -> None:
-    @FrozenDataclass()
-    class Target:
+    @dataclass(slots=True, frozen=True)
+    class Target(FrozenDataclassMixin):
         value: int
 
     target = cast(HasFrozenOps, Target(1))
@@ -292,8 +301,9 @@ def test_update_rejects_unknown_fields() -> None:
 
 
 def test_pre_init_with_positional_args() -> None:
-    @FrozenDataclass()
-    class Positional:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class Positional(FrozenDataclassMixin):
         a: int
         b: str
         c: float = 1.5
@@ -320,14 +330,16 @@ def test_pre_init_with_positional_args() -> None:
 def test_dataclass_options_passthrough() -> None:
     """Custom dataclass options are respected."""
 
-    @FrozenDataclass(frozen=False, slots=False, order=True)
-    class Mutable:
+    @dataclass(slots=False, frozen=False, order=True)
+    class Mutable(FrozenDataclassMixin):
         value: int
 
     m = Mutable(1)
     m.value = 2
     assert m.value == 2
-    assert not hasattr(m, "__slots__")
+    assert (
+        "__slots__" not in type(m).__dict__
+    )  # slots=False: class has no own __slots__
 
     # Order should work
     assert Mutable(1) < Mutable(2)  # type: ignore[operator]
@@ -344,8 +356,9 @@ class _WithDerivedOps(Protocol):
 def test_copy_helpers_reject_changes_to_non_init_fields() -> None:
     """Copy helpers reject attempts to change derived (non-init) fields."""
 
-    @FrozenDataclass()
-    class WithDerived:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class WithDerived(FrozenDataclassMixin):
         value: int
         derived: int = field(init=False, default=0)
 
@@ -367,8 +380,9 @@ def test_copy_helpers_reject_changes_to_non_init_fields() -> None:
 def test_copy_helpers_recompute_derived_fields() -> None:
     """Copy helpers recompute non-init fields via __pre_init__."""
 
-    @FrozenDataclass()
-    class WithDerived:
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class WithDerived(FrozenDataclassMixin):
         value: int
         derived: int = field(init=False, default=0)
 

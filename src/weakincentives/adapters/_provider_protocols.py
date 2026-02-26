@@ -15,9 +15,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 
 __all__ = [
     "ProviderChoice",
@@ -85,24 +86,24 @@ class ProviderCompletionCallable(Protocol):
     ) -> ProviderCompletionResponse: ...
 
 
-@FrozenDataclass()
-class ProviderFunctionCallData:
+@dataclass(slots=True, frozen=True)
+class ProviderFunctionCallData(FrozenDataclassMixin):
     """Dataclass implementation of ``ProviderFunctionCall``."""
 
     name: str
     arguments: str | None
 
 
-@FrozenDataclass()
-class ProviderToolCallData:
+@dataclass(slots=True, frozen=True)
+class ProviderToolCallData(FrozenDataclassMixin):
     """Dataclass implementation of ``ProviderToolCall``."""
 
     function: ProviderFunctionCallData
     id: str | None = None
 
 
-@FrozenDataclass()
-class ProviderMessageData:
+@dataclass(slots=True, frozen=True)
+class ProviderMessageData(FrozenDataclassMixin):
     """Dataclass implementation of ``ProviderMessage``."""
 
     content: str | Sequence[object] | None
@@ -110,8 +111,8 @@ class ProviderMessageData:
     parsed: object | None = None
 
 
-@FrozenDataclass()
-class ProviderChoiceData:
+@dataclass(slots=True, frozen=True)
+class ProviderChoiceData(FrozenDataclassMixin):
     """Dataclass implementation of ``ProviderChoice``."""
 
     message: ProviderMessageData | None = None

@@ -37,8 +37,8 @@ contrib
     - ``contrib.tools``: Workspace digest tools
 
 dataclasses
-    Enhanced frozen dataclass decorator (``FrozenDataclass``) with copy helpers
-    (``update()``, ``merge()``, ``map()``) and ``__pre_init__`` support.
+    Enhanced frozen dataclass mixin (``FrozenDataclassMixin``) with copy helpers
+    (``update()``, ``merge()``, ``map()``) and ``pre_init`` decorator support.
 
 dbc
     Design-by-contract decorators for runtime validation:
@@ -160,7 +160,8 @@ Logging
 Dataclasses and Types
 ~~~~~~~~~~~~~~~~~~~~~
 
-- ``FrozenDataclass``: Decorator for frozen, slotted dataclasses with helpers
+- ``FrozenDataclassMixin``: Mixin for frozen dataclasses with update/merge/map helpers
+- ``pre_init``: Decorator enabling ``__pre_init__`` input normalization hook
 - ``PromptResponse``: Response from adapter prompt evaluation
 - ``JSONValue``: Union type for JSON-compatible values
 - ``SupportsDataclass``: Protocol for dataclass-like objects
@@ -250,7 +251,7 @@ from .clock import (
     SystemClock,
     WallClock,
 )
-from .dataclasses import FrozenDataclass
+from .dataclasses import FrozenDataclassMixin, pre_init
 from .deadlines import Deadline
 from .errors import DeadlineExceededError, ToolValidationError, WinkError
 from .prompt import (
@@ -283,7 +284,7 @@ __all__ = [
     "Deadline",
     "DeadlineExceededError",
     "FakeClock",
-    "FrozenDataclass",
+    "FrozenDataclassMixin",
     "JSONValue",
     "MarkdownSection",
     "MonotonicClock",
@@ -309,6 +310,7 @@ __all__ = [
     "configure_logging",
     "get_logger",
     "parse_structured_output",
+    "pre_init",
 ]
 
 

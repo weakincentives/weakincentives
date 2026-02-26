@@ -15,11 +15,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, MutableMapping
-from dataclasses import field, is_dataclass, replace
+from dataclasses import dataclass, field, is_dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, cast, override
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..deadlines import Deadline
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import (
@@ -51,8 +51,8 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "prompt"})
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
 
 
-@FrozenDataclass()
-class RenderedPrompt[OutputT_co]:
+@dataclass(slots=True, frozen=True)
+class RenderedPrompt[OutputT_co](FrozenDataclassMixin):
     """Rendered prompt text paired with structured output metadata."""
 
     text: str

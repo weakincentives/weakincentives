@@ -130,13 +130,13 @@ Exports
 
 from __future__ import annotations
 
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import datetime
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...types import AdapterName
 from ..logging import StructuredLogger, get_logger
 from ..run_context import RunContext
@@ -221,8 +221,8 @@ class InProcessDispatcher:
         )
 
 
-@FrozenDataclass()
-class PromptExecuted:
+@dataclass(slots=True, frozen=True)
+class PromptExecuted(FrozenDataclassMixin):
     """Event emitted after an adapter finishes evaluating a prompt."""
 
     prompt_name: str
@@ -235,8 +235,8 @@ class PromptExecuted:
     event_id: UUID = field(default_factory=uuid4)
 
 
-@FrozenDataclass()
-class PromptRendered:
+@dataclass(slots=True, frozen=True)
+class PromptRendered(FrozenDataclassMixin):
     """Event emitted immediately before dispatching a rendered prompt."""
 
     prompt_ns: str

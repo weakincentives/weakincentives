@@ -27,7 +27,7 @@ from ...adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
 )
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...prompt import MarkdownSection, Prompt, PromptTemplate, WorkspaceSection
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
@@ -49,16 +49,16 @@ _LOGGER: StructuredLogger = get_logger(
 )
 
 
-@FrozenDataclass()
-class _DigestResponse:
+@dataclass(slots=True, frozen=True)
+class _DigestResponse(FrozenDataclassMixin):
     """Structured response from the workspace digest generation prompt."""
 
     summary: str
     digest: str
 
 
-@FrozenDataclass()
-class WorkspaceDigestResult:
+@dataclass(slots=True, frozen=True)
+class WorkspaceDigestResult(FrozenDataclassMixin):
     """Result of workspace digest optimization.
 
     Attributes:

@@ -14,17 +14,17 @@
 
 from __future__ import annotations
 
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from .clock import SYSTEM_CLOCK, WallClock
-from .dataclasses import FrozenDataclass
+from .dataclasses import FrozenDataclassMixin
 
 __all__ = ["Deadline"]
 
 
-@FrozenDataclass()
-class Deadline:
+@dataclass(slots=True, frozen=True)
+class Deadline(FrozenDataclassMixin):
     """Immutable value object describing a wall-clock expiration.
 
     Example::

@@ -20,10 +20,10 @@ user-provided visibility selector or constant.
 
 from __future__ import annotations
 
-from dataclasses import field, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...prompt.errors import SectionPath, SectionVisibility
 from .slices import Replace
 from .state_slice import reducer
@@ -34,8 +34,8 @@ if TYPE_CHECKING:
     from .protocols import SessionProtocol
 
 
-@FrozenDataclass()
-class SetVisibilityOverride:
+@dataclass(slots=True, frozen=True)
+class SetVisibilityOverride(FrozenDataclassMixin):
     """Event to set a visibility override for a section path."""
 
     path: SectionPath = field(
@@ -46,8 +46,8 @@ class SetVisibilityOverride:
     )
 
 
-@FrozenDataclass()
-class ClearVisibilityOverride:
+@dataclass(slots=True, frozen=True)
+class ClearVisibilityOverride(FrozenDataclassMixin):
     """Event to clear a visibility override for a section path."""
 
     path: SectionPath = field(
@@ -55,13 +55,13 @@ class ClearVisibilityOverride:
     )
 
 
-@FrozenDataclass()
-class ClearAllVisibilityOverrides:
+@dataclass(slots=True, frozen=True)
+class ClearAllVisibilityOverrides(FrozenDataclassMixin):
     """Event to clear all visibility overrides."""
 
 
-@FrozenDataclass()
-class VisibilityOverrides:
+@dataclass(slots=True, frozen=True)
+class VisibilityOverrides(FrozenDataclassMixin):
     """Session state slice for section visibility overrides.
 
     Store this in session state to control section visibility dynamically

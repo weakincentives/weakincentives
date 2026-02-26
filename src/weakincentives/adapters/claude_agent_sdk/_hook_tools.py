@@ -19,6 +19,7 @@ tool transaction management, event dispatch, and feedback collection.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -31,7 +32,7 @@ from claude_agent_sdk.types import (
 
 from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...deadlines import Deadline
 from ...prompt.feedback import collect_feedback
 from ...runtime.events.types import ToolInvoked
@@ -182,8 +183,8 @@ def _setup_tool_execution_state(
         )
 
 
-@FrozenDataclass()
-class _ParsedToolData:
+@dataclass(slots=True, frozen=True)
+class _ParsedToolData(FrozenDataclassMixin):
     """Parsed tool data from PostToolUse hook input."""
 
     tool_name: str

@@ -14,14 +14,14 @@
 
 from __future__ import annotations
 
-from dataclasses import field
+from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 
 
-@FrozenDataclass()
-class RunContext:
+@dataclass(slots=True, frozen=True)
+class RunContext(FrozenDataclassMixin):
     """Immutable context capturing execution metadata for a single request run.
 
     RunContext provides correlation identifiers and execution metadata

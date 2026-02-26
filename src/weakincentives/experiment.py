@@ -15,16 +15,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import field, replace
+from dataclasses import dataclass, field, replace
 from typing import TypeVar, overload
 
-from .dataclasses import FrozenDataclass
+from .dataclasses import FrozenDataclassMixin
 
 T = TypeVar("T")
 
 
-@FrozenDataclass()
-class Experiment:
+@dataclass(slots=True, frozen=True)
+class Experiment(FrozenDataclassMixin):
     """Named configuration variant for systematic evaluation.
 
     Bundles a prompt overrides tag with feature flags, enabling coordinated

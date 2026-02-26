@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 
 if TYPE_CHECKING:
     from ..runtime.session import SessionProtocol, SessionViewProtocol
@@ -32,8 +32,8 @@ from ..experiment import Experiment
 from ..serde import parse
 
 
-@FrozenDataclass()
-class Sample[InputT, ExpectedT]:
+@dataclass(slots=True, frozen=True)
+class Sample[InputT, ExpectedT](FrozenDataclassMixin):
     """Single evaluation input.
 
     Pairs an input with its expected output for evaluation.
@@ -52,8 +52,8 @@ class Sample[InputT, ExpectedT]:
     """The expected output to compare against."""
 
 
-@FrozenDataclass()
-class Score:
+@dataclass(slots=True, frozen=True)
+class Score(FrozenDataclassMixin):
     """Result of scoring one output.
 
     The ``value`` field enables ranking and aggregation (0.0 to 1.0 normalized).
@@ -120,8 +120,8 @@ def _coerce[T](value: object, target: type[T]) -> T:
     raise TypeError(msg)
 
 
-@FrozenDataclass()
-class Dataset[InputT, ExpectedT]:
+@dataclass(slots=True, frozen=True)
+class Dataset[InputT, ExpectedT](FrozenDataclassMixin):
     """Immutable collection of evaluation samples.
 
     Provides a clean API for loading and accessing evaluation data.
@@ -186,8 +186,8 @@ class Dataset[InputT, ExpectedT]:
         return Dataset(samples=tuple(samples))
 
 
-@FrozenDataclass()
-class EvalResult:
+@dataclass(slots=True, frozen=True)
+class EvalResult(FrozenDataclassMixin):
     """Result for one sample under an experiment.
 
     Captures the score, latency, experiment name, and any error that occurred
@@ -226,8 +226,8 @@ class EvalResult:
         return self.error is None
 
 
-@FrozenDataclass()
-class ExperimentComparison:
+@dataclass(slots=True, frozen=True)
+class ExperimentComparison(FrozenDataclassMixin):
     """Statistical comparison between two experiments.
 
     Provides metrics for comparing a treatment experiment against a baseline.
@@ -278,8 +278,8 @@ class ExperimentComparison:
         return self.pass_rate_delta / self.baseline_pass_rate
 
 
-@FrozenDataclass()
-class EvalReport:
+@dataclass(slots=True, frozen=True)
+class EvalReport(FrozenDataclassMixin):
     """Aggregate evaluation results with computed metrics and experiment breakdown.
 
     Provides properties for pass rate, mean score, mean latency,
@@ -420,8 +420,8 @@ class EvalReport:
         )
 
 
-@FrozenDataclass()
-class EvalRequest[InputT, ExpectedT]:
+@dataclass(slots=True, frozen=True)
+class EvalRequest[InputT, ExpectedT](FrozenDataclassMixin):
     """Request to evaluate a sample under an experiment.
 
     Wraps a sample with an experiment configuration for evaluation.

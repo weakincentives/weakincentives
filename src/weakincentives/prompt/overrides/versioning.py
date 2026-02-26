@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import field
+from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Literal, Protocol, Self, cast, overload
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...dbc import require
 from ...errors import WinkError
 from ...serde.schema import schema
@@ -127,8 +127,8 @@ def ensure_hex_digest(value: object, *, field_name: str) -> HexDigest:
     raise PromptOverridesError(msg)
 
 
-@FrozenDataclass()
-class SectionDescriptor:
+@dataclass(slots=True, frozen=True)
+class SectionDescriptor(FrozenDataclassMixin):
     """Hash metadata for a single section within a prompt."""
 
     path: tuple[str, ...]
@@ -136,8 +136,8 @@ class SectionDescriptor:
     number: str
 
 
-@FrozenDataclass()
-class ToolDescriptor:
+@dataclass(slots=True, frozen=True)
+class ToolDescriptor(FrozenDataclassMixin):
     """Stable metadata describing a tool exposed by a prompt."""
 
     path: tuple[str, ...]
@@ -146,8 +146,8 @@ class ToolDescriptor:
     example_hashes: tuple[HexDigest, ...] = ()
 
 
-@FrozenDataclass()
-class TaskExampleDescriptor:
+@dataclass(slots=True, frozen=True)
+class TaskExampleDescriptor(FrozenDataclassMixin):
     """Metadata describing a task example within a section."""
 
     path: tuple[str, ...]
@@ -155,8 +155,8 @@ class TaskExampleDescriptor:
     content_hash: HexDigest
 
 
-@FrozenDataclass()
-class PromptDescriptor:
+@dataclass(slots=True, frozen=True)
+class PromptDescriptor(FrozenDataclassMixin):
     """Stable metadata describing a prompt and its hash-aware sections."""
 
     ns: str
@@ -219,8 +219,8 @@ def descriptor_for_prompt(prompt: PromptLike) -> PromptDescriptor:
     return PromptDescriptor.from_prompt(prompt)
 
 
-@FrozenDataclass()
-class SectionOverride:
+@dataclass(slots=True, frozen=True)
+class SectionOverride(FrozenDataclassMixin):
     """Override payload for a prompt section validated by hash.
 
     Attributes:
@@ -238,8 +238,8 @@ class SectionOverride:
     visibility: Literal["full", "summary"] | None = None
 
 
-@FrozenDataclass()
-class ToolExampleOverride:
+@dataclass(slots=True, frozen=True)
+class ToolExampleOverride(FrozenDataclassMixin):
     """Override for a single tool example."""
 
     index: int  # Original index, or -1 for append
@@ -250,8 +250,8 @@ class ToolExampleOverride:
     output_json: str | None = None  # JSON-serialized result
 
 
-@FrozenDataclass()
-class ToolOverride:
+@dataclass(slots=True, frozen=True)
+class ToolOverride(FrozenDataclassMixin):
     """Description overrides validated against a tool contract hash."""
 
     name: str
@@ -265,8 +265,8 @@ class ToolOverride:
     )
 
 
-@FrozenDataclass()
-class TaskStepOverride:
+@dataclass(slots=True, frozen=True)
+class TaskStepOverride(FrozenDataclassMixin):
     """Override for a single step within a task example."""
 
     index: int
@@ -276,8 +276,8 @@ class TaskStepOverride:
     output_json: str | None = None
 
 
-@FrozenDataclass()
-class TaskExampleOverride:
+@dataclass(slots=True, frozen=True)
+class TaskExampleOverride(FrozenDataclassMixin):
     """Override for a task example within TaskExamplesSection."""
 
     path: tuple[str, ...]
@@ -291,8 +291,8 @@ class TaskExampleOverride:
     steps_to_append: tuple[TaskStepOverride, ...] = ()  # New steps
 
 
-@FrozenDataclass()
-class PromptOverride:
+@dataclass(slots=True, frozen=True)
+class PromptOverride(FrozenDataclassMixin):
     """Runtime replacements for prompt sections validated by an overrides store."""
 
     ns: str

@@ -117,6 +117,7 @@ Basic Usage
 Creating a prompt template::
 
     from dataclasses import dataclass
+    from weakincentives.dataclasses import FrozenDataclassMixin
     from weakincentives.prompt import (
         PromptTemplate,
         Section,
@@ -125,17 +126,17 @@ Creating a prompt template::
         ToolResult,
     )
 
-    @FrozenDataclass()
-    class TaskParams:
+    @dataclass(slots=True, frozen=True)
+    class TaskParams(FrozenDataclassMixin):
         objective: str
         deadline: str
 
-    @FrozenDataclass()
-    class GreetParams:
+    @dataclass(slots=True, frozen=True)
+    class GreetParams(FrozenDataclassMixin):
         name: str
 
-    @FrozenDataclass()
-    class GreetResult:
+    @dataclass(slots=True, frozen=True)
+    class GreetResult(FrozenDataclassMixin):
         message: str
 
         def render(self) -> str:
@@ -201,8 +202,8 @@ Rendering a prompt::
 
 Using structured output::
 
-    @FrozenDataclass()
-    class TaskOutput:
+    @dataclass(slots=True, frozen=True)
+    class TaskOutput(FrozenDataclassMixin):
         status: str
         summary: str
 

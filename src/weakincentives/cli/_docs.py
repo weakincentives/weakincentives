@@ -18,9 +18,10 @@ import argparse
 import re
 import sys
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from importlib.resources import files
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from .docs_metadata import GUIDE_DESCRIPTIONS, SPEC_DESCRIPTIONS
 
 
@@ -56,15 +57,15 @@ from weakincentives.runtime import Session
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 
 
-@FrozenDataclass()
-class ReviewResponse:
+@dataclass(slots=True, frozen=True)
+class ReviewResponse(FrozenDataclassMixin):
     \"\"\"Structured output from the review agent.\"\"\"
     summary: str
     next_steps: list[str]
 
 
-@FrozenDataclass()
-class ReviewParams:
+@dataclass(slots=True, frozen=True)
+class ReviewParams(FrozenDataclassMixin):
     \"\"\"Parameters for a review request.\"\"\"
     request: str
 
@@ -309,8 +310,8 @@ def _select_doc_iterator(
     return _iter_all_docs()
 
 
-@FrozenDataclass()
-class SearchOptions:
+@dataclass(slots=True, frozen=True)
+class SearchOptions(FrozenDataclassMixin):
     """Options for document search."""
 
     specs_only: bool = False

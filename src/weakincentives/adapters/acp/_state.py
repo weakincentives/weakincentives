@@ -14,13 +14,15 @@
 
 from __future__ import annotations
 
-from ...dataclasses import FrozenDataclass
+from dataclasses import dataclass
+
+from ...dataclasses import FrozenDataclassMixin
 
 __all__ = ["ACPSessionState"]
 
 
-@FrozenDataclass()
-class ACPSessionState:
+@dataclass(slots=True, frozen=True)
+class ACPSessionState(FrozenDataclassMixin):
     """Stores ACP session ID and workspace fingerprint for reuse.
 
     Attributes:

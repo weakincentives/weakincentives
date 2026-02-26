@@ -15,13 +15,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
-from ....dataclasses import FrozenDataclass
+from ....dataclasses import FrozenDataclassMixin
 from ....types.dataclass import SupportsDataclass
 
 
-@FrozenDataclass()
-class Append[T: SupportsDataclass]:
+@dataclass(slots=True, frozen=True)
+class Append[T: SupportsDataclass](FrozenDataclassMixin):
     """Append a single item to the slice.
 
     Most efficient operation for file-backed slices - just appends
@@ -31,15 +32,15 @@ class Append[T: SupportsDataclass]:
     item: T
 
 
-@FrozenDataclass()
-class Extend[T: SupportsDataclass]:
+@dataclass(slots=True, frozen=True)
+class Extend[T: SupportsDataclass](FrozenDataclassMixin):
     """Append multiple items to the slice."""
 
     items: tuple[T, ...]
 
 
-@FrozenDataclass()
-class Replace[T: SupportsDataclass]:
+@dataclass(slots=True, frozen=True)
+class Replace[T: SupportsDataclass](FrozenDataclassMixin):
     """Replace entire slice contents.
 
     Required when reducer transforms existing state. For file-backed
@@ -49,8 +50,8 @@ class Replace[T: SupportsDataclass]:
     items: tuple[T, ...]
 
 
-@FrozenDataclass()
-class Clear[T: SupportsDataclass]:
+@dataclass(slots=True, frozen=True)
+class Clear[T: SupportsDataclass](FrozenDataclassMixin):
     """Clear items from the slice.
 
     Args:

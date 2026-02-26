@@ -26,12 +26,12 @@ from __future__ import annotations
 import contextlib
 import threading
 from collections.abc import Mapping, Sequence
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from ..clock import SYSTEM_CLOCK
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from .logging import StructuredLogger, get_logger
 
 __all__ = [
@@ -63,8 +63,8 @@ _logger: StructuredLogger = get_logger(
 )
 
 
-@FrozenDataclass()
-class TranscriptEntry:
+@dataclass(slots=True, frozen=True)
+class TranscriptEntry(FrozenDataclassMixin):
     """A single entry in a reconstructed transcript."""
 
     prompt_name: str
@@ -78,8 +78,8 @@ class TranscriptEntry:
     raw: str | None = None
 
 
-@FrozenDataclass()
-class TranscriptSummary:
+@dataclass(slots=True, frozen=True)
+class TranscriptSummary(FrozenDataclassMixin):
     """Summary statistics for a transcript."""
 
     total_entries: int

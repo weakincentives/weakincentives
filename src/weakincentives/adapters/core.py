@@ -15,10 +15,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..budget import Budget, BudgetTracker
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..deadlines import Deadline
 from ..errors import (
     PROMPT_EVALUATION_PHASE_BUDGET,
@@ -36,8 +37,8 @@ if TYPE_CHECKING:
     from ..runtime.watchdog import Heartbeat
 
 
-@FrozenDataclass()
-class PromptResponse[OutputT]:
+@dataclass(slots=True, frozen=True)
+class PromptResponse[OutputT](FrozenDataclassMixin):
     """Structured result emitted by an adapter evaluation."""
 
     prompt_name: str

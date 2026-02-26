@@ -24,11 +24,11 @@ import json
 import sqlite3
 import threading
 from collections.abc import Sequence
-from dataclasses import field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, override
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..debug import BundleValidationError, DebugBundle
 from ..errors import WinkError
 from ..resources.protocols import Closeable
@@ -49,8 +49,8 @@ class QueryError(WinkError, RuntimeError):
     """Raised when a query operation fails."""
 
 
-@FrozenDataclass()
-class ColumnInfo:
+@dataclass(slots=True, frozen=True)
+class ColumnInfo(FrozenDataclassMixin):
     """Column metadata for schema output."""
 
     name: str
@@ -58,8 +58,8 @@ class ColumnInfo:
     description: str = ""
 
 
-@FrozenDataclass()
-class TableInfo:
+@dataclass(slots=True, frozen=True)
+class TableInfo(FrozenDataclassMixin):
     """Table metadata for schema output."""
 
     name: str
@@ -68,16 +68,16 @@ class TableInfo:
     columns: tuple[ColumnInfo, ...] = ()
 
 
-@FrozenDataclass()
-class SchemaHints:
+@dataclass(slots=True, frozen=True)
+class SchemaHints(FrozenDataclassMixin):
     """Hints for querying the database effectively."""
 
     json_extraction: tuple[str, ...] = ()
     common_queries: dict[str, str] = field(default_factory=lambda: {})
 
 
-@FrozenDataclass()
-class SchemaOutput:
+@dataclass(slots=True, frozen=True)
+class SchemaOutput(FrozenDataclassMixin):
     """Schema output structure."""
 
     bundle_id: str

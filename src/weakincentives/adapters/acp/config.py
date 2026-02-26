@@ -15,9 +15,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 
 __all__ = ["ACPAdapterConfig", "ACPClientConfig", "McpServerConfig"]
 
@@ -25,8 +26,8 @@ McpServerConfig = dict[str, Any]
 """MCP server configuration passed through to ACP new_session."""
 
 
-@FrozenDataclass()
-class ACPClientConfig:
+@dataclass(slots=True, frozen=True)
+class ACPClientConfig(FrozenDataclassMixin):
     """Client-level configuration for ACP agents.
 
     Generic defaults that work with any ACP-compatible agent binary.
@@ -54,8 +55,8 @@ class ACPClientConfig:
     mcp_servers: tuple[McpServerConfig, ...] = ()
 
 
-@FrozenDataclass()
-class ACPAdapterConfig:
+@dataclass(slots=True, frozen=True)
+class ACPAdapterConfig(FrozenDataclassMixin):
     """Adapter-level configuration for ACP evaluation.
 
     Attributes:

@@ -19,19 +19,19 @@ One entry is appended per prompt render as a LOG slice.
 
 from __future__ import annotations
 
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
-@FrozenDataclass()
-class ToolSchema:
+@dataclass(slots=True, frozen=True)
+class ToolSchema(FrozenDataclassMixin):
     """Schema definition for a single tool at render time.
 
     Captures the tool's name, description, and JSON Schema for parameters.
@@ -46,8 +46,8 @@ class ToolSchema:
     )
 
 
-@FrozenDataclass()
-class RenderedTools:
+@dataclass(slots=True, frozen=True)
+class RenderedTools(FrozenDataclassMixin):
     """Record of tools available at prompt render time.
 
     This dataclass is stored as a LOG slice in the session with one entry

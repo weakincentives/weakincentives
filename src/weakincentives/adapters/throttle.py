@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Literal
 
 from ..clock import SYSTEM_CLOCK, Sleeper
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from .core import PromptEvaluationError, PromptEvaluationPhase
 
 ThrottleKind = Literal["rate_limit", "quota_exhausted", "timeout", "unknown"]
@@ -32,8 +33,8 @@ _DEFAULT_MAX_DELAY = timedelta(seconds=8)
 _DEFAULT_MAX_TOTAL_DELAY = timedelta(seconds=30)
 
 
-@FrozenDataclass()
-class ThrottlePolicy:
+@dataclass(slots=True, frozen=True)
+class ThrottlePolicy(FrozenDataclassMixin):
     """Configuration for throttle retry handling."""
 
     max_attempts: int = _DEFAULT_MAX_ATTEMPTS
@@ -71,8 +72,8 @@ def new_throttle_policy(
     )
 
 
-@FrozenDataclass()
-class ThrottleDetails:
+@dataclass(slots=True, frozen=True)
+class ThrottleDetails(FrozenDataclassMixin):
     """Provider throttle metadata tracked alongside PromptEvaluationError details."""
 
     kind: ThrottleKind

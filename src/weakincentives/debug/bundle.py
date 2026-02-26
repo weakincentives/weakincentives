@@ -40,7 +40,7 @@ import json
 import logging
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import (
@@ -50,7 +50,7 @@ from typing import (
     runtime_checkable,
 )
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin, pre_init
 from ..errors import WinkError
 from ..serde import dump
 from ..types import JSONValue
@@ -156,8 +156,8 @@ class BundleValidationError(BundleError):
     """Raised when bundle validation fails."""
 
 
-@FrozenDataclass()
-class BundleRetentionPolicy:
+@dataclass(slots=True, frozen=True)
+class BundleRetentionPolicy(FrozenDataclassMixin):
     """Policy for cleaning up old debug bundles in the target directory.
 
     Retention is applied after each bundle is successfully created. If multiple
@@ -220,8 +220,9 @@ class BundleStorageHandler(Protocol):
         ...
 
 
-@FrozenDataclass()
-class BundleConfig:
+@pre_init
+@dataclass(slots=True, frozen=True)
+class BundleConfig(FrozenDataclassMixin):
     """Configuration for bundle creation.
 
     Attributes:
@@ -268,8 +269,8 @@ class BundleConfig:
         return self.target is not None
 
 
-@FrozenDataclass()
-class CaptureInfo:
+@dataclass(slots=True, frozen=True)
+class CaptureInfo(FrozenDataclassMixin):
     """Capture metadata for manifest."""
 
     mode: str
@@ -279,8 +280,8 @@ class CaptureInfo:
     )
 
 
-@FrozenDataclass()
-class PromptInfo:
+@dataclass(slots=True, frozen=True)
+class PromptInfo(FrozenDataclassMixin):
     """Prompt metadata for manifest."""
 
     ns: str = ""
@@ -288,8 +289,8 @@ class PromptInfo:
     adapter: str = ""
 
 
-@FrozenDataclass()
-class RequestInfo:
+@dataclass(slots=True, frozen=True)
+class RequestInfo(FrozenDataclassMixin):
     """Request metadata for manifest."""
 
     request_id: str
@@ -299,24 +300,24 @@ class RequestInfo:
     ended_at: str = ""
 
 
-@FrozenDataclass()
-class IntegrityInfo:
+@dataclass(slots=True, frozen=True)
+class IntegrityInfo(FrozenDataclassMixin):
     """Integrity metadata for manifest."""
 
     algorithm: str = "sha256"
     checksums: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
 
 
-@FrozenDataclass()
-class BuildInfo:
+@dataclass(slots=True, frozen=True)
+class BuildInfo(FrozenDataclassMixin):
     """Build metadata for manifest."""
 
     version: str = ""
     commit: str = ""
 
 
-@FrozenDataclass()
-class BundleManifest:
+@dataclass(slots=True, frozen=True)
+class BundleManifest(FrozenDataclassMixin):
     """Bundle manifest containing metadata and integrity checksums.
 
     Schema::

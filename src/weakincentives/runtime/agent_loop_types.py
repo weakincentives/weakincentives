@@ -19,7 +19,7 @@ handling, including AgentLoopRequest, AgentLoopResult, and AgentLoopConfig.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 
 from ..budget import Budget
 from ..clock import SYSTEM_CLOCK
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..deadlines import Deadline
 from ..experiment import Experiment
 from .lease_extender import LeaseExtenderConfig
@@ -40,8 +40,8 @@ if TYPE_CHECKING:
     from .session import Session
 
 
-@FrozenDataclass()
-class AgentLoopResult[OutputT]:
+@dataclass(slots=True, frozen=True)
+class AgentLoopResult[OutputT](FrozenDataclassMixin):
     """Response from AgentLoop execution.
 
     Consolidates success and failure into a single type. Check ``success``
@@ -135,8 +135,8 @@ class BundleContext[OutputT]:
         self._writer.write_metadata(name, data)
 
 
-@FrozenDataclass()
-class AgentLoopConfig:
+@dataclass(slots=True, frozen=True)
+class AgentLoopConfig(FrozenDataclassMixin):
     """Configuration for AgentLoop execution defaults.
 
     Request-level ``budget`` and ``resources`` override these defaults.
@@ -156,8 +156,8 @@ class AgentLoopConfig:
     debug_bundle: BundleConfig | None = None
 
 
-@FrozenDataclass()
-class AgentLoopRequest[UserRequestT]:
+@dataclass(slots=True, frozen=True)
+class AgentLoopRequest[UserRequestT](FrozenDataclassMixin):
     """Request for AgentLoop execution with optional constraints.
 
     The ``budget``, ``deadline``, and ``resources`` fields override config defaults.
@@ -186,8 +186,8 @@ class AgentLoopRequest[UserRequestT]:
 # allowing inspection of request/response data in the debug UI sessions view.
 
 
-@FrozenDataclass()
-class LoopRequestState[UserRequestT]:
+@dataclass(slots=True, frozen=True)
+class LoopRequestState[UserRequestT](FrozenDataclassMixin):
     """Session state capturing the incoming request after prepare().
 
     This slice is published to the session immediately after prepare() is called,
@@ -204,8 +204,8 @@ class LoopRequestState[UserRequestT]:
     """Timestamp when this state was captured."""
 
 
-@FrozenDataclass()
-class LoopRawResponse[OutputT]:
+@dataclass(slots=True, frozen=True)
+class LoopRawResponse[OutputT](FrozenDataclassMixin):
     """Session state capturing the response before finalize() transforms it.
 
     This slice is published to the session after adapter evaluation completes
@@ -228,8 +228,8 @@ class LoopRawResponse[OutputT]:
     """Timestamp when this state was captured."""
 
 
-@FrozenDataclass()
-class LoopFinalResponse[OutputT]:
+@dataclass(slots=True, frozen=True)
+class LoopFinalResponse[OutputT](FrozenDataclassMixin):
     """Session state capturing the response after finalize() transforms it.
 
     This slice is published to the session after finalize() completes,

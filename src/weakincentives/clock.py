@@ -64,7 +64,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Final, Protocol, runtime_checkable
 
-from .dataclasses import FrozenDataclass
+from .dataclasses import FrozenDataclassMixin
 
 
 @runtime_checkable
@@ -139,8 +139,8 @@ class Clock(MonotonicClock, WallClock, Sleeper, AsyncSleeper, Protocol):
     pass
 
 
-@FrozenDataclass()
-class SystemClock:
+@dataclass(slots=True, frozen=True)
+class SystemClock(FrozenDataclassMixin):
     """Production clock using system time functions.
 
     This is the default clock used throughout WINK. It delegates to:
