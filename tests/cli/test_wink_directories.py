@@ -51,7 +51,6 @@ def test_directory_argument_loads_latest_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     older = _create_test_bundle(tmp_path, "old")
-    time.sleep(0.01)
     newer = _create_test_bundle(tmp_path, "new")
 
     now_ts = time.time()

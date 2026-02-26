@@ -216,7 +216,6 @@ def test_reload_endpoint_replaces_bundle(tmp_path: Path) -> None:
 
 def test_bundle_listing_and_switch(tmp_path: Path) -> None:
     bundle_one = _create_test_bundle(tmp_path, ["a"])
-    time.sleep(0.01)
     bundle_two = _create_test_bundle(tmp_path, ["b", "c"])
 
     now = time.time()
@@ -650,7 +649,6 @@ def test_bundle_store_from_directory(tmp_path: Path) -> None:
     """Test creating BundleStore from a directory with multiple bundles."""
     # Create two bundles
     bundle_one = _create_test_bundle(tmp_path, ["a"])
-    time.sleep(0.01)
     bundle_two = _create_test_bundle(tmp_path, ["b"])
 
     # Set mtimes to make bundle_two newest

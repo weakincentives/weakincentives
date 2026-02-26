@@ -322,7 +322,7 @@ class TestCacheInvalidation:
 
     def test_stale_cache_removed(self, tmp_path: Path) -> None:
         """Test that stale cache is removed and rebuilt."""
-        import time
+        import os
 
         bundle_path = create_test_bundle(tmp_path)
         cache_path = bundle_path.with_suffix(bundle_path.suffix + ".sqlite")
@@ -332,9 +332,10 @@ class TestCacheInvalidation:
         db1.close()
         assert cache_path.exists()
 
-        # Make cache stale by touching bundle with newer time
-        time.sleep(0.02)
-        bundle_path.touch()
+        # Make cache stale: push both files into the past, bundle newer than cache
+        cache_mtime = cache_path.stat().st_mtime
+        os.utime(cache_path, (cache_mtime - 10, cache_mtime - 10))
+        os.utime(bundle_path, (cache_mtime - 5, cache_mtime - 5))
 
         # Re-open should rebuild cache
         db2 = open_query_database(bundle_path)

@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -234,9 +233,14 @@ class TestMessageContentExtraction:
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Test that evaluation raises error when deadline already expired."""
+        from weakincentives.clock import FakeClock
         from weakincentives.deadlines import Deadline
 
-        near_expiry_deadline = Deadline(datetime.now(UTC) + timedelta(seconds=1.1))
+        clock = FakeClock()
+        anchor = datetime.now(UTC)
+        clock.set_wall(anchor)
+        expired_deadline = Deadline(anchor + timedelta(seconds=1), clock=clock)
+        clock.advance(2)
 
         setup_mock_query(
             [
@@ -249,11 +253,9 @@ class TestMessageContentExtraction:
         adapter = ClaudeAgentSDKAdapter()
 
         with sdk_patches():
-            time.sleep(1.2)
-
             with pytest.raises(PromptEvaluationError, match="Deadline expired"):
                 adapter.evaluate(
-                    simple_prompt, session=session, deadline=near_expiry_deadline
+                    simple_prompt, session=session, deadline=expired_deadline
                 )
 
     def test_multiturn_budget_exceeded(
