@@ -95,15 +95,17 @@ class TestIsCacheValid:
         assert _is_cache_valid(bundle, cache) is False
 
     def test_cache_older(self, tmp_path: Path) -> None:
-        import time
+        import os
 
         from weakincentives.cli.query import _is_cache_valid
 
         bundle = tmp_path / "bundle.zip"
         cache = tmp_path / "bundle.zip.sqlite"
         cache.touch()
-        time.sleep(0.01)  # Ensure different mtime
         bundle.touch()
+        # Ensure bundle has a newer mtime than cache
+        cache_mtime = cache.stat().st_mtime
+        os.utime(bundle, (cache_mtime + 1, cache_mtime + 1))
         assert _is_cache_valid(bundle, cache) is False
 
 
