@@ -18,9 +18,9 @@ import argparse
 import re
 import sys
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
 from importlib.resources import files
 
+from ..dataclasses import FrozenDataclass
 from .docs_metadata import GUIDE_DESCRIPTIONS, SPEC_DESCRIPTIONS
 
 
@@ -48,7 +48,7 @@ session management, and adapter integration.
 ## Source Code
 
 ```python
-from dataclasses import dataclass
+
 
 from weakincentives import Prompt
 from weakincentives.prompt import MarkdownSection, PromptTemplate
@@ -56,14 +56,14 @@ from weakincentives.runtime import Session
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class ReviewResponse:
     \"\"\"Structured output from the review agent.\"\"\"
     summary: str
     next_steps: list[str]
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class ReviewParams:
     \"\"\"Parameters for a review request.\"\"\"
     request: str
@@ -309,7 +309,7 @@ def _select_doc_iterator(
     return _iter_all_docs()
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class SearchOptions:
     """Options for document search."""
 

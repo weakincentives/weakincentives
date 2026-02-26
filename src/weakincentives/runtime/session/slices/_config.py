@@ -14,14 +14,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from ....dataclasses import FrozenDataclass
 from ..slice_policy import SlicePolicy
 from ._memory import MemorySliceFactory
 from ._protocols import SliceFactory
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class SliceFactoryConfig:
     """Configuration mapping slice policies to factories.
 

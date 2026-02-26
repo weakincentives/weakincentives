@@ -125,16 +125,16 @@ Creating a prompt template::
         ToolResult,
     )
 
-    @dataclass(slots=True, frozen=True)
+    @FrozenDataclass()
     class TaskParams:
         objective: str
         deadline: str
 
-    @dataclass(slots=True, frozen=True)
+    @FrozenDataclass()
     class GreetParams:
         name: str
 
-    @dataclass(slots=True, frozen=True)
+    @FrozenDataclass()
     class GreetResult:
         message: str
 
@@ -201,7 +201,7 @@ Rendering a prompt::
 
 Using structured output::
 
-    @dataclass(slots=True, frozen=True)
+    @FrozenDataclass()
     class TaskOutput:
         status: str
         summary: str

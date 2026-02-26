@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import field
 from datetime import datetime
 from typing import Any, Protocol, cast, override
 from uuid import UUID, uuid4
@@ -76,7 +76,7 @@ class HandlerFailure:
         return f"{self.handler!r} -> {self.error!r}"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class DispatchResult:
     """Summary of an event dispatch invocation."""
 

@@ -22,9 +22,10 @@ See specs/PROGRESSIVE_DISCLOSURE.md for the complete specification.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import field
 from typing import TYPE_CHECKING, NoReturn
 
+from ..dataclasses import FrozenDataclass
 from ._visibility import SectionVisibility
 from .errors import PromptValidationError, SectionPath, VisibilityExpansionRequired
 from .tool import Tool, ToolContext
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from .registry import RegistrySnapshot, SectionNode
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class OpenSectionsParams:
     """Parameters for the open_sections tool."""
 
@@ -61,7 +62,7 @@ class OpenSectionsParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ReadSectionParams:
     """Parameters for the read_section tool."""
 
@@ -76,7 +77,7 @@ class ReadSectionParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ReadSectionResult:
     """Result of the read_section tool."""
 

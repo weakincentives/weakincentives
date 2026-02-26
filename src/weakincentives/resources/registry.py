@@ -155,7 +155,7 @@ class ResourceRegistry:
             if protocol in entries:
                 raise DuplicateBindingError(protocol)
             if isinstance(value, Binding):
-                entries[protocol] = value
+                entries[protocol] = cast(Binding[object], value)
             else:
                 entries[protocol] = Binding.instance(protocol, value)
         return ResourceRegistry(_bindings=MappingProxyType(entries))

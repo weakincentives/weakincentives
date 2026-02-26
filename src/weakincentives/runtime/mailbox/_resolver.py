@@ -21,9 +21,9 @@ See ``specs/MAILBOX.md`` for the complete specification.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ...dataclasses import FrozenDataclass
 from ._types import MailboxError
 
 if TYPE_CHECKING:
@@ -95,7 +95,7 @@ class MailboxFactory[R](Protocol):
         ...
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class RegistryResolver[R]:
     """Simple resolver backed by a static registry.
 
@@ -140,7 +140,7 @@ class RegistryResolver[R]:
         return self.registry.get(identifier)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class CompositeResolver[R]:
     """Combines a registry with a factory for dynamic resolution.
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from weakincentives.dataclasses import FrozenDataclass
 from datetime import datetime
 
 from weakincentives.filesystem import FileEntry, is_path_under
@@ -39,7 +40,7 @@ class InMemoryFile:
     modified_at: datetime
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class InMemoryState:
     """Frozen snapshot of in-memory filesystem state."""
 

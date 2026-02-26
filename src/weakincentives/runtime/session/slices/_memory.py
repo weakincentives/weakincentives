@@ -17,10 +17,11 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 
+from ....dataclasses import FrozenDataclass
 from ....types.dataclass import SupportsDataclass
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class MemorySliceView[T: SupportsDataclass]:
     """Immutable readonly view of a MemorySlice.
 
@@ -131,7 +132,7 @@ class MemorySlice[T: SupportsDataclass]:
         return MemorySliceView(self._data)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class MemorySliceFactory:
     """Factory that creates in-memory slices."""
 

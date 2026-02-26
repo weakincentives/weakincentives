@@ -20,9 +20,9 @@ the judge selects from a fixed set of rating labels that map to values.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from ..dataclasses import FrozenDataclass
 from ..prompt import MarkdownSection, Prompt, PromptTemplate
 from ..runtime import Session
 from ._types import Score
@@ -48,7 +48,7 @@ PASSING_RATINGS: frozenset[Rating] = frozenset(_PASSING)
 """Ratings that count as passing."""
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class JudgeOutput:
     """Structured output from judge prompt."""
 
@@ -59,7 +59,7 @@ class JudgeOutput:
     """Brief explanation of the rating."""
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class JudgeParams:
     """Parameters for the judge prompt."""
 

@@ -47,7 +47,7 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -154,7 +154,7 @@ class Feedback:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class FeedbackContext:
     """Context provided to feedback providers.
 

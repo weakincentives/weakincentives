@@ -19,15 +19,16 @@ TLA+ specifications embedded in Python code via @formal_spec decorators.
 from __future__ import annotations
 
 import subprocess  # nosec B404
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from ..dataclasses import FrozenDataclass
 
 if TYPE_CHECKING:
     from weakincentives.formal import FormalSpec
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class ModelCheckResult:
     """Result of TLC model checking."""
 

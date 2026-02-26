@@ -32,9 +32,9 @@ Example:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Literal
 
+from ..dataclasses import FrozenDataclass
 from .feedback import Feedback, FeedbackContext
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ def _format_duration(seconds: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@FrozenDataclass()
 class DeadlineFeedback:
     """Feedback provider that reports remaining time until deadline.
 
@@ -185,7 +185,7 @@ class DeadlineFeedback:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@FrozenDataclass()
 class StaticFeedbackProvider:
     """Feedback provider that delivers a fixed message.
 

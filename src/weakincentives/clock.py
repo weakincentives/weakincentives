@@ -64,6 +64,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Final, Protocol, runtime_checkable
 
+from .dataclasses import FrozenDataclass
+
 
 @runtime_checkable
 class MonotonicClock(Protocol):
@@ -137,7 +139,7 @@ class Clock(MonotonicClock, WallClock, Sleeper, AsyncSleeper, Protocol):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class SystemClock:
     """Production clock using system time functions.
 

@@ -32,6 +32,7 @@ from typing import (
 )
 
 from ..budget import BudgetTracker
+from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..types.dataclass import (
     SupportsDataclass,
@@ -78,7 +79,7 @@ ParamsT_contra = TypeVar(
 ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ToolExample[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     """Representative invocation for a tool documenting inputs and outputs."""
 
@@ -87,7 +88,7 @@ class ToolExample[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]
     output: ResultT
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ToolContext:
     """Immutable container exposing prompt execution state to handlers.
 

@@ -19,7 +19,7 @@ handling, including AgentLoopRequest, AgentLoopResult, and AgentLoopConfig.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class AgentLoopResult[OutputT]:
     """Response from AgentLoop execution.
 

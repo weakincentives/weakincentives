@@ -15,12 +15,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 
+from ....dataclasses import FrozenDataclass
 from ....types.dataclass import SupportsDataclass
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class Append[T: SupportsDataclass]:
     """Append a single item to the slice.
 
@@ -31,14 +31,14 @@ class Append[T: SupportsDataclass]:
     item: T
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class Extend[T: SupportsDataclass]:
     """Append multiple items to the slice."""
 
     items: tuple[T, ...]
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class Replace[T: SupportsDataclass]:
     """Replace entire slice contents.
 
@@ -49,7 +49,7 @@ class Replace[T: SupportsDataclass]:
     items: tuple[T, ...]
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class Clear[T: SupportsDataclass]:
     """Clear items from the slice.
 

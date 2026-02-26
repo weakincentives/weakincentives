@@ -19,12 +19,12 @@ These types are used throughout the codebase for filesystem operations.
 from __future__ import annotations
 
 import fnmatch
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, Literal
 from uuid import UUID
 
 from ..clock import SYSTEM_CLOCK
+from ..dataclasses import FrozenDataclass
 from ._path import (
     MAX_PATH_DEPTH,
     MAX_SEGMENT_LENGTH,
@@ -49,7 +49,7 @@ WriteMode = Literal["create", "overwrite", "append"]
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class FileStat:
     """Metadata for a file or directory."""
 
@@ -61,7 +61,7 @@ class FileStat:
     modified_at: datetime | None = None
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class FileEntry:
     """Directory listing entry."""
 
@@ -71,7 +71,7 @@ class FileEntry:
     is_directory: bool
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class GlobMatch:
     """Result from glob operations."""
 
@@ -79,7 +79,7 @@ class GlobMatch:
     is_file: bool
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class GrepMatch:
     """Result from grep operations."""
 
@@ -90,7 +90,7 @@ class GrepMatch:
     match_end: int
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ReadResult:
     """Content returned from text read operations."""
 
@@ -102,7 +102,7 @@ class ReadResult:
     truncated: bool
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ReadBytesResult:
     """Content returned from binary read operations."""
 
@@ -114,7 +114,7 @@ class ReadBytesResult:
     truncated: bool
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class WriteResult:
     """Confirmation of a write operation."""
 
@@ -123,7 +123,7 @@ class WriteResult:
     mode: WriteMode
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class FilesystemSnapshot:
     """Immutable capture of filesystem state, storable in session.
 

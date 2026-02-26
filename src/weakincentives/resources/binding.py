@@ -15,8 +15,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 
+from ..dataclasses import FrozenDataclass
 from .protocols import ResourceResolver
 from .scope import Scope
 
@@ -24,7 +24,7 @@ type Provider[T] = Callable[[ResourceResolver], T]
 """Factory function that constructs a resource given a resolver for dependencies."""
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class Binding[T]:
     """Describes how to construct a resource and its lifetime.
 

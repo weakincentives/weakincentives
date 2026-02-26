@@ -334,7 +334,7 @@ def _parse_snapshot_metadata(
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PendingToolExecution:
     """Metadata for an in-flight native tool execution.
 

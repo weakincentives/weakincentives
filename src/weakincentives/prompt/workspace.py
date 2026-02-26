@@ -28,7 +28,6 @@ import shutil
 import tempfile
 import threading
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final, override
@@ -341,7 +340,7 @@ def compute_workspace_fingerprint(mounts: tuple[HostMount, ...]) -> str:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _WorkspaceSectionParams:
     """Default params for WorkspaceSection (empty placeholder)."""
 

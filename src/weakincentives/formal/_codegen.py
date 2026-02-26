@@ -17,9 +17,10 @@ Depends only on the metadata dataclasses from ``_metadata``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import field
 from typing import Any
 
+from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.formal._metadata import Action, Invariant, StateVar
 
 _TLA_SEPARATOR = (
@@ -49,7 +50,7 @@ def _infer_default(var: StateVar) -> str:
     return "NULL"
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class FormalSpec:
     """Complete formal specification metadata.
 

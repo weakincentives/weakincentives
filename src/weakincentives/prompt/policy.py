@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ..dataclasses import FrozenDataclass
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from .tool_result import ToolResult
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PolicyDecision:
     """Result of a policy check."""
 
@@ -102,7 +102,7 @@ class ToolPolicy(Protocol):
         ...
 
 
-@dataclass(frozen=True)
+@FrozenDataclass()
 class SequentialDependencyPolicy:
     """Enforce unconditional tool invocation order.
 
@@ -199,7 +199,7 @@ def _normalize_path(path: str, mount_point: str | None) -> str:
     return strip_mount_point(normalized, mount_point)
 
 
-@dataclass(frozen=True)
+@FrozenDataclass()
 class ReadBeforeWritePolicy:
     """Enforce read-before-write semantics on filesystem tools.
 

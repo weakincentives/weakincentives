@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+
+from ..dataclasses import FrozenDataclass
 
 if TYPE_CHECKING:
     from ..runtime.session import SessionProtocol, SessionViewProtocol
@@ -30,7 +32,7 @@ from ..experiment import Experiment
 from ..serde import parse
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class Sample[InputT, ExpectedT]:
     """Single evaluation input.
 
@@ -50,7 +52,7 @@ class Sample[InputT, ExpectedT]:
     """The expected output to compare against."""
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class Score:
     """Result of scoring one output.
 
@@ -118,7 +120,7 @@ def _coerce[T](value: object, target: type[T]) -> T:
     raise TypeError(msg)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class Dataset[InputT, ExpectedT]:
     """Immutable collection of evaluation samples.
 
@@ -184,7 +186,7 @@ class Dataset[InputT, ExpectedT]:
         return Dataset(samples=tuple(samples))
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class EvalResult:
     """Result for one sample under an experiment.
 
@@ -224,7 +226,7 @@ class EvalResult:
         return self.error is None
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ExperimentComparison:
     """Statistical comparison between two experiments.
 
@@ -276,7 +278,7 @@ class ExperimentComparison:
         return self.pass_rate_delta / self.baseline_pass_rate
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class EvalReport:
     """Aggregate evaluation results with computed metrics and experiment breakdown.
 
@@ -418,7 +420,7 @@ class EvalReport:
         )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class EvalRequest[InputT, ExpectedT]:
     """Request to evaluate a sample under an experiment.
 

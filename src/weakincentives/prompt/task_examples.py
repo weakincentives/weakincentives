@@ -17,9 +17,9 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Any, Final, Self, TypeVar, cast, override
 
+from ..dataclasses import FrozenDataclass
 from ..serde import clone as clone_dataclass, dump
 from ..types.dataclass import (
     SupportsDataclass,
@@ -47,7 +47,7 @@ TaskExamplesParamsT = TypeVar(
 OutcomeT = TypeVar("OutcomeT", bound="str | SupportsDataclass", covariant=True)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class TaskStep[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     """Single tool invocation in a task trajectory."""
 

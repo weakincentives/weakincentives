@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 
 from ..clock import SYSTEM_CLOCK, MonotonicClock
 from ..dataclasses import FrozenDataclass
@@ -384,7 +384,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
 
     @staticmethod
     def _build_eval_info(
-        request: EvalRequest[object, object],
+        request: EvalRequest[Any, Any],
         score: Score,
         latency_ms: int,
         error: str | None,

@@ -39,11 +39,11 @@ import contextlib
 import logging
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Self
 from uuid import UUID
 
+from ..dataclasses import FrozenDataclass
 from .lifecycle import wait_until
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError
 from .watchdog import Heartbeat
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class DeadLetter[T]:
     """Dead-lettered message with failure metadata.
 
@@ -103,7 +103,7 @@ class DeadLetter[T]:
     """
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class DLQPolicy[T, R]:
     """Dead letter queue policy.
 
