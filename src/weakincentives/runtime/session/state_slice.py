@@ -28,7 +28,7 @@ Example::
     from weakincentives.runtime.session import reducer
     from weakincentives.runtime.session.slices import Replace
 
-    @dataclass(frozen=True)
+    @dataclass(slots=True, frozen=True)
     class AgentPlan:
         steps: tuple[str, ...]
         current_step: int = 0
@@ -223,7 +223,7 @@ def install_state_slice[T: SupportsDataclass](
 
     Example::
 
-        @dataclass(frozen=True)
+        @dataclass(slots=True, frozen=True)
         class AgentPlan:
             steps: tuple[str, ...]
 

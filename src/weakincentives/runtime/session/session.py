@@ -279,7 +279,7 @@ class Session(SessionProtocol):
 
         Example::
 
-            @dataclass(frozen=True)
+            @dataclass(slots=True, frozen=True)
             class AgentPlan:
                 steps: tuple[str, ...]
 

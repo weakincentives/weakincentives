@@ -314,7 +314,7 @@ class FeedbackProvider(Protocol):
 
     Implement this protocol to create custom feedback providers:
 
-        @dataclass(frozen=True)
+        @dataclass(slots=True, frozen=True)
         class MyProvider:
             @property
             def name(self) -> str:

@@ -102,7 +102,7 @@ Simple adapter usage without workspace mounts::
     from weakincentives.runtime import Session, InProcessDispatcher
     from dataclasses import dataclass
 
-    @dataclass(frozen=True)
+    @dataclass(slots=True, frozen=True)
     class TaskResult:
         message: str
 
@@ -144,7 +144,7 @@ Using workspace sections to mount host files::
     from weakincentives.runtime import Session, InProcessDispatcher
     from dataclasses import dataclass
 
-    @dataclass(frozen=True)
+    @dataclass(slots=True, frozen=True)
     class ReviewResult:
         summary: str
         issues: list[str]

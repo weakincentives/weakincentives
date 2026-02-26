@@ -67,7 +67,7 @@ def _format_duration(seconds: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True, frozen=True)
 class DeadlineFeedback:
     """Feedback provider that reports remaining time until deadline.
 
@@ -185,7 +185,7 @@ class DeadlineFeedback:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True, frozen=True)
 class StaticFeedbackProvider:
     """Feedback provider that delivers a fixed message.
 

@@ -47,7 +47,7 @@ slices and mutations flow through pure reducers::
     from weakincentives.runtime import Session
     from dataclasses import dataclass, replace
 
-    @dataclass(frozen=True)
+    @dataclass(slots=True, frozen=True)
     class AgentPlan:
         steps: tuple[str, ...]
 

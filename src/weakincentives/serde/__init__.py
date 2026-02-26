@@ -252,7 +252,7 @@ Create modified copies of frozen dataclasses using ``clone()``:
     from dataclasses import dataclass
     from weakincentives.serde import clone
 
-    @dataclass(frozen=True)
+    @dataclass(slots=True, frozen=True)
     class Point:
         x: int
         y: int

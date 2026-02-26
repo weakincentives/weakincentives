@@ -102,7 +102,7 @@ class ToolPolicy(Protocol):
         ...
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True, frozen=True)
 class SequentialDependencyPolicy:
     """Enforce unconditional tool invocation order.
 
@@ -199,7 +199,7 @@ def _normalize_path(path: str, mount_point: str | None) -> str:
     return strip_mount_point(normalized, mount_point)
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True, frozen=True)
 class ReadBeforeWritePolicy:
     """Enforce read-before-write semantics on filesystem tools.
 
