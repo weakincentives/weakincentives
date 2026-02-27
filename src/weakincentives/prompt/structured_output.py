@@ -15,9 +15,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Final, Literal, cast
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..errors import WinkError
 from ..serde import SerdeScope
 from ..serde.parse import parse as parse_dataclass
@@ -55,8 +56,8 @@ class OutputParseError(WinkError):
         self.dataclass_type = dataclass_type
 
 
-@FrozenDataclass()
-class PayloadParsingConfig:
+@dataclass(slots=True, frozen=True)
+class PayloadParsingConfig(FrozenDataclassMixin):
     """Configuration for parsing structured payloads into dataclasses."""
 
     container: Literal["object", "array"]

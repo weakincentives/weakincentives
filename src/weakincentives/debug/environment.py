@@ -41,12 +41,12 @@ import shutil
 import subprocess  # nosec B404 - needed for system introspection
 import sys
 from collections.abc import Mapping
-from dataclasses import field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..clock import SYSTEM_CLOCK
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ._git import GitInfo, capture_git_diff, capture_git_info
 
 if TYPE_CHECKING:
@@ -106,8 +106,8 @@ _MIN_MEMINFO_PARTS = 2
 _CONTAINER_ID_LENGTH = 64
 
 
-@FrozenDataclass()
-class SystemInfo:
+@dataclass(slots=True, frozen=True)
+class SystemInfo(FrozenDataclassMixin):
     """System/OS information.
 
     Attributes:
@@ -131,8 +131,8 @@ class SystemInfo:
     hostname: str = ""
 
 
-@FrozenDataclass()
-class PythonInfo:
+@dataclass(slots=True, frozen=True)
+class PythonInfo(FrozenDataclassMixin):
     """Python runtime information.
 
     Attributes:
@@ -154,8 +154,8 @@ class PythonInfo:
     is_virtualenv: bool = False
 
 
-@FrozenDataclass()
-class ContainerInfo:
+@dataclass(slots=True, frozen=True)
+class ContainerInfo(FrozenDataclassMixin):
     """Container runtime information.
 
     Attributes:
@@ -175,8 +175,8 @@ class ContainerInfo:
     is_containerized: bool = False
 
 
-@FrozenDataclass()
-class CommandInfo:
+@dataclass(slots=True, frozen=True)
+class CommandInfo(FrozenDataclassMixin):
     """Command invocation details.
 
     Attributes:
@@ -192,8 +192,8 @@ class CommandInfo:
     executable: str = ""
 
 
-@FrozenDataclass()
-class EnvironmentCapture:
+@dataclass(slots=True, frozen=True)
+class EnvironmentCapture(FrozenDataclassMixin):
     """Complete environment capture for reproducibility.
 
     This is the main data structure capturing all environment information

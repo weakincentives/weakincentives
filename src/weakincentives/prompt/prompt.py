@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import MISSING, field, is_dataclass
+from dataclasses import MISSING, dataclass, field, is_dataclass
 from functools import cached_property
 from typing import (
     TYPE_CHECKING,
@@ -25,7 +25,7 @@ from typing import (
     get_origin,
 )
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin, pre_init
 from ..resources import ResourceRegistry
 from ._normalization import normalize_component_key
 from ._overrides_protocols import PromptOverridesStore
@@ -92,8 +92,9 @@ def _resolve_output_spec(
     )
 
 
-@FrozenDataclass(slots=False)
-class PromptTemplate[OutputT]:
+@pre_init
+@dataclass(slots=False, frozen=True)
+class PromptTemplate[OutputT](FrozenDataclassMixin):
     """Coordinate prompt sections and their parameter bindings.
 
     PromptTemplate is an immutable dataclass that coordinates prompt sections
@@ -382,7 +383,7 @@ class Prompt[OutputT]:
             raise RuntimeError("PromptTemplate._snapshot not initialized")
         return PromptRenderer(
             registry=snapshot,
-            structured_output=self.template._structured_output,  # pyright: ignore[reportPrivateUsage]
+            structured_output=self.template.structured_output,
         )
 
     def bind(

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Literal, override
 
-from .dataclasses import FrozenDataclass
+from .dataclasses import FrozenDataclassMixin
 from .deadlines import Deadline
 from .errors import WinkError
 
@@ -32,8 +32,8 @@ __all__ = [
 ]
 
 
-@FrozenDataclass()
-class TokenUsage:
+@dataclass(slots=True, frozen=True)
+class TokenUsage(FrozenDataclassMixin):
     """Token accounting captured from provider responses."""
 
     input_tokens: int | None = None
@@ -55,8 +55,8 @@ BudgetExceededDimension = Literal[
 """Dimension that caused a budget limit to be exceeded."""
 
 
-@FrozenDataclass()
-class Budget:
+@dataclass(slots=True, frozen=True)
+class Budget(FrozenDataclassMixin):
     """Resource envelope combining time and token limits.
 
     At least one limit must be set. Token limits must be positive when provided.
@@ -90,8 +90,8 @@ class Budget:
             raise ValueError(msg)
 
 
-@FrozenDataclass()
-class BudgetExceededError(WinkError, RuntimeError):
+@dataclass(slots=True, frozen=True)
+class BudgetExceededError(FrozenDataclassMixin, WinkError, RuntimeError):
     """Raised when a budget limit is breached."""
 
     budget: Budget

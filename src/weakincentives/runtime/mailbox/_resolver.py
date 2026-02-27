@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ...dataclasses import FrozenDataclassMixin
 from ._types import MailboxError
 
 if TYPE_CHECKING:
@@ -96,7 +97,7 @@ class MailboxFactory[R](Protocol):
 
 
 @dataclass(slots=True, frozen=True)
-class RegistryResolver[R]:
+class RegistryResolver[R](FrozenDataclassMixin):
     """Simple resolver backed by a static registry.
 
     Resolution looks up the identifier in the registry mapping.
@@ -141,7 +142,7 @@ class RegistryResolver[R]:
 
 
 @dataclass(slots=True, frozen=True)
-class CompositeResolver[R]:
+class CompositeResolver[R](FrozenDataclassMixin):
     """Combines a registry with a factory for dynamic resolution.
 
     Resolution order:

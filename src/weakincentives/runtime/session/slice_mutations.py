@@ -37,14 +37,14 @@ ensuring they always succeed regardless of registered reducers.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import field
+from dataclasses import dataclass, field
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...types.dataclass import SupportsDataclass
 
 
-@FrozenDataclass()
-class InitializeSlice[T: SupportsDataclass]:
+@dataclass(slots=True, frozen=True)
+class InitializeSlice[T: SupportsDataclass](FrozenDataclassMixin):
     """System event to initialize or replace a slice.
 
     This event replaces all values in a slice with the provided values.
@@ -71,8 +71,8 @@ class InitializeSlice[T: SupportsDataclass]:
     )
 
 
-@FrozenDataclass()
-class ClearSlice[T: SupportsDataclass]:
+@dataclass(slots=True, frozen=True)
+class ClearSlice[T: SupportsDataclass](FrozenDataclassMixin):
     """System event to clear items from a slice.
 
     This event removes items from a slice, optionally filtering by predicate.

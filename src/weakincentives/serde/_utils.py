@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Mapping, Sized
-from dataclasses import field
+from dataclasses import dataclass, field
 from decimal import Decimal
 from importlib import import_module
 from re import Pattern
 from typing import Any as _AnyType, Final, Literal, cast, get_args
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..types import JSONValue
 
 # Import SerdeScope lazily to avoid circular imports
@@ -42,8 +42,8 @@ def _ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
     return items
 
 
-@FrozenDataclass()
-class _ParseConfig:
+@dataclass(slots=True, frozen=True)
+class _ParseConfig(FrozenDataclassMixin):
     extra: Literal["ignore", "forbid"]
     coerce: bool
     typevar_map: Mapping[object, type] = field(

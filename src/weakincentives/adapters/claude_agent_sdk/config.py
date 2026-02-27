@@ -14,11 +14,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from claude_agent_sdk import PermissionMode
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ..config import LLMConfig
 from ._transcript_collector import TranscriptCollectorConfig
 
@@ -44,8 +45,8 @@ Controls how much thinking Claude allocates to each request:
 """
 
 
-@FrozenDataclass()
-class ClaudeAgentSDKClientConfig:
+@dataclass(slots=True, frozen=True)
+class ClaudeAgentSDKClientConfig(FrozenDataclassMixin):
     """Client-level configuration for Claude Agent SDK.
 
     Attributes:
@@ -83,12 +84,12 @@ class ClaudeAgentSDKClientConfig:
     stop_on_structured_output: bool = True
     isolation: IsolationConfig | None = None
     betas: tuple[str, ...] | None = None
-    transcript_collection: TranscriptCollectorConfig | None = (
-        TranscriptCollectorConfig()
+    transcript_collection: TranscriptCollectorConfig | None = field(
+        default_factory=TranscriptCollectorConfig
     )
 
 
-@FrozenDataclass()
+@dataclass(slots=True, frozen=True)
 class ClaudeAgentSDKModelConfig(LLMConfig):
     """Model-level configuration for Claude Agent SDK.
 

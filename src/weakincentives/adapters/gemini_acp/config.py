@@ -14,13 +14,14 @@
 
 from __future__ import annotations
 
-from ...dataclasses import FrozenDataclass
+from dataclasses import dataclass
+
 from ..acp.config import ACPAdapterConfig, ACPClientConfig
 
 __all__ = ["GeminiACPAdapterConfig", "GeminiACPClientConfig"]
 
 
-@FrozenDataclass()
+@dataclass(slots=True, frozen=True)
 class GeminiACPClientConfig(ACPClientConfig):
     """Gemini CLI-specific client configuration.
 
@@ -33,7 +34,7 @@ class GeminiACPClientConfig(ACPClientConfig):
     startup_timeout_s: float = 15.0
 
 
-@FrozenDataclass()
+@dataclass(slots=True, frozen=True)
 class GeminiACPAdapterConfig(ACPAdapterConfig):
     """Gemini CLI-specific adapter configuration.
 

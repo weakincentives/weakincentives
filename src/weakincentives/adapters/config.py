@@ -15,9 +15,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ._api_types import LLMRequestParams
 
 __all__ = [
@@ -25,8 +26,8 @@ __all__ = [
 ]
 
 
-@FrozenDataclass()
-class LLMConfig:
+@dataclass(slots=True, frozen=True)
+class LLMConfig(FrozenDataclassMixin):
     """Base configuration for LLM model parameters.
 
     These parameters are common across most LLM providers and control

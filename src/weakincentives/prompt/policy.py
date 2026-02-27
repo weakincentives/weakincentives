@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..filesystem import strip_mount_point
 from ..types.dataclass import SupportsDataclass
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True, frozen=True)
-class PolicyDecision:
+class PolicyDecision(FrozenDataclassMixin):
     """Result of a policy check."""
 
     allowed: bool
@@ -45,8 +45,8 @@ class PolicyDecision:
         return cls(allowed=False, reason=reason)
 
 
-@FrozenDataclass()
-class PolicyState:
+@dataclass(slots=True, frozen=True)
+class PolicyState(FrozenDataclassMixin):
     """Tracks which tools/keys have been invoked for policy enforcement.
 
     This dataclass is stored in a session slice to track policy state
@@ -102,8 +102,8 @@ class ToolPolicy(Protocol):
         ...
 
 
-@dataclass(frozen=True)
-class SequentialDependencyPolicy:
+@dataclass(slots=True, frozen=True)
+class SequentialDependencyPolicy(FrozenDataclassMixin):
     """Enforce unconditional tool invocation order.
 
     Tracks which tools have been successfully invoked and blocks tools
@@ -199,8 +199,8 @@ def _normalize_path(path: str, mount_point: str | None) -> str:
     return strip_mount_point(normalized, mount_point)
 
 
-@dataclass(frozen=True)
-class ReadBeforeWritePolicy:
+@dataclass(slots=True, frozen=True)
+class ReadBeforeWritePolicy(FrozenDataclassMixin):
     """Enforce read-before-write semantics on filesystem tools.
 
     A file must be read before it can be overwritten or edited. However,

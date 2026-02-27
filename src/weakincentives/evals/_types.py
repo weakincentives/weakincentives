@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from ..dataclasses import FrozenDataclassMixin
+
 if TYPE_CHECKING:
     from ..runtime.session import SessionProtocol, SessionViewProtocol
 
@@ -31,7 +33,7 @@ from ..serde import parse
 
 
 @dataclass(slots=True, frozen=True)
-class Sample[InputT, ExpectedT]:
+class Sample[InputT, ExpectedT](FrozenDataclassMixin):
     """Single evaluation input.
 
     Pairs an input with its expected output for evaluation.
@@ -51,7 +53,7 @@ class Sample[InputT, ExpectedT]:
 
 
 @dataclass(slots=True, frozen=True)
-class Score:
+class Score(FrozenDataclassMixin):
     """Result of scoring one output.
 
     The ``value`` field enables ranking and aggregation (0.0 to 1.0 normalized).
@@ -119,7 +121,7 @@ def _coerce[T](value: object, target: type[T]) -> T:
 
 
 @dataclass(slots=True, frozen=True)
-class Dataset[InputT, ExpectedT]:
+class Dataset[InputT, ExpectedT](FrozenDataclassMixin):
     """Immutable collection of evaluation samples.
 
     Provides a clean API for loading and accessing evaluation data.
@@ -185,7 +187,7 @@ class Dataset[InputT, ExpectedT]:
 
 
 @dataclass(slots=True, frozen=True)
-class EvalResult:
+class EvalResult(FrozenDataclassMixin):
     """Result for one sample under an experiment.
 
     Captures the score, latency, experiment name, and any error that occurred
@@ -225,7 +227,7 @@ class EvalResult:
 
 
 @dataclass(slots=True, frozen=True)
-class ExperimentComparison:
+class ExperimentComparison(FrozenDataclassMixin):
     """Statistical comparison between two experiments.
 
     Provides metrics for comparing a treatment experiment against a baseline.
@@ -277,7 +279,7 @@ class ExperimentComparison:
 
 
 @dataclass(slots=True, frozen=True)
-class EvalReport:
+class EvalReport(FrozenDataclassMixin):
     """Aggregate evaluation results with computed metrics and experiment breakdown.
 
     Provides properties for pass rate, mean score, mean latency,
@@ -419,7 +421,7 @@ class EvalReport:
 
 
 @dataclass(slots=True, frozen=True)
-class EvalRequest[InputT, ExpectedT]:
+class EvalRequest[InputT, ExpectedT](FrozenDataclassMixin):
     """Request to evaluate a sample under an experiment.
 
     Wraps a sample with an experiment configuration for evaluation.

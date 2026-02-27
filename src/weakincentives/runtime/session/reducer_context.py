@@ -14,13 +14,15 @@
 
 from __future__ import annotations
 
-from ...dataclasses import FrozenDataclass
+from dataclasses import dataclass
+
+from ...dataclasses import FrozenDataclassMixin
 from ._types import ReducerContextProtocol
 from .protocols import SessionViewProtocol
 
 
-@FrozenDataclass()
-class ReducerContext(ReducerContextProtocol):
+@dataclass(slots=True, frozen=True)
+class ReducerContext(FrozenDataclassMixin, ReducerContextProtocol):
     """Immutable bundle of runtime services shared with reducers.
 
     Provides read-only access to session state via :class:`SessionViewProtocol`.

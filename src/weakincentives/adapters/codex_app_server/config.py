@@ -15,9 +15,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 
 __all__ = [
     "ApiKeyAuth",
@@ -55,15 +56,15 @@ DEFAULT_MODEL = "gpt-5.3-codex"
 """Default Codex model identifier."""
 
 
-@FrozenDataclass()
-class ApiKeyAuth:
+@dataclass(slots=True, frozen=True)
+class ApiKeyAuth(FrozenDataclassMixin):
     """API key authentication for Codex."""
 
     api_key: str
 
 
-@FrozenDataclass()
-class ExternalTokenAuth:
+@dataclass(slots=True, frozen=True)
+class ExternalTokenAuth(FrozenDataclassMixin):
     """External token authentication (ChatGPT tokens)."""
 
     id_token: str
@@ -74,8 +75,8 @@ CodexAuthMode = ApiKeyAuth | ExternalTokenAuth
 """Union of supported authentication modes."""
 
 
-@FrozenDataclass()
-class CodexAppServerClientConfig:
+@dataclass(slots=True, frozen=True)
+class CodexAppServerClientConfig(FrozenDataclassMixin):
     """Client-level configuration for Codex App Server.
 
     Attributes:
@@ -111,8 +112,8 @@ class CodexAppServerClientConfig:
     """Include raw notification JSON in ``raw`` field."""
 
 
-@FrozenDataclass()
-class CodexAppServerModelConfig:
+@dataclass(slots=True, frozen=True)
+class CodexAppServerModelConfig(FrozenDataclassMixin):
     """Model-level configuration for Codex App Server.
 
     Attributes:

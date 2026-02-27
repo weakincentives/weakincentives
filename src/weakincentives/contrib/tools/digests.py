@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 import textwrap
-from dataclasses import field
+from dataclasses import dataclass, field
 from typing import override
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ...prompt import normalize_component_key
 from ...prompt.section import Section, SectionVisibility
 from ...runtime.logging import StructuredLogger, get_logger
@@ -27,8 +27,8 @@ from ...runtime.session.protocols import SessionProtocol
 from ...types.dataclass import SupportsDataclass
 
 
-@FrozenDataclass()
-class WorkspaceDigest(SupportsDataclass):
+@dataclass(slots=True, frozen=True)
+class WorkspaceDigest(FrozenDataclassMixin, SupportsDataclass):
     """Digest entry persisted within a :class:`Session` slice.
 
     The digest contains a short summary and the full body content. By default,

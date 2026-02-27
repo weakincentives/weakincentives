@@ -57,6 +57,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, is_dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from ...dataclasses import FrozenDataclassMixin
 from ...types.dataclass import SupportsDataclass
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .slices import Replace, SliceOp, SliceView
@@ -69,7 +70,7 @@ _REDUCER_META = "__wink_reducer_meta__"
 
 
 @dataclass(slots=True, frozen=True)
-class ReducerMeta:
+class ReducerMeta(FrozenDataclassMixin):
     """Metadata for a reducer method."""
 
     event_type: type[SupportsDataclass]

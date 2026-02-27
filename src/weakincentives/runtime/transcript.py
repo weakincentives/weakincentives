@@ -31,6 +31,7 @@ from datetime import datetime
 from typing import Any
 
 from ..clock import SYSTEM_CLOCK
+from ..dataclasses import FrozenDataclassMixin
 from .logging import StructuredLogger, get_logger
 
 __all__ = [
@@ -63,7 +64,7 @@ _logger: StructuredLogger = get_logger(
 
 
 @dataclass(slots=True, frozen=True)
-class TranscriptEntry:
+class TranscriptEntry(FrozenDataclassMixin):
     """A single entry in a reconstructed transcript."""
 
     prompt_name: str
@@ -78,7 +79,7 @@ class TranscriptEntry:
 
 
 @dataclass(slots=True, frozen=True)
-class TranscriptSummary:
+class TranscriptSummary(FrozenDataclassMixin):
     """Summary statistics for a transcript."""
 
     total_entries: int

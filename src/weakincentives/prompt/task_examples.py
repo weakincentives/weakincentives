@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Self, TypeVar, cast, override
 
+from ..dataclasses import FrozenDataclassMixin
 from ..serde import clone as clone_dataclass, dump
 from ..types.dataclass import (
     SupportsDataclass,
@@ -48,7 +49,9 @@ OutcomeT = TypeVar("OutcomeT", bound="str | SupportsDataclass", covariant=True)
 
 
 @dataclass(slots=True, frozen=True)
-class TaskStep[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
+class TaskStep[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
+    FrozenDataclassMixin
+):
     """Single tool invocation in a task trajectory."""
 
     tool_name: str

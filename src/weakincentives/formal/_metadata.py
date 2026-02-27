@@ -19,9 +19,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..dataclasses import FrozenDataclassMixin
 
-@dataclass(frozen=True, slots=True)
-class StateVar:
+
+@dataclass(slots=True, frozen=True)
+class StateVar(FrozenDataclassMixin):
     """TLA+ state variable metadata.
 
     Attributes:
@@ -37,8 +39,8 @@ class StateVar:
     initial_value: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ActionParameter:
+@dataclass(slots=True, frozen=True)
+class ActionParameter(FrozenDataclassMixin):
     """TLA+ action parameter with domain.
 
     Attributes:
@@ -50,8 +52,8 @@ class ActionParameter:
     domain: str
 
 
-@dataclass(frozen=True, slots=True)
-class Action:
+@dataclass(slots=True, frozen=True)
+class Action(FrozenDataclassMixin):
     """TLA+ action metadata.
 
     Attributes:
@@ -69,8 +71,8 @@ class Action:
     description: str = ""
 
 
-@dataclass(frozen=True, slots=True)
-class Invariant:
+@dataclass(slots=True, frozen=True)
+class Invariant(FrozenDataclassMixin):
     """TLA+ invariant metadata.
 
     Attributes:

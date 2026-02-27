@@ -23,9 +23,10 @@ developed by Anthropic and released as an open standard.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 
 __all__ = [
     "MAX_SKILL_FILE_BYTES",
@@ -51,8 +52,8 @@ MAX_SKILL_TOTAL_BYTES: int = 10 * 1024 * 1024
 # -----------------------------------------------------------------------------
 
 
-@FrozenDataclass()
-class Skill:
+@dataclass(slots=True, frozen=True)
+class Skill(FrozenDataclassMixin):
     """Represents a skill definition.
 
     A skill is a collection of instructions, scripts, and resources that
@@ -87,8 +88,8 @@ class Skill:
     content: str | None = None
 
 
-@FrozenDataclass()
-class SkillMount:
+@dataclass(slots=True, frozen=True)
+class SkillMount(FrozenDataclassMixin):
     """Configuration for mounting a skill into an agent environment.
 
     A skill mount specifies how to copy a skill from the host filesystem

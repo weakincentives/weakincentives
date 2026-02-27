@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Final, override
 
 from ..clock import SYSTEM_CLOCK
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..errors import WinkError
 from ..filesystem import Filesystem, HostFilesystem
 from ..resources import ResourceRegistry
@@ -72,8 +72,8 @@ class WorkspaceSecurityError(WinkError):
 # ---------------------------------------------------------------------------
 
 
-@FrozenDataclass()
-class HostMount:
+@dataclass(slots=True, frozen=True)
+class HostMount(FrozenDataclassMixin):
     """Configuration for mounting host files into the workspace.
 
     Attributes:
@@ -94,8 +94,8 @@ class HostMount:
     follow_symlinks: bool = False
 
 
-@FrozenDataclass()
-class HostMountPreview:
+@dataclass(slots=True, frozen=True)
+class HostMountPreview(FrozenDataclassMixin):
     """Summary of a materialized host mount.
 
     Attributes:
@@ -342,7 +342,7 @@ def compute_workspace_fingerprint(mounts: tuple[HostMount, ...]) -> str:
 
 
 @dataclass(slots=True, frozen=True)
-class _WorkspaceSectionParams:
+class _WorkspaceSectionParams(FrozenDataclassMixin):
     """Default params for WorkspaceSection (empty placeholder)."""
 
 

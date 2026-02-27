@@ -34,7 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ..runtime.logging import get_logger
 
 if TYPE_CHECKING:
@@ -52,8 +52,8 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-@FrozenDataclass()
-class TaskCompletionResult:
+@dataclass(slots=True, frozen=True)
+class TaskCompletionResult(FrozenDataclassMixin):
     """Result of a task completion check.
 
     Attributes:

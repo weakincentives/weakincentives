@@ -32,6 +32,7 @@ from claude_agent_sdk.types import (
 
 from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK
+from ...dataclasses import FrozenDataclassMixin
 from ...deadlines import Deadline
 from ...prompt.feedback import collect_feedback
 from ...runtime.events.types import ToolInvoked
@@ -183,7 +184,7 @@ def _setup_tool_execution_state(
 
 
 @dataclass(slots=True, frozen=True)
-class _ParsedToolData:
+class _ParsedToolData(FrozenDataclassMixin):
     """Parsed tool data from PostToolUse hook input."""
 
     tool_name: str

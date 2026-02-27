@@ -23,12 +23,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..dataclasses import FrozenDataclassMixin
+
 if TYPE_CHECKING:
     from weakincentives.formal import FormalSpec
 
 
-@dataclass(frozen=True, slots=True)
-class ModelCheckResult:
+@dataclass(slots=True, frozen=True)
+class ModelCheckResult(FrozenDataclassMixin):
     """Result of TLC model checking."""
 
     passed: bool

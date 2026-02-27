@@ -44,6 +44,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Self
 from uuid import UUID
 
+from ..dataclasses import FrozenDataclassMixin
 from .lifecycle import wait_until
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError
 from .watchdog import Heartbeat
@@ -55,7 +56,7 @@ _logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True, frozen=True)
-class DeadLetter[T]:
+class DeadLetter[T](FrozenDataclassMixin):
     """Dead-lettered message with failure metadata.
 
     Preserves the original message body along with context about why
@@ -104,7 +105,7 @@ class DeadLetter[T]:
 
 
 @dataclass(slots=True, frozen=True)
-class DLQPolicy[T, R]:
+class DLQPolicy[T, R](FrozenDataclassMixin):
     """Dead letter queue policy.
 
     Combines destination mailbox with decision logic for when to

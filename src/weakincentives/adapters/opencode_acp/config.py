@@ -14,13 +14,14 @@
 
 from __future__ import annotations
 
-from ...dataclasses import FrozenDataclass
+from dataclasses import dataclass
+
 from ..acp.config import ACPAdapterConfig, ACPClientConfig
 
 __all__ = ["OpenCodeACPAdapterConfig", "OpenCodeACPClientConfig"]
 
 
-@FrozenDataclass()
+@dataclass(slots=True, frozen=True)
 class OpenCodeACPClientConfig(ACPClientConfig):
     """OpenCode-specific client configuration.
 
@@ -30,7 +31,7 @@ class OpenCodeACPClientConfig(ACPClientConfig):
     """
 
 
-@FrozenDataclass()
+@dataclass(slots=True, frozen=True)
 class OpenCodeACPAdapterConfig(ACPAdapterConfig):
     """OpenCode-specific adapter configuration.
 

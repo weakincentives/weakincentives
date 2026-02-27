@@ -35,6 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from ..dataclasses import FrozenDataclassMixin
 from .feedback import Feedback, FeedbackContext
 
 # ---------------------------------------------------------------------------
@@ -67,8 +68,8 @@ def _format_duration(seconds: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class DeadlineFeedback:
+@dataclass(slots=True, frozen=True)
+class DeadlineFeedback(FrozenDataclassMixin):
     """Feedback provider that reports remaining time until deadline.
 
     This provider helps agents manage their time during unattended execution
@@ -185,8 +186,8 @@ class DeadlineFeedback:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class StaticFeedbackProvider:
+@dataclass(slots=True, frozen=True)
+class StaticFeedbackProvider(FrozenDataclassMixin):
     """Feedback provider that delivers a fixed message.
 
     This provider returns a static feedback message configured at construction

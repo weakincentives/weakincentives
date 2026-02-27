@@ -25,6 +25,7 @@ from typing import Final, Literal
 from uuid import UUID
 
 from ..clock import SYSTEM_CLOCK
+from ..dataclasses import FrozenDataclassMixin
 from ._path import (
     MAX_PATH_DEPTH,
     MAX_SEGMENT_LENGTH,
@@ -50,7 +51,7 @@ WriteMode = Literal["create", "overwrite", "append"]
 
 
 @dataclass(slots=True, frozen=True)
-class FileStat:
+class FileStat(FrozenDataclassMixin):
     """Metadata for a file or directory."""
 
     path: str
@@ -62,7 +63,7 @@ class FileStat:
 
 
 @dataclass(slots=True, frozen=True)
-class FileEntry:
+class FileEntry(FrozenDataclassMixin):
     """Directory listing entry."""
 
     name: str
@@ -72,7 +73,7 @@ class FileEntry:
 
 
 @dataclass(slots=True, frozen=True)
-class GlobMatch:
+class GlobMatch(FrozenDataclassMixin):
     """Result from glob operations."""
 
     path: str
@@ -80,7 +81,7 @@ class GlobMatch:
 
 
 @dataclass(slots=True, frozen=True)
-class GrepMatch:
+class GrepMatch(FrozenDataclassMixin):
     """Result from grep operations."""
 
     path: str
@@ -91,7 +92,7 @@ class GrepMatch:
 
 
 @dataclass(slots=True, frozen=True)
-class ReadResult:
+class ReadResult(FrozenDataclassMixin):
     """Content returned from text read operations."""
 
     content: str
@@ -103,7 +104,7 @@ class ReadResult:
 
 
 @dataclass(slots=True, frozen=True)
-class ReadBytesResult:
+class ReadBytesResult(FrozenDataclassMixin):
     """Content returned from binary read operations."""
 
     content: bytes
@@ -115,7 +116,7 @@ class ReadBytesResult:
 
 
 @dataclass(slots=True, frozen=True)
-class WriteResult:
+class WriteResult(FrozenDataclassMixin):
     """Confirmation of a write operation."""
 
     path: str
@@ -124,7 +125,7 @@ class WriteResult:
 
 
 @dataclass(slots=True, frozen=True)
-class FilesystemSnapshot:
+class FilesystemSnapshot(FrozenDataclassMixin):
     """Immutable capture of filesystem state, storable in session.
 
     Snapshots capture the state of a workspace at a point in time, enabling

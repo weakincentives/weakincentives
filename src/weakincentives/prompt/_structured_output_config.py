@@ -12,16 +12,17 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 from ._types import SupportsDataclass
 
 __all__ = ["StructuredOutputConfig"]
 
 
-@FrozenDataclass()
-class StructuredOutputConfig[DataclassT: SupportsDataclass]:
+@dataclass(slots=True, frozen=True)
+class StructuredOutputConfig[DataclassT: SupportsDataclass](FrozenDataclassMixin):
     """Resolved structured output declaration for a prompt."""
 
     dataclass_type: type[DataclassT]

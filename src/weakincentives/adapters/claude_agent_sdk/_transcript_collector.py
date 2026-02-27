@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from ...clock import SYSTEM_CLOCK, AsyncSleeper
+from ...dataclasses import FrozenDataclassMixin
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.transcript import TranscriptEmitter
 from ._transcript_parser import emit_entry
@@ -90,7 +91,7 @@ def _extract_assistant_text(messages: list[Any]) -> str:
 
 
 @dataclass(slots=True, frozen=True)
-class TranscriptCollectorConfig:
+class TranscriptCollectorConfig(FrozenDataclassMixin):
     """Configuration for TranscriptCollector."""
 
     poll_interval: float = 0.25

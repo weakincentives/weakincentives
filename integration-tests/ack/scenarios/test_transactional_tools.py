@@ -22,7 +22,7 @@ from typing import cast
 import pytest
 
 from weakincentives.adapters._shared._bridge import create_bridged_tools
-from weakincentives.dataclasses import FrozenDataclass
+from weakincentives.dataclasses import FrozenDataclassMixin
 from weakincentives.debug import BundleConfig, BundleWriter, DebugBundle
 from weakincentives.prompt import (
     Prompt,
@@ -39,8 +39,8 @@ from . import TransactionPromptParams, build_transactional_prompt, make_adapter_
 pytestmark = pytest.mark.ack_capability("transactional_tools")
 
 
-@FrozenDataclass()
-class ToolOperation:
+@dataclass(slots=True, frozen=True)
+class ToolOperation(FrozenDataclassMixin):
     """A session-recorded tool operation identifier."""
 
     operation_id: str
@@ -48,15 +48,15 @@ class ToolOperation:
     filename: str
 
 
-@FrozenDataclass()
-class RecordToolOperation:
+@dataclass(slots=True, frozen=True)
+class RecordToolOperation(FrozenDataclassMixin):
     """Event used to append operations to ``ToolOperationLog``."""
 
     operation: ToolOperation
 
 
-@FrozenDataclass()
-class ToolOperationLog:
+@dataclass(slots=True, frozen=True)
+class ToolOperationLog(FrozenDataclassMixin):
     """Session slice for transactional operation tracking."""
 
     operations: tuple[ToolOperation, ...] = field(default=())

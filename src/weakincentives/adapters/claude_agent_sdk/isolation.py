@@ -45,11 +45,12 @@ import json
 import logging
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import FrozenDataclassMixin
 from ._model_utils import (
     DEFAULT_BEDROCK_MODEL,
     DEFAULT_MODEL,
@@ -69,8 +70,8 @@ __all__ = [
 ]
 
 
-@FrozenDataclass()
-class NetworkPolicy:
+@dataclass(slots=True, frozen=True)
+class NetworkPolicy(FrozenDataclassMixin):
     """Network access policy for Claude Agent SDK sandbox.
 
     Controls which network resources tools can access during execution.
@@ -114,8 +115,8 @@ class NetworkPolicy:
         return cls(allowed_domains=domains)
 
 
-@FrozenDataclass()
-class SandboxConfig:
+@dataclass(slots=True, frozen=True)
+class SandboxConfig(FrozenDataclassMixin):
     """Sandbox configuration for Claude Agent SDK.
 
     Provides programmatic control over OS-level sandboxing that would otherwise
@@ -192,8 +193,8 @@ class AuthMode(Enum):
 # This ensures that if 'claude' works on the host, WINK agents will too.
 
 
-@FrozenDataclass()
-class BedrockConfig:
+@dataclass(slots=True, frozen=True)
+class BedrockConfig(FrozenDataclassMixin):
     """Detected Bedrock configuration from the environment.
 
     Represents the Bedrock authentication configuration found in the
@@ -325,8 +326,8 @@ def get_default_model() -> str:
     return DEFAULT_MODEL
 
 
-@FrozenDataclass()
-class IsolationOptions:
+@dataclass(slots=True, frozen=True)
+class IsolationOptions(FrozenDataclassMixin):
     """Common optional parameters for IsolationConfig factory methods.
 
     Groups network, sandbox, environment, and skills configuration to simplify
@@ -346,8 +347,8 @@ class IsolationOptions:
     """If True, inherit non-sensitive host environment variables."""
 
 
-@FrozenDataclass()
-class IsolationConfig:
+@dataclass(slots=True, frozen=True)
+class IsolationConfig(FrozenDataclassMixin):
     """Configuration for hermetic SDK isolation.
 
     When provided to the adapter, creates an ephemeral home directory with

@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..clock import SYSTEM_CLOCK, MonotonicClock
+from ..dataclasses import FrozenDataclassMixin
 from .mailbox import ReceiptHandleExpiredError
 
 if TYPE_CHECKING:
@@ -51,8 +52,8 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class LeaseExtenderConfig:
+@dataclass(slots=True, frozen=True)
+class LeaseExtenderConfig(FrozenDataclassMixin):
     """Configuration for heartbeat-triggered lease extension.
 
     Attributes:

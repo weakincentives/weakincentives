@@ -27,10 +27,10 @@ import logging
 import re
 import subprocess  # nosec B404 - needed for git introspection
 from collections.abc import Mapping
-from dataclasses import field
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclassMixin
 
 _logger = logging.getLogger(__name__)
 
@@ -64,8 +64,8 @@ _SENSITIVE_FILE_PATTERNS = (
 )
 
 
-@FrozenDataclass()
-class GitInfo:
+@dataclass(slots=True, frozen=True)
+class GitInfo(FrozenDataclassMixin):
     """Git repository state.
 
     Attributes:

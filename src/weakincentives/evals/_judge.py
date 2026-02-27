@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from ..dataclasses import FrozenDataclassMixin
 from ..prompt import MarkdownSection, Prompt, PromptTemplate
 from ..runtime import Session
 from ._types import Score
@@ -49,7 +50,7 @@ PASSING_RATINGS: frozenset[Rating] = frozenset(_PASSING)
 
 
 @dataclass(slots=True, frozen=True)
-class JudgeOutput:
+class JudgeOutput(FrozenDataclassMixin):
     """Structured output from judge prompt."""
 
     rating: Rating
@@ -60,7 +61,7 @@ class JudgeOutput:
 
 
 @dataclass(slots=True, frozen=True)
-class JudgeParams:
+class JudgeParams(FrozenDataclassMixin):
     """Parameters for the judge prompt."""
 
     criterion: str
