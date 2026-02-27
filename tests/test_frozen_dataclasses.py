@@ -14,29 +14,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 from dataclasses import _MISSING_TYPE, MISSING, FrozenInstanceError, dataclass, field
-from typing import ClassVar, Protocol, Self, cast
+from typing import ClassVar
 
 import pytest
 
 from weakincentives.dataclasses import FrozenDataclassMixin, pre_init
 
 pytestmark = pytest.mark.core
-
-
-class HasFrozenOps(Protocol):
-    calls: ClassVar[list[str]]
-    value: int
-    label: str
-
-    def update(self, **changes: object) -> Self: ...
-
-    def merge(self, mapping_or_obj: object) -> Self: ...
-
-    def map(
-        self, transform: Callable[[dict[str, object]], Mapping[str, object]]
-    ) -> Self: ...
 
 
 def test_pre_init_shapes_inputs_and_runs_post_init() -> None:
@@ -141,7 +126,7 @@ def test_copy_helpers_skip_pre_init_and_support_mapping_and_objects() -> None:
         def __post_init__(self) -> None:
             type(self).calls.append("post")
 
-    tracker = cast(HasFrozenOps, Tracker(1))
+    tracker = Tracker(1)
 
     with pytest.raises(FrozenInstanceError):
         tracker.value = 2
@@ -240,7 +225,7 @@ def test_merge_requires_source_fields() -> None:
         def __pre_init__(cls, *, value: int) -> dict[str, int]:
             return {"value": value}
 
-    target = cast(HasFrozenOps, Target(1))
+    target = Target(1)
 
     with pytest.raises(TypeError, match="no matching fields"):
         target.merge(object())
@@ -260,10 +245,10 @@ def test_merge_with_partial_object_attributes() -> None:
     class PartialSource:
         a = 10
 
-    merged = cast(HasFrozenOps, multi).merge(PartialSource())
-    assert merged.a == 10  # type: ignore[attr-defined]
-    assert merged.b == 2  # type: ignore[attr-defined]
-    assert merged.c == 3  # type: ignore[attr-defined]
+    merged = multi.merge(PartialSource())
+    assert merged.a == 10
+    assert merged.b == 2
+    assert merged.c == 3
 
 
 def test_pre_init_is_noop_without_pre_init_method() -> None:
@@ -276,8 +261,8 @@ def test_pre_init_is_noop_without_pre_init_method() -> None:
 
     instance = NoHook(42)
     assert instance.value == 42
-    updated = cast(HasFrozenOps, instance).update(value=99)
-    assert updated.value == 99  # type: ignore[attr-defined]
+    updated = instance.update(value=99)
+    assert updated.value == 99
 
 
 def test_frozen_dataclass_without_pre_init() -> None:
@@ -297,8 +282,7 @@ def test_frozen_dataclass_without_pre_init() -> None:
     assert simple2.label == "custom"
 
     # Copy helpers still work
-    simple_ops = cast(HasFrozenOps, simple)
-    updated = simple_ops.update(label="updated")
+    updated = simple.update(label="updated")
     assert updated.label == "updated"
     assert updated.value == 42
 
@@ -308,7 +292,7 @@ def test_update_rejects_unknown_fields() -> None:
     class Target(FrozenDataclassMixin):
         value: int
 
-    target = cast(HasFrozenOps, Target(1))
+    target = Target(1)
 
     with pytest.raises(TypeError, match="unexpected field"):
         target.update(unknown=99)
@@ -359,14 +343,6 @@ def test_dataclass_options_passthrough() -> None:
     assert Mutable(1) < Mutable(2)  # type: ignore[operator]
 
 
-class _WithDerivedOps(Protocol):
-    value: int
-    derived: int
-
-    def update(self, **kwargs: object) -> Self: ...
-    def merge(self, source: object) -> Self: ...
-
-
 def test_copy_helpers_reject_changes_to_non_init_fields() -> None:
     """Copy helpers reject attempts to change derived (non-init) fields."""
 
@@ -380,7 +356,7 @@ def test_copy_helpers_reject_changes_to_non_init_fields() -> None:
         def __pre_init__(cls, *, value: int) -> dict[str, int]:
             return {"value": value, "derived": value * 2}
 
-    instance = cast(_WithDerivedOps, WithDerived(value=5))
+    instance = WithDerived(value=5)
     assert instance.derived == 10
 
     with pytest.raises(TypeError, match="cannot update derived field"):
@@ -404,7 +380,7 @@ def test_copy_helpers_recompute_derived_fields() -> None:
         def __pre_init__(cls, *, value: int) -> dict[str, int]:
             return {"value": value, "derived": value * 2}
 
-    instance = cast(_WithDerivedOps, WithDerived(value=5))
+    instance = WithDerived(value=5)
     assert instance.value == 5
     assert instance.derived == 10
 
