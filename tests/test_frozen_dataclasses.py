@@ -266,6 +266,20 @@ def test_merge_with_partial_object_attributes() -> None:
     assert merged.c == 3  # type: ignore[attr-defined]
 
 
+def test_pre_init_is_noop_without_pre_init_method() -> None:
+    """pre_init is a no-op when the class has no __pre_init__ method."""
+
+    @pre_init
+    @dataclass(slots=True, frozen=True)
+    class NoHook(FrozenDataclassMixin):
+        value: int
+
+    instance = NoHook(42)
+    assert instance.value == 42
+    updated = cast(HasFrozenOps, instance).update(value=99)
+    assert updated.value == 99  # type: ignore[attr-defined]
+
+
 def test_frozen_dataclass_without_pre_init() -> None:
     """Classes without __pre_init__ work normally."""
 
