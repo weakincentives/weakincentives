@@ -383,7 +383,7 @@ class Prompt[OutputT]:
             raise RuntimeError("PromptTemplate._snapshot not initialized")
         return PromptRenderer(
             registry=snapshot,
-            structured_output=self.template._structured_output,  # pyright: ignore[reportPrivateUsage]
+            structured_output=self.template.structured_output,
         )
 
     def bind(

@@ -117,6 +117,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import MISSING, Field, fields
+from types import MethodType
 from typing import Any, Self, cast
 
 __all__ = ["FrozenDataclassMixin", "pre_init"]
@@ -192,7 +193,9 @@ def pre_init[T](cls: type[T]) -> type[T]:
     if pre_init_method is None:
         return cls
     original_init = cls.__init__
-    wrapper = _build_pre_init_wrapper(cls, pre_init_method, original_init)
+    wrapper = _build_pre_init_wrapper(
+        cls, cast(MethodType, pre_init_method), original_init
+    )
     cast(Any, cls).__init__ = wrapper
     return cls
 
@@ -204,7 +207,7 @@ def pre_init[T](cls: type[T]) -> type[T]:
 
 def _build_pre_init_wrapper(
     cls: type[Any],
-    pre_init: Callable[..., Mapping[str, object]],
+    pre_init: MethodType,
     original_init: Callable[..., None],
 ) -> Callable[..., None]:
     all_fields = fields(cls)
@@ -214,7 +217,7 @@ def _build_pre_init_wrapper(
     all_field_names = init_field_names + list(non_init_field_names)
     # Get the underlying function from the classmethod to allow calling with
     # the actual subclass type, not the class where __pre_init__ was defined.
-    pre_init_func = pre_init.__func__  # type: ignore[union-attr]
+    pre_init_func = pre_init.__func__
 
     def wrapper(self: object, *args: object, **kwargs: object) -> None:
         actual_cls = type(self)
