@@ -31,7 +31,7 @@ jobs:
         run: marp wink-presentation.md --pdf --allow-local-files -o wink-presentation.pdf
 
       - name: Upload PDF artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wink-presentation-pdf
           path: wink-presentation.pdf
@@ -49,7 +49,7 @@ jobs:
         run: marp wink-presentation.md --html --allow-local-files -o wink-presentation.html
 
       - name: Upload HTML artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wink-presentation-html
           path: wink-presentation.html
