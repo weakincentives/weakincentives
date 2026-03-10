@@ -10,11 +10,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tool policy types for enforcing sequential dependencies."""
+"""Tool policy types for enforcing constraints on tool invocations.
+
+Policies are declarative constraints that gate tool calls. Each policy
+evaluates independently; all must allow for a call to proceed (fail-closed).
+
+Built-in policies use isolated session state: each policy type stores its
+own state in a dedicated session slice, preventing cross-policy interference.
+
+Combinators (:class:`AllOfPolicy`, :class:`AnyOfPolicy`) compose multiple
+policies with AND/OR semantics.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -27,12 +37,22 @@ if TYPE_CHECKING:
     from .tool_result import ToolResult
 
 
+# ---------------------------------------------------------------------------
+# PolicyDecision
+# ---------------------------------------------------------------------------
+
+
 @dataclass(slots=True, frozen=True)
 class PolicyDecision:
-    """Result of a policy check."""
+    """Result of a policy check.
+
+    Contains the allow/deny verdict, an optional human-readable reason,
+    and optional remediation suggestions the agent can act on.
+    """
 
     allowed: bool
     reason: str | None = None
+    suggestions: tuple[str, ...] = ()
 
     @classmethod
     def allow(cls) -> PolicyDecision:
@@ -40,18 +60,52 @@ class PolicyDecision:
         return cls(allowed=True)
 
     @classmethod
-    def deny(cls, reason: str) -> PolicyDecision:
-        """Block the tool call with an explanation."""
-        return cls(allowed=False, reason=reason)
+    def deny(
+        cls,
+        reason: str,
+        *,
+        suggestions: tuple[str, ...] = (),
+    ) -> PolicyDecision:
+        """Block the tool call with an explanation and optional suggestions."""
+        return cls(allowed=False, reason=reason, suggestions=suggestions)
+
+
+# ---------------------------------------------------------------------------
+# Per-policy state types (isolated session slices)
+# ---------------------------------------------------------------------------
+
+
+@FrozenDataclass()
+class SequentialDependencyState:
+    """Session slice for :class:`SequentialDependencyPolicy`.
+
+    Tracks which tools have been successfully invoked so that dependency
+    checks can determine whether prerequisites are satisfied.
+    """
+
+    invoked_tools: frozenset[str] = frozenset()
+
+
+@FrozenDataclass()
+class ReadBeforeWriteState:
+    """Session slice for :class:`ReadBeforeWritePolicy`.
+
+    Tracks which (tool, path) pairs have been recorded as reads so that
+    write attempts can verify prior read access.
+    """
+
+    invoked_keys: frozenset[tuple[str, str]] = frozenset()
 
 
 @FrozenDataclass()
 class PolicyState:
-    """Tracks which tools/keys have been invoked for policy enforcement.
+    """Generic policy state for custom policy implementations.
 
-    This dataclass is stored in a session slice to track policy state
-    across tool invocations. It supports both unconditional tool tracking
-    and parameter-keyed tracking.
+    Built-in policies use their own dedicated state types
+    (:class:`SequentialDependencyState`, :class:`ReadBeforeWriteState`)
+    for isolation. This type is provided as a convenience for custom
+    policies that need simple tool/key tracking without defining their
+    own state dataclass.
     """
 
     policy_name: str
@@ -59,8 +113,13 @@ class PolicyState:
     invoked_keys: frozenset[tuple[str, str]] = frozenset()  # (tool_name, key) pairs
 
 
+# ---------------------------------------------------------------------------
+# ToolPolicy protocol
+# ---------------------------------------------------------------------------
+
+
 class ToolPolicy(Protocol):
-    """Protocol for sequential dependency constraints on tool invocations.
+    """Protocol for declarative constraints on tool invocations.
 
     Policies declare that tool B requires tool A to have been called first,
     either unconditionally or keyed by a parameter value. Policies are
@@ -97,9 +156,14 @@ class ToolPolicy(Protocol):
         """Update session state after successful execution.
 
         Called after the handler returns a successful result. Use this to
-        record the invocation in the session's PolicyState slice.
+        record the invocation in the session's state slice.
         """
         ...
+
+
+# ---------------------------------------------------------------------------
+# Built-in policies
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -107,7 +171,8 @@ class SequentialDependencyPolicy:
     """Enforce unconditional tool invocation order.
 
     Tracks which tools have been successfully invoked and blocks tools
-    whose prerequisites have not been satisfied.
+    whose prerequisites have not been satisfied. State is stored in a
+    dedicated :class:`SequentialDependencyState` session slice.
 
     Example::
 
@@ -117,7 +182,7 @@ class SequentialDependencyPolicy:
                 "build": frozenset({"lint"}),
             }
         )
-        # Required order: lint → build, then test, then deploy
+        # Required order: lint -> build, then test, then deploy
     """
 
     dependencies: Mapping[str, frozenset[str]]  # tool -> required predecessors
@@ -139,13 +204,15 @@ class SequentialDependencyPolicy:
         if not required:
             return PolicyDecision.allow()
 
-        state = context.session[PolicyState].latest()
+        state = context.session[SequentialDependencyState].latest()
         invoked: frozenset[str] = state.invoked_tools if state else frozenset()
         missing = required - invoked
 
         if missing:
+            sorted_missing = sorted(missing)
             return PolicyDecision.deny(
-                f"Tool '{tool.name}' requires: {', '.join(sorted(missing))}"
+                f"Tool '{tool.name}' requires: {', '.join(sorted_missing)}",
+                suggestions=tuple(f"Call '{t}' first." for t in sorted_missing),
             )
         return PolicyDecision.allow()
 
@@ -161,16 +228,18 @@ class SequentialDependencyPolicy:
         if not result.success:
             return
 
-        state = context.session[PolicyState].latest()
-        if state is None:
-            state = PolicyState(policy_name=self.name)
+        state = context.session[SequentialDependencyState].latest()
+        current_tools: frozenset[str] = state.invoked_tools if state else frozenset()
 
-        new_state = PolicyState(
-            policy_name=self.name,
-            invoked_tools=state.invoked_tools | {tool.name},
-            invoked_keys=state.invoked_keys,
+        new_state = SequentialDependencyState(
+            invoked_tools=current_tools | {tool.name},
         )
-        context.session[PolicyState].seed(new_state)
+        context.session[SequentialDependencyState].seed(new_state)
+
+
+# ---------------------------------------------------------------------------
+# Path helpers (shared by ReadBeforeWritePolicy)
+# ---------------------------------------------------------------------------
 
 
 def _extract_path(params: SupportsDataclass | None) -> str | None:
@@ -193,7 +262,7 @@ def _normalize_path(path: str, mount_point: str | None) -> str:
 
     Delegates to the shared :func:`strip_mount_point` implementation.
     """
-    # Strip leading slashes (absolute → relative)
+    # Strip leading slashes (absolute -> relative)
     normalized = path.lstrip("/")
     # Strip mount point prefix using shared implementation
     return strip_mount_point(normalized, mount_point)
@@ -204,16 +273,17 @@ class ReadBeforeWritePolicy:
     """Enforce read-before-write semantics on filesystem tools.
 
     A file must be read before it can be overwritten or edited. However,
-    creating new files (paths that don't exist) is always allowed.
+    creating new files (paths that don't exist) is always allowed. State
+    is stored in a dedicated :class:`ReadBeforeWriteState` session slice.
 
     Example::
 
         policy = ReadBeforeWritePolicy()
 
-        # write_file(path="new.txt")      → OK (file doesn't exist)
-        # write_file(path="config.yaml")  → DENIED (exists, not read)
-        # read_file(path="config.yaml")   → OK (records path)
-        # write_file(path="config.yaml")  → OK (was read)
+        # write_file(path="new.txt")      -> OK (file doesn't exist)
+        # write_file(path="config.yaml")  -> DENIED (exists, not read)
+        # read_file(path="config.yaml")   -> OK (records path)
+        # write_file(path="config.yaml")  -> OK (was read)
 
     For tools that use mount point prefixes (e.g., Podman with /workspace),
     specify mount_point to normalize paths before existence checks::
@@ -262,7 +332,7 @@ class ReadBeforeWritePolicy:
             return PolicyDecision.allow()
 
         # Existing file: check if it was read
-        state = context.session[PolicyState].latest()
+        state = context.session[ReadBeforeWriteState].latest()
         invoked_keys: frozenset[tuple[str, str]] = (
             state.invoked_keys if state else frozenset()
         )
@@ -270,7 +340,8 @@ class ReadBeforeWritePolicy:
 
         if path not in read_paths:
             return PolicyDecision.deny(
-                f"File '{raw_path}' must be read before overwriting."
+                f"File '{raw_path}' must be read before overwriting.",
+                suggestions=(f"Read '{raw_path}' first with a read tool.",),
             )
         return PolicyDecision.allow()
 
@@ -295,13 +366,132 @@ class ReadBeforeWritePolicy:
         # Normalize path to match what check() will use
         path = _normalize_path(raw_path, self.mount_point)
 
-        state = context.session[PolicyState].latest()
-        if state is None:
-            state = PolicyState(policy_name=self.name)
-
-        new_state = PolicyState(
-            policy_name=self.name,
-            invoked_tools=state.invoked_tools,
-            invoked_keys=state.invoked_keys | {(tool.name, path)},
+        state = context.session[ReadBeforeWriteState].latest()
+        current_keys: frozenset[tuple[str, str]] = (
+            state.invoked_keys if state else frozenset()
         )
-        context.session[PolicyState].seed(new_state)
+
+        new_state = ReadBeforeWriteState(
+            invoked_keys=current_keys | {(tool.name, path)},
+        )
+        context.session[ReadBeforeWriteState].seed(new_state)
+
+
+# ---------------------------------------------------------------------------
+# Policy combinators
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AllOfPolicy:
+    """Composite policy requiring all child policies to allow.
+
+    Evaluates child policies in order. The first denial short-circuits
+    and is returned immediately. If all allow, the call proceeds.
+
+    Delegates ``on_result`` to all children so each can update its state.
+
+    Example::
+
+        policy = AllOfPolicy(policies=(
+            ReadBeforeWritePolicy(),
+            SequentialDependencyPolicy(dependencies={...}),
+        ))
+    """
+
+    policies: Sequence[ToolPolicy]
+
+    @property
+    def name(self) -> str:
+        """Return the policy name."""
+        return "all_of"
+
+    def check(
+        self,
+        tool: Tool[Any, Any],
+        params: SupportsDataclass | None,
+        *,
+        context: ToolContext,
+    ) -> PolicyDecision:
+        """Check all child policies; first denial wins."""
+        for policy in self.policies:
+            decision = policy.check(tool, params, context=context)
+            if not decision.allowed:
+                return decision
+        return PolicyDecision.allow()
+
+    def on_result(
+        self,
+        tool: Tool[Any, Any],
+        params: SupportsDataclass | None,
+        result: ToolResult[Any],
+        *,
+        context: ToolContext,
+    ) -> None:
+        """Notify all child policies of the result."""
+        for policy in self.policies:
+            policy.on_result(tool, params, result, context=context)
+
+
+@dataclass(frozen=True)
+class AnyOfPolicy:
+    """Composite policy requiring at least one child policy to allow.
+
+    Evaluates child policies in order. The first allow short-circuits
+    and the call proceeds. If all deny, a combined denial is returned.
+
+    Delegates ``on_result`` to all children so each can update its state.
+
+    Example::
+
+        policy = AnyOfPolicy(policies=(
+            policy_a,
+            policy_b,
+        ))
+        # Call proceeds if either policy_a OR policy_b allows
+    """
+
+    policies: Sequence[ToolPolicy]
+
+    @property
+    def name(self) -> str:
+        """Return the policy name."""
+        return "any_of"
+
+    def check(
+        self,
+        tool: Tool[Any, Any],
+        params: SupportsDataclass | None,
+        *,
+        context: ToolContext,
+    ) -> PolicyDecision:
+        """Check child policies; first allow wins."""
+        denials: list[PolicyDecision] = []
+        for policy in self.policies:
+            decision = policy.check(tool, params, context=context)
+            if decision.allowed:
+                return decision
+            denials.append(decision)
+
+        # All denied: combine reasons and suggestions
+        reasons = [d.reason for d in denials if d.reason]
+        all_suggestions: list[str] = []
+        for d in denials:
+            all_suggestions.extend(d.suggestions)
+
+        return PolicyDecision.deny(
+            "; ".join(reasons) if reasons else "All policies denied.",
+            suggestions=tuple(all_suggestions),
+        )
+
+    def on_result(
+        self,
+        tool: Tool[Any, Any],
+        params: SupportsDataclass | None,
+        result: ToolResult[Any],
+        *,
+        context: ToolContext,
+    ) -> None:
+        """Notify all child policies of the result."""
+        for policy in self.policies:
+            policy.on_result(tool, params, result, context=context)
