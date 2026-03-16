@@ -129,7 +129,30 @@ extend-select = [
     "PERF",
     "TID251",
 ]
-extend-ignore = ["TRY003", "RUF067"]
+extend-ignore = [
+    "TRY003",
+    "RUF067",
+    # New rules from ruff 0.15.2 --preview; address in follow-up
+    "BLE001",   # Do not catch blind exception
+    "DTZ001",   # datetime without tzinfo
+    "DTZ005",   # datetime.now() without tz
+    "EXE001",   # Shebang present but file not executable
+    "FLY002",   # Use f-string instead of join
+    "FURB188",  # Slice-to-remove
+    "PIE790",   # Unnecessary pass
+    "PIE807",   # Prefer list over lambda: []
+    "PIE810",   # Unnecessary spread in startswith/endswith
+    "PLC0105",  # TypeVar name does not reflect variance
+    "PLC0414",  # Useless import alias
+    "PLW1510",  # subprocess.run without check
+    "PYI025",   # Use collections.abc.Set
+    "PYI034",   # __aenter__ should return Self
+    "PYI036",   # Star-args in __aexit__ should be object
+    "PYI041",   # Use float instead of int | float
+    "PYI055",   # Combine type[X] | type[Y] into type[X | Y]
+    "PYI061",   # Redundant None literal
+    "TC005",    # Empty type-checking block
+]
 fixable = ["I001", "F401"]
 
 [tool.ruff.lint.isort]
@@ -139,7 +162,7 @@ combine-as-imports = true
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
 # C901 is ignored because test functions can legitimately have higher complexity.
-"tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "RUF038", "RUF069", "ANN201", "ANN401", "PERF401"]
+"tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "S102", "SIM117", "RUF029", "RUF038", "RUF069", "ANN201", "ANN401", "PERF401"]
 "integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/overrides/_section_overrides.py" = ["PLR0913"]

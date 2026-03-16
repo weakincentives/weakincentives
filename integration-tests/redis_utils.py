@@ -79,7 +79,7 @@ def _wait_for_redis(host: str, port: int, timeout: float = 30.0) -> bool:
             if client.ping():
                 client.close()
                 return True
-        except Exception:
+        except Exception:  # noqa: S110 - polling loop, failures expected
             pass
         time.sleep(0.1)
     return False
@@ -101,7 +101,7 @@ def _wait_for_cluster_ready(host: str, port: int, timeout: float = 60.0) -> bool
                 client.close()
                 return True
             client.close()
-        except Exception:
+        except Exception:  # noqa: S110 - polling loop, failures expected
             pass
         time.sleep(0.5)
     return False
