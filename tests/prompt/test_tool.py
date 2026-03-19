@@ -194,9 +194,7 @@ def test_tool_example_output_requires_dataclass_instance_for_object_results() ->
 
 
 def test_tool_accepts_none_params_type() -> None:
-    def handler(
-        params: Literal[None], *, context: ToolContext
-    ) -> ToolResult[ExampleResult]:
+    def handler(params: None, *, context: ToolContext) -> ToolResult[ExampleResult]:
         return ToolResult.ok(ExampleResult(value="result"), message="ok")
 
     tool = Tool[None, ExampleResult](

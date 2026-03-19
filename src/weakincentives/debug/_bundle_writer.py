@@ -102,7 +102,7 @@ def _resolve_build_info() -> BuildInfo:
         from importlib.metadata import version as pkg_version
 
         version = pkg_version("weakincentives")
-    except Exception:  # pragma: no cover
+    except Exception:  # noqa: S110  # pragma: no cover
         pass  # nosec B110 - best-effort, non-critical metadata
     try:
         # Resolve from the package's own repo, not the process cwd.
@@ -112,10 +112,11 @@ def _resolve_build_info() -> BuildInfo:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode == 0:
             commit = result.stdout.strip()
-    except Exception:  # pragma: no cover
+    except Exception:  # noqa: S110  # pragma: no cover
         pass  # nosec B110 - best-effort, non-critical metadata
     return BuildInfo(version=version, commit=commit)
 

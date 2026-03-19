@@ -35,7 +35,7 @@ pytestmark = pytest.mark.core
 
 def test_session_requires_timezone_aware_created_at() -> None:
     dispatcher = InProcessDispatcher()
-    naive_timestamp = datetime.now()
+    naive_timestamp = datetime.now()  # noqa: DTZ005
 
     with pytest.raises(ValueError):
         Session(dispatcher=dispatcher, created_at=naive_timestamp)

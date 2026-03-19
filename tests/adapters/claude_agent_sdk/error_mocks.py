@@ -93,19 +93,13 @@ class MockMaxTurnsExceededError(Exception):
     name-based matching for this error type.
     """
 
-    pass
-
 
 class MockSDKError(Exception):
     """Mock for generic SDK errors from claude_agent_sdk.errors module."""
 
-    pass
-
 
 class MockCodeError(Exception):
     """Mock for errors from claude_code.client module."""
-
-    pass
 
 
 # Set __name__ to match SDK class names (for error message formatting)

@@ -134,8 +134,6 @@ class Clock(MonotonicClock, WallClock, Sleeper, AsyncSleeper, Protocol):
     or wall-clock time should depend on the narrower protocol.
     """
 
-    pass
-
 
 @dataclass(frozen=True, slots=True)
 class SystemClock:

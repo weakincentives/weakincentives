@@ -171,8 +171,7 @@ class HostFilesystem:
         content = "".join(selected_lines)
 
         # Remove trailing newline for consistency
-        if content.endswith("\n"):
-            content = content[:-1]
+        content = content.removesuffix("\n")
 
         # Return path relative to root
         rel_path = normalize_path(path) or "/"

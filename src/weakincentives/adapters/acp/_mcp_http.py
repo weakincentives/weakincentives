@@ -18,7 +18,7 @@ import asyncio
 import secrets
 import threading
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from ...runtime.logging import StructuredLogger, get_logger
 
@@ -297,9 +297,9 @@ class MCPHttpServer:
         self._port = None
         logger.info("acp.mcp_http.stopped", event="mcp_http.stopped")
 
-    async def __aenter__(self) -> MCPHttpServer:
+    async def __aenter__(self) -> Self:
         await self.start()
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         await self.stop()

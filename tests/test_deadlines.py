@@ -23,7 +23,7 @@ from weakincentives.deadlines import Deadline
 
 
 def test_deadline_rejects_naive_datetime() -> None:
-    naive = datetime.now()
+    naive = datetime.now()  # noqa: DTZ005
     with pytest.raises(ValueError):
         Deadline(naive)
 

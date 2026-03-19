@@ -114,7 +114,7 @@ def _validate_numeric_constraints(
 
 
 def _enforce_bound(
-    numeric: Decimal | float | int, bound: object, path: str, kind: str
+    numeric: Decimal | float, bound: object, path: str, kind: str
 ) -> None:
     if not isinstance(bound, (int, float, Decimal)):
         return

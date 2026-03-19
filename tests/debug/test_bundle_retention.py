@@ -324,7 +324,7 @@ class TestRetentionPolicyIntegration:
 
         mock_recent_bundle = MagicMock()
         # Use naive datetime (no tzinfo) - recent date (now)
-        naive_recent_timestamp = datetime.now().replace(tzinfo=None)
+        naive_recent_timestamp = datetime.now().replace(tzinfo=None)  # noqa: DTZ005
         mock_recent_bundle.manifest.created_at = naive_recent_timestamp.isoformat()
 
         original_load = DebugBundle.load

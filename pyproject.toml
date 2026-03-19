@@ -135,24 +135,11 @@ extend-ignore = [
     # New preview rules from ruff 0.15.7 upgrade - suppress for now
     "BLE001",   # blind exception catches (intentional in adapters/resources)
     "DTZ001",   # datetime without tz (needs careful migration)
-    "DTZ005",   # datetime.now() without tz
-    "EXE001",   # shebang without executable bit
     "FLY002",   # string join vs f-string
-    "FURB188",  # slice-to-remove
-    "PIE790",   # unnecessary pass
     "PIE807",   # prefer-list-builtin
-    "PIE810",   # single startswith/endswith call
     "PLC0105",  # TypeVar naming conventions for variance
     "PLC0414",  # useless import alias
-    "PLW1510",  # subprocess.run without check
-    "PYI025",   # unaliased collections.abc.Set
-    "PYI034",   # __enter__ return Self
-    "PYI036",   # __exit__ star-args annotation
-    "PYI041",   # redundant numeric union
     "PYI055",   # multiple type[] in union
-    "PYI061",   # redundant None literal
-    "S102",     # exec builtin
-    "S110",     # try-except-pass
     "TC005",    # empty TYPE_CHECKING block
 ]
 fixable = ["I001", "F401", "RUF100"]

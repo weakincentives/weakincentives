@@ -29,6 +29,7 @@ Example::
 from __future__ import annotations
 
 from types import TracebackType
+from typing import Self
 
 
 class FakeLogger:
@@ -80,7 +81,7 @@ class FakeContextManager:
         self.exited = False
         self._raise_on_exit = raise_on_exit
 
-    def __enter__(self) -> FakeContextManager:
+    def __enter__(self) -> Self:
         self.entered = True
         return self
 
