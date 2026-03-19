@@ -31,14 +31,14 @@ from pathlib import Path
 _ROOT = Path(__file__).parent
 sys.path.insert(0, str(_ROOT))
 
-from toolchain import (  # noqa: E402
+from toolchain import (
     ConsoleFormatter,
     JSONFormatter,
     QuietFormatter,
     Runner,
 )
-from toolchain.checkers import create_all_checkers  # noqa: E402
-from toolchain.utils import patch_ast_for_bandit  # noqa: E402
+from toolchain.checkers import create_all_checkers
+from toolchain.utils import patch_ast_for_bandit
 
 
 def main() -> int:

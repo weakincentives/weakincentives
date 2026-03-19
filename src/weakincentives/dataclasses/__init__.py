@@ -283,7 +283,7 @@ def _attach_helpers(cls: type[Any]) -> None:
     pre_init = getattr(cls, "__pre_init__", None)
 
     if pre_init is not None:
-        cls.__init__ = _build_pre_init_wrapper(cls, pre_init, original_init)
+        cls.__init__ = _build_pre_init_wrapper(cls, pre_init, original_init)  # ty: ignore[invalid-assignment]
 
     cls.update = _build_update_helper(cls)
     cls.merge = _build_merge_helper(cls)
