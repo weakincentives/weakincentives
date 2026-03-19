@@ -34,7 +34,7 @@ timezone-aware (UTC).
 
 ## Clock Protocols
 
-Narrow protocols at `src/weakincentives/clock/_protocols.py`:
+Narrow protocols at `src/weakincentives/clock.py`:
 
 | Protocol | Method | Use for |
 |----------|--------|---------|

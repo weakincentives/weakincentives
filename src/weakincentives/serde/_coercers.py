@@ -230,7 +230,7 @@ def _coerce_primitive(
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: expected {type_name}")
     try:
-        coerced_value = coercer(value)
+        coerced_value = coercer(value)  # ty: ignore[call-non-callable]
     except Exception as error:
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: unable to coerce {value!r} to {type_name}") from error
@@ -508,7 +508,7 @@ def _coerce_to_type(
             return result
 
     try:
-        coerced = base_type(value)
+        coerced = base_type(value)  # ty: ignore[call-non-callable]
     except Exception as error:
         raise type(error)(str(error)) from error
     return _apply_constraints(coerced, merged_meta, path)
