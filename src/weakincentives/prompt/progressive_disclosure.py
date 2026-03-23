@@ -31,7 +31,7 @@ from .tool import Tool, ToolContext
 from .tool_result import ToolResult
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Set
+    from collections.abc import Iterator, Mapping, Set as AbstractSet
 
     from ..runtime.session.protocols import SessionProtocol
     from ._types import SupportsDataclass
@@ -119,7 +119,7 @@ def _validate_section_keys(
         raise PromptValidationError("At least one section key must be provided.")
 
     requested_overrides: dict[SectionPath, SectionVisibility] = {}
-    valid_paths: Set[SectionPath] = set(registry.section_paths)
+    valid_paths: AbstractSet[SectionPath] = set(registry.section_paths)
 
     for key in section_keys:
         path = _parse_section_key(key)

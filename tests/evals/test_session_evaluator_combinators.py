@@ -292,7 +292,7 @@ def test_is_session_aware_rejects_unannotated_third_param() -> None:
     # Create a function with 3 params but no type annotations dynamically
     # This avoids ruff's ANN rules while testing the behavior
     def make_unannotated() -> Callable[..., None]:
-        exec(
+        exec(  # noqa: S102
             """
 def unannotated_evaluator(output, expected, session):
     pass
@@ -341,7 +341,7 @@ def test_is_session_aware_with_raw_type_annotation() -> None:
     def make_evaluator() -> Callable[..., None]:
         # Include an undefined forward reference in return type to make get_type_hints fail
         # But keep the session parameter as an actual type object
-        exec(
+        exec(  # noqa: S102
             """
 def raw_type_evaluator(output, expected, session):
     pass

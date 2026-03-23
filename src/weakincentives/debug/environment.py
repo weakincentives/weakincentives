@@ -245,6 +245,7 @@ def _get_darwin_memory_bytes() -> int | None:
         capture_output=True,
         text=True,
         timeout=5,
+        check=False,
     )
     if result.returncode == 0:
         return int(result.stdout.strip())
@@ -302,6 +303,7 @@ def _capture_packages() -> str:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=False,
             )
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
@@ -315,6 +317,7 @@ def _capture_packages() -> str:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         if result.returncode == 0:
             return result.stdout.strip()

@@ -24,7 +24,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, Self
 
 if TYPE_CHECKING:
     from .isolation import IsolationConfig, NetworkPolicy, SandboxConfig
@@ -691,7 +691,7 @@ class EphemeralHome:
         """Path to the skills directory within ephemeral home."""
         return self._claude_dir / "skills"
 
-    def __enter__(self) -> EphemeralHome:
+    def __enter__(self) -> Self:
         """Context manager entry."""
         return self
 

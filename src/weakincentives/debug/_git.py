@@ -96,6 +96,7 @@ def _run_git_command(*args: str, cwd: Path | None = None) -> str | None:
             text=True,
             timeout=10,
             cwd=cwd,
+            check=False,
         )
         if result.returncode == 0:
             return result.stdout.strip()

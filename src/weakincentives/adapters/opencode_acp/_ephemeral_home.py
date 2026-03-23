@@ -29,6 +29,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Self
 
 from ...skills import (
     MAX_SKILL_TOTAL_BYTES,
@@ -270,7 +271,7 @@ class OpenCodeEphemeralHome:
             shutil.rmtree(self._temp_dir, ignore_errors=True)
             self._cleaned_up = True
 
-    def __enter__(self) -> OpenCodeEphemeralHome:
+    def __enter__(self) -> Self:
         """Context manager entry."""
         return self
 
