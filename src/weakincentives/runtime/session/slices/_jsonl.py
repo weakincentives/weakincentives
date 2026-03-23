@@ -17,21 +17,15 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, TYPE_CHECKING
+from typing import IO
 
 from ....serde import dump, parse
 from ....types.dataclass import SupportsDataclass
-
-if TYPE_CHECKING:
-    pass
-
-
-# Cross-platform file locking utilities
-import sys
 
 # Import platform-specific locking module at module level for type checking
 if sys.platform == "win32":  # pragma: no cover

@@ -83,7 +83,7 @@ class GitInfo:
     commit_short: str = ""
     branch: str | None = None
     is_dirty: bool = False
-    remotes: Mapping[str, str] = field(default_factory=lambda: {})
+    remotes: Mapping[str, str] = field(default_factory=dict[str, str])
     tags: tuple[str, ...] = ()
 
 

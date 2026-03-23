@@ -38,11 +38,11 @@ from ..types import JSONValue
 
 # Re-export public symbols that other modules access as ``debug_app.X``.
 from ._bundle_store import (
-    BundleLoadError as BundleLoadError,
-    BundleStore as BundleStore,
+    BundleLoadError as BundleLoadError,  # noqa: PLC0414 (re-export)
+    BundleStore as BundleStore,  # noqa: PLC0414 (re-export)
     _markdown,
 )
-from .query import iter_bundle_files as iter_bundle_files
+from .query import iter_bundle_files as iter_bundle_files  # noqa: PLC0414 (re-export)
 
 # Module-level logger keeps loader warnings consistent with the debug server.
 logger: StructuredLogger = get_logger(__name__)

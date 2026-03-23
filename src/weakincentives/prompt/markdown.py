@@ -28,10 +28,12 @@ from .section import Section, SectionVisibility, VisibilitySelector
 if TYPE_CHECKING:
     from .policy import ToolPolicy
 
-MarkdownParamsT = TypeVar("MarkdownParamsT", bound=SupportsDataclass, covariant=True)
+MarkdownParamsT_co = TypeVar(
+    "MarkdownParamsT_co", bound=SupportsDataclass, covariant=True
+)
 
 
-class MarkdownSection(Section[MarkdownParamsT]):
+class MarkdownSection(Section[MarkdownParamsT_co]):
     """Render markdown content using :class:`string.Template`."""
 
     def __init__(
@@ -40,7 +42,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
         title: str,
         template: str,
         key: str,
-        default_params: MarkdownParamsT | None = None,
+        default_params: MarkdownParamsT_co | None = None,
         children: Sequence[Section[SupportsDataclass]] | None = None,
         enabled: Callable[[SupportsDataclass], bool] | None = None,
         tools: Sequence[object] | None = None,

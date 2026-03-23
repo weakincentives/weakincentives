@@ -134,13 +134,6 @@ extend-ignore = [
     "RUF067",
     # New preview rules from ruff 0.15.7 upgrade - suppress for now
     "BLE001",   # blind exception catches (intentional in adapters/resources)
-    "DTZ001",   # datetime without tz (needs careful migration)
-    "FLY002",   # string join vs f-string
-    "PIE807",   # prefer-list-builtin
-    "PLC0105",  # TypeVar naming conventions for variance
-    "PLC0414",  # useless import alias
-    "PYI055",   # multiple type[] in union
-    "TC005",    # empty TYPE_CHECKING block
 ]
 fixable = ["I001", "F401", "RUF100"]
 
@@ -151,8 +144,8 @@ combine-as-imports = true
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
 # C901 is ignored because test functions can legitimately have higher complexity.
-"tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "RUF038", "RUF069", "ANN201", "ANN401", "PERF401"]
-"integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
+"tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "RUF038", "RUF069", "ANN201", "ANN401", "PERF401", "DTZ001", "FLY002", "PYI055", "TC005"]
+"integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "TC005"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/overrides/_section_overrides.py" = ["PLR0913"]
 "src/weakincentives/prompt/overrides/_tool_overrides.py" = ["PLR0913"]
@@ -165,19 +158,17 @@ combine-as-imports = true
 "src/weakincentives/prompt/markdown.py" = ["PLR0913"]
 "src/weakincentives/prompt/feedback_providers.py" = ["PLR6301"]
 "src/weakincentives/prompt/overrides/local_store.py" = ["PLR6301"]
-"src/weakincentives/prompt/registry.py" = ["PLR0917"]
 "src/weakincentives/prompt/rendering.py" = ["PLR0914", "PLR6301"]
 "src/weakincentives/prompt/section.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/structured_output.py" = ["PLR0913"]
 "src/weakincentives/prompt/tool_result.py" = ["PLR0911"]
-"src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915"]
-"src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
+"src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0913", "PLR0914"]
+"src/weakincentives/serde/schema.py" = ["PLR0914"]
 "src/weakincentives/clock.py" = ["PLR6301"]
 "src/weakincentives/contrib/optimizers/workspace_digest.py" = ["PLR0914", "PLR6301"]
 "src/weakincentives/adapters/claude_agent_sdk/_bridge.py" = ["PLR0913", "TRY300", "RUF029"]
 "src/weakincentives/adapters/_shared/_bridge.py" = ["PLR0913", "TRY300", "RUF029"]
 "src/weakincentives/adapters/claude_agent_sdk/_hooks.py" = ["RUF029"]
-"src/weakincentives/adapters/codex_app_server/workspace.py" = ["TRY301"]
 "src/weakincentives/adapters/codex_app_server/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
 "src/weakincentives/adapters/codex_app_server/client.py" = ["C901", "PLR6301"]
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
@@ -187,13 +178,13 @@ combine-as-imports = true
 "src/weakincentives/adapters/acp/_prompt_loop.py" = ["PLR0913", "PLR0917", "ANN401"]
 "src/weakincentives/adapters/acp/adapter.py" = ["PLR0913", "PLR0914", "PLR6301", "ANN401", "TRY300", "RUF029"]
 "src/weakincentives/adapters/opencode_acp/adapter.py" = ["PLR0913", "ANN401", "PLR6301"]
-"src/weakincentives/runtime/session/session.py" = ["PLR0904", "PLR0913"]
+"src/weakincentives/runtime/session/session.py" = ["PLR0913"]
 "src/weakincentives/runtime/session/slices/_memory.py" = ["PLR6301"]
 "src/weakincentives/runtime/transactions.py" = ["PLR0914"]
 "src/weakincentives/runtime/watchdog.py" = ["PLR6301"]
 "src/weakincentives/contrib/mailbox/_redis.py" = ["PLR0914", "PLR6301", "C901", "TRY300", "TRY301", "SIM108"]
 "src/weakincentives/formal/__init__.py" = ["PLR0913", "B010"]
-"src/weakincentives/formal/_codegen.py" = ["C901", "PLR0912", "PLR0914", "PLR0915", "A002", "PERF401"]
+"src/weakincentives/formal/_codegen.py" = ["C901", "PLR0914", "A002", "PERF401"]
 "src/weakincentives/formal/testing.py" = ["PLR0914"]
 "formal-tests/**" = ["PLR2004"]
 

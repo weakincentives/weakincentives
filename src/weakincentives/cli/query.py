@@ -34,9 +34,9 @@ from ..errors import WinkError
 from ..resources.protocols import Closeable
 from ._query_builders import build_all_tables
 from ._query_formatters import (
-    export_jsonl as export_jsonl,
-    format_as_json as format_as_json,
-    format_as_table as format_as_table,
+    export_jsonl as export_jsonl,  # noqa: PLC0414 (re-export)
+    format_as_json as format_as_json,  # noqa: PLC0414 (re-export)
+    format_as_table as format_as_table,  # noqa: PLC0414 (re-export)
 )
 from ._query_helpers import (
     _SCHEMA_VERSION,
@@ -73,7 +73,7 @@ class SchemaHints:
     """Hints for querying the database effectively."""
 
     json_extraction: tuple[str, ...] = ()
-    common_queries: dict[str, str] = field(default_factory=lambda: {})
+    common_queries: dict[str, str] = field(default_factory=dict[str, str])
 
 
 @FrozenDataclass()

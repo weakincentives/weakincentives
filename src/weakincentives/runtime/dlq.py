@@ -41,15 +41,12 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Self
+from typing import Any, Self
 from uuid import UUID
 
 from .lifecycle import wait_until
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError
 from .watchdog import Heartbeat
-
-if TYPE_CHECKING:
-    pass
 
 _logger = logging.getLogger(__name__)
 

@@ -487,7 +487,7 @@ class PendingToolTracker:
     session: SessionProtocol
     resources: ScopedResourceContext
     _pending_tools: dict[str, PendingToolExecution] = field(
-        default_factory=lambda: {}, repr=False
+        default_factory=dict[str, PendingToolExecution], repr=False
     )
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
