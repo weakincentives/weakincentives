@@ -104,12 +104,13 @@ class CodexAppServerClient:
                 _ = await self._proc.wait()
             self._proc = None
 
-        # Resolve any pending futures with errors
+        self._fail_pending("Client stopped with pending requests")
+
+    def _fail_pending(self, message: str) -> None:
+        """Resolve all pending futures with an error and clear them."""
         for future in self._pending.values():  # pragma: no branch
             if not future.done():  # pragma: no branch
-                future.set_exception(
-                    CodexClientError("Client stopped with pending requests")
-                )
+                future.set_exception(CodexClientError(message))
         self._pending.clear()
 
     async def send_request(
@@ -213,21 +214,7 @@ class CodexAppServerClient:
             return  # pragma: no cover
 
         try:
-            while True:
-                raw = await self._proc.stdout.readline()
-                if not raw:
-                    break  # EOF — process exited
-
-                line = raw.decode().strip()
-                if not line:
-                    continue
-
-                parsed = self._try_parse(line)
-                if parsed is None:
-                    continue
-
-                self._route_message(parsed)
-
+            await self._read_messages()
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -237,17 +224,27 @@ class CodexAppServerClient:
                 exc_info=True,
             )
         finally:
-            # Signal end of messages
             await self._message_queue.put(_SENTINEL)
-            # Resolve any remaining pending futures
-            for future in self._pending.values():  # pragma: no branch
-                if not future.done():  # pragma: no branch
-                    future.set_exception(
-                        CodexClientError("Subprocess exited unexpectedly")
-                    )
-            self._pending.clear()
+            self._fail_pending("Subprocess exited unexpectedly")
 
-    def _try_parse(self, line: str) -> dict[str, Any] | None:
+    async def _read_messages(self) -> None:
+        """Read and route messages from stdout until EOF."""
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            return  # pragma: no cover
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break  # EOF — process exited
+            line = raw.decode().strip()
+            if not line:
+                continue
+            parsed = self._try_parse(line)
+            if parsed is not None:
+                self._route_message(parsed)
+
+    @staticmethod
+    def _try_parse(line: str) -> dict[str, Any] | None:
         """Try to parse a JSON line, returning None on failure."""
         try:
             parsed: Any = json.loads(line)

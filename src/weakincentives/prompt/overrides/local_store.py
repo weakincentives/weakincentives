@@ -333,8 +333,8 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             )
             return self._upsert_unlocked(descriptor, prompt_override, file_path)
 
+    @staticmethod
     def _resolve_unlocked(
-        self,
         descriptor: PromptDescriptor,
         tag: str,
         file_path: Path,

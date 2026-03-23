@@ -188,7 +188,7 @@ def test_config_with_init_next():
         invariants=(Invariant("INV-1", "Safety", "TRUE"),),
     )
 
-    cfg = spec.to_tla_config(init="CustomInit", next="CustomNext")
+    cfg = spec.to_tla_config(init="CustomInit", next_formula="CustomNext")
 
     # Check INIT/NEXT instead of SPECIFICATION
     assert "INIT CustomInit" in cfg
@@ -296,7 +296,7 @@ def test_config_with_only_init():
     spec = FormalSpec(module="TestOnlyInit")
 
     # Only init, no next (neither branch executes - no SPEC line generated)
-    cfg = spec.to_tla_config(init="CustomInit", next=None)
+    cfg = spec.to_tla_config(init="CustomInit", next_formula=None)
 
     # Neither default nor custom INIT/NEXT is generated
     assert "SPECIFICATION" not in cfg

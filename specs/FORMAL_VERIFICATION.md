@@ -77,7 +77,7 @@ The `to_tla_config()` method accepts optional parameters:
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `init` | `str \| None` | Initial state formula (for simulation) |
-| `next` | `str \| None` | Next-state formula (for simulation) |
+| `next_formula` | `str \| None` | Next-state formula (for simulation) |
 | `check_deadlock` | `bool` | Whether to check for deadlocks (default: False) |
 | `state_constraint` | `str \| None` | Override state constraint expression |
 

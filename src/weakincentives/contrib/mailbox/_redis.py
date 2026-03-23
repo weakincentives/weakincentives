@@ -75,6 +75,12 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _decode_bytes(value: bytes | str) -> str:
+    """Decode a Redis bytes value to string."""
+    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+
+
 # Default TTL for Redis keys: 3 days in seconds.
 # Keys are refreshed on each operation, so active queues stay alive indefinitely.
 # Set to 0 to disable TTL expiration.
@@ -479,86 +485,27 @@ class RedisMailbox[T, R]:
         Returns:
             A Message if one was received, None otherwise.
         """
-        keys = self._keys
-        lua_keys = [keys.pending, keys.invisible, keys.data, keys.meta]
-        poll_interval = 0.3  # 300ms between poll attempts
-
-        deadline = self.clock.monotonic() + wait_seconds
-
-        while True:
-            receipt_suffix = str(uuid4())
-
-            # Atomic Lua script: RPOP + ZADD + metadata in one operation
-            # Script computes expiry using Redis server TIME + visibility_timeout
-            result = self._scripts["receive"](
-                keys=lua_keys,
-                args=[visibility_timeout, receipt_suffix, self.default_ttl],
-            )
-
-            if result is not None:
-                msg_id = (
-                    result[0].decode("utf-8")
-                    if isinstance(result[0], bytes)
-                    else str(result[0])
-                )
-                data = result[1]
-                delivery_count = int(result[2])
-                enqueued_raw = result[3]
-                # Result tuple: [msg_id, data, count, enqueued, reply_to?]
-                reply_to_raw = result[4] if len(result) > 4 else None  # noqa: PLR2004
-                break
-
-            # No message available
-            remaining = deadline - self.clock.monotonic()
-            if remaining <= 0:
-                return None
-
-            # Poll again after interval (but don't overshoot deadline)
-            self.sleeper.sleep(min(poll_interval, remaining))
-
-        if data is None:
-            # Message data was deleted (shouldn't happen, but handle gracefully)
+        result, receipt_suffix = self._poll_for_message(
+            visibility_timeout, wait_seconds
+        )
+        if result is None:
             return None
 
-        # Parse enqueued timestamp
-        if enqueued_raw:
-            enqueued_str = (
-                enqueued_raw.decode("utf-8")
-                if isinstance(enqueued_raw, bytes)
-                else str(enqueued_raw)
-            )
-            enqueued_at = datetime.fromisoformat(enqueued_str)
-        else:
-            enqueued_at = SYSTEM_CLOCK.utcnow()
+        msg_id = _decode_bytes(result[0])
+        data = result[1]
+        delivery_count = int(result[2])
+        enqueued_raw = result[3]
+        # Result tuple: [msg_id, data, count, enqueued, reply_to?]
+        reply_to_raw = result[4] if len(result) > 4 else None  # noqa: PLR2004
 
-        # Parse reply_to name and resolve to mailbox
-        reply_to: Mailbox[R, None] | None = None
-        if reply_to_raw:
-            reply_to_name = (
-                reply_to_raw.decode("utf-8")
-                if isinstance(reply_to_raw, bytes)
-                else str(reply_to_raw)
-            )
-            # Resolve the mailbox from the stored name
-            # If resolution fails, reply_to stays None and Message.reply() will raise
-            # ReplyNotAvailableError with a clear message
-            if self.reply_resolver is not None:
-                try:
-                    reply_to = self.reply_resolver.resolve(reply_to_name)
-                except MailboxResolutionError:
-                    _LOGGER.debug(
-                        "Failed to resolve reply_to mailbox '%s' for queue '%s'",
-                        reply_to_name,
-                        self.name,
-                    )
+        if data is None:
+            return None
 
-        # Compose receipt handle from msg_id and suffix
+        enqueued_at = self._parse_enqueued_at(enqueued_raw)
+        reply_to = self._resolve_reply(reply_to_raw)
         receipt_handle = f"{msg_id}:{receipt_suffix}"
-
-        # Deserialize body
         body = self._deserialize(data)
 
-        # Bind callbacks with both msg_id and receipt_suffix for validation
         return Message[T, R](
             id=msg_id,
             body=body,
@@ -574,6 +521,55 @@ class RedisMailbox[T, R]:
                 mid, suf, t
             ),
         )
+
+    def _poll_for_message(
+        self, visibility_timeout: int, wait_seconds: float
+    ) -> tuple[Any, str] | tuple[None, str]:
+        """Poll Redis until a message is available or deadline expires.
+
+        Returns:
+            Tuple of (result, receipt_suffix) or (None, "") if no message.
+        """
+        keys = self._keys
+        lua_keys = [keys.pending, keys.invisible, keys.data, keys.meta]
+        poll_interval = 0.3
+        deadline = self.clock.monotonic() + wait_seconds
+
+        while True:
+            receipt_suffix = str(uuid4())
+            result = self._scripts["receive"](
+                keys=lua_keys,
+                args=[visibility_timeout, receipt_suffix, self.default_ttl],
+            )
+            if result is not None:
+                return result, receipt_suffix
+            remaining = deadline - self.clock.monotonic()
+            if remaining <= 0:
+                return None, ""
+            self.sleeper.sleep(min(poll_interval, remaining))
+
+    def _parse_enqueued_at(self, enqueued_raw: bytes | str | None) -> datetime:
+        """Parse enqueued timestamp from Redis result."""
+        if enqueued_raw:
+            return datetime.fromisoformat(_decode_bytes(enqueued_raw))
+        return SYSTEM_CLOCK.utcnow()
+
+    def _resolve_reply(
+        self, reply_to_raw: bytes | str | None
+    ) -> Mailbox[R, None] | None:
+        """Resolve reply_to mailbox from stored name."""
+        if not reply_to_raw or self.reply_resolver is None:
+            return None
+        reply_to_name = _decode_bytes(reply_to_raw)
+        try:
+            return self.reply_resolver.resolve(reply_to_name)
+        except MailboxResolutionError:
+            _LOGGER.debug(
+                "Failed to resolve reply_to mailbox '%s' for queue '%s'",
+                reply_to_name,
+                self.name,
+            )
+            return None
 
     def _acknowledge(self, msg_id: str, receipt_suffix: str) -> None:
         """Delete message from queue.
