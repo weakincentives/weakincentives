@@ -327,6 +327,123 @@ guards, overloads, or proper `TypeVar` bounds.
 
 ---
 
+## 17. Evaluator Type Detection Uses Fragile String Matching
+
+**Location:** `src/weakincentives/evals/_evaluators.py:120-165`
+**Severity:** High (correctness)
+
+The `is_session_aware()` function detects session-aware evaluators by inspecting
+raw annotation strings:
+
+```python
+# Fallback substring matching
+any(name in hint for name in _SESSION_TYPE_NAMES)
+```
+
+This is fragile because:
+
+- It depends on `__globals__` for name resolution
+- Substring matching is too loose — a parameter named
+  `my_custom_session_protocol_wrapper` would trigger a false positive
+- The function returns a runtime classification that the type checker cannot
+  verify, leading to `type: ignore[call-arg]` in `EvalLoop`
+
+**Recommendation:** Define explicit `SessionAwareEvaluator` and
+`StandardEvaluator` protocols. Use `isinstance()` checks with protocols rather
+than string-based annotation inspection. This makes the distinction
+statically verifiable.
+
+---
+
+## 18. Inconsistent Serialization Strategies Across Subsystems
+
+**Severity:** Medium (consistency)
+
+The library uses three different serialization approaches without a clear policy:
+
+- **Adapters:** `TypedDict` definitions (`MessageDict`, `ToolCallDict`, etc.)
+- **Evals:** `@dataclass` / `@FrozenDataclass()` for the same purpose
+  (`Sample`, `Score`, `EvalResult`)
+- **Tools:** Mix of both patterns
+
+For a library that provides its own `serde` module and `FrozenDataclass`
+decorator, the internal code should dogfood a single strategy. TypedDicts are
+appropriate for external API boundaries (JSON payloads to/from providers);
+frozen dataclasses should be used for all internal domain types.
+
+**Recommendation:** Establish and document the convention: `TypedDict` for
+external API payloads only, `@FrozenDataclass()` for all internal types.
+
+---
+
+## 19. `LLMConfig` Missing Field Validation
+
+**Location:** `src/weakincentives/adapters/config.py:58-89`
+**Severity:** Medium (correctness)
+
+`LLMConfig` stores LLM parameters (temperature, penalties, etc.) but performs no
+validation of field ranges. Temperature has a well-known 0.0-2.0 range for most
+providers; `top_p` must be 0.0-1.0; `max_tokens` must be positive.
+
+The `to_request_params()` method also has a `ty: ignore[no-matching-overload]`
+comment suggesting a type mismatch that was suppressed rather than resolved.
+
+For a library with a `dbc` module specifically designed for this purpose:
+
+**Recommendation:** Add `@require` / `@ensure` contracts or `Annotated`
+constraints to `LLMConfig` fields. The library should dogfood its own DbC
+system for its own configuration types.
+
+---
+
+## 20. EvalLoop Exception Handling Complexity
+
+**Location:** `src/weakincentives/evals/_loop.py:286-360`
+**Severity:** Medium (maintainability)
+
+`_evaluate_sample_with_bundle()` has ~75 lines of exception handling with:
+
+- Multiple exception types caught differently (`ReplyNotAvailableError`,
+  `ReceiptHandleExpiredError`)
+- Context variable tracking and score recomputation logic
+- Nested try/except/finally blocks
+
+This is acknowledged in comments as a known complexity issue. The function
+handles too many concerns: bundle writing, score computation, error reporting,
+message acknowledgment.
+
+**Recommendation:** Extract into smaller functions: `_compute_score()`,
+`_write_eval_bundle()`, `_handle_eval_failure()`. Consider a Result monad
+pattern instead of exception-based control flow for expected failure paths.
+
+---
+
+## 21. Tool Union Type Coercion Silently Discards Optional Semantics
+
+**Location:** `src/weakincentives/prompt/tool.py:188-201`
+**Severity:** Medium (surprising behavior)
+
+```python
+def _coerce_none_type(candidate: object) -> object:
+    origin = get_origin(candidate)
+    if origin is types.UnionType:
+        args = get_args(candidate)
+        non_none = [arg for arg in args if arg is not _NONE_TYPE]
+        if non_none:
+            return non_none[0]  # Silently strips Optional[T] to T
+```
+
+When a `Tool[Optional[Params], ...]` is declared, the `Optional` is silently
+stripped and `params_type` becomes `Params`. This means the tool handler will
+never receive `None` params even if the type annotation says it should be
+possible. The behavior is implicit rather than explicit and not documented.
+
+**Recommendation:** Either document this coercion explicitly in the `Tool`
+docstring, or preserve the `Optional` semantics and handle `None` params in the
+handler dispatch.
+
+---
+
 ## Summary
 
 The library demonstrates strong architectural thinking in its core patterns
@@ -334,11 +451,14 @@ The library demonstrates strong architectural thinking in its core patterns
 The areas where it falls short:
 
 1. **Type safety compromises** — blanket pyright suppressions, `Any`/`object`
-   escape hatches, 274 casts
+   escape hatches, 274 casts, fragile string-based type detection
 2. **Inconsistent immutability** — `Tool` mutable, `Prompt.bind()` mutates,
    while everything else is frozen
 3. **Encapsulation leaks** — backward-compat properties, double-private access
-4. **Silent failure modes** — reducer exceptions swallowed, TOCTOU in dispatch
+4. **Silent failure modes** — reducer exceptions swallowed, TOCTOU in dispatch,
+   silent type coercion in tool params
+5. **Missing dogfooding** — library doesn't use its own DbC for config
+   validation, inconsistent serialization strategies across subsystems
 
 These are all fixable without changing the fundamental architecture. The core
 design — separating definition from harness, policies over workflows,
