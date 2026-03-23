@@ -13,12 +13,11 @@
 """Type coercion functions for serde parsing."""
 
 # pyright: reportImportCycles=false
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPrivateUsage=false
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
@@ -33,13 +32,16 @@ from typing import (
 from uuid import UUID
 
 from ..types import JSONValue
-from ._generics import _build_typevar_map, _is_typevar
+from ._generics import (
+    _build_typevar_map,  # pyright: ignore[reportPrivateUsage]
+    _is_typevar,  # pyright: ignore[reportPrivateUsage]
+)
 from ._utils import (
-    _UNION_TYPE,
-    _AnyType,
-    _apply_constraints,
-    _merge_annotated_meta,
-    _ParseConfig,
+    _UNION_TYPE,  # pyright: ignore[reportPrivateUsage]
+    _AnyType,  # pyright: ignore[reportPrivateUsage]
+    _apply_constraints,  # pyright: ignore[reportPrivateUsage]
+    _merge_annotated_meta,  # pyright: ignore[reportPrivateUsage]
+    _ParseConfig,  # pyright: ignore[reportPrivateUsage]
 )
 
 # typing.Union origin (for Optional[X] and Union[X, Y] constructs from type aliases)
@@ -84,20 +86,17 @@ def _time_from_any(value: object) -> object:
     return time.fromisoformat(str(value))
 
 
-_PRIMITIVE_COERCERS: dict[type[object], object] = cast(
-    dict[type[object], object],
-    {
-        int: int,
-        float: float,
-        str: str,
-        Decimal: _decimal_from_any,
-        UUID: _uuid_from_any,
-        Path: _path_from_any,
-        datetime: _datetime_from_any,
-        date: _date_from_any,
-        time: _time_from_any,
-    },
-)
+_PRIMITIVE_COERCERS: dict[type[object], Callable[..., object]] = {
+    int: int,
+    float: float,
+    str: str,
+    Decimal: _decimal_from_any,
+    UUID: _uuid_from_any,
+    Path: _path_from_any,
+    datetime: _datetime_from_any,
+    date: _date_from_any,
+    time: _time_from_any,
+}
 
 
 def _is_union_type(origin: object) -> bool:
@@ -160,7 +159,7 @@ def _try_coerce_literal(
     value: object, literal: object
 ) -> tuple[object | None, Exception | None]:
     """Attempt to coerce value to match a literal. Returns (coerced, error)."""
-    literal_type = type(literal)
+    literal_type = cast(Callable[..., object], type(literal))
     try:
         if isinstance(literal, bool) and isinstance(value, str):
             coerced = _bool_from_str(value)
@@ -230,7 +229,7 @@ def _coerce_primitive(
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: expected {type_name}")
     try:
-        coerced_value = coercer(value)  # ty: ignore[call-non-callable]
+        coerced_value = coercer(value)
     except Exception as error:
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: unable to coerce {value!r} to {type_name}") from error
@@ -271,7 +270,7 @@ def _coerce_dataclass(
     path: str,
     config: _ParseConfig,
 ) -> object:
-    from .parse import _parse_dataclass
+    from .parse import _parse_dataclass  # pyright: ignore[reportPrivateUsage]
 
     # Handle generic aliases like MyClass[int] - extract the origin class
     origin = get_origin(base_type)
@@ -508,7 +507,7 @@ def _coerce_to_type(
             return result
 
     try:
-        coerced = base_type(value)  # ty: ignore[call-non-callable]
+        coerced = cast(Callable[..., object], base_type)(value)
     except Exception as error:
         raise type(error)(str(error)) from error
     return _apply_constraints(coerced, merged_meta, path)
