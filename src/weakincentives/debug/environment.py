@@ -43,14 +43,10 @@ import sys
 from collections.abc import Mapping
 from dataclasses import field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ._git import GitInfo, capture_git_diff, capture_git_info
-
-if TYPE_CHECKING:
-    pass
 
 _logger = logging.getLogger(__name__)
 
@@ -214,7 +210,7 @@ class EnvironmentCapture:
     system: SystemInfo = field(default_factory=SystemInfo)
     python: PythonInfo = field(default_factory=PythonInfo)
     packages: str = ""
-    env_vars: Mapping[str, str] = field(default_factory=lambda: {})
+    env_vars: Mapping[str, str] = field(default_factory=dict[str, str])
     git: GitInfo | None = None
     git_diff: str | None = None
     command: CommandInfo = field(default_factory=CommandInfo)

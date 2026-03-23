@@ -58,7 +58,7 @@ class Experiment:
 
     name: str
     overrides_tag: str = "latest"
-    flags: Mapping[str, object] = field(default_factory=lambda: {})
+    flags: Mapping[str, object] = field(default_factory=dict[str, object])
     owner: str | None = None
     description: str | None = None
 

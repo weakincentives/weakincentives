@@ -44,10 +44,12 @@ from ._visibility import (
 )
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 
-SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
+SectionParamsT_co = TypeVar(
+    "SectionParamsT_co", bound=SupportsDataclass, covariant=True
+)
 
 
-class Section(GenericParamsSpecializer[SectionParamsT], ABC):
+class Section(GenericParamsSpecializer[SectionParamsT_co], ABC):
     """Abstract building block for prompt content."""
 
     _generic_owner_name: ClassVar[str | None] = "Section"
@@ -60,7 +62,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         *,
         title: str,
         key: str,
-        default_params: SectionParamsT | None = None,
+        default_params: SectionParamsT_co | None = None,
         children: Sequence[Section[SupportsDataclass]] | None = None,
         enabled: EnabledPredicate | None = None,
         tools: Sequence[object] | None = None,
@@ -77,8 +79,8 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         )
         params_type = cast(type[SupportsDataclass] | None, candidate_type)
 
-        self.params_type: type[SectionParamsT] | None = cast(
-            type[SectionParamsT] | None, params_type
+        self.params_type: type[SectionParamsT_co] | None = cast(
+            type[SectionParamsT_co] | None, params_type
         )
         self.title = title
         self.key = self._normalize_key(key)

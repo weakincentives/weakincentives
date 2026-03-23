@@ -38,13 +38,13 @@ _TITLE_TRUNCATE_LENGTH: Final = 60
 
 _TOOL_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
 
-TaskExampleParamsT = TypeVar(
-    "TaskExampleParamsT", bound=SupportsDataclass, covariant=True
+TaskExampleParamsT_co = TypeVar(
+    "TaskExampleParamsT_co", bound=SupportsDataclass, covariant=True
 )
-TaskExamplesParamsT = TypeVar(
-    "TaskExamplesParamsT", bound=SupportsDataclass, covariant=True
+TaskExamplesParamsT_co = TypeVar(
+    "TaskExamplesParamsT_co", bound=SupportsDataclass, covariant=True
 )
-OutcomeT = TypeVar("OutcomeT", bound="str | SupportsDataclass", covariant=True)
+OutcomeT_co = TypeVar("OutcomeT_co", bound="str | SupportsDataclass", covariant=True)
 
 
 @dataclass(slots=True, frozen=True)
@@ -123,7 +123,7 @@ def _render_outcome(outcome: str | SupportsDataclass) -> str:
     return json.dumps(serialized, ensure_ascii=False)
 
 
-class TaskExample(Section[TaskExampleParamsT]):
+class TaskExample(Section[TaskExampleParamsT_co]):
     """Section representing a single task trajectory example.
 
     The outcome type must match the PromptTemplate's output type:
@@ -141,7 +141,7 @@ class TaskExample(Section[TaskExampleParamsT]):
         outcome: str | SupportsDataclass,
         steps: Sequence[TaskStep[Any, Any]],
         title: str | None = None,
-        default_params: TaskExampleParamsT | None = None,
+        default_params: TaskExampleParamsT_co | None = None,
         enabled: EnabledPredicate | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
@@ -269,7 +269,7 @@ class TaskExample(Section[TaskExampleParamsT]):
         return cast(Self, clone)
 
 
-class TaskExamplesSection(Section[TaskExamplesParamsT]):
+class TaskExamplesSection(Section[TaskExamplesParamsT_co]):
     """Container section for task example children."""
 
     def __init__(  # noqa: PLR0913
@@ -278,7 +278,7 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
         key: str = "task-examples",
         title: str = "Task Examples",
         examples: Sequence[TaskExample[Any]],
-        default_params: TaskExamplesParamsT | None = None,
+        default_params: TaskExamplesParamsT_co | None = None,
         enabled: EnabledPredicate | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,

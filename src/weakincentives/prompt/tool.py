@@ -67,15 +67,15 @@ if TYPE_CHECKING:
         RenderedPromptProtocol,
     )
 
-type ParamsType = type[SupportsDataclass] | type[None]
-type ResultType = type[SupportsDataclass] | type[None]
+type ParamsType = type[SupportsDataclass | None]
+type ResultType = type[SupportsDataclass | None]
 
 # Contravariance for ParamsT allows a handler accepting broader param types
 # to substitute for one requiring narrower types (Liskov substitution).
 ParamsT_contra = TypeVar(
     "ParamsT_contra", bound=SupportsDataclassOrNone, contravariant=True
 )
-ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
+ResultT = TypeVar("ResultT", bound=SupportsToolResult)
 
 
 @dataclass(slots=True, frozen=True)
@@ -201,12 +201,12 @@ def _coerce_none_type(candidate: object) -> object:
     return candidate
 
 
-class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
+class ToolHandler(Protocol[ParamsT_contra, ResultT]):
     """Callable protocol implemented by tool handlers."""
 
     def __call__(
         self, params: ParamsT_contra, *, context: ToolContext
-    ) -> ToolResult[ResultT_co]: ...
+    ) -> ToolResult[ResultT]: ...
 
 
 @dataclass(slots=True)
@@ -220,7 +220,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         default_factory=tuple,
     )
     params_type: type[ParamsT] = field(init=False, repr=False)
-    result_type: type[SupportsDataclass] | type[None] = field(init=False, repr=False)
+    result_type: type[SupportsDataclass | None] = field(init=False, repr=False)
     result_container: Literal["object", "array"] = field(
         init=False,
         repr=False,

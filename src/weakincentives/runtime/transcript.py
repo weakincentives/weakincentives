@@ -73,7 +73,7 @@ class TranscriptEntry:
     source: str
     timestamp: datetime
     session_id: str | None = None
-    detail: dict[str, Any] = field(default_factory=lambda: {})
+    detail: dict[str, Any] = field(default_factory=dict[str, Any])
     raw: str | None = None
 
 

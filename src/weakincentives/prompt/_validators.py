@@ -434,7 +434,7 @@ def _validate_step_input_type(
     example: object,
     step_idx: int,
     tool_name: str,
-    expected_type: type[SupportsDataclass] | type[None],
+    expected_type: type[SupportsDataclass | None],
     path: SectionPath,
 ) -> None:
     """Validate step input matches expected params type."""
@@ -467,7 +467,7 @@ def _validate_step_output_type(  # noqa: PLR0913, PLR0917
     example: object,
     step_idx: int,
     tool_name: str,
-    expected_type: type[SupportsDataclass] | type[None],
+    expected_type: type[SupportsDataclass | None],
     container: str,
     path: SectionPath,
 ) -> None:

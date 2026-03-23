@@ -53,7 +53,7 @@ def _task_example_descriptors_factory() -> list[TaskExampleDescriptor]:
 class ToolContractProtocol(Protocol):
     name: str
     description: str
-    params_type: type[SupportsDataclass] | type[None]
+    params_type: type[SupportsDataclass | None]
     result_type: type[SupportsDataclassOrNone]
     result_container: Literal["object", "array"]
     accepts_overrides: bool
@@ -382,9 +382,7 @@ def _tool_contract_hash(tool: ToolContractProtocol) -> HexDigest:
         Literal["object", "array"], getattr(tool, "result_container", "object")
     )
     result_schema_hash = hash_json(_result_schema(tool.result_type, container))
-    return hash_text(
-        "::".join((description_hash, params_schema_hash, result_schema_hash))
-    )
+    return hash_text(f"{description_hash}::{params_schema_hash}::{result_schema_hash}")
 
 
 def _require_str_value(value: object) -> tuple[bool, str]:
@@ -405,7 +403,7 @@ def hash_json(value: object) -> HexDigest:
 
 
 def _params_schema(
-    params_type: type[SupportsDataclass] | type[None],
+    params_type: type[SupportsDataclass | None],
 ) -> dict[str, JSONValue]:
     if params_type is type(None):
         return {

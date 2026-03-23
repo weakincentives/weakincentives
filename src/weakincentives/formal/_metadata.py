@@ -65,7 +65,7 @@ class Action:
     name: str
     parameters: tuple[ActionParameter, ...] = field(default_factory=tuple)
     preconditions: tuple[str, ...] = field(default_factory=tuple)
-    updates: dict[str, str] = field(default_factory=lambda: {})
+    updates: dict[str, str] = field(default_factory=dict[str, str])
     description: str = ""
 
 
