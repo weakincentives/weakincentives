@@ -145,9 +145,11 @@ def _normalize_mapping_value(value: object) -> object:
         return [_normalize_mapping_value(item) for item in sequence_values]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return str(value)
+    return (
+        value.decode("utf-8", errors="replace")
+        if isinstance(value, bytes)
+        else str(value)
+    )
 
 
 def _render_sequence(items: Sequence[object]) -> str:

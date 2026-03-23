@@ -37,10 +37,10 @@ def callable_requires_positional_argument(callback: EnabledPredicate) -> bool:
     for parameter in signature.parameters.values():
         if (
             parameter.kind
-            in (
+            in {
                 inspect.Parameter.POSITIONAL_ONLY,
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
+            }
             and parameter.default is inspect.Signature.empty
         ):
             return True

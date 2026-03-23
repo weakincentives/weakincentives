@@ -379,8 +379,8 @@ class PromptRenderer[OutputT]:
         """
         return self._registry.children_by_path.get(parent_node.path, ())
 
+    @staticmethod
     def _collect_section_tools(
-        self,
         section: Section[SupportsDataclass],
         tool_override_lookup: dict[str, ToolOverride],
         collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -407,8 +407,8 @@ class PromptRenderer[OutputT]:
                     )
             collected_tools.append(patched_tool)
 
+    @staticmethod
     def _collect_section_skills(
-        self,
         section: Section[SupportsDataclass],
         collected_skills: list[SkillMount],
     ) -> None:
@@ -450,8 +450,8 @@ class PromptRenderer[OutputT]:
 
             yield node, section_params
 
+    @staticmethod
     def _render_section(
-        self,
         node: SectionNode[SupportsDataclass],
         section_params: SupportsDataclass | None,
         override_body: str | None,

@@ -143,8 +143,9 @@ class FormalSpec:
         _tla_section_header(lines, "Helper Operators")
         for name, definition in self.helpers.items():
             lines.append(f"{name} ==")
-            for line in definition.split("\n"):
-                lines.append(f"    {line}" if line.strip() else "")
+            lines.extend(
+                f"    {line}" if line.strip() else "" for line in definition.split("\n")
+            )
             lines.append("")
 
     def _emit_init(self, lines: list[str]) -> None:
@@ -174,10 +175,8 @@ class FormalSpec:
         else:
             sig = action.name
         lines.append(f"{sig} ==")
-        for precond in action.preconditions:
-            lines.append(f"    /\\ {precond}")
-        for var, expr in action.updates.items():
-            lines.append(f"    /\\ {var}' = {expr}")
+        lines.extend(f"    /\\ {precond}" for precond in action.preconditions)
+        lines.extend(f"    /\\ {var}' = {expr}" for var, expr in action.updates.items())
         unchanged_vars = [
             v.name for v in self.state_vars if v.name not in action.updates
         ]
@@ -222,8 +221,9 @@ class FormalSpec:
             if len(pred_lines) == 1:
                 lines.append(f"    {inv.predicate}")
             else:
-                for pline in pred_lines:
-                    lines.append(f"    {pline}" if pline.strip() else "")
+                lines.extend(
+                    f"    {pline}" if pline.strip() else "" for pline in pred_lines
+                )
             lines.append("")
 
     def _emit_constraint(self, lines: list[str]) -> None:
@@ -237,7 +237,7 @@ class FormalSpec:
         self,
         *,
         init: str | None = None,
-        next: str | None = None,
+        next_formula: str | None = None,
         check_deadlock: bool = False,
         state_constraint: str | None = None,
     ) -> str:
@@ -245,7 +245,7 @@ class FormalSpec:
 
         Args:
             init: Initial state formula (optional, for simulation mode)
-            next: Next-state formula (optional, for simulation mode)
+            next_formula: Next-state formula (optional, for simulation mode)
             check_deadlock: Whether to check for deadlocks
             state_constraint: Optional state constraint expression
 
@@ -253,43 +253,47 @@ class FormalSpec:
             TLC configuration file content
         """
         lines: list[str] = []
-
-        # Use SPECIFICATION Spec if available
-        if init is None and next is None:
-            lines.append("SPECIFICATION Spec")
-            lines.append("")
-        elif init and next:
-            lines.append(f"INIT {init}")
-            lines.append(f"NEXT {next}")
-            lines.append("")
-
-        # Constants
-        if self.constants:
-            lines.append("CONSTANTS")
-            for name, value in self.constants.items():
-                lines.append(f"    {name} = {value}")
-            lines.append("")
-
-        # Invariants
-        if self.invariants:
-            lines.append("INVARIANTS")
-            for inv in self.invariants:
-                lines.append(f"    {inv.name}")
-            lines.append("")
-
-        # State constraint (use parameter if provided, otherwise use instance field)
-        if state_constraint:
-            # Custom constraint provided as parameter
-            lines.append(f"CONSTRAINT {state_constraint}")
-            lines.append("")
-        elif self.constraint:
-            # Use the StateConstraint operator defined in the spec
-            lines.append("CONSTRAINT StateConstraint")
-            lines.append("")
-
-        # Deadlock checking
+        self._config_spec(lines, init, next_formula)
+        self._config_constants(lines)
+        self._config_invariants(lines)
+        self._config_constraint(lines, state_constraint)
         if not check_deadlock:
             lines.append("CHECK_DEADLOCK FALSE")
             lines.append("")
-
         return "\n".join(lines)
+
+    @staticmethod
+    def _config_spec(
+        lines: list[str], init: str | None, next_formula: str | None
+    ) -> None:
+        if init is None and next_formula is None:
+            lines.append("SPECIFICATION Spec")
+            lines.append("")
+        elif init and next_formula:
+            lines.append(f"INIT {init}")
+            lines.append(f"NEXT {next_formula}")
+            lines.append("")
+
+    def _config_constants(self, lines: list[str]) -> None:
+        if not self.constants:
+            return
+        lines.append("CONSTANTS")
+        lines.extend(f"    {name} = {value}" for name, value in self.constants.items())
+        lines.append("")
+
+    def _config_invariants(self, lines: list[str]) -> None:
+        if not self.invariants:
+            return
+        lines.append("INVARIANTS")
+        lines.extend(f"    {inv.name}" for inv in self.invariants)
+        lines.append("")
+
+    def _config_constraint(
+        self, lines: list[str], state_constraint: str | None
+    ) -> None:
+        if state_constraint:
+            lines.append(f"CONSTRAINT {state_constraint}")
+            lines.append("")
+        elif self.constraint:
+            lines.append("CONSTRAINT StateConstraint")
+            lines.append("")
