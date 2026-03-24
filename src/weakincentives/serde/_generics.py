@@ -12,8 +12,6 @@
 
 """TypeVar resolution and forward-reference AST scanning for serde parsing."""
 
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPrivateUsage=false
-
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

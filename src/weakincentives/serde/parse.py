@@ -12,23 +12,25 @@
 
 """Dataclass parsing helpers."""
 
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPrivateUsage=false
-
 from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
 from dataclasses import MISSING
 from typing import (
+    Any,
     Literal,
     cast,
     get_origin,
 )
 
-from ._coercers import _coerce_to_type
-from ._generics import _build_typevar_map, _get_field_types
+from ._coercers import _coerce_to_type  # pyright: ignore[reportPrivateUsage]
+from ._generics import (
+    _build_typevar_map,  # pyright: ignore[reportPrivateUsage]
+    _get_field_types,  # pyright: ignore[reportPrivateUsage]
+)
 from ._scope import SerdeScope, is_hidden_in_scope
-from ._utils import _ParseConfig
+from ._utils import _ParseConfig  # pyright: ignore[reportPrivateUsage]
 
 
 def _find_key(data: Mapping[str, object], name: str, alias: str | None) -> str | None:
@@ -80,7 +82,7 @@ def _collect_field_kwargs(
         else SerdeScope.DEFAULT
     )
 
-    for field in dataclasses.fields(cls):
+    for field in dataclasses.fields(cast(Any, cls)):
         if not field.init:
             continue
         field_type = type_hints.get(field.name, field.type)
@@ -190,7 +192,7 @@ def parse[T](
     origin = get_origin(cls)
     target_cls = cast(type[T], origin if origin is not None else cls)
 
-    if not dataclasses.is_dataclass(target_cls) or not isinstance(target_cls, type):
+    if not dataclasses.is_dataclass(target_cls) or not isinstance(target_cls, type):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError("parse() requires a dataclass type")
 
     # Build TypeVar mapping from generic alias type arguments
