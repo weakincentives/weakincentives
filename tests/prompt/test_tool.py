@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import types
 import typing
-from dataclasses import dataclass
+from dataclasses import FrozenInstanceError, dataclass
 from typing import Annotated, Literal, cast
 
 import pytest
@@ -44,6 +44,17 @@ class ExampleResult:
 @dataclass
 class OtherParams:
     value: int
+
+
+def test_tool_is_frozen() -> None:
+    tool = Tool[ExampleParams, ExampleResult](
+        name="lookup",
+        description="Lookup information.",
+        handler=None,
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        tool.name = "other"  # type: ignore[misc]
 
 
 def test_tool_examples_are_preserved() -> None:
