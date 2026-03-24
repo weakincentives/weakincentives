@@ -32,6 +32,7 @@ from typing import (
 )
 
 from ..budget import BudgetTracker
+from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..types.dataclass import (
     SupportsDataclass,
@@ -209,7 +210,7 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT]):
     ) -> ToolResult[ResultT]: ...
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     """Describe a callable tool exposed by prompt sections."""
 
@@ -228,50 +229,50 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     _result_annotation: ResultT = field(init=False, repr=False)
     accepts_overrides: bool = True
 
-    def __post_init__(self) -> None:
-        params_type, raw_result_annotation = self._resolve_type_arguments()
+    @classmethod
+    def __pre_init__(
+        cls,
+        *,
+        name: str,
+        description: str,
+        handler: ToolHandler[ParamsT, ResultT] | None,
+        examples: tuple[ToolExample[ParamsT, ResultT], ...],
+        accepts_overrides: bool,
+    ) -> dict[str, object]:
+        params_type, raw_result_annotation = cls._resolve_type_arguments()
 
-        result_type, result_container = self._normalize_result_annotation(
+        result_type, result_container = cls._normalize_result_annotation(
             raw_result_annotation,
             params_type,
         )
 
-        object.__setattr__(self, "params_type", cast(type[ParamsT], params_type))
-        object.__setattr__(self, "result_type", result_type)
-        object.__setattr__(self, "result_container", result_container)
-        object.__setattr__(self, "_result_annotation", raw_result_annotation)
-
-        object.__setattr__(self, "name", self._validate_name(params_type))
-        object.__setattr__(self, "description", self._validate_description(params_type))
-        object.__setattr__(
-            self,
-            "examples",
-            self._validate_examples(params_type, result_type),
+        validated_name = cls._validate_name(name, params_type)
+        validated_description = cls._validate_description(description, params_type)
+        validated_examples = cls._validate_examples(
+            examples, params_type, result_type, result_container
         )
 
-        # Handler validation removed: pyright strict mode catches signature mismatches
-        # at development time. Runtime TypeErrors are caught in _handle_tool_exception
-        # (tool_executor.py) and converted to ToolResult errors.
+        return {
+            "name": validated_name,
+            "description": validated_description,
+            "handler": handler,
+            "examples": validated_examples,
+            "accepts_overrides": accepts_overrides,
+            "params_type": cast(type[ParamsT], params_type),
+            "result_type": result_type,
+            "result_container": result_container,
+            "_result_annotation": raw_result_annotation,
+        }
 
+    @classmethod
     def _resolve_type_arguments(
-        self,
+        cls,
     ) -> tuple[ParamsType, ResultT]:
-        params_attr = getattr(self, "params_type", None)
+        params_attr = getattr(cls, "_specialized_params_type", None)
         params_type: ParamsType | None = (
             cast(ParamsType, params_attr) if isinstance(params_attr, type) else None
         )
-        raw_result_annotation = getattr(self, "_result_annotation", None)
-        if params_type is None or raw_result_annotation is None:
-            origin = getattr(self, "__orig_class__", None)
-            if origin is not None:  # pragma: no cover - interpreter-specific path
-                args = get_args(origin)
-                if len(args) == _EXPECTED_TYPE_ARGUMENTS:
-                    params_arg, result_arg = args
-                    if isinstance(params_arg, type):
-                        params_type = cast(ParamsType, _coerce_none_type(params_arg))
-                        raw_result_annotation = cast(
-                            ResultT, _coerce_none_type(result_arg)
-                        )
+        raw_result_annotation = getattr(cls, "_specialized_result_annotation", None)
         if params_type is None or raw_result_annotation is None:
             raise PromptValidationError(
                 "Tool must be instantiated with concrete type arguments.",
@@ -280,8 +281,9 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
         return params_type, cast(ResultT, raw_result_annotation)
 
-    def _validate_name(self, params_type: ParamsType) -> str:
-        raw_name = self.name
+    @staticmethod
+    def _validate_name(name: str, params_type: ParamsType) -> str:
+        raw_name = name
         stripped_name = raw_name.strip()
         if raw_name != stripped_name:
             normalized_name = stripped_name
@@ -309,8 +311,9 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
         return name_clean
 
-    def _validate_description(self, params_type: ParamsType) -> str:
-        description_clean = self.description.strip()
+    @staticmethod
+    def _validate_description(description: str, params_type: ParamsType) -> str:
+        description_clean = description.strip()
         if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
             raise PromptValidationError(
                 "Tool description must be 1-200 ASCII characters.",
@@ -373,11 +376,12 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                 placeholder="examples",
             )
 
+    @staticmethod
     def _validate_example_output(
-        self,
         example_output: object,
         params_type: ParamsType,
         result_type: ResultType,
+        result_container: Literal["object", "array"],
     ) -> None:
         if result_type is _NONE_TYPE:
             if example_output is not None:
@@ -387,7 +391,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                     placeholder="examples",
                 )
             return
-        if self.result_container == "array":
+        if result_container == "array":
             if not isinstance(example_output, SequenceABC) or isinstance(
                 example_output, (str, bytes, bytearray)
             ):
@@ -417,12 +421,14 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                 placeholder="examples",
             )
 
+    @staticmethod
     def _validate_examples(
-        self,
+        examples: tuple[ToolExample[ParamsT, ResultT], ...] | tuple[object, ...],
         params_type: ParamsType,
         result_type: ResultType,
+        result_container: Literal["object", "array"],
     ) -> tuple[ToolExample[ParamsT, ResultT], ...]:
-        examples_value = cast(tuple[object, ...], self.examples)
+        examples_value = cast(tuple[object, ...], examples)
         if not examples_value:
             return ()
 
@@ -437,10 +443,10 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
             typed_example = cast(ToolExample[ParamsT, ResultT], example)
 
-            self._validate_example_description(typed_example.description, params_type)
-            self._validate_example_input(typed_example.input, params_type)
-            self._validate_example_output(
-                typed_example.output, params_type, result_type
+            Tool._validate_example_description(typed_example.description, params_type)
+            Tool._validate_example_input(typed_example.input, params_type)
+            Tool._validate_example_output(
+                typed_example.output, params_type, result_type, result_container
             )
 
             normalized_examples.append(typed_example)
@@ -522,12 +528,8 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         result_annotation = cast(ResultT, result_candidate)
 
         class _SpecializedTool(cls):  # ty: ignore[shadowed-type-variable]  # dynamic class
-            def __post_init__(self) -> None:
-                object.__setattr__(
-                    self, "params_type", cast(type[ParamsT], params_type)
-                )
-                object.__setattr__(self, "_result_annotation", result_annotation)
-                super().__post_init__()
+            _specialized_params_type = params_type
+            _specialized_result_annotation = result_annotation
 
         _SpecializedTool.__name__ = cls.__name__
         _SpecializedTool.__qualname__ = cls.__qualname__
