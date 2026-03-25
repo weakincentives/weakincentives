@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from threading import RLock
-from typing import Any, Final, cast, override
+from typing import Final, cast, override
 from uuid import UUID, uuid4
 
 from ...clock import SYSTEM_CLOCK
@@ -58,7 +58,7 @@ from ._session_helpers import (
 from ._slice_types import SessionSliceType
 from ._types import TypedReducer
 from .protocols import SessionProtocol, SnapshotProtocol
-from .reducer_registry import ReducerRegistration, ReducerRegistry
+from .reducer_registry import ReducerRegistry
 from .rendered_tools import RenderedTools
 from .session_cloning import (
     apply_policies_to_clone,
@@ -590,56 +590,6 @@ class Session(SessionProtocol):
                 return
 
         register_visibility_reducers(self)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Backward Compatibility Attributes (Internal Use Only)
-    # ──────────────────────────────────────────────────────────────────────
-
-    @property
-    def _slices(self) -> dict[SessionSliceType, Slice[Any]]:
-        """Access internal slices dict for backward compatibility.
-
-        WARNING: Caller MUST hold Session's lock (via locked() context manager).
-        Returns a direct mutable reference - not a defensive copy.
-
-        This property is for internal use by session_cloning module only.
-        """
-        return self._store._slices  # pyright: ignore[reportPrivateUsage]
-
-    @property
-    def _slice_policies(self) -> dict[SessionSliceType, SlicePolicy]:
-        """Access internal policies dict for backward compatibility.
-
-        WARNING: Caller MUST hold Session's lock (via locked() context manager).
-        Returns a direct mutable reference - not a defensive copy.
-
-        This property is for internal use by session_cloning module only.
-        """
-        return self._store._slice_policies  # pyright: ignore[reportPrivateUsage]
-
-    @_slice_policies.setter
-    def _slice_policies(self, value: dict[SessionSliceType, SlicePolicy]) -> None:
-        """Set internal policies dict for backward compatibility.
-
-        WARNING: Caller MUST hold Session's lock (via locked() context manager).
-        """
-        self._store._slice_policies = value  # pyright: ignore[reportPrivateUsage]
-
-    @property
-    def _reducers(self) -> dict[SessionSliceType, list[ReducerRegistration]]:
-        """Access internal reducers dict for backward compatibility.
-
-        WARNING: Caller MUST hold Session's lock (via locked() context manager).
-        Returns a direct mutable reference - not a defensive copy.
-
-        This property is for internal use by session_cloning module only.
-        """
-        return self._registry._reducers  # pyright: ignore[reportPrivateUsage]
-
-    @property
-    def _slice_config(self) -> SliceFactoryConfig:
-        """Access internal slice config for backward compatibility."""
-        return self._store.config
 
 
 __all__ = [

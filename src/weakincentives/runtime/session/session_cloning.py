@@ -48,16 +48,9 @@ def snapshot_reducers_and_state(
         A tuple of (reducer_snapshot, state_snapshot, policy_snapshot).
     """
     with session.locked():
-        reducer_snapshot = [
-            (data_type, tuple(registrations))
-            for data_type, registrations in session._reducers.items()
-        ]
-        # Convert slices to tuples for snapshot
-        state_snapshot = {
-            slice_type: slice_instance.snapshot()
-            for slice_type, slice_instance in session._slices.items()
-        }
-        policy_snapshot = dict(session._slice_policies)
+        reducer_snapshot = session._registry.snapshot()
+        state_snapshot = session._store.snapshot_slices()
+        policy_snapshot = dict(session._store._slice_policies)
     return reducer_snapshot, state_snapshot, policy_snapshot
 
 
@@ -73,7 +66,7 @@ def copy_reducers_to_clone(
     """
     with clone.locked():
         for data_type, registrations in reducer_snapshot:
-            if data_type in clone._reducers:
+            if clone._registry.has_registrations(data_type):
                 continue
             for registration in registrations:
                 clone._mutation_register_reducer(
@@ -110,7 +103,7 @@ def apply_policies_to_clone(
         policy_snapshot: Dict mapping slice types to their policies.
     """
     with clone.locked():
-        clone._slice_policies = dict(policy_snapshot)
+        clone._store.apply_policies(policy_snapshot)
 
 
 def resolve_clone_parent(session: Session, parent: Session | None) -> Session | None:
