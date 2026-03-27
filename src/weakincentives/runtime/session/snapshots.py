@@ -524,6 +524,6 @@ class Snapshot(Constructable):
             parent_id=parent_id,
             children_ids=children_ids,
             slices=restored,
-            tags=dict(payload.tags),
+            tags=payload.tags,
             policies=_resolve_payload_policies(payload.policies),
         )
