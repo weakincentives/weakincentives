@@ -132,24 +132,26 @@ class Constructable:
 
     ``replace(**changes)`` is provided automatically: it introspects
     ``create()``'s signature, copies current values for unchanged fields,
-    and delegates to ``create()`` so that all validation re-runs.
+    and delegates to ``create()`` so that all validation re-runs.  Every
+    ``create()`` parameter must correspond to an instance field; if not,
+    override ``replace()`` in the subclass.
 
     Example::
 
         @FrozenDataclass()
-        class Order(Constructable):
-            subtotal: int
-            tax: int
-            total: int
+        class Deadline(Constructable):
+            expires_at: datetime
+            started_at: datetime
 
             @classmethod
-            def create(cls, subtotal: int, tax_rate: float = 0.1) -> Order:
-                tax = int(subtotal * tax_rate)
+            def create(cls, expires_at: datetime, started_at: datetime | None = None) -> Deadline:
+                if started_at is None:
+                    started_at = datetime.now(UTC)
                 with allow_construction():
-                    return cls(subtotal=subtotal, tax=tax, total=subtotal + tax)
+                    return cls(expires_at=expires_at, started_at=started_at)
 
-        order = Order.create(subtotal=1000)
-        order2 = order.replace(subtotal=2000)
+        d = Deadline.create(expires_at=some_time)
+        d2 = d.replace(expires_at=new_time)
     """
 
     __slots__ = ()
@@ -160,6 +162,11 @@ class Constructable:
         Only fields that appear as parameters in ``create()`` can be
         replaced.  Derived fields are recomputed automatically because
         ``replace()`` delegates to ``create()``.
+
+        Every ``create()`` parameter must correspond to an instance
+        attribute so that ``replace()`` can round-trip values.  If
+        ``create()`` accepts configuration-only parameters (not stored
+        as fields), override ``replace()`` in the subclass.
         """
         cls = type(self)
         create_method = getattr(cls, "create", None)
@@ -180,9 +187,17 @@ class Constructable:
                 f"{cls.__name__}.replace() got unexpected field(s): {joined}"
             )
 
-        current = {
-            name: getattr(self, name) for name in create_params if hasattr(self, name)
-        }
+        non_field_params = {name for name in create_params if not hasattr(self, name)}
+        if non_field_params:
+            joined = ", ".join(sorted(non_field_params))
+            msg = (
+                f"{cls.__name__}.replace() cannot round-trip create() "
+                f"parameter(s) that are not instance fields: {joined}. "
+                f"Override replace() in {cls.__name__} to handle this."
+            )
+            raise TypeError(msg)
+
+        current = {name: getattr(self, name) for name in create_params}
         current.update(changes)
         return cls.create(**current)  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
 

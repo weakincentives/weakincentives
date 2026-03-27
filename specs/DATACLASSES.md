@@ -99,8 +99,8 @@ from weakincentives.dataclasses import Constructable, allow_construction
 `Constructable` is a mixin for Tier 2 classes. It provides:
 
 1. **`__init__` guard** — direct `MyClass(...)` raises `TypeError`
-2. **`replace(**changes)`** — functional update via `create()`
-3. **`allow_construction()`** — context manager for use inside `create()`
+1. **`replace(**changes)`** — functional update via `create()`
+1. **`allow_construction()`** — context manager for use inside `create()`
 
 ### The __init__ Guard
 
@@ -122,10 +122,10 @@ Each `Constructable` subclass defines a `create()` classmethod. This is the
 **only** public construction path. It:
 
 1. Accepts raw input types (may differ from stored field types)
-2. Validates all preconditions
-3. Normalizes values to their stored representation
-4. Computes derived fields
-5. Calls `cls(...)` inside `allow_construction()` with fully prepared values
+1. Validates all preconditions
+1. Normalizes values to their stored representation
+1. Computes derived fields
+1. Calls `cls(...)` inside `allow_construction()` with fully prepared values
 
 ```python
 @classmethod
@@ -220,30 +220,28 @@ d2 = deadline.replace(expires_at=new_time)
 ### How It Works
 
 1. Introspect `create()`'s signature to discover the parameter names
-2. Read each parameter's current value from the instance via `getattr`
-3. Overlay the caller's `**changes`
-4. Call `cls.create(**merged)` — all validation and derivation re-runs
+1. Verify every parameter corresponds to an instance attribute
+1. Read each parameter's current value from the instance via `getattr`
+1. Overlay the caller's `**changes`
+1. Call `cls.create(**merged)` — all validation and derivation re-runs
 
-```python
-def replace(self, **changes: object) -> Self:
-    cls = type(self)
-    sig = inspect.signature(cls.create)
-    create_params = {
-        name for name, p in sig.parameters.items()
-        if name != "cls"
-        and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
-    }
+### The Round-Trip Requirement
 
-    # Reject unknown fields
-    unknown = set(changes) - create_params
-    if unknown:
-        raise TypeError(f"unexpected field(s): {sorted(unknown)}")
+Every `create()` parameter must correspond to a stored instance field so
+that `replace()` can read the current value back via `getattr`. If
+`create()` accepts configuration-only parameters that are not stored as
+fields (e.g. a `tax_rate` used only to compute derived `tax` and `total`),
+`replace()` raises `TypeError` at runtime with guidance to override it:
 
-    # Merge current values with changes, delegate to create()
-    current = {name: getattr(self, name) for name in create_params}
-    current.update(changes)
-    return cls.create(**current)
 ```
+TypeError: Order.replace() cannot round-trip create() parameter(s)
+that are not instance fields: tax_rate. Override replace() in Order
+to handle this.
+```
+
+This is intentional — silently dropping parameters would be a data loss
+footgun. If the class needs functional update with non-field params,
+override `replace()` with custom logic.
 
 ### The Idempotency Requirement
 
@@ -461,12 +459,12 @@ construction. We reject it for Tier 2 classes because:
 1. **Untyped.** `object.__setattr__(self, "name", value)` accepts any string.
    Typos are silent. The type checker cannot verify field names or value types.
 
-2. **Input/stored type conflation.** The dataclass field declaration must serve
+1. **Input/stored type conflation.** The dataclass field declaration must serve
    as both the input type and the stored type. When these differ (e.g.,
    `datetime | None` input, `datetime` stored), the declaration lies about
    one of them.
 
-3. **No construction guard.** Anyone can call `MyClass(...)` and bypass
+1. **No construction guard.** Anyone can call `MyClass(...)` and bypass
    validation. The invariant is only enforced by convention.
 
 ### Why not a `_freeze(**attrs)` helper?

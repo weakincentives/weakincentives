@@ -62,7 +62,7 @@ def _create_test_bundle(
 
     with BundleWriter(
         target_dir,
-        config=BundleConfig(),
+        config=BundleConfig.create(),
     ) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": "test"})
@@ -275,7 +275,7 @@ def test_api_slice_renders_markdown(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice(markdown_text))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -306,7 +306,7 @@ def test_markdown_renderer_handles_nested_values(tmp_path: Path) -> None:
         )
     )
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})

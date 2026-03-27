@@ -49,7 +49,7 @@ def create_test_bundle(
     session.dispatch(_AgentPlan(goal="Test goal", steps=3))
     session.dispatch(_TaskStatus(task_id="task-001", completed=True))
 
-    with BundleWriter(target_dir, config=BundleConfig()) as writer:
+    with BundleWriter(target_dir, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": "test"})
         writer.write_request_output({"status": "ok"})
@@ -96,7 +96,7 @@ def create_bundle_with_logs(target_dir: Path) -> Path:
     session = Session()
     session.dispatch(_AgentPlan(goal="Test goal", steps=3))
 
-    with BundleWriter(target_dir, config=BundleConfig()) as writer:
+    with BundleWriter(target_dir, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": "test"})
         writer.write_request_output({"status": "ok"})

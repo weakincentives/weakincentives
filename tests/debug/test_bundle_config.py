@@ -37,7 +37,7 @@ class TestBundleConfig:
 
     def test_default_config(self) -> None:
         """Test default configuration values."""
-        config = BundleConfig()
+        config = BundleConfig.create()
         assert config.target is None
         assert config.max_file_size == 10_000_000
         assert config.max_total_size == 52_428_800
@@ -45,15 +45,15 @@ class TestBundleConfig:
 
     def test_config_with_string_target(self, tmp_path: Path) -> None:
         """Test config normalizes string target to Path."""
-        config = BundleConfig(target=str(tmp_path))  # type: ignore[arg-type]
+        config = BundleConfig.create(target=str(tmp_path))
         assert config.target == tmp_path
 
     def test_enabled_property(self, tmp_path: Path) -> None:
         """Test enabled property."""
-        config_disabled = BundleConfig()
+        config_disabled = BundleConfig.create()
         assert config_disabled.enabled is False
 
-        config_enabled = BundleConfig(target=tmp_path)
+        config_enabled = BundleConfig.create(target=tmp_path)
         assert config_enabled.enabled is True
 
 

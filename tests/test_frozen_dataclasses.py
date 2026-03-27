@@ -201,8 +201,8 @@ def test_replace_rejects_unknown_fields() -> None:
         s.replace(unknown=99)
 
 
-def test_replace_with_non_field_create_param() -> None:
-    """replace() handles create() params that aren't stored fields."""
+def test_replace_rejects_non_field_create_param() -> None:
+    """replace() raises when create() has params that aren't stored fields."""
 
     @FrozenDataclass()
     class Order(Constructable):
@@ -219,16 +219,12 @@ def test_replace_with_non_field_create_param() -> None:
     order = Order.create(subtotal=1000)
     assert order.total == 1100
 
-    # tax_rate is a create() param but not a stored field — replace() should
-    # use create()'s default for it when not explicitly provided
-    updated = order.replace(subtotal=2000)
-    assert updated.subtotal == 2000
-    assert updated.total == 2200
-
-    # Explicitly passing the non-field param should also work
-    custom = order.replace(subtotal=1000, tax_rate=0.2)
-    assert custom.tax == 200
-    assert custom.total == 1200
+    # tax_rate is a create() param but not a stored field — replace()
+    # cannot round-trip it and should raise with guidance to override
+    with pytest.raises(
+        TypeError, match=r"cannot round-trip.*tax_rate.*Override replace"
+    ):
+        order.replace(subtotal=2000)
 
 
 def test_constructable_bans_post_init() -> None:

@@ -51,7 +51,7 @@ def _create_test_bundle(
 
     with BundleWriter(
         target_dir,
-        config=BundleConfig(),
+        config=BundleConfig.create(),
     ) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": "test"})
@@ -112,7 +112,7 @@ def test_api_logs_endpoint(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -139,7 +139,7 @@ def test_logs_endpoint_with_level_filter(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -183,7 +183,7 @@ def test_logs_facets_endpoint(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -219,7 +219,7 @@ def test_logs_filter_by_logger(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -252,7 +252,7 @@ def test_logs_filter_by_event(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -280,7 +280,7 @@ def test_logs_exclude_logger(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -311,7 +311,7 @@ def test_logs_search_filter(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -342,7 +342,7 @@ def test_logs_offset_only(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -370,7 +370,7 @@ def test_logs_with_pagination(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})

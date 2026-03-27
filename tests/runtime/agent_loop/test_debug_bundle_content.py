@@ -50,7 +50,7 @@ def test_loop_debug_bundle_includes_metrics(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -91,7 +91,7 @@ def test_loop_debug_bundle_metrics_include_budget(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         budget = Budget(max_total_tokens=1000)
         config = AgentLoopConfig(debug_bundle=bundle_config, budget=budget)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
@@ -135,7 +135,7 @@ def test_loop_debug_bundle_includes_prompt_info(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -194,7 +194,7 @@ def test_loop_debug_bundle_run_context_has_session_id(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -239,7 +239,7 @@ def test_loop_debug_bundle_includes_prompt_overrides(tmp_path: Path) -> None:
             {("section1",): SectionVisibility.FULL},
         ]
         adapter = MockAdapter(visibility_requests=visibility_requests)
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -288,7 +288,7 @@ def test_loop_debug_bundle_per_request_override(tmp_path: Path) -> None:
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
         # But include debug_bundle in request
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         request = AgentLoopRequest(
             request=SampleRequest(message="hello request bundle"),
             debug_bundle=bundle_config,
@@ -332,7 +332,7 @@ def test_loop_handles_visibility_expansion_with_bundle(tmp_path: Path) -> None:
             {("section1",): SectionVisibility.FULL},
         ]
         adapter = MockAdapter(visibility_requests=visibility_requests)
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -373,7 +373,7 @@ def test_loop_with_debug_bundle_includes_environment(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 

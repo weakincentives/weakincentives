@@ -230,7 +230,7 @@ def test_eval_loop_creates_debug_bundle(tmp_path: Path) -> None:
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
+        config = EvalLoopConfig(debug_bundle=BundleConfig.create(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -293,7 +293,7 @@ def test_eval_loop_bundle_contains_request_id_directory(tmp_path: Path) -> None:
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
+        config = EvalLoopConfig(debug_bundle=BundleConfig.create(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -333,7 +333,7 @@ def test_eval_loop_bundle_captures_failed_evaluation(tmp_path: Path) -> None:
     try:
         # Create loop that returns "wrong" - will fail exact_match
         agent_loop = _create_test_loop(result="wrong")
-        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
+        config = EvalLoopConfig(debug_bundle=BundleConfig.create(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -383,7 +383,7 @@ def test_eval_loop_bundle_captures_none_output(tmp_path: Path) -> None:
             AgentLoopRequest[str], AgentLoopResult[_Output]
         ] = InMemoryMailbox(name="dummy-requests")
         agent_loop = _NoneOutputLoop(adapter=adapter, requests=dummy_requests)
-        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
+        config = EvalLoopConfig(debug_bundle=BundleConfig.create(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -460,7 +460,7 @@ def test_eval_loop_bundle_with_session_aware_evaluator(tmp_path: Path) -> None:
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
+        config = EvalLoopConfig(debug_bundle=BundleConfig.create(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_session_aware_evaluator,
@@ -503,7 +503,7 @@ def test_eval_loop_bundle_fallback_on_error(tmp_path: Path) -> None:
 
     try:
         agent_loop = _create_test_loop(result="correct")
-        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
+        config = EvalLoopConfig(debug_bundle=BundleConfig.create(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -555,7 +555,7 @@ def test_eval_loop_bundle_no_reexecution_on_finalization_error(tmp_path: Path) -
         from weakincentives.debug.bundle import BundleConfig
         from weakincentives.evals import EvalLoopConfig
 
-        config = EvalLoopConfig(debug_bundle=BundleConfig(target=tmp_path))
+        config = EvalLoopConfig(debug_bundle=BundleConfig.create(target=tmp_path))
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
             evaluator=_output_to_str,
@@ -623,7 +623,9 @@ def test_eval_loop_bundle_invokes_storage_handler(tmp_path: Path) -> None:
         agent_loop = _create_test_loop(result="correct")
         storage_handler = TestStorageHandler()
         config = EvalLoopConfig(
-            debug_bundle=BundleConfig(target=tmp_path, storage_handler=storage_handler)
+            debug_bundle=BundleConfig.create(
+                target=tmp_path, storage_handler=storage_handler
+            )
         )
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=agent_loop,
@@ -680,7 +682,7 @@ def test_eval_loop_bundle_storage_handler_error_does_not_fail_eval(
     try:
         agent_loop = _create_test_loop(result="correct")
         config = EvalLoopConfig(
-            debug_bundle=BundleConfig(
+            debug_bundle=BundleConfig.create(
                 target=tmp_path, storage_handler=FailingStorageHandler()
             )
         )

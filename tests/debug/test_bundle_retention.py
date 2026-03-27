@@ -57,7 +57,7 @@ class TestRetentionPolicyIntegration:
     def test_retention_max_bundles_deletes_oldest(self, tmp_path: Path) -> None:
         """Test max_bundles limit deletes oldest bundles."""
         retention = BundleRetentionPolicy(max_bundles=2)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         # Create 3 bundles
         paths: list[Path] = []
@@ -90,7 +90,7 @@ class TestRetentionPolicyIntegration:
 
         # Create a new bundle with retention policy
         retention = BundleRetentionPolicy(max_age_seconds=86400)  # 24 hours
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         with (
             patch("weakincentives.debug._bundle_writer.SYSTEM_CLOCK", future_clock),
@@ -117,7 +117,7 @@ class TestRetentionPolicyIntegration:
 
         # Create second bundle with retention that allows only ~one bundle worth
         retention = BundleRetentionPolicy(max_total_bytes=first_size + 100)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         with BundleWriter(tmp_path, config=config) as second_writer:
             second_writer.write_request_input({"data": "y" * 1000})
@@ -136,7 +136,7 @@ class TestRetentionPolicyIntegration:
         _ = invalid_file.write_text("not a valid zip")
 
         retention = BundleRetentionPolicy(max_bundles=10)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         # This should not raise
         with BundleWriter(tmp_path, config=config) as writer:
@@ -152,7 +152,7 @@ class TestRetentionPolicyIntegration:
     ) -> None:
         """Test retention errors are logged but don't fail bundle creation."""
         retention = BundleRetentionPolicy(max_bundles=1)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         # Mock _enforce_retention to raise
         def failing_enforce(**kwargs: object) -> None:
@@ -172,7 +172,7 @@ class TestRetentionPolicyIntegration:
 
     def test_retention_none_does_nothing(self, tmp_path: Path) -> None:
         """Test that no retention policy means no cleanup."""
-        config = BundleConfig(target=tmp_path, retention=None)
+        config = BundleConfig.create(target=tmp_path, retention=None)
 
         # Create multiple bundles
         paths: list[Path] = []
@@ -201,7 +201,7 @@ class TestRetentionPolicyIntegration:
             max_bundles=2,  # Will mark oldest for deletion
             max_total_bytes=100_000_000,  # Large enough to not delete more
         )
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_request_input({"bundle": 3})
@@ -226,7 +226,7 @@ class TestRetentionPolicyIntegration:
         retention = BundleRetentionPolicy(
             max_total_bytes=first_size * 10  # Plenty of room
         )
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         with BundleWriter(tmp_path, config=config) as second_writer:
             second_writer.write_request_input({"data": "small"})
@@ -256,7 +256,7 @@ class TestRetentionPolicyIntegration:
         # Create new bundle with size limit that fits only 2 bundles
         # (new bundle + one existing = 2 bundles worth)
         retention = BundleRetentionPolicy(max_total_bytes=bundle_size * 2 + 100)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         with BundleWriter(tmp_path, config=config) as new_writer:
             new_writer.write_request_input({"bundle": "new", "data": "x" * 100})
@@ -284,7 +284,7 @@ class TestRetentionPolicyIntegration:
 
         # Create a new bundle with retention that will try to delete the first
         retention = BundleRetentionPolicy(max_bundles=1)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         # Patch Path.unlink to fail
         original_unlink = Path.unlink
@@ -338,7 +338,7 @@ class TestRetentionPolicyIntegration:
 
         # Create a new bundle with max_age retention
         retention = BundleRetentionPolicy(max_age_seconds=86400)  # 24 hours
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         with patch.object(DebugBundle, "load", mock_load):
             with BundleWriter(tmp_path, config=config) as writer:
@@ -456,7 +456,7 @@ class TestRetentionWithNestedDirectories:
         # Create new bundle with retention that limits to 2 total bundles
         # Key: config.target points to the root (tmp_path) for recursive search
         retention = BundleRetentionPolicy(max_bundles=2)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         subdir3 = tmp_path / "request-3"
         subdir3.mkdir()
@@ -486,7 +486,7 @@ class TestRetentionWithNestedDirectories:
         # Create new bundle with retention limit
         # config.target is the root for recursive search
         retention = BundleRetentionPolicy(max_bundles=3)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         subdir = tmp_path / "request-4"
         subdir.mkdir()
@@ -511,7 +511,7 @@ class TestRetentionWithNestedDirectories:
 
         # Create new bundle with tight size limit
         retention = BundleRetentionPolicy(max_total_bytes=total_size)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         subdir = tmp_path / "request-2"
         subdir.mkdir()
@@ -536,7 +536,7 @@ class TestRetentionWithNestedDirectories:
 
         # Create new bundle with max_bundles=1 in same target tree
         retention = BundleRetentionPolicy(max_bundles=1)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         new_subdir = tmp_path / "request-2"
         new_subdir.mkdir()
@@ -560,7 +560,7 @@ class TestRetentionWithNestedDirectories:
         # Create new bundle with retention but no config.target
         # This means retention will only search in the writer's target (tmp_path)
         retention = BundleRetentionPolicy(max_bundles=1)
-        config = BundleConfig(retention=retention)  # No target set
+        config = BundleConfig.create(retention=retention)  # No target set
 
         with BundleWriter(tmp_path, config=config) as second_writer:
             second_writer.write_request_input({"second": True})
@@ -593,7 +593,7 @@ class TestRetentionWithNestedDirectories:
         # Now create new bundle with retention that limits to 2
         # Symlinks should be skipped, so only real bundles count
         retention = BundleRetentionPolicy(max_bundles=2)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
 
         with BundleWriter(tmp_path, config=config) as new_writer:
             new_writer.write_request_input({"new": True})

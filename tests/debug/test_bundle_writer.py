@@ -259,7 +259,7 @@ class TestBundleWriter:
 
     def test_writer_with_custom_compression(self, tmp_path: Path) -> None:
         """Test writer with different compression methods."""
-        config = BundleConfig(target=tmp_path, compression="stored")
+        config = BundleConfig.create(target=tmp_path, compression="stored")
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_request_input({"test": "data"})
 
@@ -312,7 +312,7 @@ class TestWriteExceptionHandling:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test write_session_before handles errors gracefully."""
-        config = BundleConfig(target=tmp_path)
+        config = BundleConfig.create(target=tmp_path)
 
         class BrokenSession:
             """Session that raises on snapshot."""
