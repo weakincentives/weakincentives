@@ -90,7 +90,7 @@ class _Prompt:
 def _build_prompt_with_tool() -> tuple[
     _Prompt, PromptDescriptor, Tool[_Params, _Result]
 ]:
-    tool = Tool[_Params, _Result](
+    tool = Tool[_Params, _Result].create(
         name="demo_tool",
         description="Example tool",
         handler=None,

@@ -37,7 +37,7 @@ class TestResolveResponseWaitTimeout:
         mock_deadline = MagicMock(spec=Deadline)
         mock_deadline.remaining.return_value = timedelta(seconds=-1)
 
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test", name="test"
         )
         prompt: Prompt[None] = Prompt(template)

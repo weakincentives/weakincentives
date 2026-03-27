@@ -116,7 +116,7 @@ class _TestLoop(AgentLoop[_Request, _Output]):
         | None = None,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests, config=config, dlq=dlq)
-        self._template = PromptTemplate[_Output](
+        self._template = PromptTemplate[_Output].create(
             ns="test",
             key="test-prompt",
             sections=[

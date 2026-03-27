@@ -174,7 +174,7 @@ class TestMessageContentExtraction:
                 return TaskCompletionResult.ok("Task complete.")
 
         checker = TestChecker()
-        template = PromptTemplate[None](
+        template = PromptTemplate[None].create(
             ns="test",
             key="with-checker",
             sections=[
@@ -239,7 +239,7 @@ class TestMessageContentExtraction:
         clock = FakeClock()
         anchor = datetime.now(UTC)
         clock.set_wall(anchor)
-        expired_deadline = Deadline(anchor + timedelta(seconds=1), clock=clock)
+        expired_deadline = Deadline.create(anchor + timedelta(seconds=1), clock=clock)
         clock.advance(2)
 
         setup_mock_query(

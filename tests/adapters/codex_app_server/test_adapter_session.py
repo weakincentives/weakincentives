@@ -50,7 +50,7 @@ def _make_session() -> tuple[Session, InProcessDispatcher]:
 
 
 def _make_simple_prompt(name: str = "test-prompt") -> Prompt[object]:
-    template: PromptTemplate[object] = PromptTemplate(
+    template: PromptTemplate[object] = PromptTemplate.create(
         ns="test",
         key="basic",
         sections=(),
@@ -76,7 +76,7 @@ def _add_handler(params: _AddParams, *, context: ToolContext) -> ToolResult[_Add
     )
 
 
-_ADD_TOOL = Tool[_AddParams, _AddResult](
+_ADD_TOOL = Tool[_AddParams, _AddResult].create(
     name="add",
     description="Add two numbers",
     handler=_add_handler,
@@ -90,7 +90,7 @@ def _make_prompt_with_tool(name: str = "tool-prompt") -> Prompt[object]:
         key="tools",
         tools=[_ADD_TOOL],
     )
-    template: PromptTemplate[object] = PromptTemplate(
+    template: PromptTemplate[object] = PromptTemplate.create(
         ns="test",
         key="with-tool",
         sections=(section,),
@@ -162,7 +162,7 @@ class TestResolveCwd:
         workspace = WorkspaceSection(session=session)
         workspace_root = str(workspace.temp_dir)
         try:
-            template: PromptTemplate[object] = PromptTemplate(
+            template: PromptTemplate[object] = PromptTemplate.create(
                 ns="test",
                 key="with-ws",
                 sections=(workspace,),
@@ -199,7 +199,7 @@ class TestResolveCwd:
 
         workspace = WorkspaceSection(session=session)
         try:
-            template: PromptTemplate[object] = PromptTemplate(
+            template: PromptTemplate[object] = PromptTemplate.create(
                 ns="test",
                 key="with-ws2",
                 sections=(workspace,),

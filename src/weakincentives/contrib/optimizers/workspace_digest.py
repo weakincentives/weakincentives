@@ -124,7 +124,7 @@ class WorkspaceDigestOptimizer:
             mounts=self.mounts,
         )
 
-        template = PromptTemplate[_DigestResponse](
+        template = PromptTemplate[_DigestResponse].create(
             ns="weakincentives.optimization",
             key="workspace-digest-generator",
             name="Workspace Digest Generator",

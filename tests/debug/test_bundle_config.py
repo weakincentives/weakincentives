@@ -45,7 +45,7 @@ class TestBundleConfig:
 
     def test_config_with_string_target(self, tmp_path: Path) -> None:
         """Test config normalizes string target to Path."""
-        config = BundleConfig(target=str(tmp_path))
+        config = BundleConfig(target=str(tmp_path))  # type: ignore[arg-type]
         assert config.target == tmp_path
 
     def test_enabled_property(self, tmp_path: Path) -> None:

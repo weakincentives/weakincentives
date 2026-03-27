@@ -53,7 +53,7 @@ class TestPreToolUseHook:
         clock = FakeClock()
         anchor = datetime.now(UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+        deadline = Deadline.create(anchor + timedelta(seconds=5), clock=clock)
         clock.advance(10)
 
         constraints = HookConstraints(deadline=deadline)

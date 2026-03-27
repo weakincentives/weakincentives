@@ -177,7 +177,7 @@ def _noop_handler(params: None, *, context: ToolContext) -> ToolResult[None]:
 class TestSequentialDependencyPolicy:
     def _make_context(self, session: Session) -> ToolContext:
         """Create a minimal ToolContext for testing."""
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test-prompt", name="test"
         )
         prompt: Prompt[None] = Prompt(template)
@@ -191,7 +191,7 @@ class TestSequentialDependencyPolicy:
 
     def _make_tool(self, name: str) -> Tool[None, None]:
         """Create a minimal tool for testing."""
-        return Tool[None, None](
+        return Tool[None, None].create(
             name=name, description=f"Tool {name}", handler=_noop_handler
         )
 
@@ -311,13 +311,13 @@ class TestReadBeforeWritePolicy:
             registry = ResourceRegistry.of(
                 Binding(Filesystem, lambda _: filesystem)  # type: ignore[type-abstract]
             )
-            template: PromptTemplate[None] = PromptTemplate(
+            template: PromptTemplate[None] = PromptTemplate.create(
                 ns="test", key="test-prompt", name="test", resources=registry
             )
             prompt: Prompt[None] = Prompt(template)
             prompt = prompt.bind(resources={Filesystem: filesystem})  # type: ignore[type-abstract]
         else:
-            template = PromptTemplate(ns="test", key="test-prompt", name="test")
+            template = PromptTemplate.create(ns="test", key="test-prompt", name="test")
             prompt = Prompt(template)
 
         # Always enter resource context
@@ -333,7 +333,7 @@ class TestReadBeforeWritePolicy:
 
     def _make_tool(self, name: str) -> Tool[FileParams, None]:
         """Create a tool with path parameter."""
-        return Tool[FileParams, None](
+        return Tool[FileParams, None].create(
             name=name, description=f"Tool {name}", handler=_file_handler
         )
 
@@ -356,7 +356,7 @@ class TestReadBeforeWritePolicy:
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
-        tool = Tool[NoPathParams, None](
+        tool = Tool[NoPathParams, None].create(
             name="write_file",
             description="Write file",
             handler=None,
@@ -469,7 +469,7 @@ class TestReadBeforeWritePolicy:
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
-        tool = Tool[NoPathParams, None](
+        tool = Tool[NoPathParams, None].create(
             name="read_file",
             description="Read",
             handler=None,

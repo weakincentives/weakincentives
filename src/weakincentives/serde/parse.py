@@ -148,7 +148,13 @@ def _parse_dataclass[T](
         config,
     )
 
-    instance = target_cls(**kwargs)
+    from ..dataclasses import Constructable, allow_construction
+
+    if issubclass(target_cls, Constructable):
+        with allow_construction():
+            instance = target_cls(**kwargs)
+    else:
+        instance = target_cls(**kwargs)
 
     _apply_extra_fields(mapping_data, used_keys, config.extra)
     _run_validation_hooks(instance)

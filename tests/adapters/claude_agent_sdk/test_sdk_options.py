@@ -132,7 +132,7 @@ class TestSDKConfigOptions:
         """Test that prompts with tools create an MCP server."""
         from tests.adapters.claude_agent_sdk.test_bridge import search_tool
 
-        template_with_tools = PromptTemplate[SimpleOutput](
+        template_with_tools = PromptTemplate[SimpleOutput].create(
             ns="test",
             key="with_tools",
             sections=[

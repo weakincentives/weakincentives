@@ -263,7 +263,7 @@ class TestBudgetSerde:
         clock = FakeClock()
         clock.set_wall(datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC))
 
-        deadline = Deadline(
+        deadline = Deadline.create(
             expires_at=datetime(2024, 6, 15, 13, 0, 0, tzinfo=UTC),
             clock=clock,
         )

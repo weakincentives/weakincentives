@@ -56,7 +56,7 @@ def _build_summary_prompt(
         template="Summarize ${topic} and include view counts.",
         key="task",
     )
-    return PromptTemplate[Summary](
+    return PromptTemplate[Summary].create(
         ns="tests.prompts",
         key="summaries",
         name="summaries",
@@ -87,7 +87,9 @@ def test_template_structured_output_property() -> None:
 
 def test_prompt_specialization_requires_dataclass() -> None:
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate[str](ns="tests.prompts", key="invalid-output", sections=[])
+        PromptTemplate[str].create(
+            ns="tests.prompts", key="invalid-output", sections=[]
+        )
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is str
@@ -99,7 +101,9 @@ def test_prompt_resolve_output_spec_requires_dataclass_type() -> None:
         _output_container_spec = "object"
 
     with pytest.raises(PromptValidationError) as exc:
-        InvalidOutputPrompt(ns="tests.prompts", key="invalid-output", sections=())
+        InvalidOutputPrompt.create(
+            ns="tests.prompts", key="invalid-output", sections=[]
+        )
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is str
@@ -169,7 +173,7 @@ def test_parse_structured_output_supports_array_container() -> None:
         template="Return search results.",
         key="task",
     )
-    template = PromptTemplate[list[ResultItem]](
+    template = PromptTemplate[list[ResultItem]].create(
         ns="tests.prompts",
         key="search-array-support",
         name="search",
@@ -193,7 +197,7 @@ def test_parse_structured_output_requires_wrapped_array_key() -> None:
         template="Return search results.",
         key="task",
     )
-    template = PromptTemplate[list[ResultItem]](
+    template = PromptTemplate[list[ResultItem]].create(
         ns="tests.prompts",
         key="search-array-missing-key",
         name="search",
@@ -215,7 +219,7 @@ def test_parse_structured_output_requires_wrapped_array_list_value() -> None:
         template="Return search results.",
         key="task",
     )
-    prompt = PromptTemplate[list[ResultItem]](
+    prompt = PromptTemplate[list[ResultItem]].create(
         ns="tests.prompts",
         key="search-array-non-list",
         name="search",
@@ -260,7 +264,7 @@ def test_parse_structured_output_requires_specialized_prompt() -> None:
         template="Return guidance.",
         key="task",
     )
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="plain-guidance",
         name="plain",
@@ -278,7 +282,7 @@ def test_parse_structured_output_array_requires_array_container() -> None:
         template="Return search results.",
         key="task",
     )
-    template = PromptTemplate[list[ResultItem]](
+    template = PromptTemplate[list[ResultItem]].create(
         ns="tests.prompts",
         key="search-array",
         name="search",
@@ -298,7 +302,7 @@ def test_parse_structured_output_array_requires_object_items() -> None:
     task_section = MarkdownSection[Guidance](
         title="Task", template="Return search results.", key="task"
     )
-    template = PromptTemplate[list[ResultItem]](
+    template = PromptTemplate[list[ResultItem]].create(
         ns="tests.prompts",
         key="search-array-items",
         name="search",
@@ -318,7 +322,7 @@ def test_parse_structured_output_array_reports_item_validation_error() -> None:
     task_section = MarkdownSection[Guidance](
         title="Task", template="Return search results.", key="task"
     )
-    template = PromptTemplate[list[ResultItem]](
+    template = PromptTemplate[list[ResultItem]].create(
         ns="tests.prompts",
         key="search-array-validation",
         name="search",

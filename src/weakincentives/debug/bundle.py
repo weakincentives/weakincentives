@@ -225,7 +225,9 @@ class BundleConfig:
     """Configuration for bundle creation.
 
     Attributes:
-        target: Output directory for bundles. None disables bundling.
+        target: Output directory for bundles. Accepts ``str`` or ``Path``;
+            strings are coerced to ``Path`` in ``__post_init__``.
+            None disables bundling.
         max_file_size: Skip files larger than this (bytes). Default 10MB.
         max_total_size: Maximum filesystem capture size (bytes). Default 50MB.
         compression: Zip compression method.
@@ -240,27 +242,10 @@ class BundleConfig:
     retention: BundleRetentionPolicy | None = None
     storage_handler: BundleStorageHandler | None = None
 
-    @classmethod
-    def __pre_init__(  # noqa: PLR0913
-        cls,
-        *,
-        target: Path | str | None = None,
-        max_file_size: int = 10_000_000,
-        max_total_size: int = 52_428_800,
-        compression: str = "deflate",
-        retention: BundleRetentionPolicy | None = None,
-        storage_handler: BundleStorageHandler | None = None,
-    ) -> Mapping[str, object]:
-        """Normalize inputs before construction."""
-        normalized_target = Path(target) if isinstance(target, str) else target
-        return {
-            "target": normalized_target,
-            "max_file_size": max_file_size,
-            "max_total_size": max_total_size,
-            "compression": compression,
-            "retention": retention,
-            "storage_handler": storage_handler,
-        }
+    def __post_init__(self) -> None:
+        """Coerce string target to Path at runtime."""
+        if self.target is not None:
+            object.__setattr__(self, "target", Path(self.target))
 
     @property
     def enabled(self) -> bool:

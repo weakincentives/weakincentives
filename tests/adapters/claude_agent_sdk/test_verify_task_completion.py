@@ -72,7 +72,9 @@ class TestVerifyTaskCompletion:
         """When output is None, verification passes."""
         checker = FileOutputChecker(files=("output.txt",))
         prompt: Prompt[object] = Prompt(
-            PromptTemplate(ns="test", key="test", task_completion_checker=checker)
+            PromptTemplate.create(
+                ns="test", key="test", task_completion_checker=checker
+            )
         )
         prompt.resources.__enter__()
         adapter = ClaudeAgentSDKAdapter()
@@ -134,7 +136,9 @@ class TestVerifyTaskCompletion:
         """When deadline is exceeded, verification is skipped."""
         checker = FileOutputChecker(files=("output.txt",))
         prompt: Prompt[object] = Prompt(
-            PromptTemplate(ns="test", key="test", task_completion_checker=checker)
+            PromptTemplate.create(
+                ns="test", key="test", task_completion_checker=checker
+            )
         )
         prompt.resources.__enter__()
         adapter = ClaudeAgentSDKAdapter()
@@ -159,7 +163,9 @@ class TestVerifyTaskCompletion:
 
         checker = FileOutputChecker(files=("output.txt",))
         prompt: Prompt[object] = Prompt(
-            PromptTemplate(ns="test", key="test", task_completion_checker=checker)
+            PromptTemplate.create(
+                ns="test", key="test", task_completion_checker=checker
+            )
         )
         prompt.resources.__enter__()
         adapter = ClaudeAgentSDKAdapter()
@@ -294,7 +300,7 @@ class TestCheckTaskCompletion:
         )
 
         checker = MagicMock()
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test", name="test"
         )
         prompt: Prompt[None] = Prompt(template)
@@ -356,7 +362,7 @@ class TestCheckTaskCompletion:
         )
 
         checker = FileOutputChecker(files=("output.txt",))
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test", name="test"
         )
         prompt_obj: Prompt[None] = Prompt(template)
@@ -392,7 +398,7 @@ class TestCheckTaskCompletion:
         )
 
         # Prompt without resources context entered → resources.get raises RuntimeError
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test", name="test"
         )
         prompt: Prompt[None] = Prompt(template)

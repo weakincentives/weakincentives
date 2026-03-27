@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import field
 from datetime import datetime
 from typing import Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...budget import TokenUsage
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import Constructable, FrozenDataclass, allow_construction
 from ...types import AdapterName
 from ..run_context import RunContext
 
@@ -76,17 +76,30 @@ class HandlerFailure:
         return f"{self.handler!r} -> {self.error!r}"
 
 
-@dataclass(slots=True, frozen=True)
-class DispatchResult:
+@FrozenDataclass()
+class DispatchResult(Constructable):
     """Summary of an event dispatch invocation."""
 
     event: object
     handlers_invoked: tuple[EventHandler, ...]
     errors: tuple[HandlerFailure, ...]
-    handled_count: int = field(init=False)
+    handled_count: int
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "handled_count", len(self.handlers_invoked))
+    @classmethod
+    def create(
+        cls,
+        event: object,
+        handlers_invoked: tuple[EventHandler, ...],
+        errors: tuple[HandlerFailure, ...],
+    ) -> DispatchResult:
+        """Create a dispatch result with derived handled_count."""
+        with allow_construction():
+            return cls(
+                event=event,
+                handlers_invoked=handlers_invoked,
+                errors=errors,
+                handled_count=len(handlers_invoked),
+            )
 
     @property
     def ok(self) -> bool:

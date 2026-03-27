@@ -106,7 +106,7 @@ Simple adapter usage without workspace mounts::
     class TaskResult:
         message: str
 
-    template = PromptTemplate[TaskResult](
+    template = PromptTemplate[TaskResult].create(
         ns="example",
         key="hello",
         sections=(
@@ -165,7 +165,7 @@ Using workspace sections to mount host files::
         allowed_host_roots=["/home/user/project"],
     )
 
-    template = PromptTemplate[ReviewResult](
+    template = PromptTemplate[ReviewResult].create(
         ns="review",
         key="code",
         sections=(
@@ -199,7 +199,7 @@ Using task completion checking to verify required output files::
 
     from weakincentives.prompt import FileOutputChecker, PromptTemplate
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="my-agent",
         key="main",
         sections=[...],

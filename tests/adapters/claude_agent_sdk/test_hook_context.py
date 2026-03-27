@@ -59,7 +59,7 @@ class TestHookContext:
         clock = FakeClock()
         anchor = datetime.now(UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(anchor + timedelta(minutes=5), clock=clock)
+        deadline = Deadline.create(anchor + timedelta(minutes=5), clock=clock)
         budget = Budget(max_total_tokens=1000)
         tracker = BudgetTracker(budget)
 

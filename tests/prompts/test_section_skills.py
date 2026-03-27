@@ -213,7 +213,7 @@ def test_rendered_prompt_collects_skills(tmp_path: Path) -> None:
     skill_dir.mkdir()
     skill = SkillMount(source=skill_dir, name="collected-skill")
 
-    template = PromptTemplate[None](
+    template = PromptTemplate[None].create(
         ns="test",
         key="prompt-with-skills",
         sections=(
@@ -238,7 +238,7 @@ def test_rendered_prompt_skills_empty_without_skills() -> None:
     """RenderedPrompt.skills is empty when no sections have skills."""
     from weakincentives.prompt import Prompt, PromptTemplate
 
-    template = PromptTemplate[None](
+    template = PromptTemplate[None].create(
         ns="test",
         key="prompt-no-skills",
         sections=(
@@ -273,7 +273,7 @@ def test_summarized_section_with_skills_uses_open_sections(tmp_path: Path) -> No
     skill_dir.mkdir()
     skill = SkillMount(source=skill_dir, name="test-skill")
 
-    template = PromptTemplate[None](
+    template = PromptTemplate[None].create(
         ns="test",
         key="skills-progressive-disclosure",
         sections=(
@@ -300,7 +300,7 @@ def test_summarized_section_without_tools_or_skills_uses_read_section() -> None:
     """Summarized sections without tools or skills get read_section instruction."""
     from weakincentives.prompt import Prompt, PromptTemplate, SectionVisibility
 
-    template = PromptTemplate[None](
+    template = PromptTemplate[None].create(
         ns="test",
         key="no-tools-no-skills",
         sections=(

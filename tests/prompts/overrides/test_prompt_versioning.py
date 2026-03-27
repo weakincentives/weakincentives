@@ -61,7 +61,7 @@ class _StaticSection(Section[_GreetingParams]):
 
 
 def _build_prompt() -> PromptTemplate:
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting",
         name="greeting",
@@ -88,13 +88,13 @@ class _LookupItem:
 def _build_tool_prompt(
     *, accepts_overrides: bool = True
 ) -> tuple[PromptTemplate, Tool[_GreetingParams, _LookupResult]]:
-    tool = Tool[_GreetingParams, _LookupResult](
+    tool = Tool[_GreetingParams, _LookupResult].create(
         name="greeter",
         description="Greet the provided subject in a friendly way.",
         handler=None,
         accepts_overrides=accepts_overrides,
     )
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting-tools",
         name="greeting-tools",
@@ -113,13 +113,13 @@ def _build_tool_prompt(
 def _build_sequence_tool_prompt(
     *, accepts_overrides: bool = True
 ) -> tuple[PromptTemplate, Tool[_GreetingParams, tuple[_LookupItem, ...]]]:
-    tool = Tool[_GreetingParams, tuple[_LookupItem, ...]](
+    tool = Tool[_GreetingParams, tuple[_LookupItem, ...]].create(
         name="greeter_sequence",
         description="Greet and capture multiple responses.",
         handler=None,
         accepts_overrides=accepts_overrides,
     )
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting-tools-seq",
         name="greeting-tools-seq",
@@ -154,7 +154,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
 
 def test_prompt_descriptor_ignores_non_hash_sections() -> None:
     section = _StaticSection(title="Static", key="static")
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-static",
         sections=[section],

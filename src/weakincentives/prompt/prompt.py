@@ -13,19 +13,21 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import MISSING, field, is_dataclass
+from dataclasses import field, is_dataclass
 from functools import cached_property
 from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
     Literal,
+    Self,
     cast,
     get_args,
     get_origin,
+    override,
 )
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import Constructable, FrozenDataclass, allow_construction
 from ..resources import ResourceRegistry
 from ._normalization import normalize_component_key
 from ._overrides_protocols import PromptOverridesStore
@@ -93,15 +95,12 @@ def _resolve_output_spec(
 
 
 @FrozenDataclass(slots=False)
-class PromptTemplate[OutputT]:
+class PromptTemplate[OutputT](Constructable):
     """Coordinate prompt sections and their parameter bindings.
 
     PromptTemplate is an immutable dataclass that coordinates prompt sections
-    and their parameter bindings. All construction logic runs through
-    ``__pre_init__`` to derive internal state before the instance is frozen.
-
-    Copy helpers ``update()``, ``merge()``, and ``map()`` are available for
-    producing modified copies when needed.
+    and their parameter bindings.  Construction happens via ``create()``, which
+    normalizes inputs and derives internal state.
 
     Resources can be declared at the template level and will be combined with
     resources contributed by individual sections.
@@ -110,19 +109,15 @@ class PromptTemplate[OutputT]:
     ns: str
     key: str
     name: str | None = None
-    # Field accepts Section sequence as input and stores SectionNode tuple
-    sections: (
-        Sequence[Section[SupportsDataclass]]
-        | tuple[SectionNode[SupportsDataclass], ...]
-    ) = ()
-    policies: Sequence[ToolPolicy] = ()
-    feedback_providers: Sequence[FeedbackProviderConfig] = ()
+    sections: tuple[SectionNode[SupportsDataclass], ...] = ()
+    policies: tuple[ToolPolicy, ...] = ()
+    feedback_providers: tuple[FeedbackProviderConfig, ...] = ()
     task_completion_checker: TaskCompletionChecker | None = None
     allow_extra_keys: bool = False
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
-    _snapshot: RegistrySnapshot | None = field(init=False, default=None)
+    _snapshot: RegistrySnapshot | None = field(default=None)
     _structured_output: StructuredOutputConfig[SupportsDataclass] | None = field(
-        init=False, default=None
+        default=None
     )
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
@@ -151,90 +146,64 @@ class PromptTemplate[OutputT]:
         return type(name, (cls,), namespace)
 
     @classmethod
-    def __pre_init__(
+    def create(
         cls,
         *,
-        ns: str | object = MISSING,
-        key: str | object = MISSING,
-        name: str | object | None = MISSING,
+        ns: str,
+        key: str,
+        name: str | None = None,
         sections: Sequence[Section[SupportsDataclass]]
-        | tuple[SectionNode[SupportsDataclass], ...]
-        | object
-        | None = MISSING,
-        policies: Sequence[ToolPolicy] | object = MISSING,
-        feedback_providers: Sequence[FeedbackProviderConfig] | object = MISSING,
-        task_completion_checker: TaskCompletionChecker | object | None = MISSING,
-        allow_extra_keys: bool | object = MISSING,
-        resources: ResourceRegistry | object = MISSING,
-    ) -> dict[str, Any]:
-        """Normalize inputs and derive internal state before construction."""
-        # Validate required inputs
-        if ns is MISSING:
-            raise TypeError("PromptTemplate() missing required argument: 'ns'")
-        if key is MISSING:
-            raise TypeError("PromptTemplate() missing required argument: 'key'")
-
-        ns_str = cast(str, ns)
-        key_str = cast(str, key)
-        name_val = cast(str | None, name) if name is not MISSING else None
-        sections_input = (
-            cast(Sequence[Section[SupportsDataclass]] | None, sections)
-            if sections is not MISSING
-            else None
-        )
-        policies_input: Sequence[ToolPolicy] = (
-            cast(Sequence[ToolPolicy], policies) if policies is not MISSING else ()
-        )
-        feedback_providers_input: Sequence[FeedbackProviderConfig] = (
-            cast(Sequence[FeedbackProviderConfig], feedback_providers)
-            if feedback_providers is not MISSING
-            else ()
-        )
-        allow_extra = (
-            cast(bool, allow_extra_keys) if allow_extra_keys is not MISSING else False
-        )
-        resources_val = (
-            cast(ResourceRegistry, resources)
-            if resources is not MISSING
-            else ResourceRegistry()
-        )
-
+        | tuple[SectionNode[SupportsDataclass], ...] = (),
+        policies: Sequence[ToolPolicy] = (),
+        feedback_providers: Sequence[FeedbackProviderConfig] = (),
+        task_completion_checker: TaskCompletionChecker | None = None,
+        allow_extra_keys: bool = False,
+        resources: ResourceRegistry | None = None,
+    ) -> PromptTemplate[OutputT]:
+        """Create a validated PromptTemplate instance."""
         try:
-            stripped_ns = normalize_component_key(ns_str, owner="Prompt namespace")
+            stripped_ns = normalize_component_key(ns, owner="Prompt namespace")
         except ValueError as exc:
             raise PromptValidationError(str(exc)) from exc
         try:
-            stripped_key = normalize_component_key(key_str, owner="Prompt key")
+            stripped_key = normalize_component_key(key, owner="Prompt key")
         except ValueError as exc:
             raise PromptValidationError(str(exc)) from exc
 
-        sections_tuple = tuple(sections_input or ())
+        sections_input = cast(Sequence[Section[SupportsDataclass]], sections)
+        sections_tuple = tuple(sections_input)
         registry = PromptRegistry()
         registry.register_sections(sections_tuple)
 
-        structured_output = _resolve_output_spec(cls, allow_extra)
+        structured_output = _resolve_output_spec(cls, allow_extra_keys)
         structured_output_type = (
             structured_output.dataclass_type if structured_output is not None else None
         )
         snapshot = registry.snapshot(structured_output_type=structured_output_type)
 
-        return {
-            "ns": stripped_ns,
-            "key": stripped_key,
-            "name": name_val,
-            "sections": snapshot.sections,
-            "policies": tuple(policies_input),
-            "feedback_providers": tuple(feedback_providers_input),
-            "task_completion_checker": (
-                cast(TaskCompletionChecker | None, task_completion_checker)
-                if task_completion_checker is not MISSING
-                else None
-            ),
-            "allow_extra_keys": allow_extra,
-            "resources": resources_val,
-            "_snapshot": snapshot,
-            "_structured_output": structured_output,
-        }
+        with allow_construction():
+            return cls(
+                ns=stripped_ns,
+                key=stripped_key,
+                name=name,
+                sections=snapshot.sections,
+                policies=tuple(policies),
+                feedback_providers=tuple(feedback_providers),
+                task_completion_checker=task_completion_checker,
+                allow_extra_keys=allow_extra_keys,
+                resources=resources if resources is not None else ResourceRegistry(),
+                _snapshot=snapshot,
+                _structured_output=structured_output,
+            )
+
+    @override
+    def replace(self, **changes: object) -> Self:
+        """PromptTemplate does not support replace()."""
+        msg = (
+            "PromptTemplate.replace() is not supported. "
+            "Use PromptTemplate.create() instead."
+        )
+        raise NotImplementedError(msg)
 
     @property
     def params_types(self) -> set[type[SupportsDataclass]]:
@@ -330,10 +299,7 @@ class Prompt[OutputT]:
 
     @property
     def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
-        # sections is always SectionNode tuple after construction
-        return cast(  # pragma: no cover
-            tuple[SectionNode[SupportsDataclass], ...], self.template.sections
-        )
+        return self.template.sections  # pragma: no cover
 
     @property
     def descriptor(self) -> PromptDescriptor:

@@ -466,7 +466,7 @@ def run_review(
     )
     loop_request = AgentLoopRequest(
         request=review_request,
-        deadline=Deadline(
+        deadline=Deadline.create(
             expires_at=datetime.now(UTC) + timedelta(minutes=deadline_minutes)
         ),
     )

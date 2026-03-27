@@ -77,7 +77,7 @@ def _build_workspace_write_tool(
         result = WriteFileResult(written=True, path=params.path)
         return ToolResult.ok(result, message=f"Wrote {params.path}")
 
-    return Tool[WriteFileParams, WriteFileResult](
+    return Tool[WriteFileParams, WriteFileResult].create(
         name="write_workspace_file",
         description="Write content to a file in the workspace.",
         handler=handler,
@@ -118,7 +118,7 @@ def test_task_completion_blocks_early_stop(
         key="task",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns=make_adapter_ns(adapter_fixture.adapter_name),
         key="ack-task-completion",
         name="ack_task_completion",
@@ -165,7 +165,7 @@ def test_task_completion_allows_stop_when_complete(
         key="task",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns=make_adapter_ns(adapter_fixture.adapter_name),
         key="ack-task-complete",
         name="ack_task_complete",
@@ -195,7 +195,7 @@ def test_no_checker_allows_free_stop(
         key="task",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns=make_adapter_ns(adapter_fixture.adapter_name),
         key="ack-no-checker",
         name="ack_no_checker",

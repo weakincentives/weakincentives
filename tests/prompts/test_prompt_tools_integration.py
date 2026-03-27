@@ -99,7 +99,7 @@ def _lookup_handler_with_render(
 
 
 def test_prompt_tools_integration_example() -> None:
-    lookup_tool = Tool[LookupParams, LookupResult](
+    lookup_tool = Tool[LookupParams, LookupResult].create(
         name="lookup_entity",
         description="Fetch structured information for a given entity id.",
         handler=_lookup_handler,
@@ -123,7 +123,7 @@ def test_prompt_tools_integration_example() -> None:
         children=[tools_section],
     )
 
-    prompt_template = PromptTemplate(
+    prompt_template = PromptTemplate.create(
         ns="tests.prompts",
         key="tools-overview",
         name="tools_overview",
@@ -149,7 +149,7 @@ def test_prompt_tools_integration_example() -> None:
 
 
 def test_prompt_renders_tool_examples_with_rendered_output() -> None:
-    lookup_tool = Tool[LookupParams, RenderedLookupResult](
+    lookup_tool = Tool[LookupParams, RenderedLookupResult].create(
         name="lookup_entity",
         description="Fetch structured information for a given entity id.",
         handler=_lookup_handler_with_render,
@@ -173,7 +173,7 @@ def test_prompt_renders_tool_examples_with_rendered_output() -> None:
         default_params=ToolDescriptionParams(),
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="tools-rendered-output",
         name="tools_rendered_output",
@@ -206,7 +206,7 @@ def test_prompt_renders_tool_examples_with_rendered_output() -> None:
 
 
 def test_prompt_renders_tool_examples_inline() -> None:
-    lookup_tool = Tool[LookupParams, list[LookupResultWithOptional]](
+    lookup_tool = Tool[LookupParams, list[LookupResultWithOptional]].create(
         name="lookup_entity",
         description="Fetch structured information for a given entity id.",
         handler=_lookup_handler_with_optional_list,
@@ -242,7 +242,7 @@ def test_prompt_renders_tool_examples_inline() -> None:
         children=[tools_section],
     )
 
-    prompt_template = PromptTemplate(
+    prompt_template = PromptTemplate.create(
         ns="tests.prompts",
         key="tools-overview",
         name="tools_overview",

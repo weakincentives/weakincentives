@@ -54,7 +54,7 @@ class _ToolResult:
 
 
 def _build_prompt() -> PromptTemplate:
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting",
         sections=[
@@ -68,12 +68,12 @@ def _build_prompt() -> PromptTemplate:
 
 
 def _build_prompt_with_tool() -> PromptTemplate:
-    tool = Tool[_ToolParams, _ToolResult](
+    tool = Tool[_ToolParams, _ToolResult].create(
         name="search",
         description="Search stored notes.",
         handler=None,
     )
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting-tools",
         sections=[
@@ -304,13 +304,13 @@ def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
     class _PlainResult:
         value: str
 
-    tool = Tool[_PlainParams, _PlainResult](
+    tool = Tool[_PlainParams, _PlainResult].create(
         name="plain",
         description="Plain description.",
         handler=None,
     )
 
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.versioning",
         key="plain-metadata",
         sections=[
@@ -343,13 +343,13 @@ def test_collect_param_descriptions_with_partial_metadata(tmp_path: Path) -> Non
     class _MixedResult:
         value: str
 
-    tool = Tool[_MixedParams, _MixedResult](
+    tool = Tool[_MixedParams, _MixedResult].create(
         name="mixed",
         description="Mixed metadata description.",
         handler=None,
     )
 
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.versioning",
         key="mixed-metadata",
         sections=[

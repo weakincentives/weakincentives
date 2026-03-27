@@ -161,6 +161,7 @@ combine-as-imports = true
 "src/weakincentives/adapters/core.py" = ["PLR0913"]
 "src/weakincentives/dbc/__init__.py" = ["PLR0913"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0913"]
+"src/weakincentives/runtime/session/snapshots.py" = ["PLR0913"]
 # Adapter files: external SDK types force broad signatures and Any usage
 "src/weakincentives/adapters/claude_agent_sdk/_hooks.py" = ["RUF029"]
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "ANN401", "TRY300"]

@@ -40,7 +40,7 @@ def _build_prompt() -> PromptTemplate[str]:
         MarkdownSection(title="One", template="first", key="one"),
         MarkdownSection(title="Two", template="second", key="two"),
     )
-    return PromptTemplate(ns="test", key="prompt", sections=sections)
+    return PromptTemplate.create(ns="test", key="prompt", sections=sections)
 
 
 def test_prompt_find_section_by_key_and_candidates() -> None:
@@ -75,7 +75,7 @@ def test_store_section_override_requires_registered_path(tmp_path: Path) -> None
 def test_workspace_digest_section_in_descriptor() -> None:
     section = WorkspaceDigestSection(session=Session())
     descriptor = PromptDescriptor.from_prompt(
-        PromptTemplate(ns="digest", key="prompt", sections=(section,))
+        PromptTemplate.create(ns="digest", key="prompt", sections=(section,))
     )
 
     assert section.original_body_template() == section._placeholder

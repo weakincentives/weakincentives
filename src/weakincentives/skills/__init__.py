@@ -103,7 +103,7 @@ Attaching skills to prompt sections::
     )
 
     # Create prompt with the section
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="demo",
         key="reviewer",
         sections=[section],

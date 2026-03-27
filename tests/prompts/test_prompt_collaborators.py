@@ -50,7 +50,7 @@ def _build_registry() -> tuple[PromptRegistry, MarkdownSection[_IntroParams]]:
         template="Intro: ${title}",
         key="intro",
         tools=[
-            Tool[_ToolParams, _ToolResult](
+            Tool[_ToolParams, _ToolResult].create(
                 name="search",
                 description="Search for context.",
                 handler=None,

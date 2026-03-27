@@ -195,7 +195,7 @@ def create_open_sections_handler(
             params.reason,
         )
 
-    return Tool[OpenSectionsParams, None](
+    return Tool[OpenSectionsParams, None].create(
         name="open_sections",
         description="Expand summarized sections to view their full content.",
         handler=handler,
@@ -279,7 +279,7 @@ def create_read_section_handler(
             success=True,
         )
 
-    return Tool[ReadSectionParams, ReadSectionResult](
+    return Tool[ReadSectionParams, ReadSectionResult].create(
         name="read_section",
         description=(
             "Read the full content of a summarized section without expanding it. "

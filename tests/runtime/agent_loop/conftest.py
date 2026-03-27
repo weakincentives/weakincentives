@@ -170,7 +170,7 @@ class SampleLoop(AgentLoop[SampleRequest, SampleOutput]):
         super().__init__(
             adapter=adapter, requests=requests, config=config, worker_id=worker_id
         )
-        self._template = PromptTemplate[SampleOutput](
+        self._template = PromptTemplate[SampleOutput].create(
             ns="test",
             key="test-prompt",
             sections=[

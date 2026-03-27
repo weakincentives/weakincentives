@@ -45,7 +45,7 @@ class SnapshotItem:
 def make_snapshot_payload() -> dict[str, object]:
     """Return a JSON-ready payload for a minimal snapshot."""
 
-    snapshot = Snapshot(
+    snapshot = Snapshot.create(
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
         slices={SnapshotItem: (SnapshotItem(1),)},
     )
@@ -129,7 +129,7 @@ def test_infer_item_type_requires_uniform_dataclasses() -> None:
 
 
 def test_snapshot_normalizes_state_and_is_hashable() -> None:
-    snapshot = Snapshot(
+    snapshot = Snapshot.create(
         created_at=datetime(2024, 1, 1), slices={SnapshotItem: (SnapshotItem(1),)}
     )
 
@@ -141,7 +141,7 @@ def test_snapshot_normalizes_state_and_is_hashable() -> None:
 
 def test_snapshot_rejects_non_dataclass_policy_keys() -> None:
     with pytest.raises(TypeError):
-        Snapshot(
+        Snapshot.create(
             created_at=datetime(2024, 1, 1, tzinfo=UTC),
             slices={SnapshotItem: (SnapshotItem(1),)},
             policies=cast(Mapping[object, object], {"not-a-type": SlicePolicy.STATE}),
@@ -150,7 +150,7 @@ def test_snapshot_rejects_non_dataclass_policy_keys() -> None:
 
 def test_snapshot_rejects_invalid_policy_values() -> None:
     with pytest.raises(TypeError):
-        Snapshot(
+        Snapshot.create(
             created_at=datetime(2024, 1, 1, tzinfo=UTC),
             slices={SnapshotItem: (SnapshotItem(1),)},
             policies=cast(Mapping[object, object], {SnapshotItem: "state"}),
@@ -162,7 +162,7 @@ def test_snapshot_serializes_relationship_metadata() -> None:
     child_one = uuid4()
     child_two = uuid4()
 
-    snapshot = Snapshot(
+    snapshot = Snapshot.create(
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
         parent_id=parent_id,
         children_ids=(child_one, child_two),
@@ -183,7 +183,7 @@ def test_snapshot_serializes_relationship_metadata() -> None:
 def test_snapshot_to_json_surfaces_serialization_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    snapshot = Snapshot(
+    snapshot = Snapshot.create(
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
         slices={SnapshotItem: (SnapshotItem(1),)},
     )
@@ -266,7 +266,7 @@ def test_snapshot_from_json_success_sets_timezone() -> None:
 
 
 def test_snapshot_policies_roundtrip() -> None:
-    snapshot = Snapshot(
+    snapshot = Snapshot.create(
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
         slices={SnapshotItem: (SnapshotItem(1),)},
         policies={SnapshotItem: SlicePolicy.LOG},

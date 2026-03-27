@@ -25,7 +25,7 @@ from weakincentives.deadlines import Deadline
 def test_deadline_rejects_naive_datetime() -> None:
     naive = datetime.now()  # noqa: DTZ005
     with pytest.raises(ValueError):
-        Deadline(naive)
+        Deadline.create(naive)
 
 
 def test_deadline_rejects_past_datetime() -> None:
@@ -34,7 +34,7 @@ def test_deadline_rejects_past_datetime() -> None:
     clock.set_wall(anchor)
 
     with pytest.raises(ValueError):
-        Deadline(anchor - timedelta(seconds=10), clock=clock)
+        Deadline.create(anchor - timedelta(seconds=10), clock=clock)
 
 
 def test_deadline_requires_future_second() -> None:
@@ -43,7 +43,7 @@ def test_deadline_requires_future_second() -> None:
     clock.set_wall(anchor)
 
     with pytest.raises(ValueError):
-        Deadline(anchor + timedelta(milliseconds=500), clock=clock)
+        Deadline.create(anchor + timedelta(milliseconds=500), clock=clock)
 
 
 def test_deadline_remaining_uses_override() -> None:
@@ -51,7 +51,7 @@ def test_deadline_remaining_uses_override() -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
 
-    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=30), clock=clock)
 
     remaining = deadline.remaining(now=anchor + timedelta(seconds=5))
 
@@ -63,7 +63,7 @@ def test_deadline_remaining_uses_clock() -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
 
-    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=30), clock=clock)
 
     assert deadline.remaining() == timedelta(seconds=30)
 
@@ -76,7 +76,7 @@ def test_deadline_remaining_rejects_naive_datetime() -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
 
-    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=30), clock=clock)
 
     with pytest.raises(ValueError):
         deadline.remaining(now=datetime(2024, 1, 1, 12, 0))
@@ -101,7 +101,7 @@ def test_deadline_started_at_defaults_to_now() -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
 
-    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=30), clock=clock)
 
     assert deadline.started_at == anchor
 
@@ -112,7 +112,7 @@ def test_deadline_started_at_can_be_explicit() -> None:
     clock.set_wall(anchor)
 
     explicit_start = anchor - timedelta(minutes=5)
-    deadline = Deadline(
+    deadline = Deadline.create(
         anchor + timedelta(seconds=30),
         started_at=explicit_start,
         clock=clock,
@@ -127,7 +127,7 @@ def test_deadline_started_at_rejects_naive_datetime() -> None:
     clock.set_wall(anchor)
 
     with pytest.raises(ValueError, match="started_at must be timezone-aware"):
-        Deadline(
+        Deadline.create(
             anchor + timedelta(seconds=30),
             started_at=datetime(2024, 1, 1, 11, 55),  # naive
             clock=clock,
@@ -139,7 +139,7 @@ def test_deadline_elapsed_uses_clock() -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
 
-    deadline = Deadline(anchor + timedelta(seconds=60), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=60), clock=clock)
 
     assert deadline.elapsed() == timedelta(seconds=0)
 
@@ -152,7 +152,7 @@ def test_deadline_elapsed_uses_override() -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
 
-    deadline = Deadline(anchor + timedelta(seconds=60), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=60), clock=clock)
 
     elapsed = deadline.elapsed(now=anchor + timedelta(seconds=25))
 
@@ -164,7 +164,7 @@ def test_deadline_elapsed_rejects_naive_datetime() -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
 
-    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=30), clock=clock)
 
     with pytest.raises(ValueError, match="elapsed now must be timezone-aware"):
         deadline.elapsed(now=datetime(2024, 1, 1, 12, 0, 10))

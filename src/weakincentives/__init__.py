@@ -37,8 +37,8 @@ contrib
     - ``contrib.tools``: Workspace digest tools
 
 dataclasses
-    Enhanced frozen dataclass decorator (``FrozenDataclass``) with copy helpers
-    (``update()``, ``merge()``, ``map()``) and ``__pre_init__`` support.
+    Enhanced frozen dataclass decorator (``FrozenDataclass``) with ``Constructable``
+    base class for validated factory construction via ``create()``.
 
 dbc
     Design-by-contract decorators for runtime validation:
@@ -197,7 +197,7 @@ Using clocks for testable time-dependent code::
     from datetime import UTC, datetime, timedelta
 
     # Production: use system clock
-    deadline = Deadline(
+    deadline = Deadline.create(
         expires_at=datetime.now(UTC) + timedelta(hours=1),
         clock=SYSTEM_CLOCK,
     )
@@ -205,7 +205,7 @@ Using clocks for testable time-dependent code::
     # Testing: use fake clock for deterministic behavior
     clock = FakeClock()
     clock.set_wall(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
-    deadline = Deadline(
+    deadline = Deadline.create(
         expires_at=datetime(2024, 6, 1, 13, 0, 0, tzinfo=UTC),
         clock=clock,
     )
@@ -218,7 +218,7 @@ Budget enforcement::
     from datetime import UTC, datetime, timedelta
 
     budget = Budget(
-        deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1)),
+        deadline=Deadline.create(expires_at=datetime.now(UTC) + timedelta(hours=1)),
         max_total_tokens=100000,
     )
     tracker = BudgetTracker(budget=budget)
@@ -250,7 +250,7 @@ from .clock import (
     SystemClock,
     WallClock,
 )
-from .dataclasses import FrozenDataclass
+from .dataclasses import Constructable, FrozenDataclass, allow_construction
 from .deadlines import Deadline
 from .errors import DeadlineExceededError, ToolValidationError, WinkError
 from .prompt import (
@@ -280,6 +280,7 @@ __all__ = [
     "BudgetExceededError",
     "BudgetTracker",
     "Clock",
+    "Constructable",
     "Deadline",
     "DeadlineExceededError",
     "FakeClock",
@@ -306,6 +307,7 @@ __all__ = [
     "ToolValidationError",
     "WallClock",
     "WinkError",
+    "allow_construction",
     "configure_logging",
     "get_logger",
     "parse_structured_output",

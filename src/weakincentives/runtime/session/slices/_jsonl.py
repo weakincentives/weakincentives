@@ -274,11 +274,11 @@ class JsonlSliceFactory:
     def __post_init__(self) -> None:
         """Initialize the resolved directory."""
         if self.base_dir is not None:
-            object.__setattr__(self, "_resolved_dir", self.base_dir)
+            self._resolved_dir = self.base_dir
         else:
             # Create a temporary directory that persists for factory lifetime
             temp_dir = tempfile.mkdtemp(prefix="wink_slices_")
-            object.__setattr__(self, "_resolved_dir", Path(temp_dir))
+            self._resolved_dir = Path(temp_dir)
 
     def create[T: SupportsDataclass](self, slice_type: type[T]) -> JsonlSlice[T]:
         """Create a new JSONL-backed slice.

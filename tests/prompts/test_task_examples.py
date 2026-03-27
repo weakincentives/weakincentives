@@ -94,7 +94,7 @@ def report_handler(
 
 @pytest.fixture
 def read_tool() -> Tool[ReadParams, ReadResult]:
-    return Tool[ReadParams, ReadResult](
+    return Tool[ReadParams, ReadResult].create(
         name="read_file",
         description="Read a file from the workspace.",
         handler=read_handler,
@@ -103,7 +103,7 @@ def read_tool() -> Tool[ReadParams, ReadResult]:
 
 @pytest.fixture
 def search_tool() -> Tool[SearchParams, SearchResult]:
-    return Tool[SearchParams, SearchResult](
+    return Tool[SearchParams, SearchResult].create(
         name="search",
         description="Search for patterns in files.",
         handler=search_handler,
@@ -112,7 +112,7 @@ def search_tool() -> Tool[SearchParams, SearchResult]:
 
 @pytest.fixture
 def report_tool() -> Tool[ReportParams, ReportResult]:
-    return Tool[ReportParams, ReportResult](
+    return Tool[ReportParams, ReportResult].create(
         name="report_issue",
         description="Report a security issue.",
         handler=report_handler,

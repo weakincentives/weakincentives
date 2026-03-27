@@ -52,7 +52,7 @@ class _ToolResult:
 
 
 def _build_prompt() -> PromptTemplate:
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting",
         sections=[
@@ -66,12 +66,12 @@ def _build_prompt() -> PromptTemplate:
 
 
 def _build_prompt_with_tool() -> PromptTemplate:
-    tool = Tool[_ToolParams, _ToolResult](
+    tool = Tool[_ToolParams, _ToolResult].create(
         name="search",
         description="Search stored notes.",
         handler=None,
     )
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting-tools",
         sections=[

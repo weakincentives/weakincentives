@@ -70,7 +70,7 @@ def test_prompt_cleanup_calls_sections() -> None:
     s1 = _TrackingSection(key="sec-a")
     s2 = _TrackingSection(key="sec-b")
 
-    template = PromptTemplate(ns="test", key="cleanup-test", sections=[s1, s2])
+    template = PromptTemplate.create(ns="test", key="cleanup-test", sections=[s1, s2])
     prompt = Prompt(template)
 
     prompt.cleanup()
@@ -85,7 +85,7 @@ def test_prompt_cleanup_is_depth_first() -> None:
     child = _TrackingSection(key="child", children=[grandchild])
     root = _TrackingSection(key="root", children=[child])
 
-    template = PromptTemplate(ns="test", key="deep-cleanup", sections=[root])
+    template = PromptTemplate.create(ns="test", key="deep-cleanup", sections=[root])
     prompt = Prompt(template)
 
     prompt.cleanup()
@@ -99,7 +99,7 @@ def test_prompt_cleanup_idempotent() -> None:
     """Prompt.cleanup() can be called multiple times safely."""
     s1 = _TrackingSection(key="sec-a")
 
-    template = PromptTemplate(ns="test", key="idem-cleanup", sections=[s1])
+    template = PromptTemplate.create(ns="test", key="idem-cleanup", sections=[s1])
     prompt = Prompt(template)
 
     prompt.cleanup()
@@ -110,7 +110,7 @@ def test_prompt_cleanup_idempotent() -> None:
 
 def test_prompt_cleanup_no_sections() -> None:
     """Prompt.cleanup() is safe with no sections."""
-    template = PromptTemplate(ns="test", key="empty-cleanup")
+    template = PromptTemplate.create(ns="test", key="empty-cleanup")
     prompt = Prompt(template)
 
     # Should not raise

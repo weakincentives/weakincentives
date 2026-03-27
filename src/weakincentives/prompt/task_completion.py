@@ -19,7 +19,7 @@ task completion before allowing an agent to stop. Checkers are declared on the
 Example:
     >>> from weakincentives.prompt import FileOutputChecker, PromptTemplate
     >>>
-    >>> template = PromptTemplate(
+    >>> template = PromptTemplate.create(
     ...     ns="my-agent",
     ...     key="main",
     ...     sections=[...],

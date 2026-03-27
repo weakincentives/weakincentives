@@ -19,7 +19,7 @@ from dataclasses import field, is_dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, cast, override
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import FrozenDataclass, allow_construction
 from ..deadlines import Deadline
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import (
@@ -400,7 +400,8 @@ class PromptRenderer[OutputT]:
                     override.description is not None
                     and override.description != tool.description
                 ):
-                    patched_tool = replace(tool, description=override.description)
+                    with allow_construction():
+                        patched_tool = replace(tool, description=override.description)
                 if override.param_descriptions:
                     field_description_patches[tool.name] = dict(
                         override.param_descriptions

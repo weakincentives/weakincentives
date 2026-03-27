@@ -149,7 +149,7 @@ class SessionSnapshotter:
             raise SnapshotSerializationError(msg) from error
 
         created_at = SYSTEM_CLOCK.utcnow()
-        return Snapshot(
+        return Snapshot.create(
             created_at=created_at,
             parent_id=parent_id,
             children_ids=children_ids,

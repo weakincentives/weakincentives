@@ -45,7 +45,9 @@ def _make_prompt_with_resources(
     resources: dict[type[object], object],
 ) -> Prompt[object]:
     """Create a prompt with resources bound in active context."""
-    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate.create(ns="tests", key="bridge-test")
+    )
     prompt = prompt.bind(resources=resources)
     prompt.resources.__enter__()
     return prompt
@@ -73,7 +75,7 @@ def search_handler(
     )
 
 
-search_tool = Tool[SearchParams, SearchResult](
+search_tool = Tool[SearchParams, SearchResult].create(
     name="search",
     description="Search for content",
     handler=search_handler,
@@ -89,7 +91,9 @@ def session() -> Session:
 @pytest.fixture
 def prompt() -> Prompt[object]:
     """Create a prompt in active context."""
-    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate.create(ns="tests", key="bridge-test")
+    )
     prompt.resources.__enter__()
     return prompt
 
@@ -117,7 +121,7 @@ class TestCreateBridgedToolsWithFilesystem:
                 SearchResult(matches=3), message=f"Searched for {params.query}"
             )
 
-        capture_tool = Tool[SearchParams, SearchResult](
+        capture_tool = Tool[SearchParams, SearchResult].create(
             name="capture",
             description="Tool that captures context",
             handler=capture_context_handler,
@@ -162,7 +166,7 @@ class TestBudgetTrackerInResourceRegistry:
                 SearchResult(matches=3), message=f"Searched for {params.query}"
             )
 
-        capture_tool = Tool[SearchParams, SearchResult](
+        capture_tool = Tool[SearchParams, SearchResult].create(
             name="capture",
             description="Tool that captures context",
             handler=capture_context_handler,
@@ -213,7 +217,7 @@ class TestBudgetTrackerInResourceRegistry:
                 SearchResult(matches=3), message=f"Searched for {params.query}"
             )
 
-        capture_tool = Tool[SearchParams, SearchResult](
+        capture_tool = Tool[SearchParams, SearchResult].create(
             name="capture",
             description="Tool that captures context",
             handler=capture_context_handler,
@@ -269,7 +273,7 @@ class TestBridgedToolTransactionalExecution:
                 success=False,
             )
 
-        fail_tool = Tool[SearchParams, SearchResult](
+        fail_tool = Tool[SearchParams, SearchResult].create(
             name="fail_tool",
             description="Tool that returns failure",
             handler=failing_result_handler,
@@ -317,7 +321,7 @@ class TestBridgedToolTransactionalExecution:
                 context.filesystem.write("/test.txt", "modified content")
             raise RuntimeError("Handler exploded")
 
-        exception_tool = Tool[SearchParams, SearchResult](
+        exception_tool = Tool[SearchParams, SearchResult].create(
             name="exception_tool",
             description="Tool that raises exception",
             handler=exception_handler,
@@ -407,7 +411,7 @@ class TestBridgedToolTransactionalExecution:
                 section_keys=("section.key",),
             )
 
-        visibility_tool = Tool[SearchParams, SearchResult](
+        visibility_tool = Tool[SearchParams, SearchResult].create(
             name="visibility_tool",
             description="Tool that requests visibility expansion",
             handler=visibility_handler,
@@ -457,14 +461,16 @@ class TestBridgedToolTransactionalExecution:
             captured_filesystem.append(context.filesystem)
             return ToolResult.ok(SearchResult(matches=0), message="Tool executed")
 
-        capture_tool = Tool[SearchParams, SearchResult](
+        capture_tool = Tool[SearchParams, SearchResult].create(
             name="capture_tool",
             description="Tool that captures context",
             handler=capture_handler,
         )
 
         # Create prompt without filesystem in resources
-        prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="no-fs-test"))
+        prompt: Prompt[object] = Prompt(
+            PromptTemplate.create(ns="tests", key="no-fs-test")
+        )
         prompt.resources.__enter__()
 
         bridged = BridgedTool(

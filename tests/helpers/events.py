@@ -39,7 +39,7 @@ class NullDispatcher:
     def dispatch(event: object) -> DispatchResult:
         """Drop the provided event instance."""
 
-        return DispatchResult(
+        return DispatchResult.create(
             event=event,
             handlers_invoked=(),
             errors=(),

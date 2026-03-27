@@ -109,7 +109,7 @@ Seeding overrides from a prompt::
 
     from weakincentives.prompt import Prompt, PromptTemplate
 
-    template = PromptTemplate(ns="my-app", key="main", sections=[...])
+    template = PromptTemplate.create(ns="my-app", key="main", sections=[...])
     prompt = Prompt(template)
 
     # Creates override file with current section/tool content

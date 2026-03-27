@@ -55,7 +55,7 @@ class TestToolToSpec:
 
     def test_tool_with_params(self) -> None:
         """Tool with params generates schema from dataclass."""
-        tool = Tool[FileParams, str](
+        tool = Tool[FileParams, str].create(
             name="read_file",
             description="Read a file from disk.",
             handler=_dummy_handler,
@@ -71,7 +71,7 @@ class TestToolToSpec:
 
     def test_tool_without_params(self) -> None:
         """Tool with None params uses empty schema."""
-        tool = Tool[None, None](
+        tool = Tool[None, None].create(
             name="get_time",
             description="Get the current time.",
             handler=_none_handler,

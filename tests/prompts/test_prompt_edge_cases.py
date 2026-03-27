@@ -44,7 +44,7 @@ def test_prompt_render_rejects_unregistered_params_type() -> None:
         template="Registered: ${value}",
         key="registered",
     )
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="edge-unregistered",
         sections=[section],
@@ -87,7 +87,7 @@ def test_prompt_render_detects_constructor_returning_none() -> None:
         template="Null body",
         key="null",
     )
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="edge-constructor-none",
         sections=[section],
@@ -107,7 +107,7 @@ def test_prompt_render_detects_constructor_returning_non_dataclass() -> None:
         template="Invalid body",
         key="invalid",
     )
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="edge-constructor-invalid",
         sections=[section],
@@ -150,7 +150,7 @@ class BrokenSection(Section[BrokenParams]):
 
 def test_prompt_render_wraps_prompt_errors_with_context() -> None:
     section = BrokenSection()
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="edge-wrap-error",
         sections=[section],
@@ -196,7 +196,7 @@ def test_prompt_register_requires_dataclass_params() -> None:
     section = InvalidParamsSection()
 
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate(
+        PromptTemplate.create(
             ns="tests.prompts",
             key="edge-dataclass-required",
             sections=[section],
@@ -221,7 +221,7 @@ def test_prompt_register_validates_defaults_type() -> None:
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate(
+        PromptTemplate.create(
             ns="tests.prompts",
             key="edge-defaults-type",
             sections=[section],
@@ -251,7 +251,7 @@ def test_prompt_register_requires_defaults_type_match() -> None:
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate(
+        PromptTemplate.create(
             ns="tests.prompts",
             key="edge-defaults-mismatch",
             sections=[section],
@@ -375,7 +375,7 @@ class ContextAwareSection(Section[ContextParams]):
 
 def test_prompt_render_propagates_errors_with_existing_context() -> None:
     section = ContextAwareSection()
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="edge-preserve-context",
         sections=[section],

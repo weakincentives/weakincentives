@@ -75,7 +75,7 @@ def test_request_default_values() -> None:
 def test_request_custom_values() -> None:
     """AgentLoopRequest accepts custom values."""
     budget = Budget(max_total_tokens=1000)
-    deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
+    deadline = Deadline.create(expires_at=datetime.now(UTC) + timedelta(minutes=5))
     request = AgentLoopRequest(
         request=SampleRequest(message="hello"),
         budget=budget,

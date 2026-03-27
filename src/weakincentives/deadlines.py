@@ -18,13 +18,13 @@ from dataclasses import field
 from datetime import datetime, timedelta
 
 from .clock import SYSTEM_CLOCK, WallClock
-from .dataclasses import FrozenDataclass
+from .dataclasses import Constructable, FrozenDataclass, allow_construction
 
 __all__ = ["Deadline"]
 
 
 @FrozenDataclass()
-class Deadline:
+class Deadline(Constructable):
     """Immutable value object describing a wall-clock expiration.
 
     Example::
@@ -33,7 +33,7 @@ class Deadline:
         from weakincentives import Deadline
 
         # Create a deadline 1 hour from now
-        deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1))
+        deadline = Deadline.create(expires_at=datetime.now(UTC) + timedelta(hours=1))
 
         # Check remaining time
         remaining = deadline.remaining()
@@ -48,7 +48,7 @@ class Deadline:
         clock = TestClock()
         clock.set_wall(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
 
-        deadline = Deadline(
+        deadline = Deadline.create(
             expires_at=datetime(2024, 6, 1, 13, 0, 0, tzinfo=UTC),
             clock=clock,
         )
@@ -61,27 +61,41 @@ class Deadline:
     """
 
     expires_at: datetime
-    started_at: datetime | None = None
-    """When the deadline tracking started. Defaults to creation time."""
+    started_at: datetime
+    """When the deadline tracking started. Set by ``create()``."""
     clock: WallClock = field(default=SYSTEM_CLOCK, repr=False, compare=False)
     """Clock for time operations. Defaults to system clock."""
 
-    def __post_init__(self) -> None:
-        expires_at = self.expires_at
+    @classmethod
+    def create(
+        cls,
+        expires_at: datetime,
+        started_at: datetime | None = None,
+        clock: WallClock = SYSTEM_CLOCK,
+    ) -> Deadline:
+        """Create a validated deadline.
+
+        Args:
+            expires_at: When the deadline expires. Must be timezone-aware
+                and in the future.
+            started_at: When tracking started. Defaults to now.
+                Must be timezone-aware if provided.
+            clock: Clock for time operations.
+
+        Raises:
+            ValueError: If timestamps are invalid.
+        """
         if expires_at.tzinfo is None or expires_at.utcoffset() is None:
             msg = "Deadline expires_at must be timezone-aware."
             raise ValueError(msg)
 
-        now = self.clock.utcnow()
+        now = clock.utcnow()
 
-        # Default started_at to now if not provided
-        if self.started_at is None:
-            object.__setattr__(self, "started_at", now)
-        else:
-            started_at = self.started_at
-            if started_at.tzinfo is None or started_at.utcoffset() is None:
-                msg = "Deadline started_at must be timezone-aware."
-                raise ValueError(msg)
+        if started_at is None:
+            started_at = now
+        elif started_at.tzinfo is None or started_at.utcoffset() is None:
+            msg = "Deadline started_at must be timezone-aware."
+            raise ValueError(msg)
 
         if expires_at <= now:
             msg = "Deadline expires_at must be in the future."
@@ -90,6 +104,9 @@ class Deadline:
         if expires_at - now < timedelta(seconds=1):
             msg = "Deadline must be at least one second in the future."
             raise ValueError(msg)
+
+        with allow_construction():
+            return cls(expires_at=expires_at, started_at=started_at, clock=clock)
 
     def remaining(self, *, now: datetime | None = None) -> timedelta:
         """Return the remaining duration before expiration.
@@ -129,6 +146,4 @@ class Deadline:
             msg = "Deadline elapsed now must be timezone-aware."
             raise ValueError(msg)
 
-        # started_at is guaranteed to be set by __post_init__
-        assert self.started_at is not None  # nosec B101
         return current - self.started_at

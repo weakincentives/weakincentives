@@ -47,7 +47,7 @@ class OtherParams:
 
 
 def test_tool_is_frozen() -> None:
-    tool = Tool[ExampleParams, ExampleResult](
+    tool = Tool[ExampleParams, ExampleResult].create(
         name="lookup",
         description="Lookup information.",
         handler=None,
@@ -64,7 +64,7 @@ def test_tool_examples_are_preserved() -> None:
         output=ExampleResult(value="result"),
     )
 
-    tool = Tool[ExampleParams, ExampleResult](
+    tool = Tool[ExampleParams, ExampleResult].create(
         name="lookup",
         description="Lookup information.",
         handler=None,
@@ -82,7 +82,7 @@ def test_tool_example_requires_ascii_description() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name="lookup",
             description="Lookup information.",
             handler=None,
@@ -98,7 +98,7 @@ def test_tool_example_input_must_match_params_type() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name="lookup",
             description="Lookup information.",
             handler=None,
@@ -113,7 +113,7 @@ def test_tool_example_output_must_match_sequence_when_result_is_array() -> None:
         output=[ExampleResult(value="first"), ExampleResult(value="second")],
     )
 
-    tool = Tool[ExampleParams, list[ExampleResult]](
+    tool = Tool[ExampleParams, list[ExampleResult]].create(
         name="batch_lookup",
         description="Lookup multiple results.",
         handler=None,
@@ -132,7 +132,7 @@ def test_tool_example_output_must_match_sequence_when_result_is_array() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Tool[ExampleParams, list[ExampleResult]](
+        Tool[ExampleParams, list[ExampleResult]].create(
             name="batch_lookup",
             description="Lookup multiple results.",
             handler=None,
@@ -148,7 +148,7 @@ def test_tool_example_rejects_blank_description() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name="lookup",
             description="Lookup information.",
             handler=None,
@@ -164,7 +164,7 @@ def test_tool_example_input_requires_dataclass_instance() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name="lookup",
             description="Lookup information.",
             handler=None,
@@ -180,7 +180,7 @@ def test_tool_example_output_validates_sequence_items() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Tool[ExampleParams, list[ExampleResult]](
+        Tool[ExampleParams, list[ExampleResult]].create(
             name="batch_lookup",
             description="Lookup multiple results.",
             handler=None,
@@ -196,7 +196,7 @@ def test_tool_example_output_requires_dataclass_instance_for_object_results() ->
     )
 
     with pytest.raises(PromptValidationError):
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name="lookup",
             description="Lookup information.",
             handler=None,
@@ -208,7 +208,7 @@ def test_tool_accepts_none_params_type() -> None:
     def handler(params: None, *, context: ToolContext) -> ToolResult[ExampleResult]:
         return ToolResult.ok(ExampleResult(value="result"), message="ok")
 
-    tool = Tool[None, ExampleResult](
+    tool = Tool[None, ExampleResult].create(
         name="noop",
         description="No parameters required.",
         handler=handler,
@@ -221,7 +221,7 @@ def test_tool_accepts_none_result_type() -> None:
     def handler(params: ExampleParams, *, context: ToolContext) -> ToolResult[None]:
         return ToolResult.ok(None, message="done")
 
-    tool = Tool[ExampleParams, None](
+    tool = Tool[ExampleParams, None].create(
         name="no_result",
         description="Does not return a payload.",
         handler=handler,
@@ -238,7 +238,7 @@ def test_tool_example_input_requires_none_when_params_none() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Tool[None, ExampleResult](
+        Tool[None, ExampleResult].create(
             name="noop",
             description="No parameters required.",
             handler=None,
@@ -254,7 +254,7 @@ def test_tool_example_output_requires_none_when_result_none() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Tool[ExampleParams, None](
+        Tool[ExampleParams, None].create(
             name="noop",
             description="No result returned.",
             handler=None,
@@ -306,7 +306,7 @@ def test_tool_examples_accept_none_params_and_result() -> None:
         output=None,
     )
 
-    tool = Tool[None, None](
+    tool = Tool[None, None].create(
         name="noop",
         description="Does nothing.",
         handler=None,
@@ -318,7 +318,7 @@ def test_tool_examples_accept_none_params_and_result() -> None:
 
 def test_tool_examples_must_be_tool_example_instances() -> None:
     with pytest.raises(PromptValidationError):
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name="lookup",
             description="Lookup information.",
             handler=None,

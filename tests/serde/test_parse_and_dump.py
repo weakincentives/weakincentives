@@ -551,3 +551,29 @@ def test_bool_coercion_and_errors() -> None:
 
     with pytest.raises(TypeError):
         parse(BoolModel, {"flag": "true"}, coerce=False)
+
+
+def test_parse_constructable_dataclass() -> None:
+    """parse() uses allow_construction() for Constructable subclasses."""
+    from weakincentives.dataclasses import (
+        Constructable,
+        FrozenDataclass,
+        allow_construction,
+    )
+
+    @FrozenDataclass()
+    class Guarded(Constructable):
+        value: int
+
+        @classmethod
+        def create(cls, value: int) -> Guarded:
+            with allow_construction():
+                return cls(value=value)
+
+    # Direct construction should fail
+    with pytest.raises(TypeError, match="not directly constructable"):
+        Guarded(value=42)
+
+    # parse() should use allow_construction() internally
+    result = parse(Guarded, {"value": 42})
+    assert result.value == 42

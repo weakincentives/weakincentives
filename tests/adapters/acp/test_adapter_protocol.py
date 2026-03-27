@@ -373,7 +373,7 @@ class TestEvaluateProtocol:
 
         budget = Budget(
             max_input_tokens=1000,
-            deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1)),
+            deadline=Deadline.create(expires_at=datetime.now(UTC) + timedelta(hours=1)),
         )
         tracker = BudgetTracker(budget)
 
@@ -413,7 +413,7 @@ class TestEvaluateProtocol:
 
         budget = Budget(
             max_input_tokens=1000,
-            deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1)),
+            deadline=Deadline.create(expires_at=datetime.now(UTC) + timedelta(hours=1)),
         )
 
         adapter = ACPAdapter(
@@ -605,7 +605,7 @@ class TestEvaluateProtocol:
         def _handler(params: _Params, *, context: ToolContext) -> ToolResult[_Result]:
             return ToolResult.ok(_Result(value=params.x))
 
-        tool = Tool[_Params, _Result](
+        tool = Tool[_Params, _Result].create(
             name="calc", description="Calculate", handler=_handler
         )
 

@@ -24,15 +24,17 @@ from typing import (
     Final,
     Literal,
     Protocol,
+    Self,
     TypeVar,
     cast,
     get_args,
     get_origin,
     get_type_hints,
+    override,
 )
 
 from ..budget import BudgetTracker
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import Constructable, FrozenDataclass, allow_construction
 from ..deadlines import Deadline
 from ..types.dataclass import (
     SupportsDataclass,
@@ -211,7 +213,9 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT]):
 
 
 @FrozenDataclass()
-class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
+class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
+    Constructable
+):
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
@@ -220,49 +224,55 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     examples: tuple[ToolExample[ParamsT, ResultT], ...] = field(
         default_factory=tuple,
     )
-    params_type: type[ParamsT] = field(init=False, repr=False)
-    result_type: type[SupportsDataclass | None] = field(init=False, repr=False)
+    params_type: type[ParamsT] = field(default=cast("type[ParamsT]", None), repr=False)
+    result_type: type[SupportsDataclass | None] = field(
+        default=cast("type[SupportsDataclass | None]", None), repr=False
+    )
     result_container: Literal["object", "array"] = field(
-        init=False,
+        default="object",
         repr=False,
     )
-    _result_annotation: ResultT = field(init=False, repr=False)
+    _result_annotation: ResultT = field(default=cast("ResultT", None), repr=False)
     accepts_overrides: bool = True
 
     @classmethod
-    def __pre_init__(
+    def create(
         cls,
         *,
         name: str,
         description: str,
         handler: ToolHandler[ParamsT, ResultT] | None,
-        examples: tuple[ToolExample[ParamsT, ResultT], ...],
-        accepts_overrides: bool,
-    ) -> dict[str, object]:
+        examples: tuple[ToolExample[ParamsT, ResultT], ...] = (),
+        accepts_overrides: bool = True,
+    ) -> Tool[ParamsT, ResultT]:
+        """Create a validated Tool instance."""
         params_type, raw_result_annotation = cls._resolve_type_arguments()
-
         result_type, result_container = cls._normalize_result_annotation(
             raw_result_annotation,
             params_type,
         )
 
-        validated_name = cls._validate_name(name, params_type)
-        validated_description = cls._validate_description(description, params_type)
-        validated_examples = cls._validate_examples(
-            examples, params_type, result_type, result_container
-        )
+        with allow_construction():
+            return cls(
+                name=cls._validate_name(name, params_type),
+                description=cls._validate_description(description, params_type),
+                handler=handler,
+                examples=cls._validate_examples(
+                    examples, params_type, result_type, result_container
+                ),
+                params_type=cast(type[ParamsT], params_type),
+                result_type=result_type,
+                result_container=result_container,
+                _result_annotation=raw_result_annotation,
+                accepts_overrides=accepts_overrides,
+            )
 
-        return {
-            "name": validated_name,
-            "description": validated_description,
-            "handler": handler,
-            "examples": validated_examples,
-            "accepts_overrides": accepts_overrides,
-            "params_type": cast(type[ParamsT], params_type),
-            "result_type": result_type,
-            "result_container": result_container,
-            "_result_annotation": raw_result_annotation,
-        }
+    @override
+    def replace(self, **changes: object) -> Self:
+        """Tool does not support replace()."""
+        raise NotImplementedError(
+            "Tool.replace() is not supported. Use Tool.create() instead."
+        )
 
     @classmethod
     def _resolve_type_arguments(
@@ -647,7 +657,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
         handler_name = getattr(fn, "__name__", type(fn).__name__)
 
-        return specialized_tool_type(
+        return specialized_tool_type.create(
             name=handler_name,
             description=description,
             handler=fn,

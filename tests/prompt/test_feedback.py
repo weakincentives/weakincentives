@@ -52,7 +52,7 @@ def make_session() -> Session:
 
 def make_prompt() -> Prompt[None]:
     """Create a minimal prompt for testing."""
-    template: PromptTemplate[None] = PromptTemplate(
+    template: PromptTemplate[None] = PromptTemplate.create(
         ns="test", key="test-prompt", name="test"
     )
     return Prompt(template)
@@ -243,7 +243,7 @@ class TestFeedbackContext:
     def test_creates_context_with_deadline(self) -> None:
         session = make_session()
         prompt = make_prompt()
-        deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1))
+        deadline = Deadline.create(expires_at=datetime.now(UTC) + timedelta(hours=1))
 
         context = FeedbackContext(session=session, prompt=prompt, deadline=deadline)
 
