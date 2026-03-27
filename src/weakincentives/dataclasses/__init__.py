@@ -180,7 +180,9 @@ class Constructable:
                 f"{cls.__name__}.replace() got unexpected field(s): {joined}"
             )
 
-        current = {name: getattr(self, name) for name in create_params}
+        current = {
+            name: getattr(self, name) for name in create_params if hasattr(self, name)
+        }
         current.update(changes)
         return cls.create(**current)  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
 

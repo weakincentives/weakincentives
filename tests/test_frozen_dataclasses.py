@@ -201,6 +201,36 @@ def test_replace_rejects_unknown_fields() -> None:
         s.replace(unknown=99)
 
 
+def test_replace_with_non_field_create_param() -> None:
+    """replace() handles create() params that aren't stored fields."""
+
+    @FrozenDataclass()
+    class Order(Constructable):
+        subtotal: int
+        tax: int
+        total: int
+
+        @classmethod
+        def create(cls, subtotal: int, tax_rate: float = 0.1) -> Order:
+            tax = int(subtotal * tax_rate)
+            with allow_construction():
+                return cls(subtotal=subtotal, tax=tax, total=subtotal + tax)
+
+    order = Order.create(subtotal=1000)
+    assert order.total == 1100
+
+    # tax_rate is a create() param but not a stored field — replace() should
+    # use create()'s default for it when not explicitly provided
+    updated = order.replace(subtotal=2000)
+    assert updated.subtotal == 2000
+    assert updated.total == 2200
+
+    # Explicitly passing the non-field param should also work
+    custom = order.replace(subtotal=1000, tax_rate=0.2)
+    assert custom.tax == 200
+    assert custom.total == 1200
+
+
 def test_constructable_bans_post_init() -> None:
     """Constructable subclasses cannot define __post_init__."""
     with pytest.raises(TypeError, match="must not define __post_init__"):
