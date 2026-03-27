@@ -219,7 +219,7 @@ def create_snapshot(
         created_at=SYSTEM_CLOCK.utcnow(),
         commit_ref=commit_ref,
         root_path=root,
-        git_dir=git_dir,
+        backend_ref=git_dir,
         tag=tag,
     )
 

@@ -270,6 +270,59 @@ class Filesystem(Protocol):
         """
         ...
 
+    def rename(
+        self,
+        src: str,
+        dst: str,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Rename (move) a file or directory.
+
+        Atomic on backends that support it. For remote filesystems this is
+        a single round-trip instead of the read+write+delete alternative.
+
+        Args:
+            src: Source path relative to workspace root.
+            dst: Destination path relative to workspace root.
+            overwrite: If True, overwrite an existing destination file.
+
+        Raises:
+            FileNotFoundError: *src* does not exist.
+            FileExistsError: *dst* exists and *overwrite* is False.
+            IsADirectoryError: *dst* is an existing directory.
+            PermissionError: Write access denied or filesystem is read-only.
+            ValueError: Invalid path (depth/segment constraints).
+        """
+        ...
+
+    def copy(
+        self,
+        src: str,
+        dst: str,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Copy a file.
+
+        For remote filesystems this is a single round-trip instead of the
+        read+write alternative.  Does not copy directories; use
+        ``glob`` + ``copy`` for recursive copies.
+
+        Args:
+            src: Source file path relative to workspace root.
+            dst: Destination file path relative to workspace root.
+            overwrite: If True, overwrite an existing destination file.
+
+        Raises:
+            FileNotFoundError: *src* does not exist.
+            IsADirectoryError: *src* is a directory.
+            FileExistsError: *dst* exists and *overwrite* is False.
+            PermissionError: Write access denied or filesystem is read-only.
+            ValueError: Invalid path (depth/segment constraints).
+        """
+        ...
+
     # --- Metadata ---
 
     @property
@@ -280,6 +333,21 @@ class Filesystem(Protocol):
     @property
     def read_only(self) -> bool:
         """True if write operations are disabled."""
+        ...
+
+    # --- Lifecycle ---
+
+    def close(self) -> None:
+        """Release resources held by this filesystem.
+
+        Implementations should clean up any external state (git directories,
+        network connections, container handles, etc.).  Safe to call multiple
+        times.  After ``close()``, behaviour of other methods is undefined.
+
+        This method satisfies the ``Closeable`` resource protocol so that
+        filesystems bound via the resource system are cleaned up
+        automatically when the resource context exits.
+        """
         ...
 
     # --- Streaming Operations (Primary API) ---

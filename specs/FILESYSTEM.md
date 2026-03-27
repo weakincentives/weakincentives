@@ -92,10 +92,18 @@ Streaming type protocols at `src/weakincentives/filesystem/_types.py`:
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
+| `rename(src, dst, overwrite)` | `src`, `dst`, `overwrite` | Rename/move file or directory (single round-trip) |
+| `copy(src, dst, overwrite)` | `src`, `dst`, `overwrite` | Copy file (single round-trip, files only) |
 | `delete(path, recursive)` | `path`, `recursive` | Delete file/directory |
 | `mkdir(path, parents, exist_ok)` | `path`, `parents`, `exist_ok` | Create directory |
 
 **Write modes:** `"create"`, `"overwrite"`, `"append"`
+
+**Lifecycle:**
+
+| Method | Description |
+|--------|-------------|
+| `close()` | Release resources (git dirs, connections). Satisfies `Closeable` protocol. |
 
 **Metadata Properties:**
 
@@ -177,7 +185,10 @@ relative to root, streaming support, and read-only mode.
 
 Capture workspace state for rollback after failed tools or exploratory changes.
 `FilesystemSnapshot` at `src/weakincentives/filesystem/_types.py` records
-`snapshot_id`, `created_at`, `commit_ref`, `root_path`, `git_dir`, and `tag`.
+`snapshot_id`, `created_at`, `commit_ref`, `root_path`, `backend_ref`, and `tag`.
+The `backend_ref` field is an opaque, backend-specific locator (git directory
+path for HostFilesystem, container image tag for remote backends, etc.).
+A backward-compatible `git_dir` property alias is provided.
 
 `SnapshotableFilesystem` protocol extends `Filesystem` with:
 
@@ -208,3 +219,4 @@ decoding, and error handling on closed streams. Test fixtures at
 - **Git dependency**: Disk snapshots require git
 - **No partial restore**: All-or-nothing
 - **UTF-8 only**: Text operations support only UTF-8 encoding
+- **No recursive copy**: `copy()` operates on single files; use `glob` + `copy` for trees

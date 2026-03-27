@@ -10,3 +10,8 @@
 #   path/to/file.py                        – file-length violation
 #   path/to/file.py:Class.method           – function-length violation
 
+# Filesystem implementations mirror the 20+ method protocol surface;
+# splitting would harm cohesion without reducing complexity.
+src/weakincentives/filesystem/_host.py
+src/weakincentives/contrib/tools/filesystem_memory.py
+tests/helpers/filesystem.py

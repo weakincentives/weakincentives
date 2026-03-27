@@ -46,6 +46,8 @@ from weakincentives.filesystem import (
     MAX_WRITE_BYTES,
     MAX_WRITE_LENGTH,
     READ_ENTIRE_FILE,
+    ByteReader,
+    ByteWriter,
     DefaultTextReader,
     FileEntry,
     FileStat,
@@ -556,6 +558,122 @@ class InMemoryFilesystem:
             if parent_path and parent_path not in self._directories:
                 self._directories.add(parent_path)
 
+    # --- Lifecycle ---
+
+    def close(self) -> None:
+        """Release resources (no-op for in-memory backend)."""
+
+    # --- Rename / Copy ---
+
+    def rename(
+        self,
+        src: str,
+        dst: str,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Rename (move) a file or directory."""
+        if self._read_only:
+            msg = "Filesystem is read-only"
+            raise PermissionError(msg)
+
+        src_normalized = normalize_path(src)
+        dst_normalized = normalize_path(dst)
+        if not src_normalized:
+            msg = "Cannot rename root directory"
+            raise PermissionError(msg)
+        if not dst_normalized:
+            msg = "Cannot rename to root directory"
+            raise ValueError(msg)
+
+        validate_path(dst_normalized)
+
+        # Source must exist (file or directory)
+        is_file = src_normalized in self._files
+        is_dir = src_normalized in self._directories
+
+        if not is_file and not is_dir:
+            raise FileNotFoundError(src)
+
+        if dst_normalized in self._directories:
+            msg = f"Destination is a directory: {dst}"
+            raise IsADirectoryError(msg)
+
+        if dst_normalized in self._files and not overwrite:
+            raise FileExistsError(f"Destination already exists: {dst}")
+
+        # Ensure parent directories of destination exist
+        dst_parent = "/".join(dst_normalized.split("/")[:-1])
+        if dst_parent:
+            self._ensure_parents(dst_parent)
+
+        if is_file:
+            self._files[dst_normalized] = self._files.pop(src_normalized)
+        else:
+            # Move directory and all contents underneath it
+            self._directories.discard(src_normalized)
+            self._directories.add(dst_normalized)
+            # Move child files
+            src_prefix = f"{src_normalized}/"
+            to_move = [
+                (k, v) for k, v in self._files.items() if k.startswith(src_prefix)
+            ]
+            for old_key, value in to_move:
+                new_key = dst_normalized + old_key[len(src_normalized) :]
+                self._files[new_key] = value
+                del self._files[old_key]
+            # Move child directories
+            child_dirs = [
+                d for d in self._directories if d.startswith(src_prefix)
+            ]
+            for old_dir in child_dirs:
+                new_dir = dst_normalized + old_dir[len(src_normalized) :]
+                self._directories.discard(old_dir)
+                self._directories.add(new_dir)
+
+    def copy(
+        self,
+        src: str,
+        dst: str,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Copy a file."""
+        if self._read_only:
+            msg = "Filesystem is read-only"
+            raise PermissionError(msg)
+
+        src_normalized = normalize_path(src)
+        dst_normalized = normalize_path(dst)
+        if not dst_normalized:
+            msg = "Cannot copy to root directory"
+            raise ValueError(msg)
+
+        validate_path(dst_normalized)
+
+        if src_normalized in self._directories:
+            msg = f"Cannot copy directory: {src}. Use glob + copy for recursive copies."
+            raise IsADirectoryError(msg)
+
+        if src_normalized not in self._files:
+            raise FileNotFoundError(src)
+
+        if dst_normalized in self._files and not overwrite:
+            raise FileExistsError(f"Destination already exists: {dst}")
+
+        # Ensure parent directories of destination exist
+        dst_parent = "/".join(dst_normalized.split("/")[:-1])
+        if dst_parent:
+            self._ensure_parents(dst_parent)
+
+        src_file = self._files[src_normalized]
+        timestamp = now()
+        self._files[dst_normalized] = InMemoryFile(
+            content=src_file.content,
+            created_at=timestamp,
+            modified_at=timestamp,
+        )
+
     # --- Snapshot Operations ---
 
     def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
@@ -614,7 +732,7 @@ class InMemoryFilesystem:
 
     # --- Streaming Operations ---
 
-    def open_read(self, path: str) -> MemoryByteReader:
+    def open_read(self, path: str) -> ByteReader:
         """Open a file for streaming byte reads.
 
         Returns a ByteReader context manager for chunked reading.
@@ -638,7 +756,7 @@ class InMemoryFilesystem:
         *,
         mode: Literal["create", "overwrite", "append"] = "overwrite",
         create_parents: bool = True,
-    ) -> InMemoryByteWriter:
+    ) -> ByteWriter:
         """Open a file for streaming byte writes.
 
         Returns a ByteWriter context manager for chunked writing.

@@ -134,16 +134,27 @@ class FilesystemSnapshot:
     filesystems (HostFilesystem) or an internal version identifier for
     in-memory filesystems (InMemoryFilesystem).
 
-    For HostFilesystem, ``git_dir`` stores the external git repository
-    location to enable cross-session restore.
+    ``backend_ref`` stores an opaque, backend-specific locator needed to
+    perform the restore.  For HostFilesystem this is the external git
+    directory path; remote backends might store a container image tag or
+    API handle.
     """
 
     snapshot_id: UUID
     created_at: datetime
     commit_ref: str
     root_path: str
-    git_dir: str | None = None
+    backend_ref: str | None = None
     tag: str | None = None
+
+    # ------------------------------------------------------------------
+    # Backward-compatible property alias
+    # ------------------------------------------------------------------
+
+    @property
+    def git_dir(self) -> str | None:
+        """Alias for ``backend_ref`` (backward compatibility)."""
+        return self.backend_ref
 
 
 # ---------------------------------------------------------------------------

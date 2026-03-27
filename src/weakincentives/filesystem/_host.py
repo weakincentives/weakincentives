@@ -44,11 +44,11 @@ from ._git_ops import (
     init_git_repo,
     restore_snapshot,
 )
+from ._stream_protocols import ByteReader, ByteWriter, TextReader
 from ._streams import (
     DefaultTextReader,
     HostByteReader,
     HostByteWriter,
-    TextReader,
 )
 from ._types import (
     DEFAULT_READ_LIMIT,
@@ -77,7 +77,7 @@ __all__ = ["HostFilesystem"]
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass(slots=True)  # noqa: PLR0904
 class HostFilesystem:
     """Filesystem backed by a host directory with path restrictions.
 
@@ -571,7 +571,7 @@ class HostFilesystem:
 
     # --- Streaming Operations ---
 
-    def open_read(self, path: str) -> HostByteReader:
+    def open_read(self, path: str) -> ByteReader:
         """Open a file for streaming byte reads.
 
         Returns a ByteReader context manager for chunked reading.
@@ -586,7 +586,7 @@ class HostFilesystem:
         *,
         mode: Literal["create", "overwrite", "append"] = "overwrite",
         create_parents: bool = True,
-    ) -> HostByteWriter:
+    ) -> ByteWriter:
         """Open a file for streaming byte writes.
 
         Returns a ByteWriter context manager for chunked writing.
@@ -626,6 +626,91 @@ class HostFilesystem:
 
         byte_reader = self.open_read(path)
         return DefaultTextReader.wrap(byte_reader, encoding=encoding)
+
+    # --- Lifecycle ---
+
+    def close(self) -> None:
+        """Release resources (external git directory).
+
+        Safe to call multiple times.
+        """
+        self.cleanup()
+
+    # --- Rename / Copy ---
+
+    def rename(
+        self,
+        src: str,
+        dst: str,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Rename (move) a file or directory."""
+        if self._read_only:
+            msg = "Filesystem is read-only"
+            raise PermissionError(msg)
+
+        src_normalized = normalize_path(src)
+        dst_normalized = normalize_path(dst)
+        if not src_normalized:
+            msg = "Cannot rename root directory"
+            raise PermissionError(msg)
+        if not dst_normalized:
+            msg = "Cannot rename to root directory"
+            raise ValueError(msg)
+
+        validate_path(dst_normalized)
+
+        src_resolved = self._resolve_path(src)
+        dst_resolved = self._resolve_path(dst)
+
+        if not src_resolved.exists():
+            raise FileNotFoundError(src)
+
+        if dst_resolved.is_dir():
+            msg = f"Destination is a directory: {dst}"
+            raise IsADirectoryError(msg)
+
+        if dst_resolved.exists() and not overwrite:
+            raise FileExistsError(f"Destination already exists: {dst}")
+
+        dst_resolved.parent.mkdir(parents=True, exist_ok=True)
+        _ = src_resolved.rename(dst_resolved)
+
+    def copy(
+        self,
+        src: str,
+        dst: str,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Copy a file."""
+        if self._read_only:
+            msg = "Filesystem is read-only"
+            raise PermissionError(msg)
+
+        dst_normalized = normalize_path(dst)
+        if not dst_normalized:
+            msg = "Cannot copy to root directory"
+            raise ValueError(msg)
+
+        validate_path(dst_normalized)
+
+        src_resolved = self._resolve_path(src)
+        dst_resolved = self._resolve_path(dst)
+
+        if not src_resolved.exists():
+            raise FileNotFoundError(src)
+
+        if src_resolved.is_dir():
+            msg = f"Cannot copy directory: {src}. Use glob + copy for recursive copies."
+            raise IsADirectoryError(msg)
+
+        if dst_resolved.exists() and not overwrite:
+            raise FileExistsError(f"Destination already exists: {dst}")
+
+        dst_resolved.parent.mkdir(parents=True, exist_ok=True)
+        _ = shutil.copy2(src_resolved, dst_resolved)
 
     # --- Snapshot Operations ---
 
@@ -668,9 +753,9 @@ class HostFilesystem:
         Raises:
             SnapshotRestoreError: If git reset fails (e.g., invalid commit).
         """
-        # Use git_dir from snapshot if available and we don't have one yet
-        if snapshot.git_dir is not None and self._git_dir is None:
-            self._git_dir = snapshot.git_dir
+        # Use backend_ref from snapshot if available and we don't have one yet
+        if snapshot.backend_ref is not None and self._git_dir is None:
+            self._git_dir = snapshot.backend_ref
         git_dir = self._ensure_git()
         restore_snapshot(self._root, git_dir, snapshot)
 

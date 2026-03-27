@@ -642,6 +642,133 @@ class FilesystemValidationSuite:
         assert result.content == "content with émojis 🎉"
 
     # -------------------------------------------------------------------------
+    # Rename Operation
+    # -------------------------------------------------------------------------
+
+    def test_rename_file(self, fs: Filesystem) -> None:
+        """rename() should move a file to a new path."""
+        fs.write("old.txt", "content")
+        fs.rename("old.txt", "new.txt")
+        assert not fs.exists("old.txt")
+        assert fs.read("new.txt").content == "content"
+
+    def test_rename_file_overwrite(self, fs: Filesystem) -> None:
+        """rename() with overwrite=True should replace destination."""
+        fs.write("src.txt", "new content")
+        fs.write("dst.txt", "old content")
+        fs.rename("src.txt", "dst.txt", overwrite=True)
+        assert not fs.exists("src.txt")
+        assert fs.read("dst.txt").content == "new content"
+
+    def test_rename_file_no_overwrite_fails(self, fs: Filesystem) -> None:
+        """rename() should fail if destination exists and overwrite is False."""
+        fs.write("src.txt", "content")
+        fs.write("dst.txt", "existing")
+        with pytest.raises(FileExistsError):
+            fs.rename("src.txt", "dst.txt")
+
+    def test_rename_missing_source_raises(self, fs: Filesystem) -> None:
+        """rename() should raise FileNotFoundError for missing source."""
+        with pytest.raises(FileNotFoundError):
+            fs.rename("missing.txt", "dst.txt")
+
+    def test_rename_creates_parent_dirs(self, fs: Filesystem) -> None:
+        """rename() should create parent directories for destination."""
+        fs.write("file.txt", "content")
+        fs.rename("file.txt", "a/b/file.txt")
+        assert fs.read("a/b/file.txt").content == "content"
+
+    def test_rename_to_existing_directory_raises(self, fs: Filesystem) -> None:
+        """rename() should raise IsADirectoryError if dst is a directory."""
+        fs.write("file.txt", "content")
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.rename("file.txt", "mydir")
+
+    def test_rename_root_raises(self, fs: Filesystem) -> None:
+        """rename() should raise PermissionError when renaming root."""
+        with pytest.raises(PermissionError):
+            fs.rename(".", "somewhere")
+
+    def test_rename_to_root_raises(self, fs: Filesystem) -> None:
+        """rename() should raise ValueError when destination is root."""
+        fs.write("file.txt", "content")
+        with pytest.raises(ValueError):
+            fs.rename("file.txt", ".")
+
+    def test_rename_directory(self, fs: Filesystem) -> None:
+        """rename() should move a directory and its contents."""
+        fs.mkdir("src/sub", parents=True)
+        fs.write("src/sub/file.txt", "content")
+        fs.rename("src", "dst")
+        assert not fs.exists("src")
+        assert fs.read("dst/sub/file.txt").content == "content"
+
+    # -------------------------------------------------------------------------
+    # Copy Operation
+    # -------------------------------------------------------------------------
+
+    def test_copy_file(self, fs: Filesystem) -> None:
+        """copy() should duplicate a file."""
+        fs.write("src.txt", "content")
+        fs.copy("src.txt", "dst.txt")
+        assert fs.exists("src.txt")
+        assert fs.read("dst.txt").content == "content"
+
+    def test_copy_file_overwrite(self, fs: Filesystem) -> None:
+        """copy() with overwrite=True should replace destination."""
+        fs.write("src.txt", "new")
+        fs.write("dst.txt", "old")
+        fs.copy("src.txt", "dst.txt", overwrite=True)
+        assert fs.read("dst.txt").content == "new"
+
+    def test_copy_file_no_overwrite_fails(self, fs: Filesystem) -> None:
+        """copy() should fail if destination exists and overwrite is False."""
+        fs.write("src.txt", "content")
+        fs.write("dst.txt", "existing")
+        with pytest.raises(FileExistsError):
+            fs.copy("src.txt", "dst.txt")
+
+    def test_copy_missing_source_raises(self, fs: Filesystem) -> None:
+        """copy() should raise FileNotFoundError for missing source."""
+        with pytest.raises(FileNotFoundError):
+            fs.copy("missing.txt", "dst.txt")
+
+    def test_copy_directory_raises(self, fs: Filesystem) -> None:
+        """copy() should raise IsADirectoryError for directory source."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.copy("mydir", "mydir2")
+
+    def test_copy_creates_parent_dirs(self, fs: Filesystem) -> None:
+        """copy() should create parent directories for destination."""
+        fs.write("file.txt", "content")
+        fs.copy("file.txt", "a/b/copy.txt")
+        assert fs.read("a/b/copy.txt").content == "content"
+
+    def test_copy_to_root_raises(self, fs: Filesystem) -> None:
+        """copy() should raise ValueError when destination is root."""
+        fs.write("file.txt", "content")
+        with pytest.raises(ValueError):
+            fs.copy("file.txt", ".")
+
+    def test_copy_binary_content(self, fs: Filesystem) -> None:
+        """copy() should preserve binary content exactly."""
+        data = b"\xff\xfe\x00\x01\x80\x81"
+        fs.write_bytes("src.bin", data)
+        fs.copy("src.bin", "dst.bin")
+        assert fs.read_bytes("dst.bin").content == data
+
+    # -------------------------------------------------------------------------
+    # Close Operation
+    # -------------------------------------------------------------------------
+
+    def test_close_is_idempotent(self, fs: Filesystem) -> None:
+        """close() should be safe to call multiple times."""
+        fs.close()
+        fs.close()
+
+    # -------------------------------------------------------------------------
     # Streaming Read Operations (open_read)
     # -------------------------------------------------------------------------
 

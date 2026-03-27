@@ -343,6 +343,16 @@ class ReadOnlyFilesystemValidationSuite:
         with pytest.raises(PermissionError):
             fs_readonly.open_write("file.bin")
 
+    def test_rename_fails_on_readonly(self, fs_readonly: Filesystem) -> None:
+        """rename() should raise PermissionError on read-only filesystem."""
+        with pytest.raises(PermissionError):
+            fs_readonly.rename("a.txt", "b.txt")
+
+    def test_copy_fails_on_readonly(self, fs_readonly: Filesystem) -> None:
+        """copy() should raise PermissionError on read-only filesystem."""
+        with pytest.raises(PermissionError):
+            fs_readonly.copy("a.txt", "b.txt")
+
 
 class SnapshotableFilesystemValidationSuite:
     """Test suite for SnapshotableFilesystem protocol compliance.
