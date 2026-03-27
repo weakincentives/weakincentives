@@ -316,14 +316,15 @@ override if needed.
 
 ## Adapter Support
 
-All three WINK adapters support skill installation. Each uses an ephemeral home
-directory to make skills discoverable by the subprocess:
+Three of the four WINK adapters support skill installation. Each uses an
+ephemeral home directory to make skills discoverable by the subprocess:
 
 | Adapter | Discovery Path | Auth Preservation |
 |---------|---------------|-------------------|
 | Claude Agent SDK | `$HOME/.claude/skills/` | `settings.json` in ephemeral home |
 | Codex App Server | `$HOME/.agents/skills/` | `CODEX_HOME` env var points to real `~/.codex` |
 | OpenCode ACP | `$HOME/.claude/skills/` | Copies `~/.local/share/opencode/` and `~/.aws/` |
+| Gemini CLI ACP | Not supported | Gemini CLI has no known skill discovery path |
 
 Skills are collected from `RenderedPrompt.skills` during prompt rendering and
 mounted automatically by the adapter before spawning the agent subprocess. No

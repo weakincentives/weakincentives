@@ -80,9 +80,51 @@ The adapter provides:
 covering workspace sections, isolation configuration, tool bridging, skill
 mounting, and production patterns.
 
+## Gemini CLI ACP Adapter
+
+**Install:** `pip install "weakincentives[acp]"` (same as OpenCode ACP)
+
+The Gemini CLI adapter runs agents via Google's `gemini --experimental-acp`
+command, using the same ACP protocol as OpenCode. It is a thin subclass of
+`ACPAdapter` with Gemini-specific defaults and CLI flag injection.
+
+```python nocheck
+from weakincentives.adapters.gemini_acp import (
+    GeminiACPAdapter,
+    GeminiACPAdapterConfig,
+    GeminiACPClientConfig,
+)
+
+adapter = GeminiACPAdapter(
+    adapter_config=GeminiACPAdapterConfig(
+        model_id="gemini-2.5-flash",  # default
+    ),
+    client_config=GeminiACPClientConfig(
+        cwd="/path/to/workspace",
+    ),
+)
+response = adapter.evaluate(prompt, session=session)
+```
+
+**Gemini-specific behavior:**
+
+- **Default model**: `gemini-2.5-flash` with thought chunk emission enabled
+- **Model selection**: Model is passed as `--model` CLI flag (Gemini does not
+  support `session/setModel`)
+- **Empty-response detection**: Raises `PromptEvaluationError` when zero
+  `AgentMessageChunk` objects are received (indicates invalid model or config)
+- **Sandbox caveat**: `--sandbox` is incompatible with `--experimental-acp`
+  in current Gemini CLI versions—the sandbox re-launches `gemini` via
+  `sandbox-exec`, breaking ACP's stdio pipe
+
+**Note**: Skill mounting is not yet supported for Gemini CLI (no known skill
+discovery path comparable to `$HOME/.claude/skills/`).
+
+See [Gemini ACP Adapter spec](../specs/GEMINI_ACP_ADAPTER.md) for full details.
+
 ## Guardrails
 
-All three adapters support the full guardrails stack:
+All WINK adapters support the full guardrails stack:
 
 - **Tool policies**: Gate tool invocations via session-scoped state
 - **Feedback providers**: Inject advisory guidance after tool calls
