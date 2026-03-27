@@ -182,7 +182,7 @@ class Constructable:
 
         current = {name: getattr(self, name) for name in create_params}
         current.update(changes)
-        return cls.create(**current)  # type: ignore[return-value]
+        return cls.create(**current)  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
 
 
 @dataclass_transform(field_specifiers=(field,))
