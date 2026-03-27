@@ -289,30 +289,27 @@ def test_agent_loop_shutdown_timeout_returns_false() -> None:
         InMemoryMailbox(name="requests")
     )
 
-    try:
-        # Very slow adapter
-        adapter = _MockAdapter(delay=5.0)
-        loop = _TestLoop(adapter=adapter, requests=requests)
+    # Very slow adapter
+    adapter = _MockAdapter(delay=5.0)
+    loop = _TestLoop(adapter=adapter, requests=requests)
 
-        requests.send(AgentLoopRequest(request=_Request(message="slow")))
+    requests.send(AgentLoopRequest(request=_Request(message="slow")))
 
-        thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
-        )
-        thread.start()
+    thread = threading.Thread(
+        target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
+    )
+    thread.start()
 
-        time.sleep(0.1)
+    time.sleep(0.1)
 
-        # Short timeout - should return False
-        result = loop.shutdown(timeout=0.1)
+    # Short timeout - should return False
+    result = loop.shutdown(timeout=0.1)
 
-        # Clean up - let the thread finish
-        requests.close()
-        thread.join(timeout=6.0)
+    # Clean up - let the thread finish
+    requests.close()
+    thread.join(timeout=6.0)
 
-        assert result is False
-    finally:
-        pass
+    assert result is False
 
 
 def test_agent_loop_can_restart_after_shutdown() -> None:

@@ -302,7 +302,7 @@ def _build_pre_init_wrapper(
     all_field_names = init_field_names + list(non_init_field_names)
     # Get the underlying function from the classmethod to allow calling with
     # the actual subclass type, not the class where __pre_init__ was defined.
-    pre_init_func = pre_init.__func__  # type: ignore[union-attr]
+    pre_init_func = pre_init.__func__  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
 
     def wrapper(self: object, *args: object, **kwargs: object) -> None:
         actual_cls = type(self)
@@ -425,7 +425,7 @@ def _build_map_helper(cls: type[Any]) -> Callable[..., _SupportsUpdate]:
         # Only expose init fields to transform (non-init fields are derived)
         current = {
             f.name: getattr(self, f.name)
-            for f in fields(self)  # type: ignore[arg-type]
+            for f in fields(self)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             if f.init
         }
         updates = transform(current)
@@ -464,7 +464,7 @@ def _apply_changes(
     instance: _SupportsUpdate, changes: Mapping[str, object]
 ) -> _SupportsUpdate:
     cls = type(instance)
-    field_defs = fields(instance)  # type: ignore[arg-type]
+    field_defs = fields(instance)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
     init_fields = [f for f in field_defs if f.init]
     non_init_fields = [f for f in field_defs if not f.init]
     init_field_names = {f.name for f in init_fields}

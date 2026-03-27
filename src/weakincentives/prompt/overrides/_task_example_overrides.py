@@ -62,7 +62,7 @@ def _parse_task_example_action(
         raise PromptOverridesError(
             f"Task example override action must be 'modify', 'remove', or 'append', got {action!r}."
         )
-    return action  # type: ignore[return-value]
+    return action  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
 
 def _parse_steps_to_remove(item_map: Mapping[str, JSONValue]) -> tuple[int, ...]:

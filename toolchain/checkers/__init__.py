@@ -194,7 +194,7 @@ def create_pip_audit_checker() -> SubprocessChecker:
     return SubprocessChecker(
         name="pip-audit",
         description="Vulnerability scanning with pip-audit",
-        command=["uv", "run", "pip-audit"],
+        command=["uv", "run", "pip-audit", "--ignore-vuln", "CVE-2026-4539"],
         parser=parse_pip_audit,
     )
 

@@ -43,18 +43,18 @@ skills = [
     "pyyaml>=6.0.3",
 ]
 redis = [
-    "redis>=7.3.0",
+    "redis>=7.4.0",
 ]
 claude-agent-sdk = [
-    "claude-agent-sdk>=0.1.48,<0.1.49",
+    "claude-agent-sdk>=0.1.50",
 ]
 acp = [
-    "agent-client-protocol>=0.8.1",
+    "agent-client-protocol>=0.9.0",
     "mcp>=1.26.0",
     "uvicorn>=0.42.0",
 ]
 wink = [
-    "fastapi>=0.135.1",
+    "fastapi>=0.135.2",
     "markdown-it-py[linkify]>=4.0.0",
     "uvicorn>=0.42.0",
 ]
@@ -90,16 +90,16 @@ dev = [
     "deptry>=0.25.1",
     "pytest>=9.0.2",
     "pytest-timeout>=2.4.0",
-    "pytest-cov>=7.0.0",
+    "pytest-cov>=7.1.0",
     "pytest-randomly>=4.0.1",
     "pytest-rerunfailures>=16.1",
     "pip-audit>=2.10.0",
-    "ruff>=0.15.7",
+    "ruff>=0.15.8",
     "pyright>=1.1.408",
-    "ty>=0.0.24",
+    "ty>=0.0.26",
     "mdformat>=1.0.0",
     "hypothesis>=6.151.9",
-    "vulture>=2.15",
+    "vulture>=2.16",
     "pytest-testmon>=2.2.0",
 ]
 

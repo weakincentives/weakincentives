@@ -124,7 +124,7 @@ def _parse_section_visibility(
         raise PromptOverridesError(
             f"Section visibility must be 'full' or 'summary', got {visibility!r}."
         )
-    return visibility  # type: ignore[return-value]
+    return visibility  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
 
 def _load_section_override_entry(

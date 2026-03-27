@@ -112,7 +112,7 @@ def _coerce[T](value: object, target: type[T]) -> T:
             raise TypeError(msg)
         return value
     if isinstance(value, Mapping):
-        data: Mapping[str, object] = value  # type: ignore[assignment]
+        data: Mapping[str, object] = value  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         return parse(target, data)
     msg = f"cannot coerce {type(value).__name__} to {target.__name__}"
     raise TypeError(msg)

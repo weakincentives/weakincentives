@@ -241,7 +241,7 @@ def slice_contains[T](
     ) -> Score:
         # Use the slice accessor's where method which returns an iterator
         # Type ignore needed: slice_type is generic T, session indexing is dynamic
-        accessor = session[slice_type]  # type: ignore[index]
+        accessor = session[slice_type]  # type: ignore[index]  # ty: ignore[invalid-argument-type]
         items: tuple[object, ...] = tuple(accessor.where(predicate))  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType,reportUnknownVariableType]
         passed = len(items) >= min_count
         return Score(
