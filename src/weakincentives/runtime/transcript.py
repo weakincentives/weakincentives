@@ -28,7 +28,7 @@ import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from ..clock import SYSTEM_CLOCK
 from .logging import StructuredLogger, get_logger
@@ -234,7 +234,7 @@ def reconstruct_transcript(
         ctx_raw = record.get("context")
         if not isinstance(ctx_raw, dict):
             continue
-        ctx: dict[str, object] = ctx_raw  # type: ignore[assignment]
+        ctx = cast("dict[str, object]", ctx_raw)
         try:
             entry = _parse_transcript_record(ctx)
             entries.append(entry)
@@ -263,7 +263,7 @@ def _parse_transcript_record(ctx: dict[str, object]) -> TranscriptEntry:
 
     detail_raw = ctx.get("detail")
     if isinstance(detail_raw, dict):
-        detail_typed: dict[str, object] = detail_raw  # type: ignore[assignment]
+        detail_typed = cast("dict[str, object]", detail_raw)
         detail: dict[str, Any] = {str(k): v for k, v in detail_typed.items()}
     else:
         detail = {}

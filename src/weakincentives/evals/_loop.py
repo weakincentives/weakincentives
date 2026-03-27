@@ -247,9 +247,9 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         # Invoke evaluator with session if session-aware
         # Type ignore needed: is_session_aware narrows the type at runtime
         if is_session_aware(self._evaluator):
-            score = self._evaluator(response.output, sample.expected, session)  # type: ignore[call-arg]
+            score = self._evaluator(response.output, sample.expected, session)  # type: ignore[call-arg]  # ty: ignore[too-many-positional-arguments]
         else:
-            score = self._evaluator(response.output, sample.expected)  # type: ignore[call-arg]
+            score = self._evaluator(response.output, sample.expected)  # type: ignore[call-arg]  # ty: ignore[missing-argument]
 
         return EvalResult(
             sample_id=sample.id,
@@ -377,9 +377,9 @@ class EvalLoop[InputT, OutputT, ExpectedT](
             )
 
         if is_session_aware(self._evaluator):
-            score = self._evaluator(output, expected, session)  # type: ignore[call-arg]
+            score = self._evaluator(output, expected, session)  # type: ignore[call-arg]  # ty: ignore[invalid-argument-type,too-many-positional-arguments]
         else:
-            score = self._evaluator(output, expected)  # type: ignore[call-arg]
+            score = self._evaluator(output, expected)  # type: ignore[call-arg]  # ty: ignore[missing-argument]
         return score, None  # pyright: ignore[reportUnknownVariableType]
 
     @staticmethod

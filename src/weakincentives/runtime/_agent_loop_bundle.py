@@ -446,7 +446,7 @@ def _execute_with_bundled_settings(  # noqa: PLR0913
         resources=request_event.resources,
     )
 
-    with writer.capture_logs():  # type: ignore[union-attr]
+    with writer.capture_logs():  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
         response = loop._evaluate_with_retries(
             prompt=prompt,
             session=session,

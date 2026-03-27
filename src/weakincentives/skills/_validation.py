@@ -54,7 +54,7 @@ def _load_yaml_module() -> _YAMLModule:
         module = import_module("yaml")
     except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
         raise RuntimeError(_ERROR_MESSAGE) from exc
-    return module  # type: ignore[return-value]
+    return module  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
 
 __all__ = [
@@ -197,7 +197,7 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
 
     # Type-checked: we've verified it's a dict
     # pyright doesn't know yaml.safe_load's return type, but we validate it's a dict
-    frontmatter: dict[str, Any] = parsed  # type: ignore[assignment]
+    frontmatter: dict[str, Any] = parsed  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
     return frontmatter
 
 

@@ -246,19 +246,16 @@ def test_dlq_consumer_beats_heartbeat() -> None:
 def test_dlq_consumer_exits_when_mailbox_closed() -> None:
     """DLQConsumer exits when mailbox is closed."""
     dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
-    try:
-        consumer = DLQConsumer(mailbox=dlq_mailbox, handler=lambda _: None)
+    consumer = DLQConsumer(mailbox=dlq_mailbox, handler=lambda _: None)
 
-        # Close mailbox
-        dlq_mailbox.close()
+    # Close mailbox
+    dlq_mailbox.close()
 
-        # Run should exit immediately
-        consumer.run(max_iterations=10, wait_time_seconds=0)
+    # Run should exit immediately
+    consumer.run(max_iterations=10, wait_time_seconds=0)
 
-        # Should not raise, should just exit
-        assert not consumer.running
-    finally:
-        pass  # Mailbox already closed
+    # Should not raise, should just exit
+    assert not consumer.running
 
 
 def test_dlq_consumer_nacks_on_shutdown_during_messages() -> None:

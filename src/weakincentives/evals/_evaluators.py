@@ -190,7 +190,7 @@ def adapt[O, E](evaluator: Evaluator) -> SessionEvaluator:
         _ = session  # Unused - adapts standard evaluator to session-aware signature
         return evaluator(output, expected)
 
-    return evaluate  # type: ignore[return-value]
+    return evaluate  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
 
 def all_of[O, E](
@@ -220,8 +220,8 @@ def all_of[O, E](
     # Adapt standard evaluators to session-aware signature at runtime
     # Type ignore needed: is_session_aware narrows the type at runtime but
     # the static type checker cannot verify this transformation
-    adapted: list[SessionEvaluator] = [  # type: ignore[assignment]
-        e if is_session_aware(e) else adapt(e)  # type: ignore[arg-type]
+    adapted: list[SessionEvaluator] = [  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        e if is_session_aware(e) else adapt(e)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         for e in evaluators
     ]
 
@@ -234,7 +234,7 @@ def all_of[O, E](
         reasons = [s.reason for s in scores if s.reason]
         return Score(value=value, passed=passed, reason="; ".join(reasons))
 
-    return evaluate  # type: ignore[return-value]
+    return evaluate  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
 
 def any_of[O, E](
@@ -264,8 +264,8 @@ def any_of[O, E](
     # Adapt standard evaluators to session-aware signature at runtime
     # Type ignore needed: is_session_aware narrows the type at runtime but
     # the static type checker cannot verify this transformation
-    adapted: list[SessionEvaluator] = [  # type: ignore[assignment]
-        e if is_session_aware(e) else adapt(e)  # type: ignore[arg-type]
+    adapted: list[SessionEvaluator] = [  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        e if is_session_aware(e) else adapt(e)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         for e in evaluators
     ]
 
@@ -278,7 +278,7 @@ def any_of[O, E](
         reasons = [s.reason for s in scores if s.reason]
         return Score(value=value, passed=passed, reason="; ".join(reasons))
 
-    return evaluate  # type: ignore[return-value]
+    return evaluate  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
 
 __all__ = [
