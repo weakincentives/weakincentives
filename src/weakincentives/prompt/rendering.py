@@ -15,11 +15,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, MutableMapping
-from dataclasses import field, is_dataclass, replace
+from dataclasses import field, is_dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, cast, override
 
-from ..dataclasses import FrozenDataclass, allow_construction
+from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import (
@@ -400,8 +400,7 @@ class PromptRenderer[OutputT]:
                     override.description is not None
                     and override.description != tool.description
                 ):
-                    with allow_construction():
-                        patched_tool = replace(tool, description=override.description)
+                    patched_tool = tool.replace(description=override.description)
                 if override.param_descriptions:
                     field_description_patches[tool.name] = dict(
                         override.param_descriptions

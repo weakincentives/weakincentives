@@ -294,12 +294,16 @@ def test_tool_accepts_annotated_param_and_return() -> None:
     assert tool.handler is handler
 
 
-def test_tool_replace_raises_not_implemented() -> None:
-    """Tool.replace() raises NotImplementedError."""
+def test_tool_replace_description() -> None:
+    """Tool.replace() delegates to create() and re-validates."""
     tool = Tool[ExampleParams, ExampleResult].create(
         name="test_tool",
-        description="A test tool.",
+        description="Original description.",
         handler=_example_handler,
     )
-    with pytest.raises(NotImplementedError, match=r"Tool\.replace"):
-        tool.replace(name="new_name")
+    replaced = tool.replace(description="New description.")
+    assert replaced.description == "New description."
+    # Derived fields are preserved through create()
+    assert replaced.params_type is ExampleParams
+    assert replaced.name == "test_tool"
+    assert replaced.handler is tool.handler

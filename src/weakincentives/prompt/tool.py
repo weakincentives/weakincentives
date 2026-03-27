@@ -24,13 +24,11 @@ from typing import (
     Final,
     Literal,
     Protocol,
-    Self,
     TypeVar,
     cast,
     get_args,
     get_origin,
     get_type_hints,
-    override,
 )
 
 from ..budget import BudgetTracker
@@ -266,13 +264,6 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
                 _result_annotation=raw_result_annotation,
                 accepts_overrides=accepts_overrides,
             )
-
-    @override
-    def replace(self, **changes: object) -> Self:
-        """Tool does not support replace()."""
-        raise NotImplementedError(
-            "Tool.replace() is not supported. Use Tool.create() instead."
-        )
 
     @classmethod
     def _resolve_type_arguments(
