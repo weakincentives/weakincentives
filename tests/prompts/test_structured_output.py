@@ -79,17 +79,16 @@ def test_template_structured_output_property() -> None:
     template = _build_summary_prompt()
     prompt = Prompt(template).bind(Guidance(topic="Ada"))
 
-    assert template.structured_output is not None
-    assert template.structured_output.dataclass_type is Summary
     assert prompt.structured_output is not None
     assert prompt.structured_output.dataclass_type is Summary
 
 
 def test_prompt_specialization_requires_dataclass() -> None:
+    template = PromptTemplate[str].create(
+        ns="tests.prompts", key="invalid-output", sections=[]
+    )
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate[str].create(
-            ns="tests.prompts", key="invalid-output", sections=[]
-        )
+        _ = Prompt(template).structured_output
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is str
@@ -100,10 +99,11 @@ def test_prompt_resolve_output_spec_requires_dataclass_type() -> None:
         _output_dataclass_candidate = "oops"
         _output_container_spec = "object"
 
+    template = InvalidOutputPrompt.create(
+        ns="tests.prompts", key="invalid-output", sections=[]
+    )
     with pytest.raises(PromptValidationError) as exc:
-        InvalidOutputPrompt.create(
-            ns="tests.prompts", key="invalid-output", sections=[]
-        )
+        _ = Prompt(template).structured_output
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is str

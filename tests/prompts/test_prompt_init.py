@@ -75,7 +75,8 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         sections=[root],
     )
 
-    sections = cast(tuple[SectionNode[Any], ...], prompt.sections)
+    bound = Prompt(prompt)
+    sections = cast(tuple[SectionNode[Any], ...], bound.sections)
     titles = [node.section.title for node in sections]
     depths = [node.depth for node in sections]
     paths = [node.path for node in sections]
@@ -87,7 +88,7 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         ("root", "child"),
         ("root", "sibling"),
     ]
-    assert prompt.params_types == {RootParams, ChildParams, SiblingParams}
+    assert bound.params_types == {RootParams, ChildParams, SiblingParams}
     assert prompt.name == "demo"
 
 
@@ -162,7 +163,7 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
 
     assert "First: alpha" in rendered.text
     assert "Second: beta" in rendered.text
-    assert template.params_types == {DuplicateParams}
+    assert Prompt(template).params_types == {DuplicateParams}
 
 
 def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
@@ -198,7 +199,7 @@ def test_prompt_exposes_placeholders_from_registry_snapshot() -> None:
         ns="tests.prompts", key="placeholder", sections=[section]
     )
 
-    assert prompt.placeholders == {("root",): frozenset({"title"})}
+    assert Prompt(prompt).placeholders == {("root",): frozenset({"title"})}
 
 
 def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_default() -> (
@@ -239,10 +240,12 @@ def test_prompt_validates_text_section_placeholders() -> None:
         key="invalid",
     )
 
+    template = PromptTemplate.create(
+        ns="tests.prompts", key="invalid-placeholder", sections=[section]
+    )
+
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate.create(
-            ns="tests.prompts", key="invalid-placeholder", sections=[section]
-        )
+        Prompt(template).sections  # noqa: B018
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.placeholder == "oops"
@@ -281,7 +284,7 @@ def test_prompt_template_is_immutable() -> None:
     with pytest.raises(AttributeError):
         prompt.ns = "changed"
     with pytest.raises(AttributeError):
-        prompt.placeholders = {}  # type: ignore[misc]
+        prompt.sections = ()  # type: ignore[misc]
 
 
 def test_prompt_descriptor_cached_on_first_access(
@@ -296,7 +299,8 @@ def test_prompt_descriptor_cached_on_first_access(
     )
 
     # First access triggers lazy creation and caches the descriptor
-    first_descriptor = template.descriptor
+    prompt = Prompt(template)
+    first_descriptor = prompt.descriptor
     assert first_descriptor.ns == "tests.prompts"
 
     def _fail(
@@ -307,11 +311,10 @@ def test_prompt_descriptor_cached_on_first_access(
     monkeypatch.setattr(PromptDescriptor, "from_prompt", classmethod(_fail))
 
     # Subsequent accesses should use the cached descriptor
-    prompt = Prompt(template).bind(RootParams(title="hello"))
+    prompt = prompt.bind(RootParams(title="hello"))
     rendered = prompt.render()
 
-    assert template.descriptor is first_descriptor
-    assert prompt.descriptor is template.descriptor
+    assert prompt.descriptor is first_descriptor
     assert "Root: hello" in rendered.text
 
 
@@ -488,8 +491,9 @@ class TestPromptResourceLifecycle:
             assert resolved is created_instance
 
 
-def test_prompt_template_replace_raises_not_implemented() -> None:
-    """PromptTemplate.replace() raises NotImplementedError."""
+def test_prompt_template_replace_works() -> None:
+    """PromptTemplate.replace() works via base Constructable.replace()."""
     template = PromptTemplate.create(ns="tests", key="replace-test")
-    with pytest.raises(NotImplementedError, match=r"PromptTemplate\.replace"):
-        template.replace(ns="other")
+    replaced = template.replace(ns="other")
+    assert replaced.ns == "other"
+    assert replaced.key == "replace-test"

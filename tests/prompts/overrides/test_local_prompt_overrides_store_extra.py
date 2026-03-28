@@ -19,7 +19,7 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, PromptTemplate, Tool
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate, Tool
 from weakincentives.prompt.overrides import (
     HexDigest,
     LocalPromptOverridesStore,
@@ -104,20 +104,20 @@ VALID_DIGEST = HexDigest("a" * 64)
 
 def test_seed_errors_on_corrupt_file(tmp_path: Path) -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
-    store.seed(prompt)
+    store.seed(Prompt(prompt))
     override_path = _override_path(tmp_path, descriptor)
     override_path.write_text("not-json", encoding="utf-8")
 
     with pytest.raises(PromptOverridesError):
-        store.seed(prompt)
+        store.seed(Prompt(prompt))
 
 
 def test_seed_errors_on_stale_override(tmp_path: Path) -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     override_path = _override_path(tmp_path, descriptor)
@@ -139,7 +139,7 @@ def test_seed_errors_on_stale_override(tmp_path: Path) -> None:
     override_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(PromptOverridesError):
-        store.seed(prompt)
+        store.seed(Prompt(prompt))
 
 
 def test_root_detection_git_command_success(
@@ -156,7 +156,7 @@ def test_root_detection_git_command_success(
     monkeypatch.chdir(nested)
 
     store = LocalPromptOverridesStore(_git_toplevel_fn=lambda: repo_root)
-    override = store.seed(prompt)
+    override = store.seed(Prompt(prompt))
 
     assert override.sections
     assert (repo_root / ".weakincentives").exists()
@@ -169,7 +169,7 @@ def test_root_detection_without_git_raises(
     nested.mkdir(parents=True)
 
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
     monkeypatch.chdir(nested)
 
@@ -193,7 +193,7 @@ def test_git_toplevel_empty_output_falls_back(
     monkeypatch.chdir(nested)
 
     store = LocalPromptOverridesStore(_git_toplevel_fn=lambda: None)
-    store.seed(prompt)
+    store.seed(Prompt(prompt))
 
     assert (repo_root / ".weakincentives" / "prompts").exists()
 
@@ -219,7 +219,7 @@ def test_identifier_validation_errors(tmp_path: Path) -> None:
 
 def test_resolve_header_validation_errors(tmp_path: Path) -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     section = descriptor.sections[0]
@@ -252,7 +252,7 @@ def test_resolve_header_validation_errors(tmp_path: Path) -> None:
 
 def test_seed_sections_missing_section_raises(tmp_path: Path) -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
     missing_section_descriptor = replace(
         descriptor,
@@ -266,33 +266,31 @@ def test_seed_sections_missing_section_raises(tmp_path: Path) -> None:
     )
 
     with pytest.raises(PromptOverridesError):
-        seed_sections(prompt, missing_section_descriptor)
+        seed_sections(Prompt(prompt), missing_section_descriptor)
 
 
 def test_seed_sections_missing_template_raises(tmp_path: Path) -> None:
     _ = tmp_path
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
-    for node in prompt.sections:
-        section = cast(Any, node.section)  # type: ignore[union-attr]
-        section.original_body_template = lambda: None
+    for section in prompt.sections:
+        cast(Any, section).original_body_template = lambda: None
 
     with pytest.raises(PromptOverridesError):
-        seed_sections(prompt, descriptor)
+        seed_sections(Prompt(prompt), descriptor)
 
 
 def test_seed_tools_missing_tool_raises(tmp_path: Path) -> None:
     _ = tmp_path
     prompt = _build_prompt_with_tool()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
-    for node in prompt.sections:
-        section = cast(Any, node.section)  # type: ignore[union-attr]
-        section._tools = ()
+    for section in prompt.sections:
+        cast(Any, section)._tools = ()
 
     with pytest.raises(PromptOverridesError):
-        seed_tools(prompt, descriptor)
+        seed_tools(Prompt(prompt), descriptor)
 
 
 def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
@@ -322,10 +320,11 @@ def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
             )
         ],
     )
-    descriptor = PromptDescriptor.from_prompt(prompt)
-    object.__setattr__(tool, "params_type", str)
+    bound = Prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(bound)
+    type(tool)._specialized_params_type = str  # type: ignore[attr-defined]
 
-    overrides = seed_tools(prompt, descriptor)
+    overrides = seed_tools(bound, descriptor)
 
     assert overrides[tool.name].param_descriptions == {}
 
@@ -361,9 +360,9 @@ def test_collect_param_descriptions_with_partial_metadata(tmp_path: Path) -> Non
             )
         ],
     )
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
-    overrides = seed_tools(prompt, descriptor)
+    overrides = seed_tools(Prompt(prompt), descriptor)
 
     # Only the field with a non-empty description should be included
     assert overrides[tool.name].param_descriptions == {"with_desc": "Has a description"}
@@ -371,7 +370,7 @@ def test_collect_param_descriptions_with_partial_metadata(tmp_path: Path) -> Non
 
 def test_store_section_override_hash_mismatch(tmp_path: Path) -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     section = descriptor.sections[0]
@@ -388,7 +387,7 @@ def test_store_section_override_hash_mismatch(tmp_path: Path) -> None:
 
 def test_store_tool_override_hash_mismatch(tmp_path: Path) -> None:
     prompt = _build_prompt_with_tool()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     tool = descriptor.tools[0]
@@ -406,7 +405,7 @@ def test_store_tool_override_hash_mismatch(tmp_path: Path) -> None:
 
 def test_store_task_example_override(tmp_path: Path) -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     task_override = TaskExampleOverride(
@@ -424,7 +423,7 @@ def test_store_task_example_override(tmp_path: Path) -> None:
 
 def test_store_task_example_override_updates_existing(tmp_path: Path) -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     task_override1 = TaskExampleOverride(
@@ -453,7 +452,7 @@ def test_store_task_example_override_updates_existing(tmp_path: Path) -> None:
 
 def test_store_task_example_override_appends_different_index(tmp_path: Path) -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     task_override1 = TaskExampleOverride(
@@ -479,7 +478,7 @@ def test_store_task_example_override_appends_different_index(tmp_path: Path) -> 
 def test_upsert_and_resolve_section_with_summary_and_visibility(tmp_path: Path) -> None:
     """Test that summary and visibility fields are persisted and resolved."""
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     section = descriptor.sections[0]
@@ -522,7 +521,7 @@ def test_upsert_and_resolve_section_with_summary_and_visibility(tmp_path: Path) 
 def test_resolve_section_without_summary_and_visibility(tmp_path: Path) -> None:
     """Test that sections without summary/visibility default to None."""
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     section = descriptor.sections[0]
@@ -552,7 +551,7 @@ def test_resolve_section_without_summary_and_visibility(tmp_path: Path) -> None:
 def test_load_sections_invalid_summary_raises(tmp_path: Path) -> None:
     """Test that non-string summary values raise an error."""
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     section = descriptor.sections[0]
     section_key = "/".join(section.path)
 
@@ -572,7 +571,7 @@ def test_load_sections_invalid_summary_raises(tmp_path: Path) -> None:
 def test_load_sections_invalid_visibility_raises(tmp_path: Path) -> None:
     """Test that invalid visibility values raise an error."""
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     section = descriptor.sections[0]
     section_key = "/".join(section.path)
 
@@ -594,7 +593,7 @@ def test_load_sections_invalid_visibility_raises(tmp_path: Path) -> None:
 def test_store_section_with_summary_and_visibility(tmp_path: Path) -> None:
     """Test that store() preserves summary and visibility fields."""
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     section = descriptor.sections[0]
@@ -616,7 +615,7 @@ def test_store_section_with_summary_and_visibility(tmp_path: Path) -> None:
 def test_store_tool_override_success(tmp_path: Path) -> None:
     """Test successful tool override storage via store()."""
     prompt = _build_prompt_with_tool()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     tool = descriptor.tools[0]
@@ -636,7 +635,7 @@ def test_store_tool_override_success(tmp_path: Path) -> None:
 def test_store_tool_override_unknown_tool(tmp_path: Path) -> None:
     """Test that store() raises error for unknown tool names."""
     prompt = _build_prompt_with_tool()  # Has tools, but we'll look for a different one
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     override = ToolOverride(
@@ -655,7 +654,7 @@ def test_store_tool_override_unknown_tool(tmp_path: Path) -> None:
 def test_store_with_malformed_existing_json(tmp_path: Path) -> None:
     """Test store() raises error when existing file contains malformed JSON."""
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     # Create malformed JSON file

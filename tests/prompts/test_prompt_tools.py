@@ -176,12 +176,13 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
         default_params=SecondaryToggleParams(),
     )
 
+    template = PromptTemplate.create(
+        ns="tests.prompts",
+        key="tools-duplicate",
+        sections=[first_section, second_section],
+    )
     with pytest.raises(PromptValidationError) as error_info:
-        PromptTemplate.create(
-            ns="tests.prompts",
-            key="tools-duplicate",
-            sections=[first_section, second_section],
-        )
+        _ = Prompt(template).sections
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("second-tools",)
@@ -246,12 +247,13 @@ class _InvalidToolSection(Section[GuidanceParams]):
 def test_prompt_tools_requires_tool_instances() -> None:
     invalid_section = _InvalidToolSection(title="Invalid", key="invalid")
 
+    template = PromptTemplate.create(
+        ns="tests.prompts",
+        key="tools-invalid-instance",
+        sections=[invalid_section],
+    )
     with pytest.raises(PromptValidationError) as error_info:
-        PromptTemplate.create(
-            ns="tests.prompts",
-            key="tools-invalid-instance",
-            sections=[invalid_section],
-        )
+        _ = Prompt(template).sections
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("invalid",)
@@ -260,7 +262,8 @@ def test_prompt_tools_requires_tool_instances() -> None:
 
 def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     tool = _build_primary_tool()
-    object.__setattr__(tool, "params_type", str)
+    # params_type is now a class-level property; override at class level
+    type(tool)._specialized_params_type = str
 
     section = MarkdownSection[PrimarySectionParams](
         title="Primary",
@@ -270,16 +273,21 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
         default_params=PrimarySectionParams(),
     )
 
-    with pytest.raises(PromptValidationError) as error_info:
-        PromptTemplate.create(
-            ns="tests.prompts",
-            key="tools-bad-params-type",
-            sections=[section],
-        )
+    template = PromptTemplate.create(
+        ns="tests.prompts",
+        key="tools-bad-params-type",
+        sections=[section],
+    )
+    try:
+        with pytest.raises(PromptValidationError) as error_info:
+            _ = Prompt(template).sections
 
-    error = cast(PromptValidationError, error_info.value)
-    assert error.section_path == ("primary",)
-    assert error.dataclass_type is str
+        error = cast(PromptValidationError, error_info.value)
+        assert error.section_path == ("primary",)
+        assert error.dataclass_type is str
+    finally:
+        # Restore to avoid polluting other tests
+        type(tool)._specialized_params_type = PrimaryToolParams
 
 
 @dataclass(frozen=True)

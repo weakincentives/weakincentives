@@ -20,11 +20,9 @@ from typing import (
     Any,
     ClassVar,
     Literal,
-    Self,
     cast,
     get_args,
     get_origin,
-    override,
 )
 
 from ..dataclasses import Constructable, FrozenDataclass, allow_construction
@@ -96,11 +94,11 @@ def _resolve_output_spec(
 
 @FrozenDataclass(slots=False)
 class PromptTemplate[OutputT](Constructable):
-    """Coordinate prompt sections and their parameter bindings.
+    """Immutable definition of a prompt's structure.
 
-    PromptTemplate is an immutable dataclass that coordinates prompt sections
-    and their parameter bindings.  Construction happens via ``create()``, which
-    normalizes inputs and derives internal state.
+    PromptTemplate stores the declared sections, policies, and metadata.
+    All derived state (registry snapshot, structured output config) is
+    computed by :class:`Prompt` at bind time.
 
     Resources can be declared at the template level and will be combined with
     resources contributed by individual sections.
@@ -109,16 +107,12 @@ class PromptTemplate[OutputT](Constructable):
     ns: str
     key: str
     name: str | None = None
-    sections: tuple[SectionNode[SupportsDataclass], ...] = ()
+    sections: tuple[Section[SupportsDataclass], ...] = ()
     policies: tuple[ToolPolicy, ...] = ()
     feedback_providers: tuple[FeedbackProviderConfig, ...] = ()
     task_completion_checker: TaskCompletionChecker | None = None
     allow_extra_keys: bool = False
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
-    _snapshot: RegistrySnapshot | None = field(default=None)
-    _structured_output: StructuredOutputConfig[SupportsDataclass] | None = field(
-        default=None
-    )
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -152,8 +146,7 @@ class PromptTemplate[OutputT](Constructable):
         ns: str,
         key: str,
         name: str | None = None,
-        sections: Sequence[Section[SupportsDataclass]]
-        | tuple[SectionNode[SupportsDataclass], ...] = (),
+        sections: Sequence[Section[SupportsDataclass]] = (),
         policies: Sequence[ToolPolicy] = (),
         feedback_providers: Sequence[FeedbackProviderConfig] = (),
         task_completion_checker: TaskCompletionChecker | None = None,
@@ -170,99 +163,26 @@ class PromptTemplate[OutputT](Constructable):
         except ValueError as exc:
             raise PromptValidationError(str(exc)) from exc
 
-        sections_input = cast(Sequence[Section[SupportsDataclass]], sections)
-        sections_tuple = tuple(sections_input)
-        registry = PromptRegistry()
-        registry.register_sections(sections_tuple)
-
-        structured_output = _resolve_output_spec(cls, allow_extra_keys)
-        structured_output_type = (
-            structured_output.dataclass_type if structured_output is not None else None
-        )
-        snapshot = registry.snapshot(structured_output_type=structured_output_type)
-
         with allow_construction():
             return cls(
                 ns=stripped_ns,
                 key=stripped_key,
                 name=name,
-                sections=snapshot.sections,
+                sections=tuple(sections),
                 policies=tuple(policies),
                 feedback_providers=tuple(feedback_providers),
                 task_completion_checker=task_completion_checker,
                 allow_extra_keys=allow_extra_keys,
                 resources=resources if resources is not None else ResourceRegistry(),
-                _snapshot=snapshot,
-                _structured_output=structured_output,
             )
-
-    @override
-    def replace(self, **changes: object) -> Self:
-        """PromptTemplate does not support replace()."""
-        msg = (
-            "PromptTemplate.replace() is not supported. "
-            "Use PromptTemplate.create() instead."
-        )
-        raise NotImplementedError(msg)
-
-    @property
-    def params_types(self) -> set[type[SupportsDataclass]]:
-        """Return the set of parameter types used by this prompt's sections."""
-        snapshot = self._snapshot
-        if snapshot is None:  # pragma: no cover
-            raise RuntimeError("PromptTemplate._snapshot not initialized")
-        return snapshot.params_types
-
-    @cached_property
-    def descriptor(self) -> PromptDescriptor:
-        """Return the prompt descriptor for this template, computed lazily."""
-        return PromptDescriptor.from_prompt(cast("PromptLike", self))
-
-    @property
-    def placeholders(self) -> Mapping[SectionPath, frozenset[str]]:
-        """Return the placeholders for each section path."""
-        snapshot = self._snapshot
-        if snapshot is None:  # pragma: no cover
-            raise RuntimeError("PromptTemplate._snapshot not initialized")
-        return snapshot.placeholders
-
-    @property
-    def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
-        """Resolved structured output declaration, when present."""
-        return self._structured_output
-
-    def find_section(
-        self,
-        selector: type[Section[SupportsDataclass]]
-        | tuple[type[Section[SupportsDataclass]], ...],
-    ) -> Section[SupportsDataclass]:
-        """Return the first section matching ``selector``."""
-
-        if isinstance(selector, tuple):
-            if not selector:
-                raise TypeError("find_section requires at least one section type.")
-            candidates = selector
-        else:
-            candidates = (selector,)
-
-        snapshot = self._snapshot
-        if snapshot is None:  # pragma: no cover
-            raise RuntimeError("PromptTemplate._snapshot not initialized")
-        for node in snapshot.sections:
-            if any(isinstance(node.section, candidate) for candidate in candidates):
-                return node.section
-
-        raise KeyError(
-            f"Section matching {candidates!r} not found in prompt {self.ns}:{self.key}."
-        )
 
 
 class Prompt[OutputT]:
     """Bind a prompt template with overrides and parameters for rendering.
 
     Prompt is the only way to render a PromptTemplate. It holds the runtime
-    configuration (overrides store, tag, params) and performs all rendering
-    and override resolution.
+    configuration (overrides store, tag, params) and computes derived state
+    (registry snapshot, structured output) from the template.
 
     Resource lifecycle is managed via ``prompt.resources``::
 
@@ -291,23 +211,45 @@ class Prompt[OutputT]:
         self._bound_resources: ResourceRegistry | None = None
         self._resource_context: ScopedResourceContext | None = None
 
+    @cached_property
+    def _snapshot(self) -> RegistrySnapshot:
+        """Registry snapshot computed from template sections."""
+        registry = PromptRegistry()
+        registry.register_sections(self.template.sections)
+        structured_output_type = (
+            self.structured_output.dataclass_type
+            if self.structured_output is not None
+            else None
+        )
+        return registry.snapshot(structured_output_type=structured_output_type)
+
+    @cached_property
+    def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
+        """Resolved structured output config from template's type specialization."""
+        return _resolve_output_spec(type(self.template), self.template.allow_extra_keys)
+
     @property
     def params(self) -> tuple[SupportsDataclass, ...]:
         """Return the parameters bound to this prompt instance."""
-
         return self._params
 
     @property
     def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
-        return self.template.sections  # pragma: no cover
+        return self._snapshot.sections
 
     @property
+    def params_types(self) -> set[type[SupportsDataclass]]:
+        """Return the set of parameter types used by this prompt's sections."""
+        return self._snapshot.params_types
+
+    @property
+    def placeholders(self) -> Mapping[SectionPath, frozenset[str]]:
+        """Return the placeholders for each section path."""
+        return self._snapshot.placeholders
+
+    @cached_property
     def descriptor(self) -> PromptDescriptor:
-        return self.template.descriptor
-
-    @property
-    def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
-        return self.template.structured_output
+        return PromptDescriptor.from_prompt(cast("PromptLike", self))
 
     @property
     def feedback_providers(self) -> tuple[FeedbackProviderConfig, ...]:
@@ -326,15 +268,12 @@ class Prompt[OutputT]:
         """
         result: list[ToolPolicy] = []
 
-        # Find section containing the tool and add its policies
-        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
-        if snapshot is not None:  # pragma: no branch - snapshot always initialized
-            for node in snapshot.sections:
-                section = node.section
-                for tool in section.tools():
-                    if tool.name == tool_name:
-                        result.extend(section.policies())
-                        break
+        for node in self._snapshot.sections:
+            section = node.section
+            for tool in section.tools():
+                if tool.name == tool_name:
+                    result.extend(section.policies())
+                    break
 
         # Add prompt-level policies
         result.extend(self.template.policies)
@@ -343,12 +282,9 @@ class Prompt[OutputT]:
     @cached_property
     def renderer(self) -> PromptRenderer[OutputT]:
         """Return the prompt renderer, created lazily on first access."""
-        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
-        if snapshot is None:  # pragma: no cover
-            raise RuntimeError("PromptTemplate._snapshot not initialized")
         return PromptRenderer(
-            registry=snapshot,
-            structured_output=self.template._structured_output,  # pyright: ignore[reportPrivateUsage]
+            registry=self._snapshot,
+            structured_output=self.structured_output,
         )
 
     def bind(
@@ -461,7 +397,24 @@ class Prompt[OutputT]:
         selector: type[Section[SupportsDataclass]]
         | tuple[type[Section[SupportsDataclass]], ...],
     ) -> Section[SupportsDataclass]:
-        return self.template.find_section(selector)  # pragma: no cover
+        """Return the first section matching ``selector``."""
+
+        if isinstance(selector, tuple):
+            if not selector:
+                raise TypeError("find_section requires at least one section type.")
+            candidates = selector
+        else:
+            candidates = (selector,)
+
+        for node in self._snapshot.sections:
+            if any(isinstance(node.section, candidate) for candidate in candidates):
+                return node.section
+
+        msg = (
+            f"Section matching {candidates!r} not found in prompt "
+            f"{self.template.ns}:{self.template.key}."
+        )
+        raise KeyError(msg)
 
     def filesystem(self) -> Filesystem | None:
         """Return the filesystem from the workspace section, if present.
@@ -473,11 +426,7 @@ class Prompt[OutputT]:
         """
         from .protocols import WorkspaceSectionProtocol
 
-        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
-        if snapshot is None:  # pragma: no cover
-            return None
-
-        for node in snapshot.sections:
+        for node in self._snapshot.sections:
             section = node.section
             if isinstance(section, WorkspaceSectionProtocol):
                 return section.filesystem  # pragma: no cover
@@ -493,10 +442,7 @@ class Prompt[OutputT]:
         Called by the AgentLoop after debug bundle artifacts have been
         captured.
         """
-        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
-        if snapshot is None:  # pragma: no cover
-            return
-        for node in snapshot.sections:
+        for node in self._snapshot.sections:
             node.section.cleanup()
 
     def _collected_resources(self) -> ResourceRegistry:
@@ -520,10 +466,8 @@ class Prompt[OutputT]:
             for child in section.children:
                 collect_from_section(child)
 
-        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
-        if snapshot is not None:  # pragma: no branch - tested separately
-            for node in snapshot.sections:
-                collect_from_section(node.section)
+        for node in self._snapshot.sections:
+            collect_from_section(node.section)
 
         # Merge bind-time resources
         if self._bound_resources is not None:

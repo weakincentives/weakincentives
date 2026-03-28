@@ -195,12 +195,13 @@ def test_invalid_params_section_render_stub() -> None:
 def test_prompt_register_requires_dataclass_params() -> None:
     section = InvalidParamsSection()
 
+    template = PromptTemplate.create(
+        ns="tests.prompts",
+        key="edge-dataclass-required",
+        sections=[section],
+    )
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate.create(
-            ns="tests.prompts",
-            key="edge-dataclass-required",
-            sections=[section],
-        )
+        _ = Prompt(template).sections
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is int
@@ -220,12 +221,13 @@ def test_prompt_register_validates_defaults_type() -> None:
         key="defaults",
     )
 
+    template = PromptTemplate.create(
+        ns="tests.prompts",
+        key="edge-defaults-type",
+        sections=[section],
+    )
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate.create(
-            ns="tests.prompts",
-            key="edge-defaults-type",
-            sections=[section],
-        )
+        _ = Prompt(template).sections
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is DefaultsParams
@@ -250,12 +252,13 @@ def test_prompt_register_requires_defaults_type_match() -> None:
         key="mismatch",
     )
 
+    template = PromptTemplate.create(
+        ns="tests.prompts",
+        key="edge-defaults-mismatch",
+        sections=[section],
+    )
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate.create(
-            ns="tests.prompts",
-            key="edge-defaults-mismatch",
-            sections=[section],
-        )
+        _ = Prompt(template).sections
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is DefaultsMismatchParams

@@ -148,16 +148,14 @@ def _parse_dataclass[T](
         config,
     )
 
-    # For Constructable subclasses, bypass the __init__ guard via
-    # allow_construction().  Note: this calls __init__ directly and does
-    # NOT invoke the class's create() method, so any validation or
-    # normalization in create() is skipped.  Deserialized data is assumed
-    # to be already valid.
-    from ..dataclasses import Constructable, allow_construction
+    # For Constructable subclasses, route through create() so that
+    # validation and normalization run on deserialized data.  This is
+    # safe because create() has the same parameter signature as __init__
+    # (no derived fields stored on the dataclass).
+    from ..dataclasses import Constructable
 
     if issubclass(target_cls, Constructable):
-        with allow_construction():
-            instance = target_cls(**kwargs)
+        instance = cast(T, target_cls.create(**kwargs))  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     else:
         instance = target_cls(**kwargs)
 

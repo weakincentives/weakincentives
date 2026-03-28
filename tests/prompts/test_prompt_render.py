@@ -113,10 +113,11 @@ def test_prompt_renders_section_without_params() -> None:
 def test_prompt_rejects_placeholders_for_paramless_section() -> None:
     section = MarkdownSection(title="Bad", key="bad", template="${value}")
 
+    template = PromptTemplate.create(
+        ns="tests.prompts", key="bad-section", sections=(section,)
+    )
     with pytest.raises(PromptValidationError):
-        PromptTemplate.create(
-            ns="tests.prompts", key="bad-section", sections=(section,)
-        )
+        _ = Prompt(template).sections
 
 
 def build_nested_prompt() -> PromptTemplate:

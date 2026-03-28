@@ -83,7 +83,6 @@ class DispatchResult(Constructable):
     event: object
     handlers_invoked: tuple[EventHandler, ...]
     errors: tuple[HandlerFailure, ...]
-    handled_count: int
 
     @classmethod
     def create(
@@ -92,14 +91,18 @@ class DispatchResult(Constructable):
         handlers_invoked: tuple[EventHandler, ...],
         errors: tuple[HandlerFailure, ...],
     ) -> DispatchResult:
-        """Create a dispatch result with derived handled_count."""
+        """Create a dispatch result."""
         with allow_construction():
             return cls(
                 event=event,
                 handlers_invoked=handlers_invoked,
                 errors=errors,
-                handled_count=len(handlers_invoked),
             )
+
+    @property
+    def handled_count(self) -> int:
+        """Number of handlers that were invoked."""
+        return len(self.handlers_invoked)
 
     @property
     def ok(self) -> bool:

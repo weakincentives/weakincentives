@@ -368,15 +368,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate.create(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert 'Unknown tool "unknown_tool"' in str(exc.value)
         assert "Available tools:" in str(exc.value)
@@ -410,15 +412,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate.create(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert "input type mismatch" in str(exc.value)
         assert "read_file" in str(exc.value)
@@ -454,15 +458,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate.create(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert "output type mismatch" in str(exc.value)
         assert "read_file" in str(exc.value)
@@ -495,15 +501,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate.create(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert "input type mismatch" in str(exc.value)
         assert "Expected: ReadParams" in str(exc.value)
@@ -537,15 +545,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate.create(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert "output type mismatch" in str(exc.value)
         assert "Expected: ReadResult" in str(exc.value)
