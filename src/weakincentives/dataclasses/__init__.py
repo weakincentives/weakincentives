@@ -122,6 +122,20 @@ def allow_construction() -> Iterator[None]:
         _ALLOW_INIT.reset(token)
 
 
+@functools.cache
+def _create_param_names(target_cls: type) -> frozenset[str]:
+    """Return cached parameter names for *target_cls*.create(), excluding 'cls'."""
+    create_method = getattr(target_cls, "create", None)
+    if create_method is None:  # pragma: no cover
+        raise TypeError(f"{target_cls.__name__} does not define create()")
+    sig = inspect.signature(create_method)
+    return frozenset(
+        name
+        for name, p in sig.parameters.items()
+        if name != "cls" and p.kind not in {p.VAR_POSITIONAL, p.VAR_KEYWORD}
+    )
+
+
 class Constructable:
     """Base for frozen dataclasses requiring factory construction.
 
@@ -169,16 +183,7 @@ class Constructable:
         as fields), override ``replace()`` in the subclass.
         """
         cls = type(self)
-        create_method = getattr(cls, "create", None)
-        if create_method is None:  # pragma: no cover
-            raise TypeError(f"{cls.__name__} does not define create()")
-
-        sig = inspect.signature(create_method)
-        create_params = {
-            name
-            for name, p in sig.parameters.items()
-            if name != "cls" and p.kind not in {p.VAR_POSITIONAL, p.VAR_KEYWORD}
-        }
+        create_params = _create_param_names(cls)
 
         unknown = set(changes) - create_params
         if unknown:
