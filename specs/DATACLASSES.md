@@ -59,8 +59,8 @@ class Deadline(Constructable):
 
 | Tier | Criteria |
 |------|----------|
-| **Tier 1** (`@FrozenDataclass()` only) | Fields are stored exactly as declared. No validation beyond type hints. No derived fields. |
-| **Tier 2** (`Constructable`) | Any of: input types differ from stored types, fields need runtime validation, derived fields are computed from other fields, construction invariants must be enforced. |
+| **Tier 1** (`@FrozenDataclass()` only) | Fields are stored exactly as declared. No validation beyond type hints. No derived state. |
+| **Tier 2** (`Constructable`) | Any of: input types differ from stored types, fields need runtime validation, construction invariants must be enforced. |
 
 ______________________________________________________________________
 
@@ -124,7 +124,6 @@ Each `Constructable` subclass defines a `create()` classmethod. This is the
 1. Accepts raw input types (may differ from stored field types)
 1. Validates all preconditions
 1. Normalizes values to their stored representation
-1. Computes derived fields
 1. Calls `cls(...)` inside `allow_construction()` with fully prepared values
 
 ```python
@@ -132,9 +131,8 @@ Each `Constructable` subclass defines a `create()` classmethod. This is the
 def create(cls, ...) -> Self:
     # 1. Validate
     # 2. Normalize
-    # 3. Derive
     with allow_construction():
-        return cls(validated_field=..., derived_field=..., ...)
+        return cls(validated_field=..., ...)
 ```
 
 **Type safety.** Because `create()` calls `cls(...)` directly (not an untyped
@@ -145,6 +143,89 @@ A typo like `cls(naem=...)` is caught statically.
 logic belongs in `create()`. The decorator enforces this — defining
 `__post_init__` on a `Constructable` subclass raises `TypeError` at class
 definition time.
+
+### The create() == __init__ Contract
+
+**Every `create()` parameter must map 1:1 to a dataclass field.** The
+parameter names must match the field names and their types must be compatible.
+
+This is the central invariant that makes the system work:
+
+- **`replace()`** reads current field values via `getattr`, overlays changes,
+  and calls `create(**merged)`. This only works if every `create()` parameter
+  is a stored field.
+
+- **`serde.parse()`** calls `create(**kwargs)` with deserialized data. This
+  only works if `create()` accepts exactly the fields that serde extracted.
+
+- **Round-tripping** (`dump` → `parse`) is lossless because every stored field
+  has a corresponding `create()` parameter.
+
+**Derived state must not be a dataclass field.** If a value is computed from
+other fields, express it as a `@property` — not as a field that `create()`
+sets but doesn't accept:
+
+```python
+@FrozenDataclass()
+class DispatchResult(Constructable):
+    event: object
+    handlers_invoked: tuple[EventHandler, ...]
+    errors: tuple[HandlerFailure, ...]
+
+    @classmethod
+    def create(
+        cls,
+        event: object,
+        handlers_invoked: tuple[EventHandler, ...],
+        errors: tuple[HandlerFailure, ...],
+    ) -> DispatchResult:
+        with allow_construction():
+            return cls(
+                event=event,
+                handlers_invoked=handlers_invoked,
+                errors=errors,
+            )
+
+    @property
+    def handled_count(self) -> int:
+        """Derived from handlers_invoked — not a stored field."""
+        return len(self.handlers_invoked)
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+```
+
+`handled_count` is never stored, never serialized, and never passed to
+`create()`. It is recomputed on every access. This is the correct pattern
+for derived state.
+
+### Class-Level Derived State (ClassVar)
+
+Some classes resolve type metadata at specialization time (e.g., via
+`__class_getitem__`). This state is per-class, not per-instance, and must
+use `ClassVar` — not instance fields:
+
+```python
+@FrozenDataclass()
+class Tool[ParamsT, ResultT](Constructable):
+    name: str
+    description: str
+    handler: ToolHandler[ParamsT, ResultT] | None
+    accepts_overrides: bool = True
+
+    # Per-class, set by __class_getitem__:
+    _specialized_params_type: ClassVar[type | None] = None
+    _specialized_result_type: ClassVar[type | None] = None
+    _specialized_result_container: ClassVar[Literal["object", "array"]] = "object"
+
+    @property
+    def params_type(self) -> type[ParamsT]:
+        return cast(type[ParamsT], type(self)._specialized_params_type)
+```
+
+The `ClassVar` fields are invisible to `dataclasses`, so they don't appear in
+`__init__`, `create()`, `replace()`, or serde. Properties provide typed access.
 
 ### Input Types vs Stored Types
 
@@ -173,39 +254,6 @@ class Snapshot(Constructable):
             )
 ```
 
-### Derived Fields
-
-Fields computed from other fields are regular init parameters (not
-`field(init=False)`). Since direct construction is blocked, nobody can pass
-an incorrect value:
-
-```python
-@FrozenDataclass()
-class DispatchResult(Constructable):
-    event: object
-    handlers_invoked: tuple[EventHandler, ...]
-    errors: tuple[HandlerFailure, ...]
-    handled_count: int                      # Derived, but a regular field
-
-    @classmethod
-    def create(
-        cls,
-        event: object,
-        handlers_invoked: tuple[EventHandler, ...],
-        errors: tuple[HandlerFailure, ...],
-    ) -> DispatchResult:
-        with allow_construction():
-            return cls(
-                event=event,
-                handlers_invoked=handlers_invoked,
-                errors=errors,
-                handled_count=len(handlers_invoked),
-            )
-```
-
-`handled_count` is not a `create()` parameter. It cannot be set by callers.
-It cannot be changed via `replace()`. It is always recomputed.
-
 ______________________________________________________________________
 
 ## replace()
@@ -219,19 +267,23 @@ d2 = deadline.replace(expires_at=new_time)
 
 ### How It Works
 
-1. Introspect `create()`'s signature to discover the parameter names
+1. Look up `create()`'s parameter names (cached per-class via `@functools.cache`)
 1. Verify every parameter corresponds to an instance attribute
 1. Read each parameter's current value from the instance via `getattr`
 1. Overlay the caller's `**changes`
-1. Call `cls.create(**merged)` — all validation and derivation re-runs
+1. Call `cls.create(**merged)` — all validation re-runs
+
+The signature introspection result is cached in a module-level
+`_create_param_names()` function decorated with `@functools.cache`, so the
+cost is paid once per class, not per invocation.
 
 ### The Round-Trip Requirement
 
 Every `create()` parameter must correspond to a stored instance field so
 that `replace()` can read the current value back via `getattr`. If
 `create()` accepts configuration-only parameters that are not stored as
-fields (e.g. a `tax_rate` used only to compute derived `tax` and `total`),
-`replace()` raises `TypeError` at runtime with guidance to override it:
+fields (e.g. a `tax_rate` used only to compute a derived value), `replace()`
+raises `TypeError` at runtime with guidance to override it:
 
 ```
 TypeError: Order.replace() cannot round-trip create() parameter(s)
@@ -258,47 +310,31 @@ result.
 | `tuple(sequence)` on tuple | Yes | Returns equivalent tuple |
 
 If a class cannot satisfy this (e.g., stored type is fundamentally
-incompatible with `create()` input type), override `replace()` to raise
-`NotImplementedError` with a clear message.
-
-### When replace() Doesn't Apply
-
-Some classes (e.g., `Tool`, `PromptTemplate`) have complex construction that
-resolves type arguments from class specialization or transforms input types
-structurally (e.g., `Section` → `SectionNode`). For these:
-
-```python
-def replace(self, **changes: object) -> Self:
-    raise NotImplementedError(
-        f"{type(self).__name__} does not support replace(). "
-        f"Construct a new instance via create()."
-    )
-```
-
-This is explicit and honest. Not every class needs functional update.
+incompatible with `create()` input type), override `replace()` with custom
+logic or raise `NotImplementedError` with a clear message.
 
 ______________________________________________________________________
 
 ## Serde Integration
 
-`serde.parse()` constructs dataclass instances via `cls(**kwargs)`. For
-`Constructable` subclasses this hits the `__init__` guard.
-
-The fix: `serde.parse()` detects `Constructable` and wraps construction in
-`allow_construction()`:
+`serde.parse()` calls `create()` for `Constructable` subclasses, so that
+**all validation and normalization runs on deserialized data**:
 
 ```python
 if issubclass(target_cls, Constructable):
-    with allow_construction():
-        instance = target_cls(**kwargs)
+    instance = cast(T, target_cls.create(**kwargs))
 else:
     instance = target_cls(**kwargs)
 ```
 
-This is correct because serde deserializes already-validated data from a
-trusted store. It bypasses `create()` validation intentionally — the data was
-validated when it was first created, and re-validation could have side effects
-(e.g., reading the system clock).
+This works because the `create() == __init__` contract guarantees that
+`create()` accepts exactly the same keyword arguments that serde extracts
+from the data. No derived fields, no extra parameters, no mismatch.
+
+**Why call `create()` instead of bypassing it?** Deserialized data is not
+inherently trusted. Calling `create()` ensures that timezone checks, name
+validation, type resolution, and all other invariants are enforced regardless
+of whether data arrives via the public API or from a serialized store.
 
 The same applies to `serde.clone()`.
 
@@ -495,9 +531,51 @@ static analysis time. An untyped `cls._new(**kwargs)` would bypass this.
 
 ### Why does replace() go through create()?
 
-So validation and derivation re-run automatically. If `create()` computes
-`handled_count = len(handlers_invoked)`, then `replace(handlers_invoked=...)`
-recomputes it without any special wiring. One code path, one source of truth.
+So validation re-runs automatically. One code path, one source of truth. If
+`create()` validates that `expires_at` is timezone-aware, then
+`replace(expires_at=naive_dt)` catches the error without any special wiring.
+
+### Why does serde.parse() call create()?
+
+So that deserialized data is validated. The `create() == __init__` contract
+guarantees parameter compatibility. This means Constructable invariants are
+enforced uniformly — whether data arrives from user code, from `replace()`,
+or from a serialized store.
+
+### Why no derived fields as dataclass fields?
+
+Derived fields break the `create() == __init__` contract. If `create()`
+accepts 3 parameters but `__init__` has 4 fields (with one derived), then:
+
+- `replace()` cannot round-trip: it reads 4 fields but `create()` only
+  accepts 3.
+- `serde.parse()` cannot call `create()`: it extracts 4 fields from data
+  but `create()` only accepts 3.
+
+Using `@property` for derived state avoids these issues entirely. The
+property is never serialized, never passed to `create()`, and is always
+recomputed on access.
+
+### Why cache create() signature introspection?
+
+`replace()` needs to know which parameters `create()` accepts. Calling
+`inspect.signature()` on every `replace()` invocation is wasteful.
+The `_create_param_names()` function uses `@functools.cache` to compute
+the parameter names once per class and reuse them on subsequent calls.
+
+______________________________________________________________________
+
+## Checklist for New Constructable Subclasses
+
+When writing a new Tier 2 class:
+
+- [ ] `create()` parameters match `__init__` fields 1:1 (same names, compatible types)
+- [ ] Derived state uses `@property`, not stored fields
+- [ ] Per-class metadata uses `ClassVar`, not instance fields
+- [ ] Normalization in `create()` is idempotent (for `replace()` round-trips)
+- [ ] No `__post_init__` defined
+- [ ] `allow_construction()` wraps the `cls(...)` call inside `create()`
+- [ ] `replace()` works without override (or override is provided with tests)
 
 ______________________________________________________________________
 
