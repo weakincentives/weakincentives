@@ -26,7 +26,7 @@ class TestResolveChecker:
 
     def test_returns_none_when_prompt_has_no_checker(self) -> None:
         """No checker on prompt => None."""
-        prompt: Prompt[object] = Prompt(PromptTemplate(ns="test", key="test"))
+        prompt: Prompt[object] = Prompt(PromptTemplate.create(ns="test", key="test"))
         prompt.resources.__enter__()
 
         result = resolve_checker(prompt=cast("PromptProtocol[object]", prompt))
@@ -37,7 +37,9 @@ class TestResolveChecker:
         """Checker on prompt => prompt checker."""
         checker = FileOutputChecker(files=("output.txt",))
         prompt: Prompt[object] = Prompt(
-            PromptTemplate(ns="test", key="test", task_completion_checker=checker)
+            PromptTemplate.create(
+                ns="test", key="test", task_completion_checker=checker
+            )
         )
         prompt.resources.__enter__()
 

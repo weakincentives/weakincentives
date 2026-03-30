@@ -272,7 +272,7 @@ class RedisMailbox[T, R]:
         Send-only mailboxes (created by RedisMailboxFactory for replies) skip
         reaper thread creation and auto-resolver setup to prevent resource leaks.
         """
-        object.__setattr__(self, "_keys", _QueueKeys.for_queue(self.name))
+        self._keys = _QueueKeys.for_queue(self.name)
         self._register_scripts()
 
         # Send-only mailboxes don't need reaper threads or reply resolution
@@ -285,9 +285,7 @@ class RedisMailbox[T, R]:
             factory: RedisMailboxFactory[R] = RedisMailboxFactory(
                 client=self.client, default_ttl=self.default_ttl
             )
-            object.__setattr__(
-                self, "reply_resolver", CompositeResolver(registry={}, factory=factory)
-            )
+            self.reply_resolver = CompositeResolver(registry={}, factory=factory)
 
     def _register_scripts(self) -> None:
         """Register Lua scripts with Redis."""

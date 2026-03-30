@@ -52,7 +52,7 @@ def test_workspace_section_mounts_host_files(
     try:
         adapter = adapter_fixture.create_adapter(workspace.temp_dir)
         prompt = Prompt(
-            PromptTemplate(
+            PromptTemplate.create(
                 ns="integration.ack.workspace",
                 key="host-mount",
                 name="ack_workspace_mount",
@@ -87,7 +87,7 @@ def test_workspace_uses_temp_dir_as_cwd(
     try:
         adapter = adapter_fixture.create_adapter(workspace.temp_dir)
         prompt = Prompt(
-            PromptTemplate(
+            PromptTemplate.create(
                 ns="integration.ack.workspace",
                 key="cwd",
                 name="ack_workspace_cwd",
@@ -125,7 +125,7 @@ def test_custom_env_forwarded(
     )
 
     prompt = Prompt(
-        PromptTemplate(
+        PromptTemplate.create(
             ns="integration.ack.workspace",
             key="env",
             name="ack_workspace_env",

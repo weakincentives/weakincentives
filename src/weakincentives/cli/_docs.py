@@ -70,7 +70,7 @@ class ReviewParams:
 
 
 # Define the prompt template
-template = PromptTemplate[ReviewResponse](
+template = PromptTemplate[ReviewResponse].create(
     ns="examples",
     key="review-agent",
     name="review_agent",

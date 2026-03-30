@@ -67,7 +67,7 @@ def build_prompt() -> PromptTemplate:
         key="outro",
         default_params=OutroParams(footer="bye"),
     )
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns="tests.prompts",
         key="render-basic",
         sections=[intro, details, outro],
@@ -99,7 +99,7 @@ def test_prompt_renders_section_without_params() -> None:
     static_section = MarkdownSection(
         title="Static", key="static", template="Static content."
     )
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="paramless-section",
         sections=(static_section,),
@@ -113,8 +113,11 @@ def test_prompt_renders_section_without_params() -> None:
 def test_prompt_rejects_placeholders_for_paramless_section() -> None:
     section = MarkdownSection(title="Bad", key="bad", template="${value}")
 
+    template = PromptTemplate.create(
+        ns="tests.prompts", key="bad-section", sections=(section,)
+    )
     with pytest.raises(PromptValidationError):
-        PromptTemplate(ns="tests.prompts", key="bad-section", sections=(section,))
+        _ = Prompt(template).sections
 
 
 def build_nested_prompt() -> PromptTemplate:
@@ -141,7 +144,7 @@ def build_nested_prompt() -> PromptTemplate:
         template="Summary: ${summary}",
         key="summary",
     )
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns="tests.prompts",
         key="render-nested",
         sections=[parent, summary],
@@ -217,7 +220,7 @@ def test_prompt_render_iterates_through_siblings() -> None:
         key="child2",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="siblings",
         sections=[
@@ -334,7 +337,7 @@ def test_prompt_render_wraps_template_errors_with_context() -> None:
         template="unused",
         key="explode",
     )
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts", key="render-error", sections=[section]
     )
 
@@ -360,7 +363,7 @@ def test_prompt_render_propagates_enabled_errors() -> None:
         key="guard",
         enabled=cast(Callable[[SupportsDataclass], bool], raising_enabled),
     )
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="render-enabled-error",
         sections=[section],
@@ -395,7 +398,7 @@ def test_rendered_prompt_allow_extra_keys_none_without_structured_output() -> No
 
 
 def test_prompt_bind_mutates_and_replaces_params() -> None:
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.prompts",
         key="bind-mutation",
         sections=[
@@ -464,7 +467,7 @@ def test_section_rendering_empty_string_is_skipped() -> None:
         key="content",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="empty-section",
         sections=[empty_section, non_empty],
@@ -510,7 +513,7 @@ def test_collect_child_keys_exits_on_sibling() -> None:
         key="sibling",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="collect-children",
         sections=[parent, sibling],
@@ -566,7 +569,7 @@ def test_collect_child_keys_skips_grandchildren() -> None:
         children=[child1, child2],
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="grandchildren-skip",
         sections=[parent],
@@ -599,9 +602,9 @@ def test_markdown_section_placeholder_extraction_with_braced_syntax() -> None:
 
     # This should extract 'title' placeholder using braced syntax
     params = IntroParams(title="Hello")
-    prompt = Prompt(PromptTemplate(ns="test", key="braced", sections=[section])).bind(
-        params
-    )
+    prompt = Prompt(
+        PromptTemplate.create(ns="test", key="braced", sections=[section])
+    ).bind(params)
 
     rendered = prompt.render()
     assert "Title: Hello" in rendered.text

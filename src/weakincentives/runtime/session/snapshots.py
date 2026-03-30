@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from typing import TypeGuard, cast, override
 from uuid import UUID
 
-from ...dataclasses import FrozenDataclass
+from ...dataclasses import Constructable, FrozenDataclass, allow_construction
 from ...errors import WinkError
 from ...serde import dump, parse, resolve_type_identifier, type_identifier
 from ...types import JSONValue
@@ -345,7 +345,7 @@ class SnapshotPayload:
 
 
 @FrozenDataclass()
-class Snapshot:
+class Snapshot(Constructable):
     """Frozen value object representing session slice state."""
 
     created_at: datetime
@@ -367,23 +367,33 @@ class Snapshot:
         )
     )
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "created_at", _ensure_timezone(self.created_at))
-        object.__setattr__(
-            self,
-            "slices",
-            cast(SnapshotState, types.MappingProxyType(dict(self.slices))),
-        )
-        object.__setattr__(
-            self,
-            "tags",
-            cast(Mapping[str, str], types.MappingProxyType(dict(self.tags))),
-        )
-        object.__setattr__(
-            self,
-            "policies",
-            normalize_snapshot_policies(dict(self.policies)),
-        )
+    @classmethod
+    def create(
+        cls,
+        *,
+        created_at: datetime,
+        parent_id: UUID | None = None,
+        children_ids: tuple[UUID, ...] = (),
+        slices: Mapping[type, tuple[object, ...]] | None = None,
+        tags: Mapping[str, str] | None = None,
+        policies: Mapping[type, object] | None = None,
+    ) -> Snapshot:
+        """Create a snapshot with normalized immutable collections."""
+        with allow_construction():
+            return cls(
+                created_at=_ensure_timezone(created_at),
+                parent_id=parent_id,
+                children_ids=children_ids,
+                slices=cast(
+                    SnapshotState,
+                    types.MappingProxyType(dict(slices or {})),
+                ),
+                tags=cast(
+                    Mapping[str, str],
+                    types.MappingProxyType(dict(tags or {})),
+                ),
+                policies=normalize_snapshot_policies(dict(policies or {})),
+            )
 
     @override
     def __hash__(self) -> int:
@@ -509,8 +519,8 @@ class Snapshot:
             slice_type, items = cls._restore_slice_entry(entry)
             restored[slice_type] = items
 
-        return cls(
-            created_at=_ensure_timezone(created_at),
+        return cls.create(
+            created_at=created_at,
             parent_id=parent_id,
             children_ids=children_ids,
             slices=restored,

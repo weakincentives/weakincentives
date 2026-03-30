@@ -49,7 +49,7 @@ def make_session() -> Session:
 
 def make_prompt() -> Prompt[None]:
     """Create a minimal prompt for testing."""
-    template: PromptTemplate[None] = PromptTemplate(
+    template: PromptTemplate[None] = PromptTemplate.create(
         ns="test", key="test-prompt", name="test"
     )
     return Prompt(template)
@@ -182,7 +182,7 @@ class TestShouldTriggerWithFileCreated:
             )
 
         # Create template and bind filesystem resource
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test",
             key="test-prompt",
             name="test",
@@ -259,7 +259,7 @@ class TestRunFeedbackProvidersWithFileCreated:
             for path, content in files.items():
                 fs.write(path, content)
 
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test",
             key="test-prompt",
             name="test",

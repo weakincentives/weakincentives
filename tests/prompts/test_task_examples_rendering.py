@@ -97,7 +97,7 @@ def report_handler(
 
 @pytest.fixture
 def read_tool() -> Tool[ReadParams, ReadResult]:
-    return Tool[ReadParams, ReadResult](
+    return Tool[ReadParams, ReadResult].create(
         name="read_file",
         description="Read a file from the workspace.",
         handler=read_handler,
@@ -106,7 +106,7 @@ def read_tool() -> Tool[ReadParams, ReadResult]:
 
 @pytest.fixture
 def search_tool() -> Tool[SearchParams, SearchResult]:
-    return Tool[SearchParams, SearchResult](
+    return Tool[SearchParams, SearchResult].create(
         name="search",
         description="Search for patterns in files.",
         handler=search_handler,
@@ -115,7 +115,7 @@ def search_tool() -> Tool[SearchParams, SearchResult]:
 
 @pytest.fixture
 def report_tool() -> Tool[ReportParams, ReportResult]:
-    return Tool[ReportParams, ReportResult](
+    return Tool[ReportParams, ReportResult].create(
         name="report_issue",
         description="Report a security issue.",
         handler=report_handler,
@@ -329,7 +329,7 @@ class TestTaskExamplesIntegration:
 
         examples_section = TaskExamplesSection(examples=[example])
 
-        template = PromptTemplate(
+        template = PromptTemplate.create(
             ns="test",
             key="with-examples",
             sections=[tools_section, examples_section],
@@ -368,15 +368,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert 'Unknown tool "unknown_tool"' in str(exc.value)
         assert "Available tools:" in str(exc.value)
@@ -410,15 +412,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert "input type mismatch" in str(exc.value)
         assert "read_file" in str(exc.value)
@@ -454,15 +458,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert "output type mismatch" in str(exc.value)
         assert "read_file" in str(exc.value)
@@ -495,15 +501,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert "input type mismatch" in str(exc.value)
         assert "Expected: ReadParams" in str(exc.value)
@@ -537,15 +545,17 @@ class TestTaskExamplesIntegration:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            Prompt(template).sections  # noqa: B018
 
         assert "output type mismatch" in str(exc.value)
         assert "Expected: ReadResult" in str(exc.value)
@@ -583,7 +593,7 @@ class TestTaskExamplesIntegration:
         )
 
         # Should succeed - validation happens after all sections registered
-        template = PromptTemplate(
+        template = PromptTemplate.create(
             ns="test",
             key="order-test",
             sections=[examples_section, tools_section],

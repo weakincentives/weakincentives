@@ -224,7 +224,7 @@ class TestTaskCompletionStopHook:
         clock = FakeClock()
         anchor = datetime.now(UTC)
         clock.set_wall(anchor)
-        expired_deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+        expired_deadline = Deadline.create(anchor + timedelta(seconds=5), clock=clock)
         clock.advance(10)  # Now expired
 
         constraints = HookConstraints(deadline=expired_deadline)

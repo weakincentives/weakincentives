@@ -255,7 +255,7 @@ eval_loop = EvalLoop(
     evaluator=exact_match,
     requests=eval_requests,
     config=EvalLoopConfig(
-        debug_bundle=BundleConfig(target="./eval_bundles/"),
+        debug_bundle=BundleConfig.create(target="./eval_bundles/"),
     ),
 )
 ```

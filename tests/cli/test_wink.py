@@ -38,7 +38,7 @@ def _create_test_bundle(target_dir: Path) -> Path:
     session = Session()
     session.dispatch(_ExampleSlice("a"))
 
-    with BundleWriter(target_dir, config=BundleConfig()) as writer:
+    with BundleWriter(target_dir, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": "test"})
         writer.write_request_output({"status": "ok"})

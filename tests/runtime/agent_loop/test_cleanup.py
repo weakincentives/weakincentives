@@ -101,7 +101,7 @@ def test_loop_calls_prompt_cleanup_with_bundle(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -136,7 +136,7 @@ def test_loop_calls_prompt_cleanup_with_bundle_on_failure(tmp_path: Path) -> Non
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter(error=RuntimeError("execution failed"))
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -168,7 +168,7 @@ def test_loop_bundle_reply_failure_does_not_double_cleanup(tmp_path: Path) -> No
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 

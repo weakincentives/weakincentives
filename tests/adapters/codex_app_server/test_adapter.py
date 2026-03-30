@@ -67,7 +67,7 @@ def _make_session() -> tuple[Session, InProcessDispatcher]:
 
 
 def _make_simple_prompt(name: str = "test-prompt") -> Prompt[object]:
-    template: PromptTemplate[object] = PromptTemplate(
+    template: PromptTemplate[object] = PromptTemplate.create(
         ns="test",
         key="basic",
         sections=(),
@@ -93,7 +93,7 @@ def _add_handler(params: _AddParams, *, context: ToolContext) -> ToolResult[_Add
     )
 
 
-_ADD_TOOL = Tool[_AddParams, _AddResult](
+_ADD_TOOL = Tool[_AddParams, _AddResult].create(
     name="add",
     description="Add two numbers",
     handler=_add_handler,
@@ -107,7 +107,7 @@ def _make_prompt_with_tool(name: str = "tool-prompt") -> Prompt[object]:
         key="tools",
         tools=[_ADD_TOOL],
     )
-    template: PromptTemplate[object] = PromptTemplate(
+    template: PromptTemplate[object] = PromptTemplate.create(
         ns="test",
         key="with-tool",
         sections=(section,),
@@ -589,7 +589,9 @@ class TestCreateDeadlineWatchdog:
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(expires_at=anchor + timedelta(seconds=5), clock=clock)
+        deadline = Deadline.create(
+            expires_at=anchor + timedelta(seconds=5), clock=clock
+        )
         # Advance clock past expiration
         clock.advance(10)
         result = create_deadline_watchdog(client, "t", 1, deadline)
@@ -599,7 +601,7 @@ class TestCreateDeadlineWatchdog:
         async def _run() -> None:
             client = _make_mock_client()
             future_time = datetime.now(UTC) + timedelta(seconds=60)
-            deadline = Deadline(expires_at=future_time)
+            deadline = Deadline.create(expires_at=future_time)
             task = create_deadline_watchdog(client, "t", 1, deadline)
             try:
                 assert task is not None

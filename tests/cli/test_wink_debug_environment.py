@@ -50,7 +50,7 @@ def _create_test_bundle(
 
     with BundleWriter(
         target_dir,
-        config=BundleConfig(),
+        config=BundleConfig.create(),
     ) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": "test"})

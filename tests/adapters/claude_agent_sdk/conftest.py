@@ -295,7 +295,7 @@ def hook_context(session: Session) -> HookContext:
 
 @pytest.fixture
 def simple_prompt() -> Prompt[SimpleOutput]:
-    template = PromptTemplate[SimpleOutput](
+    template = PromptTemplate[SimpleOutput].create(
         ns="test",
         key="simple",
         sections=[
@@ -311,7 +311,7 @@ def simple_prompt() -> Prompt[SimpleOutput]:
 
 @pytest.fixture
 def untyped_prompt() -> Prompt[None]:
-    template = PromptTemplate[None](
+    template = PromptTemplate[None].create(
         ns="test",
         key="untyped",
         sections=[
@@ -327,7 +327,7 @@ def untyped_prompt() -> Prompt[None]:
 
 @pytest.fixture
 def nullable_prompt() -> Prompt[NullableOutput]:
-    template = PromptTemplate[NullableOutput](
+    template = PromptTemplate[NullableOutput].create(
         ns="test",
         key="nullable",
         sections=[

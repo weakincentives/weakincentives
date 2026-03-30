@@ -12,41 +12,29 @@
 
 """Enhanced dataclass utilities with immutability-first defaults.
 
-This package provides the :func:`FrozenDataclass` decorator, which extends
-Python's standard :func:`dataclasses.dataclass` with sensible defaults for
-building immutable, memory-efficient data structures, along with convenient
-copy-and-modify helper methods.
+This package provides the :func:`FrozenDataclass` decorator and the
+:class:`Constructable` base class for building immutable, memory-efficient
+data structures.
 
 Exported Symbols
 ----------------
 FrozenDataclass
-    A decorator that creates frozen, slotted dataclasses with additional
-    helper methods for functional-style updates.
+    A decorator that creates frozen, slotted dataclasses with sensible
+    defaults.
 
-Benefits Over Standard Dataclasses
-----------------------------------
-1. **Immutability by default**: Classes are frozen (``frozen=True``), preventing
-   accidental mutation and making instances safe for use as dictionary keys or
-   in sets.
+Constructable
+    A base class for frozen dataclasses that require validated construction.
+    Subclasses define a ``create()`` classmethod; direct ``__init__`` is
+    blocked.  A ``replace()`` method is provided automatically.
 
-2. **Memory efficiency**: Slots are enabled by default (``slots=True``),
-   reducing memory overhead and improving attribute access speed.
+allow_construction
+    A context manager that temporarily permits direct ``__init__`` calls
+    on ``Constructable`` subclasses.  Used inside ``create()`` methods
+    and by framework code such as ``serde.parse()``.
 
-3. **Functional update methods**: Decorated classes gain ``update()``,
-   ``merge()``, and ``map()`` methods for creating modified copies without
-   mutation.
-
-4. **Input normalization hook**: The optional ``__pre_init__`` classmethod
-   allows transforming or validating inputs before the dataclass is constructed.
-
-5. **Full type checker support**: Uses ``@dataclass_transform`` for proper
-   static analysis with pyright, mypy, and other type checkers.
-
-Basic Usage
------------
-Create an immutable dataclass with the decorator::
-
-    from weakincentives.dataclasses import FrozenDataclass
+Two Tiers
+---------
+**Tier 1 — Simple value objects.**  Use ``@FrozenDataclass()`` alone::
 
     @FrozenDataclass()
     class Point:
@@ -54,136 +42,25 @@ Create an immutable dataclass with the decorator::
         y: float
 
     p1 = Point(1.0, 2.0)
-    p2 = p1.update(x=3.0)  # Point(x=3.0, y=2.0)
+    p1.x = 5.0  # Raises FrozenInstanceError
 
-    # Attempting mutation raises FrozenInstanceError
-    p1.x = 5.0  # Raises dataclasses.FrozenInstanceError
-
-Copy Helper Methods
--------------------
-All decorated classes receive three helper methods for functional updates:
-
-**update(**changes)**
-    Return a new instance with specified fields replaced::
-
-        @FrozenDataclass()
-        class User:
-            name: str
-            email: str
-            active: bool = True
-
-        user = User("Alice", "alice@example.com")
-        updated = user.update(email="alice@newdomain.com", active=False)
-
-**merge(mapping_or_obj)**
-    Merge fields from a dictionary or another object::
-
-        # From a dictionary
-        changes = {"email": "new@example.com"}
-        merged = user.merge(changes)
-
-        # From another object with matching attributes
-        class UserPatch:
-            email = "patched@example.com"
-
-        merged = user.merge(UserPatch())
-
-**map(transform)**
-    Apply a transformation function that receives current field values
-    as a dictionary and returns updates::
-
-        def uppercase_name(fields: dict[str, object]) -> dict[str, object]:
-            return {"name": str(fields["name"]).upper()}
-
-        transformed = user.map(uppercase_name)  # User with name="ALICE"
-
-Input Normalization with __pre_init__
--------------------------------------
-Define a ``__pre_init__`` classmethod to normalize or validate inputs before
-the dataclass is constructed. The method receives all field values as keyword
-arguments and must return a mapping of field names to values::
-
-    from collections.abc import Mapping
+**Tier 2 — Validated / normalized classes.**  Inherit from
+``Constructable`` and define a ``create()`` classmethod::
 
     @FrozenDataclass()
-    class NormalizedPath:
-        path: str
+    class Deadline(Constructable):
+        expires_at: datetime
+        started_at: datetime
 
         @classmethod
-        def __pre_init__(cls, path: str) -> Mapping[str, object]:
-            # Normalize path separators and remove trailing slashes
-            normalized = path.replace("\\\\", "/").rstrip("/")
-            return {"path": normalized}
+        def create(cls, expires_at: datetime, started_at: datetime | None = None) -> Deadline:
+            if started_at is None:
+                started_at = datetime.now(UTC)
+            with allow_construction():
+                return cls(expires_at=expires_at, started_at=started_at)
 
-    p = NormalizedPath("some\\\\path\\\\")
-    assert p.path == "some/path"
-
-The ``__pre_init__`` hook is particularly useful for:
-
-- Coercing input types (e.g., converting strings to enums)
-- Computing derived fields that depend on other fields
-- Validating invariants before construction
-- Providing alternative constructors with different signatures
-
-Derived (Non-Init) Fields
--------------------------
-Fields marked with ``init=False`` are considered derived fields. When using
-``__pre_init__``, you can compute and return values for these fields::
-
-    from dataclasses import field
-
-    @FrozenDataclass()
-    class Rectangle:
-        width: float
-        height: float
-        area: float = field(init=False)
-
-        @classmethod
-        def __pre_init__(
-            cls, width: float, height: float
-        ) -> Mapping[str, object]:
-            return {"width": width, "height": height, "area": width * height}
-
-    rect = Rectangle(3.0, 4.0)
-    assert rect.area == 12.0
-
-    # Updating triggers recomputation
-    rect2 = rect.update(width=5.0)
-    assert rect2.area == 20.0
-
-Note that derived fields cannot be modified directly via ``update()``; they
-are always recomputed through ``__pre_init__``.
-
-Customizing Dataclass Options
------------------------------
-All standard dataclass options can be overridden. The defaults are::
-
-    frozen=True      # Instances are immutable
-    slots=True       # Use __slots__ for memory efficiency
-    init=True        # Generate __init__
-    repr=True        # Generate __repr__
-    eq=True          # Generate __eq__
-    order=False      # Do not generate comparison methods
-    unsafe_hash=False
-    match_args=True  # Support pattern matching
-    kw_only=False    # Positional arguments allowed
-
-Override as needed::
-
-    @FrozenDataclass(order=True)  # Enable ordering comparisons
-    class Version:
-        major: int
-        minor: int
-        patch: int
-
-    v1 = Version(1, 0, 0)
-    v2 = Version(2, 0, 0)
-    assert v1 < v2
-
-    @FrozenDataclass(frozen=False)  # Mutable (not recommended)
-    class MutablePoint:
-        x: float
-        y: float
+    Deadline(...)          # TypeError
+    Deadline.create(...)   # OK
 
 See Also
 --------
@@ -193,35 +70,23 @@ See Also
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import MISSING, Field, dataclass, field, fields
+import functools
+import inspect
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import (
-    Any,
-    Protocol,
     Self,
     TypedDict,
     Unpack,
-    cast,
     dataclass_transform,
 )
 
-__all__ = ["FrozenDataclass"]
+__all__ = ["Constructable", "FrozenDataclass", "allow_construction"]
 
 
-class _SupportsUpdate(Protocol):
-    def update(self, **changes: object) -> Self:
-        """Return a modified copy of the dataclass."""
-        ...
-
-    def merge(self, mapping_or_obj: object) -> Self:
-        """Merge fields into a new instance."""
-        ...
-
-    def map(
-        self, transform: Callable[[dict[str, object]], Mapping[str, object]]
-    ) -> Self:
-        """Apply a mapping-based transform."""
-        ...
+_ALLOW_INIT: ContextVar[bool] = ContextVar("_allow_init", default=False)
 
 
 class DataclassOptions(TypedDict, total=False):
@@ -230,31 +95,135 @@ class DataclassOptions(TypedDict, total=False):
     eq: bool
     order: bool
     unsafe_hash: bool
-    frozen: bool
     match_args: bool
     kw_only: bool
     slots: bool
+
+
+@contextmanager
+def allow_construction() -> Iterator[None]:
+    """Temporarily permit direct ``__init__`` on ``Constructable`` subclasses.
+
+    Use inside ``create()`` methods and framework code (e.g. ``serde.parse``)
+    that needs to construct guarded instances.
+
+    Example::
+
+        @classmethod
+        def create(cls, value: int) -> MyClass:
+            validated = _validate(value)
+            with allow_construction():
+                return cls(value=validated)
+    """
+    token = _ALLOW_INIT.set(True)
+    try:
+        yield
+    finally:
+        _ALLOW_INIT.reset(token)
+
+
+@functools.cache
+def _create_param_names(target_cls: type) -> frozenset[str]:
+    """Return cached parameter names for *target_cls*.create(), excluding 'cls'."""
+    create_method = getattr(target_cls, "create", None)
+    if create_method is None:  # pragma: no cover
+        raise TypeError(f"{target_cls.__name__} does not define create()")
+    sig = inspect.signature(create_method)
+    return frozenset(
+        name
+        for name, p in sig.parameters.items()
+        if name != "cls" and p.kind not in {p.VAR_POSITIONAL, p.VAR_KEYWORD}
+    )
+
+
+class Constructable:
+    """Base for frozen dataclasses requiring factory construction.
+
+    Subclasses define a fully-typed ``create()`` classmethod that validates,
+    normalizes, and derives all field values *before* construction.  Direct
+    ``__init__`` is blocked at runtime — construction is only permitted
+    inside an :func:`allow_construction` context.
+
+    ``replace(**changes)`` is provided automatically: it introspects
+    ``create()``'s signature, copies current values for unchanged fields,
+    and delegates to ``create()`` so that all validation re-runs.  Every
+    ``create()`` parameter must correspond to an instance field; if not,
+    override ``replace()`` in the subclass.
+
+    Example::
+
+        @FrozenDataclass()
+        class Deadline(Constructable):
+            expires_at: datetime
+            started_at: datetime
+
+            @classmethod
+            def create(cls, expires_at: datetime, started_at: datetime | None = None) -> Deadline:
+                if started_at is None:
+                    started_at = datetime.now(UTC)
+                with allow_construction():
+                    return cls(expires_at=expires_at, started_at=started_at)
+
+        d = Deadline.create(expires_at=some_time)
+        d2 = d.replace(expires_at=new_time)
+    """
+
+    __slots__ = ()
+
+    def replace(self, **changes: object) -> Self:
+        """Return a copy with the given fields replaced.
+
+        Only fields that appear as parameters in ``create()`` can be
+        replaced.  Derived fields are recomputed automatically because
+        ``replace()`` delegates to ``create()``.
+
+        Every ``create()`` parameter must correspond to an instance
+        attribute so that ``replace()`` can round-trip values.  If
+        ``create()`` accepts configuration-only parameters (not stored
+        as fields), override ``replace()`` in the subclass.
+        """
+        cls = type(self)
+        create_params = _create_param_names(cls)
+
+        unknown = set(changes) - create_params
+        if unknown:
+            joined = ", ".join(sorted(unknown))
+            raise TypeError(
+                f"{cls.__name__}.replace() got unexpected field(s): {joined}"
+            )
+
+        non_field_params = {name for name in create_params if not hasattr(self, name)}
+        if non_field_params:
+            joined = ", ".join(sorted(non_field_params))
+            msg = (
+                f"{cls.__name__}.replace() cannot round-trip create() "
+                f"parameter(s) that are not instance fields: {joined}. "
+                f"Override replace() in {cls.__name__} to handle this."
+            )
+            raise TypeError(msg)
+
+        current = {name: getattr(self, name) for name in create_params}
+        current.update(changes)
+        return cls.create(**current)  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
 
 
 @dataclass_transform(field_specifiers=(field,))
 def FrozenDataclass[T](
     **dataclass_kwargs: Unpack[DataclassOptions],
 ) -> Callable[[type[T]], type[T]]:
-    """Dataclass decorator with frozen, slotted defaults plus helpers.
+    """Dataclass decorator with frozen, slotted defaults.
 
-    The decorator mirrors :func:`dataclasses.dataclass` while defaulting to
-    ``frozen=True`` and ``slots=True``. Classes may optionally define a
-    ``__pre_init__`` classmethod to normalise inputs before construction; it is
-    invoked with keyword arguments derived from the initialiser inputs.
+    Freezing is mandatory — all ``FrozenDataclass`` instances are immutable.
+    Other standard dataclass options can be customized::
 
-    Copy helpers are injected on the decorated class:
+        @FrozenDataclass(order=True)
+        class Version:
+            major: int
+            minor: int
 
-    - ``update(**changes)``: return a modified copy via
-      :func:`dataclasses.replace`.
-    - ``merge(mapping_or_obj)``: merge fields from a mapping or attribute-bearing
-      object into a copy.
-    - ``map(transform)``: provide a mapping of current fields to ``transform``
-      and apply the returned replacements.
+    For classes that need validation or normalization at construction time,
+    inherit from :class:`Constructable` and define a ``create()`` classmethod.
+    The decorator automatically guards ``__init__`` for such classes.
     """
 
     options: DataclassOptions = {
@@ -263,7 +232,6 @@ def FrozenDataclass[T](
         "eq": True,
         "order": False,
         "unsafe_hash": False,
-        "frozen": True,
         "match_args": True,
         "kw_only": False,
         "slots": True,
@@ -271,232 +239,34 @@ def FrozenDataclass[T](
     }
 
     def decorator(cls: type[T]) -> type[T]:
-        dataclass_cls = dataclass(**options)(cls)
-        _attach_helpers(dataclass_cls)
-        return dataclass_cls
+        dc = dataclass(frozen=True, **options)(cls)
+
+        if issubclass(dc, Constructable):
+            if "__post_init__" in dc.__dict__:
+                msg = (
+                    f"{dc.__name__} inherits from Constructable and must not "
+                    f"define __post_init__. Use create() instead."
+                )
+                raise TypeError(msg)
+            _inject_init_guard(dc)
+
+        return dc
 
     return decorator
 
 
-def _attach_helpers(cls: type[Any]) -> None:
+def _inject_init_guard(cls: type) -> None:
+    """Wrap ``__init__`` to reject direct construction."""
     original_init = cls.__init__
-    pre_init = getattr(cls, "__pre_init__", None)
 
-    if pre_init is not None:
-        cls.__init__ = _build_pre_init_wrapper(cls, pre_init, original_init)  # ty: ignore[invalid-assignment]
-
-    cls.update = _build_update_helper(cls)
-    cls.merge = _build_merge_helper(cls)
-    cls.map = _build_map_helper(cls)
-
-
-def _build_pre_init_wrapper(
-    cls: type[Any],
-    pre_init: Callable[..., Mapping[str, object]],
-    original_init: Callable[..., None],
-) -> Callable[..., None]:
-    all_fields = fields(cls)
-    init_field_defs = [field for field in all_fields if field.init]
-    init_field_names = [field.name for field in init_field_defs]
-    non_init_field_names = {field.name for field in all_fields if not field.init}
-    all_field_names = init_field_names + list(non_init_field_names)
-    # Get the underlying function from the classmethod to allow calling with
-    # the actual subclass type, not the class where __pre_init__ was defined.
-    pre_init_func = pre_init.__func__  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
-
-    def wrapper(self: object, *args: object, **kwargs: object) -> None:
-        actual_cls = type(self)
-        if len(args) > len(init_field_defs):
-            raise TypeError(
-                f"{actual_cls.__name__}() takes {len(init_field_defs)} positional arguments but {len(args)} were given"
+    @functools.wraps(original_init)
+    def guarded_init(self: object, *args: object, **kwargs: object) -> None:
+        if not _ALLOW_INIT.get():
+            msg = (
+                f"{type(self).__name__}() is not directly constructable. "
+                f"Use {type(self).__name__}.create() instead."
             )
+            raise TypeError(msg)
+        original_init(self, *args, **kwargs)
 
-        provided = dict(kwargs)
-        bound = _bind_fields(
-            actual_cls, init_field_defs, init_field_names, args, provided
-        )
-        if provided:
-            unexpected = ", ".join(sorted(provided))
-            raise TypeError(
-                f"{actual_cls.__name__}() got unexpected keyword arguments: {unexpected}"
-            )
-
-        normalized = pre_init_func(actual_cls, **bound)
-        _ensure_mapping(actual_cls, normalized)
-        _validate_normalized_fields(
-            actual_cls, all_field_names, init_field_names, normalized
-        )
-
-        # Separate init and non-init fields
-        init_kwargs = {k: v for k, v in normalized.items() if k in init_field_names}
-        non_init_values = {
-            k: v for k, v in normalized.items() if k in non_init_field_names
-        }
-
-        original_init(self, **init_kwargs)
-
-        # Set non-init fields directly (bypassing frozen restriction)
-        for name, value in non_init_values.items():
-            object.__setattr__(self, name, value)
-
-    return wrapper
-
-
-def _bind_fields(
-    cls: type[Any],
-    field_defs: Iterable[Field[Any]],
-    field_names: list[str],
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> dict[str, object]:
-    bound: dict[str, object] = {}
-    for index, (field_def, name) in enumerate(
-        zip(field_defs, field_names, strict=False)
-    ):
-        if index < len(args):
-            bound[name] = args[index]
-            continue
-        if name in kwargs:
-            bound[name] = kwargs.pop(name)
-            continue
-        if field_def.default is not MISSING:
-            bound[name] = field_def.default
-            continue
-        if field_def.default_factory is not MISSING:
-            bound[name] = field_def.default_factory()
-            continue
-        bound[name] = MISSING
-
-    return bound
-
-
-def _ensure_mapping(cls: type[Any], value: object) -> None:
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{cls.__name__}.__pre_init__() must return a mapping")
-
-
-def _validate_normalized_fields(
-    cls: type[Any],
-    all_field_names: list[str],
-    required_field_names: list[str],
-    normalized: Mapping[str, object],
-) -> None:
-    unexpected = normalized.keys() - set(all_field_names)
-    missing = {
-        name
-        for name in required_field_names
-        if name not in normalized or normalized[name] is MISSING
-    }
-
-    if unexpected:
-        joined = ", ".join(sorted(unexpected))
-        raise TypeError(
-            f"{cls.__name__}.__pre_init__() returned unexpected fields: {joined}"
-        )
-    if missing:
-        joined = ", ".join(sorted(missing))
-        raise TypeError(
-            f"{cls.__name__}.__pre_init__() is missing required fields: {joined}"
-        )
-
-
-def _build_update_helper(cls: type[Any]) -> Callable[..., _SupportsUpdate]:
-    def update(self: _SupportsUpdate, **changes: object) -> _SupportsUpdate:
-        return _apply_changes(self, changes)
-
-    return update
-
-
-def _build_merge_helper(cls: type[Any]) -> Callable[..., _SupportsUpdate]:
-    field_names = [field.name for field in fields(cls) if field.init]
-
-    def merge(self: _SupportsUpdate, mapping_or_obj: object) -> _SupportsUpdate:
-        updates = _extract_updates(cls, field_names, mapping_or_obj)
-        return self.update(**updates)
-
-    return merge
-
-
-def _build_map_helper(cls: type[Any]) -> Callable[..., _SupportsUpdate]:
-    def map_(
-        self: _SupportsUpdate,
-        transform: Callable[[dict[str, object]], Mapping[str, object]],
-    ) -> _SupportsUpdate:
-        # Only expose init fields to transform (non-init fields are derived)
-        current = {
-            f.name: getattr(self, f.name)
-            for f in fields(self)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-            if f.init
-        }
-        updates = transform(current)
-        _ensure_mapping(cls, updates)
-        return self.update(**dict(updates))
-
-    map_.__name__ = "map"
-    return map_
-
-
-def _extract_updates(
-    cls: type[Any], field_names: list[str], source: object
-) -> dict[str, object]:
-    if isinstance(source, Mapping):
-        typed_source = cast(Mapping[str, object], source)
-        extra_keys = typed_source.keys() - set(field_names)
-        if extra_keys:
-            joined = ", ".join(sorted(extra_keys))
-            raise TypeError(
-                f"{cls.__name__}.merge() received unexpected fields: {joined}"
-            )
-        return {key: typed_source[key] for key in field_names if key in typed_source}
-
-    updates: dict[str, object] = {}
-    for name in field_names:
-        if hasattr(source, name):
-            updates[name] = getattr(source, name)
-
-    if not updates:
-        raise TypeError(f"{cls.__name__}.merge() source has no matching fields")
-
-    return updates
-
-
-def _apply_changes(
-    instance: _SupportsUpdate, changes: Mapping[str, object]
-) -> _SupportsUpdate:
-    cls = type(instance)
-    field_defs = fields(instance)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-    init_fields = [f for f in field_defs if f.init]
-    non_init_fields = [f for f in field_defs if not f.init]
-    init_field_names = {f.name for f in init_fields}
-    all_field_names = {f.name for f in field_defs}
-
-    # Validate changes against known fields
-    unknown = set(changes) - all_field_names
-    if unknown:
-        joined = ", ".join(sorted(unknown))
-        raise TypeError(f"{cls.__name__}() got unexpected field(s): {joined}")
-
-    # Disallow direct changes to non-init (derived) fields
-    non_init_changes = set(changes) - init_field_names
-    if non_init_changes:
-        joined = ", ".join(sorted(non_init_changes))
-        raise TypeError(f"{cls.__name__}() cannot update derived field(s): {joined}")
-
-    # Collect current init-field values and apply changes
-    init_values = {f.name: getattr(instance, f.name) for f in init_fields}
-    init_values.update(changes)
-
-    # If class has non-init fields, call constructor so __pre_init__ recomputes them
-    if non_init_fields:
-        return cls(**init_values)
-
-    # Fast path: class has no derived fields, bypass __pre_init__
-    new_instance = cls.__new__(cls)
-    for name, value in init_values.items():
-        object.__setattr__(new_instance, name, value)
-
-    post_init = getattr(new_instance, "__post_init__", None)
-    if callable(post_init):
-        _ = post_init()
-
-    return new_instance
+    type.__setattr__(cls, "__init__", guarded_init)

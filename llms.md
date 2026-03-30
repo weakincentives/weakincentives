@@ -385,7 +385,7 @@ class TaskResult:
     steps: list[str]
 
 
-template = PromptTemplate[TaskResult](
+template = PromptTemplate[TaskResult].create(
     ns="myapp",
     key="task-agent",
     name="task_agent",
@@ -427,7 +427,7 @@ class OutputType:
 
 
 # Template: defines structure, typed output
-template = PromptTemplate[OutputType](
+template = PromptTemplate[OutputType].create(
     ns="namespace",  # Required: grouping
     key="prompt-key",  # Required: unique identifier
     name="prompt_name",  # Optional: display name
@@ -1192,7 +1192,7 @@ ______________________________________________________________________
 ### PromptTemplate
 
 ```text
-PromptTemplate[OutputT](
+PromptTemplate[OutputT].create(
     ns: str,                    # Namespace (validated, lowercase)
     key: str,                   # Unique key (validated, lowercase)
     name: str | None,           # Display name
@@ -1293,7 +1293,7 @@ tracker.check()  # Raises BudgetExceededError
 ### BundleConfig
 
 ```text
-BundleConfig(
+BundleConfig.create(
     target: str | Path,             # Output directory for bundles
     max_file_size: int,             # Skip files > N bytes
     max_total_size: int,            # Cap total capture
@@ -1301,7 +1301,7 @@ BundleConfig(
 )
 
 # Used in AgentLoopConfig
-config = AgentLoopConfig(debug_bundle=BundleConfig(target="./bundles/"))
+config = AgentLoopConfig(debug_bundle=BundleConfig.create(target="./bundles/"))
 ```
 
 ______________________________________________________________________

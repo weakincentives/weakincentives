@@ -45,7 +45,7 @@ def test_loop_with_debug_bundle_enabled(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -97,7 +97,7 @@ def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
         _ = fs.write("/subdir/nested.txt", "Nested content")
 
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(
             debug_bundle=bundle_config,
             resources={Filesystem: fs},
@@ -146,7 +146,7 @@ def test_loop_with_debug_bundle_no_filesystem_in_resources(tmp_path: Path) -> No
             pass
 
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(
             debug_bundle=bundle_config,
             resources={DummyResource: DummyResource()},  # Resources but no Filesystem
@@ -223,7 +223,7 @@ def test_loop_with_bundle_config_no_target() -> None:
     try:
         adapter = MockAdapter()
         # BundleConfig with target=None
-        bundle_config = BundleConfig(target=None)
+        bundle_config = BundleConfig.create(target=None)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -259,7 +259,7 @@ def test_loop_with_bundle_failure_uses_handle_failure(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -305,7 +305,7 @@ def test_loop_with_execution_failure_but_bundle_created(tmp_path: Path) -> None:
     try:
         # Adapter that raises an error during evaluate (after bundle is entered)
         adapter = MockAdapter(error=RuntimeError("Execution failed"))
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
@@ -355,7 +355,7 @@ def test_loop_debug_bundle_calls_session_methods(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         adapter = MockAdapter()
-        bundle_config = BundleConfig(target=tmp_path)
+        bundle_config = BundleConfig.create(target=tmp_path)
         config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 

@@ -250,7 +250,7 @@ class TestHandleToolCallFeedback:
             mock_prompt = MagicMock()
             clock = FakeClock()
             clock.set_wall(datetime(2024, 1, 1, 12, 0, tzinfo=UTC))
-            deadline = Deadline(
+            deadline = Deadline.create(
                 expires_at=datetime(2024, 1, 1, 13, 0, tzinfo=UTC),
                 clock=clock,
             )
@@ -423,7 +423,9 @@ class TestCheckTaskCompletion:
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
         # Create deadline while clock is before expiry
-        deadline = Deadline(expires_at=anchor + timedelta(seconds=10), clock=clock)
+        deadline = Deadline.create(
+            expires_at=anchor + timedelta(seconds=10), clock=clock
+        )
         # Advance clock past expiry
         clock.set_wall(anchor + timedelta(seconds=20))
 

@@ -44,7 +44,7 @@ def test_budget_accepts_deadline_only() -> None:
     clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=30), clock=clock)
 
     budget = Budget(deadline=deadline)
 
@@ -83,7 +83,7 @@ def test_budget_accepts_combined_limits() -> None:
     clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=30), clock=clock)
 
     budget = Budget(
         deadline=deadline,
@@ -250,7 +250,7 @@ def test_tracker_check_raises_when_deadline_expired() -> None:
     clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(seconds=30), clock=clock)
     budget = Budget(deadline=deadline)
     tracker = BudgetTracker(budget=budget)
 
@@ -396,7 +396,7 @@ def test_budget_with_all_limits() -> None:
     clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     clock.set_wall(anchor)
-    deadline = Deadline(anchor + timedelta(minutes=5), clock=clock)
+    deadline = Deadline.create(anchor + timedelta(minutes=5), clock=clock)
 
     budget = Budget(
         deadline=deadline,

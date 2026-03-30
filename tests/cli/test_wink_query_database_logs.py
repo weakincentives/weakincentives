@@ -37,7 +37,7 @@ class TestErrorJsonNonListTraceback:
         session = Session()
         session.dispatch(_AgentPlan(goal="Test", steps=1))
 
-        with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+        with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
             writer.write_session_after(session)
             writer.write_request_input({"task": "test"})
             writer.write_request_output({"status": "ok"})

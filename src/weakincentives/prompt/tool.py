@@ -21,6 +21,7 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
+    ClassVar,
     Final,
     Literal,
     Protocol,
@@ -32,7 +33,7 @@ from typing import (
 )
 
 from ..budget import BudgetTracker
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import Constructable, FrozenDataclass, allow_construction
 from ..deadlines import Deadline
 from ..types.dataclass import (
     SupportsDataclass,
@@ -211,7 +212,9 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT]):
 
 
 @FrozenDataclass()
-class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
+class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
+    Constructable
+):
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
@@ -220,49 +223,68 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     examples: tuple[ToolExample[ParamsT, ResultT], ...] = field(
         default_factory=tuple,
     )
-    params_type: type[ParamsT] = field(init=False, repr=False)
-    result_type: type[SupportsDataclass | None] = field(init=False, repr=False)
-    result_container: Literal["object", "array"] = field(
-        init=False,
-        repr=False,
-    )
-    _result_annotation: ResultT = field(init=False, repr=False)
     accepts_overrides: bool = True
 
+    # --- Class-level type resolution (set by __class_getitem__) ---
+    # These are NOT instance fields.  They are class attributes computed
+    # once per specialization (e.g. Tool[MyParams, MyResult]).
+
+    _specialized_params_type: ClassVar[type | None] = None
+    _specialized_result_annotation: ClassVar[object | None] = None
+    _specialized_result_type: ClassVar[type | None] = None
+    _specialized_result_container: ClassVar[Literal["object", "array"]] = "object"
+
+    @property
+    def params_type(self) -> type[ParamsT]:
+        """The concrete dataclass type for tool parameters."""
+        return cast(type[ParamsT], type(self)._specialized_params_type)
+
+    @property
+    def result_type(self) -> type[SupportsDataclass | None]:
+        """The concrete dataclass type for tool results."""
+        return cast(
+            "type[SupportsDataclass | None]", type(self)._specialized_result_type
+        )
+
+    @property
+    def result_container(self) -> Literal["object", "array"]:
+        """Whether the result is a single object or array of objects."""
+        return type(self)._specialized_result_container
+
     @classmethod
-    def __pre_init__(
+    def create(
         cls,
         *,
         name: str,
         description: str,
         handler: ToolHandler[ParamsT, ResultT] | None,
-        examples: tuple[ToolExample[ParamsT, ResultT], ...],
-        accepts_overrides: bool,
-    ) -> dict[str, object]:
+        examples: tuple[ToolExample[ParamsT, ResultT], ...] = (),
+        accepts_overrides: bool = True,
+    ) -> Tool[ParamsT, ResultT]:
+        """Create a validated Tool instance."""
         params_type, raw_result_annotation = cls._resolve_type_arguments()
 
-        result_type, result_container = cls._normalize_result_annotation(
-            raw_result_annotation,
-            params_type,
-        )
+        # Use pre-computed values from __class_getitem__ if available,
+        # otherwise normalize now (deferred from abstract specialization).
+        if cls._specialized_result_type is not None:
+            result_type = cast(ResultType, cls._specialized_result_type)
+            result_container = cls._specialized_result_container
+        else:
+            result_type, result_container = cls._normalize_result_annotation(
+                raw_result_annotation,
+                params_type,
+            )
 
-        validated_name = cls._validate_name(name, params_type)
-        validated_description = cls._validate_description(description, params_type)
-        validated_examples = cls._validate_examples(
-            examples, params_type, result_type, result_container
-        )
-
-        return {
-            "name": validated_name,
-            "description": validated_description,
-            "handler": handler,
-            "examples": validated_examples,
-            "accepts_overrides": accepts_overrides,
-            "params_type": cast(type[ParamsT], params_type),
-            "result_type": result_type,
-            "result_container": result_container,
-            "_result_annotation": raw_result_annotation,
-        }
+        with allow_construction():
+            return cls(
+                name=cls._validate_name(name, params_type),
+                description=cls._validate_description(description, params_type),
+                handler=handler,
+                examples=cls._validate_examples(
+                    examples, params_type, result_type, result_container
+                ),
+                accepts_overrides=accepts_overrides,
+            )
 
     @classmethod
     def _resolve_type_arguments(
@@ -527,9 +549,24 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         params_type = cast(ParamsType, params_candidate)
         result_annotation = cast(ResultT, result_candidate)
 
+        # Try to normalize eagerly.  This succeeds for concrete types
+        # (e.g. Tool[MyParams, MyResult]) but can fail for abstract type
+        # aliases used in cast() expressions.  When it fails we defer
+        # normalization to create().
+        try:
+            result_type, result_container = cls._normalize_result_annotation(
+                result_annotation,
+                params_type,
+            )
+        except PromptValidationError:
+            result_type = None
+            result_container = "object"
+
         class _SpecializedTool(cls):  # ty: ignore[shadowed-type-variable]  # dynamic class
             _specialized_params_type = params_type
             _specialized_result_annotation = result_annotation
+            _specialized_result_type = result_type
+            _specialized_result_container = result_container
 
         _SpecializedTool.__name__ = cls.__name__
         _SpecializedTool.__qualname__ = cls.__qualname__
@@ -647,7 +684,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
         handler_name = getattr(fn, "__name__", type(fn).__name__)
 
-        return specialized_tool_type(
+        return specialized_tool_type.create(
             name=handler_name,
             description=description,
             handler=fn,

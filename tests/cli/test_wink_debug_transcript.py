@@ -52,7 +52,7 @@ def _create_test_bundle(
 
     with BundleWriter(
         target_dir,
-        config=BundleConfig(),
+        config=BundleConfig.create(),
     ) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": "test"})
@@ -112,7 +112,7 @@ def test_api_transcript_endpoint(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -172,7 +172,7 @@ def test_api_transcript_markdown_rendering(tmp_path: Path) -> None:
 
     md_content = "# Heading\n\nSome **bold** text and a [link](http://example.com)."
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -231,7 +231,7 @@ def test_api_transcript_no_markdown_for_short_content(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -284,7 +284,7 @@ def test_transcript_endpoints_and_filters(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig.create()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})

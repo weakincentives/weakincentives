@@ -82,7 +82,7 @@ def _handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayl
 def _build_tool(
     name: str, *, accepts_overrides: bool = True
 ) -> Tool[ToolParams, ToolPayload]:
-    return Tool[ToolParams, ToolPayload](
+    return Tool[ToolParams, ToolPayload].create(
         name=name,
         description="echo the provided name",
         handler=_handler,

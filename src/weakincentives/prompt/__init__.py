@@ -158,7 +158,7 @@ Creating a prompt template::
                 title="Instructions",
                 key="instructions",
                 tools=(
-                    Tool[GreetParams, GreetResult](
+                    Tool[GreetParams, GreetResult].create(
                         name="greet",
                         description="Greet a user by name",
                         handler=greet_handler,
@@ -181,7 +181,7 @@ Creating a prompt template::
         def clone(self, **kwargs):
             return InstructionsSection()
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="example",
         key="task-prompt",
         sections=[InstructionsSection()],
@@ -206,7 +206,7 @@ Using structured output::
         status: str
         summary: str
 
-    template = PromptTemplate[TaskOutput](
+    template = PromptTemplate[TaskOutput].create(
         ns="example",
         key="structured-task",
         sections=[...],

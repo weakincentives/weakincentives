@@ -69,7 +69,7 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
         key="tools-section",
         summary="Summary: ${title}",
         tools=[
-            Tool[_ToolParams, _ToolResult](
+            Tool[_ToolParams, _ToolResult].create(
                 name="search_tool",
                 description="Search for something.",
                 handler=_dummy_handler,
@@ -168,7 +168,7 @@ def test_summary_visibility_skips_child_tools() -> None:
         template="Child: ${query}",
         key="child-tool",
         tools=[
-            Tool[_ToolParams, _ToolResult](
+            Tool[_ToolParams, _ToolResult].create(
                 name="child_tool",
                 description="Child tool description.",
                 handler=_dummy_handler,
@@ -225,7 +225,7 @@ def test_summary_visibility_default_excludes_tools() -> None:
         summary="Summary: ${title}",
         visibility=SectionVisibility.SUMMARY,  # Default to SUMMARY
         tools=[
-            Tool[_ToolParams, _ToolResult](
+            Tool[_ToolParams, _ToolResult].create(
                 name="excluded_tool",
                 description="This tool should be excluded.",
                 handler=_dummy_handler,
@@ -335,7 +335,7 @@ def test_markdown_section_render_override_with_empty_body_and_tools() -> None:
         template="Default: ${title}",
         key="tools-only",
         tools=[
-            Tool[_ToolParams, _ToolResult](
+            Tool[_ToolParams, _ToolResult].create(
                 name="override_tool",
                 description="Test tool for override.",
                 handler=_dummy_handler,
@@ -412,7 +412,7 @@ def test_summary_visibility_with_tools_injects_open_sections() -> None:
         summary="Summary: ${title}",
         visibility=SectionVisibility.SUMMARY,
         tools=[
-            Tool[_ToolParams, _ToolResult](
+            Tool[_ToolParams, _ToolResult].create(
                 name="section_tool",
                 description="Tool in section.",
                 handler=_dummy_handler,
@@ -449,7 +449,7 @@ def test_summary_visibility_mixed_injects_both_tools() -> None:
         summary="Summary with tools: ${title}",
         visibility=SectionVisibility.SUMMARY,
         tools=[
-            Tool[_ToolParams, _ToolResult](
+            Tool[_ToolParams, _ToolResult].create(
                 name="tooled_section_tool",
                 description="Tool in section.",
                 handler=_dummy_handler,

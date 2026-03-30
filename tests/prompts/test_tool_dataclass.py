@@ -47,7 +47,7 @@ def _example_handler(
 
 
 def test_tool_infers_param_and_result_types() -> None:
-    tool = Tool[ExampleParams, ExampleResult](
+    tool = Tool[ExampleParams, ExampleResult].create(
         name="echo",
         description="Echo the provided message.",
         handler=_example_handler,
@@ -58,7 +58,7 @@ def test_tool_infers_param_and_result_types() -> None:
 
 
 def test_tool_initialises_with_clean_name_and_description() -> None:
-    tool = Tool[ExampleParams, ExampleResult](
+    tool = Tool[ExampleParams, ExampleResult].create(
         name="lookup_entity",
         description="  Fetch structured entity info.  ",
         handler=_example_handler,
@@ -73,7 +73,9 @@ def test_tool_initialises_with_clean_name_and_description() -> None:
 
 def test_tool_requires_generic_type_arguments() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        Tool(name="lookup_entity", description="Fetch info", handler=_example_handler)
+        Tool.create(
+            name="lookup_entity", description="Fetch info", handler=_example_handler
+        )
 
     error = error_info.value
     assert isinstance(error, PromptValidationError)
@@ -89,7 +91,7 @@ def test_tool_class_getitem_requires_type_objects() -> None:
     specialized = Tool[ExampleParams, "not-a-type"]
 
     with pytest.raises(PromptValidationError):
-        specialized(
+        specialized.create(
             name="lookup_entity",
             description="Fetch info",
             handler=None,
@@ -110,7 +112,7 @@ def test_tool_subclass_resolves_generic_arguments() -> None:
     class _SubclassTool(Tool[ExampleParams, ExampleResult]):
         pass
 
-    tool = _SubclassTool(
+    tool = _SubclassTool.create(
         name="lookup_entity",
         description="Fetch info",
         handler=_example_handler,
@@ -122,7 +124,7 @@ def test_tool_subclass_resolves_generic_arguments() -> None:
 
 def test_tool_rejects_name_with_surrounding_whitespace() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name=" lookup ",
             description="Fetch info",
             handler=_example_handler,
@@ -135,7 +137,7 @@ def test_tool_rejects_name_with_surrounding_whitespace() -> None:
 
 def test_tool_rejects_name_with_invalid_characters() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name="Lookup",
             description="Fetch info",
             handler=_example_handler,
@@ -148,7 +150,7 @@ def test_tool_rejects_name_with_invalid_characters() -> None:
 
 def test_tool_rejects_empty_name() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name="",
             description="Fetch info",
             handler=_example_handler,
@@ -165,7 +167,7 @@ def test_tool_rejects_empty_name() -> None:
 )
 def test_tool_rejects_invalid_descriptions(bad_description: str) -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        Tool[ExampleParams, ExampleResult](
+        Tool[ExampleParams, ExampleResult].create(
             name="lookup_entity",
             description=bad_description,
             handler=_example_handler,
@@ -185,7 +187,7 @@ def test_tool_accepts_variadic_tuple_result_type() -> None:
         result = ToolResult.ok(value, message=params.message)
         return cast(ToolResult[tuple[ExampleResult, ...]], result)
 
-    tool = Tool[ExampleParams, tuple[ExampleResult, ...]](
+    tool = Tool[ExampleParams, tuple[ExampleResult, ...]].create(
         name="collect_examples",
         description="Collect multiple examples.",
         handler=handler,
@@ -204,7 +206,7 @@ def test_tool_accepts_list_result_type() -> None:
             [ExampleResult(message=params.message)], message=params.message
         )
 
-    tool = Tool[ExampleParams, list[ExampleResult]](
+    tool = Tool[ExampleParams, list[ExampleResult]].create(
         name="collect_list",
         description="Collect examples in a list.",
         handler=handler,
@@ -216,7 +218,7 @@ def test_tool_accepts_list_result_type() -> None:
 
 def test_tool_rejects_tuple_result_without_ellipsis() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        Tool[ExampleParams, tuple[ExampleResult, ExampleResult]](
+        Tool[ExampleParams, tuple[ExampleResult, ExampleResult]].create(
             name="bad_tuple",
             description="Invalid tuple result.",
             handler=cast(
@@ -232,7 +234,7 @@ def test_tool_rejects_tuple_result_without_ellipsis() -> None:
 
 def test_tool_rejects_sequence_result_with_non_type_element() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        _UNSAFE_TOOL[ExampleParams, tuple[None, ...]](
+        _UNSAFE_TOOL[ExampleParams, tuple[None, ...]].create(
             name="bad_tuple_element",
             description="Invalid tuple element.",
             handler=None,
@@ -245,7 +247,7 @@ def test_tool_rejects_sequence_result_with_non_type_element() -> None:
 
 def test_tool_class_getitem_rejects_unsupported_result_annotation() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        _UNSAFE_TOOL[ExampleParams, dict[str, ExampleResult]](
+        _UNSAFE_TOOL[ExampleParams, dict[str, ExampleResult]].create(
             name="bad_mapping",
             description="Unsupported mapping result.",
             handler=None,
@@ -283,10 +285,25 @@ def test_tool_accepts_annotated_param_and_return() -> None:
             ExampleResult(message=params.message), message=params.message
         )
 
-    tool = Tool[ExampleParams, ExampleResult](
+    tool = Tool[ExampleParams, ExampleResult].create(
         name="lookup_entity",
         description="Fetch structured entity info.",
         handler=handler,
     )
 
     assert tool.handler is handler
+
+
+def test_tool_replace_description() -> None:
+    """Tool.replace() delegates to create() and re-validates."""
+    tool = Tool[ExampleParams, ExampleResult].create(
+        name="test_tool",
+        description="Original description.",
+        handler=_example_handler,
+    )
+    replaced = tool.replace(description="New description.")
+    assert replaced.description == "New description."
+    # Derived fields are preserved through create()
+    assert replaced.params_type is ExampleParams
+    assert replaced.name == "test_tool"
+    assert replaced.handler is tool.handler

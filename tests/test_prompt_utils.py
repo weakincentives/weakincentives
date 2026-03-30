@@ -23,7 +23,7 @@ from weakincentives.contrib.tools.digests import (
     latest_workspace_digest,
     set_workspace_digest,
 )
-from weakincentives.prompt import MarkdownSection, PromptTemplate
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt._visibility import SectionVisibility
 from weakincentives.prompt.overrides import (
     HexDigest,
@@ -40,11 +40,11 @@ def _build_prompt() -> PromptTemplate[str]:
         MarkdownSection(title="One", template="first", key="one"),
         MarkdownSection(title="Two", template="second", key="two"),
     )
-    return PromptTemplate(ns="test", key="prompt", sections=sections)
+    return PromptTemplate.create(ns="test", key="prompt", sections=sections)
 
 
 def test_prompt_find_section_by_key_and_candidates() -> None:
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
 
     assert isinstance(prompt.find_section(MarkdownSection), MarkdownSection)
     assert isinstance(
@@ -59,7 +59,7 @@ def test_prompt_find_section_by_key_and_candidates() -> None:
 
 
 def test_store_section_override_requires_registered_path(tmp_path: Path) -> None:
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     descriptor = PromptDescriptor.from_prompt(prompt)
@@ -75,7 +75,7 @@ def test_store_section_override_requires_registered_path(tmp_path: Path) -> None
 def test_workspace_digest_section_in_descriptor() -> None:
     section = WorkspaceDigestSection(session=Session())
     descriptor = PromptDescriptor.from_prompt(
-        PromptTemplate(ns="digest", key="prompt", sections=(section,))
+        Prompt(PromptTemplate.create(ns="digest", key="prompt", sections=(section,)))
     )
 
     assert section.original_body_template() == section._placeholder

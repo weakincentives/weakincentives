@@ -109,7 +109,7 @@ class _TestLoop(AgentLoop[_Request, _Output]):
         requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]],
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
-        self._template = PromptTemplate[_Output](
+        self._template = PromptTemplate[_Output].create(
             ns="test",
             key="test-prompt",
             sections=[

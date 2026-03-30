@@ -263,13 +263,13 @@ class TestPromptTemplateIntegration:
 
     def test_default_is_none(self) -> None:
         """PromptTemplate defaults to no task completion checker."""
-        template: PromptTemplate[object] = PromptTemplate(ns="test", key="test")
+        template: PromptTemplate[object] = PromptTemplate.create(ns="test", key="test")
         assert template.task_completion_checker is None
 
     def test_set_checker_on_template(self) -> None:
         """PromptTemplate accepts a task completion checker."""
         checker = FileOutputChecker(files=("output.txt",))
-        template: PromptTemplate[object] = PromptTemplate(
+        template: PromptTemplate[object] = PromptTemplate.create(
             ns="test", key="test", task_completion_checker=checker
         )
         assert template.task_completion_checker is checker
@@ -277,7 +277,7 @@ class TestPromptTemplateIntegration:
     def test_prompt_forwards_checker(self) -> None:
         """Prompt.task_completion_checker forwards from template."""
         checker = FileOutputChecker(files=("output.txt",))
-        template: PromptTemplate[object] = PromptTemplate(
+        template: PromptTemplate[object] = PromptTemplate.create(
             ns="test", key="test", task_completion_checker=checker
         )
         prompt: Prompt[object] = Prompt(template)
@@ -285,6 +285,6 @@ class TestPromptTemplateIntegration:
 
     def test_prompt_forwards_none(self) -> None:
         """Prompt.task_completion_checker returns None when not configured."""
-        template: PromptTemplate[object] = PromptTemplate(ns="test", key="test")
+        template: PromptTemplate[object] = PromptTemplate.create(ns="test", key="test")
         prompt: Prompt[object] = Prompt(template)
         assert prompt.task_completion_checker is None

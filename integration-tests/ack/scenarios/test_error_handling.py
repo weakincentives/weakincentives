@@ -45,7 +45,7 @@ def test_deadline_enforcement(
 ) -> None:
     """Expired deadlines raise PromptEvaluationError before provider execution."""
     clock = FakeClock()
-    deadline = Deadline(
+    deadline = Deadline.create(
         expires_at=clock.utcnow() + timedelta(seconds=2),
         clock=clock,
     )

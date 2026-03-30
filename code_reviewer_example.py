@@ -452,7 +452,7 @@ def run_review(
 
     adapter = create_adapter(adapter_name, model_id=model_id)
     config = AgentLoopConfig(
-        debug_bundle=BundleConfig(target=Path("debug_bundles/")),
+        debug_bundle=BundleConfig.create(target=Path("debug_bundles/")),
     )
     loop = CodeReviewLoop(
         adapter=adapter,
@@ -466,7 +466,7 @@ def run_review(
     )
     loop_request = AgentLoopRequest(
         request=review_request,
-        deadline=Deadline(
+        deadline=Deadline.create(
             expires_at=datetime.now(UTC) + timedelta(minutes=deadline_minutes)
         ),
     )

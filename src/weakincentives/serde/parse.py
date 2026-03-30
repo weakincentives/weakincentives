@@ -148,7 +148,16 @@ def _parse_dataclass[T](
         config,
     )
 
-    instance = target_cls(**kwargs)
+    # For Constructable subclasses, route through create() so that
+    # validation and normalization run on deserialized data.  This is
+    # safe because create() has the same parameter signature as __init__
+    # (no derived fields stored on the dataclass).
+    from ..dataclasses import Constructable
+
+    if issubclass(target_cls, Constructable):
+        instance = cast(T, target_cls.create(**kwargs))  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+    else:
+        instance = target_cls(**kwargs)
 
     _apply_extra_fields(mapping_data, used_keys, config.extra)
     _run_validation_hooks(instance)

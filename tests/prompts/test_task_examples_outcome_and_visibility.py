@@ -80,7 +80,7 @@ def search_handler(
 
 @pytest.fixture
 def read_tool() -> Tool[ReadParams, ReadResult]:
-    return Tool[ReadParams, ReadResult](
+    return Tool[ReadParams, ReadResult].create(
         name="read_file",
         description="Read a file from the workspace.",
         handler=read_handler,
@@ -120,7 +120,7 @@ class TestTaskExamplesOutcomeValidation:
         )
 
         # Should succeed - string outcome for unstructured prompt
-        template = PromptTemplate(
+        template = PromptTemplate.create(
             ns="test",
             key="string-outcome-test",
             sections=[tools_section, TaskExamplesSection(examples=[example])],
@@ -157,12 +157,13 @@ class TestTaskExamplesOutcomeValidation:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad-outcome-test",
+            sections=[tools_section, TaskExamplesSection(examples=[example])],
+        )
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate(
-                ns="test",
-                key="bad-outcome-test",
-                sections=[tools_section, TaskExamplesSection(examples=[example])],
-            )
+            _ = Prompt(template).sections
 
         assert "outcome must be a string" in str(exc.value)
         assert "no structured output" in str(exc.value)
@@ -196,7 +197,7 @@ class TestTaskExamplesOutcomeValidation:
         )
 
         # Should succeed - dataclass outcome matches prompt output type
-        template = PromptTemplate[AnalysisOutput](
+        template = PromptTemplate[AnalysisOutput].create(
             ns="test",
             key="typed-outcome-test",
             sections=[tools_section, TaskExamplesSection(examples=[example])],
@@ -234,12 +235,13 @@ class TestTaskExamplesOutcomeValidation:
             ],
         )
 
+        template = PromptTemplate[AnalysisOutput].create(
+            ns="test",
+            key="bad-string-outcome-test",
+            sections=[tools_section, TaskExamplesSection(examples=[example])],
+        )
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate[AnalysisOutput](
-                ns="test",
-                key="bad-string-outcome-test",
-                sections=[tools_section, TaskExamplesSection(examples=[example])],
-            )
+            _ = Prompt(template).sections
 
         assert "outcome type mismatch" in str(exc.value)
         assert "AnalysisOutput" in str(exc.value)
@@ -272,12 +274,13 @@ class TestTaskExamplesOutcomeValidation:
             ],
         )
 
+        template = PromptTemplate[AnalysisOutput].create(
+            ns="test",
+            key="wrong-type-outcome-test",
+            sections=[tools_section, TaskExamplesSection(examples=[example])],
+        )
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate[AnalysisOutput](
-                ns="test",
-                key="wrong-type-outcome-test",
-                sections=[tools_section, TaskExamplesSection(examples=[example])],
-            )
+            _ = Prompt(template).sections
 
         assert "outcome type mismatch" in str(exc.value)
         assert "AnalysisOutput" in str(exc.value)
@@ -306,7 +309,9 @@ class TestArrayOutputValidation:
 
     def test_array_output_not_sequence(self) -> None:
         """Test error when array output is not a sequence."""
-        tool: Tool[SearchParams, list[ArrayItem]] = Tool[SearchParams, list[ArrayItem]](
+        tool: Tool[SearchParams, list[ArrayItem]] = Tool[
+            SearchParams, list[ArrayItem]
+        ].create(
             name="array_tool",
             description="Tool returning array",
             handler=_array_handler,
@@ -335,22 +340,25 @@ class TestArrayOutputValidation:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            _ = Prompt(template).sections
 
         assert "output type mismatch" in str(exc.value)
         assert "sequence of ArrayItem" in str(exc.value)
 
     def test_array_output_wrong_element_type(self) -> None:
         """Test error when array output has wrong element type."""
-        tool: Tool[SearchParams, list[ArrayItem]] = Tool[SearchParams, list[ArrayItem]](
+        tool: Tool[SearchParams, list[ArrayItem]] = Tool[
+            SearchParams, list[ArrayItem]
+        ].create(
             name="array_tool",
             description="Tool returning array",
             handler=_array_handler,
@@ -379,15 +387,16 @@ class TestArrayOutputValidation:
             ],
         )
 
+        template = PromptTemplate.create(
+            ns="test",
+            key="bad",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
         with pytest.raises(PromptValidationError) as exc:
-            PromptTemplate(
-                ns="test",
-                key="bad",
-                sections=[
-                    tools_section,
-                    TaskExamplesSection(examples=[example]),
-                ],
-            )
+            _ = Prompt(template).sections
 
         assert "output type mismatch" in str(exc.value)
         assert "sequence of ArrayItem" in str(exc.value)
@@ -558,15 +567,15 @@ class TestSectionHierarchy:
             examples=[example],
         )
 
-        template = PromptTemplate(
+        template = PromptTemplate.create(
             ns="test",
             key="paths-test",
             sections=[tools_section, examples_section],
         )
 
         # Verify section paths are registered correctly
-        snapshot = template._snapshot
-        assert snapshot is not None
+        prompt = Prompt(template)
+        snapshot = prompt._snapshot
 
         section_paths = snapshot.section_paths
         assert ("tools",) in section_paths
@@ -579,7 +588,9 @@ class TestArrayOutputValidationEdgeCases:
 
     def test_array_output_empty_sequence(self) -> None:
         """Test validation succeeds with empty array output."""
-        tool: Tool[SearchParams, list[ArrayItem]] = Tool[SearchParams, list[ArrayItem]](
+        tool: Tool[SearchParams, list[ArrayItem]] = Tool[
+            SearchParams, list[ArrayItem]
+        ].create(
             name="array_tool",
             description="Tool returning array",
             handler=_array_handler,
@@ -608,8 +619,8 @@ class TestArrayOutputValidationEdgeCases:
             ],
         )
 
-        # Should succeed - empty arrays are valid (validation only, not rendering)
-        template = PromptTemplate(
+        # Should succeed - empty arrays are valid
+        template = PromptTemplate.create(
             ns="test",
             key="empty-array",
             sections=[
@@ -618,12 +629,15 @@ class TestArrayOutputValidationEdgeCases:
             ],
         )
 
-        # Validation passed - template created successfully
+        # Trigger snapshot computation to run validation
+        _ = Prompt(template).sections
         assert template is not None
 
     def test_array_output_correct_types_all_match(self) -> None:
         """Test validation succeeds when all items match expected type."""
-        tool: Tool[SearchParams, list[ArrayItem]] = Tool[SearchParams, list[ArrayItem]](
+        tool: Tool[SearchParams, list[ArrayItem]] = Tool[
+            SearchParams, list[ArrayItem]
+        ].create(
             name="array_tool",
             description="Tool returning array",
             handler=_array_handler,
@@ -652,8 +666,8 @@ class TestArrayOutputValidationEdgeCases:
             ],
         )
 
-        # Should succeed - all items match (validation only, not rendering)
-        template = PromptTemplate(
+        # Should succeed - all items match
+        template = PromptTemplate.create(
             ns="test",
             key="good-array",
             sections=[
@@ -661,6 +675,9 @@ class TestArrayOutputValidationEdgeCases:
                 TaskExamplesSection(examples=[example]),
             ],
         )
+
+        # Trigger snapshot computation to run validation
+        _ = Prompt(template).sections
 
         # Validation passed - template created successfully
         assert template is not None

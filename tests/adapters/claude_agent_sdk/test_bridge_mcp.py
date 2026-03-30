@@ -47,7 +47,9 @@ def _make_prompt_with_resources(
     resources: dict[type[object], object],
 ) -> Prompt[object]:
     """Create a prompt with resources bound in active context."""
-    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate.create(ns="tests", key="bridge-test")
+    )
     prompt = prompt.bind(resources=resources)
     prompt.resources.__enter__()
     return prompt
@@ -75,7 +77,7 @@ def search_handler(
     )
 
 
-search_tool = Tool[SearchParams, SearchResult](
+search_tool = Tool[SearchParams, SearchResult].create(
     name="search",
     description="Search for content",
     handler=search_handler,
@@ -91,7 +93,9 @@ def session() -> Session:
 @pytest.fixture
 def prompt() -> Prompt[object]:
     """Create a prompt in active context."""
-    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate.create(ns="tests", key="bridge-test")
+    )
     prompt.resources.__enter__()
     return prompt
 
@@ -289,7 +293,7 @@ class TestVisibilityExpansionRequiredPropagation:
                 section_keys=("section.key",),
             )
 
-        expanding_tool = Tool[SearchParams, SearchResult](
+        expanding_tool = Tool[SearchParams, SearchResult].create(
             name="expanding",
             description="Tool that requests expansion",
             handler=expanding_handler,
@@ -352,7 +356,7 @@ class TestVisibilityExpansionRequiredPropagation:
                 section_keys=("a.b",),
             )
 
-        expanding_tool = Tool[SearchParams, SearchResult](
+        expanding_tool = Tool[SearchParams, SearchResult].create(
             name="expanding",
             description="Tool that requests expansion",
             handler=expanding_handler,
@@ -399,7 +403,7 @@ class TestVisibilityExpansionRequiredPropagation:
                 section_keys=("a.b",),
             )
 
-        expanding_tool = Tool[SearchParams, SearchResult](
+        expanding_tool = Tool[SearchParams, SearchResult].create(
             name="expanding",
             description="Tool that requests expansion",
             handler=expanding_handler,
@@ -452,7 +456,7 @@ class TestVisibilityExpansionRequiredPropagation:
                 SearchResult(matches=3), message=f"Searched for {params.query}"
             )
 
-        capture_tool = Tool[SearchParams, SearchResult](
+        capture_tool = Tool[SearchParams, SearchResult].create(
             name="capture",
             description="Tool that captures context",
             handler=capture_context_handler,

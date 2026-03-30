@@ -21,7 +21,7 @@ pytest fixture and backward-compatible helpers.
     def test_deadline_remaining(fake_clock: FakeClock) -> None:
         fake_clock.set_wall(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
 
-        deadline = Deadline(
+        deadline = Deadline.create(
             expires_at=datetime(2024, 6, 1, 13, 0, 0, tzinfo=UTC),
             clock=fake_clock,
         )

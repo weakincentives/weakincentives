@@ -73,7 +73,7 @@ class JudgeParams:
     """The expected/reference answer."""
 
 
-JUDGE_TEMPLATE: PromptTemplate[JudgeOutput] = PromptTemplate[JudgeOutput](
+JUDGE_TEMPLATE: PromptTemplate[JudgeOutput] = PromptTemplate[JudgeOutput].create(
     ns="wink.evals",
     key="llm-judge",
     name="llm_judge",

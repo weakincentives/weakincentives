@@ -214,7 +214,7 @@ class InProcessDispatcher:
                 )
                 failures.append(HandlerFailure(handler=handler, error=error))
 
-        return DispatchResult(
+        return DispatchResult.create(
             event=event,
             handlers_invoked=tuple(invoked),
             errors=tuple(failures),

@@ -61,7 +61,7 @@ class _TransformingSampleLoop(AgentLoop[SampleRequest, SampleOutput]):
         config: AgentLoopConfig | None = None,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests, config=config)
-        self._template = PromptTemplate[SampleOutput](
+        self._template = PromptTemplate[SampleOutput].create(
             ns="test",
             key="test-prompt",
             sections=[
@@ -111,7 +111,7 @@ class _SampleLoopNoFinalizeOverride(AgentLoop[SampleRequest, SampleOutput]):
         config: AgentLoopConfig | None = None,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests, config=config)
-        self._template = PromptTemplate[SampleOutput](
+        self._template = PromptTemplate[SampleOutput].create(
             ns="test",
             key="test-prompt",
             sections=[

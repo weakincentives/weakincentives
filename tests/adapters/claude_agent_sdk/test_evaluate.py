@@ -48,7 +48,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
         clock = FakeClock()
         anchor = datetime.now(UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+        deadline = Deadline.create(anchor + timedelta(seconds=5), clock=clock)
         clock.advance(10)
 
         adapter = ClaudeAgentSDKAdapter()
@@ -121,7 +121,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
         from tests.adapters.claude_agent_sdk.test_bridge import search_tool
         from weakincentives.runtime.session.rendered_tools import RenderedTools
 
-        template_with_tools = PromptTemplate[SimpleOutput](
+        template_with_tools = PromptTemplate[SimpleOutput].create(
             ns="test",
             key="with_tools",
             sections=[
@@ -171,7 +171,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
         from tests.adapters.claude_agent_sdk.test_bridge import search_tool
         from weakincentives.runtime.session.rendered_tools import RenderedTools
 
-        template_with_tools = PromptTemplate[SimpleOutput](
+        template_with_tools = PromptTemplate[SimpleOutput].create(
             ns="test",
             key="with_tools",
             sections=[

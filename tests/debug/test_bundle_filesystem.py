@@ -52,7 +52,7 @@ class TestFilesystemArchiving:
             def list(self, _path: str) -> list:
                 raise OSError("Simulated error")
 
-        config = BundleConfig(target=tmp_path)
+        config = BundleConfig.create(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(FailingFilesystem())  # type: ignore[arg-type]
@@ -71,7 +71,7 @@ class TestFilesystemArchiving:
         # Write a large file
         _ = fs.write("/large.txt", "x" * 1000)
 
-        config = BundleConfig(target=tmp_path, max_file_size=100)
+        config = BundleConfig.create(target=tmp_path, max_file_size=100)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -93,7 +93,7 @@ class TestFilesystemArchiving:
             _ = fs.write(f"/file{i}.txt", "x" * 100)
 
         # Set max_total_size to less than total file content
-        config = BundleConfig(target=tmp_path, max_total_size=250)
+        config = BundleConfig.create(target=tmp_path, max_total_size=250)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -123,7 +123,7 @@ class TestFilesystemEdgeCases:
         fs = PermissionErrorFilesystem()
         _ = fs.write("/test.txt", "content")
 
-        config = BundleConfig(target=tmp_path)
+        config = BundleConfig.create(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -149,7 +149,7 @@ class TestFilesystemEdgeCases:
         fs = DisappearingFilesystem()
         _ = fs.write("/test.txt", "content")
 
-        config = BundleConfig(target=tmp_path)
+        config = BundleConfig.create(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -169,7 +169,7 @@ class TestFilesystemEdgeCases:
         fs = DirectoryAsFileFilesystem()
         _ = fs.write("/test.txt", "content")
 
-        config = BundleConfig(target=tmp_path)
+        config = BundleConfig.create(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -188,7 +188,7 @@ class TestFilesystemEdgeCases:
 
         fs = ListFailsFilesystem()
 
-        config = BundleConfig(target=tmp_path)
+        config = BundleConfig.create(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -207,7 +207,7 @@ class TestFilesystemEdgeCases:
 
         fs = NotADirFilesystem()
 
-        config = BundleConfig(target=tmp_path)
+        config = BundleConfig.create(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -221,7 +221,7 @@ class TestFilesystemEdgeCases:
         fs = InMemoryFilesystem()
         _ = fs.write("/level1/level2/deep.txt", "deep content")
 
-        config = BundleConfig(target=tmp_path)
+        config = BundleConfig.create(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)

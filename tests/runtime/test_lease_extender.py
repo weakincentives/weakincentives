@@ -329,7 +329,9 @@ def test_tool_context_beat_with_heartbeat() -> None:
     heartbeat.add_callback(lambda: beat_count.__setitem__(0, beat_count[0] + 1))
 
     session = Session()
-    template: PromptTemplate[None] = PromptTemplate(ns="test", key="test", name="test")
+    template: PromptTemplate[None] = PromptTemplate.create(
+        ns="test", key="test", name="test"
+    )
     prompt: Prompt[None] = Prompt(template)
     context = ToolContext(
         prompt=prompt,
@@ -358,7 +360,9 @@ def test_hook_context_beat_with_heartbeat() -> None:
     heartbeat.add_callback(lambda: beat_count.__setitem__(0, beat_count[0] + 1))
 
     session = Session()
-    template: PromptTemplate[None] = PromptTemplate(ns="test", key="test", name="test")
+    template: PromptTemplate[None] = PromptTemplate.create(
+        ns="test", key="test", name="test"
+    )
     prompt: Prompt[None] = Prompt(template)
     constraints = HookConstraints(heartbeat=heartbeat)
     context = HookContext(
@@ -379,7 +383,9 @@ def test_tool_context_beat_without_heartbeat() -> None:
     from weakincentives.runtime.session import Session
 
     session = Session()
-    template: PromptTemplate[None] = PromptTemplate(ns="test", key="test", name="test")
+    template: PromptTemplate[None] = PromptTemplate.create(
+        ns="test", key="test", name="test"
+    )
     prompt: Prompt[None] = Prompt(template)
     context = ToolContext(
         prompt=prompt,

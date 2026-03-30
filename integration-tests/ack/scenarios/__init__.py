@@ -118,7 +118,7 @@ def build_greeting_prompt(ns: str) -> PromptTemplate[object]:
         ),
         key="greeting",
     )
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns=ns,
         key="ack-greeting",
         name="ack_greeting",
@@ -142,7 +142,7 @@ def build_uppercase_tool(
         result = TransformResult(text=params.text.upper())
         return ToolResult.ok(result, message=f"Uppercased: {result.text}")
 
-    return Tool[TransformRequest, TransformResult](
+    return Tool[TransformRequest, TransformResult].create(
         name="uppercase_text",
         description="Return the provided text in uppercase characters.",
         handler=handler,
@@ -163,7 +163,7 @@ def build_tool_prompt(
         tools=(tool,),
         key="instruction",
     )
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns=ns,
         key="ack-uppercase",
         name="ack_uppercase_workflow",
@@ -181,7 +181,7 @@ def build_structured_prompt(ns: str) -> PromptTemplate[ReviewAnalysis]:
         ),
         key="analysis",
     )
-    return PromptTemplate[ReviewAnalysis](
+    return PromptTemplate[ReviewAnalysis].create(
         ns=ns,
         key="ack-structured",
         name="ack_structured_review",
@@ -204,7 +204,7 @@ def build_verify_tool() -> Tool[VerifyRequest, VerifyResult]:
         )
         return ToolResult.ok(result, message=result.message)
 
-    return Tool[VerifyRequest, VerifyResult](
+    return Tool[VerifyRequest, VerifyResult].create(
         name="verify_result",
         description="Verify the provided value and return verification details.",
         handler=handler,
@@ -252,7 +252,7 @@ def build_progressive_disclosure_prompt(
         children=[guidelines_section],
     )
 
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns=ns,
         key="ack-progressive-disclosure",
         name="ack_progressive_disclosure",
@@ -270,7 +270,7 @@ def build_native_tool_prompt(ns: str) -> PromptTemplate[object]:
         ),
         key="task",
     )
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns=ns,
         key="ack-native-tool",
         name="ack_native_tool",
@@ -294,7 +294,7 @@ def build_transactional_prompt(
         tools=(write_succeed_tool, write_fail_tool),
         key="task",
     )
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns=ns,
         key="ack-transactional",
         name="ack_transactional_tools",
@@ -355,7 +355,7 @@ def build_skill_prompt(
         key="skill-task",
         skills=(SkillMount(source=skill_dir, name="ack-secret-skill"),),
     )
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns=ns,
         key="ack-skill-installation",
         name="ack_skill_installation",

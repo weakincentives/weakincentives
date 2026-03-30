@@ -32,7 +32,7 @@ Example:
     ...     PromptTemplate,
     ... )
     >>>
-    >>> template = PromptTemplate[OutputType](
+    >>> template = PromptTemplate[OutputType].create(
     ...     ns="my-agent",
     ...     key="main",
     ...     feedback_providers=(

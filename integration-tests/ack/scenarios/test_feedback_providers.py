@@ -74,7 +74,7 @@ def _build_echo_tool() -> Tool[TransformRequest, TransformResult]:
         result = TransformResult(text=params.text)
         return ToolResult.ok(result, message=f"Echo: {result.text}")
 
-    return Tool[TransformRequest, TransformResult](
+    return Tool[TransformRequest, TransformResult].create(
         name="echo_text",
         description="Return the provided text unchanged.",
         handler=handler,
@@ -99,7 +99,7 @@ def test_feedback_provider_delivers_content(
         key="task",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns=make_adapter_ns(adapter_fixture.adapter_name),
         key="ack-feedback",
         name="ack_feedback_provider",

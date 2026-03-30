@@ -176,7 +176,7 @@ class BundleWriter:
         super().__init__()
         self._target = Path(target)
         self._bundle_id = bundle_id if bundle_id is not None else uuid4()
-        self._config = config if config is not None else BundleConfig()
+        self._config = config if config is not None else BundleConfig.create()
         self._temp_dir = None
         self._started_at = SYSTEM_CLOCK.utcnow()
         self._ended_at = None

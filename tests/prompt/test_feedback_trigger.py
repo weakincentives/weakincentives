@@ -57,7 +57,7 @@ def make_session() -> Session:
 
 def make_prompt() -> Prompt[None]:
     """Create a minimal prompt for testing."""
-    template: PromptTemplate[None] = PromptTemplate(
+    template: PromptTemplate[None] = PromptTemplate.create(
         ns="test", key="test-prompt", name="test"
     )
     return Prompt(template)
@@ -467,14 +467,14 @@ class TestDeadlineFeedback:
 
     def test_should_run_returns_true_with_deadline(self) -> None:
         provider = DeadlineFeedback()
-        deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1))
+        deadline = Deadline.create(expires_at=datetime.now(UTC) + timedelta(hours=1))
         context = self._make_context(deadline=deadline)
 
         assert provider.should_run(context=context) is True
 
     def test_provide_returns_info_when_plenty_of_time(self) -> None:
         provider = DeadlineFeedback(warning_threshold_seconds=120)
-        deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=2))
+        deadline = Deadline.create(expires_at=datetime.now(UTC) + timedelta(hours=2))
         context = self._make_context(deadline=deadline)
 
         feedback = provider.provide(context=context)
@@ -489,7 +489,7 @@ class TestDeadlineFeedback:
 
     def test_provide_returns_warning_when_low_time(self) -> None:
         provider = DeadlineFeedback(warning_threshold_seconds=120)
-        deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=90))
+        deadline = Deadline.create(expires_at=datetime.now(UTC) + timedelta(seconds=90))
         context = self._make_context(deadline=deadline)
 
         feedback = provider.provide(context=context)
@@ -526,7 +526,9 @@ class TestDeadlineFeedback:
 
     def test_custom_warning_threshold(self) -> None:
         provider = DeadlineFeedback(warning_threshold_seconds=300)
-        deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=240))
+        deadline = Deadline.create(
+            expires_at=datetime.now(UTC) + timedelta(seconds=240)
+        )
         context = self._make_context(deadline=deadline)
 
         feedback = provider.provide(context=context)
@@ -574,7 +576,7 @@ class TestPromptTemplateFeedbackProviders:
     """Tests for feedback providers on PromptTemplate."""
 
     def test_creates_template_without_providers(self) -> None:
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test", name="test"
         )
         assert template.feedback_providers == ()
@@ -584,7 +586,7 @@ class TestPromptTemplateFeedbackProviders:
         config = FeedbackProviderConfig(
             provider=provider, trigger=FeedbackTrigger(every_n_seconds=30)
         )
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test", name="test", feedback_providers=[config]
         )
 
@@ -602,7 +604,7 @@ class TestPromptTemplateFeedbackProviders:
                 trigger=FeedbackTrigger(every_n_calls=10),
             ),
         ]
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test", name="test", feedback_providers=configs
         )
 
@@ -618,7 +620,7 @@ class TestPromptFeedbackProviders:
         config = FeedbackProviderConfig(
             provider=provider, trigger=FeedbackTrigger(every_n_seconds=30)
         )
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test", name="test", feedback_providers=[config]
         )
         prompt: Prompt[None] = Prompt(template)
@@ -627,7 +629,7 @@ class TestPromptFeedbackProviders:
         assert prompt.feedback_providers[0].provider is provider
 
     def test_prompt_providers_returns_tuple(self) -> None:
-        template: PromptTemplate[None] = PromptTemplate(
+        template: PromptTemplate[None] = PromptTemplate.create(
             ns="test", key="test", name="test"
         )
         prompt: Prompt[None] = Prompt(template)

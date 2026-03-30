@@ -45,7 +45,7 @@ def _make_prompt_with_checker(
     checker: TaskCompletionChecker,
 ) -> Prompt[None]:
     """Create a minimal prompt with a task_completion_checker."""
-    template = PromptTemplate[None](
+    template = PromptTemplate[None].create(
         ns="test",
         key="with-checker",
         sections=[
@@ -229,7 +229,7 @@ class TestMultiturnEdgeCases:
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Deadline should interrupt stalled response streams."""
-        deadline = Deadline(datetime.now(UTC) + timedelta(seconds=1.5))
+        deadline = Deadline.create(datetime.now(UTC) + timedelta(seconds=1.5))
 
         class MockClientStalledStream:
             def __init__(

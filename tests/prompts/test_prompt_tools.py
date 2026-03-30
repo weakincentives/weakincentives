@@ -69,7 +69,7 @@ class SecondaryToolPayload:
 
 
 def _build_primary_tool() -> Tool[PrimaryToolParams, PrimaryToolPayload]:
-    return Tool[PrimaryToolParams, PrimaryToolPayload](
+    return Tool[PrimaryToolParams, PrimaryToolPayload].create(
         name="primary_lookup",
         description="Perform the primary lookup operation.",
         handler=None,
@@ -77,7 +77,7 @@ def _build_primary_tool() -> Tool[PrimaryToolParams, PrimaryToolPayload]:
 
 
 def _build_secondary_tool() -> Tool[SecondaryToolParams, SecondaryToolPayload]:
-    return Tool[SecondaryToolParams, SecondaryToolPayload](
+    return Tool[SecondaryToolParams, SecondaryToolPayload].create(
         name="secondary_fetch",
         description="Perform the secondary fetch operation.",
         handler=None,
@@ -116,7 +116,7 @@ def _build_prompt() -> tuple[
     )
 
     return (
-        PromptTemplate(
+        PromptTemplate.create(
             ns="tests.prompts",
             key="tools-basic",
             sections=[guidance, secondary],
@@ -176,12 +176,13 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
         default_params=SecondaryToggleParams(),
     )
 
+    template = PromptTemplate.create(
+        ns="tests.prompts",
+        key="tools-duplicate",
+        sections=[first_section, second_section],
+    )
     with pytest.raises(PromptValidationError) as error_info:
-        PromptTemplate(
-            ns="tests.prompts",
-            key="tools-duplicate",
-            sections=[first_section, second_section],
-        )
+        _ = Prompt(template).sections
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("second-tools",)
@@ -190,7 +191,7 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
 
 def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
     primary_tool = _build_primary_tool()
-    alternate_tool = Tool[PrimaryToolParams, PrimaryToolPayload](
+    alternate_tool = Tool[PrimaryToolParams, PrimaryToolPayload].create(
         name="alternate_primary",
         description="Alternate primary operation.",
         handler=None,
@@ -211,7 +212,7 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
         default_params=SecondaryToggleParams(),
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="tools-duplicate-params",
         sections=[first_section, second_section],
@@ -246,12 +247,13 @@ class _InvalidToolSection(Section[GuidanceParams]):
 def test_prompt_tools_requires_tool_instances() -> None:
     invalid_section = _InvalidToolSection(title="Invalid", key="invalid")
 
+    template = PromptTemplate.create(
+        ns="tests.prompts",
+        key="tools-invalid-instance",
+        sections=[invalid_section],
+    )
     with pytest.raises(PromptValidationError) as error_info:
-        PromptTemplate(
-            ns="tests.prompts",
-            key="tools-invalid-instance",
-            sections=[invalid_section],
-        )
+        _ = Prompt(template).sections
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("invalid",)
@@ -260,7 +262,8 @@ def test_prompt_tools_requires_tool_instances() -> None:
 
 def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     tool = _build_primary_tool()
-    object.__setattr__(tool, "params_type", str)
+    # params_type is now a class-level property; override at class level
+    type(tool)._specialized_params_type = str
 
     section = MarkdownSection[PrimarySectionParams](
         title="Primary",
@@ -270,16 +273,21 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
         default_params=PrimarySectionParams(),
     )
 
-    with pytest.raises(PromptValidationError) as error_info:
-        PromptTemplate(
-            ns="tests.prompts",
-            key="tools-bad-params-type",
-            sections=[section],
-        )
+    template = PromptTemplate.create(
+        ns="tests.prompts",
+        key="tools-bad-params-type",
+        sections=[section],
+    )
+    try:
+        with pytest.raises(PromptValidationError) as error_info:
+            _ = Prompt(template).sections
 
-    error = cast(PromptValidationError, error_info.value)
-    assert error.section_path == ("primary",)
-    assert error.dataclass_type is str
+        error = cast(PromptValidationError, error_info.value)
+        assert error.section_path == ("primary",)
+        assert error.dataclass_type is str
+    finally:
+        # Restore to avoid polluting other tests
+        type(tool)._specialized_params_type = PrimaryToolParams
 
 
 @dataclass(frozen=True)
@@ -329,7 +337,7 @@ def test_policies_for_tool_collects_section_and_prompt_policies() -> None:
         default_params=PrimarySectionParams(),
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="policies-collection",
         sections=[section],
@@ -348,7 +356,7 @@ def test_policies_for_tool_returns_prompt_policies_for_unknown_tool() -> None:
     """Test policies_for_tool returns only prompt policies for unknown tools."""
     prompt_policy = _TestPolicy(label="prompt")
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="policies-unknown-tool",
         sections=[],
@@ -368,7 +376,7 @@ def test_policies_for_tool_iterates_through_sections_and_tools() -> None:
     second_policy = _TestPolicy(label="second")
 
     # First section with a different tool
-    first_tool = Tool[PrimaryToolParams, PrimaryToolPayload](
+    first_tool = Tool[PrimaryToolParams, PrimaryToolPayload].create(
         name="first_tool",
         description="First tool.",
         handler=None,
@@ -383,12 +391,12 @@ def test_policies_for_tool_iterates_through_sections_and_tools() -> None:
     )
 
     # Second section with multiple tools - target is second tool
-    other_tool = Tool[SecondaryToolParams, SecondaryToolPayload](
+    other_tool = Tool[SecondaryToolParams, SecondaryToolPayload].create(
         name="other_tool",
         description="Other tool.",
         handler=None,
     )
-    target_tool = Tool[SecondaryToolParams, SecondaryToolPayload](
+    target_tool = Tool[SecondaryToolParams, SecondaryToolPayload].create(
         name="target_tool",
         description="Target tool.",
         handler=None,
@@ -402,7 +410,7 @@ def test_policies_for_tool_iterates_through_sections_and_tools() -> None:
         default_params=SecondaryToggleParams(),
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="policies-iteration",
         sections=[first_section, second_section],

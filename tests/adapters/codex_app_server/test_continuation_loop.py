@@ -311,7 +311,7 @@ class TestContinuationLoop:
             clock = FakeClock()
             anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
             clock.set_wall(anchor)
-            deadline = Deadline(
+            deadline = Deadline.create(
                 expires_at=anchor + timedelta(seconds=60),
                 clock=clock,
             )

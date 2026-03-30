@@ -59,7 +59,7 @@ def _make_session() -> tuple[Session, InProcessDispatcher]:
 
 
 def _make_simple_prompt(name: str = "test-prompt") -> Prompt[object]:
-    template: PromptTemplate[object] = PromptTemplate(
+    template: PromptTemplate[object] = PromptTemplate.create(
         ns="test",
         key="basic",
         sections=(),
@@ -103,7 +103,9 @@ class TestEvaluateExpiredDeadline:
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(expires_at=anchor + timedelta(seconds=5), clock=clock)
+        deadline = Deadline.create(
+            expires_at=anchor + timedelta(seconds=5), clock=clock
+        )
         clock.advance(10)
 
         with pytest.raises(PromptEvaluationError, match="Deadline expired"):
@@ -442,7 +444,7 @@ def _add_handler(params: _AddParams, *, context: ToolContext) -> ToolResult[_Add
     return ToolResult.ok(_AddResult(sum=params.x + params.y))
 
 
-_ADD_TOOL = Tool[_AddParams, _AddResult](
+_ADD_TOOL = Tool[_AddParams, _AddResult].create(
     name="add",
     description="Add two numbers",
     handler=_add_handler,
@@ -461,7 +463,7 @@ class TestEvaluateWithTools:
             key="tools",
             tools=[_ADD_TOOL],
         )
-        template: PromptTemplate[object] = PromptTemplate(
+        template: PromptTemplate[object] = PromptTemplate.create(
             ns="test",
             key="with-tool",
             sections=(section,),
@@ -521,7 +523,9 @@ class TestStreamTurnWithDeadline:
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(expires_at=anchor + timedelta(seconds=60), clock=clock)
+        deadline = Deadline.create(
+            expires_at=anchor + timedelta(seconds=60), clock=clock
+        )
 
         messages = [
             {

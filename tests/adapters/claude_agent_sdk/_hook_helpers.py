@@ -30,7 +30,7 @@ from weakincentives.prompt import (
 
 def _make_prompt() -> Prompt[object]:
     """Create a prompt in active context."""
-    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
+    prompt: Prompt[object] = Prompt(PromptTemplate.create(ns="tests", key="hooks-test"))
     prompt.resources.__enter__()
     return prompt
 
@@ -42,7 +42,7 @@ def _make_prompt_with_fs(
 ) -> Prompt[object]:
     """Create a prompt with filesystem bound in active context."""
     prompt: Prompt[object] = Prompt(
-        PromptTemplate(
+        PromptTemplate.create(
             ns="tests",
             key="hooks-test",
             task_completion_checker=task_completion_checker,
@@ -86,7 +86,7 @@ def _make_prompt_with_feedback_provider() -> Prompt[object]:
         provider=provider,  # type: ignore[arg-type]
         trigger=FeedbackTrigger(every_n_calls=1),  # Trigger on every call
     )
-    template: PromptTemplate[object] = PromptTemplate(
+    template: PromptTemplate[object] = PromptTemplate.create(
         ns="tests",
         key="hooks-test-feedback",
         name="test_prompt",  # Match the prompt_name used in HookContext

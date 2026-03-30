@@ -1347,7 +1347,7 @@ config = EvalLoopConfig(debug_bundle_dir=Path("/bundles"))
 
 # New ✅
 from weakincentives.debug.bundle import BundleConfig
-config = EvalLoopConfig(debug_bundle=BundleConfig(target=Path("/bundles")))
+config = EvalLoopConfig(debug_bundle=BundleConfig.create(target=Path("/bundles")))
 ```
 
 #### Transcript Collection Now Enabled by Default
@@ -1941,7 +1941,7 @@ fade-out) with automatic tool call + result pairing.
 Automatic cleanup of old debug bundles based on configurable limits:
 
 ```python
-config = BundleConfig(
+config = BundleConfig.create(
     target=Path("./debug/"),
     retention=BundleRetentionPolicy(
         max_bundles=10,           # Keep at most N bundles
@@ -1967,7 +1967,7 @@ class S3StorageHandler:
         key = f"{self.prefix}{manifest.bundle_id}.zip"
         s3_client.upload_file(str(bundle_path), self.bucket, key)
 
-config = BundleConfig(
+config = BundleConfig.create(
     target=Path("./debug/"),
     storage_handler=S3StorageHandler(bucket="my-bucket"),
 )
@@ -2624,7 +2624,7 @@ from weakincentives.debug import BundleConfig
 from weakincentives.runtime import AgentLoopConfig
 
 config = AgentLoopConfig(
-    debug_bundle=BundleConfig(target="./debug_bundles/"),
+    debug_bundle=BundleConfig.create(target="./debug_bundles/"),
 )
 # Bundles created automatically for each request
 ```
@@ -2952,7 +2952,7 @@ from weakincentives.debug import BundleConfig
 from weakincentives.runtime import AgentLoopConfig
 
 config = AgentLoopConfig(
-    debug_bundle=BundleConfig(
+    debug_bundle=BundleConfig.create(
         target="./debug_bundles/",
     ),
 )

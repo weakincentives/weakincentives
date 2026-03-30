@@ -148,7 +148,7 @@ class TestAppendFeedback:
         mock_prompt = MagicMock()
         clock = FakeClock()
         clock.set_wall(datetime(2024, 1, 1, 12, 0, tzinfo=UTC))
-        deadline = Deadline(
+        deadline = Deadline.create(
             expires_at=datetime(2024, 1, 1, 13, 0, tzinfo=UTC),
             clock=clock,
         )
@@ -316,7 +316,9 @@ class TestCheckTaskCompletion:
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(expires_at=anchor + timedelta(seconds=10), clock=clock)
+        deadline = Deadline.create(
+            expires_at=anchor + timedelta(seconds=10), clock=clock
+        )
         clock.set_wall(anchor + timedelta(seconds=20))
 
         should_continue, feedback = check_task_completion(

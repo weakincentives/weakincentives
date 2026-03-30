@@ -61,7 +61,7 @@ class _StaticSection(Section[_GreetingParams]):
 
 
 def _build_prompt() -> PromptTemplate:
-    return PromptTemplate(
+    return PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting",
         name="greeting",
@@ -88,13 +88,13 @@ class _LookupItem:
 def _build_tool_prompt(
     *, accepts_overrides: bool = True
 ) -> tuple[PromptTemplate, Tool[_GreetingParams, _LookupResult]]:
-    tool = Tool[_GreetingParams, _LookupResult](
+    tool = Tool[_GreetingParams, _LookupResult].create(
         name="greeter",
         description="Greet the provided subject in a friendly way.",
         handler=None,
         accepts_overrides=accepts_overrides,
     )
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting-tools",
         name="greeting-tools",
@@ -113,13 +113,13 @@ def _build_tool_prompt(
 def _build_sequence_tool_prompt(
     *, accepts_overrides: bool = True
 ) -> tuple[PromptTemplate, Tool[_GreetingParams, tuple[_LookupItem, ...]]]:
-    tool = Tool[_GreetingParams, tuple[_LookupItem, ...]](
+    tool = Tool[_GreetingParams, tuple[_LookupItem, ...]].create(
         name="greeter_sequence",
         description="Greet and capture multiple responses.",
         handler=None,
         accepts_overrides=accepts_overrides,
     )
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-greeting-tools-seq",
         name="greeting-tools-seq",
@@ -138,7 +138,7 @@ def _build_sequence_tool_prompt(
 def test_prompt_descriptor_hashes_text_sections() -> None:
     prompt = _build_prompt()
 
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
     assert descriptor.ns == "tests.versioning"
     assert descriptor.key == "versioned-greeting"
@@ -154,13 +154,13 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
 
 def test_prompt_descriptor_ignores_non_hash_sections() -> None:
     section = _StaticSection(title="Static", key="static")
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.versioning",
         key="versioned-static",
         sections=[section],
     )
 
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
     assert descriptor.sections == []
     assert descriptor.tools == []
@@ -169,7 +169,7 @@ def test_prompt_descriptor_ignores_non_hash_sections() -> None:
 def test_prompt_descriptor_collects_tools() -> None:
     prompt, tool = _build_tool_prompt()
 
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
     description_hash = hash_text(tool.description)
     params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
@@ -191,7 +191,7 @@ def test_prompt_descriptor_collects_tools() -> None:
 def test_prompt_descriptor_collects_sequence_tools() -> None:
     prompt, tool = _build_sequence_tool_prompt()
 
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
     description_hash = hash_text(tool.description)
     params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
@@ -219,7 +219,7 @@ def test_prompt_descriptor_collects_sequence_tools() -> None:
 def test_prompt_descriptor_skips_tools_without_override_acceptance() -> None:
     prompt, _ = _build_tool_prompt(accepts_overrides=False)
 
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
     assert descriptor.tools == []
 
@@ -286,7 +286,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
 
 def test_prompt_render_applies_matching_sections() -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     section = descriptor.sections[0]
     path = section.path
 
@@ -321,7 +321,7 @@ def test_prompt_render_applies_matching_sections() -> None:
 
 def test_prompt_render_respects_section_acceptance() -> None:
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     section = descriptor.sections[0]
     path = section.path
 
@@ -339,7 +339,7 @@ def test_prompt_render_respects_section_acceptance() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    prompt.sections[0].section.accepts_overrides = False  # type: ignore[union-attr]
+    Prompt(prompt).sections[0].section.accepts_overrides = False  # type: ignore[union-attr]
 
     rendered = (
         Prompt(
@@ -402,7 +402,7 @@ def test_prompt_render_handles_missing_override() -> None:
 
 def test_prompt_render_with_tool_overrides_updates_description() -> None:
     prompt, tool = _build_tool_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     contract_hash = descriptor.tools[0].contract_hash
 
     override = PromptOverride(
@@ -440,7 +440,7 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
 
 def test_prompt_render_with_tool_overrides_respects_acceptance() -> None:
     prompt, tool = _build_tool_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
     contract_hash = descriptor.tools[0].contract_hash
 
     override = PromptOverride(
@@ -459,7 +459,7 @@ def test_prompt_render_with_tool_overrides_respects_acceptance() -> None:
     store = _RecordingOverridesStore(override)
 
     object.__setattr__(
-        prompt.sections[0].section.tools()[0], "accepts_overrides", False
+        Prompt(prompt).sections[0].section.tools()[0], "accepts_overrides", False
     )  # type: ignore[union-attr]
 
     rendered = (
@@ -476,7 +476,7 @@ def test_prompt_render_with_tool_overrides_respects_acceptance() -> None:
 
 def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
     prompt, tool = _build_tool_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
+    descriptor = PromptDescriptor.from_prompt(Prompt(prompt))
 
     override = PromptOverride(
         ns=descriptor.ns,

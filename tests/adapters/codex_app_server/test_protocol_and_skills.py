@@ -59,7 +59,7 @@ def _make_session() -> tuple[Session, InProcessDispatcher]:
 def _make_simple_prompt(name: str = "test-prompt") -> Any:
     from weakincentives.prompt import Prompt, PromptTemplate
 
-    template: PromptTemplate[object] = PromptTemplate(
+    template: PromptTemplate[object] = PromptTemplate.create(
         ns="test",
         key="basic",
         sections=(),
@@ -140,7 +140,9 @@ class TestDeadlineRemainingS:
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(expires_at=anchor + timedelta(seconds=5), clock=clock)
+        deadline = Deadline.create(
+            expires_at=anchor + timedelta(seconds=5), clock=clock
+        )
         clock.advance(10)
 
         with pytest.raises(PromptEvaluationError, match="Deadline expired during"):
@@ -150,7 +152,9 @@ class TestDeadlineRemainingS:
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(expires_at=anchor + timedelta(seconds=30), clock=clock)
+        deadline = Deadline.create(
+            expires_at=anchor + timedelta(seconds=30), clock=clock
+        )
 
         remaining = deadline_remaining_s(deadline, "test-prompt")
         assert remaining is not None
@@ -168,7 +172,9 @@ class TestSetupRPCDeadlineBounding:
         clock = FakeClock()
         anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
         clock.set_wall(anchor)
-        deadline = Deadline(expires_at=anchor + timedelta(seconds=30), clock=clock)
+        deadline = Deadline.create(
+            expires_at=anchor + timedelta(seconds=30), clock=clock
+        )
 
         with patch(
             "weakincentives.adapters.codex_app_server.adapter.CodexAppServerClient"

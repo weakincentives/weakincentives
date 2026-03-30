@@ -126,7 +126,7 @@ class TestIsolationConfig:
         )
 
         skill = SkillMount(source=skill_dir)
-        template = PromptTemplate[SimpleOutput](
+        template = PromptTemplate[SimpleOutput].create(
             ns="test",
             key="with-skills",
             sections=[
@@ -344,7 +344,7 @@ class TestIsolationConfig:
 
         workspace = WorkspaceSection(session=session)
         try:
-            template = PromptTemplate[SimpleOutput](
+            template = PromptTemplate[SimpleOutput].create(
                 ns="test",
                 key="with-workspace",
                 sections=[
@@ -383,7 +383,7 @@ class TestIsolationConfig:
 
         workspace = WorkspaceSection(session=session)
         try:
-            template = PromptTemplate[SimpleOutput](
+            template = PromptTemplate[SimpleOutput].create(
                 ns="test",
                 key="with-workspace",
                 sections=[
@@ -431,7 +431,7 @@ class TestIsolationConfig:
             _filesystem=mem_fs,
         )
 
-        template = PromptTemplate[SimpleOutput](
+        template = PromptTemplate[SimpleOutput].create(
             ns="test",
             key="with-inmem-fs",
             sections=[

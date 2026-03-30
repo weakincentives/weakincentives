@@ -40,7 +40,9 @@ def _make_prompt_with_resources(
     resources: dict[type[object], object],
 ) -> Prompt[object]:
     """Create a prompt with resources bound in active context."""
-    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate.create(ns="tests", key="bridge-test")
+    )
     prompt = prompt.bind(resources=resources)
     prompt.resources.__enter__()
     return prompt
@@ -83,19 +85,19 @@ def failing_handler(
     raise RuntimeError("Handler failed")
 
 
-search_tool = Tool[SearchParams, SearchResult](
+search_tool = Tool[SearchParams, SearchResult].create(
     name="search",
     description="Search for content",
     handler=search_handler,
 )
 
-failing_tool = Tool[SearchParams, SearchResult](
+failing_tool = Tool[SearchParams, SearchResult].create(
     name="failing",
     description="A tool that fails",
     handler=failing_handler,
 )
 
-no_handler_tool = Tool[SearchParams, SearchResult](
+no_handler_tool = Tool[SearchParams, SearchResult].create(
     name="no_handler",
     description="A tool without handler",
     handler=None,
@@ -111,7 +113,9 @@ def session() -> Session:
 @pytest.fixture
 def prompt() -> Prompt[object]:
     """Create a prompt in active context."""
-    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate.create(ns="tests", key="bridge-test")
+    )
     prompt.resources.__enter__()
     return prompt
 
@@ -272,7 +276,7 @@ class TestBridgedTool:
                 EmptyRenderResult(), message=f"Searched for {params.query}"
             )
 
-        empty_tool = Tool[SearchParams, EmptyRenderResult](
+        empty_tool = Tool[SearchParams, EmptyRenderResult].create(
             name="empty_render",
             description="Tool with empty render",
             handler=empty_handler,
@@ -318,7 +322,7 @@ class TestBridgedTool:
                 exclude_value_from_context=True,
             )
 
-        data_tool = Tool[SearchParams, SearchResult](
+        data_tool = Tool[SearchParams, SearchResult].create(
             name="data_tool",
             description="Tool returning large data",
             handler=data_handler,
@@ -423,7 +427,7 @@ class TestCreateBridgedTools:
             del params, context
             return ToolResult.ok(None, message="ok")
 
-        null_tool = Tool[None, None](
+        null_tool = Tool[None, None].create(
             name="null_tool",
             description="A tool with no params",
             handler=null_handler,
@@ -454,7 +458,7 @@ class TestCreateBridgedTools:
             del params, context
             return ToolResult.ok(None, message="executed")
 
-        null_tool = Tool[None, None](
+        null_tool = Tool[None, None].create(
             name="null_tool",
             description="A tool with no params",
             handler=null_handler,

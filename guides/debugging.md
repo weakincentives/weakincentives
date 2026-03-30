@@ -79,7 +79,7 @@ from weakincentives.runtime import AgentLoopConfig
 
 # Automatic bundling per-request via AgentLoop
 config = AgentLoopConfig(
-    debug_bundle=BundleConfig(
+    debug_bundle=BundleConfig.create(
         target="./debug_bundles/",
     ),
 )
@@ -88,7 +88,7 @@ config = AgentLoopConfig(
 from weakincentives.evals import EvalLoopConfig
 
 eval_config = EvalLoopConfig(
-    debug_bundle=BundleConfig(target="./eval_bundles/"),
+    debug_bundle=BundleConfig.create(target="./eval_bundles/"),
 )
 ```
 

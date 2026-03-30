@@ -17,10 +17,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, PromptTemplate, Tool
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate, Tool
 from weakincentives.prompt.overrides import (
     HexDigest,
     LocalPromptOverridesStore,
@@ -51,37 +52,41 @@ class _ToolResult:
     result: str
 
 
-def _build_prompt() -> PromptTemplate:
-    return PromptTemplate(
-        ns="tests.versioning",
-        key="versioned-greeting",
-        sections=[
-            MarkdownSection[_GreetingParams](
-                title="Greeting",
-                template="Greet ${subject} warmly.",
-                key="greeting",
-            )
-        ],
+def _build_prompt() -> Prompt[Any]:
+    return Prompt(
+        PromptTemplate.create(
+            ns="tests.versioning",
+            key="versioned-greeting",
+            sections=[
+                MarkdownSection[_GreetingParams](
+                    title="Greeting",
+                    template="Greet ${subject} warmly.",
+                    key="greeting",
+                )
+            ],
+        )
     )
 
 
-def _build_prompt_with_tool() -> PromptTemplate:
-    tool = Tool[_ToolParams, _ToolResult](
+def _build_prompt_with_tool() -> Prompt[Any]:
+    tool = Tool[_ToolParams, _ToolResult].create(
         name="search",
         description="Search stored notes.",
         handler=None,
     )
-    return PromptTemplate(
-        ns="tests.versioning",
-        key="versioned-greeting-tools",
-        sections=[
-            MarkdownSection[_GreetingParams](
-                title="Greeting",
-                template="Greet ${subject} warmly.",
-                key="greeting",
-                tools=[tool],
-            )
-        ],
+    return Prompt(
+        PromptTemplate.create(
+            ns="tests.versioning",
+            key="versioned-greeting-tools",
+            sections=[
+                MarkdownSection[_GreetingParams](
+                    title="Greeting",
+                    template="Greet ${subject} warmly.",
+                    key="greeting",
+                    tools=[tool],
+                )
+            ],
+        )
     )
 
 

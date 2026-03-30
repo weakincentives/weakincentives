@@ -322,7 +322,7 @@ class AgentLoop[UserRequestT, OutputT](
             print(f"Bundle at: {ctx.bundle_path}")
 
             # With storage handler for external upload:
-            config = BundleConfig(
+            config = BundleConfig.create(
                 target=bundle_dir,
                 storage_handler=S3StorageHandler(bucket="my-bucket"),
             )

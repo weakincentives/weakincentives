@@ -50,7 +50,7 @@ from typing import (
     runtime_checkable,
 )
 
-from ..dataclasses import FrozenDataclass
+from ..dataclasses import Constructable, FrozenDataclass, allow_construction
 from ..errors import WinkError
 from ..serde import dump
 from ..types import JSONValue
@@ -221,11 +221,12 @@ class BundleStorageHandler(Protocol):
 
 
 @FrozenDataclass()
-class BundleConfig:
+class BundleConfig(Constructable):
     """Configuration for bundle creation.
 
     Attributes:
-        target: Output directory for bundles. None disables bundling.
+        target: Output directory for bundles. Accepts ``str`` or ``Path``
+            via ``create()``; stored as ``Path``. None disables bundling.
         max_file_size: Skip files larger than this (bytes). Default 10MB.
         max_total_size: Maximum filesystem capture size (bytes). Default 50MB.
         compression: Zip compression method.
@@ -241,7 +242,7 @@ class BundleConfig:
     storage_handler: BundleStorageHandler | None = None
 
     @classmethod
-    def __pre_init__(  # noqa: PLR0913
+    def create(  # noqa: PLR0913
         cls,
         *,
         target: Path | str | None = None,
@@ -250,17 +251,18 @@ class BundleConfig:
         compression: str = "deflate",
         retention: BundleRetentionPolicy | None = None,
         storage_handler: BundleStorageHandler | None = None,
-    ) -> Mapping[str, object]:
-        """Normalize inputs before construction."""
-        normalized_target = Path(target) if isinstance(target, str) else target
-        return {
-            "target": normalized_target,
-            "max_file_size": max_file_size,
-            "max_total_size": max_total_size,
-            "compression": compression,
-            "retention": retention,
-            "storage_handler": storage_handler,
-        }
+    ) -> BundleConfig:
+        """Create a bundle configuration, coercing string target to Path."""
+        coerced_target = Path(target) if isinstance(target, str) else target
+        with allow_construction():
+            return cls(
+                target=coerced_target,
+                max_file_size=max_file_size,
+                max_total_size=max_total_size,
+                compression=compression,
+                retention=retention,
+                storage_handler=storage_handler,
+            )
 
     @property
     def enabled(self) -> bool:

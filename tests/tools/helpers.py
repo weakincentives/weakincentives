@@ -65,7 +65,7 @@ def build_tool_context(
     Resources are accessed via context.resources, which delegates to
     prompt.resources.
     """
-    prompt = Prompt(PromptTemplate(ns="tests", key="tool-context-helper"))
+    prompt = Prompt(PromptTemplate.create(ns="tests", key="tool-context-helper"))
     adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
     if filesystem is not None:
         prompt = prompt.bind(resources={Filesystem: filesystem})

@@ -69,7 +69,7 @@ def _build_write_tool(calls: list[str]) -> Tool[WriteParams, WriteResult]:
         calls.append(params.path)
         return ToolResult.ok(WriteResult(written=True), message=f"Wrote {params.path}")
 
-    return Tool[WriteParams, WriteResult](
+    return Tool[WriteParams, WriteResult].create(
         name="write_file",
         description="Write content to a file at the given path.",
         handler=handler,
@@ -126,7 +126,7 @@ def test_tool_policy_denies_call(
         key="task",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns=make_adapter_ns(adapter_fixture.adapter_name),
         key="ack-tool-policy",
         name="ack_tool_policy",

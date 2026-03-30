@@ -145,7 +145,7 @@ Enable automatic debug bundle creation for all AgentLoop executions::
     from weakincentives.runtime import AgentLoop, AgentLoopConfig
 
     config = AgentLoopConfig(
-        debug_bundle=BundleConfig(
+        debug_bundle=BundleConfig.create(
             target="./debug_bundles/",
             max_file_size=10_000_000,   # Skip files > 10MB
             max_total_size=52_428_800,  # Cap total capture at 50MB

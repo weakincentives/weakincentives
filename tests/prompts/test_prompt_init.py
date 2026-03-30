@@ -68,14 +68,15 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         children=[child, sibling],
     )
 
-    prompt = PromptTemplate(
+    prompt = PromptTemplate.create(
         ns="tests.prompts",
         key="prompt-init",
         name="demo",
         sections=[root],
     )
 
-    sections = cast(tuple[SectionNode[Any], ...], prompt.sections)
+    bound = Prompt(prompt)
+    sections = cast(tuple[SectionNode[Any], ...], bound.sections)
     titles = [node.section.title for node in sections]
     depths = [node.depth for node in sections]
     paths = [node.path for node in sections]
@@ -87,7 +88,7 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         ("root", "child"),
         ("root", "sibling"),
     ]
-    assert prompt.params_types == {RootParams, ChildParams, SiblingParams}
+    assert bound.params_types == {RootParams, ChildParams, SiblingParams}
     assert prompt.name == "demo"
 
 
@@ -97,7 +98,7 @@ def test_prompt_requires_non_empty_key() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        PromptTemplate(ns="tests.prompts", key="   ", sections=[section])
+        PromptTemplate.create(ns="tests.prompts", key="   ", sections=[section])
 
 
 def test_prompt_requires_non_empty_namespace() -> None:
@@ -106,7 +107,7 @@ def test_prompt_requires_non_empty_namespace() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        PromptTemplate(ns="   ", key="prompt-ns", sections=[section])
+        PromptTemplate.create(ns="   ", key="prompt-ns", sections=[section])
 
 
 def test_prompt_rejects_invalid_key_pattern() -> None:
@@ -115,7 +116,7 @@ def test_prompt_rejects_invalid_key_pattern() -> None:
     )
 
     with pytest.raises(PromptValidationError, match="must match"):
-        PromptTemplate(ns="tests.prompts", key="Invalid Key", sections=[section])
+        PromptTemplate.create(ns="tests.prompts", key="Invalid Key", sections=[section])
 
 
 def test_prompt_rejects_invalid_namespace_pattern() -> None:
@@ -124,7 +125,7 @@ def test_prompt_rejects_invalid_namespace_pattern() -> None:
     )
 
     with pytest.raises(PromptValidationError, match="must match"):
-        PromptTemplate(ns="tests/prompts", key="prompt-ns", sections=[section])
+        PromptTemplate.create(ns="tests/prompts", key="prompt-ns", sections=[section])
 
 
 def test_prompt_normalizes_ns_and_key_to_lowercase() -> None:
@@ -132,7 +133,7 @@ def test_prompt_normalizes_ns_and_key_to_lowercase() -> None:
         title="Root", template="Root: ${title}", key="root"
     )
 
-    prompt = PromptTemplate(ns=" Tests ", key=" My-Key ", sections=[section])
+    prompt = PromptTemplate.create(ns=" Tests ", key=" My-Key ", sections=[section])
 
     assert prompt.ns == "tests"
     assert prompt.key == "my-key"
@@ -152,7 +153,7 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
         default_params=DuplicateParams(value="beta"),
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="duplicate-defaults",
         sections=[first, second],
@@ -162,7 +163,7 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
 
     assert "First: alpha" in rendered.text
     assert "Second: beta" in rendered.text
-    assert template.params_types == {DuplicateParams}
+    assert Prompt(template).params_types == {DuplicateParams}
 
 
 def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
@@ -177,7 +178,7 @@ def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
         key="second",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="duplicate-shared",
         sections=[first, second],
@@ -194,9 +195,11 @@ def test_prompt_exposes_placeholders_from_registry_snapshot() -> None:
         title="Root", template="Root: ${title}", key="root"
     )
 
-    prompt = PromptTemplate(ns="tests.prompts", key="placeholder", sections=[section])
+    prompt = PromptTemplate.create(
+        ns="tests.prompts", key="placeholder", sections=[section]
+    )
 
-    assert prompt.placeholders == {("root",): frozenset({"title"})}
+    assert Prompt(prompt).placeholders == {("root",): frozenset({"title"})}
 
 
 def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_default() -> (
@@ -214,7 +217,7 @@ def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_defa
         key="second",
     )
 
-    template = PromptTemplate(
+    template = PromptTemplate.create(
         ns="tests.prompts",
         key="duplicate-type-default",
         sections=[first, second],
@@ -237,10 +240,12 @@ def test_prompt_validates_text_section_placeholders() -> None:
         key="invalid",
     )
 
+    template = PromptTemplate.create(
+        ns="tests.prompts", key="invalid-placeholder", sections=[section]
+    )
+
     with pytest.raises(PromptValidationError) as exc:
-        PromptTemplate(
-            ns="tests.prompts", key="invalid-placeholder", sections=[section]
-        )
+        Prompt(template).sections  # noqa: B018
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.placeholder == "oops"
@@ -272,12 +277,14 @@ def test_prompt_template_is_immutable() -> None:
         title="Root", template="Root: ${title}", key="root"
     )
 
-    prompt = PromptTemplate(ns="tests.prompts", key="immutable", sections=[section])
+    prompt = PromptTemplate.create(
+        ns="tests.prompts", key="immutable", sections=[section]
+    )
 
     with pytest.raises(AttributeError):
         prompt.ns = "changed"
     with pytest.raises(AttributeError):
-        prompt.placeholders = {}  # type: ignore[misc]
+        prompt.sections = ()  # type: ignore[misc]
 
 
 def test_prompt_descriptor_cached_on_first_access(
@@ -287,10 +294,13 @@ def test_prompt_descriptor_cached_on_first_access(
         title="Root", template="Root: ${title}", key="root"
     )
 
-    template = PromptTemplate(ns="tests.prompts", key="descriptor", sections=[section])
+    template = PromptTemplate.create(
+        ns="tests.prompts", key="descriptor", sections=[section]
+    )
 
     # First access triggers lazy creation and caches the descriptor
-    first_descriptor = template.descriptor
+    prompt = Prompt(template)
+    first_descriptor = prompt.descriptor
     assert first_descriptor.ns == "tests.prompts"
 
     def _fail(
@@ -301,11 +311,10 @@ def test_prompt_descriptor_cached_on_first_access(
     monkeypatch.setattr(PromptDescriptor, "from_prompt", classmethod(_fail))
 
     # Subsequent accesses should use the cached descriptor
-    prompt = Prompt(template).bind(RootParams(title="hello"))
+    prompt = prompt.bind(RootParams(title="hello"))
     rendered = prompt.render()
 
-    assert template.descriptor is first_descriptor
-    assert prompt.descriptor is template.descriptor
+    assert prompt.descriptor is first_descriptor
     assert "Root: hello" in rendered.text
 
 
@@ -314,8 +323,8 @@ def test_prompt_missing_ns_raises_type_error() -> None:
         title="Root", template="Root: ${title}", key="root"
     )
 
-    with pytest.raises(TypeError, match="missing required argument: 'ns'"):
-        PromptTemplate(key="my-key", sections=[section])  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match="'ns'"):
+        PromptTemplate.create(key="my-key", sections=[section])  # type: ignore[call-arg]
 
 
 def test_prompt_missing_key_raises_type_error() -> None:
@@ -323,8 +332,8 @@ def test_prompt_missing_key_raises_type_error() -> None:
         title="Root", template="Root: ${title}", key="root"
     )
 
-    with pytest.raises(TypeError, match="missing required argument: 'key'"):
-        PromptTemplate(ns="my-ns", sections=[section])  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match="'key'"):
+        PromptTemplate.create(ns="my-ns", sections=[section])  # type: ignore[call-arg]
 
 
 class TestPromptResourceLifecycle:
@@ -332,7 +341,7 @@ class TestPromptResourceLifecycle:
 
     def test_accessing_resources_outside_context_raises_runtime_error(self) -> None:
         """Calling get() outside context manager raises RuntimeError."""
-        template = PromptTemplate(ns="tests", key="resource-test")
+        template = PromptTemplate.create(ns="tests", key="resource-test")
         prompt = Prompt(template).bind(resources={})
 
         # Accessing prompt.resources is fine - it returns PromptResources
@@ -348,7 +357,7 @@ class TestPromptResourceLifecycle:
 
     def test_entering_context_twice_raises_runtime_error(self) -> None:
         """Entering resource context twice raises RuntimeError."""
-        template = PromptTemplate(ns="tests", key="resource-test")
+        template = PromptTemplate.create(ns="tests", key="resource-test")
         prompt = Prompt(template)
 
         with prompt.resources:
@@ -367,7 +376,7 @@ class TestPromptResourceLifecycle:
         res1 = Resource1()
         res2 = Resource2()
 
-        template = PromptTemplate(ns="tests", key="resource-test")
+        template = PromptTemplate.create(ns="tests", key="resource-test")
         prompt = Prompt(template)
         prompt = prompt.bind(resources={Resource1: res1})
         prompt = prompt.bind(resources={Resource2: res2})
@@ -380,7 +389,7 @@ class TestPromptResourceLifecycle:
         """Resources are available within the context manager."""
         from weakincentives.prompt import PromptResources
 
-        template = PromptTemplate(ns="tests", key="resource-test")
+        template = PromptTemplate.create(ns="tests", key="resource-test")
         prompt = Prompt(template).bind(resources={})
 
         # prompt.resources returns PromptResources
@@ -430,7 +439,7 @@ class TestPromptResourceLifecycle:
             ),
         )
 
-        template = PromptTemplate(
+        template = PromptTemplate.create(
             ns="tests", key="child-resources-test", sections=[parent_section]
         )
         prompt = Prompt(template).bind(RootParams(title="test"))
@@ -441,7 +450,7 @@ class TestPromptResourceLifecycle:
 
     def test_exit_before_enter_is_safe(self) -> None:
         """Calling __exit__ without __enter__ is a no-op."""
-        template = PromptTemplate(ns="tests", key="resource-test")
+        template = PromptTemplate.create(ns="tests", key="resource-test")
         prompt = Prompt(template)
 
         # Calling __exit__ without entering should be safe (no-op)
@@ -454,7 +463,7 @@ class TestPromptResourceLifecycle:
             pass
 
         instance = ToolScopedResource()
-        template = PromptTemplate(ns="tests", key="resource-test")
+        template = PromptTemplate.create(ns="tests", key="resource-test")
         prompt = Prompt(template).bind(resources={ToolScopedResource: instance})
 
         with prompt.resources:
@@ -473,10 +482,18 @@ class TestPromptResourceLifecycle:
         # Factory binding (not pre-provided) - passed via dict
         binding = Binding(FactoryResource, provider=lambda _: created_instance)
 
-        template = PromptTemplate(ns="tests", key="factory-test")
+        template = PromptTemplate.create(ns="tests", key="factory-test")
         prompt = Prompt(template).bind(resources={FactoryResource: binding})
 
         with prompt.resources:
             # get_optional should resolve via context for factory bindings
             resolved = prompt.resources.get_optional(FactoryResource)
             assert resolved is created_instance
+
+
+def test_prompt_template_replace_works() -> None:
+    """PromptTemplate.replace() works via base Constructable.replace()."""
+    template = PromptTemplate.create(ns="tests", key="replace-test")
+    replaced = template.replace(ns="other")
+    assert replaced.ns == "other"
+    assert replaced.key == "replace-test"

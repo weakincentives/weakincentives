@@ -64,7 +64,7 @@ class TestStorageHandlerIntegration:
         handler = TestHandler()
         assert isinstance(handler, BundleStorageHandler)
 
-        config = BundleConfig(target=tmp_path, storage_handler=handler)
+        config = BundleConfig.create(target=tmp_path, storage_handler=handler)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_request_input({"test": True})
@@ -82,7 +82,7 @@ class TestStorageHandlerIntegration:
                 nonlocal received_manifest
                 received_manifest = manifest
 
-        config = BundleConfig(target=tmp_path, storage_handler=TestHandler())
+        config = BundleConfig.create(target=tmp_path, storage_handler=TestHandler())
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.set_prompt_info(ns="test", key="prompt", adapter="openai")
@@ -102,7 +102,7 @@ class TestStorageHandlerIntegration:
             def store_bundle(self, bundle_path: Path, manifest: BundleManifest) -> None:
                 raise RuntimeError("Storage failed")
 
-        config = BundleConfig(target=tmp_path, storage_handler=FailingHandler())
+        config = BundleConfig.create(target=tmp_path, storage_handler=FailingHandler())
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_request_input({"test": True})
@@ -116,7 +116,7 @@ class TestStorageHandlerIntegration:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test that no storage handler means no storage attempt."""
-        config = BundleConfig(target=tmp_path, storage_handler=None)
+        config = BundleConfig.create(target=tmp_path, storage_handler=None)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_request_input({"test": True})
@@ -135,7 +135,7 @@ class TestStorageHandlerIntegration:
                 stored_paths.append(bundle_path)
 
         retention = BundleRetentionPolicy(max_bundles=2)
-        config = BundleConfig(
+        config = BundleConfig.create(
             target=tmp_path,
             retention=retention,
             storage_handler=OrderTrackingHandler(),
@@ -158,14 +158,14 @@ class TestBundleConfigWithRetentionAndStorage:
 
     def test_config_default_values(self) -> None:
         """Test BundleConfig has None defaults for retention and storage."""
-        config = BundleConfig()
+        config = BundleConfig.create()
         assert config.retention is None
         assert config.storage_handler is None
 
     def test_config_with_retention(self, tmp_path: Path) -> None:
         """Test BundleConfig accepts retention policy."""
         retention = BundleRetentionPolicy(max_bundles=5)
-        config = BundleConfig(target=tmp_path, retention=retention)
+        config = BundleConfig.create(target=tmp_path, retention=retention)
         assert config.retention is retention
         assert config.retention.max_bundles == 5
 
@@ -177,7 +177,7 @@ class TestBundleConfigWithRetentionAndStorage:
                 pass
 
         handler = TestHandler()
-        config = BundleConfig(target=tmp_path, storage_handler=handler)
+        config = BundleConfig.create(target=tmp_path, storage_handler=handler)
         assert config.storage_handler is handler
 
     def test_config_with_both_retention_and_storage(self, tmp_path: Path) -> None:
@@ -189,7 +189,7 @@ class TestBundleConfigWithRetentionAndStorage:
 
         retention = BundleRetentionPolicy(max_bundles=10)
         handler = TestHandler()
-        config = BundleConfig(
+        config = BundleConfig.create(
             target=tmp_path,
             retention=retention,
             storage_handler=handler,

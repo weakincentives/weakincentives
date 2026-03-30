@@ -133,7 +133,7 @@ def _build_write_and_fail_tool() -> Tool[WriteAndFailParams, WriteAndFailResult]
             success=False,
         )
 
-    return Tool[WriteAndFailParams, WriteAndFailResult](
+    return Tool[WriteAndFailParams, WriteAndFailResult].create(
         name="write_and_fail",
         description="Write a file, record operation, then fail to trigger rollback.",
         handler=handler,
@@ -173,7 +173,7 @@ def _build_write_and_succeed_tool() -> Tool[
             message=f"Wrote {params.filename}",
         )
 
-    return Tool[WriteAndSucceedParams, WriteAndSucceedResult](
+    return Tool[WriteAndSucceedParams, WriteAndSucceedResult].create(
         name="write_and_succeed",
         description="Write a file and persist transactional session/filesystem state.",
         handler=handler,
@@ -458,7 +458,7 @@ def test_rollback_verified_in_debug_bundle(
 
         with BundleWriter(
             target=bundle_dir,
-            config=BundleConfig(target=bundle_dir),
+            config=BundleConfig.create(target=bundle_dir),
             trigger="ack_test",
         ) as writer:
             writer.set_prompt_info(

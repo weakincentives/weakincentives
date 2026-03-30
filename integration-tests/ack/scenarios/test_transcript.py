@@ -261,7 +261,7 @@ def test_transcript_in_debug_bundle(
 
     with BundleWriter(
         target=bundle_dir,
-        config=BundleConfig(target=bundle_dir),
+        config=BundleConfig.create(target=bundle_dir),
         trigger="ack_test",
     ) as writer:
         writer.set_prompt_info(
