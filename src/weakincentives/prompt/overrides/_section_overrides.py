@@ -13,9 +13,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from typing import Literal, cast
 
+from ...dataclasses import FrozenDataclass
 from ...runtime.logging import StructuredLogger, get_logger
 from ...types import JSONValue
 from .versioning import (
@@ -43,7 +43,7 @@ def format_section_path(path: tuple[str, ...]) -> str:
     return "/".join(path)
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class SectionValidationConfig:
     strict: bool
     path_display: str

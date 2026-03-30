@@ -31,7 +31,6 @@ Example:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ..dataclasses import FrozenDataclass
@@ -77,7 +76,7 @@ class TaskCompletionResult:
         return cls(complete=False, feedback=feedback)
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class TaskCompletionContext:
     """Context provided to task completion checkers.
 

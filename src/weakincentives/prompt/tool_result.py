@@ -17,9 +17,9 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any, cast
 
+from ..dataclasses import FrozenDataclass
 from ..serde import dump
 from ..types.dataclass import SupportsDataclass, is_dataclass_instance
 
@@ -28,7 +28,7 @@ _LOGGER = logging.getLogger(__name__)
 _SEQUENCE_EXCLUSIONS = (str, bytes, bytearray)
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ToolResult[ResultValueT]:
     """Structured response emitted by a tool handler."""
 

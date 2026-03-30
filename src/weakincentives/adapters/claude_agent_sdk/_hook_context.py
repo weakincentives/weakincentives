@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK, MonotonicClock
+from ...dataclasses import FrozenDataclass
 from ...deadlines import Deadline
 from ...prompt.protocols import PromptProtocol
 from ...runtime.run_context import RunContext
@@ -77,7 +78,7 @@ class HookStats:
     """Number of hook execution errors encountered."""
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class HookConstraints:
     """Constraint configuration for hook execution.
 
