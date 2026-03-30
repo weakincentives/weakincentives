@@ -13,9 +13,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import fields, is_dataclass
 from typing import cast
 
+from ...dataclasses import FrozenDataclass
 from ...runtime.logging import StructuredLogger, get_logger
 from ...types import JSONValue
 from .versioning import (
@@ -40,7 +41,7 @@ def tool_descriptor_index(
     return {tool.name: tool for tool in descriptor.tools}
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ToolValidationConfig:
     strict: bool
     description_error_message: str
