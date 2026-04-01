@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from importlib import import_module
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol, cast
 
 from ._errors import SkillMountError, SkillValidationError
 from ._types import MAX_SKILL_FILE_BYTES, SkillMount
@@ -54,7 +54,7 @@ def _load_yaml_module() -> _YAMLModule:
         module = import_module("yaml")
     except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
         raise RuntimeError(_ERROR_MESSAGE) from exc
-    return module  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
+    return cast(_YAMLModule, module)
 
 
 __all__ = [
@@ -158,7 +158,7 @@ def validate_skill_name(name: str) -> None:
         raise SkillMountError(msg)
 
 
-def _parse_frontmatter(content: str) -> dict[str, Any]:
+def _parse_frontmatter(content: str) -> dict[str, object]:
     """Parse YAML frontmatter from SKILL.md content.
 
     Args:
@@ -195,13 +195,10 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
         msg = "SKILL.md frontmatter must be a mapping"
         raise SkillValidationError(msg)
 
-    # Type-checked: we've verified it's a dict
-    # pyright doesn't know yaml.safe_load's return type, but we validate it's a dict
-    frontmatter: dict[str, Any] = parsed  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-    return frontmatter
+    return cast("dict[str, object]", parsed)
 
 
-def _validate_name_field(frontmatter: dict[str, Any], dir_name: str | None) -> None:
+def _validate_name_field(frontmatter: dict[str, object], dir_name: str | None) -> None:
     """Validate the name field in frontmatter."""
     if "name" not in frontmatter:
         msg = "SKILL.md frontmatter missing required field: name"
@@ -237,7 +234,7 @@ def _validate_name_field(frontmatter: dict[str, Any], dir_name: str | None) -> N
         raise SkillValidationError(msg)
 
 
-def _validate_description_field(frontmatter: dict[str, Any]) -> None:
+def _validate_description_field(frontmatter: dict[str, object]) -> None:
     """Validate the description field in frontmatter."""
     if "description" not in frontmatter:
         msg = "SKILL.md frontmatter missing required field: description"
@@ -263,7 +260,7 @@ def _validate_description_field(frontmatter: dict[str, Any]) -> None:
         raise SkillValidationError(msg)
 
 
-def _validate_license_field(frontmatter: dict[str, Any]) -> None:
+def _validate_license_field(frontmatter: dict[str, object]) -> None:
     """Validate the optional license field."""
     if "license" in frontmatter:
         license_val = frontmatter["license"]
@@ -275,7 +272,7 @@ def _validate_license_field(frontmatter: dict[str, Any]) -> None:
             raise SkillValidationError(msg)
 
 
-def _validate_compatibility_field(frontmatter: dict[str, Any]) -> None:
+def _validate_compatibility_field(frontmatter: dict[str, object]) -> None:
     """Validate the optional compatibility field."""
     if "compatibility" in frontmatter:
         compat = frontmatter["compatibility"]
@@ -294,7 +291,7 @@ def _validate_compatibility_field(frontmatter: dict[str, Any]) -> None:
             raise SkillValidationError(msg)
 
 
-def _validate_metadata_field(frontmatter: dict[str, Any]) -> None:
+def _validate_metadata_field(frontmatter: dict[str, object]) -> None:
     """Validate the optional metadata field."""
     if "metadata" in frontmatter:
         metadata_value = frontmatter["metadata"]
@@ -306,9 +303,7 @@ def _validate_metadata_field(frontmatter: dict[str, Any]) -> None:
             raise SkillValidationError(msg)
 
         # All keys and values must be strings
-        # Type-checked: we've verified metadata_value is a dict
-        # pyright doesn't know the dict types from YAML, but we validate at runtime
-        metadata_dict: dict[Any, Any] = metadata_value  # pyright: ignore[reportUnknownVariableType]
+        metadata_dict = cast("dict[object, object]", metadata_value)
         for key, value in metadata_dict.items():
             if not isinstance(key, str):
                 msg = "SKILL.md frontmatter 'metadata' keys must be strings"
@@ -318,7 +313,7 @@ def _validate_metadata_field(frontmatter: dict[str, Any]) -> None:
                 raise SkillValidationError(msg)
 
 
-def _validate_allowed_tools_field(frontmatter: dict[str, Any]) -> None:
+def _validate_allowed_tools_field(frontmatter: dict[str, object]) -> None:
     """Validate the optional allowed-tools field."""
     if "allowed-tools" in frontmatter:
         tools = frontmatter["allowed-tools"]
@@ -330,7 +325,7 @@ def _validate_allowed_tools_field(frontmatter: dict[str, Any]) -> None:
             raise SkillValidationError(msg)
 
 
-def _validate_optional_fields(frontmatter: dict[str, Any]) -> None:
+def _validate_optional_fields(frontmatter: dict[str, object]) -> None:
     """Validate optional fields in frontmatter."""
     _validate_license_field(frontmatter)
     _validate_compatibility_field(frontmatter)
@@ -338,7 +333,7 @@ def _validate_optional_fields(frontmatter: dict[str, Any]) -> None:
     _validate_allowed_tools_field(frontmatter)
 
 
-def _validate_frontmatter(frontmatter: dict[str, Any], dir_name: str | None) -> None:
+def _validate_frontmatter(frontmatter: dict[str, object], dir_name: str | None) -> None:
     """Validate SKILL.md frontmatter fields.
 
     Args:

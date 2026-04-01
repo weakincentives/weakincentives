@@ -14,10 +14,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 __all__ = ["build_env"]
 
 
-def build_env(env_config: dict[str, str] | None) -> dict[str, str] | None:
+def build_env(
+    env_config: dict[str, str] | Mapping[str, str] | None,
+) -> dict[str, str] | None:
     """Build merged environment variables.
 
     When ``env_config`` is set, the full ``os.environ`` is forwarded with
@@ -30,4 +34,4 @@ def build_env(env_config: dict[str, str] | None) -> dict[str, str] | None:
         return None
     import os
 
-    return {**os.environ, **env_config}
+    return {**os.environ, **dict(env_config)}

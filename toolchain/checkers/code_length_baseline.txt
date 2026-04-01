@@ -10,3 +10,4 @@
 #   path/to/file.py                        – file-length violation
 #   path/to/file.py:Class.method           – function-length violation
 
+src/weakincentives/adapters/codex_app_server/_protocol.py

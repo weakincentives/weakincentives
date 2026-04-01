@@ -436,7 +436,7 @@ def _execute_with_bundled_settings(  # noqa: PLR0913
     prompt: Prompt[Any],
     session: Session,
     run_context: RunContext,
-    writer: object,  # BundleWriter, but avoid import for typing
+    writer: BundleWriter,
 ) -> tuple[PromptResponse[Any], BudgetTracker | None]:
     """Execute prompt with settings resolved and log capture enabled."""
     prompt, budget_tracker, eff_deadline = loop._resolve_settings(
@@ -446,7 +446,7 @@ def _execute_with_bundled_settings(  # noqa: PLR0913
         resources=request_event.resources,
     )
 
-    with writer.capture_logs():  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
+    with writer.capture_logs():
         response = loop._evaluate_with_retries(
             prompt=prompt,
             session=session,

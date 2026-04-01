@@ -15,8 +15,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
-from typing import TYPE_CHECKING, get_args, get_type_hints
+from typing import TYPE_CHECKING, TypeGuard, cast, get_args, get_type_hints
 
 from ._types import Evaluator, Score, SessionEvaluator
 
@@ -117,7 +116,7 @@ def _check_string_annotation(hint: str, fn_globals: dict[str, object]) -> bool:
     return any(name in hint for name in _SESSION_TYPE_NAMES)
 
 
-def is_session_aware(fn: Callable[..., Score]) -> bool:
+def is_session_aware(fn: Evaluator | SessionEvaluator) -> TypeGuard[SessionEvaluator]:
     """Check if evaluator accepts session parameter.
 
     Inspects the function's type hints to determine if it expects a session
@@ -165,7 +164,7 @@ def is_session_aware(fn: Callable[..., Score]) -> bool:
     return False
 
 
-def adapt[O, E](evaluator: Evaluator) -> SessionEvaluator:
+def adapt(evaluator: Evaluator) -> SessionEvaluator:
     """Adapt a standard evaluator to session-aware signature.
 
     The session parameter is ignored, allowing standard evaluators
@@ -183,17 +182,17 @@ def adapt[O, E](evaluator: Evaluator) -> SessionEvaluator:
     """
 
     def evaluate(
-        output: O,
-        expected: E,
+        output: object,
+        expected: object,
         session: SessionProtocol | SessionViewProtocol,
     ) -> Score:
         _ = session  # Unused - adapts standard evaluator to session-aware signature
         return evaluator(output, expected)
 
-    return evaluate  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
+    return evaluate
 
 
-def all_of[O, E](
+def all_of(
     *evaluators: Evaluator | SessionEvaluator,
 ) -> SessionEvaluator:
     """All evaluators must pass. Score is the mean.
@@ -217,16 +216,12 @@ def all_of[O, E](
         >>> score = evaluator("hello", "hello", session)
         >>> score.passed  # Both must pass
     """
-    # Adapt standard evaluators to session-aware signature at runtime
-    # Type ignore needed: is_session_aware narrows the type at runtime but
-    # the static type checker cannot verify this transformation
-    adapted: list[SessionEvaluator] = [  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-        e if is_session_aware(e) else adapt(e)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-        for e in evaluators
+    adapted: list[SessionEvaluator] = [
+        e if is_session_aware(e) else adapt(cast(Evaluator, e)) for e in evaluators
     ]
 
     def evaluate(
-        output: O, expected: E, session: SessionProtocol | SessionViewProtocol
+        output: object, expected: object, session: SessionProtocol | SessionViewProtocol
     ) -> Score:
         scores: list[Score] = [e(output, expected, session) for e in adapted]
         passed = all(s.passed for s in scores)
@@ -234,10 +229,10 @@ def all_of[O, E](
         reasons = [s.reason for s in scores if s.reason]
         return Score(value=value, passed=passed, reason="; ".join(reasons))
 
-    return evaluate  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
+    return evaluate
 
 
-def any_of[O, E](
+def any_of(
     *evaluators: Evaluator | SessionEvaluator,
 ) -> SessionEvaluator:
     """At least one evaluator must pass. Score is the max.
@@ -261,16 +256,12 @@ def any_of[O, E](
         >>> score = evaluator("hello world", "hello", session)
         >>> score.passed  # At least one must pass
     """
-    # Adapt standard evaluators to session-aware signature at runtime
-    # Type ignore needed: is_session_aware narrows the type at runtime but
-    # the static type checker cannot verify this transformation
-    adapted: list[SessionEvaluator] = [  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-        e if is_session_aware(e) else adapt(e)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-        for e in evaluators
+    adapted: list[SessionEvaluator] = [
+        e if is_session_aware(e) else adapt(cast(Evaluator, e)) for e in evaluators
     ]
 
     def evaluate(
-        output: O, expected: E, session: SessionProtocol | SessionViewProtocol
+        output: object, expected: object, session: SessionProtocol | SessionViewProtocol
     ) -> Score:
         scores: list[Score] = [e(output, expected, session) for e in adapted]
         passed = any(s.passed for s in scores)
@@ -278,7 +269,7 @@ def any_of[O, E](
         reasons = [s.reason for s in scores if s.reason]
         return Score(value=value, passed=passed, reason="; ".join(reasons))
 
-    return evaluate  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
+    return evaluate
 
 
 __all__ = [

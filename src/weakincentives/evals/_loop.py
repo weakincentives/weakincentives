@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, cast, override
 
 from ..clock import SYSTEM_CLOCK, MonotonicClock
 from ..dataclasses import FrozenDataclass
@@ -39,6 +39,7 @@ from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
 
 if TYPE_CHECKING:
     from ..runtime import AgentLoop
+    from ..runtime.session import SessionProtocol, SessionViewProtocol
 
 _logger = logging.getLogger(__name__)
 
@@ -245,16 +246,15 @@ class EvalLoop[InputT, OutputT, ExpectedT](
             )
 
         # Invoke evaluator with session if session-aware
-        # Type ignore needed: is_session_aware narrows the type at runtime
         if is_session_aware(self._evaluator):
-            score = self._evaluator(response.output, sample.expected, session)  # type: ignore[call-arg]  # ty: ignore[too-many-positional-arguments]
+            score = self._evaluator(response.output, sample.expected, session)
         else:
-            score = self._evaluator(response.output, sample.expected)  # type: ignore[call-arg]  # ty: ignore[missing-argument]
+            score = cast(Evaluator, self._evaluator)(response.output, sample.expected)
 
         return EvalResult(
             sample_id=sample.id,
             experiment_name=experiment.name,
-            score=score,  # pyright: ignore[reportUnknownArgumentType]
+            score=score,
             latency_ms=latency_ms,
         )
 
@@ -363,7 +363,7 @@ class EvalLoop[InputT, OutputT, ExpectedT](
         self,
         output: OutputT | None,
         expected: ExpectedT,
-        session: object,
+        session: SessionProtocol | SessionViewProtocol,
     ) -> tuple[Score, str | None]:
         """Compute score for an evaluation result.
 
@@ -377,10 +377,10 @@ class EvalLoop[InputT, OutputT, ExpectedT](
             )
 
         if is_session_aware(self._evaluator):
-            score = self._evaluator(output, expected, session)  # type: ignore[call-arg]  # ty: ignore[invalid-argument-type,too-many-positional-arguments]
+            score = self._evaluator(output, expected, session)
         else:
-            score = self._evaluator(output, expected)  # type: ignore[call-arg]  # ty: ignore[missing-argument]
-        return score, None  # pyright: ignore[reportUnknownVariableType]
+            score = cast(Evaluator, self._evaluator)(output, expected)
+        return score, None
 
     @staticmethod
     def _build_eval_info(

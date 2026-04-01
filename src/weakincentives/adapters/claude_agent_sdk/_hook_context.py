@@ -115,7 +115,7 @@ class HookContext:
     HookContext provides richer functionality for session state management.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # pyright: ignore[reportMissingSuperCall]  # noqa: PLR0913
         self,
         *,
         session: SessionProtocol,

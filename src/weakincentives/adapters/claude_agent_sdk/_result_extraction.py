@@ -19,7 +19,7 @@ response messages, and for validating completion requirements.
 from __future__ import annotations
 
 import contextlib
-from typing import Any
+from typing import Any, cast
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
@@ -31,7 +31,9 @@ from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
 from ...serde import parse, schema
 from ..core import PromptEvaluationError
-from ._schema_normalization import _normalize_claude_output_schema
+from ._schema_normalization import (
+    _normalize_claude_output_schema,  # pyright: ignore[reportPrivateUsage]
+)
 from ._task_completion import TaskCompletionContext
 
 logger: StructuredLogger = get_logger(
@@ -45,7 +47,7 @@ def build_output_format[OutputT](
     """Generate SDK output format from prompt output type."""
     output_type = rendered.output_type
 
-    if output_type is None or output_type is type(None):
+    if output_type is None or output_type is type(None):  # pyright: ignore[reportUnnecessaryComparison]
         return None
 
     return {
@@ -62,10 +64,12 @@ def try_parse_structured_output[OutputT](
     if not (hasattr(message, "structured_output") and message.structured_output):
         return None
     output_type = rendered.output_type
-    if not output_type or output_type is type(None):
+    if not output_type or output_type is type(None):  # pyright: ignore[reportUnnecessaryComparison]
         return None  # pragma: no cover - defensive for prompts without output type
     try:
-        return parse(output_type, message.structured_output, extra="ignore")
+        return cast(
+            "OutputT", parse(output_type, message.structured_output, extra="ignore")
+        )
     except (TypeError, ValueError) as error:
         logger.warning(
             "claude_agent_sdk.parse.structured_output_error",
@@ -98,8 +102,9 @@ def extract_result[OutputT](
         if hasattr(message, "usage") and message.usage:
             usage_dict = message.usage
             if isinstance(usage_dict, dict):
-                total_input_tokens += usage_dict.get("input_tokens", 0)
-                total_output_tokens += usage_dict.get("output_tokens", 0)
+                tokens_dict = cast("dict[str, Any]", usage_dict)
+                total_input_tokens += int(tokens_dict.get("input_tokens", 0))
+                total_output_tokens += int(tokens_dict.get("output_tokens", 0))
 
     usage = TokenUsage(
         input_tokens=total_input_tokens or None,
@@ -125,7 +130,7 @@ def raise_if_missing_required_structured_output[OutputT](  # noqa: PLR0913
 ) -> None:
     """Raise when structured output is required but no response was produced."""
     output_type = rendered.output_type
-    if output_type is None or output_type is type(None):
+    if output_type is None or output_type is type(None):  # pyright: ignore[reportUnnecessaryComparison]
         return
     if output is not None or result_text is not None:
         return

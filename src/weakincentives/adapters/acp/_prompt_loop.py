@@ -27,7 +27,7 @@ from ._guardrails import accumulate_usage, check_task_completion
 
 if TYPE_CHECKING:
     from ...budget import BudgetTracker
-    from ...prompt import Prompt
+    from ...prompt.protocols import PromptProtocol
     from ...runtime.run_context import RunContext
     from ...runtime.session.protocols import SessionProtocol
     from .._shared._visibility_signal import VisibilityExpansionSignal
@@ -58,7 +58,7 @@ def _extract_chunk_text(chunk: Any) -> str:
         return text
     # List of content blocks
     if isinstance(raw, list):
-        return "".join(getattr(b, "text", str(b)) for b in raw if b)
+        return "".join(getattr(b, "text", str(b)) for b in raw if b)  # pyright: ignore[reportUnknownArgumentType,reportUnknownVariableType]
     return str(raw) if raw else ""
 
 
@@ -117,8 +117,8 @@ async def drain_quiet_period(
         if now >= effective_deadline:
             break
 
-        snapshot = client.last_update_time
-        if snapshot is None:
+        snapshot = client.last_update_time  # Re-fetched each iteration; may become None
+        if snapshot is None:  # pyright: ignore[reportUnnecessaryComparison]
             break
 
         elapsed = now - snapshot
@@ -165,7 +165,7 @@ async def run_prompt_loop(
     prompt_text: str,
     deadline: Deadline | None,
     budget_tracker: BudgetTracker | None,
-    prompt: Prompt[Any] | None,
+    prompt: PromptProtocol[Any] | None,
     run_context: RunContext | None,
     visibility_signal: VisibilityExpansionSignal,
     structured_capture: Any,
@@ -237,7 +237,7 @@ async def run_prompt_loop(
             budget_tracker=budget_tracker,
         )
         if should_continue and continuation_round < max_continuation_rounds:
-            current_prompt_text = feedback  # type: ignore[assignment]
+            current_prompt_text = feedback or ""
             continuation_round += 1
             client.reset_tracking()
             continue

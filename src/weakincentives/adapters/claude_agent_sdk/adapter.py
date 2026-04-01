@@ -83,10 +83,11 @@ def _import_sdk() -> Any:  # pragma: no cover
 
         return claude_agent_sdk
     except ImportError as error:
-        raise ImportError(
+        msg = (
             "claude-agent-sdk is not installed. Install it with: "
             "pip install 'weakincentives[claude-agent-sdk]'"
-        ) from error
+        )
+        raise ImportError(msg) from error
 
 
 def _dispatch_render_events(
@@ -100,7 +101,7 @@ def _dispatch_render_events(
     session_id = getattr(session, "session_id", None)
     created_at = _utcnow()
 
-    session.dispatcher.dispatch(
+    _ = session.dispatcher.dispatch(
         PromptRendered(
             prompt_ns=prompt.ns,
             prompt_key=prompt.key,
@@ -257,7 +258,7 @@ def _build_and_dispatch_response[OutputT](
         output=output,
     )
 
-    session.dispatcher.dispatch(
+    _ = session.dispatcher.dispatch(
         PromptExecuted(
             prompt_name=prompt_name,
             adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
@@ -292,7 +293,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
     between the SDK's internal execution and the weakincentives Session.
     """
 
-    def __init__(
+    def __init__(  # pyright: ignore[reportMissingSuperCall]
         self,
         *,
         model: str | None = None,
@@ -351,7 +352,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         return CLAUDE_AGENT_SDK_ADAPTER_NAME
 
     @override
-    def evaluate(
+    def evaluate(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         prompt: Prompt[OutputT],
         *,
@@ -474,7 +475,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             if temp_workspace_dir:
                 shutil.rmtree(temp_workspace_dir, ignore_errors=True)
 
-    def _create_hook_context_and_tools[OutputT](
+    def _create_hook_context_and_tools[OutputT](  # pyright: ignore[reportGeneralTypeIssues]  # ty: ignore[shadowed-type-variable]
         self,
         *,
         prompt: Prompt[OutputT],
@@ -530,7 +531,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         )
         return hook_context, visibility_signal, bridged_tools
 
-    async def _run_with_prompt_context[OutputT](
+    async def _run_with_prompt_context[OutputT](  # pyright: ignore[reportGeneralTypeIssues]  # ty: ignore[shadowed-type-variable]
         self,
         *,
         sdk: Any,

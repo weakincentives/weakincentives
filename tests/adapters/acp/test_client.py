@@ -27,9 +27,11 @@ from weakincentives.adapters.acp.config import ACPClientConfig
 from .conftest import (
     MockAgentMessageChunk,
     MockAgentThoughtChunk,
-    MockPermissionRequestResponse,
+    MockAllowedOutcome,
+    MockDeniedOutcome,
     MockReadTextFileResponse,
     MockRequestError,
+    MockRequestPermissionResponse,
     MockSessionAccumulator,
     MockSessionNotification,
     MockToolCallProgress,
@@ -43,7 +45,9 @@ def _mock_acp_modules() -> dict[str, Any]:
     mock_acp.RequestError = MockRequestError
     mock_schema = MagicMock()
     mock_schema.SessionNotification = MockSessionNotification
-    mock_schema.PermissionRequestResponse = MockPermissionRequestResponse
+    mock_schema.RequestPermissionResponse = MockRequestPermissionResponse
+    mock_schema.AllowedOutcome = MockAllowedOutcome
+    mock_schema.DeniedOutcome = MockDeniedOutcome
     mock_schema.ReadTextFileResponse = MockReadTextFileResponse
     mock_schema.WriteTextFileResponse = MockWriteTextFileResponse
     return {"acp": mock_acp, "acp.schema": mock_schema}
@@ -77,7 +81,7 @@ class TestACPClientSessionUpdate:
             assert len(acc._notifications) == 1
             notif = acc._notifications[0]
             assert isinstance(notif, MockSessionNotification)
-            assert notif.sessionId == "sess-1"
+            assert notif.session_id == "sess-1"
             assert notif.update is update
 
         with patch.dict(sys.modules, _mock_acp_modules()):
@@ -279,10 +283,11 @@ class TestACPClientRequestPermission:
         async def _run() -> None:
             client = _make_client(permission_mode="auto")
             result = await client.request_permission(
-                options=None, session_id="s", tool_call=None
+                options=[], session_id="s", tool_call=None
             )
-            assert isinstance(result, MockPermissionRequestResponse)
-            assert result.approved
+            assert isinstance(result, MockRequestPermissionResponse)
+            assert isinstance(result.outcome, MockAllowedOutcome)
+            assert result.outcome.outcome == "selected"
 
         with patch.dict(sys.modules, _mock_acp_modules()):
             asyncio.run(_run())
@@ -291,10 +296,10 @@ class TestACPClientRequestPermission:
         async def _run() -> None:
             client = _make_client(permission_mode="deny")
             result = await client.request_permission(
-                options=None, session_id="s", tool_call=None
+                options=[], session_id="s", tool_call=None
             )
-            assert not result.approved
-            assert "policy" in (result.reason or "")
+            assert isinstance(result.outcome, MockDeniedOutcome)
+            assert result.outcome.outcome == "cancelled"
 
         with patch.dict(sys.modules, _mock_acp_modules()):
             asyncio.run(_run())
@@ -303,10 +308,10 @@ class TestACPClientRequestPermission:
         async def _run() -> None:
             client = _make_client(permission_mode="prompt")
             result = await client.request_permission(
-                options=None, session_id="s", tool_call=None
+                options=[], session_id="s", tool_call=None
             )
-            assert not result.approved
-            assert "non-interactive" in (result.reason or "")
+            assert isinstance(result.outcome, MockDeniedOutcome)
+            assert result.outcome.outcome == "cancelled"
 
         with patch.dict(sys.modules, _mock_acp_modules()):
             asyncio.run(_run())

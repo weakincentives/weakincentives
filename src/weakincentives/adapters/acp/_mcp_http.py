@@ -134,6 +134,9 @@ def create_mcp_tool_server(
             for item in result.get("content", [])
         ]
 
+    _ = _list_tools  # Registered by @server.list_tools() decorator
+    _ = _call_tool  # Registered by @server.call_tool() decorator
+
     return server
 
 
@@ -147,7 +150,7 @@ def _start_event_loop(  # pragma: no cover - runs in bg thread
     try:
         loop.run_until_complete(coro_fn())
     except BaseException as exc:
-        server._startup_error = exc
+        server._startup_error = exc  # pyright: ignore[reportPrivateUsage]
     finally:
         ready_event.set()
         loop.close()
@@ -161,7 +164,7 @@ class MCPHttpServer:
     lifecycle of the adapter call.
     """
 
-    def __init__(
+    def __init__(  # pyright: ignore[reportMissingSuperCall]
         self,
         mcp_server: Any,
         *,
@@ -260,7 +263,7 @@ class MCPHttpServer:
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 for task in pending:
-                    task.cancel()
+                    _ = task.cancel()
                 for task in done:
                     if (exc := task.exception()) is not None:
                         raise exc

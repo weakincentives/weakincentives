@@ -19,7 +19,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
@@ -112,8 +112,7 @@ def _coerce[T](value: object, target: type[T]) -> T:
             raise TypeError(msg)
         return value
     if isinstance(value, Mapping):
-        data: Mapping[str, object] = value  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-        return parse(target, data)
+        return parse(target, cast("Mapping[str, object]", value))
     msg = f"cannot coerce {type(value).__name__} to {target.__name__}"
     raise TypeError(msg)
 

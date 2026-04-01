@@ -21,13 +21,13 @@ See ``specs/TRANSCRIPT.md`` for the full specification.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
-from typing import Any, ClassVar
+from collections.abc import Callable, Mapping
+from typing import ClassVar
 
 from ...runtime.transcript import TranscriptEmitter
 
 # Type alias for notification handler methods.
-_HandlerFn = Callable[["CodexTranscriptBridge", dict[str, Any], str], None]
+_HandlerFn = Callable[["CodexTranscriptBridge", dict[str, object], str], None]
 
 __all__ = ["CodexTranscriptBridge"]
 
@@ -77,7 +77,7 @@ class CodexTranscriptBridge:
             detail={"text": text},
         )
 
-    def on_notification(self, method: str, params: dict[str, Any]) -> None:
+    def on_notification(self, method: str, params: dict[str, object]) -> None:
         """Map a Codex notification to a transcript entry and emit.
 
         Args:
@@ -100,23 +100,23 @@ class CodexTranscriptBridge:
                 raw=raw,
             )
 
-    def _handle_item_started(self, params: dict[str, Any], raw: str) -> None:
-        item: dict[str, Any] = params.get("item", {})
+    def _handle_item_started(self, params: dict[str, object], raw: str) -> None:
+        item: dict[str, object] = params.get("item", {})  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         if item.get("type", "") in _TOOL_ITEM_TYPES:
             self._emitter.emit("tool_use", detail={"notification": params}, raw=raw)
 
-    def _handle_reasoning_completed(self, params: dict[str, Any], raw: str) -> None:
+    def _handle_reasoning_completed(self, params: dict[str, object], raw: str) -> None:
         self._emitter.emit("thinking", detail={"notification": params}, raw=raw)
 
-    def _handle_token_usage(self, params: dict[str, Any], raw: str) -> None:
+    def _handle_token_usage(self, params: dict[str, object], raw: str) -> None:
         self._emitter.emit("token_usage", detail={"notification": params}, raw=raw)
 
-    def _handle_turn_completed(self, params: dict[str, Any], raw: str) -> None:
-        turn: dict[str, Any] = params.get("turn", {})
+    def _handle_turn_completed(self, params: dict[str, object], raw: str) -> None:
+        turn: dict[str, object] = params.get("turn", {})  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         if turn.get("status") == "failed":
             self._emitter.emit("error", detail={"notification": params}, raw=raw)
 
-    def _handle_turn_started(self, params: dict[str, Any], raw: str) -> None:
+    def _handle_turn_started(self, params: dict[str, object], raw: str) -> None:
         self._emitter.emit(
             "system_event",
             detail={"notification": params, "subtype": "turn_started"},
@@ -132,9 +132,9 @@ class CodexTranscriptBridge:
         "turn/completed": _handle_turn_completed,
     }
 
-    def _handle_item_completed(self, params: dict[str, Any], raw: str) -> None:
+    def _handle_item_completed(self, params: dict[str, object], raw: str) -> None:
         """Handle ``item/completed`` notifications."""
-        item: dict[str, Any] = params.get("item", {})
+        item: dict[str, object] = params.get("item", {})  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         item_type = item.get("type", "")
 
         if item_type == "agentMessage":
@@ -156,7 +156,7 @@ class CodexTranscriptBridge:
                 raw=raw,
             )
 
-    def on_tool_call(self, params: dict[str, Any]) -> None:
+    def on_tool_call(self, params: dict[str, object]) -> None:
         """Emit ``tool_use`` for a WINK bridged tool call.
 
         Args:
@@ -169,7 +169,9 @@ class CodexTranscriptBridge:
             raw=raw,
         )
 
-    def on_tool_result(self, params: dict[str, Any], result: dict[str, Any]) -> None:
+    def on_tool_result(
+        self, params: dict[str, object], result: Mapping[str, object]
+    ) -> None:
         """Emit ``tool_result`` after a WINK bridged tool completes.
 
         Args:

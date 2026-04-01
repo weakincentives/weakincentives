@@ -18,7 +18,7 @@ from SDK response objects for debug logging and tracing.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 
 def _extract_content_block(block: dict[str, Any]) -> dict[str, Any]:
@@ -49,7 +49,9 @@ def _extract_content_block(block: dict[str, Any]) -> dict[str, Any]:
 def _extract_list_content(content: list[Any]) -> list[dict[str, Any]]:
     """Extract full content from content block list."""
     return [
-        _extract_content_block(block) for block in content if isinstance(block, dict)
+        _extract_content_block(cast(dict[str, Any], block))
+        for block in content
+        if isinstance(block, dict)
     ]
 
 
@@ -63,18 +65,18 @@ def _extract_inner_message_content(inner_msg: dict[str, Any]) -> dict[str, Any]:
     if isinstance(content, str):
         result["content"] = content
     elif isinstance(content, list):
-        result["content_blocks"] = _extract_list_content(content)
+        result["content_blocks"] = _extract_list_content(cast(list[Any], content))
     return result
 
 
-def _extract_message_content(message: Any) -> dict[str, Any]:  # noqa: ANN401
+def _extract_message_content(message: Any) -> dict[str, Any]:  # noqa: ANN401  # pyright: ignore[reportUnusedFunction]
     """Extract full content from an SDK message for debug logging."""
     result: dict[str, Any] = {}
 
     # Try to get the inner message dict (common pattern in SDK messages)
     inner_msg = getattr(message, "message", None)
     if isinstance(inner_msg, dict):
-        result.update(_extract_inner_message_content(inner_msg))
+        result.update(_extract_inner_message_content(cast(dict[str, Any], inner_msg)))
 
     # ResultMessage specific: extract the full result field
     sdk_result = getattr(message, "result", None)
@@ -92,11 +94,14 @@ def _extract_message_content(message: Any) -> dict[str, Any]:  # noqa: ANN401
         result["usage"] = usage if isinstance(usage, dict) else str(usage)
         # Extract thinking tokens for extended thinking mode
         if isinstance(usage, dict):
-            result["input_tokens"] = usage.get("input_tokens")
-            result["output_tokens"] = usage.get("output_tokens")
+            usage_dict = cast(dict[str, Any], usage)
+            result["input_tokens"] = usage_dict.get("input_tokens")
+            result["output_tokens"] = usage_dict.get("output_tokens")
             # Check for cache-related fields
-            result["cache_read_input_tokens"] = usage.get("cache_read_input_tokens")
-            result["cache_creation_input_tokens"] = usage.get(
+            result["cache_read_input_tokens"] = usage_dict.get(
+                "cache_read_input_tokens"
+            )
+            result["cache_creation_input_tokens"] = usage_dict.get(
                 "cache_creation_input_tokens"
             )
 

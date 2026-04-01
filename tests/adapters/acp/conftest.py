@@ -26,20 +26,20 @@ import pytest
 class MockRequestError(Exception):
     """Mock of acp.RequestError."""
 
-    def __init__(self, message: str = "", code: int = -1) -> None:
+    def __init__(self, code: int = -1, message: str = "") -> None:
         super().__init__(message)
         self.code = code
 
     @classmethod
     def method_not_found(cls, method: str) -> MockRequestError:
-        return cls(f"Method not found: {method}", code=-32601)
+        return cls(code=-32601, message=f"Method not found: {method}")
 
 
 @dataclass
 class MockSessionNotification:
     """Mock of acp.schema.SessionNotification."""
 
-    sessionId: str
+    session_id: str
     update: Any
 
 
@@ -184,11 +184,25 @@ class MockAgentCapabilities:
 
 
 @dataclass
-class MockPermissionRequestResponse:
-    """Mock of acp.schema.PermissionRequestResponse."""
+class MockAllowedOutcome:
+    """Mock of acp.schema.AllowedOutcome."""
 
-    approved: bool = True
-    reason: str | None = None
+    option_id: str = "approve"
+    outcome: str = "selected"
+
+
+@dataclass
+class MockDeniedOutcome:
+    """Mock of acp.schema.DeniedOutcome."""
+
+    outcome: str = "cancelled"
+
+
+@dataclass
+class MockRequestPermissionResponse:
+    """Mock of acp.schema.RequestPermissionResponse."""
+
+    outcome: MockAllowedOutcome | MockDeniedOutcome | None = None
 
 
 @dataclass
