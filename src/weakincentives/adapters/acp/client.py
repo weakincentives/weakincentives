@@ -37,7 +37,7 @@ class ACPClient:
     at call time.
     """
 
-    def __init__(
+    def __init__(  # pyright: ignore[reportMissingSuperCall]
         self,
         config: ACPClientConfig,
         *,
@@ -99,7 +99,7 @@ class ACPClient:
         self._last_update_time = self._clock.monotonic()
 
         # Wrap in SessionNotification for accumulator
-        notification = SessionNotification(sessionId=session_id, update=update)
+        notification = SessionNotification(session_id=session_id, update=update)
         if self._accumulator is not None:
             self._accumulator.apply(notification)
 
@@ -166,21 +166,23 @@ class ACPClient:
             }
 
     async def request_permission(
-        self, options: Any, session_id: str, tool_call: Any, **kwargs: Any
+        self, options: list[Any], session_id: str, tool_call: Any, **kwargs: Any
     ) -> Any:
         """Handle ``session/request_permission``."""
-        from acp.schema import PermissionRequestResponse
+        from acp.schema import (
+            AllowedOutcome,
+            DeniedOutcome,
+            RequestPermissionResponse,
+        )
 
         mode = self._config.permission_mode
         if mode == "auto":
-            return PermissionRequestResponse(approved=True)
+            option_id = options[0].id if options else "approve"
+            return RequestPermissionResponse(
+                outcome=AllowedOutcome(option_id=option_id, outcome="selected"),
+            )
         # "deny" and "prompt" both deny (prompt must not block)
-        reason = (
-            "Permission denied: non-interactive mode"
-            if mode == "prompt"
-            else "Permission denied by policy"
-        )
-        return PermissionRequestResponse(approved=False, reason=reason)
+        return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
 
     async def read_text_file(self, path: str, session_id: str, **kwargs: Any) -> Any:
         """Handle ``fs/read_text_file`` request."""
@@ -196,7 +198,7 @@ class ACPClient:
         resolved = Path(path).resolve()
         workspace = Path(self._workspace_root).resolve()
         if not resolved.is_relative_to(workspace):
-            raise RequestError("Path outside workspace", code=-32600)
+            raise RequestError(-32600, "Path outside workspace")
 
         content = resolved.read_text()
         return ReadTextFileResponse(content=content)
@@ -217,10 +219,10 @@ class ACPClient:
         resolved = Path(path).resolve()
         workspace = Path(self._workspace_root).resolve()
         if not resolved.is_relative_to(workspace):
-            raise RequestError("Path outside workspace", code=-32600)
+            raise RequestError(-32600, "Path outside workspace")
 
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        resolved.write_text(content)
+        _ = resolved.write_text(content)
         return WriteTextFileResponse()
 
     async def create_terminal(

@@ -43,7 +43,7 @@ class StructuredOutputCapture:
     thread.  A lock serialises access to ``_data`` and ``_called``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self) -> None:  # pyright: ignore[reportMissingSuperCall]
         self._lock = threading.Lock()
         self._data: Any = None
         self._called = False
@@ -74,7 +74,7 @@ class StructuredOutputTool:
     ``.description``, ``.input_schema``, and ``__call__``.
     """
 
-    def __init__(
+    def __init__(  # pyright: ignore[reportMissingSuperCall]
         self,
         *,
         json_schema: dict[str, Any],
@@ -97,6 +97,18 @@ class StructuredOutputTool:
         self._capture = capture
         self._json_schema = json_schema
 
+    def _validate_schema(self, data: object) -> str | None:
+        """Validate data against JSON schema. Returns error message or None."""
+        try:
+            import jsonschema
+        except ImportError:
+            return None  # jsonschema not available — skip validation
+        try:
+            jsonschema.validate(data, self._json_schema)
+        except jsonschema.ValidationError as exc:
+            return exc.message
+        return None
+
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the structured output tool."""
         data = args.get("data")
@@ -107,18 +119,13 @@ class StructuredOutputTool:
             }
 
         # Validate against schema before storing (best-effort).
-        try:
-            import jsonschema
-
-            jsonschema.validate(data, self._json_schema)
-        except ImportError:
-            pass  # jsonschema not available — skip validation
-        except jsonschema.ValidationError as exc:
+        validation_error = self._validate_schema(data)
+        if validation_error is not None:
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": f"Schema validation failed: {exc.message}",
+                        "text": f"Schema validation failed: {validation_error}",
                     }
                 ],
                 "isError": True,

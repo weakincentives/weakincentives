@@ -30,6 +30,7 @@ from ...deadlines import Deadline
 from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
+from ...prompt.protocols import PromptProtocol
 from ...prompt.structured_output import OutputParseError, parse_structured_output
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events.types import TokenUsage
@@ -290,7 +291,7 @@ class ACPAdapter(ProviderAdapter[Any]):
             _append_feedback(
                 content,
                 is_error=is_error,
-                prompt=prompt,
+                prompt=cast("PromptProtocol[Any]", prompt),
                 session=session,
                 deadline=deadline,
             )
@@ -504,7 +505,7 @@ class ACPAdapter(ProviderAdapter[Any]):
             stdio_limit = 10 * 1024 * 1024
 
             async with spawn_agent_process(
-                client,
+                client,  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]  # ACPClient duck-types acp.interfaces.Client
                 self._client_config.agent_bin,
                 *self._agent_spawn_args(),
                 cwd=effective_cwd,
@@ -537,7 +538,7 @@ class ACPAdapter(ProviderAdapter[Any]):
                     prompt_text=prompt_text,
                     deadline=deadline,
                     budget_tracker=budget_tracker,
-                    prompt=prompt,
+                    prompt=cast("PromptProtocol[Any] | None", prompt),
                     run_context=run_context,
                     visibility_signal=visibility_signal,
                     structured_capture=structured_capture,
@@ -561,14 +562,14 @@ class ACPAdapter(ProviderAdapter[Any]):
         from acp import PROTOCOL_VERSION
         from acp.schema import (
             ClientCapabilities,
-            FileSystemCapability,
+            FileSystemCapabilities,
             Implementation,
         )
 
         _ = await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=ClientCapabilities(
-                fs=FileSystemCapability(
+                fs=FileSystemCapabilities(
                     read_text_file=self._client_config.allow_file_reads,
                     write_text_file=self._client_config.allow_file_writes,
                 ),
@@ -588,7 +589,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         acp_session_id: str = new_session_resp.session_id
 
         # Validate model against available models
-        available_models = (
+        available_models: list[Any] = (
             new_session_resp.models.available_models if new_session_resp.models else []
         )
         if self._adapter_config.model_id:

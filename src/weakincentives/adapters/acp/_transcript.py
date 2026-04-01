@@ -159,13 +159,14 @@ class ACPTranscriptBridge:
 
         buf = self._tool_bufs.get(tool_id)
         if buf is None:
-            buf = {
+            new_buf: dict[str, object] = {
                 "tool_name": title or "",
                 "tool_call_id": tool_id,
                 "status": "",
                 "output": "",
             }
-            self._tool_bufs[tool_id] = buf
+            self._tool_bufs[tool_id] = new_buf
+            buf = new_buf
 
         # Merge fields — later updates override earlier ones.
         if status:
