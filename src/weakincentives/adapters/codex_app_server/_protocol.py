@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK, AsyncSleeper
@@ -333,7 +333,8 @@ async def start_turn(  # noqa: PLR0913
     if output_schema is not None:
         turn_params["outputSchema"] = output_schema
 
-    return await client.send_request("turn/start", turn_params, timeout=timeout)  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
+    result = await client.send_request("turn/start", turn_params, timeout=timeout)
+    return cast(TurnStartResult, result)
 
 
 async def stream_turn(  # noqa: PLR0913
@@ -399,7 +400,7 @@ def raise_for_terminal_notification(
     if kind == "error":
         params: dict[str, object] = message.get("params", {})
         turn_raw = params.get("turn", {})
-        turn: TurnInfo = turn_raw if isinstance(turn_raw, dict) else {}  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        turn = cast(TurnInfo, turn_raw if isinstance(turn_raw, dict) else {})
         phase = map_codex_error_phase(turn.get("codexErrorInfo"))
         raise PromptEvaluationError(
             message=value,
@@ -433,7 +434,7 @@ async def consume_messages(  # noqa: PLR0913
     """Consume messages from the client until turn/completed."""
     turn_completed = False
     async for raw_message in client.read_messages():
-        message: JsonRpcMessage = raw_message  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        message = cast(JsonRpcMessage, raw_message)
         if "id" in message and "method" in message:
             await handle_server_request(
                 client,
@@ -564,7 +565,7 @@ def _handle_item_completed(
 ) -> tuple[str, str] | None:
     """Handle item/completed notification."""
     item_raw = params.get("item", {})
-    item: CodexItem = item_raw if isinstance(item_raw, dict) else {}  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+    item = cast(CodexItem, item_raw if isinstance(item_raw, dict) else {})
     item_type = item.get("type", "")
 
     if item_type == "agentMessage":
@@ -592,7 +593,7 @@ def _handle_item_completed(
 def _handle_turn_completed(params: dict[str, object]) -> tuple[str, str]:
     """Handle turn/completed notification."""
     turn_raw = params.get("turn", {})
-    turn: TurnInfo = turn_raw if isinstance(turn_raw, dict) else {}  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+    turn = cast(TurnInfo, turn_raw if isinstance(turn_raw, dict) else {})
     status = turn.get("status", "")
 
     if status == "failed":
@@ -662,12 +663,14 @@ async def handle_tool_call(  # noqa: PLR0913
     arguments: dict[str, object]
     if isinstance(arguments_raw, str):
         try:
-            parsed: object = json.loads(arguments_raw)
-            arguments = parsed if isinstance(parsed, dict) else {}  # type: ignore[assignment]
+            parsed = json.loads(arguments_raw)
+            arguments = (
+                cast("dict[str, object]", parsed) if isinstance(parsed, dict) else {}
+            )
         except json.JSONDecodeError:
             arguments = {}
     elif isinstance(arguments_raw, dict):
-        arguments = arguments_raw  # pyright: ignore[reportUnknownVariableType]  # ty: ignore[invalid-assignment]
+        arguments = cast("dict[str, object]", arguments_raw)
     else:  # pragma: no cover - default is {} (dict)
         arguments = {}
 

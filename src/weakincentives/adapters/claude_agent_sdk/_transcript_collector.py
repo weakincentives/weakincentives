@@ -67,10 +67,12 @@ def _extract_text_from_content(content: object) -> str:
         if isinstance(text, str) and text:
             parts.append(text)
             continue
-        if isinstance(block, dict) and block.get("type") == "text":  # pyright: ignore[reportUnknownMemberType]  # ty: ignore[invalid-argument-type]
-            text_val: object = block.get("text", "")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]  # ty: ignore[no-matching-overload]
-            if isinstance(text_val, str) and text_val:
-                parts.append(text_val)
+        if isinstance(block, dict):
+            block_dict = cast("dict[str, Any]", block)
+            if block_dict.get("type") == "text":
+                text_val = block_dict.get("text", "")
+                if isinstance(text_val, str) and text_val:
+                    parts.append(text_val)
     return "\n".join(parts)
 
 
@@ -86,8 +88,10 @@ def _extract_assistant_text(messages: list[Any]) -> str:
             return _extract_text_from_content(getattr(message, "content", None))
         # JSONL transcript format: dict with role/content
         inner = getattr(message, "message", None)
-        if isinstance(inner, dict) and inner.get("role") == "assistant":  # pyright: ignore[reportUnknownMemberType]
-            return _extract_text_from_content(inner.get("content"))  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+        if isinstance(inner, dict):
+            inner_dict = cast("dict[str, Any]", inner)
+            if inner_dict.get("role") == "assistant":
+                return _extract_text_from_content(inner_dict.get("content"))
     return ""
 
 
