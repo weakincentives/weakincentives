@@ -118,6 +118,8 @@ class TestAuthPassthrough:
         opencode_dir = fake_home / ".local" / "share" / "opencode"
         opencode_dir.mkdir(parents=True)
         (opencode_dir / "auth.json").write_text('{"key": "value"}')
+        # Extra files should NOT be copied (only auth.json matters)
+        (opencode_dir / "opencode.db").write_text("big db")
 
         with (
             patch.dict(os.environ, {"HOME": str(fake_home)}),
@@ -128,6 +130,10 @@ class TestAuthPassthrough:
             )
             assert copied.exists()
             assert copied.read_text() == '{"key": "value"}'
+            # Only auth.json should be copied, not the whole directory
+            assert not (
+                Path(home.home_path) / ".local" / "share" / "opencode" / "opencode.db"
+            ).exists()
 
     def test_copies_aws_config_when_present(self, tmp_path: Path) -> None:
         from weakincentives.adapters.opencode_acp._ephemeral_home import (
@@ -188,7 +194,7 @@ class TestAuthPassthrough:
 
         with (
             patch.dict(os.environ, {"HOME": str(fake_home)}),
-            patch("shutil.copytree", side_effect=OSError("permission denied")),
+            patch("shutil.copy2", side_effect=OSError("permission denied")),
             OpenCodeEphemeralHome(workspace_path=str(tmp_path)) as home,
         ):
             # Should not raise, just warn

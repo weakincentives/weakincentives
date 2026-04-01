@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -61,7 +62,18 @@ class GeminiACPFixture:
         )
 
     def is_available(self) -> bool:
-        return shutil.which("gemini") is not None
+        if shutil.which("gemini") is None:
+            return False
+        try:
+            subprocess.run(
+                ["gemini", "--version"],
+                capture_output=True,
+                timeout=10,
+                check=True,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return False
+        return True
 
     def create_adapter(self, tmp_path: Path) -> ProviderAdapter[object]:
         from weakincentives.adapters.gemini_acp import (
