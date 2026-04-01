@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK, AsyncSleeper
@@ -36,6 +36,13 @@ from ._events import (
 )
 from ._guardrails import accumulate_usage, append_feedback, check_task_completion
 from ._transcript import CodexTranscriptBridge
+from ._types import (
+    CodexItem,
+    JsonRpcMessage,
+    ToolCallResponse,
+    TurnInfo,
+    TurnStartResult,
+)
 from .client import CodexAppServerClient, CodexClientError
 from .config import (
     ApiKeyAuth,
@@ -91,7 +98,7 @@ async def _initialize_session(  # noqa: PLR0913
     client_config: CodexAppServerClientConfig,
     model_config: CodexAppServerModelConfig,
     effective_cwd: str,
-    dynamic_tool_specs: list[dict[str, Any]],
+    dynamic_tool_specs: list[dict[str, object]],
     deadline: Deadline | None,
     prompt_name: str,
 ) -> str:
@@ -141,9 +148,9 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
     prompt_name: str,
     prompt_text: str,
     effective_cwd: str,
-    dynamic_tool_specs: list[dict[str, Any]],
+    dynamic_tool_specs: list[dict[str, object]],
     tool_lookup: dict[str, BridgedTool],
-    output_schema: dict[str, Any] | None,
+    output_schema: dict[str, object] | None,
     deadline: Deadline | None,
     budget_tracker: BudgetTracker | None,
     run_context: RunContext | None,
@@ -279,14 +286,14 @@ async def authenticate(
 async def create_thread(  # noqa: PLR0913
     client: CodexAppServerClient,
     effective_cwd: str,
-    dynamic_tool_specs: list[dict[str, Any]],
+    dynamic_tool_specs: list[dict[str, object]],
     *,
     client_config: CodexAppServerClientConfig,
     model_config: CodexAppServerModelConfig,
     timeout: float | None = None,
 ) -> str:
     """Create a new Codex thread. Returns the thread ID."""
-    thread_params: dict[str, Any] = {
+    thread_params: dict[str, object] = {
         "model": model_config.model,
         "cwd": effective_cwd,
         "approvalPolicy": client_config.approval_policy,
@@ -307,13 +314,13 @@ async def start_turn(  # noqa: PLR0913
     client: CodexAppServerClient,
     thread_id: str,
     prompt_text: str,
-    output_schema: dict[str, Any] | None,
+    output_schema: dict[str, object] | None,
     *,
     model_config: CodexAppServerModelConfig,
     timeout: float | None = None,
-) -> dict[str, Any]:
+) -> TurnStartResult:
     """Start a turn and return the response."""
-    turn_params: dict[str, Any] = {
+    turn_params: dict[str, object] = {
         "threadId": thread_id,
         "input": [{"type": "text", "text": prompt_text}],
     }
@@ -326,7 +333,7 @@ async def start_turn(  # noqa: PLR0913
     if output_schema is not None:
         turn_params["outputSchema"] = output_schema
 
-    return await client.send_request("turn/start", turn_params, timeout=timeout)
+    return await client.send_request("turn/start", turn_params, timeout=timeout)  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
 
 async def stream_turn(  # noqa: PLR0913
@@ -386,12 +393,13 @@ def raise_for_terminal_notification(
     kind: str,
     value: str,
     prompt_name: str,
-    message: dict[str, Any],
+    message: JsonRpcMessage,
 ) -> None:
     """Raise PromptEvaluationError for terminal notification kinds."""
     if kind == "error":
-        params: dict[str, Any] = message.get("params", {})
-        turn: dict[str, Any] = params.get("turn", {})
+        params: dict[str, object] = message.get("params", {})
+        turn_raw = params.get("turn", {})
+        turn: TurnInfo = turn_raw if isinstance(turn_raw, dict) else {}  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         phase = map_codex_error_phase(turn.get("codexErrorInfo"))
         raise PromptEvaluationError(
             message=value,
@@ -424,7 +432,8 @@ async def consume_messages(  # noqa: PLR0913
 ) -> tuple[str, TokenUsage | None]:
     """Consume messages from the client until turn/completed."""
     turn_completed = False
-    async for message in client.read_messages():
+    async for raw_message in client.read_messages():
+        message: JsonRpcMessage = raw_message  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         if "id" in message and "method" in message:
             await handle_server_request(
                 client,
@@ -446,8 +455,8 @@ async def consume_messages(  # noqa: PLR0913
         # Emit transcript entry for this notification.
         if bridge is not None:
             method = message.get("method", "")
-            params: dict[str, Any] = message.get("params", {})
-            bridge.on_notification(method, params)
+            notif_params: dict[str, object] = message.get("params", {})
+            bridge.on_notification(method, notif_params)
 
         result = process_notification(
             message, session, adapter_name, prompt_name, run_context
@@ -472,7 +481,7 @@ async def consume_messages(  # noqa: PLR0913
 
 def apply_notification(
     result: tuple[str, str],
-    message: dict[str, Any],
+    message: JsonRpcMessage,
     accumulated_text: str,
     usage: TokenUsage | None,
     prompt_name: str,
@@ -514,7 +523,7 @@ def create_deadline_watchdog(
 
 
 def process_notification(
-    message: dict[str, Any],
+    message: JsonRpcMessage,
     session: SessionProtocol,
     adapter_name: str,
     prompt_name: str,
@@ -527,10 +536,10 @@ def process_notification(
     Returns None for unhandled notification types.
     """
     method = message.get("method", "")
-    params: dict[str, Any] = message.get("params", {})
+    params: dict[str, object] = message.get("params", {})
 
     if method == "item/agentMessage/delta":
-        return ("delta", params.get("delta", ""))
+        return ("delta", str(params.get("delta", "")))
 
     if method == "item/completed":
         return _handle_item_completed(
@@ -547,14 +556,15 @@ def process_notification(
 
 
 def _handle_item_completed(
-    params: dict[str, Any],
+    params: dict[str, object],
     session: SessionProtocol,
     adapter_name: str,
     prompt_name: str,
     run_context: RunContext | None,
 ) -> tuple[str, str] | None:
     """Handle item/completed notification."""
-    item: dict[str, Any] = params.get("item", {})
+    item_raw = params.get("item", {})
+    item: CodexItem = item_raw if isinstance(item_raw, dict) else {}  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
     item_type = item.get("type", "")
 
     if item_type == "agentMessage":
@@ -579,9 +589,10 @@ def _handle_item_completed(
     return None
 
 
-def _handle_turn_completed(params: dict[str, Any]) -> tuple[str, str]:
+def _handle_turn_completed(params: dict[str, object]) -> tuple[str, str]:
     """Handle turn/completed notification."""
-    turn: dict[str, Any] = params.get("turn", {})
+    turn_raw = params.get("turn", {})
+    turn: TurnInfo = turn_raw if isinstance(turn_raw, dict) else {}  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
     status = turn.get("status", "")
 
     if status == "failed":
@@ -597,7 +608,7 @@ def _handle_turn_completed(params: dict[str, Any]) -> tuple[str, str]:
 
 async def handle_server_request(  # noqa: PLR0913
     client: CodexAppServerClient,
-    message: dict[str, Any],
+    message: JsonRpcMessage,
     tool_lookup: dict[str, BridgedTool],
     *,
     approval_policy: str,
@@ -607,9 +618,9 @@ async def handle_server_request(  # noqa: PLR0913
     deadline: Deadline | None = None,
 ) -> None:
     """Handle a server-initiated request (tool call or approval)."""
-    method: str = message["method"]
-    params: dict[str, Any] = message.get("params", {})
-    request_id: int = message["id"]
+    method = str(message.get("method", ""))
+    params: dict[str, object] = message.get("params", {})
+    request_id = int(message.get("id", 0))
 
     if method == "item/tool/call":
         await handle_tool_call(
@@ -637,7 +648,7 @@ async def handle_server_request(  # noqa: PLR0913
 async def handle_tool_call(  # noqa: PLR0913
     client: CodexAppServerClient,
     request_id: int,
-    params: dict[str, Any],
+    params: dict[str, object],
     tool_lookup: dict[str, BridgedTool],
     *,
     bridge: CodexTranscriptBridge | None = None,
@@ -646,13 +657,19 @@ async def handle_tool_call(  # noqa: PLR0913
     deadline: Deadline | None = None,
 ) -> None:
     """Handle an item/tool/call server request."""
-    tool_name: str = params.get("tool", "")
-    arguments = params.get("arguments", {})
-    if isinstance(arguments, str):
+    tool_name = str(params.get("tool", ""))
+    arguments_raw = params.get("arguments", {})
+    arguments: dict[str, object]
+    if isinstance(arguments_raw, str):
         try:
-            arguments = json.loads(arguments)
+            parsed: object = json.loads(arguments_raw)
+            arguments = parsed if isinstance(parsed, dict) else {}  # type: ignore[assignment]
         except json.JSONDecodeError:
             arguments = {}
+    elif isinstance(arguments_raw, dict):
+        arguments = arguments_raw  # pyright: ignore[reportUnknownVariableType]  # ty: ignore[invalid-assignment]
+    else:  # pragma: no cover - default is {} (dict)
+        arguments = {}
 
     # Emit tool_use transcript entry before execution.
     if bridge is not None:
@@ -660,7 +677,7 @@ async def handle_tool_call(  # noqa: PLR0913
 
     bridged_tool = tool_lookup.get(tool_name)
     if bridged_tool is None:
-        error_response: dict[str, Any] = {
+        error_response: ToolCallResponse = {
             "success": False,
             "contentItems": [
                 {"type": "inputText", "text": f"Unknown tool: {tool_name}"}
@@ -671,11 +688,9 @@ async def handle_tool_call(  # noqa: PLR0913
         await client.send_response(request_id, error_response)
         return
 
-    mcp_result: dict[str, Any] = await asyncio.to_thread(
-        bridged_tool, cast(dict[str, Any], arguments)
-    )
+    mcp_result: dict[str, Any] = await asyncio.to_thread(bridged_tool, arguments)
     is_error: bool = mcp_result.get("isError", False)
-    mcp_content: list[dict[str, Any]] = mcp_result.get("content", [])
+    mcp_content: list[dict[str, str]] = mcp_result.get("content", [])
     content_items: list[dict[str, str]] = [
         {"type": "inputText", "text": str(c.get("text", ""))}
         for c in mcp_content
@@ -690,7 +705,7 @@ async def handle_tool_call(  # noqa: PLR0913
         deadline=deadline,
     )
 
-    response: dict[str, Any] = {
+    response: ToolCallResponse = {
         "success": not is_error,
         "contentItems": content_items,
     }

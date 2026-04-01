@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from ...clock import SYSTEM_CLOCK
@@ -23,6 +23,12 @@ from ...runtime.events import ToolInvoked
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ..core import PromptEvaluationPhase
+from ._types import (
+    CodexItem,
+    MCPContentEntry,
+    TokenUsageInfo,
+    TokenUsageLast,
+)
 
 if TYPE_CHECKING:
     from ...runtime.run_context import RunContext
@@ -39,7 +45,7 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "codex_eve
 
 def dispatch_item_tool_invoked(
     *,
-    item: dict[str, Any],
+    item: CodexItem,
     session: SessionProtocol,
     adapter_name: str,
     prompt_name: str,
@@ -55,29 +61,29 @@ def dispatch_item_tool_invoked(
 
     # Build a name and params summary based on item type
     name: str
-    params: dict[str, Any]
+    event_params: dict[str, str]
     rendered_output: str
 
     if item_type == "commandExecution":
         name = "codex:command"
-        params = {"command": item.get("command", ""), "cwd": item.get("cwd", "")}
+        event_params = {"command": item.get("command", ""), "cwd": item.get("cwd", "")}
         rendered_output = (item.get("aggregatedOutput") or "")[:1000]
     elif item_type == "fileChange":
         name = "codex:file_change"
-        params = {"file": item.get("file", "")}
+        event_params = {"file": item.get("file", "")}
         rendered_output = str(item.get("status", ""))
     elif item_type == "mcpToolCall":
         tool_name = item.get("tool", "unknown")
         name = f"codex:mcp:{tool_name}"
-        params = {"server": item.get("server", ""), "tool": item.get("tool", "")}
+        event_params = {"server": item.get("server", ""), "tool": item.get("tool", "")}
         rendered_output = _extract_mcp_output(item)
     elif item_type == "webSearch":
         name = "codex:web_search"
-        params = {"query": item.get("query", "")}
+        event_params = {"query": item.get("query", "")}
         rendered_output = ""
     else:
         name = f"codex:{item_type}"
-        params = {}
+        event_params = {}
         rendered_output = ""
 
     result: ToolResult[None]
@@ -92,7 +98,7 @@ def dispatch_item_tool_invoked(
         prompt_name=prompt_name,
         adapter=adapter_name,
         name=name,
-        params=params,
+        params=event_params,
         result=result,
         session_id=session_id,
         created_at=SYSTEM_CLOCK.utcnow(),
@@ -104,29 +110,31 @@ def dispatch_item_tool_invoked(
     _ = session.dispatcher.dispatch(event)
 
 
-def _extract_mcp_output(item: dict[str, Any]) -> str:
+def _extract_mcp_output(item: CodexItem) -> str:
     """Extract text output from an mcpToolCall item."""
-    content: Any = item.get("result", {})
-    if isinstance(content, dict):
-        content_dict = cast(dict[str, Any], content)
-        content_list: list[Any] = content_dict.get("content", [])
-        text_parts: list[str] = []
-        for c in content_list:
-            entry = cast(dict[str, Any], c) if isinstance(c, dict) else None
-            if entry is not None and entry.get("type") == "text":
-                text_parts.append(str(entry.get("text", "")))
-        return "\n".join(text_parts)[:1000]
-    return str(content)[:1000]
+    result_raw: object = item.get("result", {})
+    if not isinstance(result_raw, dict):
+        return str(result_raw)[:1000]
+    mcp_result = cast("dict[str, object]", result_raw)
+    content_list = cast("list[MCPContentEntry]", mcp_result.get("content", []))
+    text_parts: list[str] = []
+    for entry in content_list:
+        if not isinstance(entry, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
+            continue
+        if entry.get("type") == "text":
+            text_parts.append(str(entry.get("text", "")))
+    return "\n".join(text_parts)[:1000]
 
 
-def extract_token_usage(params: dict[str, Any]) -> TokenUsage | None:
+def extract_token_usage(params: dict[str, object]) -> TokenUsage | None:
     """Extract TokenUsage from a thread/tokenUsage/updated notification."""
-    token_usage: dict[str, Any] = params.get("tokenUsage", {})
-    last_raw: Any = token_usage.get("last")
+    token_usage: TokenUsageInfo = params.get("tokenUsage", {})  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+
+    last_raw = token_usage.get("last")
     if not isinstance(last_raw, dict):
         return None
 
-    last = cast(dict[str, Any], last_raw)
+    last: TokenUsageLast = last_raw
     return TokenUsage(
         input_tokens=last.get("inputTokens"),
         output_tokens=last.get("outputTokens"),
@@ -152,7 +160,7 @@ _ERROR_PHASE_MAP: dict[str, PromptEvaluationPhase] = {
 
 
 def map_codex_error_phase(
-    error_info: str | dict[str, Any] | None,
+    error_info: str | dict[str, str] | None,
 ) -> PromptEvaluationPhase:
     """Map a codexErrorInfo value to a PromptEvaluationError phase.
 

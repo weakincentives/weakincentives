@@ -125,7 +125,7 @@ def _copy_skill(
                     if total_bytes > max_total_bytes:
                         msg = f"Skill exceeds total size limit ({total_bytes} > {max_total_bytes})"
                         raise SkillMountError(msg)
-                    shutil.copy2(item, dest_file)
+                    _ = shutil.copy2(item, dest_file)
         else:
             # Single file skill - wrap in directory as SKILL.md
             dest_file = dest_dir / "SKILL.md"
@@ -134,7 +134,7 @@ def _copy_skill(
             if total_bytes > max_total_bytes:
                 msg = f"Skill exceeds total size limit ({total_bytes} > {max_total_bytes})"
                 raise SkillMountError(msg)
-            shutil.copy2(source, dest_file)
+            _ = shutil.copy2(source, dest_file)
     except OSError as e:
         msg = f"Failed to copy skill: {e}"
         raise SkillMountError(msg) from e
@@ -178,7 +178,7 @@ class EphemeralHome:
         ...     ephemeral.cleanup()
     """
 
-    def __init__(
+    def __init__(  # pyright: ignore[reportMissingSuperCall]
         self,
         isolation: IsolationConfig,
         *,
@@ -311,7 +311,9 @@ class EphemeralHome:
         credentials. This is intentional - the security boundary is the host
         system's settings.json, which the user controls.
         """
-        from .isolation import _read_host_claude_settings
+        from .isolation import (
+            _read_host_claude_settings,  # pyright: ignore[reportPrivateUsage]
+        )
 
         settings["env"] = {
             "DISABLE_AUTOUPDATER": "1",
@@ -319,9 +321,9 @@ class EphemeralHome:
 
         # Read host settings.json and inherit auth-related env vars
         host_settings = _read_host_claude_settings()
-        host_env = host_settings.get("env", {})
+        host_env: dict[str, str] = host_settings.get("env", {})
 
-        inherited_vars = []
+        inherited_vars: list[str] = []
         for key in _SETTINGS_JSON_AUTH_VARS:
             # Prefer shell environment over host settings
             if key in os.environ:
@@ -348,7 +350,7 @@ class EphemeralHome:
     def _write_settings(self, settings: dict[str, Any]) -> None:
         """Write settings.json to the ephemeral .claude directory."""
         settings_path = self._claude_dir / "settings.json"
-        settings_path.write_text(json.dumps(settings, indent=2))
+        _ = settings_path.write_text(json.dumps(settings, indent=2))
 
         _logger.debug(
             "isolation.generate_settings.complete",
@@ -419,7 +421,7 @@ class EphemeralHome:
                 validate_skill(source)
 
             dest = skills_dir / name
-            _copy_skill(source, dest)
+            _ = _copy_skill(source, dest)
 
     def _resolve_aws_config_dir(self, bedrock_enabled: bool) -> AwsConfigResolution:
         """Resolve the AWS config directory path.
@@ -470,7 +472,10 @@ class EphemeralHome:
         Raises:
             IsolationAuthError: If Bedrock is configured but AWS config copy fails.
         """
-        from .isolation import IsolationAuthError, _is_bedrock_configured
+        from .isolation import (
+            IsolationAuthError,
+            _is_bedrock_configured,  # pyright: ignore[reportPrivateUsage]
+        )
 
         # Skip when using explicit API key (Bedrock is disabled)
         if self._isolation.api_key:
@@ -495,7 +500,7 @@ class EphemeralHome:
         # Copy AWS config to ephemeral home
         ephemeral_aws_dir = Path(self._temp_dir) / ".aws"
         try:
-            shutil.copytree(aws_dir, ephemeral_aws_dir, dirs_exist_ok=True)
+            _ = shutil.copytree(aws_dir, ephemeral_aws_dir, dirs_exist_ok=True)
             copied_files = list(ephemeral_aws_dir.rglob("*"))
             _logger.debug(
                 "isolation.copy_aws_config.success",
@@ -578,7 +583,9 @@ class EphemeralHome:
     @staticmethod
     def _apply_inherit_host_auth_env(env: dict[str, str]) -> None:
         """Apply environment for inherit host auth mode."""
-        from .isolation import _read_host_claude_settings
+        from .isolation import (
+            _read_host_claude_settings,  # pyright: ignore[reportPrivateUsage]
+        )
 
         env["DISABLE_AUTOUPDATER"] = "1"
 
@@ -586,10 +593,10 @@ class EphemeralHome:
         # Note: ~/.aws is copied to ephemeral home, so SDK finds config at $HOME/.aws
         # Also inherit auth vars from host settings.json if not in shell env
         host_settings = _read_host_claude_settings()
-        host_env = host_settings.get("env", {})
+        host_env: dict[str, str] = host_settings.get("env", {})
 
-        aws_vars_found = []
-        aws_vars_missing = []
+        aws_vars_found: list[str] = []
+        aws_vars_missing: list[str] = []
         for key in _AWS_PASSTHROUGH_VARS:
             if key in os.environ:
                 env[key] = os.environ[key]

@@ -21,11 +21,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from ...filesystem import Filesystem
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ..core import PromptEvaluationError
 from ._hooks import HookContext
-from ._message_extraction import _extract_message_content
+from ._message_extraction import (
+    _extract_message_content,  # pyright: ignore[reportPrivateUsage]
+)
 from ._task_completion import TaskCompletionContext
 from ._visibility_signal import VisibilityExpansionSignal
 
@@ -93,14 +96,14 @@ def update_token_stats(
         )
 
 
-def _resolve_filesystem(hook_context: HookContext) -> object | None:
+def _resolve_filesystem(hook_context: HookContext) -> Filesystem | None:
     """Resolve filesystem from prompt resources, returning None if unavailable."""
     try:
-        from ...filesystem import Filesystem
-
-        return hook_context.resources.get(Filesystem)
+        result: Filesystem = hook_context.resources.get(Filesystem)
     except (LookupError, AttributeError, RuntimeError):
         return None
+    else:
+        return result
 
 
 def check_task_completion(
@@ -436,8 +439,8 @@ async def run_sdk_query(  # noqa: PLR0913
             checker=task_completion_checker,
         )
     finally:
-        if client._transport is not None:
-            await client._transport.end_input()
+        if client._transport is not None:  # pyright: ignore[reportPrivateUsage]
+            await client._transport.end_input()  # pyright: ignore[reportPrivateUsage]
         logger.debug(
             "claude_agent_sdk.sdk_query.disconnecting",
             event="sdk_query.disconnecting",

@@ -66,7 +66,7 @@ def _utcnow() -> datetime:
 
 def _compute_budget_info(budget_tracker: BudgetTracker | None) -> dict[str, Any]:
     """Compute budget info for logging."""
-    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):
+    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):  # pyright: ignore[reportUnnecessaryIsInstance]
         return {}
     budget = budget_tracker.budget
     consumed = budget_tracker.consumed
@@ -91,7 +91,7 @@ def _is_deadline_exceeded(deadline: Deadline | None) -> bool:
 
 def _is_budget_exhausted(budget_tracker: BudgetTracker | None) -> bool:
     """Check if token budget has been exhausted."""
-    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):
+    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):  # pyright: ignore[reportUnnecessaryIsInstance]
         return False
     budget = budget_tracker.budget
     consumed = budget_tracker.consumed
@@ -207,18 +207,18 @@ def _parse_tool_data(input_data: PostToolUseHookInput) -> _ParsedToolData:
     output_text: str = ""
 
     if isinstance(tool_response, dict):
-        stderr = tool_response.get("stderr")
-        tool_error = stderr if stderr else None
-        stdout = tool_response.get("stdout", "")
-        output_text = stdout or str(tool_response)
+        stderr: str | None = tool_response.get("stderr")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        tool_error = stderr if stderr else None  # pyright: ignore[reportUnknownVariableType]
+        stdout: str = tool_response.get("stdout", "")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        output_text = stdout or str(tool_response)  # pyright: ignore[reportUnknownArgumentType,reportUnknownVariableType]
     elif tool_response is not None:
         output_text = str(tool_response)
 
     return _ParsedToolData(
         tool_name=tool_name,
-        tool_input=tool_input if isinstance(tool_input, dict) else {},
-        tool_error=tool_error,
-        output_text=output_text,
+        tool_input=tool_input if isinstance(tool_input, dict) else {},  # pyright: ignore[reportUnnecessaryIsInstance]
+        tool_error=tool_error,  # pyright: ignore[reportUnknownArgumentType]
+        output_text=output_text,  # pyright: ignore[reportUnknownArgumentType]
         result_raw=tool_response,
     )
 
@@ -301,7 +301,7 @@ def _dispatch_tool_invoked_event(
         call_id=tool_use_id,
         run_context=hook_context.run_context,
     )
-    hook_context.session.dispatcher.dispatch(event)
+    _ = hook_context.session.dispatcher.dispatch(event)
 
 
 def _handle_mcp_tool_post(
@@ -324,7 +324,7 @@ def _run_feedback_providers(  # pragma: no cover - integration tested
 ) -> SyncHookJSONOutput | None:
     """Run feedback providers and return hook response if triggered."""
     feedback_text = collect_feedback(
-        prompt=hook_context._prompt,
+        prompt=hook_context._prompt,  # pyright: ignore[reportPrivateUsage]
         session=hook_context.session,
         deadline=hook_context.deadline,
     )
@@ -398,15 +398,15 @@ def _is_tool_error_response(response: Any) -> bool:  # noqa: ANN401
         return False
 
     # Check explicit error flag
-    if response.get("is_error") or response.get("isError"):
+    if response.get("is_error") or response.get("isError"):  # pyright: ignore[reportUnknownMemberType]
         return True
 
     # Check for error in content (Claude Agent SDK format)
-    content = response.get("content")
+    content: object = response.get("content")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
     if isinstance(content, list) and content:
-        first_item = content[0]
+        first_item: object = content[0]  # pyright: ignore[reportUnknownVariableType]
         if isinstance(first_item, dict):
-            text = first_item.get("text", "")
+            text: object = first_item.get("text", "")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
             if isinstance(text, str):
                 text_lower = text.lower()
                 # Common error indicators in tool output

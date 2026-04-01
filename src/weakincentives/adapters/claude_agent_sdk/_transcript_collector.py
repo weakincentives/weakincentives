@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyright: reportImportCycles=false
+
 """File monitoring for Claude Agent SDK transcripts.
 
 This module provides real-time file tailing and collection of Claude Agent SDK
@@ -60,15 +62,15 @@ def _extract_text_from_content(content: object) -> str:
     if not isinstance(content, list):
         return ""
     parts: list[str] = []
-    for block in content:
-        text = getattr(block, "text", None)
+    for block in content:  # pyright: ignore[reportUnknownVariableType]
+        text: str | None = getattr(block, "text", None)  # pyright: ignore[reportUnknownArgumentType]
         if isinstance(text, str) and text:
             parts.append(text)
             continue
-        if isinstance(block, dict) and block.get("type") == "text":
-            text = block.get("text", "")
-            if text:
-                parts.append(text)
+        if isinstance(block, dict) and block.get("type") == "text":  # pyright: ignore[reportUnknownMemberType]  # ty: ignore[invalid-argument-type]
+            text_val: object = block.get("text", "")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]  # ty: ignore[no-matching-overload]
+            if isinstance(text_val, str) and text_val:
+                parts.append(text_val)
     return "\n".join(parts)
 
 
@@ -84,8 +86,8 @@ def _extract_assistant_text(messages: list[Any]) -> str:
             return _extract_text_from_content(getattr(message, "content", None))
         # JSONL transcript format: dict with role/content
         inner = getattr(message, "message", None)
-        if isinstance(inner, dict) and inner.get("role") == "assistant":
-            return _extract_text_from_content(inner.get("content"))
+        if isinstance(inner, dict) and inner.get("role") == "assistant":  # pyright: ignore[reportUnknownMemberType]
+            return _extract_text_from_content(inner.get("content"))  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
     return ""
 
 
@@ -128,10 +130,10 @@ class _TailerState:
     entry_count: int = 0
     """Entries emitted from this file."""
 
-    tool_names: dict[str, str] = field(default_factory=dict)
+    tool_names: dict[str, str] = field(default_factory=dict[str, str])
     """Map of tool_use_id → tool_name for correlating results."""
 
-    observed_types: set[str] = field(default_factory=set)
+    observed_types: set[str] = field(default_factory=set[str])
     """Canonical entry types observed from file parsing."""
 
 
@@ -168,10 +170,14 @@ class TranscriptCollector:
     async_sleeper: AsyncSleeper = field(default=SYSTEM_CLOCK)
     """Async sleeper for delay operations (injectable for testing)."""
 
-    _tailers: dict[str, _TailerState] = field(default_factory=dict, init=False)
+    _tailers: dict[str, _TailerState] = field(
+        default_factory=dict[str, _TailerState], init=False
+    )
     """Active tailers by source."""
 
-    _pending_tailers: dict[str, Path] = field(default_factory=dict, init=False)
+    _pending_tailers: dict[str, Path] = field(
+        default_factory=dict[str, Path], init=False
+    )
     """Sources awaiting file creation (path not yet on disk)."""
 
     _running: bool = field(default=False, init=False)
@@ -256,7 +262,7 @@ class TranscriptCollector:
         ``user_message``.  Same for ``assistant_message``.
         """
         main_tailer = self._tailers.get("main")
-        observed = main_tailer.observed_types if main_tailer else set()
+        observed: set[str] = main_tailer.observed_types if main_tailer else set()
         emitter = self._get_emitter()
 
         if "user_message" not in observed and self._fallback_user_text is not None:
@@ -324,7 +330,7 @@ class TranscriptCollector:
         ) -> SyncHookJSONOutput:
             """SDK hook wrapper that delegates to hook_callback."""
             # HookInput is a TypedDict union - cast to dict[str, Any] for hook_callback
-            await self.hook_callback(
+            _ = await self.hook_callback(
                 cast(dict[str, Any], input_data), tool_use_id, context
             )
             # Return empty dict (no hook modifications)
@@ -370,12 +376,12 @@ class TranscriptCollector:
 
             # Cancel tasks
             if self._poll_task is not None:
-                self._poll_task.cancel()
+                _ = self._poll_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._poll_task
 
             if self._discovery_task is not None:
-                self._discovery_task.cancel()
+                _ = self._discovery_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._discovery_task
 
@@ -446,7 +452,7 @@ class TranscriptCollector:
                 inode=stat.st_ino,
             )
             self._tailers[source] = tailer
-            self._pending_tailers.pop(source, None)
+            _ = self._pending_tailers.pop(source, None)
 
             if source.startswith("subagent:"):
                 logger.debug(
@@ -593,7 +599,7 @@ class TranscriptCollector:
             Bytes read from file.
         """
         with path.open("rb") as f:
-            f.seek(offset)
+            _ = f.seek(offset)
             return f.read(count)
 
     async def _emit_entries(self, tailer: _TailerState, content: bytes) -> None:

@@ -57,19 +57,19 @@ from ...filesystem import Filesystem
 from ...runtime.logging import StructuredLogger, get_logger
 from ._hook_context import HookConstraints, HookContext, HookStats
 from ._hook_tools import (
-    _check_budget_constraint,
-    _check_deadline_constraint,
-    _compute_budget_info,
-    _dispatch_tool_invoked_event,
-    _handle_mcp_tool_post,
-    _handle_structured_output_completion,
-    _handle_tool_transaction,
-    _is_budget_exhausted,
-    _is_deadline_exceeded,
-    _is_tool_error_response,  # noqa: F401 - re-exported for tests
-    _parse_tool_data,
-    _run_feedback_providers,
-    _setup_tool_execution_state,
+    _check_budget_constraint,  # pyright: ignore[reportPrivateUsage]
+    _check_deadline_constraint,  # pyright: ignore[reportPrivateUsage]
+    _compute_budget_info,  # pyright: ignore[reportPrivateUsage]
+    _dispatch_tool_invoked_event,  # pyright: ignore[reportPrivateUsage]
+    _handle_mcp_tool_post,  # pyright: ignore[reportPrivateUsage]
+    _handle_structured_output_completion,  # pyright: ignore[reportPrivateUsage]
+    _handle_tool_transaction,  # pyright: ignore[reportPrivateUsage]
+    _is_budget_exhausted,  # pyright: ignore[reportPrivateUsage]
+    _is_deadline_exceeded,  # pyright: ignore[reportPrivateUsage]
+    _is_tool_error_response,  # pyright: ignore[reportPrivateUsage,reportUnusedImport]  # noqa: F401 - re-exported for tests
+    _parse_tool_data,  # pyright: ignore[reportPrivateUsage]
+    _run_feedback_providers,  # pyright: ignore[reportPrivateUsage]
+    _setup_tool_execution_state,  # pyright: ignore[reportPrivateUsage]
 )
 from ._task_completion import (
     TaskCompletionChecker,
@@ -121,12 +121,12 @@ def create_pre_tool_use_hook(
         hook_context.beat()
 
         if (
-            not isinstance(input_data, dict)
+            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
             or input_data.get("hook_event_name") != "PreToolUse"
         ):
             return {}
 
-        pre_input: PreToolUseHookInput = input_data  # type: ignore[assignment]
+        pre_input: PreToolUseHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         tool_name = pre_input.get("tool_name", "")
 
         # Log with constraint status
@@ -213,7 +213,7 @@ def create_post_tool_use_hook(
             stop_reason="structured_output",
             filesystem=_get_filesystem(),
         )
-        return task_completion_checker.check(context)  # type: ignore[union-attr]
+        return task_completion_checker.check(context)  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
 
     async def post_tool_use_hook(
         input_data: HookInput,
@@ -224,15 +224,15 @@ def create_post_tool_use_hook(
         hook_start = hook_context.clock.monotonic()
 
         if (
-            not isinstance(input_data, dict)
+            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
             or input_data.get("hook_event_name") != "PostToolUse"
         ):
             return {}
 
-        post_input: PostToolUseHookInput = input_data  # type: ignore[assignment]
+        post_input: PostToolUseHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         data = _parse_tool_data(post_input)
         hook_context.beat()
-        hook_context._tool_count += 1
+        hook_context._tool_count += 1  # pyright: ignore[reportPrivateUsage]
         hook_context.stats.tool_count += 1
 
         # MCP tools dispatch their own events - just clear state and run feedback
@@ -287,12 +287,12 @@ def create_user_prompt_submit_hook(
 
         # Type narrow to UserPromptSubmitHookInput
         if (
-            not isinstance(input_data, dict)
+            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
             or input_data.get("hook_event_name") != "UserPromptSubmit"
         ):
             return {}
 
-        prompt_input: UserPromptSubmitHookInput = input_data  # type: ignore[assignment]
+        prompt_input: UserPromptSubmitHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         prompt_content = prompt_input.get("prompt", "")
         session_id = prompt_input.get("session_id", "")
 
@@ -343,12 +343,12 @@ def create_stop_hook(
 
         # Type narrow to StopHookInput
         if (
-            not isinstance(input_data, dict)
+            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
             or input_data.get("hook_event_name") != "Stop"
         ):
             return {}
 
-        stop_input: StopHookInput = input_data  # type: ignore[assignment]
+        stop_input: StopHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         stop_reason = "end_turn"  # StopHookInput doesn't have stopReason field
         hook_context.stop_reason = stop_reason
 
@@ -437,7 +437,7 @@ def create_task_completion_stop_hook(
         _ = sdk_context
 
         if (
-            not isinstance(input_data, dict)
+            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
             or input_data.get("hook_event_name") != "Stop"
         ):
             return {}
@@ -509,12 +509,12 @@ def create_subagent_stop_hook(
 
         # Type narrow to SubagentStopHookInput
         if (
-            not isinstance(input_data, dict)
+            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
             or input_data.get("hook_event_name") != "SubagentStop"
         ):
             return {}
 
-        subagent_input: SubagentStopHookInput = input_data  # type: ignore[assignment]
+        subagent_input: SubagentStopHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_stop",
@@ -560,12 +560,12 @@ def create_pre_compact_hook(
 
         # Type narrow to PreCompactHookInput
         if (
-            not isinstance(input_data, dict)
+            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
             or input_data.get("hook_event_name") != "PreCompact"
         ):
             return {}
 
-        compact_input: PreCompactHookInput = input_data  # type: ignore[assignment]
+        compact_input: PreCompactHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
         logger.debug(
             "claude_agent_sdk.hook.pre_compact",

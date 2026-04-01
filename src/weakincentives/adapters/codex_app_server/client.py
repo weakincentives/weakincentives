@@ -176,9 +176,11 @@ class CodexAppServerClient:
             msg["params"] = params
         await self._write(msg)
 
-    async def send_response(self, request_id: int, result: dict[str, Any]) -> None:
+    async def send_response(
+        self, request_id: int, result: Mapping[str, object]
+    ) -> None:
         """Send a response to a server-initiated request."""
-        msg: dict[str, Any] = {"id": request_id, "result": result}
+        msg: dict[str, object] = {"id": request_id, "result": dict(result)}
         await self._write(msg)
 
     async def read_messages(self) -> AsyncIterator[dict[str, Any]]:

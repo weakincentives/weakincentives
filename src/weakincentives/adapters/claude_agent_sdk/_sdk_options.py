@@ -72,9 +72,11 @@ def supported_option_names(
 
     Returns None when the options type accepts arbitrary keyword arguments.
     """
-    dataclass_fields = getattr(options_type, "__dataclass_fields__", None)
+    dataclass_fields: dict[str, Any] | None = getattr(
+        options_type, "__dataclass_fields__", None
+    )
     if isinstance(dataclass_fields, dict):
-        return set(dataclass_fields)
+        return set(dataclass_fields.keys())  # ty: ignore[invalid-return-type]
 
     try:
         signature = inspect.signature(options_type)

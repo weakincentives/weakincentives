@@ -25,7 +25,9 @@ from typing import TYPE_CHECKING, Any
 from ...runtime.transcript import TranscriptEmitter
 
 if TYPE_CHECKING:
-    from ._transcript_collector import _TailerState
+    from ._transcript_collector import (
+        _TailerState,  # pyright: ignore[reportPrivateUsage]
+    )
 
 __all__ = [
     "emit_assistant_split",
@@ -44,9 +46,12 @@ _SDK_TYPE_MAP: dict[str, str] = {
 }
 
 
-def _has_block_type(content: list[Any], block_type: str) -> bool:
+def _has_block_type(content: list[object], block_type: str) -> bool:
     """Check if a content block list contains any blocks of the given type."""
-    return any(isinstance(b, dict) and b.get("type") == block_type for b in content)
+    return any(
+        isinstance(b, dict) and b.get("type") == block_type  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]  # ty: ignore[invalid-argument-type]
+        for b in content
+    )
 
 
 def emit_entry(
@@ -71,7 +76,7 @@ def emit_entry(
     # Always parse to determine canonical entry type
     try:
         entry = json.loads(line)
-        sdk_type = entry.get("type", "unknown")
+        sdk_type: str = entry.get("type", "unknown")
         entry_type = _SDK_TYPE_MAP.get(sdk_type, "unknown")
         detail: dict[str, Any] = {"sdk_entry": entry}
 
@@ -114,18 +119,19 @@ def _try_emit_split(
     line: str,
 ) -> bool:
     """Try to split an entry with mixed content blocks. Returns True if split."""
-    message = entry.get("message")
+    message: object = entry.get("message")
     if not isinstance(message, dict):
         return False
-    content = message.get("content")
+    content: object = message.get("content")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
     if not isinstance(content, list):
         return False
 
-    if entry_type == "assistant_message" and _has_block_type(content, "tool_use"):
+    content_list: list[object] = content  # pyright: ignore[reportUnknownVariableType]
+    if entry_type == "assistant_message" and _has_block_type(content_list, "tool_use"):
         emit_assistant_split(emitter, tailer, entry, line)
         return True
 
-    if entry_type == "user_message" and _has_block_type(content, "tool_result"):
+    if entry_type == "user_message" and _has_block_type(content_list, "tool_result"):
         emit_user_tool_result_split(emitter, tailer, entry, line)
         return True
 
@@ -146,19 +152,23 @@ def emit_assistant_split(
         entry: Parsed SDK entry dict.
         line: Raw JSONL line (attached only to the assistant_message).
     """
-    content = entry["message"]["content"]
+    content: list[Any] = entry["message"]["content"]
 
     # Partition content blocks
-    text_blocks = [
-        b for b in content if not (isinstance(b, dict) and b.get("type") == "tool_use")
+    text_blocks: list[Any] = [
+        b
+        for b in content
+        if not (isinstance(b, dict) and b.get("type") == "tool_use")  # pyright: ignore[reportUnknownMemberType]
     ]
-    tool_blocks = [
-        b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"
+    tool_blocks: list[dict[str, Any]] = [
+        b
+        for b in content
+        if isinstance(b, dict) and b.get("type") == "tool_use"  # pyright: ignore[reportUnknownMemberType]
     ]
 
     # Emit assistant_message with text-only blocks (if any)
     if text_blocks:
-        text_entry = {
+        text_entry: dict[str, Any] = {
             **entry,
             "message": {**entry["message"], "content": text_blocks},
         }
@@ -172,8 +182,8 @@ def emit_assistant_split(
 
     # Record tool_use_id → tool_name mappings for later tool_result correlation
     for block in tool_blocks:
-        block_id = block.get("id")
-        block_name = block.get("name")
+        block_id: str | None = block.get("id")
+        block_name: str | None = block.get("name")
         if block_id and block_name:
             tailer.tool_names[block_id] = block_name
 
@@ -208,21 +218,23 @@ def emit_user_tool_result_split(
         line: Raw JSONL line (attached only to the user_message if any
               non-tool_result blocks remain).
     """
-    content = entry["message"]["content"]
+    content: list[Any] = entry["message"]["content"]
 
     # Partition content blocks
-    other_blocks = [
+    other_blocks: list[Any] = [
         b
         for b in content
-        if not (isinstance(b, dict) and b.get("type") == "tool_result")
+        if not (isinstance(b, dict) and b.get("type") == "tool_result")  # pyright: ignore[reportUnknownMemberType]
     ]
-    result_blocks = [
-        b for b in content if isinstance(b, dict) and b.get("type") == "tool_result"
+    result_blocks: list[dict[str, Any]] = [
+        b
+        for b in content
+        if isinstance(b, dict) and b.get("type") == "tool_result"  # pyright: ignore[reportUnknownMemberType]
     ]
 
     # Emit user_message with non-tool_result blocks (if any)
     if other_blocks:
-        other_entry = {
+        other_entry: dict[str, Any] = {
             **entry,
             "message": {**entry["message"], "content": other_blocks},
         }
@@ -236,8 +248,8 @@ def emit_user_tool_result_split(
 
     # Emit one tool_result entry per tool_result block
     for block in result_blocks:
-        tool_use_id = block.get("tool_use_id", "")
-        tool_name = tailer.tool_names.get(tool_use_id, "")
+        tool_use_id: str = block.get("tool_use_id", "")
+        tool_name: str = tailer.tool_names.get(tool_use_id, "")
         detail: dict[str, Any] = {"sdk_entry": block}
         if tool_name:
             detail["tool_name"] = tool_name

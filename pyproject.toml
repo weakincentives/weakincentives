@@ -259,7 +259,6 @@ exclude = [
     ".pytest_cache",
     ".ruff_cache",
     "dist",
-    "src/weakincentives/adapters/claude_agent_sdk",
     "src/weakincentives/docs",
 ]
 deprecateTypingAliases = true
@@ -306,9 +305,7 @@ ignore_names = [
 [tool.ty]
 
 [tool.ty.src]
-exclude = [
-    "src/weakincentives/adapters/claude_agent_sdk",
-]
+exclude = []
 
 [tool.ty.environment]
 python-version = "3.12"

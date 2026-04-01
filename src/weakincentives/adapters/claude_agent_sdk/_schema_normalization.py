@@ -25,10 +25,13 @@ from typing import Any, cast
 def _collapse_nullable_any_of(any_of: object) -> dict[str, Any] | None:
     """Collapse ``anyOf`` nullable unions into ``type=[..., "null"]``."""
     nullable_arity = 2
-    if not isinstance(any_of, list) or len(any_of) != nullable_arity:
+    if (
+        not isinstance(any_of, list)
+        or len(cast(list[object], any_of)) != nullable_arity
+    ):
         return None
 
-    if not all(isinstance(entry, dict) for entry in any_of):
+    if not all(isinstance(entry, dict) for entry in cast(list[object], any_of)):
         return None
 
     entries = cast(list[dict[str, Any]], any_of)
@@ -49,7 +52,7 @@ def _collapse_nullable_any_of(any_of: object) -> dict[str, Any] | None:
         non_null_entry["type"] = [schema_type, "null"]
         return non_null_entry
     if isinstance(schema_type, list) and all(
-        isinstance(value, str) for value in schema_type
+        isinstance(value, str) for value in cast(list[object], schema_type)
     ):
         typed_values = cast(list[str], schema_type)
         non_null_entry["type"] = (
@@ -66,11 +69,14 @@ def _normalize_claude_output_schema(raw_schema: dict[str, Any]) -> dict[str, Any
     if normalized.get("type") == "object":
         properties = normalized.get("properties")
         if isinstance(properties, dict):
+            prop_items: list[tuple[str, Any]] = list(
+                cast(dict[str, Any], properties).items()
+            )
             normalized["properties"] = {
                 key: _normalize_claude_output_schema(cast(dict[str, Any], value))
                 if isinstance(value, dict)
                 else value
-                for key, value in properties.items()
+                for key, value in prop_items
             }
 
     if "items" in normalized and isinstance(normalized["items"], dict):
@@ -81,21 +87,23 @@ def _normalize_claude_output_schema(raw_schema: dict[str, Any]) -> dict[str, Any
     for combinator in ("anyOf", "oneOf", "allOf"):
         combinator_items = normalized.get(combinator)
         if isinstance(combinator_items, list):
+            typed_items: list[Any] = cast(list[Any], combinator_items)
             normalized[combinator] = [
                 _normalize_claude_output_schema(cast(dict[str, Any], entry))
                 if isinstance(entry, dict)
                 else entry
-                for entry in combinator_items
+                for entry in typed_items
             ]
 
     for defs_key in ("$defs", "definitions"):
         defs = normalized.get(defs_key)
         if isinstance(defs, dict):
+            def_items: list[tuple[str, Any]] = list(cast(dict[str, Any], defs).items())
             normalized[defs_key] = {
                 key: _normalize_claude_output_schema(cast(dict[str, Any], value))
                 if isinstance(value, dict)
                 else value
-                for key, value in defs.items()
+                for key, value in def_items
             }
 
     collapsed_nullable = _collapse_nullable_any_of(normalized.get("anyOf"))
