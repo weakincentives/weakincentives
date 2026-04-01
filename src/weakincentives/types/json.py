@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, cast
 
 _JSONPrimitive = str | int | float | bool | None
 
@@ -34,6 +34,30 @@ JSONObjectT = TypeVar("JSONObjectT", bound=JSONObject)
 JSONArrayT = TypeVar("JSONArrayT", bound=JSONArray)
 
 
+def as_json_object(value: object) -> JSONObject:
+    """Narrow *value* to :data:`JSONObject` or raise :exc:`TypeError`.
+
+    Centralizes the ``cast()`` needed because ``isinstance(v, Mapping)``
+    narrows to ``Mapping[Unknown, object]``, not ``Mapping[str, JSONValue]``.
+    """
+    if not isinstance(value, Mapping):
+        msg = f"Expected JSON object (Mapping), got {type(value).__name__}"
+        raise TypeError(msg)
+    return cast(JSONObject, value)
+
+
+def as_json_array(value: object) -> JSONArray:
+    """Narrow *value* to :data:`JSONArray` or raise :exc:`TypeError`.
+
+    Centralizes the ``cast()`` needed because ``isinstance(v, Sequence)``
+    narrows to ``Sequence[Unknown]``, not ``Sequence[JSONValue]``.
+    """
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        msg = f"Expected JSON array (Sequence), got {type(value).__name__}"
+        raise TypeError(msg)
+    return cast(JSONArray, value)
+
+
 __all__ = [
     "ContractResult",
     "JSONArray",
@@ -42,4 +66,6 @@ __all__ = [
     "JSONObjectT",
     "JSONValue",
     "ParseableDataclassT",
+    "as_json_array",
+    "as_json_object",
 ]

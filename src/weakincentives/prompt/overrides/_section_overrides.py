@@ -12,12 +12,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from typing import Literal, cast
 
 from ...dataclasses import FrozenDataclass
 from ...runtime.logging import StructuredLogger, get_logger
-from ...types import JSONValue
+from ...types import JSONValue, as_json_object
 from .versioning import (
     HexDigest,
     PromptDescriptor,
@@ -139,7 +139,7 @@ def _load_section_override_entry(
     path = tuple(part for part in path_key.split("/") if part)
     if not isinstance(section_payload_raw, Mapping):
         raise PromptOverridesError("Section payload must be an object.")
-    section_payload = cast(Mapping[str, JSONValue], section_payload_raw)
+    section_payload = as_json_object(section_payload_raw)
     expected_hash = section_payload.get("expected_hash")
     body = section_payload.get("body")
     summary = _parse_section_summary(section_payload)
@@ -173,11 +173,10 @@ def load_sections(
         raise PromptOverridesError("Sections payload must be a mapping.")
     if not payload:
         return {}
-    mapping_payload = cast(Mapping[object, JSONValue], payload)
-    mapping_entries = cast(Iterable[tuple[object, JSONValue]], mapping_payload.items())
+    mapping_payload = as_json_object(payload)
     descriptor_index = section_descriptor_index(descriptor)
     overrides: dict[tuple[str, ...], SectionOverride] = {}
-    for path_key_raw, section_payload_raw in mapping_entries:
+    for path_key_raw, section_payload_raw in mapping_payload.items():
         normalized_section = _load_section_override_entry(
             path_key_raw=path_key_raw,
             section_payload_raw=section_payload_raw,

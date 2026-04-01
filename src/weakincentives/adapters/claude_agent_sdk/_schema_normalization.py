@@ -34,7 +34,7 @@ def _collapse_nullable_any_of(any_of: object) -> dict[str, Any] | None:
     if not all(isinstance(entry, dict) for entry in cast(list[object], any_of)):
         return None
 
-    entries = cast(list[dict[str, Any]], any_of)
+    entries: list[dict[str, Any]] = any_of  # pyright: ignore[reportUnknownVariableType]  # ty: ignore[invalid-assignment]
     null_index = next(
         (
             index

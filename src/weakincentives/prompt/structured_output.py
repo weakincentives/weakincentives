@@ -21,7 +21,13 @@ from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
 from ..serde import SerdeScope
 from ..serde.parse import parse as parse_dataclass
-from ..types import JSONValue, ParseableDataclassT
+from ..types import (
+    JSONObject,
+    JSONValue,
+    ParseableDataclassT,
+    as_json_array,
+    as_json_object,
+)
 from ._structured_output_config import StructuredOutputConfig
 from ._types import SupportsDataclass
 from .protocols import RenderedPromptProtocol
@@ -138,15 +144,14 @@ def _unwrap_array_payload(
 ) -> Sequence[JSONValue]:
     """Unwrap array payload from possible wrapper object."""
     if isinstance(payload, Mapping):
-        mapping_payload = cast(Mapping[str, JSONValue], payload)
+        mapping_payload: JSONObject = as_json_object(payload)
         if ARRAY_WRAPPER_KEY not in mapping_payload:
             raise TypeError(config.array_error)
         payload = mapping_payload[ARRAY_WRAPPER_KEY]
-    if not isinstance(payload, Sequence) or isinstance(
-        payload, (str, bytes, bytearray)
-    ):
-        raise TypeError(config.array_error)
-    return cast(Sequence[JSONValue], payload)
+    try:
+        return as_json_array(payload)
+    except TypeError:
+        raise TypeError(config.array_error) from None
 
 
 def parse_dataclass_payload(
@@ -168,7 +173,7 @@ def parse_dataclass_payload(
     if config.container == "object":
         if not isinstance(payload, Mapping):
             raise TypeError(config.object_error)
-        mapping_payload = cast(Mapping[str, JSONValue], payload)
+        mapping_payload: JSONObject = as_json_object(payload)
         return parse_dataclass(
             dataclass_type,
             mapping_payload,
@@ -181,7 +186,7 @@ def parse_dataclass_payload(
     for index, item in enumerate(sequence_payload):
         if not isinstance(item, Mapping):
             raise TypeError(config.array_item_error.format(index=index))
-        mapping_item = cast(Mapping[str, JSONValue], item)
+        mapping_item: JSONObject = as_json_object(item)
         parsed_items.append(
             parse_dataclass(
                 dataclass_type,

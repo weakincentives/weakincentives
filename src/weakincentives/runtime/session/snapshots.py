@@ -25,7 +25,7 @@ from uuid import UUID
 from ...dataclasses import Constructable, FrozenDataclass, allow_construction
 from ...errors import WinkError
 from ...serde import dump, parse, resolve_type_identifier, type_identifier
-from ...types import JSONValue
+from ...types import JSONValue, as_json_object
 from ...types.dataclass import SupportsDataclass
 from ._slice_types import SessionSlice, SessionSliceType
 from .dataclasses import is_dataclass_instance
@@ -140,7 +140,7 @@ def _load_snapshot_object(raw: str) -> Mapping[str, JSONValue]:
     if not isinstance(payload_obj, Mapping):
         raise SnapshotRestoreError("Snapshot payload must be an object")
 
-    return cast(Mapping[str, JSONValue], payload_obj)
+    return as_json_object(payload_obj)
 
 
 def _validate_schema_version(version: str) -> None:
@@ -200,10 +200,7 @@ def _validate_tags(payload: Mapping[str, JSONValue]) -> Mapping[str, str]:
     if not isinstance(tags_obj, Mapping):
         raise SnapshotRestoreError("Snapshot tags must be an object")
 
-    return _normalize_tags(
-        cast(Mapping[object, object] | None, tags_obj),
-        error_cls=SnapshotRestoreError,
-    )
+    return _normalize_tags(tags_obj, error_cls=SnapshotRestoreError)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
 
 def _validate_payload_policies(payload: Mapping[str, JSONValue]) -> PayloadPolicies:
@@ -292,7 +289,7 @@ class SnapshotSlicePayload:
         if not isinstance(obj, Mapping):
             raise SnapshotRestoreError("Slice entry must be an object")
 
-        entry = cast(Mapping[str, JSONValue], obj)
+        entry = as_json_object(obj)  # pyright: ignore[reportUnknownArgumentType]
         slice_identifier = entry.get("slice_type")
         item_identifier = entry.get("item_type")
 
@@ -310,7 +307,8 @@ class SnapshotSlicePayload:
         for item in items_obj:
             if not isinstance(item, Mapping):
                 raise SnapshotRestoreError("Slice items must be objects")
-            items.append(cast(Mapping[str, JSONValue], item))
+            json_item = as_json_object(item)
+            items.append(json_item)
 
         return cls(
             slice_type=slice_identifier,

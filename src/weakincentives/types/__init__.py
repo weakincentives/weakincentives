@@ -186,6 +186,8 @@ from .json import (
     JSONObjectT,
     JSONValue,
     ParseableDataclassT,
+    as_json_array,
+    as_json_object,
 )
 
 __all__ = [
@@ -206,5 +208,7 @@ __all__ = [
     "SupportsDataclass",
     "SupportsDataclassOrNone",
     "SupportsToolResult",
+    "as_json_array",
+    "as_json_object",
     "is_dataclass_instance",
 ]

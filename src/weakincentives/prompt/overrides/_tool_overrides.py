@@ -12,13 +12,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from typing import cast
 
 from ...dataclasses import FrozenDataclass
 from ...runtime.logging import StructuredLogger, get_logger
-from ...types import JSONValue
+from ...types import JSONValue, as_json_object
 from .versioning import (
     HexDigest,
     PromptDescriptor,
@@ -118,7 +118,7 @@ def _normalize_param_descriptions(
         param_descriptions = {}
     if not isinstance(param_descriptions, Mapping):
         raise PromptOverridesError(param_mapping_error_message)
-    mapping_params = cast(Mapping[str, JSONValue], param_descriptions)
+    mapping_params = as_json_object(param_descriptions)
     normalized_params: dict[str, str] = {}
     for key, value in mapping_params.items():
         if not isinstance(value, str):
@@ -181,7 +181,7 @@ def _load_tool_override_entry(
     if not isinstance(tool_payload_raw, Mapping):
         raise PromptOverridesError("Tool payload must be an object.")
     tool_name = tool_name_raw
-    tool_payload = cast(Mapping[str, JSONValue], tool_payload_raw)
+    tool_payload = as_json_object(tool_payload_raw)
     expected_hash = tool_payload.get("expected_contract_hash")
     description = tool_payload.get("description")
     param_payload = tool_payload.get("param_descriptions")
@@ -216,11 +216,10 @@ def load_tools(
         raise PromptOverridesError("Tools payload must be a mapping.")
     if not payload:
         return {}
-    mapping_payload = cast(Mapping[object, JSONValue], payload)
-    mapping_entries = cast(Iterable[tuple[object, JSONValue]], mapping_payload.items())
+    mapping_payload = as_json_object(payload)
     descriptor_index = tool_descriptor_index(descriptor)
     overrides: dict[str, ToolOverride] = {}
-    for tool_name_raw, tool_payload_raw in mapping_entries:
+    for tool_name_raw, tool_payload_raw in mapping_payload.items():
         normalized_tool = _load_tool_override_entry(
             tool_name_raw=tool_name_raw,
             tool_payload_raw=tool_payload_raw,

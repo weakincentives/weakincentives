@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal, cast
 
-from ...types import JSONValue
+from ...types import JSONValue, as_json_object
 from .versioning import (
     HexDigest,
     PromptOverridesError,
@@ -116,8 +116,8 @@ def load_task_example_overrides(
     for item in payload:
         if not isinstance(item, Mapping):
             raise PromptOverridesError("Task example override entry must be an object.")
-        item_map = cast(Mapping[str, JSONValue], item)
-        overrides.append(_parse_task_example_entry(item_map))
+        override_entry = as_json_object(item)
+        overrides.append(_parse_task_example_entry(override_entry))
     return tuple(overrides)
 
 
@@ -167,8 +167,8 @@ def _load_step_overrides(
     for item in payload:
         if not isinstance(item, Mapping):
             raise PromptOverridesError("Step override entry must be an object.")
-        item_map = cast(Mapping[str, JSONValue], item)
-        steps.append(_parse_step_override_entry(item_map))
+        step_entry = as_json_object(item)
+        steps.append(_parse_step_override_entry(step_entry))
     return tuple(steps)
 
 

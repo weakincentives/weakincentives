@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from ...clock import SYSTEM_CLOCK
@@ -115,8 +115,8 @@ def _extract_mcp_output(item: CodexItem) -> str:
     result_raw: object = item.get("result", {})
     if not isinstance(result_raw, dict):
         return str(result_raw)[:1000]
-    mcp_result = cast("dict[str, object]", result_raw)
-    content_list = cast("list[MCPContentEntry]", mcp_result.get("content", []))
+    mcp_result: dict[str, object] = result_raw  # pyright: ignore[reportAssignmentType,reportUnknownVariableType]  # ty: ignore[invalid-assignment]
+    content_list: list[MCPContentEntry] = mcp_result.get("content", [])  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
     text_parts: list[str] = []
     for entry in content_list:
         if not isinstance(entry, dict):  # pyright: ignore[reportUnnecessaryIsInstance]

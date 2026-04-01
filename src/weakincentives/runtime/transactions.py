@@ -48,7 +48,7 @@ from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ..errors import RestoreFailedError
 from ..serde import dump, parse, resolve_type_identifier, type_identifier
-from ..types import JSONValue
+from ..types import JSONValue, as_json_object
 from .session.protocols import SessionProtocol
 from .session.snapshots import (
     Snapshot,
@@ -188,7 +188,7 @@ class CompositeSnapshot:
         if not isinstance(payload_obj, Mapping):
             raise SnapshotRestoreError("Composite snapshot payload must be an object")
 
-        payload = cast(Mapping[str, JSONValue], payload_obj)
+        payload = as_json_object(payload_obj)
 
         version = payload.get("version")
         if version != COMPOSITE_SNAPSHOT_SCHEMA_VERSION:
@@ -254,9 +254,8 @@ def _parse_resource_snapshots(
     for entry in resources_payload:
         if not isinstance(entry, Mapping):
             raise SnapshotRestoreError("Resource entry must be an object")
-        resource_type, snapshot = _parse_single_resource(
-            cast(Mapping[str, JSONValue], entry)
-        )
+        typed_entry = as_json_object(entry)
+        resource_type, snapshot = _parse_single_resource(typed_entry)
         resources[resource_type] = snapshot
     return resources
 
@@ -309,7 +308,7 @@ def _parse_snapshot_metadata(
     if not isinstance(metadata_payload, Mapping):
         raise SnapshotRestoreError("Metadata must be an object")
 
-    metadata_dict = cast(Mapping[str, JSONValue], metadata_payload)
+    metadata_dict = as_json_object(metadata_payload)
     tag = metadata_dict.get("tag")
     tool_call_id = metadata_dict.get("tool_call_id")
     tool_name = metadata_dict.get("tool_name")
