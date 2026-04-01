@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from claude_agent_sdk.types import (
     PostToolUseHookInput,
@@ -66,7 +66,7 @@ def _utcnow() -> datetime:
 
 def _compute_budget_info(budget_tracker: BudgetTracker | None) -> dict[str, Any]:
     """Compute budget info for logging."""
-    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):  # pyright: ignore[reportUnnecessaryIsInstance]
+    if budget_tracker is None:
         return {}
     budget = budget_tracker.budget
     consumed = budget_tracker.consumed
@@ -91,7 +91,7 @@ def _is_deadline_exceeded(deadline: Deadline | None) -> bool:
 
 def _is_budget_exhausted(budget_tracker: BudgetTracker | None) -> bool:
     """Check if token budget has been exhausted."""
-    if budget_tracker is None or not isinstance(budget_tracker, BudgetTracker):  # pyright: ignore[reportUnnecessaryIsInstance]
+    if budget_tracker is None:
         return False
     budget = budget_tracker.budget
     consumed = budget_tracker.consumed
@@ -207,18 +207,21 @@ def _parse_tool_data(input_data: PostToolUseHookInput) -> _ParsedToolData:
     output_text: str = ""
 
     if isinstance(tool_response, dict):
-        stderr: str | None = tool_response.get("stderr")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-        tool_error = stderr if stderr else None  # pyright: ignore[reportUnknownVariableType]
-        stdout: str = tool_response.get("stdout", "")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-        output_text = stdout or str(tool_response)  # pyright: ignore[reportUnknownArgumentType,reportUnknownVariableType]
+        response_dict = cast("dict[str, Any]", tool_response)
+        stderr = response_dict.get("stderr")
+        tool_error = stderr if isinstance(stderr, str) and stderr else None
+        stdout = response_dict.get("stdout", "")
+        output_text = (
+            stdout if isinstance(stdout, str) and stdout else str(response_dict)
+        )
     elif tool_response is not None:
         output_text = str(tool_response)
 
     return _ParsedToolData(
         tool_name=tool_name,
         tool_input=tool_input if isinstance(tool_input, dict) else {},  # pyright: ignore[reportUnnecessaryIsInstance]
-        tool_error=tool_error,  # pyright: ignore[reportUnknownArgumentType]
-        output_text=output_text,  # pyright: ignore[reportUnknownArgumentType]
+        tool_error=tool_error,
+        output_text=output_text,
         result_raw=tool_response,
     )
 
@@ -397,16 +400,20 @@ def _is_tool_error_response(response: Any) -> bool:  # noqa: ANN401
     if not isinstance(response, dict):
         return False
 
+    response_dict = cast("dict[str, Any]", response)
+
     # Check explicit error flag
-    if response.get("is_error") or response.get("isError"):  # pyright: ignore[reportUnknownMemberType]
+    if response_dict.get("is_error") or response_dict.get("isError"):
         return True
 
     # Check for error in content (Claude Agent SDK format)
-    content: object = response.get("content")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    content = response_dict.get("content")
     if isinstance(content, list) and content:
-        first_item: object = content[0]  # pyright: ignore[reportUnknownVariableType]
-        if isinstance(first_item, dict):
-            text: object = first_item.get("text", "")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        content_list = cast("list[Any]", content)
+        first = content_list[0]
+        if isinstance(first, dict):
+            first_dict = cast("dict[str, Any]", first)
+            text = first_dict.get("text", "")
             if isinstance(text, str):
                 text_lower = text.lower()
                 # Common error indicators in tool output

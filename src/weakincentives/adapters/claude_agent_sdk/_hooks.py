@@ -37,7 +37,7 @@ hooks in the Python SDK. Only the hook types listed above are available.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, TypeGuard, cast
 
 from claude_agent_sdk.types import (
     HookCallback,
@@ -96,6 +96,35 @@ __all__ = [
 logger: StructuredLogger = get_logger(__name__, context={"component": "sdk_hooks"})
 
 
+# ---------------------------------------------------------------------------
+# TypeGuard narrowing for SDK HookInput discriminated union
+# ---------------------------------------------------------------------------
+
+
+def _is_pre_tool_use(data: HookInput) -> TypeGuard[PreToolUseHookInput]:
+    return isinstance(data, dict) and data.get("hook_event_name") == "PreToolUse"  # pyright: ignore[reportUnnecessaryIsInstance]
+
+
+def _is_post_tool_use(data: HookInput) -> TypeGuard[PostToolUseHookInput]:
+    return isinstance(data, dict) and data.get("hook_event_name") == "PostToolUse"  # pyright: ignore[reportUnnecessaryIsInstance]
+
+
+def _is_user_prompt_submit(data: HookInput) -> TypeGuard[UserPromptSubmitHookInput]:
+    return isinstance(data, dict) and data.get("hook_event_name") == "UserPromptSubmit"  # pyright: ignore[reportUnnecessaryIsInstance]
+
+
+def _is_stop(data: HookInput) -> TypeGuard[StopHookInput]:
+    return isinstance(data, dict) and data.get("hook_event_name") == "Stop"  # pyright: ignore[reportUnnecessaryIsInstance]
+
+
+def _is_subagent_stop(data: HookInput) -> TypeGuard[SubagentStopHookInput]:
+    return isinstance(data, dict) and data.get("hook_event_name") == "SubagentStop"  # pyright: ignore[reportUnnecessaryIsInstance]
+
+
+def _is_pre_compact(data: HookInput) -> TypeGuard[PreCompactHookInput]:
+    return isinstance(data, dict) and data.get("hook_event_name") == "PreCompact"  # pyright: ignore[reportUnnecessaryIsInstance]
+
+
 def create_pre_tool_use_hook(
     hook_context: HookContext,
 ) -> HookCallback:
@@ -120,14 +149,10 @@ def create_pre_tool_use_hook(
         hook_start = hook_context.clock.monotonic()
         hook_context.beat()
 
-        if (
-            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
-            or input_data.get("hook_event_name") != "PreToolUse"
-        ):
+        if not _is_pre_tool_use(input_data):
             return {}
 
-        pre_input: PreToolUseHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-        tool_name = pre_input.get("tool_name", "")
+        tool_name = input_data.get("tool_name", "")
 
         # Log with constraint status
         deadline_remaining_ms: int | None = None
@@ -141,7 +166,7 @@ def create_pre_tool_use_hook(
             context={
                 "tool_name": tool_name,
                 "tool_use_id": tool_use_id,
-                "tool_input": pre_input.get("tool_input", {}),
+                "tool_input": input_data.get("tool_input", {}),
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "deadline_remaining_ms": deadline_remaining_ms,
@@ -161,7 +186,7 @@ def create_pre_tool_use_hook(
             hook_context.stats.in_subagent = True
 
         # Set up tool execution state (MCP tool_use_id or native snapshot)
-        tool_input = pre_input.get("tool_input", {})
+        tool_input = input_data.get("tool_input", {})
         _setup_tool_execution_state(
             hook_context, tool_name, tool_input, tool_use_id, hook_start
         )
@@ -223,14 +248,10 @@ def create_post_tool_use_hook(
         _ = sdk_context
         hook_start = hook_context.clock.monotonic()
 
-        if (
-            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
-            or input_data.get("hook_event_name") != "PostToolUse"
-        ):
+        if not _is_post_tool_use(input_data):
             return {}
 
-        post_input: PostToolUseHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-        data = _parse_tool_data(post_input)
+        data = _parse_tool_data(input_data)
         hook_context.beat()
         hook_context._tool_count += 1  # pyright: ignore[reportPrivateUsage]
         hook_context.stats.tool_count += 1
@@ -285,16 +306,11 @@ def create_user_prompt_submit_hook(
 
         hook_context.stats.turn_count += 1
 
-        # Type narrow to UserPromptSubmitHookInput
-        if (
-            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
-            or input_data.get("hook_event_name") != "UserPromptSubmit"
-        ):
+        if not _is_user_prompt_submit(input_data):
             return {}
 
-        prompt_input: UserPromptSubmitHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-        prompt_content = prompt_input.get("prompt", "")
-        session_id = prompt_input.get("session_id", "")
+        prompt_content = input_data.get("prompt", "")
+        session_id = input_data.get("session_id", "")
 
         # Calculate prompt preview (truncate for logging)
         prompt_preview = prompt_content[:200] if prompt_content else ""
@@ -341,14 +357,9 @@ def create_stop_hook(
         _ = tool_use_id
         _ = sdk_context
 
-        # Type narrow to StopHookInput
-        if (
-            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
-            or input_data.get("hook_event_name") != "Stop"
-        ):
+        if not _is_stop(input_data):
             return {}
 
-        stop_input: StopHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         stop_reason = "end_turn"  # StopHookInput doesn't have stopReason field
         hook_context.stop_reason = stop_reason
 
@@ -357,7 +368,7 @@ def create_stop_hook(
             event="hook.stop",
             context={
                 "stop_reason": stop_reason,
-                "stop_hook_active": stop_input.get("stop_hook_active", False),
+                "stop_hook_active": input_data.get("stop_hook_active", False),
                 "elapsed_ms": hook_context.elapsed_ms,
                 "stats_tool_count": hook_context.stats.tool_count,
                 "stats_turn_count": hook_context.stats.turn_count,
@@ -436,10 +447,7 @@ def create_task_completion_stop_hook(
         _ = tool_use_id
         _ = sdk_context
 
-        if (
-            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
-            or input_data.get("hook_event_name") != "Stop"
-        ):
+        if not _is_stop(input_data):
             return {}
 
         stop_reason = "end_turn"
@@ -507,21 +515,15 @@ def create_subagent_stop_hook(
         hook_context.stats.subagent_count += 1
         hook_context.stats.in_subagent = False
 
-        # Type narrow to SubagentStopHookInput
-        if (
-            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
-            or input_data.get("hook_event_name") != "SubagentStop"
-        ):
+        if not _is_subagent_stop(input_data):
             return {}
-
-        subagent_input: SubagentStopHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_stop",
             event="hook.subagent_stop",
             context={
-                "session_id": subagent_input.get("session_id", ""),
-                "stop_hook_active": subagent_input.get("stop_hook_active", False),
+                "session_id": input_data.get("session_id", ""),
+                "stop_hook_active": input_data.get("stop_hook_active", False),
                 "elapsed_ms": hook_context.elapsed_ms,
                 "parent_tool_count": hook_context.stats.tool_count,
                 "subagent_count": hook_context.stats.subagent_count,
@@ -558,22 +560,16 @@ def create_pre_compact_hook(
 
         hook_context.stats.compact_count += 1
 
-        # Type narrow to PreCompactHookInput
-        if (
-            not isinstance(input_data, dict)  # pyright: ignore[reportUnnecessaryIsInstance]
-            or input_data.get("hook_event_name") != "PreCompact"
-        ):
+        if not _is_pre_compact(input_data):
             return {}
-
-        compact_input: PreCompactHookInput = input_data  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
         logger.debug(
             "claude_agent_sdk.hook.pre_compact",
             event="hook.pre_compact",
             context={
                 "compact_number": hook_context.stats.compact_count,
-                "trigger": compact_input.get("trigger", ""),
-                "custom_instructions": compact_input.get("custom_instructions"),
+                "trigger": input_data.get("trigger", ""),
+                "custom_instructions": input_data.get("custom_instructions"),
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "turn_count": hook_context.stats.turn_count,

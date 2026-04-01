@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from ...runtime.transcript import TranscriptEmitter
 
@@ -101,7 +101,7 @@ class CodexTranscriptBridge:
             )
 
     def _handle_item_started(self, params: dict[str, object], raw: str) -> None:
-        item: dict[str, object] = params.get("item", {})  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        item = cast("dict[str, object]", params.get("item", {}))
         if item.get("type", "") in _TOOL_ITEM_TYPES:
             self._emitter.emit("tool_use", detail={"notification": params}, raw=raw)
 
@@ -112,7 +112,7 @@ class CodexTranscriptBridge:
         self._emitter.emit("token_usage", detail={"notification": params}, raw=raw)
 
     def _handle_turn_completed(self, params: dict[str, object], raw: str) -> None:
-        turn: dict[str, object] = params.get("turn", {})  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        turn = cast("dict[str, object]", params.get("turn", {}))
         if turn.get("status") == "failed":
             self._emitter.emit("error", detail={"notification": params}, raw=raw)
 
@@ -134,7 +134,7 @@ class CodexTranscriptBridge:
 
     def _handle_item_completed(self, params: dict[str, object], raw: str) -> None:
         """Handle ``item/completed`` notifications."""
-        item: dict[str, object] = params.get("item", {})  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        item = cast("dict[str, object]", params.get("item", {}))
         item_type = item.get("type", "")
 
         if item_type == "agentMessage":

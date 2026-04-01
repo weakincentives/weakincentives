@@ -61,6 +61,10 @@ class TestExtractTextFromContent:
         ]
         assert _extract_text_from_content(content) == "valid"
 
+    def test_non_dict_non_text_blocks_skipped(self) -> None:
+        content: list[object] = [42, None, {"type": "text", "text": "ok"}]
+        assert _extract_text_from_content(content) == "ok"
+
 
 class TestExtractAssistantText:
     """Tests for _extract_assistant_text helper."""

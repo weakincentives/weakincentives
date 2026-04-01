@@ -128,7 +128,7 @@ def _extract_mcp_output(item: CodexItem) -> str:
 
 def extract_token_usage(params: dict[str, object]) -> TokenUsage | None:
     """Extract TokenUsage from a thread/tokenUsage/updated notification."""
-    token_usage: TokenUsageInfo = params.get("tokenUsage", {})  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+    token_usage = cast(TokenUsageInfo, params.get("tokenUsage", {}))
 
     last_raw = token_usage.get("last")
     if not isinstance(last_raw, dict):

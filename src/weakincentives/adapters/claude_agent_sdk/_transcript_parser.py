@@ -20,7 +20,7 @@ from file-monitoring concerns in :mod:`._transcript_collector`.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ...runtime.transcript import TranscriptEmitter
 
@@ -49,7 +49,7 @@ _SDK_TYPE_MAP: dict[str, str] = {
 def _has_block_type(content: list[object], block_type: str) -> bool:
     """Check if a content block list contains any blocks of the given type."""
     return any(
-        isinstance(b, dict) and b.get("type") == block_type  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]  # ty: ignore[invalid-argument-type]
+        isinstance(b, dict) and cast("dict[str, Any]", b).get("type") == block_type
         for b in content
     )
 
@@ -119,14 +119,15 @@ def _try_emit_split(
     line: str,
 ) -> bool:
     """Try to split an entry with mixed content blocks. Returns True if split."""
-    message: object = entry.get("message")
+    message = entry.get("message")
     if not isinstance(message, dict):
         return False
-    content: object = message.get("content")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    message_dict = cast("dict[str, Any]", message)
+    content = message_dict.get("content")
     if not isinstance(content, list):
         return False
 
-    content_list: list[object] = content  # pyright: ignore[reportUnknownVariableType]
+    content_list = cast("list[object]", content)
     if entry_type == "assistant_message" and _has_block_type(content_list, "tool_use"):
         emit_assistant_split(emitter, tailer, entry, line)
         return True
@@ -158,12 +159,14 @@ def emit_assistant_split(
     text_blocks: list[Any] = [
         b
         for b in content
-        if not (isinstance(b, dict) and b.get("type") == "tool_use")  # pyright: ignore[reportUnknownMemberType]
+        if not (
+            isinstance(b, dict) and cast("dict[str, Any]", b).get("type") == "tool_use"
+        )
     ]
     tool_blocks: list[dict[str, Any]] = [
         b
         for b in content
-        if isinstance(b, dict) and b.get("type") == "tool_use"  # pyright: ignore[reportUnknownMemberType]
+        if isinstance(b, dict) and cast("dict[str, Any]", b).get("type") == "tool_use"
     ]
 
     # Emit assistant_message with text-only blocks (if any)
@@ -224,12 +227,16 @@ def emit_user_tool_result_split(
     other_blocks: list[Any] = [
         b
         for b in content
-        if not (isinstance(b, dict) and b.get("type") == "tool_result")  # pyright: ignore[reportUnknownMemberType]
+        if not (
+            isinstance(b, dict)
+            and cast("dict[str, Any]", b).get("type") == "tool_result"
+        )
     ]
     result_blocks: list[dict[str, Any]] = [
         b
         for b in content
-        if isinstance(b, dict) and b.get("type") == "tool_result"  # pyright: ignore[reportUnknownMemberType]
+        if isinstance(b, dict)
+        and cast("dict[str, Any]", b).get("type") == "tool_result"
     ]
 
     # Emit user_message with non-tool_result blocks (if any)
