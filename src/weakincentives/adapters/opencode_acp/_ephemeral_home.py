@@ -152,18 +152,24 @@ class OpenCodeEphemeralHome:
         self._copy_aws_config(real_home)
 
     def _copy_opencode_auth(self, real_home: str) -> None:
-        """Copy OpenCode auth data (``~/.local/share/opencode/``)."""
-        source = Path(real_home) / ".local" / "share" / "opencode"
+        """Copy OpenCode auth file (``~/.local/share/opencode/auth.json``).
+
+        Only the auth file is needed — the rest of the directory may contain
+        large databases and logs that would be expensive to copy and may hold
+        file locks from a running OpenCode process.
+        """
+        source = Path(real_home) / ".local" / "share" / "opencode" / "auth.json"
         if not source.exists():
             _logger.debug(
                 "opencode.ephemeral_home.auth.opencode_skip",
-                extra={"reason": "dir_not_found", "path": str(source)},
+                extra={"reason": "auth_file_not_found", "path": str(source)},
             )
             return
 
-        dest = Path(self._temp_dir) / ".local" / "share" / "opencode"
+        dest = Path(self._temp_dir) / ".local" / "share" / "opencode" / "auth.json"
         try:
-            _ = shutil.copytree(source, dest, symlinks=True, dirs_exist_ok=True)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _ = shutil.copy2(source, dest)
             _logger.debug(
                 "opencode.ephemeral_home.auth.opencode_copied",
                 extra={"source": str(source), "dest": str(dest)},
