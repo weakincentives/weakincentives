@@ -261,8 +261,6 @@ exclude = [
     "dist",
     "src/weakincentives/adapters/claude_agent_sdk",
     "src/weakincentives/adapters/acp",
-    "src/weakincentives/adapters/opencode_acp",
-
     "src/weakincentives/docs",
 ]
 deprecateTypingAliases = true
@@ -311,7 +309,6 @@ ignore_names = [
 [tool.ty.src]
 exclude = [
     "src/weakincentives/adapters/acp",
-    "src/weakincentives/adapters/opencode_acp",
     "src/weakincentives/adapters/claude_agent_sdk",
 ]
 

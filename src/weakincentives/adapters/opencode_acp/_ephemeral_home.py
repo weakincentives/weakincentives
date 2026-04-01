@@ -84,7 +84,7 @@ def _copy_skill(
                     if total_bytes > max_total_bytes:
                         msg = f"Skill exceeds total size limit ({total_bytes} > {max_total_bytes})"
                         raise SkillMountError(msg)
-                    shutil.copy2(item, dest_file)
+                    _ = shutil.copy2(item, dest_file)
         else:
             dest_file = dest_dir / "SKILL.md"
             size = source.stat().st_size
@@ -92,7 +92,7 @@ def _copy_skill(
             if total_bytes > max_total_bytes:
                 msg = f"Skill exceeds total size limit ({total_bytes} > {max_total_bytes})"
                 raise SkillMountError(msg)
-            shutil.copy2(source, dest_file)
+            _ = shutil.copy2(source, dest_file)
     except OSError as e:
         msg = f"Failed to copy skill: {e}"
         raise SkillMountError(msg) from e
@@ -115,7 +115,7 @@ class OpenCodeEphemeralHome:
     may come from environment variables instead.
     """
 
-    def __init__(
+    def __init__(  # pyright: ignore[reportMissingSuperCall]
         self,
         *,
         workspace_path: str | None = None,
@@ -163,7 +163,7 @@ class OpenCodeEphemeralHome:
 
         dest = Path(self._temp_dir) / ".local" / "share" / "opencode"
         try:
-            shutil.copytree(source, dest, symlinks=True, dirs_exist_ok=True)
+            _ = shutil.copytree(source, dest, symlinks=True, dirs_exist_ok=True)
             _logger.debug(
                 "opencode.ephemeral_home.auth.opencode_copied",
                 extra={"source": str(source), "dest": str(dest)},
@@ -186,7 +186,7 @@ class OpenCodeEphemeralHome:
 
         dest = Path(self._temp_dir) / ".aws"
         try:
-            shutil.copytree(source, dest, symlinks=True, dirs_exist_ok=True)
+            _ = shutil.copytree(source, dest, symlinks=True, dirs_exist_ok=True)
             _logger.debug(
                 "opencode.ephemeral_home.auth.aws_copied",
                 extra={"source": str(source), "dest": str(dest)},
@@ -250,7 +250,7 @@ class OpenCodeEphemeralHome:
                 validate_skill(source)
 
             dest = skills_dir / name
-            _copy_skill(source, dest)
+            _ = _copy_skill(source, dest)
 
     @property
     def home_path(self) -> str:

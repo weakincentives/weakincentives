@@ -114,7 +114,8 @@ class OpenCodeACPAdapter(ACPAdapter):
             home.cleanup()
             raise
 
-        base_env = build_env(self._client_config.env)
+        env_cfg = self._client_config.env
+        base_env = build_env(dict(env_cfg) if env_cfg is not None else None)
         if base_env is None:
             base_env = dict(os.environ)
         base_env["HOME"] = home.home_path

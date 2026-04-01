@@ -638,8 +638,11 @@ class HostFilesystem:
         if not self._git_initialized:
             self._git_dir = init_git_repo(self._git_dir)
             self._git_initialized = True
-        # init_git_repo always returns str, so _git_dir is set after first call
-        return self._git_dir  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
+        git_dir = self._git_dir
+        if git_dir is None:  # pragma: no cover - always set after init_git_repo
+            msg = "git_dir must be set after init_git_repo"
+            raise RuntimeError(msg)
+        return git_dir
 
     def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
         """Capture current filesystem state as a git commit.
