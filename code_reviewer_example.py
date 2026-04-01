@@ -276,7 +276,7 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
 
         workspace = _create_workspace_section(session, request.project_path)
 
-        template = PromptTemplate[ReviewResponse](
+        template = PromptTemplate[ReviewResponse].create(
             ns="code-review",
             key="review-agent",
             name="Code Review Agent",
