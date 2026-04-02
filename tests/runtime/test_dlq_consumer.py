@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -123,8 +122,10 @@ def test_dlq_consumer_shutdown() -> None:
         )
         thread.start()
 
-        # Give it time to start
-        time.sleep(0.1)
+        # Wait for consumer to start
+        from weakincentives.runtime import wait_until
+
+        wait_until(lambda: consumer.running, timeout=2.0)
         assert consumer.running
 
         # Shutdown

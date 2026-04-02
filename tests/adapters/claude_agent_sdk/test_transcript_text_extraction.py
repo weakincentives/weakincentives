@@ -123,7 +123,7 @@ class TestEmitFallbacksBranches:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript_path))
                     collector.set_assistant_message_fallback([{"role": "user"}])
-                    await asyncio.sleep(0.05)
+                    await collector._poll_once()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":

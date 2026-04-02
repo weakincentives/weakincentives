@@ -23,6 +23,10 @@ Key invariants verified:
 - INV-3: Stale Handle Rejection
 - INV-4: Delivery Count Monotonicity
 - INV-5: No Message Loss
+
+Note: time.sleep() in advance_time() cannot be replaced with FakeClock.
+Redis manages visibility timeouts via server-side TIME in Lua scripts;
+the sleep lets real time pass so messages expire and the reaper requeues them.
 """
 
 from __future__ import annotations

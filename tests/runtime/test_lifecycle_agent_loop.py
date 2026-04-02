@@ -30,6 +30,7 @@ from weakincentives.runtime import (
     InMemoryMailbox,
     Runnable,
     Session,
+    wait_until,
 )
 from weakincentives.runtime.session.protocols import SessionProtocol
 
@@ -153,7 +154,7 @@ def test_agent_loop_shutdown_stops_loop() -> None:
         )
         thread.start()
 
-        time.sleep(0.1)
+        wait_until(lambda: loop.running, timeout=2.0)
         assert loop.running
 
         result = loop.shutdown(timeout=2.0)
@@ -186,7 +187,7 @@ def test_agent_loop_shutdown_completes_in_flight() -> None:
         thread.start()
 
         # Wait for processing to start
-        time.sleep(0.05)
+        wait_until(lambda: adapter.call_count > 0, timeout=2.0)
 
         # Shutdown should wait for completion
         result = loop.shutdown(timeout=2.0)
@@ -219,7 +220,7 @@ def test_agent_loop_shutdown_nacks_unprocessed_messages() -> None:
         thread.start()
 
         # Wait for first message to start processing
-        time.sleep(0.05)
+        wait_until(lambda: adapter.call_count > 0, timeout=2.0)
 
         # Shutdown during processing
         loop.shutdown(timeout=2.0)
@@ -248,7 +249,6 @@ def test_agent_loop_running_property() -> None:
         )
         thread.start()
 
-        time.sleep(0.05)
         # Might still be running or finished depending on timing
 
         loop.shutdown(timeout=1.0)
@@ -274,7 +274,7 @@ def test_agent_loop_context_manager() -> None:
                 target=loop.run, kwargs={"wait_time_seconds": 1, "max_iterations": None}
             )
             thread.start()
-            time.sleep(0.05)
+            wait_until(lambda: loop.running, timeout=2.0)
 
         # Context exit should trigger shutdown
         thread.join(timeout=2.0)
@@ -300,7 +300,7 @@ def test_agent_loop_shutdown_timeout_returns_false() -> None:
     )
     thread.start()
 
-    time.sleep(0.1)
+    wait_until(lambda: adapter.call_count > 0, timeout=2.0)
 
     # Short timeout - should return False
     result = loop.shutdown(timeout=0.1)

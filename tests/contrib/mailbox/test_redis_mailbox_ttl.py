@@ -14,6 +14,10 @@
 
 TTL is applied to all Redis keys to prevent orphaned data from accumulating.
 Keys are refreshed on each operation, so active queues stay alive indefinitely.
+
+Note: time.sleep() calls in this module cannot be replaced with FakeClock.
+The sleeps wait for the background reaper thread to run and refresh Redis
+key TTLs via server-side commands. Redis manages its own time internally.
 """
 
 from __future__ import annotations

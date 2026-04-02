@@ -15,6 +15,11 @@ Stress tests for concurrent access patterns.
 
 These tests verify correctness under high concurrency and are marked
 as slow tests that run only when explicitly requested.
+
+Note: time.sleep() calls in this module cannot be replaced with FakeClock.
+Redis manages visibility timeouts and reaper scheduling via server-side TIME
+commands in Lua scripts. The sleeps wait for real Redis server time to
+advance so that messages expire and consumers drain.
 """
 
 from __future__ import annotations

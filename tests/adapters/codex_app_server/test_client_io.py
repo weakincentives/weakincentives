@@ -246,7 +246,9 @@ class TestStderrCapture:
                 mock_exec.return_value = proc
                 client = CodexAppServerClient()
                 await client.start()
-                await asyncio.sleep(0.05)
+                # Yield control so the stderr task can process lines.
+                for _ in range(5):
+                    await asyncio.sleep(0)
                 assert "warning: something" in client.stderr_output
                 await client.stop()
 
@@ -468,7 +470,9 @@ class TestStderrLogging:
                 mock_exec.return_value = proc
                 client = CodexAppServerClient(suppress_stderr=False)
                 await client.start()
-                await asyncio.sleep(0.05)
+                # Yield control so the stderr task can process lines.
+                for _ in range(5):
+                    await asyncio.sleep(0)
                 assert "line1" in client.stderr_output
                 assert "line2" in client.stderr_output
                 await client.stop()
@@ -496,8 +500,8 @@ class TestStderrLogging:
                 client = CodexAppServerClient()
                 await client.start()
 
-                # Give the stderr task a moment to start blocking
-                await asyncio.sleep(0.01)
+                # Yield so the stderr task starts blocking
+                await asyncio.sleep(0)
                 assert client._stderr_task is not None
 
                 # Directly cancel the stderr task
@@ -525,8 +529,9 @@ class TestStopAwaitsTasksClient:
                 client = CodexAppServerClient()
                 await client.start()
 
-                # Wait for read_loop and stderr_loop to finish (EOF)
-                await asyncio.sleep(0.05)
+                # Yield control so read_loop and stderr_loop can finish (EOF)
+                for _ in range(5):
+                    await asyncio.sleep(0)
 
                 # Verify tasks exist before stop
                 assert client._read_task is not None
@@ -555,7 +560,9 @@ class TestStderrBufferBounded:
                 mock_exec.return_value = proc
                 client = CodexAppServerClient()
                 await client.start()
-                await asyncio.sleep(0.1)
+                # Yield enough iterations for 1200 stderr lines to be read.
+                for _ in range(1300):
+                    await asyncio.sleep(0)
 
                 output = client.stderr_output
                 output_lines = output.split("\n")
