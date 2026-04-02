@@ -397,7 +397,7 @@ def test_merge_annotated_meta_and_bool_parsing() -> None:
     assert _bool_from_str("off") is False
 
 
-def test_object_type_and_union_handling() -> None:
+def test_parse_object_field_with_strip_metadata() -> None:
     @dataclass
     class ObjectModel:
         payload: object = field(metadata={"strip": True})
@@ -405,6 +405,8 @@ def test_object_type_and_union_handling() -> None:
     parsed = parse(ObjectModel, {"payload": "  data  "})
     assert parsed.payload == "data"
 
+
+def test_parse_optional_str_whitespace_becomes_none() -> None:
     @dataclass
     class OptionalText:
         token: str | None
@@ -412,6 +414,8 @@ def test_object_type_and_union_handling() -> None:
     optional = parse(OptionalText, {"token": "   "})
     assert optional.token is None
 
+
+def test_parse_number_union_rejects_non_numeric_string() -> None:
     @dataclass
     class NumberUnion:
         value: int | float
@@ -420,6 +424,8 @@ def test_object_type_and_union_handling() -> None:
         parse(NumberUnion, {"value": "abc"})
     assert "value:" in str(exc.value)
 
+
+def test_parse_date_union_rejects_invalid_string() -> None:
     @dataclass
     class DateUnion:
         value: int | datetime
@@ -428,6 +434,8 @@ def test_object_type_and_union_handling() -> None:
         parse(DateUnion, {"value": "not-a-date"})
     assert "value: unable to coerce" in str(union_exc.value)
 
+
+def test_parse_custom_wrapper_type_via_constructor() -> None:
     class CustomWrapper:
         def __init__(self, value: object) -> None:
             self.value = value
@@ -449,6 +457,8 @@ def test_object_type_and_union_handling() -> None:
         globals().pop("CustomModel", None)
         globals().pop("CustomWrapper", None)
 
+
+def test_coerce_union_reports_last_value_error() -> None:
     class FailOne:
         def __init__(self, value: object) -> None:
             raise ValueError("boom1")
@@ -466,9 +476,20 @@ def test_object_type_and_union_handling() -> None:
         _coerce_to_type("data", FailOne | FailTwo, None, "field", config)
     assert str(fail_exc.value) == "field: boom2"
 
+
+def test_coerce_union_reports_type_error() -> None:
+    class FailTwo:
+        def __init__(self, value: object) -> None:
+            raise ValueError("boom2")
+
     class TypeFail:
         def __init__(self, value: object) -> None:
             raise TypeError("type boom")
+
+    config = _ParseConfig(
+        extra="ignore",
+        coerce=True,
+    )
 
     with pytest.raises(TypeError) as type_exc:
         _coerce_to_type("data", FailTwo | TypeFail, None, "field", config)

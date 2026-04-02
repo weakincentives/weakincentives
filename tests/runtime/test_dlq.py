@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -138,11 +139,65 @@ class _TestLoop(AgentLoop[_Request, _Output]):
 
 
 # =============================================================================
+# Fixtures
+# =============================================================================
+
+
+@pytest.fixture()
+def dlq_mailbox() -> Generator[InMemoryMailbox[DeadLetter[str], None]]:
+    """DLQ mailbox for DLQPolicy unit tests."""
+    mb: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    yield mb
+    mb.close()
+
+
+@pytest.fixture()
+def results_mailbox() -> Generator[InMemoryMailbox[AgentLoopResult[_Output], None]]:
+    mb: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    yield mb
+    mb.close()
+
+
+@pytest.fixture()
+def requests_mailbox() -> Generator[
+    InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]]
+]:
+    mb: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    yield mb
+    mb.close()
+
+
+@pytest.fixture()
+def agent_dlq_mailbox() -> Generator[
+    InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None]
+]:
+    mb: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = InMemoryMailbox(
+        name="requests-dlq"
+    )
+    yield mb
+    mb.close()
+
+
+def _make_message(body: str = "test", delivery_count: int = 1) -> Message[str, Any]:
+    return Message(
+        id="msg-123",
+        body=body,
+        receipt_handle="handle",
+        delivery_count=delivery_count,
+        enqueued_at=datetime.now(UTC),
+    )
+
+
+# =============================================================================
 # DeadLetter Tests
 # =============================================================================
 
 
-def test_dead_letter_creation() -> None:
+def test_dead_letter_creation_captures_metadata() -> None:
     """DeadLetter captures all required metadata."""
     body = AgentLoopRequest(request=_Request(message="test"))
     dead_letter: DeadLetter[AgentLoopRequest[_Request]] = DeadLetter(
@@ -170,7 +225,7 @@ def test_dead_letter_creation() -> None:
     assert dead_letter.trace_id == "trace-abc"
 
 
-def test_dead_letter_optional_fields() -> None:
+def test_dead_letter_optional_fields_default_to_none() -> None:
     """DeadLetter has sensible defaults for optional fields."""
     dead_letter: DeadLetter[str] = DeadLetter(
         message_id="msg-123",
@@ -210,144 +265,118 @@ def test_dead_letter_is_frozen() -> None:
 # =============================================================================
 
 
-def test_dlq_policy_default_values() -> None:
+def test_dlq_policy_default_values(
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None],
+) -> None:
     """DLQPolicy has sensible defaults."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
-    try:
-        policy: DLQPolicy[str, None] = DLQPolicy(mailbox=dlq_mailbox)
+    policy: DLQPolicy[str, None] = DLQPolicy(mailbox=dlq_mailbox)
 
-        assert policy.mailbox is dlq_mailbox
-        assert policy.max_delivery_count == 5
-        assert policy.include_errors is None
-        assert policy.exclude_errors is None
-    finally:
-        dlq_mailbox.close()
+    assert policy.mailbox is dlq_mailbox
+    assert policy.max_delivery_count == 5
+    assert policy.include_errors is None
+    assert policy.exclude_errors is None
 
 
-def test_dlq_policy_should_dead_letter_by_count() -> None:
+def test_dlq_policy_below_threshold_no_dead_letter(
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None],
+) -> None:
+    """DLQPolicy does not dead-letter when below delivery count threshold."""
+    policy: DLQPolicy[str, None] = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=3)
+    msg = _make_message(delivery_count=2)
+
+    assert not policy.should_dead_letter(msg, RuntimeError("test error"))
+
+
+def test_dlq_policy_at_threshold_dead_letters(
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None],
+) -> None:
+    """DLQPolicy dead-letters when delivery count reaches threshold."""
+    policy: DLQPolicy[str, None] = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=3)
+    msg = _make_message(delivery_count=3)
+
+    assert policy.should_dead_letter(msg, RuntimeError("test error"))
+
+
+def test_dlq_policy_above_threshold_dead_letters(
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None],
+) -> None:
     """DLQPolicy dead-letters when delivery count exceeds threshold."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
-    try:
-        policy: DLQPolicy[str, None] = DLQPolicy(
-            mailbox=dlq_mailbox,
-            max_delivery_count=3,
-        )
+    policy: DLQPolicy[str, None] = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=3)
+    msg = _make_message(delivery_count=5)
 
-        # Create a mock message
-        msg: Message[str, Any] = Message(
-            id="msg-123",
-            body="test",
-            receipt_handle="handle",
-            delivery_count=2,
-            enqueued_at=datetime.now(UTC),
-        )
-        error = RuntimeError("test error")
-
-        # Below threshold - should not dead-letter
-        assert not policy.should_dead_letter(msg, error)
-
-        # At threshold - should dead-letter
-        msg_at_threshold: Message[str, Any] = Message(
-            id="msg-123",
-            body="test",
-            receipt_handle="handle",
-            delivery_count=3,
-            enqueued_at=datetime.now(UTC),
-        )
-        assert policy.should_dead_letter(msg_at_threshold, error)
-
-        # Above threshold - should dead-letter
-        msg_above_threshold: Message[str, Any] = Message(
-            id="msg-123",
-            body="test",
-            receipt_handle="handle",
-            delivery_count=5,
-            enqueued_at=datetime.now(UTC),
-        )
-        assert policy.should_dead_letter(msg_above_threshold, error)
-    finally:
-        dlq_mailbox.close()
+    assert policy.should_dead_letter(msg, RuntimeError("test error"))
 
 
-def test_dlq_policy_include_errors() -> None:
+def test_dlq_policy_include_errors_immediate_dead_letter(
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None],
+) -> None:
     """DLQPolicy immediately dead-letters included error types."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
-    try:
-        policy: DLQPolicy[str, None] = DLQPolicy(
-            mailbox=dlq_mailbox,
-            max_delivery_count=5,
-            include_errors=frozenset({ValueError, TypeError}),
-        )
+    policy: DLQPolicy[str, None] = DLQPolicy(
+        mailbox=dlq_mailbox,
+        max_delivery_count=5,
+        include_errors=frozenset({ValueError, TypeError}),
+    )
+    msg = _make_message(delivery_count=1)
 
-        msg: Message[str, Any] = Message(
-            id="msg-123",
-            body="test",
-            receipt_handle="handle",
-            delivery_count=1,  # First attempt
-            enqueued_at=datetime.now(UTC),
-        )
-
-        # Included error - should dead-letter immediately
-        assert policy.should_dead_letter(msg, ValueError("bad value"))
-        assert policy.should_dead_letter(msg, TypeError("bad type"))
-
-        # Not included error - should not dead-letter on first attempt
-        assert not policy.should_dead_letter(msg, RuntimeError("other error"))
-    finally:
-        dlq_mailbox.close()
+    assert policy.should_dead_letter(msg, ValueError("bad value"))
+    assert policy.should_dead_letter(msg, TypeError("bad type"))
 
 
-def test_dlq_policy_exclude_errors() -> None:
+def test_dlq_policy_include_errors_skips_other_types(
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None],
+) -> None:
+    """DLQPolicy does not dead-letter non-included errors on first attempt."""
+    policy: DLQPolicy[str, None] = DLQPolicy(
+        mailbox=dlq_mailbox,
+        max_delivery_count=5,
+        include_errors=frozenset({ValueError, TypeError}),
+    )
+    msg = _make_message(delivery_count=1)
+
+    assert not policy.should_dead_letter(msg, RuntimeError("other error"))
+
+
+def test_dlq_policy_exclude_errors_never_dead_letters(
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None],
+) -> None:
     """DLQPolicy never dead-letters excluded error types."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
-    try:
-        policy: DLQPolicy[str, None] = DLQPolicy(
-            mailbox=dlq_mailbox,
-            max_delivery_count=2,
-            exclude_errors=frozenset({TimeoutError}),
-        )
+    policy: DLQPolicy[str, None] = DLQPolicy(
+        mailbox=dlq_mailbox,
+        max_delivery_count=2,
+        exclude_errors=frozenset({TimeoutError}),
+    )
+    msg = _make_message(delivery_count=10)
 
-        msg: Message[str, Any] = Message(
-            id="msg-123",
-            body="test",
-            receipt_handle="handle",
-            delivery_count=10,  # Way above threshold
-            enqueued_at=datetime.now(UTC),
-        )
-
-        # Excluded error - should never dead-letter
-        assert not policy.should_dead_letter(msg, TimeoutError("timeout"))
-
-        # Other error at high count - should dead-letter
-        assert policy.should_dead_letter(msg, RuntimeError("other error"))
-    finally:
-        dlq_mailbox.close()
+    assert not policy.should_dead_letter(msg, TimeoutError("timeout"))
 
 
-def test_dlq_policy_exclude_takes_precedence() -> None:
+def test_dlq_policy_exclude_errors_allows_other_types(
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None],
+) -> None:
+    """DLQPolicy dead-letters non-excluded errors above threshold."""
+    policy: DLQPolicy[str, None] = DLQPolicy(
+        mailbox=dlq_mailbox,
+        max_delivery_count=2,
+        exclude_errors=frozenset({TimeoutError}),
+    )
+    msg = _make_message(delivery_count=10)
+
+    assert policy.should_dead_letter(msg, RuntimeError("other error"))
+
+
+def test_dlq_policy_exclude_takes_precedence_over_include(
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None],
+) -> None:
     """Exclude errors take precedence over include errors."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
-    try:
-        # This is a weird config but should work
-        policy: DLQPolicy[str, None] = DLQPolicy(
-            mailbox=dlq_mailbox,
-            max_delivery_count=5,
-            include_errors=frozenset({ValueError}),
-            exclude_errors=frozenset({ValueError}),  # Same error in both
-        )
+    policy: DLQPolicy[str, None] = DLQPolicy(
+        mailbox=dlq_mailbox,
+        max_delivery_count=5,
+        include_errors=frozenset({ValueError}),
+        exclude_errors=frozenset({ValueError}),
+    )
+    msg = _make_message(delivery_count=1)
 
-        msg: Message[str, Any] = Message(
-            id="msg-123",
-            body="test",
-            receipt_handle="handle",
-            delivery_count=1,
-            enqueued_at=datetime.now(UTC),
-        )
-
-        # Exclude takes precedence - should NOT dead-letter
-        assert not policy.should_dead_letter(msg, ValueError("test"))
-    finally:
-        dlq_mailbox.close()
+    assert not policy.should_dead_letter(msg, ValueError("test"))
 
 
 # =============================================================================
@@ -355,321 +384,277 @@ def test_dlq_policy_exclude_takes_precedence() -> None:
 # =============================================================================
 
 
-def test_agentloop_error_reply_without_dlq() -> None:
-    """AgentLoop sends error reply without DLQ configured (original behavior)."""
-    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
-    )
-    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
-    )
-    try:
-        adapter = _MockAdapter(error=RuntimeError("failure"))
-        loop = _TestLoop(adapter=adapter, requests=requests)
+def test_agentloop_error_reply_acks_message(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    results_mailbox: InMemoryMailbox[AgentLoopResult[_Output], None],
+) -> None:
+    """AgentLoop without DLQ acknowledges failed messages."""
+    adapter = _MockAdapter(error=RuntimeError("failure"))
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox)
 
-        request = AgentLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to=results)
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results_mailbox)
+    loop.run(max_iterations=1, wait_time_seconds=0)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
-
-        # Message should be acknowledged (removed from queue)
-        assert requests.approximate_count() == 0
-
-        # Error reply should be sent
-        assert results.approximate_count() == 1
-        msgs = results.receive(max_messages=1)
-        assert not msgs[0].body.success
-        assert "failure" in (msgs[0].body.error or "")
-        msgs[0].acknowledge()
-    finally:
-        requests.close()
-        results.close()
+    assert requests_mailbox.approximate_count() == 0
 
 
-def test_agentloop_nacks_with_dlq_before_threshold() -> None:
+def test_agentloop_error_reply_sends_error_result(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    results_mailbox: InMemoryMailbox[AgentLoopResult[_Output], None],
+) -> None:
+    """AgentLoop without DLQ sends error reply."""
+    adapter = _MockAdapter(error=RuntimeError("failure"))
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox)
+
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results_mailbox)
+    loop.run(max_iterations=1, wait_time_seconds=0)
+
+    assert results_mailbox.approximate_count() == 1
+    msgs = results_mailbox.receive(max_messages=1)
+    assert not msgs[0].body.success
+    assert "failure" in (msgs[0].body.error or "")
+    msgs[0].acknowledge()
+
+
+def test_agentloop_nacks_below_dlq_threshold(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    results_mailbox: InMemoryMailbox[AgentLoopResult[_Output], None],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
     """AgentLoop nacks failed messages with DLQ before threshold is reached."""
-    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
-    )
-    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
-    )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
-    )
-    try:
-        adapter = _MockAdapter(error=RuntimeError("failure"))
-        dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=5)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+    adapter = _MockAdapter(error=RuntimeError("failure"))
+    dlq = DLQPolicy(mailbox=agent_dlq_mailbox, max_delivery_count=5)
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
 
-        request = AgentLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to=results)
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results_mailbox)
+    loop.run(max_iterations=1, wait_time_seconds=0)
 
-        # Run once - should nack for retry (below threshold)
-        loop.run(max_iterations=1, wait_time_seconds=0)
-
-        # Message should be nacked (still in queue)
-        assert requests.approximate_count() == 1
-
-        # No error reply sent on retry path
-        assert results.approximate_count() == 0
-
-        # Not dead-lettered yet
-        assert dlq_mailbox.approximate_count() == 0
-    finally:
-        requests.close()
-        results.close()
-        dlq_mailbox.close()
+    assert requests_mailbox.approximate_count() == 1
+    assert results_mailbox.approximate_count() == 0
+    assert agent_dlq_mailbox.approximate_count() == 0
 
 
-def test_agentloop_sends_to_dlq_after_threshold() -> None:
-    """AgentLoop sends to DLQ when delivery count equals threshold."""
-    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
-    )
-    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
-    )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
-    )
-    try:
-        adapter = _MockAdapter(error=RuntimeError("persistent failure"))
-        # Use max_delivery_count=1 to trigger DLQ on first failure
-        dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+def test_agentloop_dead_letters_at_threshold(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    results_mailbox: InMemoryMailbox[AgentLoopResult[_Output], None],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
+    """AgentLoop sends to DLQ when delivery count reaches threshold."""
+    adapter = _MockAdapter(error=RuntimeError("persistent failure"))
+    dlq = DLQPolicy(mailbox=agent_dlq_mailbox, max_delivery_count=1)
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
 
-        request = AgentLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to=results)
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results_mailbox)
+    loop.run(max_iterations=1, wait_time_seconds=0)
 
-        # Run once - should dead-letter immediately (delivery_count=1 >= max=1)
-        loop.run(max_iterations=1, wait_time_seconds=0)
-
-        # Message should be dead-lettered
-        assert requests.approximate_count() == 0
-        assert dlq_mailbox.approximate_count() == 1
-
-        # Check dead letter content
-        dlq_msgs = dlq_mailbox.receive(max_messages=1)
-        assert len(dlq_msgs) == 1
-        dead_letter = dlq_msgs[0].body
-        assert dead_letter.message_id is not None
-        assert dead_letter.body.request_id == request.request_id
-        assert dead_letter.source_mailbox == "requests"
-        assert dead_letter.delivery_count == 1
-        assert "persistent failure" in dead_letter.last_error
-        assert dead_letter.last_error_type == "builtins.RuntimeError"
-        dlq_msgs[0].acknowledge()
-
-        # Error reply should be sent
-        result_msgs = results.receive(max_messages=1)
-        assert len(result_msgs) == 1
-        assert not result_msgs[0].body.success
-        assert "Dead-lettered" in (result_msgs[0].body.error or "")
-        result_msgs[0].acknowledge()
-    finally:
-        requests.close()
-        results.close()
-        dlq_mailbox.close()
+    assert requests_mailbox.approximate_count() == 0
+    assert agent_dlq_mailbox.approximate_count() == 1
 
 
-def test_agentloop_immediate_dlq_for_included_error() -> None:
+def test_agentloop_dead_letter_content(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    results_mailbox: InMemoryMailbox[AgentLoopResult[_Output], None],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
+    """Dead letter captures correct metadata from the failed message."""
+    adapter = _MockAdapter(error=RuntimeError("persistent failure"))
+    dlq = DLQPolicy(mailbox=agent_dlq_mailbox, max_delivery_count=1)
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
+
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results_mailbox)
+    loop.run(max_iterations=1, wait_time_seconds=0)
+
+    dlq_msgs = agent_dlq_mailbox.receive(max_messages=1)
+    assert len(dlq_msgs) == 1
+    dead_letter = dlq_msgs[0].body
+    assert dead_letter.message_id is not None
+    assert dead_letter.body.request_id == request.request_id
+    assert dead_letter.source_mailbox == "requests"
+    assert dead_letter.delivery_count == 1
+    assert "persistent failure" in dead_letter.last_error
+    assert dead_letter.last_error_type == "builtins.RuntimeError"
+    dlq_msgs[0].acknowledge()
+
+
+def test_agentloop_dead_letter_sends_error_reply(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    results_mailbox: InMemoryMailbox[AgentLoopResult[_Output], None],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
+    """AgentLoop sends Dead-lettered error reply when DLQ threshold hit."""
+    adapter = _MockAdapter(error=RuntimeError("persistent failure"))
+    dlq = DLQPolicy(mailbox=agent_dlq_mailbox, max_delivery_count=1)
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
+
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results_mailbox)
+    loop.run(max_iterations=1, wait_time_seconds=0)
+
+    result_msgs = results_mailbox.receive(max_messages=1)
+    assert len(result_msgs) == 1
+    assert not result_msgs[0].body.success
+    assert "Dead-lettered" in (result_msgs[0].body.error or "")
+    result_msgs[0].acknowledge()
+
+
+def test_agentloop_immediate_dlq_for_included_error(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    results_mailbox: InMemoryMailbox[AgentLoopResult[_Output], None],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
     """AgentLoop immediately dead-letters included error types."""
-    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
+    adapter = _MockAdapter(error=ValueError("validation error"))
+    dlq = DLQPolicy(
+        mailbox=agent_dlq_mailbox,
+        max_delivery_count=5,
+        include_errors=frozenset({ValueError}),
     )
-    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
-    )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
-    )
-    try:
-        adapter = _MockAdapter(error=ValueError("validation error"))
-        dlq = DLQPolicy(
-            mailbox=dlq_mailbox,
-            max_delivery_count=5,
-            include_errors=frozenset({ValueError}),
-        )
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
 
-        request = AgentLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to=results)
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results_mailbox)
+    loop.run(max_iterations=1, wait_time_seconds=0)
 
-        # Run once - should immediately dead-letter
-        loop.run(max_iterations=1, wait_time_seconds=0)
-
-        # Message should be dead-lettered on first attempt
-        assert requests.approximate_count() == 0
-        assert dlq_mailbox.approximate_count() == 1
-
-        # Check delivery count is 1 (immediate dead-letter)
-        dlq_msgs = dlq_mailbox.receive(max_messages=1)
-        assert dlq_msgs[0].body.delivery_count == 1
-        dlq_msgs[0].acknowledge()
-    finally:
-        requests.close()
-        results.close()
-        dlq_mailbox.close()
+    assert requests_mailbox.approximate_count() == 0
+    assert agent_dlq_mailbox.approximate_count() == 1
+    dlq_msgs = agent_dlq_mailbox.receive(max_messages=1)
+    assert dlq_msgs[0].body.delivery_count == 1
+    dlq_msgs[0].acknowledge()
 
 
-def test_agentloop_never_dlq_for_excluded_error() -> None:
+def test_agentloop_never_dlq_for_excluded_error(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    results_mailbox: InMemoryMailbox[AgentLoopResult[_Output], None],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
     """AgentLoop never dead-letters excluded error types."""
-    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
+    adapter = _MockAdapter(error=TimeoutError("transient timeout"))
+    dlq = DLQPolicy(
+        mailbox=agent_dlq_mailbox,
+        max_delivery_count=2,
+        exclude_errors=frozenset({TimeoutError}),
     )
-    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
-    )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
-    )
-    try:
-        adapter = _MockAdapter(error=TimeoutError("transient timeout"))
-        dlq = DLQPolicy(
-            mailbox=dlq_mailbox,
-            max_delivery_count=2,
-            exclude_errors=frozenset({TimeoutError}),
-        )
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
 
-        request = AgentLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to=results)
-
-        # Run many times - should never dead-letter
-        for _ in range(5):
-            loop.run(max_iterations=1, wait_time_seconds=0)
-
-        # Message should still be in queue (nacked, not dead-lettered)
-        assert requests.approximate_count() == 1
-        assert dlq_mailbox.approximate_count() == 0
-    finally:
-        requests.close()
-        results.close()
-        dlq_mailbox.close()
-
-
-def test_agentloop_dlq_preserves_request_id() -> None:
-    """AgentLoop DLQ preserves request ID in dead letter."""
-    results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
-    )
-    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
-    )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
-    )
-    try:
-        adapter = _MockAdapter(error=RuntimeError("failure"))
-        dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
-
-        request = AgentLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to=results)
-
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results_mailbox)
+    for _ in range(5):
         loop.run(max_iterations=1, wait_time_seconds=0)
 
-        dlq_msgs = dlq_mailbox.receive(max_messages=1)
-        assert len(dlq_msgs) == 1
-        assert dlq_msgs[0].body.request_id == request.request_id
-        dlq_msgs[0].acknowledge()
-    finally:
-        requests.close()
-        results.close()
-        dlq_mailbox.close()
+    assert requests_mailbox.approximate_count() == 1
+    assert agent_dlq_mailbox.approximate_count() == 0
 
 
-def test_agentloop_dlq_preserves_reply_to() -> None:
+def test_agentloop_dlq_preserves_request_id(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    results_mailbox: InMemoryMailbox[AgentLoopResult[_Output], None],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
+    """AgentLoop DLQ preserves request ID in dead letter."""
+    adapter = _MockAdapter(error=RuntimeError("failure"))
+    dlq = DLQPolicy(mailbox=agent_dlq_mailbox, max_delivery_count=1)
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
+
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results_mailbox)
+    loop.run(max_iterations=1, wait_time_seconds=0)
+
+    dlq_msgs = agent_dlq_mailbox.receive(max_messages=1)
+    assert len(dlq_msgs) == 1
+    assert dlq_msgs[0].body.request_id == request.request_id
+    dlq_msgs[0].acknowledge()
+
+
+def test_agentloop_dlq_preserves_reply_to(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
     """AgentLoop DLQ preserves reply_to mailbox name in dead letter."""
     results: InMemoryMailbox[AgentLoopResult[_Output], None] = InMemoryMailbox(
         name="my-results-queue"
     )
-    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
-    )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
-    )
     try:
         adapter = _MockAdapter(error=RuntimeError("failure"))
-        dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+        dlq = DLQPolicy(mailbox=agent_dlq_mailbox, max_delivery_count=1)
+        loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
 
         request = AgentLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to=results)
-
+        requests_mailbox.send(request, reply_to=results)
         loop.run(max_iterations=1, wait_time_seconds=0)
 
-        dlq_msgs = dlq_mailbox.receive(max_messages=1)
+        dlq_msgs = agent_dlq_mailbox.receive(max_messages=1)
         assert len(dlq_msgs) == 1
         assert dlq_msgs[0].body.reply_to == "my-results-queue"
         dlq_msgs[0].acknowledge()
     finally:
-        requests.close()
         results.close()
-        dlq_mailbox.close()
 
 
-def test_agentloop_dlq_without_reply_to() -> None:
+def test_agentloop_dlq_without_reply_to(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
     """AgentLoop DLQ handles messages without reply_to."""
-    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
-    )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
-    )
-    try:
-        adapter = _MockAdapter(error=RuntimeError("failure"))
-        dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+    adapter = _MockAdapter(error=RuntimeError("failure"))
+    dlq = DLQPolicy(mailbox=agent_dlq_mailbox, max_delivery_count=1)
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
 
-        request = AgentLoopRequest(request=_Request(message="hello"))
-        # Send without reply_to
-        requests.send(request)
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request)
+    loop.run(max_iterations=1, wait_time_seconds=0)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
-
-        # Message should be dead-lettered
-        assert requests.approximate_count() == 0
-        assert dlq_mailbox.approximate_count() == 1
-
-        # reply_to should be None in dead letter
-        dlq_msgs = dlq_mailbox.receive(max_messages=1)
-        assert dlq_msgs[0].body.reply_to is None
-        dlq_msgs[0].acknowledge()
-    finally:
-        requests.close()
-        dlq_mailbox.close()
+    assert requests_mailbox.approximate_count() == 0
+    assert agent_dlq_mailbox.approximate_count() == 1
+    dlq_msgs = agent_dlq_mailbox.receive(max_messages=1)
+    assert dlq_msgs[0].body.reply_to is None
+    dlq_msgs[0].acknowledge()
 
 
-def test_agentloop_dlq_handles_reply_error() -> None:
+def test_agentloop_dlq_handles_reply_error(
+    requests_mailbox: InMemoryMailbox[
+        AgentLoopRequest[_Request], AgentLoopResult[_Output]
+    ],
+    agent_dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None],
+) -> None:
     """AgentLoop DLQ handles errors when sending reply."""
     from weakincentives.runtime.mailbox import MailboxConnectionError
 
     results: FakeMailbox[AgentLoopResult[_Output], None] = FakeMailbox(name="results")
-    requests: InMemoryMailbox[AgentLoopRequest[_Request], AgentLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
-    )
-    dlq_mailbox: InMemoryMailbox[DeadLetter[AgentLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
-    )
-    try:
-        adapter = _MockAdapter(error=RuntimeError("failure"))
-        dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+    adapter = _MockAdapter(error=RuntimeError("failure"))
+    dlq = DLQPolicy(mailbox=agent_dlq_mailbox, max_delivery_count=1)
+    loop = _TestLoop(adapter=adapter, requests=requests_mailbox, dlq=dlq)
 
-        request = AgentLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to=results)
+    request = AgentLoopRequest(request=_Request(message="hello"))
+    requests_mailbox.send(request, reply_to=results)
+    results.set_connection_error(MailboxConnectionError("connection lost"))
+    loop.run(max_iterations=1, wait_time_seconds=0)
 
-        # Make reply send fail
-        results.set_connection_error(MailboxConnectionError("connection lost"))
-
-        loop.run(max_iterations=1, wait_time_seconds=0)
-
-        # Message should still be dead-lettered despite reply failure
-        assert requests.approximate_count() == 0
-        assert dlq_mailbox.approximate_count() == 1
-    finally:
-        requests.close()
-        dlq_mailbox.close()
+    assert requests_mailbox.approximate_count() == 0
+    assert agent_dlq_mailbox.approximate_count() == 1

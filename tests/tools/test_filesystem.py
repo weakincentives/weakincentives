@@ -291,6 +291,44 @@ class TestHostFilesystemEdgeCases:
             fs.delete(".")
 
 
+def _patch_first_commit_to_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch subprocess.run so the next git-commit call fails once."""
+    import subprocess
+    from unittest.mock import MagicMock
+
+    original_run = subprocess.run
+    commit_call_count = 0
+
+    def mock_subprocess_run(
+        args: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
+        nonlocal commit_call_count
+
+        subcommand = None
+        for arg in args:
+            if arg in {
+                "init", "--bare", "config", "add", "commit", "rev-parse",
+            }:
+                subcommand = arg
+                break
+
+        if subcommand in {"init", "--bare", "config", "add", "rev-parse"}:
+            return original_run(args, **kwargs)
+
+        if subcommand == "commit":
+            commit_call_count += 1
+            if commit_call_count == 1:
+                mock_result = MagicMock()
+                mock_result.returncode = 1
+                mock_result.stderr = "simulated failure"
+                return mock_result
+            return original_run(args, **kwargs)
+
+        return original_run(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+
 class TestHostFilesystemGitSnapshots:
     """Tests for HostFilesystem git-based snapshot features."""
 
@@ -345,39 +383,8 @@ class TestHostFilesystemGitSnapshots:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Snapshot should handle edge case where commit fails on empty repo."""
-        import subprocess
-        from unittest.mock import MagicMock
-
         fs = HostFilesystem(_root=str(tmp_path))
-        original_run = subprocess.run
-        commit_call_count = 0
-
-        def mock_subprocess_run(
-            args: list[str], **kwargs: object
-        ) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
-            nonlocal commit_call_count
-
-            subcommand = None
-            for arg in args:
-                if arg in {"init", "--bare", "config", "add", "commit", "rev-parse"}:
-                    subcommand = arg
-                    break
-
-            if subcommand in {"init", "--bare", "config", "add", "rev-parse"}:
-                return original_run(args, **kwargs)
-
-            if subcommand == "commit":
-                commit_call_count += 1
-                if commit_call_count == 1:
-                    mock_result = MagicMock()
-                    mock_result.returncode = 1
-                    mock_result.stderr = "simulated failure"
-                    return mock_result
-                return original_run(args, **kwargs)
-
-            return original_run(args, **kwargs)
-
-        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        _patch_first_commit_to_fail(monkeypatch)
         snapshot = fs.snapshot()
         assert isinstance(snapshot, FilesystemSnapshot)
         assert len(snapshot.commit_ref) == 40
@@ -386,42 +393,11 @@ class TestHostFilesystemGitSnapshots:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Commit failure with existing HEAD should raise SnapshotError."""
-        import subprocess
-        from unittest.mock import MagicMock
-
         fs = HostFilesystem(_root=str(tmp_path))
         fs.write("file.txt", "initial")
         _ = fs.snapshot(tag="initial")
 
-        original_run = subprocess.run
-        commit_call_count = 0
-
-        def mock_subprocess_run(
-            args: list[str], **kwargs: object
-        ) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
-            nonlocal commit_call_count
-
-            subcommand = None
-            for arg in args:
-                if arg in {"init", "--bare", "config", "add", "commit", "rev-parse"}:
-                    subcommand = arg
-                    break
-
-            if subcommand in {"init", "--bare", "config", "add", "rev-parse"}:
-                return original_run(args, **kwargs)
-
-            if subcommand == "commit":
-                commit_call_count += 1
-                if commit_call_count == 1:
-                    mock_result = MagicMock()
-                    mock_result.returncode = 1
-                    mock_result.stderr = "simulated failure"
-                    return mock_result
-                return original_run(args, **kwargs)
-
-            return original_run(args, **kwargs)
-
-        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        _patch_first_commit_to_fail(monkeypatch)
         with pytest.raises(SnapshotError, match="Failed to create snapshot commit"):
             fs.snapshot(tag="second")
 
