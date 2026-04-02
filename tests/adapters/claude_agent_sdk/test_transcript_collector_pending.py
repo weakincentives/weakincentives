@@ -128,14 +128,14 @@ class TestTranscriptCollectorPending:
                 await collector._remember_transcript_path(str(transcript_path))
                 assert "main" not in collector._tailers
 
-                # Poll once — file still missing, stays pending.
-                await collector._poll_once()
+                # Wait one poll cycle.
+                await asyncio.sleep(0.02)
 
                 # File appears.
                 transcript_path.write_text('{"type": "user", "message": "late"}\n')
 
-                # Poll again to pick it up.
-                await collector._poll_once()
+                # Wait for another poll cycle to pick it up.
+                await asyncio.sleep(0.05)
 
             assert collector.main_entry_count == 1
 

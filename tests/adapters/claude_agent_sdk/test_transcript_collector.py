@@ -283,8 +283,8 @@ class TestTranscriptCollectorLifecycle:
                     assert collector._poll_task is not None
                     assert collector._discovery_task is not None
 
-                    # Explicitly poll instead of sleeping
-                    await collector._poll_once()
+                    # Wait a bit for polling
+                    await asyncio.sleep(0.05)
 
                 # Should have stopped
                 assert not collector._running
@@ -354,7 +354,7 @@ class TestTranscriptCollectorLifecycle:
 
             async with collector.run():
                 await collector._remember_transcript_path(str(transcript))
-                await collector._poll_once()
+                await asyncio.sleep(0.05)
 
             # Should have processed 3 entries (1 valid, 1 invalid, 1 valid)
             assert collector.main_entry_count == 3
@@ -470,7 +470,7 @@ class TestTranscriptCollectorLifecycle:
 
             async with collector.run():
                 await collector._remember_transcript_path(str(transcript))
-                await collector._poll_once()
+                await asyncio.sleep(0.02)
 
                 # Delete the file to trigger error handling
                 transcript.unlink()
@@ -577,7 +577,7 @@ class TestTranscriptCollectorLifecycle:
 
             async with collector.run():
                 await collector._remember_transcript_path(str(transcript))
-                await collector._poll_once()
+                await asyncio.sleep(0.05)
 
             # Should have processed only 2 entries (skipping empty lines)
             assert collector.main_entry_count == 2
@@ -609,7 +609,7 @@ class TestTranscriptCollectorLifecycle:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await collector._poll_once()
+                    await asyncio.sleep(0.05)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
