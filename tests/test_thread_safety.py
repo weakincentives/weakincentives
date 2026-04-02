@@ -273,6 +273,7 @@ def test_session_reset_clears_runtime_state() -> None:
 def test_session_reducer_optimistic_concurrency_retry() -> None:
     """Test branch 818->796: reducer retries when state is modified concurrently."""
     import threading
+    import time
 
     from weakincentives.runtime.session import Append, SliceView
     from weakincentives.runtime.session.reducer_context import ReducerContext
@@ -298,10 +299,9 @@ def test_session_reducer_optimistic_concurrency_retry() -> None:
         del view, context  # unused
         with call_count_lock:
             call_count += 1
-        # Yield to other threads to increase chance of concurrent modification.
-        # threading.Event().wait(0) acts as a cooperative yield point without
-        # importing time or introducing a real delay.
-        threading.Event().wait(0)
+        # Real sleep to force GIL release and increase chance of concurrent
+        # modification — needed to exercise the optimistic-concurrency retry path.
+        time.sleep(0.001)
         return Append(event)
 
     # Register the slow reducer
