@@ -24,6 +24,7 @@ import pytest
 
 from weakincentives.adapters.acp._env import build_env
 from weakincentives.adapters.acp._prompt_loop import drain_quiet_period, extract_text
+from weakincentives.adapters.acp.adapter import ACPAdapter
 from weakincentives.adapters.acp.config import ACPAdapterConfig, ACPClientConfig
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.clock import SYSTEM_CLOCK
@@ -79,17 +80,50 @@ def _make_mock_deadline(*, remaining_s: float = 60.0) -> MagicMock:
     return deadline
 
 
-class TestACPAdapterInit:
-    def test_defaults(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
+@pytest.fixture()
+def acp_adapter() -> ACPAdapter:
+    """Create a default ACPAdapter instance."""
+    return ACPAdapter()
 
+
+@pytest.fixture()
+def mock_session() -> MagicMock:
+    """Create a mock session with dispatcher."""
+    return _make_mock_session()
+
+
+@pytest.fixture()
+def mock_prompt() -> MagicMock:
+    """Create a mock prompt with defaults."""
+    return _make_mock_prompt()
+
+
+@pytest.fixture()
+def rendered_with_structured_output() -> MagicMock:
+    """Create a rendered mock expecting structured output."""
+    rendered = MagicMock()
+    rendered.output_type = str
+    rendered.container = "object"
+    return rendered
+
+
+@pytest.fixture()
+def rendered_without_structured_output() -> MagicMock:
+    """Create a rendered mock with no structured output."""
+    rendered = MagicMock()
+    rendered.tools = ()
+    rendered.output_type = None
+    rendered.container = None
+    return rendered
+
+
+class TestACPAdapterInit:
+    def test_init_defaults_quiet_period_and_agent_bin(self) -> None:
         adapter = ACPAdapter()
         assert adapter._adapter_config.quiet_period_ms == 500
         assert adapter._client_config.agent_bin == "opencode"
 
-    def test_custom_config(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
+    def test_init_custom_config_applies_model_and_quiet_period(self) -> None:
         cfg = ACPAdapterConfig(model_id="test-model", quiet_period_ms=100)
         adapter = ACPAdapter(adapter_config=cfg)
         assert adapter._adapter_config.model_id == "test-model"
@@ -97,45 +131,35 @@ class TestACPAdapterInit:
 
 
 class TestACPAdapterName:
-    def test_returns_acp(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
+    def test_adapter_name_method_returns_acp(self) -> None:
         adapter = ACPAdapter()
         assert adapter._adapter_name() == "acp"
 
-    def test_adapter_name_property(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
+    def test_adapter_name_property_returns_acp(self) -> None:
         adapter = ACPAdapter()
         assert adapter.adapter_name == "acp"
 
 
 class TestExpiredDeadline:
-    def test_raises_on_expired_deadline(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
-        prompt = _make_mock_prompt()
+    def test_evaluate_expired_deadline_raises_prompt_evaluation_error(
+        self, acp_adapter: ACPAdapter, mock_prompt: MagicMock
+    ) -> None:
         session = _make_mock_session()
         deadline = _make_mock_deadline(remaining_s=-1.0)
 
         with pytest.raises(PromptEvaluationError, match="Deadline expired"):
-            adapter.evaluate(prompt, session=session, deadline=deadline)
+            acp_adapter.evaluate(mock_prompt, session=session, deadline=deadline)
 
 
 class TestResolveCwd:
-    def test_uses_config_cwd(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
+    def test_resolve_cwd_config_cwd_returns_configured_path(self) -> None:
         adapter = ACPAdapter(client_config=ACPClientConfig(cwd="/tmp/work"))
         prompt = _make_mock_prompt()
         effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
         assert effective_cwd == "/tmp/work"
         assert temp_dir is None
 
-    def test_creates_temp_dir_when_no_cwd(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
+    def test_resolve_cwd_no_cwd_creates_temp_dir(self) -> None:
         adapter = ACPAdapter(client_config=ACPClientConfig(cwd=None))
         prompt = _make_mock_prompt()
         effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
@@ -148,8 +172,7 @@ class TestResolveCwd:
 
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_uses_filesystem_root(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
+    def test_resolve_cwd_filesystem_root_used_when_no_config(self) -> None:
         from weakincentives.filesystem import HostFilesystem
 
         adapter = ACPAdapter(client_config=ACPClientConfig(cwd=None))
@@ -160,9 +183,7 @@ class TestResolveCwd:
         assert effective_cwd == "/tmp/fs-root"
         assert temp_dir is None
 
-    def test_config_cwd_with_existing_filesystem(self) -> None:
-        """Covers branch where filesystem exists AND cwd is configured."""
-        from weakincentives.adapters.acp.adapter import ACPAdapter
+    def test_resolve_cwd_config_takes_precedence_over_filesystem(self) -> None:
         from weakincentives.filesystem import HostFilesystem
 
         adapter = ACPAdapter(client_config=ACPClientConfig(cwd="/tmp/configured"))
@@ -170,37 +191,31 @@ class TestResolveCwd:
         fs = HostFilesystem(_root="/tmp/fs-root")
         prompt.filesystem.return_value = fs
         effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-        # Config cwd takes precedence, filesystem is not None so elif is skipped
         assert effective_cwd == "/tmp/configured"
         assert temp_dir is None
 
-    def test_non_host_filesystem_falls_back_to_cwd(self) -> None:
-        """Covers the fallback to Path.cwd() when filesystem is not HostFilesystem."""
-        from weakincentives.adapters.acp.adapter import ACPAdapter
+    def test_resolve_cwd_non_host_filesystem_falls_back_to_cwd(self) -> None:
+        from pathlib import Path
 
         adapter = ACPAdapter(client_config=ACPClientConfig(cwd=None))
         prompt = _make_mock_prompt()
-        # Non-HostFilesystem object
         mock_fs = MagicMock()
         mock_fs.__class__.__name__ = "SomeOtherFilesystem"
         prompt.filesystem.return_value = mock_fs
         effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
         assert effective_cwd is not None
         assert temp_dir is None
-        # Falls back to current directory
-        from pathlib import Path
-
         assert effective_cwd == str(Path.cwd().resolve())
 
 
 class TestExtractText:
-    def test_no_message_chunks(self) -> None:
+    def test_extract_text_no_chunks_returns_none(self) -> None:
         client = MagicMock()
         client.message_chunks = []
         client.thought_chunks = []
         assert extract_text(client, emit_thought_chunks=False) is None
 
-    def test_message_chunks(self) -> None:
+    def test_extract_text_message_chunks_concatenated(self) -> None:
         client = MagicMock()
         client.message_chunks = [
             AgentMessageChunk("Hello "),
@@ -209,30 +224,28 @@ class TestExtractText:
         client.thought_chunks = []
         assert extract_text(client, emit_thought_chunks=False) == "Hello world"
 
-    def test_with_thoughts_enabled(self) -> None:
+    def test_extract_text_thoughts_enabled_prepends_thoughts(self) -> None:
         client = MagicMock()
         client.message_chunks = [AgentMessageChunk("answer")]
         client.thought_chunks = [AgentThoughtChunk("thinking...")]
         result = extract_text(client, emit_thought_chunks=True)
         assert result == "thinking...answer"
 
-    def test_with_thoughts_disabled(self) -> None:
+    def test_extract_text_thoughts_disabled_excludes_thoughts(self) -> None:
         client = MagicMock()
         client.message_chunks = [AgentMessageChunk("answer")]
         client.thought_chunks = [AgentThoughtChunk("thinking...")]
         result = extract_text(client, emit_thought_chunks=False)
         assert result == "answer"
 
-    def test_empty_thought_content_skipped(self) -> None:
-        """Covers branch where thought chunk content is empty."""
+    def test_extract_text_empty_thought_content_skipped(self) -> None:
         client = MagicMock()
         client.message_chunks = [AgentMessageChunk("answer")]
         client.thought_chunks = [AgentThoughtChunk(""), AgentThoughtChunk("ok")]
         result = extract_text(client, emit_thought_chunks=True)
         assert result == "okanswer"
 
-    def test_empty_message_content_skipped(self) -> None:
-        """Covers branch where message chunk content is empty."""
+    def test_extract_text_empty_message_content_skipped(self) -> None:
         client = MagicMock()
         client.message_chunks = [
             AgentMessageChunk(""),
@@ -244,7 +257,7 @@ class TestExtractText:
 
 
 class TestExtractChunkTextListContent:
-    def test_list_of_content_blocks(self) -> None:
+    def test_extract_chunk_text_list_of_text_blocks_concatenated(self) -> None:
         from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         block1 = MagicMock()
@@ -255,7 +268,7 @@ class TestExtractChunkTextListContent:
         chunk.content = [block1, block2]
         assert _extract_chunk_text(chunk) == "hello world"
 
-    def test_list_with_non_text_blocks(self) -> None:
+    def test_extract_chunk_text_non_text_blocks_use_str_fallback(self) -> None:
         from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         class PlainBlock:
@@ -266,7 +279,7 @@ class TestExtractChunkTextListContent:
         chunk.content = [PlainBlock()]
         assert _extract_chunk_text(chunk) == "fallback"
 
-    def test_list_skips_falsy_blocks(self) -> None:
+    def test_extract_chunk_text_list_skips_falsy_blocks(self) -> None:
         from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         block = MagicMock()
@@ -275,7 +288,7 @@ class TestExtractChunkTextListContent:
         chunk.content = [None, block, 0, False]
         assert _extract_chunk_text(chunk) == "kept"
 
-    def test_text_content_block(self) -> None:
+    def test_extract_chunk_text_text_content_block(self) -> None:
         from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         inner = type("TextContentBlock", (), {"text": "hello"})()
@@ -283,14 +296,14 @@ class TestExtractChunkTextListContent:
         chunk.content = inner
         assert _extract_chunk_text(chunk) == "hello"
 
-    def test_non_string_non_list_fallback(self) -> None:
+    def test_extract_chunk_text_non_string_non_list_uses_str(self) -> None:
         from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         chunk = MagicMock()
         chunk.content = 42
         assert _extract_chunk_text(chunk) == "42"
 
-    def test_falsy_non_string_content(self) -> None:
+    def test_extract_chunk_text_none_content_returns_empty(self) -> None:
         from weakincentives.adapters.acp._prompt_loop import _extract_chunk_text
 
         chunk = MagicMock()
@@ -299,49 +312,33 @@ class TestExtractChunkTextListContent:
 
 
 class TestSubclassHooks:
-    def test_validate_model_is_noop(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
+    def test_validate_model_noop(self, acp_adapter: ACPAdapter) -> None:
+        acp_adapter._validate_model("any-model", [])
 
-        adapter = ACPAdapter()
-        # Should not raise
-        adapter._validate_model("any-model", [])
+    def test_handle_mode_error_no_raise(self, acp_adapter: ACPAdapter) -> None:
+        acp_adapter._handle_mode_error(RuntimeError("test error"))
 
-    def test_handle_mode_error_logs_warning(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
-        # Should not raise
-        adapter._handle_mode_error(RuntimeError("test error"))
-
-    def test_detect_empty_response_is_noop(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
-        client = MagicMock()
-        # Should not raise
-        adapter._detect_empty_response(client, MagicMock())
+    def test_detect_empty_response_noop(self, acp_adapter: ACPAdapter) -> None:
+        acp_adapter._detect_empty_response(MagicMock(), MagicMock())
 
 
 class TestStructuredOutputResolution:
     """Test structured output edge cases."""
 
-    def test_missing_output_raises(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
+    def test_resolve_structured_output_missing_text_raises(
+        self, acp_adapter: ACPAdapter
+    ) -> None:
         rendered = MagicMock()
         rendered.output_type = str
 
         with pytest.raises(PromptEvaluationError, match="Structured output required"):
-            adapter._resolve_structured_output(None, rendered, "p", None)
+            acp_adapter._resolve_structured_output(None, rendered, "p", None)
 
-    def test_capture_parse_error_raises(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
+    def test_resolve_structured_output_capture_parse_error_raises(
+        self, acp_adapter: ACPAdapter
+    ) -> None:
         rendered = MagicMock()
         rendered.output_type = str
-
         capture = MagicMock()
         capture.called = True
         capture.data = "invalid"
@@ -353,15 +350,13 @@ class TestStructuredOutputResolution:
             ),
             pytest.raises(PromptEvaluationError, match="Failed to parse"),
         ):
-            adapter._resolve_structured_output("text", rendered, "p", capture)
+            acp_adapter._resolve_structured_output("text", rendered, "p", capture)
 
-    def test_text_parse_error_raises(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
+    def test_resolve_structured_output_text_parse_error_raises(
+        self, acp_adapter: ACPAdapter
+    ) -> None:
         rendered = MagicMock()
         rendered.output_type = str
-
         capture = MagicMock()
         capture.called = False
 
@@ -372,15 +367,13 @@ class TestStructuredOutputResolution:
             ),
             pytest.raises(PromptEvaluationError, match="Failed to parse"),
         ):
-            adapter._resolve_structured_output("raw text", rendered, "p", capture)
+            acp_adapter._resolve_structured_output("raw text", rendered, "p", capture)
 
-    def test_capture_succeeds(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
+    def test_resolve_structured_output_capture_succeeds(
+        self, acp_adapter: ACPAdapter
+    ) -> None:
         rendered = MagicMock()
         rendered.output_type = str
-
         capture = MagicMock()
         capture.called = True
         capture.data = {"key": "value"}
@@ -389,109 +382,92 @@ class TestStructuredOutputResolution:
             "weakincentives.adapters.acp.adapter.parse_structured_output",
             return_value="parsed",
         ) as mock_parse:
-            result = adapter._resolve_structured_output("text", rendered, "p", capture)
+            result = acp_adapter._resolve_structured_output(
+                "text", rendered, "p", capture
+            )
 
         assert result == "parsed"
-        # Verify capture data is JSON-serialized before parsing
         mock_parse.assert_called_once_with('{"key": "value"}', rendered)
 
 
 class TestBuildEnv:
-    def test_returns_none_when_no_env(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
+    def test_build_env_no_config_returns_none(self) -> None:
         adapter = ACPAdapter(client_config=ACPClientConfig(env=None))
         assert build_env(adapter._client_config.env) is None
 
-    def test_merges_with_os_environ(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
+    def test_build_env_merges_with_os_environ(self) -> None:
         adapter = ACPAdapter(client_config=ACPClientConfig(env={"MY_VAR": "my_val"}))
         result = build_env(adapter._client_config.env)
         assert result is not None
         assert result["MY_VAR"] == "my_val"
-        # os.environ keys should also be present
         assert "PATH" in result
 
 
 class TestPrepareExecutionEnv:
-    def test_default_returns_build_env_and_noop(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(client_config=ACPClientConfig(env=None))
-        rendered = MagicMock()
-
-        env, cleanup = adapter._prepare_execution_env(
-            rendered=rendered,
+    def test_prepare_env_no_config_returns_none_env(
+        self, acp_adapter: ACPAdapter
+    ) -> None:
+        env, cleanup = acp_adapter._prepare_execution_env(
+            rendered=MagicMock(),
             effective_cwd="/tmp",
         )
-
-        assert env is None  # _build_env returns None when no config env
+        assert env is None
         cleanup()  # Should be a no-op, must not raise
 
-    def test_default_with_config_env(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter(
-            client_config=ACPClientConfig(env={"KEY": "val"}),
-        )
-        rendered = MagicMock()
-
+    def test_prepare_env_with_config_returns_merged_env(self) -> None:
+        adapter = ACPAdapter(client_config=ACPClientConfig(env={"KEY": "val"}))
         env, cleanup = adapter._prepare_execution_env(
-            rendered=rendered,
+            rendered=MagicMock(),
             effective_cwd="/tmp",
         )
-
         assert env is not None
         assert env["KEY"] == "val"
         cleanup()
 
 
+@pytest.fixture()
+def _prepare_tools_common(
+    mock_session: MagicMock, mock_prompt: MagicMock
+) -> dict[str, Any]:
+    """Common keyword arguments for _prepare_tools calls."""
+    return {
+        "session": mock_session,
+        "prompt": mock_prompt,
+        "deadline": None,
+        "budget_tracker": None,
+        "adapter_name": "acp",
+        "prompt_name": "test",
+        "heartbeat": None,
+        "run_context": None,
+        "visibility_signal": MagicMock(),
+    }
+
+
 class TestPrepareTools:
-    def test_no_structured_output(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
-        rendered = MagicMock()
-        rendered.tools = ()
-        rendered.output_type = None
-        rendered.container = None
-
-        prompt = _make_mock_prompt()
-        session = _make_mock_session()
-
+    def test_prepare_tools_no_structured_output_returns_empty(
+        self,
+        acp_adapter: ACPAdapter,
+        rendered_without_structured_output: MagicMock,
+        _prepare_tools_common: dict[str, Any],
+    ) -> None:
         with patch(
             "weakincentives.adapters.acp.adapter.create_bridged_tools"
         ) as mock_bt:
             mock_bt.return_value = ()
-            tools, capture = adapter._prepare_tools(
-                rendered=rendered,
-                session=session,
-                prompt=prompt,
-                deadline=None,
-                budget_tracker=None,
-                adapter_name="acp",
-                prompt_name="test",
-                heartbeat=None,
-                run_context=None,
-                visibility_signal=MagicMock(),
+            tools, capture = acp_adapter._prepare_tools(
+                rendered=rendered_without_structured_output,
+                **_prepare_tools_common,
             )
 
         assert capture is None
         assert tools == []
 
-    def test_with_structured_output(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
-        rendered = MagicMock()
-        rendered.tools = ()
-        rendered.output_type = str
-        rendered.container = "object"
-
-        prompt = _make_mock_prompt()
-        session = _make_mock_session()
-
+    def test_prepare_tools_with_structured_output_includes_capture_tool(
+        self,
+        acp_adapter: ACPAdapter,
+        rendered_with_structured_output: MagicMock,
+        _prepare_tools_common: dict[str, Any],
+    ) -> None:
         with (
             patch(
                 "weakincentives.adapters.acp.adapter.create_bridged_tools"
@@ -505,17 +481,9 @@ class TestPrepareTools:
             mock_capture = MagicMock()
             mock_sot.return_value = (mock_tool, mock_capture)
 
-            tools, capture = adapter._prepare_tools(
-                rendered=rendered,
-                session=session,
-                prompt=prompt,
-                deadline=None,
-                budget_tracker=None,
-                adapter_name="acp",
-                prompt_name="test",
-                heartbeat=None,
-                run_context=None,
-                visibility_signal=MagicMock(),
+            tools, capture = acp_adapter._prepare_tools(
+                rendered=rendered_with_structured_output,
+                **_prepare_tools_common,
             )
 
         assert capture is mock_capture
@@ -523,25 +491,18 @@ class TestPrepareTools:
 
 
 class TestFinalizeResponse:
-    def test_basic_response(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
-        session = _make_mock_session()
+    def test_finalize_response_basic_text(
+        self, acp_adapter: ACPAdapter, mock_session: MagicMock
+    ) -> None:
         rendered = MagicMock()
         rendered.output_type = None
 
-        result = (
-            "response text",
-            None,
-        )
-
-        response = adapter._finalize_response(
-            result=result,
+        response = acp_adapter._finalize_response(
+            result=("response text", None),
             rendered=rendered,
             prompt_name="test-prompt",
             adapter_name="acp",
-            session=session,
+            session=mock_session,
             budget_tracker=None,
             run_context=None,
             start_time=datetime.now(UTC),
@@ -551,11 +512,9 @@ class TestFinalizeResponse:
         assert response.text == "response text"
         assert response.prompt_name == "test-prompt"
 
-    def test_with_structured_output(self) -> None:
-        from weakincentives.adapters.acp.adapter import ACPAdapter
-
-        adapter = ACPAdapter()
-        session = _make_mock_session()
+    def test_finalize_response_with_structured_output(
+        self, acp_adapter: ACPAdapter, mock_session: MagicMock
+    ) -> None:
         rendered = MagicMock()
         rendered.output_type = str
         rendered.container = "object"
@@ -568,12 +527,12 @@ class TestFinalizeResponse:
             "weakincentives.adapters.acp.adapter.parse_structured_output",
             return_value="parsed_result",
         ):
-            response = adapter._finalize_response(
+            response = acp_adapter._finalize_response(
                 result=("text", None),
                 rendered=rendered,
                 prompt_name="test-prompt",
                 adapter_name="acp",
-                session=session,
+                session=mock_session,
                 budget_tracker=None,
                 run_context=None,
                 start_time=datetime.now(UTC),
@@ -584,11 +543,10 @@ class TestFinalizeResponse:
 
 
 class TestDrainQuietPeriod:
-    def test_immediate_drain_when_zero_quiet_period(self) -> None:
+    def test_drain_zero_quiet_period_returns_immediately(self) -> None:
         client = MagicMock()
         client.last_update_time = 0.0
 
-        # Should return immediately
         asyncio.run(
             drain_quiet_period(
                 client,
@@ -599,7 +557,7 @@ class TestDrainQuietPeriod:
             )
         )
 
-    def test_drain_with_deadline(self) -> None:
+    def test_drain_with_deadline_respects_timeout(self) -> None:
         client = MagicMock()
         client.last_update_time = time.monotonic()
 
@@ -615,9 +573,8 @@ class TestDrainQuietPeriod:
             )
         )
 
-    def test_drain_waits_for_quiet(self) -> None:
+    def test_drain_waits_for_quiet_period(self) -> None:
         client = MagicMock()
-        # Recent update — should wait
         client.last_update_time = time.monotonic()
 
         asyncio.run(
