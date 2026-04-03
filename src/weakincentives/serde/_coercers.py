@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -32,6 +33,8 @@ from typing import (
 from uuid import UUID
 
 from ..types import JSONValue
+
+logger = logging.getLogger(__name__)
 from ._generics import (
     _build_typevar_map,  # pyright: ignore[reportPrivateUsage]
     _is_typevar,  # pyright: ignore[reportPrivateUsage]
@@ -230,8 +233,18 @@ def _coerce_primitive(
         raise TypeError(f"{path}: expected {type_name}")
     try:
         coerced_value = coercer(value)
+    except (TypeError, ValueError) as error:
+        type_name = getattr(base_type, "__name__", type(base_type).__name__)
+        raise TypeError(f"{path}: unable to coerce {value!r} to {type_name}") from error
     except Exception as error:
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
+        logger.warning(
+            "Coercer for %s raised unexpected %s at %s: %s",
+            type_name,
+            type(error).__name__,
+            path,
+            error,
+        )
         raise TypeError(f"{path}: unable to coerce {value!r} to {type_name}") from error
     return _apply_constraints(coerced_value, merged_meta, path)
 
@@ -508,6 +521,14 @@ def _coerce_to_type(
 
     try:
         coerced = cast(Callable[..., object], base_type)(value)
-    except Exception as error:
+    except (TypeError, ValueError) as error:
         raise type(error)(str(error)) from error
+    except Exception as error:
+        logger.warning(
+            "Fallback coercion to %r raised unexpected %s: %s",
+            base_type,
+            type(error).__name__,
+            error,
+        )
+        raise TypeError(str(error)) from error
     return _apply_constraints(coerced, merged_meta, path)

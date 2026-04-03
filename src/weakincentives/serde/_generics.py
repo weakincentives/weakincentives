@@ -14,12 +14,15 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from typing import (
     get_args,
     get_origin,
     get_type_hints,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _is_typevar(typ: object) -> bool:
@@ -49,10 +52,20 @@ def _get_field_types(cls: type[object]) -> dict[str, object]:
         except NameError as exc:
             missing = _extract_missing_name(exc)
             if missing is None or missing in localns:
-                raise  # pragma: no cover - defensive
+                logger.warning(
+                    "Could not extract or already resolved missing name from %s: %s",
+                    cls.__qualname__,
+                    exc,
+                )
+                raise
             resolved = _resolve_type_checking_imports(cls, missing)
             if resolved is None:
-                raise  # pragma: no cover - defensive
+                logger.warning(
+                    "Could not resolve TYPE_CHECKING import %r for %s",
+                    missing,
+                    cls.__qualname__,
+                )
+                raise
             localns[missing] = resolved
 
     return get_type_hints(cls, localns=localns, include_extras=True)  # pragma: no cover
@@ -84,7 +97,13 @@ def _resolve_type_checking_imports(cls: type[object], name: str) -> object | Non
     try:
         source = inspect.getsource(module)
         tree = ast.parse(source)
-    except (OSError, TypeError, SyntaxError):  # pragma: no cover - defensive
+    except (OSError, TypeError, SyntaxError) as exc:
+        logger.warning(
+            "Could not parse source for module %s while resolving %r: %s",
+            module_name,
+            name,
+            exc,
+        )
         return None
 
     for node in ast.walk(tree):

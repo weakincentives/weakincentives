@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable, Iterable, Mapping, Sized
 from dataclasses import field
@@ -24,6 +25,8 @@ from typing import Any as _AnyType, Final, Literal, cast, get_args
 
 from ..dataclasses import FrozenDataclass
 from ..types import JSONValue
+
+logger = logging.getLogger(__name__)
 
 # Import SerdeScope lazily to avoid circular imports
 # The actual import happens in _ParseConfig usage
@@ -239,7 +242,14 @@ def _run_validator(validator: object, candidate: object, path: str) -> object:
         return fn(candidate)
     except (TypeError, ValueError) as error:
         raise type(error)(f"{path}: {error}") from error
-    except Exception as error:  # pragma: no cover - defensive
+    except Exception as error:
+        logger.warning(
+            "Validator %r raised unexpected %s at %s: %s",
+            validator,
+            type(error).__name__,
+            path,
+            error,
+        )
         raise ValueError(f"{path}: validator raised {error!r}") from error
 
 
@@ -256,7 +266,14 @@ def _apply_converter(
         return converter(candidate)  # ty: ignore[call-top-callable]
     except (TypeError, ValueError) as error:
         raise type(error)(f"{path}: {error}") from error
-    except Exception as error:  # pragma: no cover - defensive
+    except Exception as error:
+        logger.warning(
+            "Converter %r raised unexpected %s at %s: %s",
+            converter,
+            type(error).__name__,
+            path,
+            error,
+        )
         raise ValueError(f"{path}: converter raised {error!r}") from error
 
 
