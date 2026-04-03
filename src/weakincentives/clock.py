@@ -289,6 +289,25 @@ class FakeClock:
             self._waiters.append((deadline, future))
         await future
 
+    def _wake_waiters(self) -> None:
+        """Wake async waiters whose deadlines are at or before current time.
+
+        Must be called **outside** ``_lock``.  Collects ready futures under
+        the lock, then resolves them after releasing it.
+        """
+        with self._lock:
+            ready: list[Future[None]] = []
+            remaining: list[tuple[float, Future[None]]] = []
+            for deadline, future in self._waiters:
+                if deadline <= self._monotonic:
+                    ready.append(future)
+                else:
+                    remaining.append((deadline, future))
+            self._waiters = remaining
+        for future in ready:
+            if not future.done():
+                _resolve_future(future)
+
     def advance(self, seconds: float) -> None:
         """Advance both clocks and wake async waiters past their deadline.
 
@@ -304,22 +323,16 @@ class FakeClock:
         with self._lock:
             self._monotonic += seconds
             self._wall += timedelta(seconds=seconds)
-            ready: list[Future[None]] = []
-            remaining: list[tuple[float, Future[None]]] = []
-            for deadline, future in self._waiters:
-                if deadline <= self._monotonic:
-                    ready.append(future)
-                else:
-                    remaining.append((deadline, future))
-            self._waiters = remaining
-        for future in ready:
-            if not future.done():
-                _resolve_future(future)
+        self._wake_waiters()
 
     def set_monotonic(self, value: float) -> None:
-        """Set monotonic time to an absolute value."""
+        """Set monotonic time to an absolute value.
+
+        Wakes async waiters whose deadlines are at or before *value*.
+        """
         with self._lock:
             self._monotonic = value
+        self._wake_waiters()
 
     def set_wall(self, value: datetime) -> None:
         """Set wall-clock time to an absolute value.
