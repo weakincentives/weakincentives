@@ -22,7 +22,7 @@ import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 from ....serde import dump, parse
 from ....types.dataclass import SupportsDataclass
@@ -34,7 +34,7 @@ else:
     import fcntl as _fcntl  # Unix locking
 
 
-def _lock_shared(f: IO[str]) -> None:
+def _lock_shared(f: IO[Any]) -> None:
     """Acquire a shared (read) lock on the file."""
     if sys.platform == "win32":  # pragma: no cover
         _msvcrt.locking(f.fileno(), _msvcrt.LK_LOCK, 1)
@@ -42,7 +42,7 @@ def _lock_shared(f: IO[str]) -> None:
         _fcntl.flock(f.fileno(), _fcntl.LOCK_SH)
 
 
-def _lock_exclusive(f: IO[str]) -> None:
+def _lock_exclusive(f: IO[Any]) -> None:
     """Acquire an exclusive (write) lock on the file."""
     if sys.platform == "win32":  # pragma: no cover
         _msvcrt.locking(f.fileno(), _msvcrt.LK_LOCK, 1)
@@ -50,7 +50,7 @@ def _lock_exclusive(f: IO[str]) -> None:
         _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)
 
 
-def _unlock(f: IO[str]) -> None:
+def _unlock(f: IO[Any]) -> None:
     """Release lock on the file."""
     if sys.platform == "win32":  # pragma: no cover
         _msvcrt.locking(f.fileno(), _msvcrt.LK_UNLCK, 1)
@@ -110,20 +110,11 @@ class JsonlSliceView[T: SupportsDataclass]:
         return self._slice.all()
 
     def latest(self) -> T | None:
-        """Return last item. Can be optimized to read only last line."""
-        # Use cache if available
+        """Return last item using reverse seek (O(1) for uncached)."""
         if self._slice._cache is not None:
             cache = self._slice._cache
             return cache[-1] if cache else None
-        # Optimization: read last line only (seek from end)
-        if not self.path.exists():
-            return None
-        if self.path.stat().st_size == 0:
-            return None
-        # For simplicity, fall back to full read with caching
-        # A production impl could seek to find last newline
-        items = self._slice.all()
-        return items[-1] if items else None
+        return self._slice._read_last_item()
 
     def where(self, predicate: Callable[[T], bool]) -> Iterator[T]:
         """Stream filtered items."""
@@ -171,10 +162,46 @@ class JsonlSlice[T: SupportsDataclass]:
         self._cache = result
         return result
 
+    def _read_last_item(self) -> T | None:
+        """Read only the last non-empty line from the JSONL file.
+
+        Uses reverse seeking to avoid reading the entire file.
+        Returns None if the file is empty or does not exist.
+        """
+        if not self.path.exists():
+            return None
+        chunk_size = 8192
+        with self.path.open("rb") as fb:
+            _lock_shared(fb)
+            try:
+                _ = fb.seek(0, 2)
+                remaining = fb.tell()
+                if remaining == 0:
+                    return None
+                tail = b""
+                while remaining > 0:
+                    read_size = min(chunk_size, remaining)
+                    remaining -= read_size
+                    _ = fb.seek(remaining)
+                    chunk = fb.read(read_size)
+                    tail = chunk + tail
+                    lines = tail.split(b"\n")
+                    # If remaining > 0, lines[0] may be incomplete
+                    start_idx = 0 if remaining == 0 else 1
+                    for i in range(len(lines) - 1, start_idx - 1, -1):
+                        stripped = lines[i].strip()
+                        if stripped:
+                            data = json.loads(stripped)
+                            return parse(self.item_type, data)
+                return None
+            finally:
+                _unlock(fb)
+
     def latest(self) -> T | None:
         """Return the most recent item, or None if empty."""
-        items = self.all()
-        return items[-1] if items else None
+        if self._cache is not None:
+            return self._cache[-1] if self._cache else None
+        return self._read_last_item()
 
     @staticmethod
     def _write_item(f: IO[str], item: SupportsDataclass) -> None:

@@ -421,6 +421,120 @@ def test_jsonl_slice_view_iteration_skips_empty_lines() -> None:
         assert items == [SimpleItem("a", 1), SimpleItem("b", 2)]
 
 
+def test_jsonl_slice_latest_uncached_reads_last_line() -> None:
+    """JsonlSlice.latest() reads only last line when uncached."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "test.jsonl"
+        slice_obj = JsonlSlice(path=path, item_type=SimpleItem)
+
+        slice_obj.extend([SimpleItem(f"item-{i}", i) for i in range(1000)])
+
+        # Invalidate cache to force file read
+        slice_obj._cache = None
+
+        # Should return last item without reading entire file
+        result = slice_obj.latest()
+        assert result == SimpleItem("item-999", 999)
+
+        # Cache should NOT be populated (we only read the last line)
+        assert slice_obj._cache is None
+
+
+def test_jsonl_slice_latest_uses_cache_when_available() -> None:
+    """JsonlSlice.latest() uses cache when populated."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "test.jsonl"
+        slice_obj = JsonlSlice(path=path, item_type=SimpleItem)
+
+        slice_obj.extend([SimpleItem("a", 1), SimpleItem("b", 2)])
+
+        # Populate cache
+        _ = slice_obj.all()
+        assert slice_obj._cache is not None
+
+        # latest() should use cache
+        assert slice_obj.latest() == SimpleItem("b", 2)
+
+
+def test_jsonl_slice_latest_empty_file() -> None:
+    """JsonlSlice.latest() returns None for empty file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "test.jsonl"
+        path.touch()
+        slice_obj = JsonlSlice(path=path, item_type=SimpleItem)
+
+        assert slice_obj.latest() is None
+
+
+def test_jsonl_slice_latest_nonexistent_file() -> None:
+    """JsonlSlice.latest() returns None when file doesn't exist."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "test.jsonl"
+        slice_obj = JsonlSlice(path=path, item_type=SimpleItem)
+
+        assert slice_obj.latest() is None
+
+
+def test_jsonl_slice_latest_single_line() -> None:
+    """JsonlSlice.latest() works with single-line file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "test.jsonl"
+        slice_obj = JsonlSlice(path=path, item_type=SimpleItem)
+
+        slice_obj.append(SimpleItem("only", 42))
+        slice_obj._cache = None
+
+        assert slice_obj.latest() == SimpleItem("only", 42)
+
+
+def test_jsonl_slice_latest_skips_trailing_empty_lines() -> None:
+    """JsonlSlice.latest() handles trailing empty/whitespace lines."""
+    import json
+
+    from weakincentives.serde import dump
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "test.jsonl"
+        with path.open("w") as f:
+            data = dump(SimpleItem("a", 1))
+            f.write(json.dumps(data) + "\n")
+            data = dump(SimpleItem("b", 2))
+            f.write(json.dumps(data) + "\n")
+            f.write("\n")
+            f.write("   \n")
+
+        slice_obj = JsonlSlice(path=path, item_type=SimpleItem)
+        assert slice_obj.latest() == SimpleItem("b", 2)
+
+
+def test_jsonl_slice_latest_all_empty_lines() -> None:
+    """JsonlSlice.latest() returns None when file has only empty lines."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "test.jsonl"
+        with path.open("w") as f:
+            f.write("\n\n   \n\n")
+
+        slice_obj = JsonlSlice(path=path, item_type=SimpleItem)
+        assert slice_obj.latest() is None
+
+
+def test_jsonl_slice_view_latest_uncached_uses_reverse_seek() -> None:
+    """JsonlSliceView.latest() uses reverse seek when uncached."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "test.jsonl"
+        slice_obj = JsonlSlice(path=path, item_type=SimpleItem)
+
+        slice_obj.extend([SimpleItem(f"item-{i}", i) for i in range(100)])
+        slice_obj._cache = None
+
+        view = slice_obj.view()
+        result = view.latest()
+        assert result == SimpleItem("item-99", 99)
+
+        # Cache should NOT be populated
+        assert slice_obj._cache is None
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Session SliceOp integration tests
 # ──────────────────────────────────────────────────────────────────────
