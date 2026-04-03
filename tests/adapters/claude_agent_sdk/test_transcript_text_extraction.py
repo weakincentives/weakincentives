@@ -26,6 +26,7 @@ from weakincentives.adapters.claude_agent_sdk._transcript_collector import (
     _extract_assistant_text,
     _extract_text_from_content,
 )
+from weakincentives.clock import FakeClock
 
 
 class TestExtractTextFromContent:
@@ -104,9 +105,11 @@ class TestEmitFallbacksBranches:
         """Fallback assistant_message is NOT emitted when text extraction is empty."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="empty_assistant_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             # Transcript with no assistant entry.
@@ -123,7 +126,9 @@ class TestEmitFallbacksBranches:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript_path))
                     collector.set_assistant_message_fallback([{"role": "user"}])
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":

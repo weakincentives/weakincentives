@@ -26,6 +26,7 @@ from weakincentives.adapters.claude_agent_sdk._transcript_collector import (
     TranscriptCollector,
     TranscriptCollectorConfig,
 )
+from weakincentives.clock import FakeClock
 
 
 class TestTranscriptCollectorFallback:
@@ -61,9 +62,11 @@ class TestTranscriptCollectorFallback:
         """Fallback user_message is emitted when file has no user entry."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="fallback_user_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             # Transcript with only an assistant entry (no user entry).
@@ -79,7 +82,9 @@ class TestTranscriptCollectorFallback:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript_path))
                     collector.set_user_message_fallback("Hello from user")
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -98,9 +103,11 @@ class TestTranscriptCollectorFallback:
         """Fallback user_message is NOT emitted when file already has user entry."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="no_fallback_user_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             # Transcript with a user entry.
@@ -116,7 +123,9 @@ class TestTranscriptCollectorFallback:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript_path))
                     collector.set_user_message_fallback("Hello from user")
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -134,9 +143,11 @@ class TestTranscriptCollectorFallback:
         """Fallback assistant_message emitted when file has no assistant entry."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="fallback_assistant_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             # Transcript with only a user entry (no assistant entry).
@@ -158,7 +169,9 @@ class TestTranscriptCollectorFallback:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript_path))
                     collector.set_assistant_message_fallback([FakeAssistantMessage()])
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -174,9 +187,11 @@ class TestTranscriptCollectorFallback:
         """Assistant message with text + 2 tool_use blocks emits 1 + 2 entries."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="split_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entry = {
@@ -207,7 +222,9 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -239,9 +256,11 @@ class TestTranscriptCollectorFallback:
         """Assistant message with only tool_use blocks emits no assistant_message."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="split_only_tools_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entry = {
@@ -265,7 +284,9 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -281,9 +302,11 @@ class TestTranscriptCollectorFallback:
         """Assistant message with only text emits single assistant_message."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="no_split_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entry = {
@@ -300,7 +323,9 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -316,9 +341,11 @@ class TestTranscriptCollectorFallback:
         """Assistant message with string content (not list) is not split."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="string_content_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entry = {
@@ -335,7 +362,9 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -351,9 +380,11 @@ class TestTranscriptCollectorFallback:
         """Entry count reflects total emitted entries including splits."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="count_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entries = [
@@ -379,7 +410,9 @@ class TestTranscriptCollectorFallback:
 
             async with collector.run():
                 await collector._remember_transcript_path(str(transcript))
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)  # yield to poll loop
+                clock.advance(0.01)
+                await asyncio.sleep(0)
 
             assert collector.main_entry_count == 5
 
@@ -389,9 +422,11 @@ class TestTranscriptCollectorFallback:
         """User message with tool_result blocks emits tool_result entries."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="user_split_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entry = {
@@ -414,7 +449,9 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -440,9 +477,11 @@ class TestTranscriptCollectorFallback:
         """User message with text + tool_result -> user_message + tool_result."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="user_mixed_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entry = {
@@ -471,7 +510,9 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -501,9 +542,11 @@ class TestTranscriptCollectorFallback:
         """tool_result entries include tool_name from earlier tool_use blocks."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="tool_name_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             assistant_entry = {
@@ -542,7 +585,9 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -562,9 +607,11 @@ class TestTranscriptCollectorFallback:
         """tool_use block without id does not record a name mapping."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="no_id_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entry = {
@@ -587,7 +634,9 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -606,9 +655,11 @@ class TestTranscriptCollectorFallback:
         """User message without tool_result is not split."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="user_no_split_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entry = {
@@ -625,7 +676,9 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    # Let poll loop complete (run_in_executor needs ticks).
+                    for _ in range(5):
+                        await asyncio.sleep(0)
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":

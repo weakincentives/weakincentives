@@ -26,6 +26,7 @@ from weakincentives.adapters.claude_agent_sdk._transcript_collector import (
     TranscriptCollectorConfig,
 )
 from weakincentives.adapters.claude_agent_sdk._transcript_parser import emit_entry
+from weakincentives.clock import FakeClock
 
 
 class TestTranscriptCollectorPending:
@@ -116,9 +117,11 @@ class TestTranscriptCollectorPending:
         """End-to-end: file appears after collector.run() starts."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="late_file_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             transcript_path = tmp_path / "session123.jsonl"
@@ -128,14 +131,17 @@ class TestTranscriptCollectorPending:
                 await collector._remember_transcript_path(str(transcript_path))
                 assert "main" not in collector._tailers
 
-                # Wait one poll cycle.
-                await asyncio.sleep(0.02)
+                # Let poll loop run first iteration (file still missing).
+                for _ in range(5):
+                    await asyncio.sleep(0)
 
                 # File appears.
                 transcript_path.write_text('{"type": "user", "message": "late"}\n')
 
-                # Wait for another poll cycle to pick it up.
-                await asyncio.sleep(0.05)
+                # Wake poll loop to pick up the file.
+                clock.advance(0.01)
+                for _ in range(5):
+                    await asyncio.sleep(0)
 
             assert collector.main_entry_count == 1
 

@@ -42,7 +42,7 @@ Example (async production)::
 
     await SYSTEM_CLOCK.async_sleep(1.0)  # Yields to event loop
 
-Example (testing)::
+Example (testing — sync)::
 
     from weakincentives.clock import FakeClock
 
@@ -51,8 +51,13 @@ Example (testing)::
     clock.sleep(10)  # Advances instantly, no real delay
     assert clock.monotonic() - start == 10
 
-    await clock.async_sleep(5)  # Also advances instantly
-    assert clock.monotonic() - start == 15
+Example (testing — async background loop)::
+
+    clock = FakeClock()
+    component = MyComponent(async_sleeper=clock)
+    async with component.run():       # starts background poll loop
+        clock.advance(0.01)           # wake loop's async_sleep
+        await asyncio.sleep(0)        # yield so loop coroutine runs
 """
 
 from __future__ import annotations
@@ -60,6 +65,7 @@ from __future__ import annotations
 import asyncio as _asyncio
 import threading
 import time as _time
+from asyncio import Future
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Final, Protocol, runtime_checkable
@@ -179,33 +185,64 @@ Tests can inject FakeClock instead for deterministic behavior.
 """
 
 
+def _resolve_future(future: Future[None]) -> None:
+    """Resolve an async future, handling cross-thread scenarios."""
+    loop = future.get_loop()
+    try:
+        running_loop = _asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    if running_loop is loop:
+        # Same event loop thread — resolve directly.
+        future.set_result(None)
+    elif loop.is_running():
+        # Different thread — schedule on the future's loop.
+        _ = loop.call_soon_threadsafe(future.set_result, None)
+    else:  # pragma: no cover
+        future.set_result(None)
+
+
 @dataclass
 class FakeClock:
     """Controllable clock for deterministic testing.
 
     Both monotonic and wall-clock time advance together when ``advance()``
-    is called. Sleep operations advance time immediately without blocking.
+    is called.
 
-    Example::
+    **Sync sleep** (``sleep()``) advances time instantly without blocking.
+
+    **Async sleep** (``async_sleep()``) *suspends* the calling coroutine
+    until ``advance()`` moves time past the requested deadline. This enables
+    deterministic control of async background loops — the test decides
+    exactly when each sleep completes by calling ``advance()``.
+
+    Example (sync)::
 
         clock = FakeClock()
-
         start = clock.monotonic()
         clock.sleep(10)  # Advances immediately, no real delay
         assert clock.monotonic() - start == 10
 
-        # Or advance manually
-        clock.advance(60)
-        assert clock.monotonic() - start == 70
+    Example (async background loop control)::
+
+        clock = FakeClock()
+        # Background loop calls: await clock.async_sleep(interval)
+        # It suspends until test advances time:
+        clock.advance(interval)
+        await asyncio.sleep(0)  # yield to let the loop coroutine run
 
     Thread-safety:
         All operations are thread-safe. Multiple threads can read and
-        advance the clock concurrently.
+        advance the clock concurrently. ``advance()`` from a non-event-loop
+        thread uses ``call_soon_threadsafe`` to resolve futures.
     """
 
     _monotonic: float = 0.0
     _wall: datetime = field(default_factory=lambda: datetime(2024, 1, 1, tzinfo=UTC))
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _waiters: list[tuple[float, Future[None]]] = field(  # pyright: ignore[reportUnknownVariableType]
+        default_factory=list, repr=False
+    )
 
     def monotonic(self) -> float:
         """Return current monotonic time."""
@@ -218,15 +255,33 @@ class FakeClock:
             return self._wall
 
     def sleep(self, seconds: float) -> None:
-        """Advance time immediately without blocking."""
+        """Advance time immediately without blocking (wakes async waiters)."""
         self.advance(seconds)
 
     async def async_sleep(self, seconds: float) -> None:
-        """Advance time immediately without blocking (async version)."""
-        self.advance(seconds)
+        """Suspend until ``advance()`` moves time past the deadline.
+
+        For ``seconds <= 0``, advances time and returns immediately
+        (preserving yield-point semantics for ``await async_sleep(0)``).
+
+        For ``seconds > 0``, registers a waiter and suspends the coroutine.
+        The coroutine resumes when ``advance()`` or ``sleep()`` moves
+        monotonic time to or past the deadline.
+        """
+        if seconds < 0:
+            msg = "Cannot advance time by negative seconds"
+            raise ValueError(msg)
+        if seconds == 0:
+            return
+        with self._lock:
+            deadline = self._monotonic + seconds
+            loop = _asyncio.get_running_loop()
+            future: Future[None] = loop.create_future()
+            self._waiters.append((deadline, future))
+        await future
 
     def advance(self, seconds: float) -> None:
-        """Advance both clocks by the given duration.
+        """Advance both clocks and wake async waiters past their deadline.
 
         Args:
             seconds: Duration to advance in seconds (must be non-negative).
@@ -240,6 +295,17 @@ class FakeClock:
         with self._lock:
             self._monotonic += seconds
             self._wall += timedelta(seconds=seconds)
+            ready: list[Future[None]] = []
+            remaining: list[tuple[float, Future[None]]] = []
+            for deadline, future in self._waiters:
+                if deadline <= self._monotonic:
+                    ready.append(future)
+                else:
+                    remaining.append((deadline, future))
+            self._waiters = remaining
+        for future in ready:
+            if not future.done():
+                _resolve_future(future)
 
     def set_monotonic(self, value: float) -> None:
         """Set monotonic time to an absolute value."""
