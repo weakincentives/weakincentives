@@ -29,6 +29,12 @@ from weakincentives.adapters.claude_agent_sdk._transcript_collector import (
 from weakincentives.clock import FakeClock
 
 
+async def _tick(n: int = 5) -> None:
+    """Yield to event loop enough times for poll loop to complete."""
+    for _ in range(n):
+        await asyncio.sleep(0)
+
+
 class TestTranscriptCollectorFallback:
     """Tests for TranscriptCollector fallback messages and assistant/user splits."""
 
@@ -82,9 +88,7 @@ class TestTranscriptCollectorFallback:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript_path))
                     collector.set_user_message_fallback("Hello from user")
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -123,9 +127,7 @@ class TestTranscriptCollectorFallback:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript_path))
                     collector.set_user_message_fallback("Hello from user")
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -169,9 +171,7 @@ class TestTranscriptCollectorFallback:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript_path))
                     collector.set_assistant_message_fallback([FakeAssistantMessage()])
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -222,9 +222,7 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -284,9 +282,7 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -323,9 +319,7 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -362,9 +356,7 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -449,9 +441,7 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -510,9 +500,7 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -585,9 +573,7 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -634,9 +620,7 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":
@@ -676,9 +660,7 @@ class TestTranscriptCollectorFallback:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    # Let poll loop complete (run_in_executor needs ticks).
-                    for _ in range(5):
-                        await asyncio.sleep(0)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":

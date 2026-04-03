@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Self
 
 import pytest
 
-from weakincentives.clock import FakeClock
+from weakincentives.clock import SYSTEM_CLOCK, FakeClock, MonotonicClock
 from weakincentives.runtime import (
     LoopGroup,
     ShutdownCoordinator,
@@ -365,15 +365,12 @@ class _MockRunnableWithHeartbeat(_MockRunnable):
         self,
         *,
         run_delay: float = 0.0,
-        clock: FakeClock | None = None,
+        clock: MonotonicClock = SYSTEM_CLOCK,
     ) -> None:
         super().__init__(run_delay=run_delay)
         from weakincentives.runtime.watchdog import Heartbeat as HeartbeatCls
 
-        if clock is not None:
-            self._heartbeat: Heartbeat = HeartbeatCls(clock=clock)
-        else:
-            self._heartbeat = HeartbeatCls()
+        self._heartbeat: Heartbeat = HeartbeatCls(clock=clock)
         self.name = "test-loop"
 
     @property

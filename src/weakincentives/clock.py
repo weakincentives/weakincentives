@@ -186,19 +186,28 @@ Tests can inject FakeClock instead for deterministic behavior.
 
 
 def _resolve_future(future: Future[None]) -> None:
-    """Resolve an async future, handling cross-thread scenarios."""
+    """Resolve an async future, handling cross-thread scenarios.
+
+    Guards against cancellation races: the task may be cancelled between
+    the ``future.done()`` check in ``advance()`` and actual resolution.
+    """
     loop = future.get_loop()
     try:
         running_loop = _asyncio.get_running_loop()
     except RuntimeError:
         running_loop = None
     if running_loop is loop:
-        # Same event loop thread — resolve directly.
+        # Same event loop thread — safe to resolve directly.
         future.set_result(None)
     elif loop.is_running():
-        # Different thread — schedule on the future's loop.
-        _ = loop.call_soon_threadsafe(future.set_result, None)
-    else:  # pragma: no cover
+        # Different thread — re-check done() inside callback to guard
+        # against cancellation between enqueue and execution.
+        def _safe_resolve() -> None:
+            if not future.done():  # pragma: no branch
+                future.set_result(None)
+
+        _ = loop.call_soon_threadsafe(_safe_resolve)
+    elif not future.done():  # pragma: no cover
         future.set_result(None)
 
 
