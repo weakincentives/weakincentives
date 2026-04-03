@@ -16,6 +16,11 @@ Targeted tests for specific mailbox invariants.
 These tests focus on edge cases and race conditions that are
 critical for correctness. Each test class corresponds to an
 invariant from specs/VERIFICATION.md.
+
+Note: time.sleep() calls in this module cannot be replaced with FakeClock.
+Redis manages visibility timeouts and reaper scheduling via server-side TIME
+commands in Lua scripts. The sleeps wait for real Redis server time to
+advance so that messages expire and the background reaper requeues them.
 """
 
 from __future__ import annotations

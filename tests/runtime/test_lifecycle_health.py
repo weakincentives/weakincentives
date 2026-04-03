@@ -15,11 +15,11 @@
 from __future__ import annotations
 
 import threading
-import time
 from typing import TYPE_CHECKING, Self
 
 import pytest
 
+from weakincentives.clock import SYSTEM_CLOCK, FakeClock, MonotonicClock
 from weakincentives.runtime import (
     LoopGroup,
     ShutdownCoordinator,
@@ -36,6 +36,7 @@ class _MockRunnable:
     def __init__(self, *, run_delay: float = 0.0) -> None:
         self._run_delay = run_delay
         self._shutdown_event = threading.Event()
+        self._started_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
         self.run_called = False
@@ -52,13 +53,13 @@ class _MockRunnable:
         with self._lock:
             self._running = True
         self.run_called = True
+        self._started_event.set()
 
         # Simulate work until shutdown
-        while not self._shutdown_event.is_set():
-            time.sleep(0.01)
-            if self._run_delay > 0:
-                time.sleep(self._run_delay)
-                break
+        if self._run_delay > 0:
+            self._shutdown_event.wait(timeout=self._run_delay)
+        else:
+            self._shutdown_event.wait()
 
         with self._lock:
             self._running = False
@@ -263,16 +264,15 @@ def test_loop_group_starts_health_server(reset_coordinator: None) -> None:
     import urllib.request
 
     _ = reset_coordinator
-    loops = [_MockRunnable(run_delay=0.2)]
-    group = LoopGroup(loops=loops, health_port=0, health_host="127.0.0.1")
+    loop = _MockRunnable(run_delay=5.0)
+    group = LoopGroup(loops=[loop], health_port=0, health_host="127.0.0.1")
 
     # Run in background thread
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
     thread.start()
 
     try:
-        # Wait for server to start
-        time.sleep(0.05)
+        loop._started_event.wait(timeout=2.0)
 
         # Health server should be running
         assert group._health_server is not None
@@ -294,15 +294,14 @@ def test_loop_group_readiness_reflects_loop_state(reset_coordinator: None) -> No
     import urllib.request
 
     _ = reset_coordinator
-    loops = [_MockRunnable()]
-    group = LoopGroup(loops=loops, health_port=0, health_host="127.0.0.1")
+    loop = _MockRunnable()
+    group = LoopGroup(loops=[loop], health_port=0, health_host="127.0.0.1")
 
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
     thread.start()
 
     try:
-        # Wait for server and loops to start
-        time.sleep(0.1)
+        loop._started_event.wait(timeout=2.0)
 
         assert group._health_server is not None
         _, port = group._health_server.address  # type: ignore[misc]
@@ -320,14 +319,14 @@ def test_loop_group_readiness_reflects_loop_state(reset_coordinator: None) -> No
 def test_loop_group_no_health_server_without_port(reset_coordinator: None) -> None:
     """LoopGroup does not start health server when health_port is None."""
     _ = reset_coordinator
-    loops = [_MockRunnable(run_delay=0.05)]
-    group = LoopGroup(loops=loops)  # No health_port
+    loop = _MockRunnable(run_delay=5.0)
+    group = LoopGroup(loops=[loop])  # No health_port
 
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
     thread.start()
 
     try:
-        time.sleep(0.02)
+        loop._started_event.wait(timeout=2.0)
         assert group._health_server is None
     finally:
         group.shutdown(timeout=1.0)
@@ -337,14 +336,14 @@ def test_loop_group_no_health_server_without_port(reset_coordinator: None) -> No
 def test_loop_group_health_server_stops_on_shutdown(reset_coordinator: None) -> None:
     """LoopGroup stops health server on shutdown."""
     _ = reset_coordinator
-    loops = [_MockRunnable()]
-    group = LoopGroup(loops=loops, health_port=0, health_host="127.0.0.1")
+    loop = _MockRunnable()
+    group = LoopGroup(loops=[loop], health_port=0, health_host="127.0.0.1")
 
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
     thread.start()
 
     try:
-        time.sleep(0.05)
+        loop._started_event.wait(timeout=2.0)
         assert group._health_server is not None
     finally:
         group.shutdown(timeout=1.0)
@@ -362,11 +361,16 @@ def test_loop_group_health_server_stops_on_shutdown(reset_coordinator: None) -> 
 class _MockRunnableWithHeartbeat(_MockRunnable):
     """Mock implementation of Runnable with heartbeat for testing watchdog."""
 
-    def __init__(self, *, run_delay: float = 0.0) -> None:
+    def __init__(
+        self,
+        *,
+        run_delay: float = 0.0,
+        clock: MonotonicClock = SYSTEM_CLOCK,
+    ) -> None:
         super().__init__(run_delay=run_delay)
         from weakincentives.runtime.watchdog import Heartbeat as HeartbeatCls
 
-        self._heartbeat: Heartbeat = HeartbeatCls()
+        self._heartbeat: Heartbeat = HeartbeatCls(clock=clock)
         self.name = "test-loop"
 
     @property
@@ -392,9 +396,9 @@ class _MockRunnableWithHeartbeat(_MockRunnable):
 def test_loop_group_starts_watchdog_with_heartbeats(reset_coordinator: None) -> None:
     """LoopGroup starts watchdog when loops have heartbeat properties."""
     _ = reset_coordinator
-    loops = [_MockRunnableWithHeartbeat(run_delay=0.05)]
+    loop = _MockRunnableWithHeartbeat(run_delay=5.0)
     group = LoopGroup(
-        loops=loops,
+        loops=[loop],
         watchdog_threshold=60.0,
         watchdog_interval=1.0,
     )
@@ -403,7 +407,7 @@ def test_loop_group_starts_watchdog_with_heartbeats(reset_coordinator: None) -> 
     thread.start()
 
     try:
-        time.sleep(0.02)
+        loop._started_event.wait(timeout=2.0)
         # Watchdog should be started
         assert group._watchdog is not None
     finally:
@@ -419,9 +423,9 @@ def test_loop_group_watchdog_disabled_when_threshold_none(
 ) -> None:
     """LoopGroup does not start watchdog when watchdog_threshold is None."""
     _ = reset_coordinator
-    loops = [_MockRunnableWithHeartbeat(run_delay=0.05)]
+    loop = _MockRunnableWithHeartbeat(run_delay=5.0)
     group = LoopGroup(
-        loops=loops,
+        loops=[loop],
         watchdog_threshold=None,  # Disable watchdog
     )
 
@@ -429,7 +433,7 @@ def test_loop_group_watchdog_disabled_when_threshold_none(
     thread.start()
 
     try:
-        time.sleep(0.02)
+        loop._started_event.wait(timeout=2.0)
         # Watchdog should not be started
         assert group._watchdog is None
     finally:
@@ -443,7 +447,10 @@ def test_loop_group_build_readiness_check_with_heartbeats(
     """LoopGroup._build_readiness_check incorporates heartbeat freshness."""
     _ = reset_coordinator
 
-    loop = _MockRunnableWithHeartbeat()
+    clock = FakeClock()
+    clock.advance(1.0)  # Start at non-zero for realistic elapsed calculations
+
+    loop = _MockRunnableWithHeartbeat(clock=clock)
     group = LoopGroup(
         loops=[loop],
         watchdog_threshold=0.1,  # Short threshold for testing
@@ -463,8 +470,8 @@ def test_loop_group_build_readiness_check_with_heartbeats(
     # Now should be healthy
     assert check() is True
 
-    # Wait for heartbeat to go stale
-    time.sleep(0.15)
+    # Advance clock past threshold
+    clock.advance(0.15)
 
     # Now should be unhealthy due to stale heartbeat
     assert check() is False
@@ -480,7 +487,8 @@ def test_loop_group_build_readiness_check_without_threshold(
     """LoopGroup._build_readiness_check works when watchdog_threshold is None."""
     _ = reset_coordinator
 
-    loop = _MockRunnableWithHeartbeat()
+    clock = FakeClock()
+    loop = _MockRunnableWithHeartbeat(clock=clock)
     group = LoopGroup(
         loops=[loop],
         watchdog_threshold=None,  # No threshold
@@ -494,9 +502,9 @@ def test_loop_group_build_readiness_check_without_threshold(
     loop._running = True
 
     # Should be healthy regardless of heartbeat age when threshold is None
-    time.sleep(0.05)  # Let heartbeat go a bit stale
+    clock.advance(0.05)
     assert check() is True
 
     # Even with very stale heartbeat, still healthy (no threshold check)
-    time.sleep(0.1)
+    clock.advance(0.1)
     assert check() is True

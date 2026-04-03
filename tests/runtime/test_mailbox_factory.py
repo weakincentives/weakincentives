@@ -93,8 +93,10 @@ def test_in_memory_mailbox_close_wakes_blocked_receivers() -> None:
     """InMemoryMailbox.close() wakes receivers blocked on wait."""
     mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
     received: list[bool] = []
+    started = threading.Event()
 
     def receiver() -> None:
+        started.set()
         # This would block for 10 seconds normally
         _ = mailbox.receive(max_messages=1, wait_time_seconds=10)
         received.append(True)
@@ -102,8 +104,9 @@ def test_in_memory_mailbox_close_wakes_blocked_receivers() -> None:
     thread = threading.Thread(target=receiver)
     thread.start()
 
-    # Give thread time to start waiting
-    time.sleep(0.1)
+    # Wait for thread to start (will then block on receive)
+    started.wait(timeout=2.0)
+    time.sleep(0.001)  # Minimal yield for thread to enter receive()
 
     # Close should wake the receiver
     mailbox.close()

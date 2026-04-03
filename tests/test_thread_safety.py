@@ -299,7 +299,8 @@ def test_session_reducer_optimistic_concurrency_retry() -> None:
         del view, context  # unused
         with call_count_lock:
             call_count += 1
-        # Small delay to increase chance of concurrent modification
+        # Real sleep to force GIL release and increase chance of concurrent
+        # modification — needed to exercise the optimistic-concurrency retry path.
         time.sleep(0.001)
         return Append(event)
 

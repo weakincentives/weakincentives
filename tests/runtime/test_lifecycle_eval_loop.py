@@ -32,6 +32,7 @@ from weakincentives.runtime import (
     InMemoryMailbox,
     Session,
     ShutdownCoordinator,
+    wait_until,
 )
 from weakincentives.runtime.session.protocols import SessionProtocol
 
@@ -186,7 +187,7 @@ def test_eval_loop_shutdown_stops_loop() -> None:
         )
         thread.start()
 
-        time.sleep(0.1)
+        wait_until(lambda: eval_loop.running, timeout=2.0)
         assert eval_loop.running
 
         result = eval_loop.shutdown(timeout=2.0)
@@ -247,7 +248,7 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
         thread.start()
 
         # Wait for processing to start
-        time.sleep(0.05)
+        wait_until(lambda: adapter.call_count > 0, timeout=2.0)
 
         # Shutdown during processing
         eval_loop.shutdown(timeout=2.0)
@@ -284,7 +285,7 @@ def test_eval_loop_context_manager() -> None:
                 kwargs={"wait_time_seconds": 1, "max_iterations": None},
             )
             thread.start()
-            time.sleep(0.05)
+            wait_until(lambda: eval_loop.running, timeout=2.0)
 
         # Context exit should trigger shutdown
         thread.join(timeout=2.0)

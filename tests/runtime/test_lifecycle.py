@@ -158,6 +158,7 @@ class _MockRunnable:
     def __init__(self, *, run_delay: float = 0.0) -> None:
         self._run_delay = run_delay
         self._shutdown_event = threading.Event()
+        self._started_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
         self.run_called = False
@@ -174,13 +175,13 @@ class _MockRunnable:
         with self._lock:
             self._running = True
         self.run_called = True
+        self._started_event.set()
 
         # Simulate work until shutdown
-        while not self._shutdown_event.is_set():
-            time.sleep(0.01)
-            if self._run_delay > 0:
-                time.sleep(self._run_delay)
-                break
+        if self._run_delay > 0:
+            self._shutdown_event.wait(timeout=self._run_delay)
+        else:
+            self._shutdown_event.wait()
 
         with self._lock:
             self._running = False
@@ -385,15 +386,16 @@ def test_coordinator_signal_handler(reset_coordinator: None) -> None:
 def test_loop_group_runs_all_loops(reset_coordinator: None) -> None:
     """LoopGroup.run() starts all loops."""
     _ = reset_coordinator
-    loops = [_MockRunnable(run_delay=0.1) for _ in range(3)]
+    loops = [_MockRunnable(run_delay=5.0) for _ in range(3)]
     group = LoopGroup(loops=loops)
 
     # Run in background thread
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
     thread.start()
 
-    # Wait a bit for loops to start
-    time.sleep(0.05)
+    # Wait for all loops to start
+    for loop in loops:
+        loop._started_event.wait(timeout=2.0)
 
     # Trigger shutdown
     group.shutdown(timeout=1.0)
@@ -413,7 +415,9 @@ def test_loop_group_shutdown_stops_all_loops(reset_coordinator: None) -> None:
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
     thread.start()
 
-    time.sleep(0.05)
+    for loop in loops:
+        loop._started_event.wait(timeout=2.0)
+
     result = group.shutdown(timeout=1.0)
     thread.join(timeout=2.0)
 
@@ -431,7 +435,8 @@ def test_loop_group_context_manager(reset_coordinator: None) -> None:
     with LoopGroup(loops=loops) as group:
         thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
         thread.start()
-        time.sleep(0.05)
+        for loop in loops:
+            loop._started_event.wait(timeout=2.0)
 
     # Context exit should trigger shutdown
     thread.join(timeout=2.0)
@@ -445,7 +450,7 @@ def test_loop_group_with_signals(reset_coordinator: None) -> None:
     # Pre-install coordinator to avoid signal handler issues
     coordinator = ShutdownCoordinator.install()
 
-    loops = [_MockRunnable(run_delay=0.05) for _ in range(2)]
+    loops = [_MockRunnable(run_delay=5.0) for _ in range(2)]
     group = LoopGroup(loops=loops)
 
     # Run in background thread with install_signals=True
@@ -453,7 +458,8 @@ def test_loop_group_with_signals(reset_coordinator: None) -> None:
     thread = threading.Thread(target=group.run, kwargs={"install_signals": True})
     thread.start()
 
-    time.sleep(0.02)
+    for loop in loops:
+        loop._started_event.wait(timeout=2.0)
 
     # Trigger via coordinator
     coordinator.trigger()
@@ -484,13 +490,14 @@ def test_coordinator_handle_signal_triggers_shutdown(reset_coordinator: None) ->
 def test_loop_group_trigger_shutdown_returns_result(reset_coordinator: None) -> None:
     """LoopGroup._trigger_shutdown returns shutdown result."""
     _ = reset_coordinator
-    loops = [_MockRunnable(run_delay=0.05) for _ in range(2)]
+    loops = [_MockRunnable(run_delay=5.0) for _ in range(2)]
     group = LoopGroup(loops=loops)
 
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
     thread.start()
 
-    time.sleep(0.02)
+    for loop in loops:
+        loop._started_event.wait(timeout=2.0)
 
     # Call _trigger_shutdown directly
     result = group._trigger_shutdown()

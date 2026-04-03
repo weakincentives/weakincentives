@@ -27,6 +27,13 @@ from weakincentives.adapters.claude_agent_sdk._transcript_collector import (
     TranscriptCollector,
     TranscriptCollectorConfig,
 )
+from weakincentives.clock import FakeClock
+
+
+async def _tick(n: int = 5) -> None:
+    """Yield to event loop enough times for poll loop to complete."""
+    for _ in range(n):
+        await asyncio.sleep(0)
 
 
 class TestTranscriptCollectorLifecycle:
@@ -265,10 +272,15 @@ class TestTranscriptCollectorLifecycle:
         assert tailer.entry_count == 1
         assert tailer.partial_line == ""
 
-    def test_context_manager_lifecycle(
-        self, collector: TranscriptCollector, temp_dir: Path
-    ) -> None:
+    def test_context_manager_lifecycle(self, temp_dir: Path) -> None:
         """Collector starts and stops correctly as context manager."""
+        clock = FakeClock()
+        config = TranscriptCollectorConfig(poll_interval=0.01, emit_raw=True)
+        collector = TranscriptCollector(
+            prompt_name="test-prompt",
+            config=config,
+            async_sleeper=clock,
+        )
         transcript_path = temp_dir / "session123.jsonl"
         transcript_path.write_text('{"type": "user", "message": "test"}\n')
 
@@ -283,25 +295,15 @@ class TestTranscriptCollectorLifecycle:
                     assert collector._poll_task is not None
                     assert collector._discovery_task is not None
 
-                    # Wait a bit for polling
-                    await asyncio.sleep(0.05)
+                    # Let poll loop run
+                    await _tick()
 
                 # Should have stopped
                 assert not collector._running
 
-                # Should have logged start and stop
-                start_calls = [
-                    call
-                    for call in mock_logger.debug.call_args_list
-                    if call[1].get("event") == "transcript.start"
-                ]
-                stop_calls = [
-                    call
-                    for call in mock_logger.debug.call_args_list
-                    if call[1].get("event") == "transcript.stop"
-                ]
-                assert len(start_calls) == 1
-                assert len(stop_calls) == 1
+                events = [c[1].get("event") for c in mock_logger.debug.call_args_list]
+                assert events.count("transcript.start") == 1
+                assert events.count("transcript.stop") == 1
 
         asyncio.run(run_test())
 
@@ -339,11 +341,13 @@ class TestTranscriptCollectorLifecycle:
         """Test handling of invalid JSON in transcript files."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="json_error_test",
                 config=TranscriptCollectorConfig(
                     poll_interval=0.01,
                 ),
+                async_sleeper=clock,
             )
 
             # Create transcript with invalid JSON
@@ -354,7 +358,9 @@ class TestTranscriptCollectorLifecycle:
 
             async with collector.run():
                 await collector._remember_transcript_path(str(transcript))
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)  # yield to poll loop
+                clock.advance(0.01)
+                await asyncio.sleep(0)
 
             # Should have processed 3 entries (1 valid, 1 invalid, 1 valid)
             assert collector.main_entry_count == 3
@@ -459,9 +465,11 @@ class TestTranscriptCollectorLifecycle:
         """Test graceful handling of file access errors."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="error_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             # Create a transcript file
@@ -470,7 +478,8 @@ class TestTranscriptCollectorLifecycle:
 
             async with collector.run():
                 await collector._remember_transcript_path(str(transcript))
-                await asyncio.sleep(0.02)
+                # Explicitly poll to read file (run_in_executor is non-deterministic).
+                await collector._poll_once()
 
                 # Delete the file to trigger error handling
                 transcript.unlink()
@@ -566,9 +575,11 @@ class TestTranscriptCollectorLifecycle:
         """Test that empty lines are skipped."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="empty_lines_test",
-                config=TranscriptCollectorConfig(),
+                config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             # Create transcript with empty lines
@@ -577,7 +588,9 @@ class TestTranscriptCollectorLifecycle:
 
             async with collector.run():
                 await collector._remember_transcript_path(str(transcript))
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)  # yield to poll loop
+                clock.advance(0.01)
+                await asyncio.sleep(0)
 
             # Should have processed only 2 entries (skipping empty lines)
             assert collector.main_entry_count == 2
@@ -588,9 +601,11 @@ class TestTranscriptCollectorLifecycle:
         """Verify SDK transcript types map to canonical entry types."""
 
         async def run_test() -> None:
+            clock = FakeClock()
             collector = TranscriptCollector(
                 prompt_name="type_map_test",
                 config=TranscriptCollectorConfig(poll_interval=0.01),
+                async_sleeper=clock,
             )
 
             entries = [
@@ -609,7 +624,7 @@ class TestTranscriptCollectorLifecycle:
             with patch("weakincentives.runtime.transcript._logger") as mock_logger:
                 async with collector.run():
                     await collector._remember_transcript_path(str(transcript))
-                    await asyncio.sleep(0.05)
+                    await _tick()
 
                 for call in mock_logger.debug.call_args_list:
                     if call[1].get("event") == "transcript.entry":

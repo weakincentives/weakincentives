@@ -446,9 +446,7 @@ class TestInMemoryMailbox:
             for t in sender_threads:
                 t.join()
 
-            # Wait for messages to be available
-            time.sleep(0.1)
-
+            # All senders joined — messages are immediately available
             # Receive all messages
             total_received = 0
             while mailbox.approximate_count() > 0:
