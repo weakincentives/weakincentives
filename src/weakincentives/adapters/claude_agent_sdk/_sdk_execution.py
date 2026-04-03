@@ -27,7 +27,7 @@ from ...runtime.logging import StructuredLogger, get_logger
 from ..core import PromptEvaluationError
 from ._hooks import HookContext
 from ._message_extraction import (
-    _extract_message_content,  # pyright: ignore[reportPrivateUsage]
+    extract_message_content,
 )
 from ._task_completion import TaskCompletionContext
 from ._visibility_signal import VisibilityExpansionSignal
@@ -288,7 +288,7 @@ async def collect_round_messages(
         messages.append(message)
         round_messages.append(message)
 
-        content = _extract_message_content(message)
+        content = extract_message_content(message)
         update_token_stats(hook_context, content)
         log_message_received(
             message, messages, continuation_round, hook_context, content

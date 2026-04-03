@@ -40,31 +40,31 @@ from ._hook_context import HookContext
 from ._task_completion import TaskCompletionChecker, TaskCompletionResult
 
 __all__ = [
-    "_ParsedToolData",
-    "_check_budget_constraint",
-    "_check_deadline_constraint",
-    "_compute_budget_info",
-    "_dispatch_tool_invoked_event",
-    "_handle_mcp_tool_post",
-    "_handle_structured_output_completion",
-    "_handle_tool_transaction",
-    "_is_budget_exhausted",
-    "_is_deadline_exceeded",
-    "_is_tool_error_response",
-    "_parse_tool_data",
-    "_run_feedback_providers",
-    "_setup_tool_execution_state",
-    "_utcnow",
+    "ParsedToolData",
+    "check_budget_constraint",
+    "check_deadline_constraint",
+    "compute_budget_info",
+    "dispatch_tool_invoked_event",
+    "handle_mcp_tool_post",
+    "handle_structured_output_completion",
+    "handle_tool_transaction",
+    "is_budget_exhausted",
+    "is_deadline_exceeded",
+    "is_tool_error_response",
+    "parse_tool_data",
+    "run_feedback_providers",
+    "setup_tool_execution_state",
+    "utcnow",
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "sdk_hooks"})
 
 
-def _utcnow() -> datetime:
+def utcnow() -> datetime:
     return SYSTEM_CLOCK.utcnow()
 
 
-def _compute_budget_info(budget_tracker: BudgetTracker | None) -> dict[str, Any]:
+def compute_budget_info(budget_tracker: BudgetTracker | None) -> dict[str, Any]:
     """Compute budget info for logging."""
     if budget_tracker is None:
         return {}
@@ -84,12 +84,12 @@ def _compute_budget_info(budget_tracker: BudgetTracker | None) -> dict[str, Any]
     }
 
 
-def _is_deadline_exceeded(deadline: Deadline | None) -> bool:
+def is_deadline_exceeded(deadline: Deadline | None) -> bool:
     """Check if deadline has been exceeded."""
     return deadline is not None and deadline.remaining().total_seconds() <= 0
 
 
-def _is_budget_exhausted(budget_tracker: BudgetTracker | None) -> bool:
+def is_budget_exhausted(budget_tracker: BudgetTracker | None) -> bool:
     """Check if token budget has been exhausted."""
     if budget_tracker is None:
         return False
@@ -102,11 +102,11 @@ def _is_budget_exhausted(budget_tracker: BudgetTracker | None) -> bool:
     )
 
 
-def _check_deadline_constraint(
+def check_deadline_constraint(
     hook_context: HookContext, tool_name: str
 ) -> SyncHookJSONOutput | None:
     """Check deadline constraint and return deny response if exceeded."""
-    if not _is_deadline_exceeded(hook_context.deadline):
+    if not is_deadline_exceeded(hook_context.deadline):
         return None
     logger.warning(
         "claude_agent_sdk.hook.deadline_exceeded",
@@ -125,12 +125,12 @@ def _check_deadline_constraint(
     return {"hookSpecificOutput": output}
 
 
-def _check_budget_constraint(
+def check_budget_constraint(
     hook_context: HookContext, tool_name: str
 ) -> SyncHookJSONOutput | None:
     """Check budget constraint and return deny response if exhausted."""
     budget_tracker = hook_context.budget_tracker
-    if budget_tracker is None or not _is_budget_exhausted(budget_tracker):
+    if budget_tracker is None or not is_budget_exhausted(budget_tracker):
         return None
     budget = budget_tracker.budget
     consumed = budget_tracker.consumed
@@ -153,7 +153,7 @@ def _check_budget_constraint(
     return {"hookSpecificOutput": output}
 
 
-def _setup_tool_execution_state(
+def setup_tool_execution_state(
     hook_context: HookContext,
     tool_name: str,
     tool_input: dict[str, Any],
@@ -183,7 +183,7 @@ def _setup_tool_execution_state(
 
 
 @dataclass(slots=True, frozen=True)
-class _ParsedToolData:
+class ParsedToolData:
     """Parsed tool data from PostToolUse hook input."""
 
     tool_name: str
@@ -193,7 +193,7 @@ class _ParsedToolData:
     result_raw: Any
 
 
-def _parse_tool_data(input_data: PostToolUseHookInput) -> _ParsedToolData:
+def parse_tool_data(input_data: PostToolUseHookInput) -> ParsedToolData:
     """Parse tool data from PostToolUse hook input.
 
     Uses the SDK's PostToolUseHookInput TypedDict for type-safe access.
@@ -217,18 +217,18 @@ def _parse_tool_data(input_data: PostToolUseHookInput) -> _ParsedToolData:
     elif tool_response is not None:
         output_text = str(tool_response)
 
-    return _ParsedToolData(
+    return ParsedToolData(
         tool_name=tool_name,
-        tool_input=tool_input if isinstance(tool_input, dict) else {},  # pyright: ignore[reportUnnecessaryIsInstance]
+        tool_input=tool_input,
         tool_error=tool_error,
         output_text=output_text,
         result_raw=tool_response,
     )
 
 
-def _handle_structured_output_completion(
+def handle_structured_output_completion(
     hook_context: HookContext,
-    data: _ParsedToolData,
+    data: ParsedToolData,
     task_completion_checker: TaskCompletionChecker | None,
     check_task_completion: Callable[[dict[str, Any]], TaskCompletionResult],
     stop_on_structured_output: bool,
@@ -287,8 +287,8 @@ def _handle_structured_output_completion(
     return None
 
 
-def _dispatch_tool_invoked_event(
-    hook_context: HookContext, data: _ParsedToolData, tool_use_id: str | None
+def dispatch_tool_invoked_event(
+    hook_context: HookContext, data: ParsedToolData, tool_use_id: str | None
 ) -> None:
     """Dispatch ToolInvoked event for native tools."""
     event = ToolInvoked(
@@ -298,7 +298,7 @@ def _dispatch_tool_invoked_event(
         params=data.tool_input,
         result=data.result_raw,
         session_id=getattr(hook_context.session, "session_id", None),
-        created_at=_utcnow(),
+        created_at=utcnow(),
         usage=None,
         rendered_output=data.output_text[:1000] if data.output_text else "",
         call_id=tool_use_id,
@@ -307,27 +307,27 @@ def _dispatch_tool_invoked_event(
     _ = hook_context.session.dispatcher.dispatch(event)
 
 
-def _handle_mcp_tool_post(
-    hook_context: HookContext, data: _ParsedToolData
+def handle_mcp_tool_post(
+    hook_context: HookContext, data: ParsedToolData
 ) -> SyncHookJSONOutput:
     """Handle post-processing for MCP tools.
 
     Runs feedback providers. MCP tools dispatch their own ToolInvoked events
     via the bridge, which also dequeues the tool_use_id.
     """
-    result = _run_feedback_providers(hook_context, data)
+    result = run_feedback_providers(hook_context, data)
     if result is not None:
         return result
     empty: SyncHookJSONOutput = {}
     return empty
 
 
-def _run_feedback_providers(  # pragma: no cover - integration tested
-    hook_context: HookContext, data: _ParsedToolData
+def run_feedback_providers(  # pragma: no cover - integration tested
+    hook_context: HookContext, data: ParsedToolData
 ) -> SyncHookJSONOutput | None:
     """Run feedback providers and return hook response if triggered."""
     feedback_text = collect_feedback(
-        prompt=hook_context._prompt,  # pyright: ignore[reportPrivateUsage]
+        prompt=hook_context.prompt,
         session=hook_context.session,
         deadline=hook_context.deadline,
     )
@@ -349,14 +349,14 @@ def _run_feedback_providers(  # pragma: no cover - integration tested
     return None
 
 
-def _handle_tool_transaction(
+def handle_tool_transaction(
     hook_context: HookContext,
-    data: _ParsedToolData,
+    data: ParsedToolData,
     tool_use_id: str | None,
     hook_start: float,
 ) -> None:
     """Handle tool transaction - log completion and restore state on failure."""
-    success = data.tool_error is None and not _is_tool_error_response(data.result_raw)
+    success = data.tool_error is None and not is_tool_error_response(data.result_raw)
     logger.debug(
         "claude_agent_sdk.hook.tool_call.complete",
         event="hook.tool_call.complete",
@@ -391,7 +391,7 @@ def _handle_tool_transaction(
             )
 
 
-def _is_tool_error_response(response: Any) -> bool:  # noqa: ANN401
+def is_tool_error_response(response: Any) -> bool:  # noqa: ANN401
     """Check if tool response indicates an error.
 
     Examines the response structure for error indicators like 'is_error' flags

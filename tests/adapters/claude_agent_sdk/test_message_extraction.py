@@ -337,10 +337,10 @@ class TestMessageContentExtraction:
         result = _extract_inner_message_content(inner_msg)
         assert result == {"role": "user"}
 
-    def test_extract_message_content_with_inner_message(self) -> None:
+    def testextract_message_content_with_inner_message(self) -> None:
         """Message with inner message dict extracts full content."""
         from weakincentives.adapters.claude_agent_sdk._message_extraction import (
-            _extract_message_content,
+            extract_message_content,
         )
 
         message = MagicMock()
@@ -349,14 +349,14 @@ class TestMessageContentExtraction:
         message.structured_output = None
         message.usage = None
 
-        result = _extract_message_content(message)
+        result = extract_message_content(message)
         assert result["role"] == "user"
         assert result["content"] == "Full user message"
 
-    def test_extract_message_content_with_result(self) -> None:
+    def testextract_message_content_with_result(self) -> None:
         """ResultMessage with result field extracts full result."""
         from weakincentives.adapters.claude_agent_sdk._message_extraction import (
-            _extract_message_content,
+            extract_message_content,
         )
 
         message = MagicMock()
@@ -365,13 +365,13 @@ class TestMessageContentExtraction:
         message.structured_output = None
         message.usage = None
 
-        result = _extract_message_content(message)
+        result = extract_message_content(message)
         assert result["result"] == "Final answer with full content"
 
-    def test_extract_message_content_with_structured_output(self) -> None:
+    def testextract_message_content_with_structured_output(self) -> None:
         """Message with structured_output includes full structured output."""
         from weakincentives.adapters.claude_agent_sdk._message_extraction import (
-            _extract_message_content,
+            extract_message_content,
         )
 
         message = MagicMock()
@@ -380,13 +380,13 @@ class TestMessageContentExtraction:
         message.structured_output = {"summary": "test", "issues": ["a", "b"]}
         message.usage = None
 
-        result = _extract_message_content(message)
+        result = extract_message_content(message)
         assert result["structured_output"] == {"summary": "test", "issues": ["a", "b"]}
 
-    def test_extract_message_content_with_usage(self) -> None:
+    def testextract_message_content_with_usage(self) -> None:
         """Message with usage includes usage data."""
         from weakincentives.adapters.claude_agent_sdk._message_extraction import (
-            _extract_message_content,
+            extract_message_content,
         )
 
         message = MagicMock()
@@ -395,16 +395,16 @@ class TestMessageContentExtraction:
         message.structured_output = None
         message.usage = {"input_tokens": 100, "output_tokens": 50}
 
-        result = _extract_message_content(message)
+        result = extract_message_content(message)
         assert result["usage"] == {"input_tokens": 100, "output_tokens": 50}
 
-    def test_extract_message_content_no_attrs(self) -> None:
+    def testextract_message_content_no_attrs(self) -> None:
         """Message without expected attributes returns empty dict."""
         from weakincentives.adapters.claude_agent_sdk._message_extraction import (
-            _extract_message_content,
+            extract_message_content,
         )
 
         message = MagicMock(spec=[])
 
-        result = _extract_message_content(message)
+        result = extract_message_content(message)
         assert result == {}

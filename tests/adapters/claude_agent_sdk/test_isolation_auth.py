@@ -29,7 +29,7 @@ from weakincentives.adapters.claude_agent_sdk.isolation import (
     IsolationAuthError,
     IsolationConfig,
     _get_effective_env_value,
-    _read_host_claude_settings,
+    read_host_claude_settings,
 )
 
 
@@ -213,12 +213,12 @@ class TestEphemeralHomeInheritHostAuth:
 
 
 class TestReadHostClaudeSettings:
-    """Tests for _read_host_claude_settings function."""
+    """Tests for read_host_claude_settings function."""
 
     def test_returns_empty_when_no_settings(self, tmp_path: Path) -> None:
         """Returns empty dict when settings.json doesn't exist."""
         with mock.patch.dict(os.environ, {"HOME": str(tmp_path)}, clear=True):
-            result = _read_host_claude_settings()
+            result = read_host_claude_settings()
             assert result == {}
 
     def test_reads_valid_settings(self, tmp_path: Path) -> None:
@@ -229,7 +229,7 @@ class TestReadHostClaudeSettings:
         (claude_dir / "settings.json").write_text(json.dumps(settings))
 
         with mock.patch.dict(os.environ, {"HOME": str(tmp_path)}, clear=True):
-            result = _read_host_claude_settings()
+            result = read_host_claude_settings()
             assert result == settings
 
     def test_returns_empty_on_invalid_json(self, tmp_path: Path) -> None:
@@ -239,7 +239,7 @@ class TestReadHostClaudeSettings:
         (claude_dir / "settings.json").write_text("not valid json {{{")
 
         with mock.patch.dict(os.environ, {"HOME": str(tmp_path)}, clear=True):
-            result = _read_host_claude_settings()
+            result = read_host_claude_settings()
             assert result == {}
 
 

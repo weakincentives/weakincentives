@@ -221,7 +221,7 @@ class BedrockConfig:
         Returns:
             BedrockConfig if Bedrock is configured, None otherwise.
         """
-        host_settings = _read_host_claude_settings() if check_host_settings else {}
+        host_settings = read_host_claude_settings() if check_host_settings else {}
 
         bedrock_enabled = _get_effective_env_value(
             "CLAUDE_CODE_USE_BEDROCK", host_settings
@@ -241,7 +241,7 @@ class BedrockConfig:
         return cls(region=region, profile=profile, source=source)
 
 
-def _read_host_claude_settings() -> dict[str, Any]:
+def read_host_claude_settings() -> dict[str, Any]:
     """Read the host's ~/.claude/settings.json if it exists.
 
     Returns an empty dict if the file doesn't exist or can't be parsed.
@@ -286,7 +286,7 @@ def _get_effective_env_value(
 
     # Fall back to host settings.json
     if host_settings is None:
-        host_settings = _read_host_claude_settings()
+        host_settings = read_host_claude_settings()
     host_env = host_settings.get("env", {})
     return host_env.get(key)
 
@@ -296,7 +296,7 @@ def _is_anthropic_api_key_set() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
-def _is_bedrock_configured(*, check_host_settings: bool = True) -> bool:
+def is_bedrock_configured(*, check_host_settings: bool = True) -> bool:
     """Check if Bedrock authentication is configured.
 
     Args:
@@ -320,7 +320,7 @@ def get_default_model() -> str:
     Returns:
         Model ID string in the appropriate format.
     """
-    if _is_bedrock_configured():
+    if is_bedrock_configured():
         return DEFAULT_BEDROCK_MODEL
     return DEFAULT_MODEL
 
@@ -437,7 +437,7 @@ class IsolationConfig:
         Raises:
             IsolationAuthError: If no authentication is configured in the environment.
         """
-        if not _is_anthropic_api_key_set() and not _is_bedrock_configured():
+        if not _is_anthropic_api_key_set() and not is_bedrock_configured():
             msg = (
                 "No authentication configured. Set either:\n"
                 "  - ANTHROPIC_API_KEY for Anthropic API\n"
@@ -551,7 +551,7 @@ class IsolationConfig:
         Raises:
             IsolationAuthError: If Bedrock is not configured in the environment.
         """
-        if not _is_bedrock_configured():
+        if not is_bedrock_configured():
             msg = (
                 "Bedrock authentication not configured. Set:\n"
                 "  - CLAUDE_CODE_USE_BEDROCK=1\n"

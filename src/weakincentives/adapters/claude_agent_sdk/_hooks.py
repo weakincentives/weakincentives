@@ -57,19 +57,19 @@ from ...filesystem import Filesystem
 from ...runtime.logging import StructuredLogger, get_logger
 from ._hook_context import HookConstraints, HookContext, HookStats
 from ._hook_tools import (
-    _check_budget_constraint,  # pyright: ignore[reportPrivateUsage]
-    _check_deadline_constraint,  # pyright: ignore[reportPrivateUsage]
-    _compute_budget_info,  # pyright: ignore[reportPrivateUsage]
-    _dispatch_tool_invoked_event,  # pyright: ignore[reportPrivateUsage]
-    _handle_mcp_tool_post,  # pyright: ignore[reportPrivateUsage]
-    _handle_structured_output_completion,  # pyright: ignore[reportPrivateUsage]
-    _handle_tool_transaction,  # pyright: ignore[reportPrivateUsage]
-    _is_budget_exhausted,  # pyright: ignore[reportPrivateUsage]
-    _is_deadline_exceeded,  # pyright: ignore[reportPrivateUsage]
-    _is_tool_error_response,  # pyright: ignore[reportPrivateUsage,reportUnusedImport]  # noqa: F401 - re-exported for tests
-    _parse_tool_data,  # pyright: ignore[reportPrivateUsage]
-    _run_feedback_providers,  # pyright: ignore[reportPrivateUsage]
-    _setup_tool_execution_state,  # pyright: ignore[reportPrivateUsage]
+    check_budget_constraint,
+    check_deadline_constraint,
+    compute_budget_info,
+    dispatch_tool_invoked_event,
+    handle_mcp_tool_post,
+    handle_structured_output_completion,
+    handle_tool_transaction,
+    is_budget_exhausted,
+    is_deadline_exceeded,
+    is_tool_error_response,  # pyright: ignore[reportUnusedImport]  # noqa: F401 - re-exported for tests
+    parse_tool_data,
+    run_feedback_providers,
+    setup_tool_execution_state,
 )
 from ._task_completion import (
     TaskCompletionChecker,
@@ -102,27 +102,27 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "sdk_hooks
 
 
 def _is_pre_tool_use(data: HookInput) -> TypeGuard[PreToolUseHookInput]:
-    return isinstance(data, dict) and data.get("hook_event_name") == "PreToolUse"  # pyright: ignore[reportUnnecessaryIsInstance]
+    return data.get("hook_event_name") == "PreToolUse"
 
 
 def _is_post_tool_use(data: HookInput) -> TypeGuard[PostToolUseHookInput]:
-    return isinstance(data, dict) and data.get("hook_event_name") == "PostToolUse"  # pyright: ignore[reportUnnecessaryIsInstance]
+    return data.get("hook_event_name") == "PostToolUse"
 
 
 def _is_user_prompt_submit(data: HookInput) -> TypeGuard[UserPromptSubmitHookInput]:
-    return isinstance(data, dict) and data.get("hook_event_name") == "UserPromptSubmit"  # pyright: ignore[reportUnnecessaryIsInstance]
+    return data.get("hook_event_name") == "UserPromptSubmit"
 
 
 def _is_stop(data: HookInput) -> TypeGuard[StopHookInput]:
-    return isinstance(data, dict) and data.get("hook_event_name") == "Stop"  # pyright: ignore[reportUnnecessaryIsInstance]
+    return data.get("hook_event_name") == "Stop"
 
 
 def _is_subagent_stop(data: HookInput) -> TypeGuard[SubagentStopHookInput]:
-    return isinstance(data, dict) and data.get("hook_event_name") == "SubagentStop"  # pyright: ignore[reportUnnecessaryIsInstance]
+    return data.get("hook_event_name") == "SubagentStop"
 
 
 def _is_pre_compact(data: HookInput) -> TypeGuard[PreCompactHookInput]:
-    return isinstance(data, dict) and data.get("hook_event_name") == "PreCompact"  # pyright: ignore[reportUnnecessaryIsInstance]
+    return data.get("hook_event_name") == "PreCompact"
 
 
 def create_pre_tool_use_hook(
@@ -170,14 +170,14 @@ def create_pre_tool_use_hook(
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "deadline_remaining_ms": deadline_remaining_ms,
-                **_compute_budget_info(hook_context.budget_tracker),
+                **compute_budget_info(hook_context.budget_tracker),
             },
         )
 
         # Check constraints - return early if violated
-        if (deny := _check_deadline_constraint(hook_context, tool_name)) is not None:
+        if (deny := check_deadline_constraint(hook_context, tool_name)) is not None:
             return deny
-        if (deny := _check_budget_constraint(hook_context, tool_name)) is not None:
+        if (deny := check_budget_constraint(hook_context, tool_name)) is not None:
             return deny
 
         # Set subagent flag when Task tool is called (subagent spawn)
@@ -187,7 +187,7 @@ def create_pre_tool_use_hook(
 
         # Set up tool execution state (MCP tool_use_id or native snapshot)
         tool_input = input_data.get("tool_input", {})
-        _setup_tool_execution_state(
+        setup_tool_execution_state(
             hook_context, tool_name, tool_input, tool_use_id, hook_start
         )
 
@@ -251,21 +251,21 @@ def create_post_tool_use_hook(
         if not _is_post_tool_use(input_data):
             return {}
 
-        data = _parse_tool_data(input_data)
+        data = parse_tool_data(input_data)
         hook_context.beat()
-        hook_context._tool_count += 1  # pyright: ignore[reportPrivateUsage]
+        hook_context.tool_count += 1
         hook_context.stats.tool_count += 1
 
         # MCP tools dispatch their own events - just clear state and run feedback
         if data.tool_name.startswith("mcp__wink__"):
-            return _handle_mcp_tool_post(hook_context, data)
+            return handle_mcp_tool_post(hook_context, data)
 
         # Native tools: dispatch event, handle transaction, check completion
-        _dispatch_tool_invoked_event(hook_context, data, tool_use_id)
-        _handle_tool_transaction(hook_context, data, tool_use_id, hook_start)
+        dispatch_tool_invoked_event(hook_context, data, tool_use_id)
+        handle_tool_transaction(hook_context, data, tool_use_id, hook_start)
 
         # Handle StructuredOutput completion
-        completion_response = _handle_structured_output_completion(
+        completion_response = handle_structured_output_completion(
             hook_context,
             data,
             task_completion_checker,
@@ -275,7 +275,7 @@ def create_post_tool_use_hook(
         if completion_response is not None:
             return completion_response
 
-        feedback_result = _run_feedback_providers(hook_context, data)
+        feedback_result = run_feedback_providers(hook_context, data)
         return feedback_result if feedback_result is not None else {}
 
     return post_tool_use_hook
@@ -388,14 +388,14 @@ def create_stop_hook(
 
 def _should_skip_task_completion(hook_context: HookContext, stop_reason: str) -> bool:
     """Check if task completion should be skipped due to constraints."""
-    if _is_deadline_exceeded(hook_context.deadline):
+    if is_deadline_exceeded(hook_context.deadline):
         logger.debug(
             "claude_agent_sdk.hook.task_completion_stop.deadline_exceeded",
             event="hook.task_completion_stop.deadline_exceeded",
             context={"stop_reason": stop_reason},
         )
         return True
-    if _is_budget_exhausted(hook_context.budget_tracker):
+    if is_budget_exhausted(hook_context.budget_tracker):
         logger.debug(
             "claude_agent_sdk.hook.task_completion_stop.budget_exhausted",
             event="hook.task_completion_stop.budget_exhausted",

@@ -115,7 +115,7 @@ class HookContext:
     HookContext provides richer functionality for session state management.
     """
 
-    def __init__(  # pyright: ignore[reportMissingSuperCall]  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913
         self,
         *,
         session: SessionProtocol,
@@ -125,6 +125,7 @@ class HookContext:
         constraints: HookConstraints | None = None,
         clock: MonotonicClock = SYSTEM_CLOCK,
     ) -> None:
+        super().__init__()
         self._session = session
         self._prompt = prompt
         self.adapter_name = adapter_name
@@ -136,7 +137,7 @@ class HookContext:
         self.run_context = constraints.run_context if constraints else None
         self.mcp_tool_state = constraints.mcp_tool_state if constraints else None
         self.stop_reason: str | None = None
-        self._tool_count = 0
+        self.tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
         self.stats: HookStats = HookStats()
         self.clock = clock

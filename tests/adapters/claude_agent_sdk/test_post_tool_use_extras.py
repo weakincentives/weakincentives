@@ -246,51 +246,51 @@ class TestPostToolUseHookTransactional:
 
 
 class TestIsToolErrorResponse:
-    """Tests for _is_tool_error_response helper function."""
+    """Tests for is_tool_error_response helper function."""
 
     def test_non_dict_returns_false(self) -> None:
         """Non-dict responses are not considered errors."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
-            _is_tool_error_response,
+            is_tool_error_response,
         )
 
-        assert _is_tool_error_response("string") is False
-        assert _is_tool_error_response(123) is False
-        assert _is_tool_error_response(None) is False
+        assert is_tool_error_response("string") is False
+        assert is_tool_error_response(123) is False
+        assert is_tool_error_response(None) is False
 
     def test_is_error_flag(self) -> None:
         """is_error flag indicates error."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
-            _is_tool_error_response,
+            is_tool_error_response,
         )
 
-        assert _is_tool_error_response({"is_error": True}) is True
-        assert _is_tool_error_response({"is_error": False}) is False
+        assert is_tool_error_response({"is_error": True}) is True
+        assert is_tool_error_response({"is_error": False}) is False
 
     def test_isError_flag(self) -> None:
         """isError flag indicates error."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
-            _is_tool_error_response,
+            is_tool_error_response,
         )
 
-        assert _is_tool_error_response({"isError": True}) is True
-        assert _is_tool_error_response({"isError": False}) is False
+        assert is_tool_error_response({"isError": True}) is True
+        assert is_tool_error_response({"isError": False}) is False
 
     def test_error_in_content(self) -> None:
         """Error text in content indicates error."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
-            _is_tool_error_response,
+            is_tool_error_response,
         )
 
         assert (
-            _is_tool_error_response(
+            is_tool_error_response(
                 {"content": [{"type": "text", "text": "Error: something went wrong"}]}
             )
             is True
         )
 
         assert (
-            _is_tool_error_response(
+            is_tool_error_response(
                 {"content": [{"type": "text", "text": "error - file not found"}]}
             )
             is True
@@ -298,7 +298,7 @@ class TestIsToolErrorResponse:
 
         # Normal content is not an error
         assert (
-            _is_tool_error_response(
+            is_tool_error_response(
                 {"content": [{"type": "text", "text": "File created successfully"}]}
             )
             is False
@@ -307,34 +307,34 @@ class TestIsToolErrorResponse:
     def test_empty_content(self) -> None:
         """Empty content is not an error."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
-            _is_tool_error_response,
+            is_tool_error_response,
         )
 
-        assert _is_tool_error_response({"content": []}) is False
-        assert _is_tool_error_response({}) is False
+        assert is_tool_error_response({"content": []}) is False
+        assert is_tool_error_response({}) is False
 
     def test_content_with_non_dict_item(self) -> None:
         """Content with non-dict first item is not considered an error."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
-            _is_tool_error_response,
+            is_tool_error_response,
         )
 
         # First item is a string instead of dict
-        assert _is_tool_error_response({"content": ["not a dict"]}) is False
+        assert is_tool_error_response({"content": ["not a dict"]}) is False
         # First item is a number instead of dict
-        assert _is_tool_error_response({"content": [123]}) is False
+        assert is_tool_error_response({"content": [123]}) is False
         # First item is None instead of dict
-        assert _is_tool_error_response({"content": [None]}) is False
+        assert is_tool_error_response({"content": [None]}) is False
 
     def test_content_with_non_string_text(self) -> None:
         """Content dict with non-string text field is not considered an error."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
-            _is_tool_error_response,
+            is_tool_error_response,
         )
 
         # Text field is a number instead of string
-        assert _is_tool_error_response({"content": [{"text": 123}]}) is False
+        assert is_tool_error_response({"content": [{"text": 123}]}) is False
         # Text field is None instead of string
-        assert _is_tool_error_response({"content": [{"text": None}]}) is False
+        assert is_tool_error_response({"content": [{"text": None}]}) is False
         # Text field is a list instead of string
-        assert _is_tool_error_response({"content": [{"text": ["error"]}]}) is False
+        assert is_tool_error_response({"content": [{"text": ["error"]}]}) is False

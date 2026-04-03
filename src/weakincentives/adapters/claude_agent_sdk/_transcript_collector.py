@@ -113,7 +113,7 @@ class TranscriptCollectorConfig:
 
 
 @dataclass(slots=True)
-class _TailerState:
+class TailerState:
     """State for a single file tailer."""
 
     path: Path
@@ -174,8 +174,8 @@ class TranscriptCollector:
     async_sleeper: AsyncSleeper = field(default=SYSTEM_CLOCK)
     """Async sleeper for delay operations (injectable for testing)."""
 
-    _tailers: dict[str, _TailerState] = field(
-        default_factory=dict[str, _TailerState], init=False
+    _tailers: dict[str, TailerState] = field(
+        default_factory=dict[str, TailerState], init=False
     )
     """Active tailers by source."""
 
@@ -449,7 +449,7 @@ class TranscriptCollector:
 
         try:
             stat = path.stat()
-            tailer = _TailerState(
+            tailer = TailerState(
                 path=path,
                 source=source,
                 position=0,
@@ -532,7 +532,7 @@ class TranscriptCollector:
             # Directory may not exist or be inaccessible
             pass
 
-    async def _read_transcript_content(self, tailer: _TailerState) -> None:
+    async def _read_transcript_content(self, tailer: TailerState) -> None:
         """Read new content from a transcript file.
 
         Args:
@@ -606,7 +606,7 @@ class TranscriptCollector:
             _ = f.seek(offset)
             return f.read(count)
 
-    async def _emit_entries(self, tailer: _TailerState, content: bytes) -> None:
+    async def _emit_entries(self, tailer: TailerState, content: bytes) -> None:
         """Parse and emit transcript entries from content.
 
         Args:

@@ -31,8 +31,10 @@ from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
 from ...serde import parse, schema
 from ..core import PromptEvaluationError
+
+_NONE_TYPE: type[Any] = type(None)
 from ._schema_normalization import (
-    _normalize_claude_output_schema,  # pyright: ignore[reportPrivateUsage]
+    normalize_claude_output_schema,
 )
 from ._task_completion import TaskCompletionContext
 
@@ -47,12 +49,12 @@ def build_output_format[OutputT](
     """Generate SDK output format from prompt output type."""
     output_type = rendered.output_type
 
-    if output_type is None or output_type is type(None):  # pyright: ignore[reportUnnecessaryComparison]
+    if output_type is None or output_type is _NONE_TYPE:
         return None
 
     return {
         "type": "json_schema",
-        "schema": _normalize_claude_output_schema(schema(output_type)),
+        "schema": normalize_claude_output_schema(schema(output_type)),
     }
 
 
@@ -64,7 +66,7 @@ def try_parse_structured_output[OutputT](
     if not (hasattr(message, "structured_output") and message.structured_output):
         return None
     output_type = rendered.output_type
-    if not output_type or output_type is type(None):  # pyright: ignore[reportUnnecessaryComparison]
+    if not output_type or output_type is _NONE_TYPE:
         return None  # pragma: no cover - defensive for prompts without output type
     try:
         return cast(
@@ -130,7 +132,7 @@ def raise_if_missing_required_structured_output[OutputT](  # noqa: PLR0913
 ) -> None:
     """Raise when structured output is required but no response was produced."""
     output_type = rendered.output_type
-    if output_type is None or output_type is type(None):  # pyright: ignore[reportUnnecessaryComparison]
+    if output_type is None or output_type is _NONE_TYPE:
         return
     if output is not None or result_text is not None:
         return

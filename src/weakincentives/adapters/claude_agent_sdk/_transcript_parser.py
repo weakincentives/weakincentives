@@ -26,7 +26,7 @@ from ...runtime.transcript import TranscriptEmitter
 
 if TYPE_CHECKING:
     from ._transcript_collector import (
-        _TailerState,  # pyright: ignore[reportPrivateUsage]
+        TailerState,
     )
 
 __all__ = [
@@ -56,7 +56,7 @@ def _has_block_type(content: list[object], block_type: str) -> bool:
 
 def emit_entry(
     emitter: TranscriptEmitter,
-    tailer: _TailerState,
+    tailer: TailerState,
     line: str,
 ) -> None:
     """Parse and emit a single transcript JSONL line.
@@ -113,7 +113,7 @@ def emit_entry(
 
 def _try_emit_split(
     emitter: TranscriptEmitter,
-    tailer: _TailerState,
+    tailer: TailerState,
     entry: dict[str, Any],
     entry_type: str,
     line: str,
@@ -141,7 +141,7 @@ def _try_emit_split(
 
 def emit_assistant_split(
     emitter: TranscriptEmitter,
-    tailer: _TailerState,
+    tailer: TailerState,
     entry: dict[str, Any],
     line: str,
 ) -> None:
@@ -203,7 +203,7 @@ def emit_assistant_split(
 
 def emit_user_tool_result_split(
     emitter: TranscriptEmitter,
-    tailer: _TailerState,
+    tailer: TailerState,
     entry: dict[str, Any],
     line: str,
 ) -> None:

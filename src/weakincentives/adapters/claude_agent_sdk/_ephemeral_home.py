@@ -178,7 +178,7 @@ class EphemeralHome:
         ...     ephemeral.cleanup()
     """
 
-    def __init__(  # pyright: ignore[reportMissingSuperCall]
+    def __init__(
         self,
         isolation: IsolationConfig,
         *,
@@ -192,6 +192,7 @@ class EphemeralHome:
             workspace_path: Optional workspace directory to include.
             temp_dir_prefix: Prefix for the temporary directory name.
         """
+        super().__init__()
         self._isolation = isolation
         self._workspace_path = workspace_path
         self._temp_dir = tempfile.mkdtemp(prefix=temp_dir_prefix)
@@ -312,7 +313,7 @@ class EphemeralHome:
         system's settings.json, which the user controls.
         """
         from .isolation import (
-            _read_host_claude_settings,  # pyright: ignore[reportPrivateUsage]
+            read_host_claude_settings,
         )
 
         settings["env"] = {
@@ -320,7 +321,7 @@ class EphemeralHome:
         }
 
         # Read host settings.json and inherit auth-related env vars
-        host_settings = _read_host_claude_settings()
+        host_settings = read_host_claude_settings()
         host_env: dict[str, str] = host_settings.get("env", {})
 
         inherited_vars: list[str] = []
@@ -474,7 +475,7 @@ class EphemeralHome:
         """
         from .isolation import (
             IsolationAuthError,
-            _is_bedrock_configured,  # pyright: ignore[reportPrivateUsage]
+            is_bedrock_configured,
         )
 
         # Skip when using explicit API key (Bedrock is disabled)
@@ -485,7 +486,7 @@ class EphemeralHome:
             )
             return
 
-        bedrock_enabled = _is_bedrock_configured(check_host_settings=True)
+        bedrock_enabled = is_bedrock_configured(check_host_settings=True)
         resolution = self._resolve_aws_config_dir(bedrock_enabled)
 
         if resolution.path is None:
@@ -584,7 +585,7 @@ class EphemeralHome:
     def _apply_inherit_host_auth_env(env: dict[str, str]) -> None:
         """Apply environment for inherit host auth mode."""
         from .isolation import (
-            _read_host_claude_settings,  # pyright: ignore[reportPrivateUsage]
+            read_host_claude_settings,
         )
 
         env["DISABLE_AUTOUPDATER"] = "1"
@@ -592,7 +593,7 @@ class EphemeralHome:
         # Pass through AWS env vars for Bedrock authentication
         # Note: ~/.aws is copied to ephemeral home, so SDK finds config at $HOME/.aws
         # Also inherit auth vars from host settings.json if not in shell env
-        host_settings = _read_host_claude_settings()
+        host_settings = read_host_claude_settings()
         host_env: dict[str, str] = host_settings.get("env", {})
 
         aws_vars_found: list[str] = []

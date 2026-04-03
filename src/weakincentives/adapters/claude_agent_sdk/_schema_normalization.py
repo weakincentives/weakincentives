@@ -62,7 +62,7 @@ def _collapse_nullable_any_of(any_of: object) -> dict[str, Any] | None:
     return None
 
 
-def _normalize_claude_output_schema(raw_schema: dict[str, Any]) -> dict[str, Any]:
+def normalize_claude_output_schema(raw_schema: dict[str, Any]) -> dict[str, Any]:
     """Normalize serde JSON schema for Claude structured output compatibility."""
     normalized = dict(raw_schema)
 
@@ -73,14 +73,14 @@ def _normalize_claude_output_schema(raw_schema: dict[str, Any]) -> dict[str, Any
                 cast(dict[str, Any], properties).items()
             )
             normalized["properties"] = {
-                key: _normalize_claude_output_schema(cast(dict[str, Any], value))
+                key: normalize_claude_output_schema(cast(dict[str, Any], value))
                 if isinstance(value, dict)
                 else value
                 for key, value in prop_items
             }
 
     if "items" in normalized and isinstance(normalized["items"], dict):
-        normalized["items"] = _normalize_claude_output_schema(
+        normalized["items"] = normalize_claude_output_schema(
             cast(dict[str, Any], normalized["items"])
         )
 
@@ -89,7 +89,7 @@ def _normalize_claude_output_schema(raw_schema: dict[str, Any]) -> dict[str, Any
         if isinstance(combinator_items, list):
             typed_items: list[Any] = cast(list[Any], combinator_items)
             normalized[combinator] = [
-                _normalize_claude_output_schema(cast(dict[str, Any], entry))
+                normalize_claude_output_schema(cast(dict[str, Any], entry))
                 if isinstance(entry, dict)
                 else entry
                 for entry in typed_items
@@ -100,7 +100,7 @@ def _normalize_claude_output_schema(raw_schema: dict[str, Any]) -> dict[str, Any
         if isinstance(defs, dict):
             def_items: list[tuple[str, Any]] = list(cast(dict[str, Any], defs).items())
             normalized[defs_key] = {
-                key: _normalize_claude_output_schema(cast(dict[str, Any], value))
+                key: normalize_claude_output_schema(cast(dict[str, Any], value))
                 if isinstance(value, dict)
                 else value
                 for key, value in def_items

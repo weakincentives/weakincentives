@@ -293,7 +293,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
     between the SDK's internal execution and the weakincentives Session.
     """
 
-    def __init__(  # pyright: ignore[reportMissingSuperCall]
+    def __init__(
         self,
         *,
         model: str | None = None,
@@ -314,6 +314,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             allowed_tools: Tools Claude can use (None = all available).
             disallowed_tools: Tools to explicitly block.
         """
+        super().__init__()
         resolved_model = model if model is not None else get_default_model()
         self._model = resolved_model
         self._client_config = client_config or ClaudeAgentSDKClientConfig()

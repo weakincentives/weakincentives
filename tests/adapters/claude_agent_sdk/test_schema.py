@@ -68,20 +68,20 @@ class TestCollapseNullableAnyOf:
 
 
 class TestNormalizeClaudeOutputSchema:
-    """Tests for _normalize_claude_output_schema recursive cases."""
+    """Tests for normalize_claude_output_schema recursive cases."""
 
     def test_object_without_properties(self) -> None:
         from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
-            _normalize_claude_output_schema,
+            normalize_claude_output_schema,
         )
 
         schema: dict[str, Any] = {"type": "object"}
-        result = _normalize_claude_output_schema(schema)
+        result = normalize_claude_output_schema(schema)
         assert result == {"type": "object"}
 
     def test_array_items_normalized(self) -> None:
         from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
-            _normalize_claude_output_schema,
+            normalize_claude_output_schema,
         )
 
         schema: dict[str, Any] = {
@@ -90,13 +90,13 @@ class TestNormalizeClaudeOutputSchema:
                 "anyOf": [{"type": "integer"}, {"type": "null"}],
             },
         }
-        result = _normalize_claude_output_schema(schema)
+        result = normalize_claude_output_schema(schema)
         assert result["items"]["type"] == ["integer", "null"]
         assert "anyOf" not in result["items"]
 
     def test_defs_normalized(self) -> None:
         from weakincentives.adapters.claude_agent_sdk._schema_normalization import (
-            _normalize_claude_output_schema,
+            normalize_claude_output_schema,
         )
 
         schema: dict[str, Any] = {
@@ -106,5 +106,5 @@ class TestNormalizeClaudeOutputSchema:
                 },
             },
         }
-        result = _normalize_claude_output_schema(schema)
+        result = normalize_claude_output_schema(schema)
         assert result["$defs"]["Inner"]["type"] == ["string", "null"]

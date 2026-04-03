@@ -69,7 +69,7 @@ def _extract_inner_message_content(inner_msg: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _extract_message_content(message: Any) -> dict[str, Any]:  # noqa: ANN401  # pyright: ignore[reportUnusedFunction]
+def extract_message_content(message: Any) -> dict[str, Any]:  # noqa: ANN401
     """Extract full content from an SDK message for debug logging."""
     result: dict[str, Any] = {}
 

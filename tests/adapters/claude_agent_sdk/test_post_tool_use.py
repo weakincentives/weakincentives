@@ -67,10 +67,10 @@ class TestPostToolUseHook:
         assert event.adapter == "test_adapter"
         assert event.prompt_name == "test_prompt"
 
-    def test_tracks_tool_count(self, hook_context: HookContext) -> None:
+    def test_trackstool_count(self, hook_context: HookContext) -> None:
         hook = create_post_tool_use_hook(hook_context)
 
-        assert hook_context._tool_count == 0
+        assert hook_context.tool_count == 0
 
         asyncio.run(
             hook(
@@ -84,7 +84,7 @@ class TestPostToolUseHook:
                 {"signal": None},
             )
         )
-        assert hook_context._tool_count == 1
+        assert hook_context.tool_count == 1
 
         asyncio.run(
             hook(
@@ -98,7 +98,7 @@ class TestPostToolUseHook:
                 {"signal": None},
             )
         )
-        assert hook_context._tool_count == 2
+        assert hook_context.tool_count == 2
 
     def test_handles_tool_error(self, session: Session) -> None:
         events: list[ToolInvoked] = []
@@ -241,7 +241,7 @@ class TestPostToolUseHook:
         assert result == {}
         assert len(events) == 0
         # Tool count IS incremented (needed for feedback provider triggers)
-        assert context._tool_count == 1
+        assert context.tool_count == 1
 
     def test_skips_mcp_wink_tools_with_parsed_input(self, session: Session) -> None:
         """MCP-bridged WINK tools should be skipped even with full SDK input format."""

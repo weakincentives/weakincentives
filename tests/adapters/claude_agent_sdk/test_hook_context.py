@@ -41,7 +41,7 @@ class TestHookContext:
         assert context.deadline is None
         assert context.budget_tracker is None
         assert context.stop_reason is None
-        assert context._tool_count == 0
+        assert context.tool_count == 0
 
     def test_prompt_property(self, session: Session) -> None:
         prompt = _make_prompt()
