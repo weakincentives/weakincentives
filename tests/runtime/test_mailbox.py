@@ -513,6 +513,17 @@ class TestInMemoryMailbox:
             requests.close()
             responses.close()
 
+    def test_close_stops_reaper_thread(self) -> None:
+        """Reaper thread exits cleanly within 2 seconds of close()."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        assert mailbox._reaper_thread is not None
+        assert mailbox._reaper_thread.is_alive()
+
+        mailbox.close()
+
+        assert not mailbox._reaper_thread.is_alive()
+        assert mailbox._stop_reaper.is_set()
+
     def test_reply_without_reply_to_raises(self) -> None:
         """Message.reply() raises when no reply_to specified."""
         mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
