@@ -478,6 +478,8 @@ class TestTranscriptCollectorLifecycle:
 
             async with collector.run():
                 await collector._remember_transcript_path(str(transcript))
+                # Advance clock to wake poll loop so it reads the file.
+                clock.advance(0.01)
                 await _tick()
 
                 # Delete the file to trigger error handling
