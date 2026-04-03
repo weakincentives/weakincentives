@@ -380,8 +380,10 @@ def test_tool_wrap_handles_type_hint_resolution_errors(
         lambda *a, **k: (_ for _ in ()).throw(TypeError()),
     )
 
-    # When hints fail, params type comes from signature which may be a string
-    with pytest.raises(PromptValidationError, match="ToolResult"):
+    # When hints fail, params type comes from signature which may be a string;
+    # the TypeGuard in _resolve_wrapped_params_type catches that the string
+    # annotation is not a concrete type before reaching return annotation checks.
+    with pytest.raises(PromptValidationError, match="ParamsT"):
         Tool.wrap(handler)
 
 
@@ -514,3 +516,33 @@ def test_tool_wrap_handles_empty_toolresult_args(
         match=r"Tool handler return annotation must be ToolResult\[ResultT\].",
     ):
         Tool.wrap(handler)
+
+
+def test_tool_result_type_falls_back_when_unresolved() -> None:
+    tool = Tool[ExampleParams, ExampleResult].create(
+        name="lookup",
+        description="Lookup information.",
+        handler=None,
+    )
+    # Temporarily clear to exercise the fallback path for deferred normalization
+    original = type(tool)._specialized_result_type
+    try:
+        type(tool)._specialized_result_type = None
+        assert tool.result_type is type(None)
+    finally:
+        type(tool)._specialized_result_type = original
+
+
+def test_tool_create_requires_result_annotation() -> None:
+    tool_cls = Tool[ExampleParams, ExampleResult]
+    original = tool_cls._specialized_result_annotation
+    try:
+        tool_cls._specialized_result_annotation = None
+        with pytest.raises(PromptValidationError, match="concrete type arguments"):
+            tool_cls.create(
+                name="test",
+                description="Test tool.",
+                handler=None,
+            )
+    finally:
+        tool_cls._specialized_result_annotation = original
