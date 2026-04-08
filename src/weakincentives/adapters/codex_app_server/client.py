@@ -49,6 +49,7 @@ _SENTINEL: dict[str, Any] = {"_sentinel": True}
 
 _WS_CONNECT_MAX_RETRIES = 50
 _WS_CONNECT_RETRY_DELAY = 0.1
+_WS_MANAGED_PORT_RETRIES = 3
 
 
 def _find_free_port() -> int:
@@ -249,21 +250,33 @@ class CodexAppServerClient:
         self._start_stderr_capture()
 
     async def _start_ws_managed(self) -> None:
-        """Spawn ``codex app-server --listen ws://…`` and connect."""
-        port = _find_free_port()
-        ws_url = f"ws://127.0.0.1:{port}"
+        """Spawn ``codex app-server --listen ws://…`` and connect.
 
-        self._proc = await self._spawn(
-            "app-server", "--listen", ws_url, stdout=asyncio.subprocess.DEVNULL
-        )
-        self._start_stderr_capture()
+        Retries with a fresh port if the selected port is already taken
+        (TOCTOU race between ``_find_free_port`` and subprocess bind).
+        """
+        last_error: CodexClientError | None = None
+        for _attempt in range(_WS_MANAGED_PORT_RETRIES):
+            port = _find_free_port()
+            ws_url = f"ws://127.0.0.1:{port}"
 
-        try:
-            await self._await_tcp_ready("127.0.0.1", port, ws_url)
-            await self._connect_ws(ws_url)
-        except BaseException:
-            await self.stop()
-            raise
+            self._proc = await self._spawn(
+                "app-server", "--listen", ws_url, stdout=asyncio.subprocess.DEVNULL
+            )
+            self._start_stderr_capture()
+
+            try:
+                await self._await_tcp_ready("127.0.0.1", port, ws_url)
+                await self._connect_ws(ws_url)
+            except CodexClientError as exc:
+                last_error = exc
+                await self.stop()
+            else:
+                return
+
+        if last_error is not None:  # pragma: no branch — loop runs at least once
+            raise last_error
+        raise CodexClientError("Managed WebSocket startup failed")  # pragma: no cover
 
     async def _start_ws_external(self) -> None:
         """Connect to an external Codex app-server via WebSocket."""

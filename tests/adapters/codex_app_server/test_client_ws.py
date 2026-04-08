@@ -387,6 +387,51 @@ class TestManagedWs:
 
         asyncio.run(_run())
 
+    def test_retries_on_port_conflict(self) -> None:
+        async def _run() -> None:
+            fake_proc = FakeManagedProcess()
+            fake_ws = FakeWebSocket(inbound=[])
+            call_count = 0
+
+            async def mock_exec(*args: object, **kwargs: object) -> FakeManagedProcess:
+                nonlocal call_count
+                call_count += 1
+                return fake_proc
+
+            with (
+                patch(
+                    "asyncio.create_subprocess_exec",
+                    side_effect=mock_exec,
+                ),
+                patch(
+                    "weakincentives.adapters.codex_app_server.client.CodexAppServerClient._await_tcp_ready",
+                    new_callable=AsyncMock,
+                ) as mock_tcp,
+                patch(
+                    "weakincentives.adapters.codex_app_server.client.CodexAppServerClient._connect_ws",
+                    new_callable=AsyncMock,
+                ) as mock_connect,
+            ):
+                # First attempt fails, second succeeds.
+                mock_tcp.side_effect = [
+                    CodexClientError("did not start listening"),
+                    None,
+                ]
+
+                async def do_connect(url: str) -> None:
+                    client._ws = fake_ws
+                    client._read_task = asyncio.create_task(client._read_loop())
+
+                mock_connect.side_effect = do_connect
+
+                client = CodexAppServerClient(transport="websocket")
+                await client.start()
+
+                assert call_count == 2
+                await client.stop()
+
+        asyncio.run(_run())
+
     def test_process_exit_during_startup_raises(self) -> None:
         async def _run() -> None:
             fake_proc = FakeManagedProcess()
