@@ -405,7 +405,7 @@ class TestReadLoopEdgeCases:
 
                 assert len(messages) == 0
                 assert future.done()
-                with pytest.raises(CodexClientError, match="exited"):
+                with pytest.raises(CodexClientError, match="disconnected"):
                     future.result()
 
                 await client.stop()

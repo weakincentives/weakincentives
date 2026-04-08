@@ -2,8 +2,9 @@
 
 > **Adapter name:** `codex_app_server`
 > **Codex entrypoint:** `codex app-server`
-> **Protocol:** JSON-RPC 2.0 (without `"jsonrpc":"2.0"` header) over newline-delimited JSON on stdio
-> **Validated against:** `codex-cli 0.98.0` with ChatGPT auth
+> **Protocol:** JSON-RPC (without `"jsonrpc":"2.0"` header)
+> **Transports:** stdio (NDJSON) or WebSocket (one message per text frame)
+> **Validated against:** `codex-cli 0.118.0` with ChatGPT auth
 
 ## Purpose
 
@@ -28,8 +29,8 @@ The Codex App Server is an **agentic harness** — it provides planning loops,
 tool orchestration, sandboxing, approval flows, and crash recovery. This
 qualifies it as an execution harness under WINK's design philosophy (see
 `specs/ADAPTERS.md`). The app-server protocol exposes the full Codex agent
-lifecycle over stdio, making it suitable for deep product integrations while
-keeping the agent definition (prompts, tools, policies) portable.
+lifecycle, making it suitable for deep product integrations while keeping the
+agent definition (prompts, tools, policies) portable.
 
 Key Codex capabilities surfaced through the app-server:
 
@@ -46,14 +47,95 @@ Key Codex capabilities surfaced through the app-server:
 
 ### Runtime Dependencies
 
-1. **Codex CLI** installed and available on `PATH` as `codex`
+1. **Codex CLI** installed and available on `PATH` (stdio mode), **or** a
+   reachable Codex App Server instance (WebSocket mode)
 1. WINK (`weakincentives`) runtime
+1. `weakincentives[codex-ws]` extra (WebSocket mode only — provides `websockets`)
 
-No additional Python dependencies beyond WINK. The adapter reuses `BridgedTool`
-and `create_bridged_tools()` from the shared adapter module at
-`src/weakincentives/adapters/_shared/_bridge.py` — it does not require the
-`claude-agent-sdk` package at runtime. Tool bridging uses Codex's native
-dynamic tools protocol.
+No additional Python dependencies beyond WINK for stdio mode. The adapter
+reuses `BridgedTool` and `create_bridged_tools()` from the shared adapter
+module at `src/weakincentives/adapters/_shared/_bridge.py` — it does not
+require the `claude-agent-sdk` package at runtime.
+
+## Transport Modes
+
+The adapter supports two transport modes that carry identical JSON-RPC
+messages. The transport determines **how** messages are framed and **who**
+manages the Codex process lifecycle.
+
+### stdio (default)
+
+The adapter spawns `codex app-server` as a child process and communicates via
+newline-delimited JSON (NDJSON) over stdin/stdout pipes. This is the original
+transport and the simplest way to run Codex locally.
+
+| Aspect | Details |
+|--------|---------|
+| **Framing** | One JSON object per `\n`-delimited line |
+| **Process lifecycle** | Adapter spawns and terminates the subprocess |
+| **Clients per process** | One (1:1 mapping) |
+| **Auth** | Inherits host-level credentials from `~/.codex/` |
+| **Stderr** | Captured for diagnostics |
+| **Backpressure** | None |
+
+### Managed WebSocket
+
+The adapter spawns `codex app-server --listen ws://127.0.0.1:PORT` as a child
+process, waits for it to start listening, then connects via WebSocket. This
+gives the benefits of WebSocket framing (text frames, no newline parsing)
+while retaining local process management.
+
+| Aspect | Details |
+|--------|---------|
+| **Framing** | One JSON object per WebSocket text frame |
+| **Process lifecycle** | Adapter spawns and terminates the subprocess |
+| **Clients per process** | One (adapter is the sole client) |
+| **Auth** | Inherits host-level credentials from `~/.codex/` |
+| **Stderr** | Captured for diagnostics |
+| **Backpressure** | `-32001` error code when server request queue is full |
+
+### External WebSocket
+
+The adapter connects to a Codex App Server that is already running and
+listening on a `ws://` or `wss://` endpoint. **The adapter does not spawn or
+manage the server process.** This mode is designed for:
+
+- **Remote execution:** Connecting to a Codex App Server running on a different
+  machine over the network.
+- **Shared servers:** Multiple WINK adapter instances (or other clients) can
+  connect to the same server concurrently. Each WebSocket connection gets its
+  own independent session.
+- **Long-lived servers:** The server lifecycle is decoupled from any single
+  client. The server continues running when clients disconnect.
+- **Managed infrastructure:** The Codex App Server may be deployed and
+  supervised by external infrastructure (systemd, Kubernetes, etc.). WINK does
+  not need to know how to start or stop it.
+
+| Aspect | Details |
+|--------|---------|
+| **Framing** | One JSON object per WebSocket text frame |
+| **Process lifecycle** | **Not managed by the adapter** — server is external |
+| **Clients per server** | Multiple concurrent connections, each independent |
+| **Auth** | `Authorization: Bearer TOKEN` header during WebSocket upgrade |
+| **Stderr** | Not available (no subprocess) |
+| **Backpressure** | `-32001` error code when server request queue is full |
+
+**Binary frames** are silently ignored. **Invalid JSON** is silently ignored
+and the connection survives.
+
+### Protocol Equivalence
+
+All three transport modes carry identical JSON-RPC messages. All protocol-level
+code works unchanged across transports:
+
+- `_protocol.py` — initialize, authenticate, thread, turn, stream
+- `_events.py` — notification → event mapping
+- `_response.py` — response building, structured output
+- `_guardrails.py` — feedback, task completion
+- `_transcript.py` — transcript bridge
+- `_schema.py` — schema transforms
+
+The only code that differs is the transport layer in `client.py`.
 
 ## Architecture
 
@@ -63,7 +145,9 @@ WINK Prompt/Session
       ├─ Render WINK prompt → markdown text
       ├─ create_bridged_tools() → BridgedTool list
       ├─ Convert to DynamicToolSpec list [{name, description, inputSchema}]
-      ├─ Spawn: codex app-server (stdio NDJSON)
+      ├─ Connect transport:
+      │    ├─ stdio: Spawn codex app-server, pipe stdin/stdout
+      │    └─ websocket: Connect to ws://host:port
       ├─ Handshake: initialize (experimentalApi) → initialized
       ├─ thread/start (model, cwd, sandbox, dynamicTools)
       ├─ turn/start (text input, outputSchema if structured)
@@ -85,13 +169,13 @@ src/weakincentives/adapters/codex_app_server/
   __init__.py
   adapter.py                # CodexAppServerAdapter (high-level orchestration)
   config.py                 # CodexAppServerClientConfig, CodexAppServerModelConfig
-  client.py                 # CodexAppServerClient (stdio JSON-RPC client)
+  client.py                 # CodexAppServerClient (transport-aware JSON-RPC client)
   _schema.py                # Schema transforms (DynamicToolSpec, OpenAI strict schema)
   _protocol.py              # JSON-RPC protocol orchestration (init, auth, thread, turn, stream)
   _response.py              # Response building and structured output parsing
   _events.py                # Codex item/turn notifications → WINK ToolInvoked mapping
   _transcript.py            # Transcript bridging for Codex notifications
-  _async.py                 # asyncio helpers for stdio NDJSON processing
+  _async.py                 # asyncio helpers
   _guardrails.py            # Feedback providers, task completion checking
   _ephemeral_home.py        # CodexEphemeralHome (skill installation)
 ```
@@ -105,21 +189,39 @@ Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `codex_bin` | `str` | `"codex"` | Executable to spawn |
+| `transport` | `Transport` | `"stdio"` | Wire protocol: `"stdio"` or `"websocket"` |
+| `codex_bin` | `str` | `"codex"` | Executable to spawn (managed modes only) |
+| `remote_url` | `str \| None` | `None` | WebSocket URL of an external server (e.g. `ws://10.0.1.5:4500`). When set, no subprocess is spawned |
+| `ws_auth_token` | `str \| None` | `None` | Bearer token for WebSocket auth. Sent as `Authorization: Bearer TOKEN` during upgrade |
 | `cwd` | `str \| None` | `None` | Working directory (must be absolute; defaults to `Path.cwd().resolve()`) |
-| `env` | `Mapping[str, str] \| None` | `None` | Extra environment variables |
-| `suppress_stderr` | `bool` | `True` | Capture stderr for debugging (not printed unless debugging) |
+| `env` | `Mapping[str, str] \| None` | `None` | Extra environment variables for the subprocess (managed modes only) |
+| `suppress_stderr` | `bool` | `True` | Capture stderr for debugging (stdio mode only) |
 | `startup_timeout_s` | `float` | `10.0` | Max time for initialize handshake |
 | `approval_policy` | `ApprovalPolicy` | `"never"` | How to handle command/file approvals |
 | `sandbox_mode` | `SandboxMode \| None` | `None` | Sandbox mode for `thread/start` |
-| `auth_mode` | `CodexAuthMode \| None` | `None` | Authentication configuration |
+| `auth_mode` | `CodexAuthMode \| None` | `None` | Authentication configuration. None inherits host credentials |
 | `mcp_servers` | `dict[str, McpServerConfig] \| None` | `None` | Additional external MCP servers |
 | `ephemeral` | `bool` | `False` | If true, thread is not persisted to disk |
 | `client_name` | `str` | `"wink"` | Client identifier for `initialize` |
 | `client_version` | `str` | `"0.1.0"` | Client version for `initialize` |
+| `transcript` | `bool` | `True` | Emit transcript entries during evaluation |
+| `transcript_emit_raw` | `bool` | `True` | Include raw notification JSON in `raw` field |
+
+**Transport selection:**
+
+- `transport="stdio"` (default), `remote_url=None`: spawn subprocess, NDJSON
+  over stdin/stdout pipes.
+- `transport="websocket"`, `remote_url=None`: spawn subprocess with
+  `--listen ws://127.0.0.1:PORT`, connect via WebSocket. The subprocess is
+  managed by the adapter.
+- `remote_url` set (any `transport` value): connect to an external server via
+  WebSocket. **No subprocess is spawned or managed.** `codex_bin`, `env`, and
+  `suppress_stderr` are ignored.
 
 > **CWD requirement:** `thread/start` requires `cwd` to be an absolute path. If
-> `None`, the adapter resolves to `Path.cwd().resolve()`.
+> `None`, the adapter resolves to `Path.cwd().resolve()`. When connecting to a
+> remote server, `cwd` refers to a path on the **remote** machine — the caller
+> is responsible for ensuring it exists and is accessible.
 
 > **Approval handling:** `approval_policy="never"` means the adapter auto-accepts
 > all approvals. For non-interactive WINK execution, `"never"` is the default
@@ -128,6 +230,16 @@ Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
 > **Tool namespace:** WINK bridged tools are registered as dynamic tools.
 > User-provided `mcp_servers` are passed to Codex via `config.mcp_servers` on
 > `thread/start`. External MCP tool names must not collide with WINK tool names.
+
+#### Transport-Specific Fields
+
+| Field | stdio | managed WS | external WS | Notes |
+|-------|-------|------------|-------------|-------|
+| `codex_bin` | Used | Used | Ignored | No subprocess in external mode |
+| `env` | Used | Used | Ignored | No subprocess env in external mode |
+| `suppress_stderr` | Used | Ignored | Ignored | Only stdio uses piped stderr |
+| `remote_url` | Ignored | Ignored | Required | URL of external server |
+| `ws_auth_token` | Ignored | Optional | Optional | Bearer token for WS upgrade |
 
 #### ApprovalPolicy
 
@@ -164,8 +276,26 @@ OAuth tokens. At `src/weakincentives/adapters/codex_app_server/config.py`.
 
 Authentication is performed after `initialize` via `account/login/start`. When
 `auth_mode` is `None`, the adapter skips authentication and assumes the Codex
-CLI environment is already authenticated (the default — Codex inherits host-level
-credentials from `~/.codex/`).
+environment is already authenticated. In stdio mode this means the CLI inherits
+host-level credentials from `~/.codex/`. In WebSocket mode the remote server
+must be pre-authenticated or the caller must provide `auth_mode`.
+
+#### WebSocket Authentication
+
+Two layers of authentication exist in WebSocket mode:
+
+1. **Transport-level auth** (`ws_auth_token`): A bearer token sent during the
+   WebSocket upgrade handshake via the `Authorization: Bearer TOKEN` header.
+   This authenticates the client to the Codex App Server process itself. The
+   server must be started with `--ws-auth capability-token --ws-token-file PATH`
+   for this to be enforced. On loopback connections, transport auth is optional.
+
+1. **Session-level auth** (`auth_mode`): The `account/login/start` request
+   sent after `initialize`. This authenticates the session with the upstream
+   model provider (OpenAI). Same mechanism as stdio mode.
+
+These are independent — a server may require transport auth without session
+auth (if pre-authenticated), or session auth without transport auth (loopback).
 
 ### CodexAppServerModelConfig
 
@@ -184,6 +314,69 @@ Personality = Literal["none", "friendly", "pragmatic"]
 
 **Note:** `seed`, `stop`, `presence_penalty`, `frequency_penalty` are not
 supported by the Codex app-server and are not fields on this config.
+
+## Transport Layer
+
+### CodexAppServerClient
+
+The client manages transport connectivity and provides a typed interface for
+the JSON-RPC protocol. It operates in one of two modes depending on
+configuration.
+
+At `src/weakincentives/adapters/codex_app_server/client.py`:
+
+**Public API** (identical across both transports):
+
+- `start()` — Establish the transport (spawn subprocess or connect WebSocket)
+- `stop()` — Tear down the transport (terminate subprocess or close WebSocket)
+- `send_request(method, params, timeout)` — Send request and await response by
+  matching `id`; returns the `result` field
+- `send_notification(method, params=None)` — Send notification (no `id`, no
+  response expected); `params` is optional
+- `send_response(request_id, result)` — Send response to a server-initiated
+  request
+- `read_messages()` — Async iterator yielding notifications and server requests
+  (responses are consumed internally by `send_request`)
+- `stderr_output` — Captured stderr output (stdio mode only; empty in WS mode)
+
+### stdio Transport Internals
+
+Each message is a single JSON object terminated by `\n`. The client assigns
+incrementing integer `id` fields to requests and correlates responses by `id`.
+
+- `_write(msg)` — `json.dumps(msg, separators=(",",":"))` + `\n` to stdin
+- `_read_loop()` — Reads lines from stdout, parses JSON, calls `_route_message()`
+- `_stderr_loop()` — Buffers up to 1000 stderr lines for diagnostics
+
+### WebSocket Transport Internals
+
+Each message is a single JSON object sent as one WebSocket text frame. No
+newline delimiter. The read/write interface matches stdio but uses
+`ws.send(frame)` / `ws.recv()` instead of pipe I/O.
+
+- `_write(msg)` — `json.dumps(msg, separators=(",",":"))` sent as WS text frame
+- `_read_loop()` — Receives WS text frames, parses JSON, calls `_route_message()`
+- No stderr capture (no subprocess)
+
+**Connection headers:** When `ws_auth_token` is configured, the client passes
+`Authorization: Bearer TOKEN` as an additional header during the WebSocket
+upgrade.
+
+### Message Routing
+
+The client demultiplexes inbound messages into three streams (same logic for
+both transports):
+
+1. **Responses** — messages with an `id` field matching a pending request
+1. **Notifications** — messages with a `method` field and no `id`
+1. **Server requests** — messages with both `method` and `id` (approval
+   requests and dynamic tool calls); the client must respond with a matching `id`
+
+Server-initiated requests require the client to respond promptly. Dynamic tool
+calls (`item/tool/call`) and approval requests both follow this pattern.
+
+**Wire format note:** The Codex protocol omits the `"jsonrpc": "2.0"` header —
+do not include it.
 
 ## Protocol Mapping
 
@@ -225,71 +418,6 @@ Codex emits notifications in two parallel namespaces:
 
 The adapter should only process v2 notifications.
 
-## Workspace Management
-
-### WorkspaceSection
-
-At `src/weakincentives/prompt/workspace.py` (exported from `weakincentives.prompt`):
-
-- Accepts `HostMount` tuples, `allowed_host_roots`, max-bytes budgets
-- Materializes temporary directory with copied files (with glob filtering,
-  symlink safety, and byte budget enforcement)
-- Exposes `temp_dir` for `CodexAppServerClientConfig.cwd`
-- Renders a provider-agnostic summary of mounts and budgets
-- Exposes cleanup via `.cleanup()` with reference counting for cloned sections
-- Provides `workspace_fingerprint` for session reuse validation
-- Binds a `HostFilesystem` resource scoped to the temp directory
-
-**Workspace types** (from `weakincentives.prompt`):
-
-| Type | Description |
-|------|-------------|
-| `WorkspaceSection` | Generic workspace section for all adapters |
-| `HostMount` | Mount configuration (host_path, mount_path, include_glob, exclude_glob, max_bytes, follow_symlinks) |
-| `HostMountPreview` | Summary of materialized mount |
-| `WorkspaceBudgetExceededError` | Mount exceeds byte budget |
-| `WorkspaceSecurityError` | Mount violates security constraints |
-
-## Stdio JSON-RPC Client
-
-### CodexAppServerClient
-
-The client manages the `codex app-server` subprocess and provides a typed
-interface over the NDJSON stdio protocol.
-
-At `src/weakincentives/adapters/codex_app_server/client.py`:
-
-- `start()` — spawn `codex app-server` via `asyncio.create_subprocess_exec`
-- `stop()` — terminate subprocess gracefully (close stdin, wait, kill if needed)
-- `send_request(method, params, timeout)` — send JSON-RPC request and await
-  response by matching `id`; returns the `result` field
-- `send_notification(method, params=None)` — send JSON-RPC notification (no
-  `id`, no response expected); `params` is optional
-- `send_response(request_id, result)` — send response to a server-initiated
-  request
-- `read_messages()` — async iterator yielding notifications and server requests
-  (responses are consumed internally by `send_request`)
-- `stderr_output` — property returning captured stderr lines
-
-**Wire format:** Each message is a single JSON object terminated by `\n`. The
-client assigns incrementing integer `id` fields to requests and correlates
-responses by `id`. Notifications (no `id`) are routed to subscribers.
-
-**Important:** The Codex protocol omits the `"jsonrpc": "2.0"` header — do
-not include it.
-
-### Message Routing
-
-The client must demultiplex stdout into three streams:
-
-1. **Responses** — messages with an `id` field matching a pending request
-1. **Notifications** — messages with a `method` field and no `id`
-1. **Server requests** — messages with both `method` and `id` (approval
-   requests and dynamic tool calls); the client must respond with a matching `id`
-
-Server-initiated requests require the client to respond promptly. Dynamic tool
-calls (`item/tool/call`) and approval requests both follow this pattern.
-
 ## Structured Output
 
 When `rendered.output_type is not None`, the adapter uses Codex's **native
@@ -327,7 +455,7 @@ text when `outputSchema` is provided.
 
 Dynamic tools are the simplest mechanism for exposing WINK tools to Codex.
 When the model calls a dynamic tool, Codex sends an `item/tool/call` server
-request **back over the same stdio channel** to the adapter process. The
+request **back over the same transport channel** to the adapter process. The
 adapter executes the `BridgedTool` in-process with full access to session
 state and resources, then responds. No subprocess, no HTTP server, no extra
 dependencies.
@@ -337,7 +465,7 @@ The entire integration is:
 1. Convert `BridgedTool` list to `DynamicToolSpec` list (3-line function)
 1. Pass `dynamicTools` on `thread/start` (requires `experimentalApi` on
    `initialize`)
-1. Handle `item/tool/call` in the stdio message loop (same pattern as approval
+1. Handle `item/tool/call` in the message loop (same pattern as approval
    handling)
 
 ### Reused Components
@@ -415,6 +543,28 @@ When a tool raises `VisibilityExpansionRequired`:
 1. After `turn/completed`, adapter checks signal
 1. If set, re-raises to caller for re-render
 
+## Workspace Management
+
+### WorkspaceSection
+
+At `src/weakincentives/prompt/workspace.py` (exported from `weakincentives.prompt`):
+
+- Accepts `HostMount` tuples, `allowed_host_roots`, max-bytes budgets
+- Materializes temporary directory with copied files (with glob filtering,
+  symlink safety, and byte budget enforcement)
+- Exposes `temp_dir` for `CodexAppServerClientConfig.cwd`
+- Renders a provider-agnostic summary of mounts and budgets
+- Exposes cleanup via `.cleanup()` with reference counting for cloned sections
+- Provides `workspace_fingerprint` for session reuse validation
+- Binds a `HostFilesystem` resource scoped to the temp directory
+
+> **Remote servers:** When using WebSocket mode to connect to a remote Codex
+> App Server, `cwd` refers to a directory on the remote machine. Workspace
+> materialization (temp dirs, file copies) happens locally and the resulting
+> path is sent to the remote server. The caller must ensure the remote server
+> has access to the specified path — typically by using a shared filesystem,
+> pre-staging files, or specifying a path that already exists on the remote.
+
 ## Execution Flow
 
 ### 1. Budget/Deadline Setup
@@ -434,20 +584,37 @@ When a tool raises `VisibilityExpansionRequired`:
 1. `create_bridged_tools(rendered.tools, adapter_name="codex_app_server", ...)`
 1. `bridged_tools_to_dynamic_specs(bridged_tools)` → `DynamicToolSpec` list
 
-### 4. Spawn Codex App Server
+### 4. Establish Transport
 
-At `src/weakincentives/adapters/codex_app_server/client.py`:
+**stdio mode** (`transport="stdio"`, `remote_url=None`):
+
 `CodexAppServerClient.start()` spawns the subprocess via
 `asyncio.create_subprocess_exec(codex_bin, "app-server", ...)` with stdin,
-stdout, and stderr pipes. Environment variables are merged from `os.environ`
-and any extra env provided in the config. A background read loop and stderr
+stdout, and stderr pipes. A background read loop and stderr capture loop are
+started as asyncio tasks.
+
+**Managed WebSocket mode** (`transport="websocket"`, `remote_url=None`):
+
+`CodexAppServerClient.start()` spawns the subprocess via
+`asyncio.create_subprocess_exec(codex_bin, "app-server", "--listen", "ws://127.0.0.1:PORT", ...)`, waits for it to accept TCP connections, then
+connects via `websockets.connect(...)`. A background read loop and stderr
 capture loop are started as asyncio tasks.
+
+**External WebSocket mode** (`remote_url` set):
+
+`CodexAppServerClient.start()` connects to the specified WebSocket URL via
+`websockets.connect(remote_url, ...)`. If `ws_auth_token` is configured, the
+`Authorization: Bearer TOKEN` header is included in the upgrade request. A
+background read loop is started as an asyncio task. No subprocess is spawned.
+No stderr capture is available.
 
 ### 5. Initialize Handshake
 
 At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
-`execute_protocol()` sends the `initialize` request with `experimentalApi: true` (enables dynamic tools on `thread/start`), then sends an `initialized`
-notification. The `startup_timeout_s` config controls the handshake timeout.
+`execute_protocol()` sends the `initialize` request with
+`capabilities: {experimentalApi: true}` (enables dynamic tools on
+`thread/start`), then sends an `initialized` notification. The
+`startup_timeout_s` config controls the handshake timeout.
 
 The server rejects all methods before `initialize`. Repeated `initialize` calls
 return `Already initialized`.
@@ -474,9 +641,10 @@ Returns `result["thread"]["id"]`.
 ### 8. Start Turn
 
 At `src/weakincentives/adapters/codex_app_server/_protocol.py`:
-`start_turn()` sends `turn/start` with `threadId` and `input` (text).
-Optional fields `effort`, `summary`, `personality`, and `outputSchema` are
-included only when set. Returns `result["turn"]["id"]`.
+`start_turn()` sends `turn/start` with `threadId` and `input` (as
+`[{"type": "text", "text": prompt_text}]`). Optional fields `effort`,
+`summary`, `personality`, and `outputSchema` are included only when set.
+Returns `result["turn"]["id"]`.
 
 ### 9. Stream Notifications
 
@@ -552,7 +720,7 @@ If deadline expires during a turn:
 
 1. Send `turn/interrupt` — `{"threadId": thread_id, "turnId": turn_id}`
 1. Wait for `turn/completed` with `status: "interrupted"` (bounded wait)
-1. Kill subprocess if needed
+1. Tear down transport (kill subprocess or close WebSocket)
 1. Raise `PromptEvaluationError(phase="request")` or `DeadlineExceededError`
 
 ## Error Handling
@@ -561,10 +729,20 @@ If deadline expires during a turn:
 
 | Phase | When |
 |-------|------|
-| `"request"` | Spawn, initialize, auth, thread/start, or turn/start fails |
+| `"request"` | Transport connect, initialize, auth, thread/start, or turn/start fails |
 | `"response"` | Structured output missing or invalid; turn completes with `status: "failed"` |
 | `"tool"` | Bridged tool execution failure |
 | `"budget"` | Token budget exceeded |
+
+### WebSocket-Specific Errors
+
+| Condition | Handling |
+|-----------|----------|
+| Connection refused | `PromptEvaluationError(phase="request")` — server not reachable |
+| HTTP 401 on upgrade | `PromptEvaluationError(phase="request")` — invalid or missing `ws_auth_token` |
+| Connection closed (code 1006) | `PromptEvaluationError(phase="request")` — server terminated |
+| `-32001` overload error | Retry with backoff, then `PromptEvaluationError(phase="request")` |
+| WebSocket frame error | Log and continue — connection survives |
 
 ### Turn Failure Mapping
 
@@ -588,8 +766,8 @@ When `turn/completed` has `status: "failed"`:
 | `modelCap` (object with `model`, `reset_after_seconds`) | `PromptEvaluationError(phase="budget")` |
 | `other` / unknown | `PromptEvaluationError(phase="response")` |
 
-Include in payload: stderr tail (bounded, e.g., last 8k), Codex error details,
-`codexErrorInfo`, and `additionalDetails`.
+Include in payload: stderr tail (stdio mode only, bounded to last 8k), Codex
+error details, `codexErrorInfo`, and `additionalDetails`.
 
 Tool telemetry errors: log but don't crash.
 
@@ -604,6 +782,11 @@ The ephemeral home provides environment overrides:
 
 - `HOME` — points to the ephemeral directory (skill discovery)
 - `CODEX_HOME` — points to the original `~/.codex` (auth / config)
+
+> **WebSocket mode:** Skill installation writes to the local filesystem and
+> modifies subprocess environment variables. In WebSocket mode (no subprocess),
+> the ephemeral home environment overrides do not apply. Skills must be
+> pre-installed on the remote server or provided via `mcp_servers`.
 
 ## Guardrails
 
@@ -677,6 +860,16 @@ The adapter uses the `last` breakdown for per-turn usage.
 - Verify thread resume with session state
 - Verify authentication flows (API key, external tokens)
 
+### WebSocket Transport Tests
+
+- Verify WebSocket connect, initialize, thread/turn lifecycle
+- Verify dynamic tool calls over WebSocket (bidirectional server requests)
+- Verify transport-level auth (bearer token, rejection on 401)
+- Verify reconnection behavior (new session per connection)
+- Verify graceful handling of server termination (close code 1006)
+- Verify backpressure error `-32001` handling
+- Verify multiple concurrent connections get independent sessions
+
 ### Integration Tests
 
 Skip unless `codex` on PATH:
@@ -685,12 +878,14 @@ Skip unless `codex` on PATH:
 - Simple prompt, verify response
 - Dynamic tool invocation, verify `ToolInvoked`
 - Thread resume, verify continuity
+- WebSocket mode: spawn with `--listen ws://`, connect, full lifecycle
 
 ### Security Tests
 
 - Workspace paths restrict file operations
 - `allowed_host_roots` enforced
 - Sandbox policy correctly propagated
+- WebSocket auth tokens not logged or leaked in error messages
 
 ## Non-Goals (v1)
 
@@ -700,6 +895,10 @@ Skip unless `codex` on PATH:
 - Apps/connectors (`app/list`) — can be added later
 - Configuration management (`config/*`) — Codex handles its own config
 - Multi-thread management — one thread per `evaluate()` call
+- WebSocket connection pooling — one connection per `evaluate()` call
+- Automatic reconnection with session resumption — the adapter creates a new
+  session on each `evaluate()` call, so reconnection is not needed within a
+  single evaluation
 
 ## Design Decisions
 
@@ -716,6 +915,19 @@ forget. The app-server protocol provides:
 For WINK's use case of deeply integrated agent orchestration with session state,
 the app-server protocol is the correct abstraction.
 
+### Why Dual Transport
+
+stdio is simple and works well for local, single-client usage. WebSocket
+enables deployment topologies where the Codex App Server runs on dedicated
+infrastructure:
+
+- **GPU servers** with local model access
+- **Shared clusters** serving multiple WINK agents
+- **Cloud deployments** where WINK runs separately from Codex
+
+The protocol is identical across transports, so the transport choice is purely
+an operational decision. Agent definitions, tools, and policies are unaffected.
+
 ### Why Dynamic Tools for WINK Tools
 
 Dynamic tools are the simplest mechanism for bridging WINK tools to Codex:
@@ -725,16 +937,9 @@ Dynamic tools are the simplest mechanism for bridging WINK tools to Codex:
   process with full access to session state, resources, and transactional
   snapshots
 - **Same pattern as approvals** — `item/tool/call` server requests are handled
-  identically to approval requests in the stdio message loop
+  identically to approval requests in the message loop
 - **3-line conversion** — `bridged_tools_to_dynamic_specs()` converts
   BridgedTool to DynamicToolSpec with no schema transformation
-
-The alternative — running an in-process MCP HTTP server via
-`StreamableHTTPServerTransport` — was prototyped and validated (see
-`scratch/codex_probes/probe_20_mcp_http_bridge.py`). It works but requires
-`claude-agent-sdk`, `mcp`, `starlette`, `uvicorn`, port allocation, background
-threads, and HTTP server lifecycle management. Dynamic tools achieve the same
-result with none of that complexity.
 
 The `experimentalApi` capability required by dynamic tools is a single flag on
 `initialize` and the protocol is stable — it powers the Codex VS Code
@@ -749,17 +954,95 @@ are designed for interactive use (VS Code extension). For WINK:
 - Sandbox policy is the primary security boundary
 - Callers can opt into `"on-request"` for maximum approval gating
 
+## Known Limitations (WebSocket Transport)
+
+The following limitations apply to the current WebSocket transport
+implementation and are expected to be addressed in future iterations.
+
+### Bearer token over plaintext `ws://`
+
+When `ws_auth_token` is set, the adapter sends the `Authorization: Bearer`
+header on any URL including unencrypted `ws://` endpoints. Over a non-loopback
+network this exposes the capability token to interception. Callers connecting
+to remote servers should use `wss://` until the adapter enforces TLS for
+non-loopback bearer auth.
+
+### Implicit local `cwd` in external mode
+
+When `remote_url` is set (external WebSocket mode), the adapter's
+`_resolve_cwd()` logic still falls back to creating a local temp directory or
+using the local `Path.cwd()`. That local path is then sent to the remote
+server's `thread/start`, where it is unlikely to be valid. Callers using
+external mode **must** set an explicit `cwd` that exists on the remote server.
+A future version should reject implicit `cwd` resolution when `remote_url` is
+configured.
+
+### Hard-coded managed-WS startup timeout
+
+The managed WebSocket startup waits a fixed 5 seconds (50 retries × 0.1 s) for
+the subprocess to begin accepting TCP connections. This limit is independent
+of `startup_timeout_s`, so raising the configured timeout does not extend the
+TCP-ready wait. A future version should plumb `startup_timeout_s` into the
+transport bring-up path.
+
+## Security Considerations (WebSocket Transport)
+
+### Transport-level authentication
+
+The Codex App Server supports `--ws-auth capability-token` and
+`--ws-auth signed-bearer-token`. When deploying a server accessible beyond
+loopback, **always** enable one of these modes and use `wss://`.
+
+### Token handling
+
+`ws_auth_token` is stored in `CodexAppServerClientConfig` as a plain string.
+It is never logged by the adapter, but callers should treat the config object
+as sensitive and avoid serializing it to logs or debug bundles.
+
+### Sandbox boundaries in external mode
+
+When connecting to a remote Codex server, the sandbox policy (`sandbox_mode`)
+is enforced by the **remote** server, not the adapter. The adapter has no
+way to verify that the remote server honours the requested policy. Operators
+must ensure the remote server is configured with appropriate sandbox
+restrictions independently.
+
+### Skill installation
+
+`CodexEphemeralHome` installs skills by writing to a local filesystem and
+setting `HOME`/`CODEX_HOME` environment variables on the subprocess. In
+external WebSocket mode there is no subprocess, so skills provided via
+`RenderedPrompt.skills` are not installed. Skills must be pre-installed on
+the remote server or provided through `mcp_servers`.
+
 ## Appendix: Protocol Reference
 
-### Validated with Probes
+### Validated Behaviors
 
-All protocol details in this spec were validated against `codex-cli 0.98.0`
-using probe scripts in `scratch/codex_probes/`. Key findings are documented in
-`scratch/codex_probes/FINDINGS.md`. The end-to-end driver
-(`scratch/codex_probes/codex_code_reviewer_driver.py`) exercises the full
-flow: initialize, thread/start with dynamic tools, turn/start with
-outputSchema, item/tool/call handling, structured output parsing, and
-turn/completed.
+All protocol details in this spec were validated against `codex-cli 0.118.0`.
+
+#### stdio Transport (validated)
+
+- NDJSON framing, no `"jsonrpc"` header, integer `id` correlation
+- Initialize → initialized handshake; double-initialize rejected
+- Dynamic tools via `experimentalApi` capability
+- `item/tool/call` bidirectional server requests
+- Approval auto-response, `turn/interrupt` on deadline
+- Structured output via `outputSchema`
+
+#### WebSocket Transport (validated)
+
+- One JSON object per WebSocket text frame (no `\n` delimiter)
+- Protocol messages identical to stdio — same JSON-RPC objects
+- Multiple concurrent clients: each connection gets an independent session
+- Server exits cleanly when terminated; clients receive close code 1006
+- Binary frames: silently ignored by server
+- Invalid JSON: silently ignored, connection survives for subsequent messages
+- Transport auth: `Authorization: Bearer TOKEN` header on upgrade, enforced
+  only when server started with `--ws-auth`
+- Loopback connections: auth not required unless explicitly configured
+- Reconnection: new connection creates a new session (no session resumption)
+- Dynamic tools and bidirectional tool calls work identically to stdio
 
 ### Available Models (ChatGPT auth)
 
@@ -771,6 +1054,22 @@ turn/completed.
 Codex supports subprocess (`{"command": "...", "args": [...]}`) and HTTP
 (`{"url": "http://..."}`) transports on `config.mcp_servers`, passed via
 `thread/start`.
+
+### Codex App Server CLI
+
+```
+codex app-server [OPTIONS]
+
+Options:
+  --listen <URL>              Transport: stdio:// (default) or ws://IP:PORT
+  --ws-auth <MODE>            Auth mode: capability-token | signed-bearer-token
+  --ws-token-file <PATH>      Token file for capability-token auth
+  --ws-shared-secret-file     Shared secret for signed JWT auth
+  --ws-issuer <ISSUER>        Expected JWT issuer
+  --ws-audience <AUDIENCE>    Expected JWT audience
+  -c, --config <key=value>    Override config.toml values
+  --enable/--disable <FEAT>   Toggle features
+```
 
 ## Related Specifications
 
