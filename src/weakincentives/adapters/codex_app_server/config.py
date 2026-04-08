@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import field
 from typing import Any, Literal
 
 from ...dataclasses import FrozenDataclass
@@ -122,7 +123,7 @@ class CodexAppServerClientConfig:
     transport: Transport = "stdio"
     codex_bin: str = "codex"
     remote_url: str | None = None
-    ws_auth_token: str | None = None
+    ws_auth_token: str | None = field(default=None, repr=False)
     cwd: str | None = None
     env: Mapping[str, str] | None = None
     suppress_stderr: bool = True

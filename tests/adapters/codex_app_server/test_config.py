@@ -108,6 +108,10 @@ class TestCodexAppServerClientConfig:
         assert cfg.remote_url == "ws://10.0.1.5:4500"
         assert cfg.ws_auth_token == "secret-token"
 
+    def test_ws_auth_token_excluded_from_repr(self) -> None:
+        cfg = CodexAppServerClientConfig(ws_auth_token="super-secret")
+        assert "super-secret" not in repr(cfg)
+
 
 class TestCodexAppServerModelConfig:
     def test_defaults(self) -> None:
