@@ -170,7 +170,7 @@ class CodexAppServerClient:
         if read_task is None:
             raise CodexClientError("Client not started")
         if read_task.done():
-            raise CodexClientError("Subprocess exited unexpectedly")
+            raise CodexClientError("Transport disconnected unexpectedly")
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
@@ -190,7 +190,9 @@ class CodexAppServerClient:
         # fail fast instead of waiting forever when timeout=None.
         if read_task.done() and not future.done():
             _ = self._pending.pop(req_id, None)
-            future.set_exception(CodexClientError("Subprocess exited unexpectedly"))
+            future.set_exception(
+                CodexClientError("Transport disconnected unexpectedly")
+            )
 
         try:
             resp = await asyncio.wait_for(future, timeout=timeout)
@@ -251,7 +253,9 @@ class CodexAppServerClient:
         port = _find_free_port()
         ws_url = f"ws://127.0.0.1:{port}"
 
-        self._proc = await self._spawn("app-server", "--listen", ws_url)
+        self._proc = await self._spawn(
+            "app-server", "--listen", ws_url, stdout=asyncio.subprocess.DEVNULL
+        )
         self._start_stderr_capture()
 
         try:
@@ -269,7 +273,10 @@ class CodexAppServerClient:
         await self._connect_ws(url)
 
     async def _spawn(
-        self, *args: str, stdin: int | None = None
+        self,
+        *args: str,
+        stdin: int | None = None,
+        stdout: int | None = asyncio.subprocess.PIPE,
     ) -> asyncio.subprocess.Process:
         """Spawn ``codex <args>`` as a subprocess."""
         merged_env = {**os.environ, **self._extra_env}
@@ -277,7 +284,7 @@ class CodexAppServerClient:
             self._codex_bin,
             *args,
             stdin=stdin,
-            stdout=asyncio.subprocess.PIPE,
+            stdout=stdout,
             stderr=asyncio.subprocess.PIPE,
             env=merged_env,
         )
@@ -365,7 +372,7 @@ class CodexAppServerClient:
             )
         finally:
             await self._message_queue.put(_SENTINEL)
-            self._fail_pending("Subprocess exited unexpectedly")
+            self._fail_pending("Transport disconnected unexpectedly")
 
     async def _read_messages(self) -> None:
         """Read and route messages until the transport disconnects."""

@@ -269,7 +269,7 @@ class TestSendRequest:
                 # Let read loop observe EOF and terminate before request.
                 await asyncio.sleep(0)
 
-                with pytest.raises(CodexClientError, match="exited"):
+                with pytest.raises(CodexClientError, match="disconnected"):
                     await client.send_request("initialize", {})
                 await client.stop()
 
@@ -328,7 +328,7 @@ class TestSendRequest:
             client._read_task = _StubReadTask([False, True])  # type: ignore[assignment]
 
             with patch.object(client, "_write", new_callable=AsyncMock):
-                with pytest.raises(CodexClientError, match="exited unexpectedly"):
+                with pytest.raises(CodexClientError, match="disconnected unexpectedly"):
                     await client.send_request("initialize", {})
 
             assert client._pending == {}

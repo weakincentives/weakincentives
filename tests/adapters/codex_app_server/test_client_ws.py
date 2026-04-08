@@ -370,13 +370,16 @@ class TestManagedWs:
                 client = CodexAppServerClient(transport="websocket")
                 await client.start()
 
-                # Verify subprocess was spawned with --listen ws://...
+                # Verify subprocess was spawned with --listen ws://
+                # and stdout=DEVNULL (no pipe — messages go over WS).
                 mock_exec.assert_called_once()
                 exec_args = mock_exec.call_args[0]
                 assert exec_args[0] == "codex"
                 assert exec_args[1] == "app-server"
                 assert exec_args[2] == "--listen"
                 assert exec_args[3].startswith("ws://127.0.0.1:")
+                exec_kwargs = mock_exec.call_args[1]
+                assert exec_kwargs.get("stdout") == asyncio.subprocess.DEVNULL
 
                 result = await client.send_request("initialize", {})
                 assert result == {"ok": True}
