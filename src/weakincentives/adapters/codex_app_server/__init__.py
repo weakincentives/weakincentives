@@ -14,9 +14,11 @@
 
 This adapter evaluates WINK prompts by delegating execution to Codex via its
 app-server protocol (the same interface powering the Codex VS Code extension).
-WINK tools are bridged as Codex dynamic tools over the same stdio channel.
+WINK tools are bridged as Codex dynamic tools over the same transport channel.
 
-No external Python dependencies beyond WINK and the ``codex`` CLI on PATH.
+Supports three transport modes: stdio (NDJSON over subprocess pipes), managed
+WebSocket (subprocess with ``--listen ws://``), and external WebSocket
+(connect to a remote server — no subprocess management).
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from .config import (
     ReasoningEffort,
     ReasoningSummary,
     SandboxMode,
+    Transport,
 )
 
 __all__ = [
@@ -53,4 +56,5 @@ __all__ = [
     "ReasoningEffort",
     "ReasoningSummary",
     "SandboxMode",
+    "Transport",
 ]

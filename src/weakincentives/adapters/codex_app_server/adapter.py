@@ -70,9 +70,10 @@ def _utcnow() -> datetime:
 class CodexAppServerAdapter(ProviderAdapter[Any]):
     """Adapter using the Codex App Server for agentic prompt evaluation.
 
-    Spawns ``codex app-server`` as a subprocess and communicates over
-    NDJSON stdio using the JSON-RPC protocol (without ``"jsonrpc"`` header).
-    WINK tools are bridged as Codex dynamic tools.
+    Communicates with ``codex app-server`` using the JSON-RPC protocol
+    (without ``"jsonrpc"`` header) over either stdio (NDJSON subprocess)
+    or WebSocket (external server).  WINK tools are bridged as Codex
+    dynamic tools.
     """
 
     def __init__(
@@ -92,7 +93,9 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             event="adapter.init",
             context={
                 "model": self._model_config.model,
+                "transport": self._client_config.transport,
                 "codex_bin": self._client_config.codex_bin,
+                "remote_url": self._client_config.remote_url,
                 "cwd": self._client_config.cwd,
                 "approval_policy": self._client_config.approval_policy,
                 "sandbox_mode": self._client_config.sandbox_mode,
@@ -317,6 +320,9 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             codex_bin=self._client_config.codex_bin,
             env=client_env,
             suppress_stderr=self._client_config.suppress_stderr,
+            transport=self._client_config.transport,
+            remote_url=self._client_config.remote_url,
+            ws_auth_token=self._client_config.ws_auth_token,
         )
 
         start_time = _utcnow()

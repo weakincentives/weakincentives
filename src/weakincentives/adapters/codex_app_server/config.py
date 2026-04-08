@@ -31,7 +31,11 @@ __all__ = [
     "ReasoningEffort",
     "ReasoningSummary",
     "SandboxMode",
+    "Transport",
 ]
+
+Transport = Literal["stdio", "websocket"]
+"""Wire protocol for communicating with the Codex app-server."""
 
 ApprovalPolicy = Literal["never", "untrusted", "on-failure", "on-request"]
 """How command/file approvals are handled."""
@@ -78,11 +82,33 @@ CodexAuthMode = ApiKeyAuth | ExternalTokenAuth
 class CodexAppServerClientConfig:
     """Client-level configuration for Codex App Server.
 
+    **Transport selection:**
+
+    - ``transport="stdio"`` (default): spawns a local ``codex app-server``
+      subprocess and communicates via NDJSON over stdin/stdout pipes.
+    - ``transport="websocket"`` with ``remote_url=None``: spawns a local
+      ``codex app-server --listen ws://127.0.0.1:PORT`` subprocess and
+      connects to it via WebSocket.  The subprocess is managed by the
+      adapter (started on ``start()``, terminated on ``stop()``).
+    - ``transport="websocket"`` with ``remote_url`` set: connects to an
+      external Codex app-server over WebSocket.  **No subprocess is spawned
+      or managed.**  The server must already be running.
+
+    When ``remote_url`` is set, ``transport`` is implicitly ``"websocket"``
+    regardless of the configured value.
+
     Attributes:
-        codex_bin: Executable to spawn.
+        transport: Wire protocol (``"stdio"`` or ``"websocket"``).
+        codex_bin: Executable to spawn (managed modes only).
+        remote_url: WebSocket URL of an external server (e.g.
+            ``ws://10.0.1.5:4500``).  When set, no subprocess is spawned.
+        ws_auth_token: Bearer token for WebSocket auth. Sent as
+            ``Authorization: Bearer TOKEN`` during upgrade.
         cwd: Working directory (must be absolute; defaults to Path.cwd()).
-        env: Extra environment variables merged into the subprocess env.
-        suppress_stderr: Capture stderr for debugging instead of printing.
+        env: Extra environment variables merged into the subprocess env
+            (managed modes only).
+        suppress_stderr: Capture stderr for debugging instead of printing
+            (stdio mode only).
         startup_timeout_s: Max time for the initialize handshake.
         approval_policy: How to handle command/file approvals.
         sandbox_mode: Sandbox mode for thread/start.
@@ -93,7 +119,10 @@ class CodexAppServerClientConfig:
         client_version: Client version for initialize.
     """
 
+    transport: Transport = "stdio"
     codex_bin: str = "codex"
+    remote_url: str | None = None
+    ws_auth_token: str | None = None
     cwd: str | None = None
     env: Mapping[str, str] | None = None
     suppress_stderr: bool = True

@@ -53,7 +53,10 @@ class TestExternalTokenAuth:
 class TestCodexAppServerClientConfig:
     def test_defaults(self) -> None:
         cfg = CodexAppServerClientConfig()
+        assert cfg.transport == "stdio"
         assert cfg.codex_bin == "codex"
+        assert cfg.remote_url is None
+        assert cfg.ws_auth_token is None
         assert cfg.cwd is None
         assert cfg.env is None
         assert cfg.suppress_stderr is True
@@ -91,6 +94,19 @@ class TestCodexAppServerClientConfig:
         assert "server1" in cfg.mcp_servers
         assert cfg.ephemeral is True
         assert cfg.client_name == "my-agent"
+
+    def test_websocket_transport(self) -> None:
+        cfg = CodexAppServerClientConfig(transport="websocket")
+        assert cfg.transport == "websocket"
+        assert cfg.remote_url is None
+
+    def test_remote_url_with_auth(self) -> None:
+        cfg = CodexAppServerClientConfig(
+            remote_url="ws://10.0.1.5:4500",
+            ws_auth_token="secret-token",
+        )
+        assert cfg.remote_url == "ws://10.0.1.5:4500"
+        assert cfg.ws_auth_token == "secret-token"
 
 
 class TestCodexAppServerModelConfig:

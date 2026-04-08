@@ -58,6 +58,9 @@ wink = [
     "markdown-it-py[linkify]>=4.0.0",
     "uvicorn>=0.42.0",
 ]
+codex-ws = [
+    "websockets>=13.0",
+]
 
 [project.scripts]
 wink = "weakincentives.cli.wink:main"
@@ -145,7 +148,7 @@ combine-as-imports = true
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
 # C901 is ignored because test functions can legitimately have higher complexity.
 "tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "RUF038", "RUF069", "ANN201", "ANN401", "PERF401", "DTZ001", "FLY002", "PYI055", "TC005"]
-"integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "TC005"]
+"integration-tests/**" = ["C901", "PLR1702", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "TC005"]
 "formal-tests/**" = ["PLR2004"]
 # --- Source files with justified remaining ignores ---
 # PLR6301: Instance methods required by protocol/subclass-override contracts
@@ -166,6 +169,7 @@ combine-as-imports = true
 "src/weakincentives/adapters/claude_agent_sdk/_hooks.py" = ["RUF029"]
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "ANN401", "TRY300"]
 "src/weakincentives/adapters/codex_app_server/adapter.py" = ["PLR0913"]
+"src/weakincentives/adapters/codex_app_server/client.py" = ["PLR0913"]
 "src/weakincentives/adapters/_shared/_bridge.py" = ["PLR0913", "TRY300"]
 "src/weakincentives/adapters/acp/client.py" = ["ANN401", "PLR6301"]
 "src/weakincentives/adapters/acp/_mcp_http.py" = ["ANN401"]
@@ -243,7 +247,7 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["agent-client-protocol", "claude-agent-sdk", "mcp", "pyyaml", "redis", "uvicorn"]
+DEP002 = ["agent-client-protocol", "claude-agent-sdk", "mcp", "pyyaml", "redis", "uvicorn", "websockets"]
 DEP003 = ["jsonschema", "starlette"]
 DEP004 = ["weakincentives"]  # Package imports itself; declared as dev dep for testing
 
