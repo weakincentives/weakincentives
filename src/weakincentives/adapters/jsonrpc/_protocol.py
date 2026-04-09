@@ -76,6 +76,7 @@ async def execute_protocol(  # noqa: PLR0913
     budget_tracker: BudgetTracker | None,
     run_context: RunContext | None,
     visibility_signal: VisibilityExpansionSignal,
+    protocol_context: object,
     async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
     prompt: PromptProtocol[Any] | None = None,
 ) -> tuple[str | None, TokenUsage | None]:
@@ -92,6 +93,7 @@ async def execute_protocol(  # noqa: PLR0913
             client,
             deadline=deadline,
             prompt_name=prompt_name,
+            protocol_context=protocol_context,
         )
 
         # Turn + Stream with task completion continuation loop
@@ -113,6 +115,7 @@ async def execute_protocol(  # noqa: PLR0913
                     deadline=deadline,
                     prompt_name=prompt_name,
                     timeout=timeout,
+                    protocol_context=protocol_context,
                 )
             except JsonRpcClientError as error:
                 raise PromptEvaluationError(

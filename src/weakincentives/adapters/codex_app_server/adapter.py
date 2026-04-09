@@ -39,6 +39,7 @@ from ..jsonrpc import (
     JsonRpcClientError,
     JsonRpcMessage,
     NotificationHandler,
+    ProtocolContext,
     ServerRequestHandler,
 )
 
@@ -162,6 +163,7 @@ class CodexAppServerAdapter(JsonRpcAdapter[Any]):
         *,
         deadline: Deadline | None,
         prompt_name: str,
+        protocol_context: ProtocolContext,
     ) -> str:
         """Run initialize → authenticate → create_thread. Returns thread_id."""
         from ..jsonrpc import deadline_remaining_s
@@ -191,8 +193,8 @@ class CodexAppServerAdapter(JsonRpcAdapter[Any]):
             timeout = deadline_remaining_s(deadline, prompt_name)
             return await create_thread(
                 client,
-                self._effective_cwd or "",
-                self._dynamic_tool_specs or [],
+                protocol_context.effective_cwd,
+                protocol_context.dynamic_tool_specs,
                 client_config=self._codex_client_config,
                 model_config=self._model_config,
                 timeout=timeout,
@@ -214,13 +216,14 @@ class CodexAppServerAdapter(JsonRpcAdapter[Any]):
         deadline: Deadline | None,
         prompt_name: str,
         timeout: float | None,
+        protocol_context: ProtocolContext,
     ) -> Any:
         """Start a Codex turn. Returns turn result dict."""
         return await start_turn(
             client,
             session_state,  # thread_id
             prompt_text,
-            self._output_schema,
+            protocol_context.output_schema,
             model_config=self._model_config,
             timeout=timeout,
         )

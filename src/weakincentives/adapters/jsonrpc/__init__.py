@@ -35,6 +35,7 @@ from ._types import (
     JsonRpcRequest,
     JsonRpcResponse,
     NotificationHandler,
+    ProtocolContext,
     ServerRequestContext,
     ServerRequestHandler,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "JsonRpcRequest",
     "JsonRpcResponse",
     "NotificationHandler",
+    "ProtocolContext",
     "ServerRequestContext",
     "ServerRequestHandler",
     "Transport",

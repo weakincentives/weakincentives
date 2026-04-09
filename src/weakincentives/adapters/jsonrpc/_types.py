@@ -147,3 +147,22 @@ class ServerRequestContext:
     prompt: object | None  # PromptProtocol | None
     session: object | None  # SessionProtocol | None
     deadline: object | None  # Deadline | None
+
+
+@dataclass(slots=True, frozen=True)
+class ProtocolContext:
+    """Per-evaluation state created by ``_run_protocol`` and threaded to hooks.
+
+    Avoids storing request-scoped values on the adapter instance, which
+    would race when multiple ``evaluate()`` calls run concurrently on the
+    same adapter.
+    """
+
+    effective_cwd: str
+    """Resolved working directory for this evaluation."""
+
+    dynamic_tool_specs: list[dict[str, object]]
+    """Provider-formatted tool specifications for this evaluation."""
+
+    output_schema: dict[str, Any] | None
+    """Provider-formatted structured output schema, or ``None``."""

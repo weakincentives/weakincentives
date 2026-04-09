@@ -53,6 +53,7 @@ from ._response import build_response
 from ._types import (
     JsonRpcMessage,
     NotificationHandler,
+    ProtocolContext,
     ServerRequestContext,
     ServerRequestHandler,
 )
@@ -159,10 +160,13 @@ class JsonRpcAdapter[OutputT_co](ProviderAdapter[OutputT_co]):
         *,
         deadline: Deadline | None,
         prompt_name: str,
+        protocol_context: ProtocolContext,
     ) -> object:
         """Run provider-specific handshake and session creation.
 
         Returns provider-specific session state (e.g. thread_id).
+        The *protocol_context* carries per-evaluation state (cwd, tool
+        specs, output schema) that hooks may need.
         """
         ...
 
@@ -176,6 +180,7 @@ class JsonRpcAdapter[OutputT_co](ProviderAdapter[OutputT_co]):
         deadline: Deadline | None,
         prompt_name: str,
         timeout: float | None,
+        protocol_context: ProtocolContext,
     ) -> object:
         """Start a turn.  Returns provider-specific turn state."""
         ...
@@ -566,11 +571,13 @@ class JsonRpcAdapter[OutputT_co](ProviderAdapter[OutputT_co]):
             visibility_signal=visibility_signal,
         )
 
-        self._dynamic_tool_specs = self._build_tool_specs(bridged_tools)
         tool_lookup = {t.name: t for t in bridged_tools}
-        self._output_schema = self._build_output_schema(rendered)
-        self._effective_cwd = effective_cwd
-        output_schema = self._output_schema
+        protocol_context = ProtocolContext(
+            effective_cwd=effective_cwd,
+            dynamic_tool_specs=self._build_tool_specs(bridged_tools),
+            output_schema=self._build_output_schema(rendered),
+        )
+        output_schema = protocol_context.output_schema
 
         env_state, client_env = self._setup_environment(
             rendered, self._client_config.env
@@ -592,6 +599,7 @@ class JsonRpcAdapter[OutputT_co](ProviderAdapter[OutputT_co]):
                 budget_tracker=budget_tracker,
                 run_context=run_context,
                 visibility_signal=visibility_signal,
+                protocol_context=protocol_context,
                 async_sleeper=self._async_sleeper,
                 prompt=cast(Any, prompt),
             )
