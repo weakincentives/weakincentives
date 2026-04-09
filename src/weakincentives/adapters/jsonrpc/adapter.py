@@ -50,7 +50,12 @@ from ..tool_spec import extract_tool_schema
 from ._async import run_async
 from ._protocol import execute_protocol
 from ._response import build_response
-from ._types import JsonRpcMessage
+from ._types import (
+    JsonRpcMessage,
+    NotificationHandler,
+    ServerRequestContext,
+    ServerRequestHandler,
+)
 from .client import JsonRpcClient, JsonRpcClientError
 from .config import JsonRpcClientConfig
 
@@ -185,7 +190,58 @@ class JsonRpcAdapter[OutputT_co](ProviderAdapter[OutputT_co]):
         """Send an interrupt request (deadline enforcement)."""
         ...
 
+    # ------------------------------------------------------------------
+    # Handler registries
+    # ------------------------------------------------------------------
+
     @abstractmethod
+    def _notification_handlers(
+        self,
+    ) -> dict[str, NotificationHandler]:
+        """Return a mapping of JSON-RPC method names to handlers.
+
+        Each handler receives ``(params, session, adapter_name,
+        prompt_name, run_context)`` and returns ``(kind, value)`` or
+        ``None``.
+
+        Adding support for a new notification is a single dict entry::
+
+            def _notification_handlers(self):
+                return {
+                    "item/agentMessage/delta": self._handle_delta,
+                    "item/completed":          self._handle_item_completed,
+                    "turn/completed":          self._handle_turn_completed,
+                    # new command — just add one line:
+                    "item/reasoning/completed": self._handle_reasoning,
+                }
+        """
+        ...
+
+    @abstractmethod
+    def _server_request_handlers(
+        self,
+    ) -> dict[str, ServerRequestHandler]:
+        """Return a mapping of JSON-RPC method names to async handlers.
+
+        Each handler receives a :class:`ServerRequestContext` and MUST
+        send a response via ``ctx.client.send_response(ctx.request_id, …)``.
+
+        Adding support for a new server request is a single dict entry::
+
+            def _server_request_handlers(self):
+                return {
+                    "item/tool/call": self._handle_tool_call,
+                    "item/commandExecution/requestApproval": self._handle_approval,
+                    # new request — just add one line:
+                    "item/fileRead/request": self._handle_file_read,
+                }
+        """
+        ...
+
+    # ------------------------------------------------------------------
+    # Concrete dispatch (driven by registries)
+    # ------------------------------------------------------------------
+
     def _process_notification(
         self,
         message: JsonRpcMessage,
@@ -194,15 +250,19 @@ class JsonRpcAdapter[OutputT_co](ProviderAdapter[OutputT_co]):
         prompt_name: str,
         run_context: RunContext | None,
     ) -> tuple[str, str] | None:
-        """Process a notification message.
+        """Dispatch a notification via the handler registry.
 
-        Returns ``(kind, value)`` where kind is one of ``"text"``,
-        ``"delta"``, ``"usage"``, ``"done"``, ``"error"``,
-        ``"interrupted"``.  Returns ``None`` for unhandled methods.
+        Looks up the handler for ``message["method"]`` in
+        :meth:`_notification_handlers`.  Returns ``None`` for unregistered
+        methods (silently ignored).
         """
-        ...
+        method = message.get("method", "")
+        params: dict[str, object] = message.get("params", {})
+        handler = self._notification_handlers().get(method)
+        if handler is None:
+            return None
+        return handler(params, session, adapter_name, prompt_name, run_context)
 
-    @abstractmethod
     async def _handle_server_request(  # noqa: PLR0913
         self,
         client: JsonRpcClient,
@@ -214,8 +274,33 @@ class JsonRpcAdapter[OutputT_co](ProviderAdapter[OutputT_co]):
         session: SessionProtocol | None = None,
         deadline: Deadline | None = None,
     ) -> None:
-        """Handle a server-initiated request (tool call, approval, etc.)."""
-        ...
+        """Dispatch a server request via the handler registry.
+
+        Looks up the handler for ``message["method"]`` in
+        :meth:`_server_request_handlers`.  Unknown methods receive an
+        empty ``{}`` response.
+        """
+        method = str(message.get("method", ""))
+        params: dict[str, object] = message.get("params", {})
+        request_id = int(message.get("id", 0))
+
+        ctx = ServerRequestContext(
+            client=client,
+            request_id=request_id,
+            method=method,
+            params=params,
+            tool_lookup=tool_lookup,
+            bridge=bridge,
+            prompt=prompt,
+            session=session,
+            deadline=deadline,
+        )
+
+        handler = self._server_request_handlers().get(method)
+        if handler is not None:
+            await handler(ctx)
+        else:
+            await client.send_response(request_id, {})
 
     @abstractmethod
     def _build_tool_specs(

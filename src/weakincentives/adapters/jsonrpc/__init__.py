@@ -34,6 +34,9 @@ from ._types import (
     JsonRpcNotification,
     JsonRpcRequest,
     JsonRpcResponse,
+    NotificationHandler,
+    ServerRequestContext,
+    ServerRequestHandler,
 )
 from .adapter import JsonRpcAdapter
 from .client import JsonRpcClient, JsonRpcClientError
@@ -48,6 +51,9 @@ __all__ = [
     "JsonRpcNotification",
     "JsonRpcRequest",
     "JsonRpcResponse",
+    "NotificationHandler",
+    "ServerRequestContext",
+    "ServerRequestHandler",
     "Transport",
     "build_response",
     "deadline_remaining_s",

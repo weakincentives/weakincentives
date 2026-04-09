@@ -20,7 +20,13 @@ module.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, TypedDict
+
+if TYPE_CHECKING:
+    from ...runtime.run_context import RunContext
+    from ...runtime.session.protocols import SessionProtocol
 
 
 class JsonRpcRequest(TypedDict, total=False):
@@ -82,3 +88,62 @@ NOTIFICATION_KIND_ERROR = "error"
 
 NOTIFICATION_KIND_INTERRUPTED = "interrupted"
 """Turn was interrupted (deadline or user)."""
+
+
+# ---------------------------------------------------------------------------
+# Handler callable protocols
+# ---------------------------------------------------------------------------
+
+# Notification handlers receive the method's params and contextual info.
+# Return (kind, value) to drive the turn accumulator, or None to skip.
+#
+# Example (Codex delta handler):
+#     def _handle_delta(params, session, adapter_name, prompt_name, run_context):
+#         return ("delta", str(params.get("delta", "")))
+type NotificationHandler = Callable[
+    [
+        dict[str, object],  # params
+        SessionProtocol,  # session
+        str,  # adapter_name
+        str,  # prompt_name
+        RunContext | None,  # run_context
+    ],
+    tuple[str, str] | None,
+]
+"""Callable that processes a single notification method.
+
+Receives the notification ``params`` and contextual info.
+Returns ``(kind, value)`` to drive the turn accumulator, or ``None``
+to indicate the notification was handled as a side-effect (e.g.
+dispatching a ``ToolInvoked`` event).
+"""
+
+# Server-request handlers receive the full request context.
+# They MUST send a response via ``client.send_response(request_id, …)``.
+type ServerRequestHandler = Callable[
+    [ServerRequestContext],
+    Coroutine[Any, Any, None],
+]
+"""Async callable that handles a server-initiated request.
+
+The handler MUST respond via ``ctx.client.send_response(ctx.request_id, …)``.
+"""
+
+
+@dataclass(slots=True, frozen=True)
+class ServerRequestContext:
+    """Context bundle passed to server-request handlers.
+
+    Provides everything a handler needs to process a server-initiated
+    request and send back a response.
+    """
+
+    client: Any  # JsonRpcClient (Any to avoid circular import)
+    request_id: int
+    method: str
+    params: dict[str, object]
+    tool_lookup: dict[str, Any]  # dict[str, BridgedTool]
+    bridge: object | None
+    prompt: object | None  # PromptProtocol | None
+    session: object | None  # SessionProtocol | None
+    deadline: object | None  # Deadline | None

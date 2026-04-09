@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
@@ -734,3 +735,103 @@ async def deadline_watchdog(
             {"threadId": thread_id, "turnId": turn_id},
             timeout=5.0,
         )
+
+
+# ---------------------------------------------------------------------------
+# Registry-compatible notification handlers
+# ---------------------------------------------------------------------------
+
+# These match the ``NotificationHandler`` signature:
+#   (params, session, adapter_name, prompt_name, run_context) -> (kind, value) | None
+
+
+def handle_delta_notification(
+    params: dict[str, object],
+    session: SessionProtocol,
+    adapter_name: str,
+    prompt_name: str,
+    run_context: RunContext | None,
+) -> tuple[str, str]:
+    """Handle ``item/agentMessage/delta``."""
+    return ("delta", str(params.get("delta", "")))
+
+
+def handle_item_completed_notification(
+    params: dict[str, object],
+    session: SessionProtocol,
+    adapter_name: str,
+    prompt_name: str,
+    run_context: RunContext | None,
+) -> tuple[str, str] | None:
+    """Handle ``item/completed``."""
+    return _handle_item_completed(
+        params, session, adapter_name, prompt_name, run_context
+    )
+
+
+def handle_token_usage_notification(
+    params: dict[str, object],
+    session: SessionProtocol,
+    adapter_name: str,
+    prompt_name: str,
+    run_context: RunContext | None,
+) -> tuple[str, str]:
+    """Handle ``thread/tokenUsage/updated``."""
+    return ("usage", "")
+
+
+def handle_turn_completed_notification(
+    params: dict[str, object],
+    session: SessionProtocol,
+    adapter_name: str,
+    prompt_name: str,
+    run_context: RunContext | None,
+) -> tuple[str, str]:
+    """Handle ``turn/completed``."""
+    return _handle_turn_completed(params)
+
+
+# ---------------------------------------------------------------------------
+# Registry-compatible server-request handlers
+# ---------------------------------------------------------------------------
+
+# These match the ``ServerRequestHandler`` signature:
+#   async (ctx: ServerRequestContext) -> None
+# The handler MUST call ctx.client.send_response(ctx.request_id, ...).
+
+if TYPE_CHECKING:
+    from ..jsonrpc._types import ServerRequestContext
+
+
+async def handle_tool_call_request(ctx: ServerRequestContext) -> None:
+    """Handle ``item/tool/call`` server request."""
+    await handle_tool_call(
+        ctx.client,
+        ctx.request_id,
+        ctx.params,
+        ctx.tool_lookup,
+        bridge=ctx.bridge,  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
+        prompt=ctx.prompt,  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
+        session=ctx.session,  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
+        deadline=ctx.deadline,  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
+    )
+
+
+def make_approval_handler(
+    approval_policy: str,
+) -> Callable[[ServerRequestContext], Coroutine[Any, Any, None]]:
+    """Create an approval handler bound to a specific policy.
+
+    Returns an async callable matching ``ServerRequestHandler``::
+
+        handlers = {
+            "item/commandExecution/requestApproval": make_approval_handler("never"),
+            "item/fileChange/requestApproval":       make_approval_handler("never"),
+        }
+    """
+
+    async def _handle(ctx: ServerRequestContext) -> None:
+        decision = "accept" if approval_policy in {"never", "on-failure"} else "decline"
+        await ctx.client.send_response(ctx.request_id, {"decision": decision})
+
+    return _handle

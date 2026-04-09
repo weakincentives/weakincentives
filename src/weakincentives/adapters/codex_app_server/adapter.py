@@ -27,7 +27,6 @@ from ...deadlines import Deadline
 from ...prompt import RenderedPrompt
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
-from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transcript import TranscriptEmitter
 from ...types import AdapterName
@@ -39,6 +38,8 @@ from ..jsonrpc import (
     JsonRpcClientConfig,
     JsonRpcClientError,
     JsonRpcMessage,
+    NotificationHandler,
+    ServerRequestHandler,
 )
 
 # Module-level alias used by _create_client and patchable in tests.
@@ -51,7 +52,12 @@ from ._events import (
 from ._protocol import (
     authenticate,
     create_thread,
-    handle_server_request,
+    handle_delta_notification,
+    handle_item_completed_notification,
+    handle_token_usage_notification,
+    handle_tool_call_request,
+    handle_turn_completed_notification,
+    make_approval_handler,
     start_turn,
 )
 from ._schema import bridged_tools_to_dynamic_specs, build_output_schema
@@ -60,12 +66,6 @@ from .config import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
 )
-
-if True:  # make lazy imports explicit — always executed
-    from typing import TYPE_CHECKING
-
-    if TYPE_CHECKING:
-        from ...prompt.protocols import PromptProtocol
 
 __all__ = [
     "CODEX_APP_SERVER_ADAPTER_NAME",
@@ -241,44 +241,31 @@ class CodexAppServerAdapter(JsonRpcAdapter[Any]):
         )
 
     @override
-    def _process_notification(
-        self,
-        message: JsonRpcMessage,
-        session: SessionProtocol,
-        adapter_name: str,
-        prompt_name: str,
-        run_context: RunContext | None,
-    ) -> tuple[str, str] | None:
-        """Route Codex notifications."""
-        from ._protocol import process_notification
+    def _notification_handlers(self) -> dict[str, NotificationHandler]:
+        """Codex notification handlers.
 
-        return process_notification(
-            message, session, adapter_name, prompt_name, run_context
-        )
+        Adding a new notification is a single dict entry.
+        """
+        return {
+            "item/agentMessage/delta": handle_delta_notification,
+            "item/completed": handle_item_completed_notification,
+            "thread/tokenUsage/updated": handle_token_usage_notification,
+            "turn/completed": handle_turn_completed_notification,
+        }
 
     @override
-    async def _handle_server_request(
-        self,
-        client: JsonRpcClient,
-        message: JsonRpcMessage,
-        tool_lookup: dict[str, BridgedTool],
-        *,
-        bridge: Any | None = None,
-        prompt: PromptProtocol[Any] | None = None,
-        session: SessionProtocol | None = None,
-        deadline: Deadline | None = None,
-    ) -> None:
-        """Handle Codex server requests (tool calls, approvals)."""
-        await handle_server_request(
-            client,
-            message,
-            tool_lookup,
-            approval_policy=self._codex_client_config.approval_policy,
-            bridge=bridge,
-            prompt=prompt,
-            session=session,
-            deadline=deadline,
-        )
+    def _server_request_handlers(self) -> dict[str, ServerRequestHandler]:
+        """Codex server-request handlers.
+
+        Adding a new server request type is a single dict entry.
+        """
+        policy = self._codex_client_config.approval_policy
+        approval = make_approval_handler(policy)
+        return {
+            "item/tool/call": handle_tool_call_request,
+            "item/commandExecution/requestApproval": approval,
+            "item/fileChange/requestApproval": approval,
+        }
 
     @override
     def _build_tool_specs(
