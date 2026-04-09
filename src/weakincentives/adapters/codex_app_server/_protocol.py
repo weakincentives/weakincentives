@@ -800,7 +800,7 @@ def handle_turn_completed_notification(
 # The handler MUST call ctx.client.send_response(ctx.request_id, ...).
 
 if TYPE_CHECKING:
-    from ..jsonrpc._types import ServerRequestContext
+    from ..jsonrpc import ServerRequestContext
 
 
 async def handle_tool_call_request(ctx: ServerRequestContext) -> None:
