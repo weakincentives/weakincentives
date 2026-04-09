@@ -133,7 +133,7 @@ class TestCodexAppServerClientInit:
 
     def test_custom_params(self) -> None:
         client = CodexAppServerClient(
-            codex_bin="/custom/codex",
+            bin_path="/custom/codex",
             env={"KEY": "VAL"},
             suppress_stderr=False,
         )

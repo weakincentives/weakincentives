@@ -312,7 +312,7 @@ class TestEvaluateEndToEnd:
             mock_client.read_messages.return_value = _messages_iterator(messages)
             MockClient.return_value = mock_client
 
-            with pytest.raises(PromptEvaluationError, match="stream ended before"):
+            with pytest.raises(PromptEvaluationError, match=r"(?i)stream ended before"):
                 adapter.evaluate(prompt, session=session)
 
     def test_stream_eof_empty_stream(self) -> None:
@@ -335,7 +335,7 @@ class TestEvaluateEndToEnd:
             mock_client.read_messages.return_value = _messages_iterator([])
             MockClient.return_value = mock_client
 
-            with pytest.raises(PromptEvaluationError, match="stream ended before"):
+            with pytest.raises(PromptEvaluationError, match=r"(?i)stream ended before"):
                 adapter.evaluate(prompt, session=session)
 
     def test_budget_creates_tracker(self) -> None:
@@ -612,7 +612,7 @@ class TestVisibilitySignalPassthrough:
 
             # Patch visibility signal to return a stored exception
             with patch(
-                "weakincentives.adapters.codex_app_server.adapter.VisibilityExpansionSignal"
+                "weakincentives.adapters.jsonrpc.adapter.VisibilityExpansionSignal"
             ) as MockSignal:
                 mock_signal = MagicMock()
                 mock_signal.get_and_clear.return_value = VisibilityExpansionRequired(

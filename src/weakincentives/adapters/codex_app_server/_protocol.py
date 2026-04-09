@@ -29,6 +29,7 @@ from ...runtime.transcript import TranscriptEmitter
 from .._shared._bridge import BridgedTool
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError
+from ..jsonrpc import JsonRpcClient, JsonRpcClientError, JsonRpcMessage
 from ._events import (
     dispatch_item_tool_invoked,
     extract_token_usage,
@@ -38,12 +39,10 @@ from ._guardrails import accumulate_usage, append_feedback, check_task_completio
 from ._transcript import CodexTranscriptBridge
 from ._types import (
     CodexItem,
-    JsonRpcMessage,
     ToolCallResponse,
     TurnInfo,
     TurnStartResult,
 )
-from .client import CodexAppServerClient, CodexClientError
 from .config import (
     ApiKeyAuth,
     CodexAppServerClientConfig,
@@ -94,7 +93,7 @@ def _create_bridge(
 
 async def _initialize_session(  # noqa: PLR0913
     *,
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     client_config: CodexAppServerClientConfig,
     model_config: CodexAppServerModelConfig,
     effective_cwd: str,
@@ -130,7 +129,7 @@ async def _initialize_session(  # noqa: PLR0913
             model_config=model_config,
             timeout=timeout,
         )
-    except CodexClientError as error:
+    except JsonRpcClientError as error:
         raise PromptEvaluationError(
             message=str(error),
             prompt_name=prompt_name,
@@ -142,7 +141,7 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
     *,
     client_config: CodexAppServerClientConfig,
     model_config: CodexAppServerModelConfig,
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     session: SessionProtocol,
     adapter_name: str,
     prompt_name: str,
@@ -197,7 +196,7 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
                     model_config=model_config,
                     timeout=timeout,
                 )
-            except CodexClientError as error:
+            except JsonRpcClientError as error:
                 raise PromptEvaluationError(
                     message=str(error),
                     prompt_name=prompt_name,
@@ -255,7 +254,7 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
 
 
 async def authenticate(
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     auth_mode: CodexAuthMode | None,
     *,
     timeout: float | None = None,
@@ -284,7 +283,7 @@ async def authenticate(
 
 
 async def create_thread(  # noqa: PLR0913
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     effective_cwd: str,
     dynamic_tool_specs: list[dict[str, object]],
     *,
@@ -311,7 +310,7 @@ async def create_thread(  # noqa: PLR0913
 
 
 async def start_turn(  # noqa: PLR0913
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     thread_id: str,
     prompt_text: str,
     output_schema: dict[str, object] | None,
@@ -339,7 +338,7 @@ async def start_turn(  # noqa: PLR0913
 
 async def stream_turn(  # noqa: PLR0913
     *,
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     session: SessionProtocol,
     adapter_name: str,
     prompt_name: str,
@@ -417,7 +416,7 @@ def raise_for_terminal_notification(
 
 async def consume_messages(  # noqa: PLR0913
     *,
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     session: SessionProtocol,
     adapter_name: str,
     prompt_name: str,
@@ -506,7 +505,7 @@ def apply_notification(
 
 
 def create_deadline_watchdog(
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     thread_id: str,
     turn_id: int,
     deadline: Deadline | None,
@@ -608,7 +607,7 @@ def _handle_turn_completed(params: dict[str, object]) -> tuple[str, str]:
 
 
 async def handle_server_request(  # noqa: PLR0913
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     message: JsonRpcMessage,
     tool_lookup: dict[str, BridgedTool],
     *,
@@ -647,7 +646,7 @@ async def handle_server_request(  # noqa: PLR0913
 
 
 async def handle_tool_call(  # noqa: PLR0913
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     request_id: int,
     params: dict[str, object],
     tool_lookup: dict[str, BridgedTool],
@@ -721,7 +720,7 @@ async def handle_tool_call(  # noqa: PLR0913
 
 
 async def deadline_watchdog(
-    client: CodexAppServerClient,
+    client: JsonRpcClient,
     thread_id: str,
     turn_id: int,
     remaining_seconds: float,
@@ -729,7 +728,7 @@ async def deadline_watchdog(
 ) -> None:
     """Sleep until deadline, then interrupt the turn."""
     await async_sleeper.async_sleep(remaining_seconds)
-    with contextlib.suppress(CodexClientError):
+    with contextlib.suppress(JsonRpcClientError):
         _ = await client.send_request(
             "turn/interrupt",
             {"threadId": thread_id, "turnId": turn_id},

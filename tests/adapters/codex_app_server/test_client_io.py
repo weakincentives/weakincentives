@@ -626,7 +626,7 @@ class TestReadLoopBroadException:
                 client._route_message = exploding_route  # type: ignore[assignment]
 
                 with patch(
-                    "weakincentives.adapters.codex_app_server.client.logger"
+                    "weakincentives.adapters.jsonrpc.client.logger"
                 ) as mock_logger:
                     await client.start()
 

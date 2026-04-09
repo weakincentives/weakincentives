@@ -168,7 +168,7 @@ class TestAdapterInit:
     def test_defaults(self) -> None:
         adapter = CodexAppServerAdapter()
         assert adapter._model_config.model == "gpt-5.3-codex"
-        assert adapter._client_config.codex_bin == "codex"
+        assert adapter._codex_client_config.codex_bin == "codex"
 
     def test_custom_config(self) -> None:
         model_cfg = CodexAppServerModelConfig(model="o3", effort="high")
@@ -177,7 +177,7 @@ class TestAdapterInit:
             model_config=model_cfg, client_config=client_cfg
         )
         assert adapter._model_config.model == "o3"
-        assert adapter._client_config.codex_bin == "/usr/bin/codex"
+        assert adapter._codex_client_config.codex_bin == "/usr/bin/codex"
 
     def test_adapter_name_property(self) -> None:
         adapter = CodexAppServerAdapter()
