@@ -158,6 +158,22 @@ and exported through `adapters/acp/__init__.py`:
 - `contrib/tools/_memory_types.py` and `_memory_writer.py` extracted from
   `filesystem_memory.py`.
 
+#### Dependency upgrades
+
+All locked dependencies are refreshed to their latest compatible releases and
+lower bounds in `pyproject.toml` are bumped accordingly:
+
+- `claude-agent-sdk` `>=0.1.50` → `>=0.1.58`
+- `fastapi` `>=0.135.2` → `>=0.135.3`
+- `mcp` `>=1.26.0` → `>=1.27.0`
+- `uvicorn` `>=0.42.0` → `>=0.44.0`
+- `websockets` `>=13.0` → `>=16.0`
+- Dev tools: `pytest` `>=9.0.3`, `ruff` `>=0.15.10`, `ty` `>=0.0.29`,
+  `hypothesis` `>=6.151.12`.
+
+A single call site in `prompt/task_examples.py` gains an explicit cast to
+accommodate stricter generic narrowing in ty 0.0.29.
+
 #### Comprehensive test suite reorganization (#1112)
 
 ~30 large monolithic test files are split into focused modules (each ~300–700
