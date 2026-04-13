@@ -111,6 +111,12 @@ class TestRaiseForTerminalNotification:
         with pytest.raises(PromptEvaluationError, match="interrupted"):
             raise_for_terminal_notification("interrupted", "", "p", msg, adapter)
 
+    def test_non_terminal_kind_no_raise(self) -> None:
+        """kind that is neither error nor interrupted returns without raising."""
+        adapter = MagicMock()
+        # Passing a non-terminal kind falls through both if branches
+        raise_for_terminal_notification("other", "value", "p", {"params": {}}, adapter)
+
 
 class TestApplyNotification:
     def test_text_replaces(self) -> None:

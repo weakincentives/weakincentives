@@ -42,9 +42,6 @@ from ..jsonrpc import (
     ProtocolContext,
     ServerRequestHandler,
 )
-
-# Module-level alias used by _create_client and patchable in tests.
-CodexAppServerClient = JsonRpcClient
 from ._ephemeral_home import CodexEphemeralHome
 from ._events import (
     extract_token_usage,
@@ -79,6 +76,9 @@ logger: StructuredLogger = get_logger(
 
 CODEX_APP_SERVER_ADAPTER_NAME: AdapterName = "codex_app_server"
 """Canonical label for the Codex App Server adapter."""
+
+# Module-level alias used by _create_client and patchable in tests.
+CodexAppServerClient = JsonRpcClient
 
 
 class CodexAppServerAdapter(JsonRpcAdapter[Any]):

@@ -9,7 +9,7 @@
 ## Purpose
 
 `JsonRpcAdapter` is a generic base adapter for evaluating WINK prompts via any
-agent that speaks a turn-based JSON-RPC protocol over stdio or WebSocket.  It
+agent that speaks a turn-based JSON-RPC protocol over stdio or WebSocket. It
 extracts the common protocol lifecycle from the Codex App Server adapter into a
 reusable base class, following the same pattern as `ACPAdapter` for
 ACP-compatible agents.
@@ -28,15 +28,15 @@ The Codex App Server adapter implements a protocol pattern that is not
 Codex-specific:
 
 1. **Initialize handshake** — client sends capabilities, server acknowledges
-2. **Create session** — establish a conversation context (thread, session)
-3. **Turn-based execution** — send prompt text, stream responses, complete
-4. **Bidirectional tool calls** — server sends requests back to client for
+1. **Create session** — establish a conversation context (thread, session)
+1. **Turn-based execution** — send prompt text, stream responses, complete
+1. **Bidirectional tool calls** — server sends requests back to client for
    tool execution
-5. **Deadline enforcement** — client sends interrupt on timeout
-6. **Token tracking** — server reports usage via notifications
+1. **Deadline enforcement** — client sends interrupt on timeout
+1. **Token tracking** — server reports usage via notifications
 
 Any agent that implements this pattern over JSON-RPC can reuse the base adapter.
-The Codex App Server is the first concrete subclass.  Future providers using
+The Codex App Server is the first concrete subclass. Future providers using
 similar JSON-RPC protocols (with different method names and payload shapes) can
 extend `JsonRpcAdapter` with minimal effort.
 
@@ -92,7 +92,7 @@ src/weakincentives/adapters/jsonrpc/
 
 ## JsonRpcClient
 
-Extracted from `CodexAppServerClient`.  A transport-agnostic bidirectional
+Extracted from `CodexAppServerClient`. A transport-agnostic bidirectional
 JSON-RPC client that handles message framing, request/response correlation,
 and server-initiated requests.
 
@@ -131,7 +131,7 @@ Defined at `src/weakincentives/adapters/jsonrpc/client.py`.
 
 ## JsonRpcClientConfig
 
-Base configuration for `JsonRpcClient` instances.  Provider-specific adapters
+Base configuration for `JsonRpcClient` instances. Provider-specific adapters
 extend this with additional fields.
 
 Defined at `src/weakincentives/adapters/jsonrpc/config.py`.
@@ -162,15 +162,15 @@ Defined at `src/weakincentives/adapters/jsonrpc/adapter.py`.
 The base class handles:
 
 1. **Budget/deadline setup** — create tracker, validate deadline
-2. **Prompt rendering** — `prompt.render(session=session)`
-3. **Event dispatch** — `PromptRendered`, `RenderedTools`, `PromptExecuted`
-4. **CWD resolution** — config, filesystem, or temp directory
-5. **Tool bridging** — `create_bridged_tools()` from shared bridge
-6. **Turn loop** — continuation with task completion checking (max 10 rounds)
-7. **Deadline enforcement** — watchdog task with interrupt hook
-8. **Message consumption** — generic loop calling hooks for processing
-9. **Visibility expansion** — signal check and re-raise
-10. **Response building** — structured output parsing, budget recording
+1. **Prompt rendering** — `prompt.render(session=session)`
+1. **Event dispatch** — `PromptRendered`, `RenderedTools`, `PromptExecuted`
+1. **CWD resolution** — config, filesystem, or temp directory
+1. **Tool bridging** — `create_bridged_tools()` from shared bridge
+1. **Turn loop** — continuation with task completion checking (max 10 rounds)
+1. **Deadline enforcement** — watchdog task with interrupt hook
+1. **Message consumption** — generic loop calling hooks for processing
+1. **Visibility expansion** — signal check and re-raise
+1. **Response building** — structured output parsing, budget recording
 
 ### Required Hooks (Abstract)
 
@@ -219,30 +219,30 @@ Defined at `src/weakincentives/adapters/jsonrpc/_protocol.py`.
 Orchestrates the full lifecycle:
 
 1. `client.start()`
-2. Create transcript bridge (optional)
-3. `_initialize_session()` → session ID
-4. **Turn continuation loop** (max 10 rounds):
+1. Create transcript bridge (optional)
+1. `_initialize_session()` → session ID
+1. **Turn continuation loop** (max 10 rounds):
    a. `_start_turn()` → turn state
    b. Create deadline watchdog (calls `_send_interrupt()` on timeout)
    c. **Message consumption loop**:
-      - Server requests → `_handle_server_request()`
-      - Notifications → `_process_notification()` → apply result
-      - Break on turn complete or visibility signal
-   d. Accumulate text and usage
-   e. `check_task_completion()` → continue or break
-5. Check visibility signal
-6. Return `(accumulated_text, usage)`
+   - Server requests → `_handle_server_request()`
+   - Notifications → `_process_notification()` → apply result
+   - Break on turn complete or visibility signal
+     d. Accumulate text and usage
+     e. `check_task_completion()` → continue or break
+1. Check visibility signal
+1. Return `(accumulated_text, usage)`
 
 ### Generic Tool Call Handler
 
 The base adapter provides `handle_tool_call()` which:
 
 1. Extracts tool name and arguments from params
-2. Looks up `BridgedTool` by name
-3. Executes via `asyncio.to_thread(bridged_tool, arguments)`
-4. Calls `_format_tool_response(success, content_items)` (hook)
-5. Appends feedback if applicable
-6. Sends response via `client.send_response()`
+1. Looks up `BridgedTool` by name
+1. Executes via `asyncio.to_thread(bridged_tool, arguments)`
+1. Calls `_format_tool_response(success, content_items)` (hook)
+1. Appends feedback if applicable
+1. Sends response via `client.send_response()`
 
 Subclasses provide:
 
@@ -261,10 +261,10 @@ Defined at `src/weakincentives/adapters/jsonrpc/_response.py`.
 Shared between all JSON-RPC subclasses:
 
 1. Parse structured output via `parse_structured_output(text, rendered)`
-2. Record budget if tracker provided
-3. Build `PromptResponse(prompt_name, text, output)`
-4. Dispatch `PromptExecuted` event
-5. Log completion with duration and token info
+1. Record budget if tracker provided
+1. Build `PromptResponse(prompt_name, text, output)`
+1. Dispatch `PromptExecuted` event
+1. Log completion with duration and token info
 
 ## Error Handling
 
@@ -303,15 +303,15 @@ implements the following hooks:
 ### Why Extract from Codex (Not Build from Scratch)
 
 The Codex App Server adapter is the most mature JSON-RPC adapter with
-comprehensive test coverage.  Extracting the generic layer from working code
-ensures correctness and preserves test coverage.  The refactoring follows the
+comprehensive test coverage. Extracting the generic layer from working code
+ensures correctness and preserves test coverage. The refactoring follows the
 same evolutionary pattern as `ACPAdapter` (extracted from OpenCode-specific
 code to support multiple ACP agents).
 
 ### Why Turn-Based Protocol Abstraction
 
 The turn-based lifecycle (init → session → turn → stream → complete) is the
-natural abstraction for agentic JSON-RPC protocols.  It's specific enough to
+natural abstraction for agentic JSON-RPC protocols. It's specific enough to
 provide real value (vs. raw JSON-RPC) but general enough to accommodate
 different provider semantics (different method names, payload shapes, auth
 flows).
@@ -320,16 +320,16 @@ flows).
 
 JSON-RPC providers that support bidirectional requests can execute WINK tools
 directly — the server sends a request, the client executes the tool in-process,
-and responds on the same channel.  This avoids the MCP HTTP server overhead
-required by ACP.  The `_format_tool_response()` hook allows each provider to
+and responds on the same channel. This avoids the MCP HTTP server overhead
+required by ACP. The `_format_tool_response()` hook allows each provider to
 define its own response format.
 
 ### Why Parameterized Client (Not Subclass)
 
 `JsonRpcClient` is parameterized via constructor arguments (bin_path, bin_args,
-etc.) rather than requiring subclassing.  The transport layer is truly generic —
+etc.) rather than requiring subclassing. The transport layer is truly generic —
 the only provider-specific aspect is which binary to spawn and with what
-arguments.  Parameterization is simpler and avoids unnecessary class hierarchy.
+arguments. Parameterization is simpler and avoids unnecessary class hierarchy.
 
 ## Testing
 

@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -22,11 +21,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from weakincentives.adapters._shared._visibility_signal import VisibilityExpansionSignal
-from weakincentives.adapters.codex_app_server._protocol import (
-    consume_messages,
-    deadline_watchdog,
-)
 from weakincentives.adapters.codex_app_server.adapter import CodexAppServerAdapter
 from weakincentives.adapters.codex_app_server.client import (
     CodexAppServerClient,
@@ -554,33 +548,6 @@ class TestStreamTurnWithDeadline:
             assert result.text == "ok"
 
 
-class TestDeadlineWatchdogBody:
-    """Test the deadline watchdog actually sends an interrupt."""
-
-    def test_watchdog_sends_interrupt(self) -> None:
-        async def _run() -> None:
-            client = _make_mock_client()
-            client.send_request.return_value = {}
-            await deadline_watchdog(client, "t-1", 42, 0.01)
-            # After sleep, it should send turn/interrupt
-            client.send_request.assert_called_once()
-            args = client.send_request.call_args
-            assert args[0][0] == "turn/interrupt"
-            assert args[0][1]["threadId"] == "t-1"
-            assert args[0][1]["turnId"] == 42
-
-        asyncio.run(_run())
-
-    def test_watchdog_suppresses_error(self) -> None:
-        async def _run() -> None:
-            client = _make_mock_client()
-            client.send_request.side_effect = CodexClientError("already done")
-            # Should not raise
-            await deadline_watchdog(client, "t-1", 42, 0.01)
-
-        asyncio.run(_run())
-
-
 class TestVisibilitySignalPassthrough:
     """Test that VisibilityExpansionRequired passes through unwrapped."""
 
@@ -625,56 +592,3 @@ class TestVisibilitySignalPassthrough:
 
                 with pytest.raises(VisibilityExpansionRequired):
                     adapter.evaluate(prompt, session=session)
-
-
-class TestConsumeMessagesVisibilitySignal:
-    """Test that consume_messages breaks early when visibility signal is set."""
-
-    def test_early_break_on_visibility_signal(self) -> None:
-        """consume_messages exits after tool call sets visibility signal."""
-        session, _ = _make_session()
-        signal = VisibilityExpansionSignal()
-
-        # Simulate: tool call sets signal, then more messages that shouldn't be read
-        messages = [
-            {
-                "id": 1,
-                "method": "item/tool/call",
-                "params": {"tool": "t", "arguments": {}},
-            },
-            # These should never be reached after early break:
-            {
-                "method": "item/completed",
-                "params": {"item": {"type": "agentMessage", "text": "x"}},
-            },
-            {"method": "turn/completed", "params": {"turn": {"status": "completed"}}},
-        ]
-
-        client = _make_mock_client()
-        client.read_messages.return_value = _messages_iterator(messages)
-        # Respond to tool call, then set the signal to simulate open_sections
-        client.send_response = AsyncMock(
-            side_effect=lambda *a, **kw: signal.set(
-                VisibilityExpansionRequired(
-                    "expand", requested_overrides={}, reason="test", section_keys=()
-                )
-            )
-        )
-
-        async def _run() -> None:
-            text, _ = await consume_messages(
-                client=client,
-                session=session,
-                adapter_name="codex_app_server",
-                prompt_name="test",
-                tool_lookup={},
-                approval_policy="never",
-                run_context=None,
-                accumulated_text="",
-                usage=None,
-                visibility_signal=signal,
-            )
-            # Should return empty text (broke early, no turn/completed text)
-            assert text == ""
-
-        asyncio.run(_run())
