@@ -15,22 +15,16 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from weakincentives.adapters.codex_app_server._protocol import (
     authenticate,
-    create_deadline_watchdog,
     create_thread,
-    handle_server_request,
+    handle_item_completed_notification,
     handle_tool_call,
-    process_notification,
-    raise_for_terminal_notification,
+    handle_turn_completed_notification,
     start_turn,
 )
 from weakincentives.adapters.codex_app_server._schema import (
@@ -49,9 +43,6 @@ from weakincentives.adapters.codex_app_server.config import (
     CodexAppServerModelConfig,
     ExternalTokenAuth,
 )
-from weakincentives.adapters.core import PromptEvaluationError
-from weakincentives.clock import FakeClock
-from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate, Tool
 from weakincentives.prompt.tool import ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessDispatcher
@@ -168,7 +159,7 @@ class TestAdapterInit:
     def test_defaults(self) -> None:
         adapter = CodexAppServerAdapter()
         assert adapter._model_config.model == "gpt-5.3-codex"
-        assert adapter._client_config.codex_bin == "codex"
+        assert adapter._codex_client_config.codex_bin == "codex"
 
     def test_custom_config(self) -> None:
         model_cfg = CodexAppServerModelConfig(model="o3", effort="high")
@@ -177,7 +168,7 @@ class TestAdapterInit:
             model_config=model_cfg, client_config=client_cfg
         )
         assert adapter._model_config.model == "o3"
-        assert adapter._client_config.codex_bin == "/usr/bin/codex"
+        assert adapter._codex_client_config.codex_bin == "/usr/bin/codex"
 
     def test_adapter_name_property(self) -> None:
         adapter = CodexAppServerAdapter()
@@ -325,190 +316,6 @@ class TestCreateThread:
         asyncio.run(_run())
 
 
-class TestProcessNotification:
-    def test_delta(self) -> None:
-        session, _ = _make_session()
-        msg = {"method": "item/agentMessage/delta", "params": {"delta": "hello"}}
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result == ("delta", "hello")
-
-    def test_item_completed_agent_message(self) -> None:
-        session, _ = _make_session()
-        msg = {
-            "method": "item/completed",
-            "params": {"item": {"type": "agentMessage", "text": "final answer"}},
-        }
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result == ("text", "final answer")
-
-    def test_item_completed_agent_message_no_text(self) -> None:
-        session, _ = _make_session()
-        msg = {
-            "method": "item/completed",
-            "params": {"item": {"type": "agentMessage"}},
-        }
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result is None
-
-    def test_item_completed_command_execution(self) -> None:
-        session, _ = _make_session()
-        msg = {
-            "method": "item/completed",
-            "params": {
-                "item": {
-                    "type": "commandExecution",
-                    "status": "completed",
-                    "command": "ls",
-                    "cwd": "/tmp",
-                    "aggregatedOutput": "files",
-                }
-            },
-        }
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result is None  # Tool dispatch doesn't return a kind
-
-    def test_token_usage_updated(self) -> None:
-        session, _ = _make_session()
-        msg = {"method": "thread/tokenUsage/updated", "params": {}}
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result == ("usage", "")
-
-    def test_turn_completed_done(self) -> None:
-        session, _ = _make_session()
-        msg = {
-            "method": "turn/completed",
-            "params": {"turn": {"status": "completed"}},
-        }
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result == ("done", "")
-
-    def test_turn_completed_failed(self) -> None:
-        session, _ = _make_session()
-        msg = {
-            "method": "turn/completed",
-            "params": {
-                "turn": {
-                    "status": "failed",
-                    "codexErrorInfo": "unauthorized",
-                    "additionalDetails": "bad key",
-                }
-            },
-        }
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result is not None
-        assert result[0] == "error"
-        assert "unauthorized" in result[1]
-
-    def test_turn_completed_interrupted(self) -> None:
-        session, _ = _make_session()
-        msg = {
-            "method": "turn/completed",
-            "params": {"turn": {"status": "interrupted"}},
-        }
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result == ("interrupted", "")
-
-    def test_unknown_method(self) -> None:
-        session, _ = _make_session()
-        msg = {"method": "unknown/thing", "params": {}}
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result is None
-
-    def test_item_completed_unknown_type(self) -> None:
-        """item/completed with an unrecognized item type returns None."""
-        session, _ = _make_session()
-        msg = {
-            "method": "item/completed",
-            "params": {"item": {"type": "somethingNew", "status": "completed"}},
-        }
-        result = process_notification(msg, session, "codex_app_server", "p", None)
-        assert result is None
-
-
-class TestRaiseForTerminalNotification:
-    def test_error_raises(self) -> None:
-        msg: dict[str, Any] = {"params": {"turn": {"codexErrorInfo": "sandboxError"}}}
-        with pytest.raises(PromptEvaluationError) as exc_info:
-            raise_for_terminal_notification("error", "boom", "p", msg)
-        assert exc_info.value.phase == "tool"
-
-    def test_interrupted_raises(self) -> None:
-        with pytest.raises(PromptEvaluationError, match="interrupted"):
-            raise_for_terminal_notification("interrupted", "", "p", {})
-
-    def test_other_kind_is_noop(self) -> None:
-        # Should not raise
-        raise_for_terminal_notification("done", "", "p", {})
-
-
-class TestHandleServerRequest:
-    def test_unknown_tool(self) -> None:
-        async def _run() -> None:
-            client = _make_mock_client()
-            msg = {
-                "id": 1,
-                "method": "item/tool/call",
-                "params": {"tool": "nonexistent", "arguments": {}},
-            }
-            await handle_server_request(client, msg, {}, approval_policy="never")
-            client.send_response.assert_called_once()
-            resp = client.send_response.call_args[0][1]
-            assert resp["success"] is False
-
-        asyncio.run(_run())
-
-    def test_command_approval_accept(self) -> None:
-        async def _run() -> None:
-            client = _make_mock_client()
-            msg = {
-                "id": 2,
-                "method": "item/commandExecution/requestApproval",
-                "params": {},
-            }
-            await handle_server_request(client, msg, {}, approval_policy="never")
-            resp = client.send_response.call_args[0][1]
-            assert resp["decision"] == "accept"
-
-        asyncio.run(_run())
-
-    def test_command_approval_decline(self) -> None:
-        async def _run() -> None:
-            client = _make_mock_client()
-            msg = {
-                "id": 3,
-                "method": "item/commandExecution/requestApproval",
-                "params": {},
-            }
-            await handle_server_request(client, msg, {}, approval_policy="on-request")
-            resp = client.send_response.call_args[0][1]
-            assert resp["decision"] == "decline"
-
-        asyncio.run(_run())
-
-    def test_file_approval(self) -> None:
-        async def _run() -> None:
-            client = _make_mock_client()
-            msg = {
-                "id": 4,
-                "method": "item/fileChange/requestApproval",
-                "params": {},
-            }
-            await handle_server_request(client, msg, {}, approval_policy="never")
-            resp = client.send_response.call_args[0][1]
-            assert resp["decision"] == "accept"
-
-        asyncio.run(_run())
-
-    def test_unknown_server_request(self) -> None:
-        async def _run() -> None:
-            client = _make_mock_client()
-            msg = {"id": 5, "method": "unknown/request", "params": {}}
-            await handle_server_request(client, msg, {}, approval_policy="never")
-            client.send_response.assert_called_once_with(5, {})
-
-        asyncio.run(_run())
-
-
 class TestHandleToolCall:
     def test_successful_tool_call(self) -> None:
         async def _run() -> None:
@@ -578,38 +385,132 @@ class TestHandleToolCall:
         asyncio.run(_run())
 
 
-class TestCreateDeadlineWatchdog:
-    def test_no_deadline(self) -> None:
-        client = _make_mock_client()
-        result = create_deadline_watchdog(client, "t", 1, None)
-        assert result is None
+class TestNotificationHandlers:
+    """Test the registry notification handlers directly."""
 
-    def test_expired_deadline(self) -> None:
-        client = _make_mock_client()
-        clock = FakeClock()
-        anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-        clock.set_wall(anchor)
-        deadline = Deadline.create(
-            expires_at=anchor + timedelta(seconds=5), clock=clock
+    def test_item_completed_agent_message_with_text(self) -> None:
+        session, _ = _make_session()
+        params: dict[str, Any] = {"item": {"type": "agentMessage", "text": "hello"}}
+        result = handle_item_completed_notification(
+            params, session, "codex_app_server", "p", None
         )
-        # Advance clock past expiration
-        clock.advance(10)
-        result = create_deadline_watchdog(client, "t", 1, deadline)
+        assert result == ("text", "hello")
+
+    def test_item_completed_agent_message_without_text(self) -> None:
+        session, _ = _make_session()
+        params: dict[str, Any] = {"item": {"type": "agentMessage"}}
+        result = handle_item_completed_notification(
+            params, session, "codex_app_server", "p", None
+        )
         assert result is None
 
-    def test_active_deadline_creates_task(self) -> None:
+    def test_item_completed_command_execution(self) -> None:
+        session, _ = _make_session()
+        params: dict[str, Any] = {
+            "item": {
+                "type": "commandExecution",
+                "id": "c-1",
+                "status": "completed",
+                "command": "ls",
+                "cwd": "/tmp",
+                "aggregatedOutput": "file1\n",
+            }
+        }
+        result = handle_item_completed_notification(
+            params, session, "codex_app_server", "p", None
+        )
+        # Tool items return None; ToolInvoked is dispatched as side effect
+        assert result is None
+
+    def test_item_completed_unknown_type(self) -> None:
+        session, _ = _make_session()
+        params: dict[str, Any] = {"item": {"type": "unknownKind"}}
+        result = handle_item_completed_notification(
+            params, session, "codex_app_server", "p", None
+        )
+        assert result is None
+
+    def test_turn_completed_interrupted(self) -> None:
+        session, _ = _make_session()
+        params: dict[str, Any] = {"turn": {"status": "interrupted"}}
+        result = handle_turn_completed_notification(
+            params, session, "codex_app_server", "p", None
+        )
+        assert result == ("interrupted", "")
+
+    def test_turn_completed_failed(self) -> None:
+        session, _ = _make_session()
+        params: dict[str, Any] = {
+            "turn": {
+                "status": "failed",
+                "codexErrorInfo": "badRequest",
+                "additionalDetails": "oops",
+            }
+        }
+        result = handle_turn_completed_notification(
+            params, session, "codex_app_server", "p", None
+        )
+        assert result[0] == "error"
+        assert "badRequest" in result[1]
+
+
+class TestCodexSendInterrupt:
+    """Exercise the real _send_interrupt body on CodexAppServerAdapter."""
+
+    def test_send_interrupt_calls_turn_interrupt(self) -> None:
         async def _run() -> None:
-            client = _make_mock_client()
-            future_time = datetime.now(UTC) + timedelta(seconds=60)
-            deadline = Deadline.create(expires_at=future_time)
-            task = create_deadline_watchdog(client, "t", 1, deadline)
-            try:
-                assert task is not None
-                assert isinstance(task, asyncio.Task)
-            finally:
-                if task is not None:
-                    _ = task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await task
+            adapter = CodexAppServerAdapter()
+            client = AsyncMock()
+            client.send_request = AsyncMock(return_value={})
+
+            await adapter._send_interrupt(
+                client,
+                session_state="thread-1",
+                turn_state={"turn": {"id": 42}},
+            )
+            client.send_request.assert_called_once()
+            call_args = client.send_request.call_args
+            assert call_args[0][0] == "turn/interrupt"
+            assert call_args[0][1] == {"threadId": "thread-1", "turnId": 42}
+
+        asyncio.run(_run())
+
+
+class TestHandleToolCallUnknownWithBridge:
+    """Covers bridge branch when tool is not found."""
+
+    def test_unknown_tool_emits_transcript(self) -> None:
+        async def _run() -> None:
+            client = AsyncMock()
+            client.send_response = AsyncMock()
+            bridge = MagicMock()
+            await handle_tool_call(
+                client,
+                99,
+                {"tool": "missing", "arguments": {}},
+                {},
+                bridge=bridge,
+            )
+            bridge.on_tool_call.assert_called_once()
+            bridge.on_tool_result.assert_called_once()
+
+        asyncio.run(_run())
+
+    def test_unknown_tool_no_bridge(self) -> None:
+        """Covers branch where bridge is None in the unknown-tool path."""
+
+        async def _run() -> None:
+            client = AsyncMock()
+            client.send_response = AsyncMock()
+            await handle_tool_call(
+                client,
+                100,
+                {"tool": "missing", "arguments": {}},
+                {},
+                bridge=None,
+            )
+            client.send_response.assert_called_once()
+            resp = client.send_response.call_args[0][1]
+            assert resp["success"] is False
 
         asyncio.run(_run())

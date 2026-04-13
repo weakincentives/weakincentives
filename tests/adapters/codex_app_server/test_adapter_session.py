@@ -21,9 +21,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from weakincentives.adapters.codex_app_server._response import (
-    parse_structured_output_or_raise,
-)
 from weakincentives.adapters.codex_app_server.adapter import CodexAppServerAdapter
 from weakincentives.adapters.codex_app_server.client import (
     CodexAppServerClient,
@@ -33,6 +30,9 @@ from weakincentives.adapters.codex_app_server.config import (
     CodexAppServerClientConfig,
 )
 from weakincentives.adapters.core import PromptEvaluationError
+from weakincentives.adapters.jsonrpc._response import (
+    parse_structured_output_or_raise,
+)
 from weakincentives.budget import Budget
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate, Tool

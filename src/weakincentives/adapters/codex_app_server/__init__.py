@@ -16,6 +16,9 @@ This adapter evaluates WINK prompts by delegating execution to Codex via its
 app-server protocol (the same interface powering the Codex VS Code extension).
 WINK tools are bridged as Codex dynamic tools over the same transport channel.
 
+Extends the generic ``JsonRpcAdapter`` base class from
+``weakincentives.adapters.jsonrpc`` with Codex-specific protocol hooks.
+
 Supports three transport modes: stdio (NDJSON over subprocess pipes), managed
 WebSocket (subprocess with ``--listen ws://``), and external WebSocket
 (connect to a remote server — no subprocess management).
@@ -23,8 +26,11 @@ WebSocket (subprocess with ``--listen ws://``), and external WebSocket
 
 from __future__ import annotations
 
+from ..jsonrpc.client import (
+    JsonRpcClient as CodexAppServerClient,
+    JsonRpcClientError as CodexClientError,
+)
 from .adapter import CODEX_APP_SERVER_ADAPTER_NAME, CodexAppServerAdapter
-from .client import CodexAppServerClient, CodexClientError
 from .config import (
     ApiKeyAuth,
     ApprovalPolicy,
