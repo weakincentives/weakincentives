@@ -21,9 +21,6 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-# Re-export generic JSON-RPC types for backward compatibility within
-# this package.
-
 # ---------------------------------------------------------------------------
 # Codex items (item/completed notification payloads)
 # ---------------------------------------------------------------------------
