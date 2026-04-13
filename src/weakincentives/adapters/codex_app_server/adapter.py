@@ -41,6 +41,7 @@ from ..jsonrpc import (
     NotificationHandler,
     ProtocolContext,
     ServerRequestHandler,
+    deadline_remaining_s,
 )
 from ._ephemeral_home import CodexEphemeralHome
 from ._events import (
@@ -166,8 +167,6 @@ class CodexAppServerAdapter(JsonRpcAdapter[Any]):
         protocol_context: ProtocolContext,
     ) -> str:
         """Run initialize → authenticate → create_thread. Returns thread_id."""
-        from ..jsonrpc import deadline_remaining_s
-
         _ = await client.send_request(
             "initialize",
             {

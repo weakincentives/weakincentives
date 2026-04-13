@@ -12,32 +12,25 @@
 
 """Guardrails support for the Codex App Server adapter.
 
-Provides feedback collection after tool calls and task completion checking.
+Provides feedback collection after tool calls.  Task completion is
+handled generically by :class:`JsonRpcAdapter._check_task_completion`.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...prompt.feedback import collect_feedback
-from ...prompt.task_completion import TaskCompletionContext
-from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
 from .._shared._guardrails import accumulate_usage, resolve_filesystem
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol
 
-logger: StructuredLogger = get_logger(
-    __name__, context={"component": "codex_app_server"}
-)
-
 __all__ = [
     "accumulate_usage",
     "append_feedback",
-    "check_task_completion",
     "resolve_filesystem",
 ]
 
@@ -56,77 +49,3 @@ def append_feedback(
     feedback_text = collect_feedback(prompt=prompt, session=session, deadline=deadline)
     if feedback_text:
         content_items.append({"type": "inputText", "text": feedback_text})
-
-
-def check_task_completion(  # noqa: PLR0911
-    *,
-    prompt: PromptProtocol[Any] | None,
-    session: SessionProtocol,
-    accumulated_text: str | None,
-    deadline: Deadline | None,
-    budget_tracker: BudgetTracker | None,
-) -> tuple[bool, str | None]:
-    """Check if the task is complete according to the prompt's checker.
-
-    Returns (should_continue, feedback). When should_continue is True,
-    feedback is guaranteed to be a non-empty string that the caller should
-    use as the prompt text for the next turn.
-    """
-    if prompt is None:
-        return False, None
-
-    checker = prompt.task_completion_checker
-    if checker is None:
-        return False, None
-
-    # Don't continue if deadline is exhausted.
-    if deadline is not None and deadline.remaining().total_seconds() <= 0:
-        logger.debug(
-            "codex_app_server.task_completion.deadline_exhausted",
-            event="task_completion.deadline_exhausted",
-        )
-        return False, None
-
-    # Don't continue if budget is exhausted.
-    if budget_tracker is not None:
-        from ...budget import BudgetExceededError
-
-        try:
-            budget_tracker.check()
-        except BudgetExceededError:
-            logger.debug(
-                "codex_app_server.task_completion.budget_exhausted",
-                event="task_completion.budget_exhausted",
-            )
-            return False, None
-
-    filesystem = resolve_filesystem(prompt)
-    context = TaskCompletionContext(
-        session=session,
-        tentative_output=accumulated_text,
-        filesystem=filesystem,
-    )
-    result = checker.check(context)
-
-    if result.complete:
-        logger.debug(
-            "codex_app_server.task_completion.complete",
-            event="task_completion.complete",
-            context={"feedback": result.feedback},
-        )
-        return False, None
-
-    # Incomplete without feedback — nothing actionable to send as a new turn.
-    if not result.feedback:
-        logger.debug(
-            "codex_app_server.task_completion.incomplete_no_feedback",
-            event="task_completion.incomplete_no_feedback",
-        )
-        return False, None
-
-    logger.info(
-        "codex_app_server.task_completion.incomplete",
-        event="task_completion.incomplete",
-        context={"feedback": result.feedback},
-    )
-    return True, result.feedback
