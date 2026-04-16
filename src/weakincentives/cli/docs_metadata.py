@@ -23,6 +23,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "ANALYSIS_LOOP": "Background analysis agent, wink query, analysis bundles, sampling",
     "CLAUDE_AGENT_SDK": "Claude Agent SDK adapter, MCP tool bridging, skill mounting",
     "CODEX_APP_SERVER": "Codex App Server adapter, stdio JSON-RPC, thread/turn lifecycle",
+    "JSONRPC_ADAPTER": "Generic JSON-RPC adapter base, transport client, turn-based protocol hooks",
     "CLOCK": "Controllable time abstractions, clock injection, testing patterns",
     "DATACLASSES": "Serde utilities, frozen dataclass patterns",
     "DBC": "DbC decorators, exhaustiveness checking, assert_never patterns",

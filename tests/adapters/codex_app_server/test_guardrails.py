@@ -15,25 +15,18 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from weakincentives.adapters.codex_app_server._guardrails import (
-    check_task_completion,
     resolve_filesystem,
 )
 from weakincentives.adapters.codex_app_server._protocol import handle_tool_call
 from weakincentives.adapters.codex_app_server.client import CodexAppServerClient
-from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt.task_completion import (
-    TaskCompletionChecker,
-    TaskCompletionResult,
-)
 from weakincentives.runtime.events import InProcessDispatcher
-from weakincentives.runtime.events.types import TokenUsage
 from weakincentives.runtime.session import Session
 
 # ---- Helpers ----
@@ -310,182 +303,3 @@ class TestResolveFilesystem:
 
 
 # ---- TestCheckTaskCompletion ----
-
-
-class TestCheckTaskCompletion:
-    """Tests for check_task_completion."""
-
-    def test_no_prompt(self) -> None:
-        session, _ = _make_session()
-        should_continue, feedback = check_task_completion(
-            prompt=None,
-            session=session,
-            accumulated_text="text",
-            deadline=None,
-            budget_tracker=None,
-        )
-        assert should_continue is False
-        assert feedback is None
-
-    def test_no_checker(self) -> None:
-        session, _ = _make_session()
-        mock_prompt = MagicMock()
-        mock_prompt.task_completion_checker = None
-
-        should_continue, feedback = check_task_completion(
-            prompt=mock_prompt,
-            session=session,
-            accumulated_text="text",
-            deadline=None,
-            budget_tracker=None,
-        )
-        assert should_continue is False
-        assert feedback is None
-
-    def test_complete(self) -> None:
-        session, _ = _make_session()
-        mock_checker = MagicMock(spec=TaskCompletionChecker)
-        mock_checker.check.return_value = TaskCompletionResult.ok("All done.")
-
-        mock_prompt = MagicMock()
-        mock_prompt.task_completion_checker = mock_checker
-
-        with patch(
-            "weakincentives.adapters.codex_app_server._guardrails.resolve_filesystem",
-            return_value=None,
-        ):
-            should_continue, feedback = check_task_completion(
-                prompt=mock_prompt,
-                session=session,
-                accumulated_text="output",
-                deadline=None,
-                budget_tracker=None,
-            )
-        assert should_continue is False
-        assert feedback is None
-
-    def test_incomplete_with_feedback(self) -> None:
-        session, _ = _make_session()
-        mock_checker = MagicMock(spec=TaskCompletionChecker)
-        mock_checker.check.return_value = TaskCompletionResult.incomplete(
-            "Missing report.md"
-        )
-
-        mock_prompt = MagicMock()
-        mock_prompt.task_completion_checker = mock_checker
-
-        with patch(
-            "weakincentives.adapters.codex_app_server._guardrails.resolve_filesystem",
-            return_value=None,
-        ):
-            should_continue, feedback = check_task_completion(
-                prompt=mock_prompt,
-                session=session,
-                accumulated_text="output",
-                deadline=None,
-                budget_tracker=None,
-            )
-        assert should_continue is True
-        assert feedback == "Missing report.md"
-
-    def test_incomplete_without_feedback(self) -> None:
-        """Incomplete with None feedback returns should_continue=False."""
-        session, _ = _make_session()
-        mock_checker = MagicMock(spec=TaskCompletionChecker)
-        mock_checker.check.return_value = TaskCompletionResult(
-            complete=False, feedback=None
-        )
-
-        mock_prompt = MagicMock()
-        mock_prompt.task_completion_checker = mock_checker
-
-        with patch(
-            "weakincentives.adapters.codex_app_server._guardrails.resolve_filesystem",
-            return_value=None,
-        ):
-            should_continue, feedback = check_task_completion(
-                prompt=mock_prompt,
-                session=session,
-                accumulated_text="output",
-                deadline=None,
-                budget_tracker=None,
-            )
-        assert should_continue is False
-        assert feedback is None
-
-    def test_deadline_exhausted(self) -> None:
-        session, _ = _make_session()
-        mock_checker = MagicMock(spec=TaskCompletionChecker)
-        mock_prompt = MagicMock()
-        mock_prompt.task_completion_checker = mock_checker
-
-        clock = FakeClock()
-        anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-        clock.set_wall(anchor)
-        # Create deadline while clock is before expiry
-        deadline = Deadline.create(
-            expires_at=anchor + timedelta(seconds=10), clock=clock
-        )
-        # Advance clock past expiry
-        clock.set_wall(anchor + timedelta(seconds=20))
-
-        should_continue, feedback = check_task_completion(
-            prompt=mock_prompt,
-            session=session,
-            accumulated_text="output",
-            deadline=deadline,
-            budget_tracker=None,
-        )
-        assert should_continue is False
-        assert feedback is None
-        mock_checker.check.assert_not_called()
-
-    def test_budget_exhausted(self) -> None:
-        session, _ = _make_session()
-        mock_checker = MagicMock(spec=TaskCompletionChecker)
-        mock_prompt = MagicMock()
-        mock_prompt.task_completion_checker = mock_checker
-
-        budget = Budget(max_input_tokens=100)
-        tracker = BudgetTracker(budget)
-        tracker.record_cumulative(
-            "eval-1", TokenUsage(input_tokens=200, output_tokens=0)
-        )
-
-        should_continue, feedback = check_task_completion(
-            prompt=mock_prompt,
-            session=session,
-            accumulated_text="output",
-            deadline=None,
-            budget_tracker=tracker,
-        )
-        assert should_continue is False
-        assert feedback is None
-        mock_checker.check.assert_not_called()
-
-    def test_filesystem_passed_to_context(self) -> None:
-        """Filesystem resolved from prompt is passed to TaskCompletionContext."""
-        session, _ = _make_session()
-        mock_fs = MagicMock()
-        mock_checker = MagicMock(spec=TaskCompletionChecker)
-        mock_checker.check.return_value = TaskCompletionResult.ok()
-
-        mock_prompt = MagicMock()
-        mock_prompt.task_completion_checker = mock_checker
-
-        with patch(
-            "weakincentives.adapters.codex_app_server._guardrails.resolve_filesystem",
-            return_value=mock_fs,
-        ):
-            check_task_completion(
-                prompt=mock_prompt,
-                session=session,
-                accumulated_text="output",
-                deadline=None,
-                budget_tracker=None,
-            )
-
-        ctx = mock_checker.check.call_args[0][0]
-        assert ctx.filesystem is mock_fs
-        assert ctx.session is session
-        assert ctx.tentative_output == "output"
