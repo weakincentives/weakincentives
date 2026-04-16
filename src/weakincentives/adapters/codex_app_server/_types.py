@@ -13,53 +13,13 @@
 """TypedDict definitions for the Codex App Server JSON-RPC protocol.
 
 These replace raw ``dict[str, Any]`` with narrow, documented shapes for
-messages flowing between the client and the Codex app-server subprocess.
+Codex-specific message payloads.  Generic JSON-RPC message types are
+imported from ``weakincentives.adapters.jsonrpc._types``.
 """
 
 from __future__ import annotations
 
 from typing import TypedDict
-
-# ---------------------------------------------------------------------------
-# JSON-RPC transport layer
-# ---------------------------------------------------------------------------
-
-
-class JsonRpcRequest(TypedDict, total=False):
-    """Outbound JSON-RPC request."""
-
-    id: int
-    method: str
-    params: dict[str, object]
-
-
-class JsonRpcNotification(TypedDict, total=False):
-    """Outbound JSON-RPC notification (no ``id``)."""
-
-    method: str
-    params: dict[str, object]
-
-
-class JsonRpcResponse(TypedDict, total=False):
-    """JSON-RPC response from the server."""
-
-    id: int
-    result: dict[str, object]
-    error: str
-
-
-class JsonRpcMessage(TypedDict, total=False):
-    """Any message on the wire (union of request, notification, response).
-
-    Discriminated at runtime by presence of ``id`` and ``method`` keys.
-    """
-
-    id: int
-    method: str
-    params: dict[str, object]
-    result: dict[str, object]
-    error: str
-
 
 # ---------------------------------------------------------------------------
 # Codex items (item/completed notification payloads)

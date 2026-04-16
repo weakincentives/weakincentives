@@ -10,7 +10,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Response building for the Codex App Server adapter."""
+"""Response building for JSON-RPC provider adapters.
+
+Shared by all JSON-RPC subclasses.  Handles structured output parsing,
+budget recording, PromptExecuted event dispatch, and logging.
+"""
 
 from __future__ import annotations
 
@@ -29,7 +33,7 @@ from ...types import AdapterName
 from ..core import PromptEvaluationError, PromptResponse
 
 logger: StructuredLogger = get_logger(
-    __name__, context={"component": "codex_app_server"}
+    __name__, context={"component": "jsonrpc_response"}
 )
 
 
@@ -98,10 +102,11 @@ def build_response[OutputT](  # noqa: PLR0913
     )
 
     logger.info(
-        "codex_app_server.evaluate.complete",
+        "jsonrpc.evaluate.complete",
         event="evaluate.complete",
         context={
             "prompt_name": prompt_name,
+            "adapter": adapter_name,
             "duration_ms": duration_ms,
             "input_tokens": usage.input_tokens if usage else None,
             "output_tokens": usage.output_tokens if usage else None,

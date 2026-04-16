@@ -26,7 +26,6 @@ from weakincentives.adapters.codex_app_server._ephemeral_home import CodexEpheme
 from weakincentives.adapters.codex_app_server._protocol import (
     authenticate,
     create_thread,
-    deadline_remaining_s,
     handle_tool_call,
     start_turn,
 )
@@ -41,6 +40,7 @@ from weakincentives.adapters.codex_app_server.config import (
     CodexAppServerModelConfig,
 )
 from weakincentives.adapters.core import PromptEvaluationError
+from weakincentives.adapters.jsonrpc import deadline_remaining_s
 from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 from weakincentives.runtime.events import InProcessDispatcher
@@ -333,17 +333,25 @@ class TestTranscriptBridgeIntegration:
 class TestApprovalPolicyUntrusted:
     def test_approval_untrusted_declines(self) -> None:
         from weakincentives.adapters.codex_app_server._protocol import (
-            handle_server_request,
+            make_approval_handler,
         )
+        from weakincentives.adapters.jsonrpc import ServerRequestContext
 
         async def _run() -> None:
             client = _make_mock_client()
-            msg = {
-                "id": 6,
-                "method": "item/commandExecution/requestApproval",
-                "params": {},
-            }
-            await handle_server_request(client, msg, {}, approval_policy="untrusted")
+            handler = make_approval_handler("untrusted")
+            ctx = ServerRequestContext(
+                client=client,
+                request_id=6,
+                method="item/commandExecution/requestApproval",
+                params={},
+                tool_lookup={},
+                bridge=None,
+                prompt=None,
+                session=None,
+                deadline=None,
+            )
+            await handler(ctx)
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "decline"
 
@@ -351,17 +359,25 @@ class TestApprovalPolicyUntrusted:
 
     def test_approval_on_failure_accepts_requested_approval(self) -> None:
         from weakincentives.adapters.codex_app_server._protocol import (
-            handle_server_request,
+            make_approval_handler,
         )
+        from weakincentives.adapters.jsonrpc import ServerRequestContext
 
         async def _run() -> None:
             client = _make_mock_client()
-            msg = {
-                "id": 7,
-                "method": "item/commandExecution/requestApproval",
-                "params": {},
-            }
-            await handle_server_request(client, msg, {}, approval_policy="on-failure")
+            handler = make_approval_handler("on-failure")
+            ctx = ServerRequestContext(
+                client=client,
+                request_id=7,
+                method="item/commandExecution/requestApproval",
+                params={},
+                tool_lookup={},
+                bridge=None,
+                prompt=None,
+                session=None,
+                deadline=None,
+            )
+            await handler(ctx)
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "accept"
 
