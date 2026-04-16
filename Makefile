@@ -271,7 +271,7 @@ clean-extracted:
 #        make demo-opencode  [PROJECT=...] [FOCUS="..."] [MODEL=...]
 PROJECT ?= test-repositories/sunfish
 FOCUS ?= Review how the UCI implementation is handled via the packaging scripts
-MODEL ?= openai/gpt-5.3-codex
+MODEL ?= openai/gpt-5.4
 GEMINI_MODEL ?= gemini-2.5-flash
 demo-claude:
 	@uv run --all-extras python code_reviewer_example.py --adapter claude "$(PROJECT)" "$(FOCUS)"

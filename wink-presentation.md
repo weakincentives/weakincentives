@@ -138,7 +138,7 @@ claude = ClaudeAgentSDKAdapter(
 
 # OpenAI Codex
 codex = CodexAppServerAdapter(
-    model_config=CodexAppServerModelConfig(model="gpt-5.3-codex"),
+    model_config=CodexAppServerModelConfig(model="gpt-5.4"),
     client_config=CodexAppServerClientConfig(sandbox_mode="workspace-write"),
 )
 

@@ -330,7 +330,7 @@ workspace = WorkspaceSection(
 )
 
 adapter = CodexAppServerAdapter(
-    model_config=CodexAppServerModelConfig(model="gpt-5.3-codex"),
+    model_config=CodexAppServerModelConfig(model="gpt-5.4"),
     client_config=CodexAppServerClientConfig(
         cwd=str(workspace.temp_dir),
         approval_policy="never",

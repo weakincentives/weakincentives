@@ -344,7 +344,7 @@ class TaskExamplesSection(Section[TaskExamplesParamsT_co]):
                 raise TypeError(
                     "TaskExamplesSection children must be TaskExample instances."
                 )
-            cloned_children.append(child.clone(**kwargs))
+            cloned_children.append(cast(TaskExample[Any], child.clone(**kwargs)))
 
         cloned_default = (
             clone_dataclass(self.default_params)
