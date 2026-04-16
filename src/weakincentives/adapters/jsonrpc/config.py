@@ -33,8 +33,9 @@ Transport = Literal["stdio", "websocket"]
 class JsonRpcClientConfig:
     """Base client-level configuration for JSON-RPC adapters.
 
-    Provider-specific adapters may extend this with additional fields
-    or use it directly.
+    Provider-specific adapters **must** supply ``bin_path``, ``bin_args``,
+    and ``bin_ws_args`` — there are no defaults so that a second provider
+    cannot accidentally launch the wrong binary.
 
     **Transport selection:**
 
@@ -46,13 +47,14 @@ class JsonRpcClientConfig:
       No subprocess is spawned.
     """
 
+    bin_path: str
+    """Binary to spawn (managed modes only).  Required — no default."""
+    bin_args: tuple[str, ...]
+    """Arguments for stdio mode.  Required — no default."""
+    bin_ws_args: tuple[str, ...]
+    """Arguments prefix for managed WebSocket mode (URL appended).
+    Required — no default."""
     transport: Transport = "stdio"
-    bin_path: str = "codex"
-    """Binary to spawn (managed modes only)."""
-    bin_args: tuple[str, ...] = ("app-server",)
-    """Arguments for stdio mode."""
-    bin_ws_args: tuple[str, ...] = ("app-server", "--listen")
-    """Arguments prefix for managed WebSocket mode (URL appended)."""
     remote_url: str | None = None
     """WebSocket URL of an external server.  When set, no subprocess is
     spawned."""

@@ -61,6 +61,7 @@ from ._protocol import (
 )
 from ._schema import bridged_tools_to_dynamic_specs, build_output_schema
 from ._transcript import CodexTranscriptBridge
+from .client import CodexAppServerClient
 from .config import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
@@ -77,9 +78,6 @@ logger: StructuredLogger = get_logger(
 
 CODEX_APP_SERVER_ADAPTER_NAME: AdapterName = "codex_app_server"
 """Canonical label for the Codex App Server adapter."""
-
-# Module-level alias used by _create_client and patchable in tests.
-CodexAppServerClient = JsonRpcClient
 
 
 class CodexAppServerAdapter(JsonRpcAdapter[Any]):

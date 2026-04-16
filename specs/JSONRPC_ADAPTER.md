@@ -120,9 +120,9 @@ Defined at `src/weakincentives/adapters/jsonrpc/client.py`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `bin_path` | `str` | `"codex"` | Binary to spawn (managed modes) |
-| `bin_args` | `tuple[str, ...]` | `("app-server",)` | Args for stdio mode |
-| `bin_ws_args` | `tuple[str, ...]` | `("app-server", "--listen")` | Args prefix for managed WS |
+| `bin_path` | `str` | *(required)* | Binary to spawn (managed modes) |
+| `bin_args` | `tuple[str, ...]` | *(required)* | Args for stdio mode |
+| `bin_ws_args` | `tuple[str, ...]` | *(required)* | Args prefix for managed WS |
 | `env` | `Mapping[str, str] \| None` | `None` | Extra environment variables |
 | `suppress_stderr` | `bool` | `True` | Capture stderr quietly |
 | `transport` | `Literal["stdio", "websocket"]` | `"stdio"` | Wire protocol |
@@ -132,16 +132,18 @@ Defined at `src/weakincentives/adapters/jsonrpc/client.py`.
 ## JsonRpcClientConfig
 
 Base configuration for `JsonRpcClient` instances. Provider-specific adapters
-extend this with additional fields.
+extend this with additional fields. The binary fields (`bin_path`, `bin_args`,
+`bin_ws_args`) are **required** — there are no defaults so that a second
+provider cannot accidentally launch the wrong binary.
 
 Defined at `src/weakincentives/adapters/jsonrpc/config.py`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `bin_path` | `str` | *(required)* | Binary to spawn |
+| `bin_args` | `tuple[str, ...]` | *(required)* | Args for stdio |
+| `bin_ws_args` | `tuple[str, ...]` | *(required)* | Args prefix for managed WS |
 | `transport` | `Literal["stdio", "websocket"]` | `"stdio"` | Wire protocol |
-| `bin_path` | `str` | `"codex"` | Binary to spawn |
-| `bin_args` | `tuple[str, ...]` | `("app-server",)` | Args for stdio |
-| `bin_ws_args` | `tuple[str, ...]` | `("app-server", "--listen")` | Args prefix for managed WS |
 | `remote_url` | `str \| None` | `None` | External WS URL |
 | `ws_auth_token` | `str \| None` | `None` | Bearer token for WS auth |
 | `cwd` | `str \| None` | `None` | Working directory |

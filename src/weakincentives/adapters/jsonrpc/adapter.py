@@ -86,11 +86,11 @@ class JsonRpcAdapter[OutputT_co](ProviderAdapter[OutputT_co]):
     def __init__(
         self,
         *,
-        client_config: JsonRpcClientConfig | None = None,
+        client_config: JsonRpcClientConfig,
         async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
     ) -> None:
         super().__init__()
-        self._client_config = client_config or JsonRpcClientConfig()
+        self._client_config = client_config
         self._async_sleeper = async_sleeper
 
     # ------------------------------------------------------------------

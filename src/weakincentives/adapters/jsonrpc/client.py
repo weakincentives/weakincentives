@@ -84,9 +84,9 @@ class JsonRpcClient:
 
     def __init__(  # noqa: PLR0913
         self,
-        bin_path: str = "codex",
-        bin_args: tuple[str, ...] = ("app-server",),
-        bin_ws_args: tuple[str, ...] = ("app-server", "--listen"),
+        bin_path: str,
+        bin_args: tuple[str, ...],
+        bin_ws_args: tuple[str, ...],
         env: Mapping[str, str] | None = None,
         suppress_stderr: bool = True,
         *,

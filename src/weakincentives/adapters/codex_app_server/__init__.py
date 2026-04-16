@@ -26,11 +26,8 @@ WebSocket (subprocess with ``--listen ws://``), and external WebSocket
 
 from __future__ import annotations
 
-from ..jsonrpc.client import (
-    JsonRpcClient as CodexAppServerClient,
-    JsonRpcClientError as CodexClientError,
-)
 from .adapter import CODEX_APP_SERVER_ADAPTER_NAME, CodexAppServerAdapter
+from .client import CodexAppServerClient, CodexClientError
 from .config import (
     ApiKeyAuth,
     ApprovalPolicy,

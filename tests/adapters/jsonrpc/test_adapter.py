@@ -27,10 +27,17 @@ from weakincentives.adapters.jsonrpc._types import (
 )
 from weakincentives.adapters.jsonrpc.adapter import JsonRpcAdapter
 from weakincentives.adapters.jsonrpc.client import JsonRpcClient, JsonRpcClientError
+from weakincentives.adapters.jsonrpc.config import JsonRpcClientConfig
 from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 
 # ---- Helpers ----
+
+_TEST_CONFIG = JsonRpcClientConfig(
+    bin_path="test-bin",
+    bin_args=("serve",),
+    bin_ws_args=("serve", "--listen"),
+)
 
 
 async def _messages_iterator(
@@ -97,7 +104,7 @@ class TestDefaultHooks:
             def _map_error_phase(self, message: Any) -> str:
                 return "response"
 
-        return Fake()
+        return Fake(client_config=_TEST_CONFIG)
 
     def test_setup_environment_default(self) -> None:
         adapter = self._make_fake_adapter()

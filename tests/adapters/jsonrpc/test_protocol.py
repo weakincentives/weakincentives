@@ -36,6 +36,7 @@ from weakincentives.adapters.jsonrpc._types import (
 )
 from weakincentives.adapters.jsonrpc.adapter import JsonRpcAdapter
 from weakincentives.adapters.jsonrpc.client import JsonRpcClient
+from weakincentives.adapters.jsonrpc.config import JsonRpcClientConfig
 from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate
@@ -43,6 +44,12 @@ from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 # ---- Helpers ----
+
+_TEST_CONFIG = JsonRpcClientConfig(
+    bin_path="test-bin",
+    bin_args=("serve",),
+    bin_ws_args=("serve", "--listen"),
+)
 
 
 def _make_session() -> tuple[Session, InProcessDispatcher]:
@@ -345,7 +352,7 @@ class TestJsonRpcAdapterDispatch:
             def _map_error_phase(self, message: Any) -> str:
                 return "response"
 
-        adapter = FakeAdapter()
+        adapter = FakeAdapter(client_config=_TEST_CONFIG)
         # Known method -> dispatches to handler
         result = adapter._process_notification(
             {"method": "test/method", "params": {}},
@@ -427,7 +434,7 @@ class TestJsonRpcAdapterDispatch:
             def _map_error_phase(self, message: Any) -> str:
                 return "response"
 
-        adapter = FakeAdapter()
+        adapter = FakeAdapter(client_config=_TEST_CONFIG)
         mock_client = AsyncMock()
 
         async def _run() -> None:
