@@ -301,7 +301,7 @@ auth (if pre-authenticated), or session auth without transport auth (loopback).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model` | `str` | `"gpt-5.3-codex"` | Codex model identifier |
+| `model` | `str` | `"gpt-5.4"` | Codex model identifier |
 | `effort` | `ReasoningEffort \| None` | `None` | Reasoning effort |
 | `summary` | `ReasoningSummary \| None` | `None` | Summary preference |
 | `personality` | `Personality \| None` | `None` | Response personality |
@@ -1046,8 +1046,8 @@ All protocol details in this spec were validated against `codex-cli 0.118.0`.
 
 ### Available Models (ChatGPT auth)
 
-`gpt-5.3-codex` (default), `gpt-5.2-codex`, `gpt-5.1-codex-max`, `gpt-5.2`,
-`gpt-5.1-codex-mini`. Model availability depends on auth type and plan.
+`gpt-5.4` (default), `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.1-codex-max`,
+`gpt-5.2`, `gpt-5.1-codex-mini`. Model availability depends on auth type and plan.
 
 ### MCP Server Config Formats
 

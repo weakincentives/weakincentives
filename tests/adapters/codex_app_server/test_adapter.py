@@ -167,7 +167,7 @@ class TestBridgedToolsToDynamicSpecs:
 class TestAdapterInit:
     def test_defaults(self) -> None:
         adapter = CodexAppServerAdapter()
-        assert adapter._model_config.model == "gpt-5.3-codex"
+        assert adapter._model_config.model == "gpt-5.4"
         assert adapter._client_config.codex_bin == "codex"
 
     def test_custom_config(self) -> None:
@@ -292,7 +292,7 @@ class TestCreateThread:
             assert thread_id == "t-abc"
 
             params = client.send_request.call_args[0][1]
-            assert params["model"] == "gpt-5.3-codex"
+            assert params["model"] == "gpt-5.4"
             assert params["cwd"] == "/tmp/work"
             assert params["approvalPolicy"] == "never"
             assert "dynamicTools" not in params

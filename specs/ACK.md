@@ -312,8 +312,8 @@ provider credentials injected.
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `CLAUDE_AGENT_SDK_TEST_MODEL` | Claude SDK model override | `get_default_model()` (Opus 4.6) |
-| `CODEX_APP_SERVER_TEST_MODEL` | Codex model override | `gpt-5.3-codex` |
-| `OPENCODE_ACP_TEST_MODEL` | OpenCode model override | `gpt-5.3` |
+| `CODEX_APP_SERVER_TEST_MODEL` | Codex model override | `gpt-5.4` |
+| `OPENCODE_ACP_TEST_MODEL` | OpenCode model override | `gpt-5.4` |
 | `ACK_TIMEOUT` | Per-test timeout seconds | `120` |
 
 ## Invariants

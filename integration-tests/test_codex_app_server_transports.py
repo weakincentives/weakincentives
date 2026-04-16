@@ -74,7 +74,7 @@ async def _run_simple_prompt(
     thread_result = await client.send_request(
         "thread/start",
         {
-            "model": "gpt-5.3-codex",
+            "model": "gpt-5.4",
             "cwd": cwd,
             "approvalPolicy": "never",
             "ephemeral": True,
@@ -218,7 +218,7 @@ class TestManagedWebSocketTransport:
                     thread_result = await client.send_request(
                         "thread/start",
                         {
-                            "model": "gpt-5.3-codex",
+                            "model": "gpt-5.4",
                             "cwd": cwd,
                             "approvalPolicy": "never",
                             "ephemeral": True,

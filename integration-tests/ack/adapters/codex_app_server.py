@@ -25,7 +25,7 @@ from weakincentives.runtime.session import Session
 from ._protocol import AdapterCapabilities
 
 _MODEL_ENV_VAR = "CODEX_APP_SERVER_TEST_MODEL"
-_DEFAULT_MODEL = "gpt-5.3-codex"
+_DEFAULT_MODEL = "gpt-5.4"
 
 
 class CodexAppServerFixture:

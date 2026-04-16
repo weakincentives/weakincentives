@@ -56,7 +56,7 @@ Personality = Literal["none", "friendly", "pragmatic"]
 McpServerConfig = dict[str, Any]
 """MCP server configuration (command+args or url)."""
 
-DEFAULT_MODEL = "gpt-5.3-codex"
+DEFAULT_MODEL = "gpt-5.4"
 """Default Codex model identifier."""
 
 

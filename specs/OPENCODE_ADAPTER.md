@@ -100,8 +100,9 @@ and via `CurrentModeUpdate` notifications.
 
 Models observed via `new_session().models.available_models`:
 
-**OpenAI:** `openai/gpt-5.3-codex`, `openai/gpt-5.2-codex`, `openai/gpt-5.2`,
-`openai/gpt-5.1-codex-mini`, `openai/gpt-5.1-codex-max`, `openai/gpt-5.1-codex`
+**OpenAI:** `openai/gpt-5.4`, `openai/gpt-5.3-codex`, `openai/gpt-5.2-codex`,
+`openai/gpt-5.2`, `openai/gpt-5.1-codex-mini`, `openai/gpt-5.1-codex-max`,
+`openai/gpt-5.1-codex`
 
 **OpenCode Zen:** `opencode/big-pickle`, `opencode/gpt-5-nano`,
 `opencode/minimax-m2.5-free`, `opencode/kimi-k2.5-free`

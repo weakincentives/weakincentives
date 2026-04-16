@@ -39,7 +39,7 @@ Architecture:
 Usage:
     python code_reviewer_example.py /path/to/project "Review the main module"
     python code_reviewer_example.py --adapter codex /path/to/project "Focus area"
-    python code_reviewer_example.py --adapter opencode --model openai/gpt-5.3-codex /path/to/project
+    python code_reviewer_example.py --adapter opencode --model openai/gpt-5.4 /path/to/project
 
 Requirements:
     pip install weakincentives
@@ -555,7 +555,7 @@ def _create_argument_parser() -> argparse.ArgumentParser:
             Examples:
               %(prog)s /path/to/project
               %(prog)s --adapter codex /path/to/project "Review auth logic"
-              %(prog)s --adapter opencode --model openai/gpt-5.3-codex /path/to/project
+              %(prog)s --adapter opencode --model openai/gpt-5.4 /path/to/project
 
             Architecture:
               This example demonstrates the AgentLoop pattern with:
@@ -574,7 +574,7 @@ def _create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default=None,
-        help="Model ID for the adapter (e.g. openai/gpt-5.3-codex)",
+        help="Model ID for the adapter (e.g. openai/gpt-5.4)",
     )
     parser.add_argument(
         "project_path",
