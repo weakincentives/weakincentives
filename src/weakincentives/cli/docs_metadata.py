@@ -27,6 +27,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "DATACLASSES": "Serde utilities, frozen dataclass patterns",
     "DBC": "DbC decorators, exhaustiveness checking, assert_never patterns",
     "DEBUG_BUNDLE": "Debug bundles, log capture, session snapshots, debug web UI",
+    "DISTILLED": "Single-file distillation of the WINK core (Bottle-style)",
     "DLQ": "Dead letter queues, poison message handling, AgentLoop/EvalLoop DLQ config",
     "EVALS": "Evaluation framework, datasets, evaluators, session evaluators",
     "EXAMPLES": "Code review agent reference implementation",
