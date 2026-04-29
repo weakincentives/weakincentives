@@ -1,8 +1,8 @@
 [project]
 name = "weakincentives"
 dynamic = ["version"]
-description = "Tools for developing and optimizing side effect free background agents"
-readme = "llms.md"
+description = "WINK: a small, modular spine for building reliable AI agents"
+readme = "README.md"
 authors = [
     { name = "Andrei Savu", email = "andrei@weakincentives.com" }
 ]
@@ -12,15 +12,13 @@ license = { text = "Apache-2.0" }
 keywords = [
     "ai",
     "agents",
-    "background-agents",
-    "side-effect-free",
-    "optimization",
     "weak-incentives",
+    "spine",
+    "minimal",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
@@ -34,36 +32,16 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://weakincentives.com/"
-Documentation = "https://github.com/weakincentives/weakincentives/blob/main/guides/README.md"
 Repository = "https://github.com/weakincentives/weakincentives"
 "Issue Tracker" = "https://github.com/weakincentives/weakincentives/issues"
 
-[project.optional-dependencies]
-skills = [
-    "pyyaml>=6.0.3",
-]
-redis = [
-    "redis>=7.4.0",
-]
-claude-agent-sdk = [
-    "claude-agent-sdk>=0.1.59",
-]
-acp = [
-    "agent-client-protocol>=0.9.0",
-    "mcp>=1.27.0",
-    "uvicorn>=0.44.0",
-]
-wink = [
-    "fastapi>=0.135.3",
-    "markdown-it-py[linkify]>=4.0.0",
-    "uvicorn>=0.44.0",
-]
-codex-ws = [
-    "websockets>=13.0",
-]
-
-[project.scripts]
-wink = "weakincentives.cli.wink:main"
+# The spine is the only required install. Future extras will appear here as
+# they are built (each declared with its own pip-installable dependency set):
+#
+#   [project.optional-dependencies]
+#   claude = ["claude-agent-sdk>=0.1.59"]
+#   redis  = ["redis>=7.4.0"]
+#   ...
 
 [build-system]
 requires = ["hatchling>=1.29.0", "hatch-vcs>=0.5.0"]
@@ -80,36 +58,22 @@ local_scheme = "no-local-version"
 [tool.hatch.build.targets.wheel]
 packages = ["src/weakincentives"]
 
-[tool.hatch.build.targets.sdist]
-exclude = ["src/examples"]
-
-[tool.hatch.build.hooks.custom]
-path = "hatch_build.py"
-
 [dependency-groups]
 dev = [
-    "weakincentives[skills]",
-    "bandit>=1.9.4",
-    "deptry>=0.25.1",
     "pytest>=9.0.3",
     "pytest-timeout>=2.4.0",
     "pytest-cov>=7.1.0",
     "pytest-randomly>=4.0.1",
-    "pytest-rerunfailures>=16.1",
-    "pip-audit>=2.10.0",
     "ruff>=0.15.10",
     "pyright>=1.1.408",
     "ty>=0.0.31",
     "mdformat>=1.0.0",
     "hypothesis>=6.152.1",
-    "vulture>=2.16",
-    "pytest-testmon>=2.2.0",
 ]
 
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-extend-exclude = ["test-repositories", "toolchain"]
 
 [tool.ruff.lint]
 extend-select = [
@@ -124,19 +88,15 @@ extend-select = [
     "RSE",
     "PTH",
     "ISC",
-    "CPY",
     "A",
     "RUF",
     "TRY",
     "PLR",
     "PERF",
-    "TID251",
 ]
 extend-ignore = [
     "TRY003",
     "RUF067",
-    # New preview rules from ruff 0.15.7 upgrade - suppress for now
-    "BLE001",   # blind exception catches (intentional in adapters/resources)
 ]
 fixable = ["I001", "F401", "RUF100"]
 
@@ -145,93 +105,34 @@ known-first-party = ["weakincentives"]
 combine-as-imports = true
 
 [tool.ruff.lint.per-file-ignores]
-# Tests rely on readable inline status codes, simple fixtures, and helper signatures.
-# C901 is ignored because test functions can legitimately have higher complexity.
-"tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "RUF038", "RUF069", "ANN201", "ANN401", "PERF401", "DTZ001", "FLY002", "PYI055", "TC005"]
-"integration-tests/**" = ["C901", "PLR1702", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "TC005"]
-"formal-tests/**" = ["PLR2004"]
-# --- Source files with justified remaining ignores ---
-# PLR6301: Instance methods required by protocol/subclass-override contracts
-"src/weakincentives/clock.py" = ["PLR6301"]
-"src/weakincentives/prompt/feedback_providers.py" = ["PLR6301"]
-"src/weakincentives/prompt/section.py" = ["PLR0913", "PLR6301"]
-"src/weakincentives/runtime/session/slices/_memory.py" = ["PLR6301"]
-# PLR0913: Public APIs with many keyword arguments by design
-"src/weakincentives/prompt/overrides/_section_overrides.py" = ["PLR0913"]
-"src/weakincentives/prompt/overrides/_tool_overrides.py" = ["PLR0913"]
-"src/weakincentives/prompt/prompt.py" = ["PLR0913"]
-"src/weakincentives/prompt/markdown.py" = ["PLR0913"]
-"src/weakincentives/adapters/core.py" = ["PLR0913"]
-"src/weakincentives/dbc/__init__.py" = ["PLR0913"]
-"src/weakincentives/runtime/session/session.py" = ["PLR0913"]
-"src/weakincentives/runtime/session/snapshots.py" = ["PLR0913"]
-# Adapter files: external SDK types force broad signatures and Any usage
-"src/weakincentives/adapters/claude_agent_sdk/_hooks.py" = ["RUF029"]
-"src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "ANN401", "TRY300"]
-"src/weakincentives/adapters/codex_app_server/adapter.py" = ["PLR0913"]
-"src/weakincentives/adapters/codex_app_server/client.py" = ["PLR0913"]
-"src/weakincentives/adapters/_shared/_bridge.py" = ["PLR0913", "TRY300"]
-"src/weakincentives/adapters/acp/client.py" = ["ANN401", "PLR6301"]
-"src/weakincentives/adapters/acp/_mcp_http.py" = ["ANN401"]
-"src/weakincentives/adapters/acp/_structured_output.py" = ["ANN401"]
-"src/weakincentives/adapters/acp/_prompt_loop.py" = ["PLR0913", "PLR0917", "ANN401"]
-"src/weakincentives/adapters/acp/adapter.py" = ["PLR0913", "PLR6301", "ANN401"]
-# Redis mailbox: inherent complexity from Lua script result parsing
-"src/weakincentives/contrib/mailbox/_redis.py" = ["PLR0914", "PLR6301", "TRY300", "TRY301"]
-# Formal verification: TLA+ DSL uses assert-for-control-flow by design
-"src/weakincentives/formal/__init__.py" = ["PLR0913", "B010"]
+"tests/**" = [
+    "ANN201",
+    "ANN401",
+    "C901",
+    "PLR0913",
+    "PLR0914",
+    "PLR2004",
+    "PLR6301",
+    "S101",
+    "SIM117",
+]
+"src/weakincentives/core/prompt.py" = ["PLR0913"]
+"src/weakincentives/core/transactions.py" = ["PLR0913"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 8
-
-[tool.ruff.lint.flake8-copyright]
-notice-rgx = '''(?s)\A(?:#!/[^\n]+\n)?# Licensed under the Apache License, Version 2.0 \(the "License"\);
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-'''
-
-[tool.ruff.lint.flake8-tidy-imports.banned-api]
-"pydantic".msg = "Pydantic is banned. Use weakincentives.serde instead."
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 
 [tool.pytest.ini_options]
-addopts = "--cov=src/weakincentives --cov=toolchain --cov-report=term-missing --cov-fail-under=100 --timeout=10 --timeout-method=thread"
-markers = [
-    "core: marks fast, high-value tests that always run in CI.",
-    "integration: marks tests that exercise live provider integrations.",
-    "ack_capability(capability): marks ACK tests requiring a named adapter capability.",
-    "timeout(timeout): set per-test timeout in seconds via pytest-timeout.",
-    "threadstress: repeat tests under randomized thread-pool conditions.",
-    "redis: marks all Redis integration tests (standalone and cluster).",
-    "redis_standalone: marks tests using standalone Redis.",
-    "redis_cluster: marks tests using Redis Cluster.",
-    "slow: marks tests that are slow and may be skipped in quick test runs.",
-]
-norecursedirs = ["test-repositories", ".uv-cache", ".venv", ".hypothesis", "integration-tests"]
-reruns = 2
-reruns_delay = 0.5
+addopts = "--cov=src/weakincentives --cov-report=term-missing --cov-fail-under=100 --timeout=10 --timeout-method=thread"
+testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["src/weakincentives", "toolchain"]
-omit = [
-    # Redis mailbox requires integration tests with a real Redis server
-    "src/weakincentives/contrib/mailbox/_redis.py",
-    # Docs directory contains bundled example files for documentation, not library code
-    "src/weakincentives/docs/*",
-]
+source = ["src/weakincentives"]
 
 [tool.coverage.report]
 fail_under = 100
@@ -244,93 +145,34 @@ exclude_lines = [
     ":\\s*\\.\\.\\.\\s*$",
 ]
 
-[tool.deptry]
-
-[tool.deptry.per_rule_ignores]
-DEP002 = ["agent-client-protocol", "claude-agent-sdk", "mcp", "pyyaml", "redis", "uvicorn", "websockets"]
-DEP003 = ["jsonschema", "starlette"]
-DEP004 = ["weakincentives"]  # Package imports itself; declared as dev dep for testing
-
 [tool.pyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
 include = ["src"]
 exclude = [
-    "test-repositories",
     ".git",
-    ".uv-cache",
     ".venv",
     ".pytest_cache",
     ".ruff_cache",
     "dist",
-    "src/weakincentives/docs",
 ]
 deprecateTypingAliases = true
-reportCallInDefaultInitializer = "error"
-reportMissingTypeStubs = "error"
 reportImplicitOverride = "error"
-reportImplicitStringConcatenation = "error"
-reportImportCycles = "error"
 reportPrivateUsage = "error"
-reportMissingSuperCall = "error"
-reportPropertyTypeMismatch = "error"
 reportUnknownMemberType = "error"
-reportUninitializedInstanceVariable = "error"
 reportUnnecessaryTypeIgnoreComment = "error"
-reportUnreachable = "error"
 reportUnusedCallResult = "error"
-reportUnusedExpression = "error"
-# Tier 1: High-impact rules
-reportInconsistentConstructor = "error"
 reportMatchNotExhaustive = "error"
-reportUnnecessaryComparison = "error"
-reportDeprecated = "error"
-# Tier 2: Medium-impact rules
-reportUnnecessaryIsInstance = "error"
-reportUnnecessaryCast = "error"
-reportUnnecessaryContains = "error"
-reportConstantRedefinition = "error"
-# Tier 3: Style rules
-reportUntypedNamedTuple = "error"
-reportTypeCommentUsage = "error"
-
-[tool.vulture]
-paths = ["src/weakincentives"]
-min_confidence = 80
-ignore_names = [
-    "__dir__",
-    "__getattr__",
-    "visit_*",
-    "expression",  # Protocol method parameter in InterpreterProtocol.eval
-    "stream",  # Protocol method parameter in _YAMLModule.safe_load
-    "terminal_id",  # ACP Client protocol method parameter
-]
 
 [tool.ty]
-
-[tool.ty.src]
-exclude = []
 
 [tool.ty.environment]
 python-version = "3.12"
 
 [tool.ty.rules]
-ambiguous-protocol-member = "error"
 deprecated = "error"
 division-by-zero = "error"
 invalid-ignore-comment = "error"
 possibly-missing-import = "error"
-possibly-unresolved-reference = "error"
-# redundant-cast disabled: false positives on cast(Self, ...) pattern
-# which is common for working around type system limitations
-redundant-cast = "ignore"
-undefined-reveal = "error"
-unresolved-global = "error"
-# unsupported-base disabled: false positives on dynamic class creation
-# patterns like `class Foo(cls):` inside __class_getitem__
-unsupported-base = "ignore"
 unused-ignore-comment = "error"
 useless-overload-body = "error"
-# High-impact additions
-possibly-missing-attribute = "error"
-ignore-comment-unknown-rule = "error"

@@ -2,282 +2,86 @@
 
 Quick-reference for AI assistants working in the `weakincentives` repository.
 
-______________________________________________________________________
+## What this repo is
 
-## Core Philosophy
+A small, modular Python toolkit for building reliable AI agents. The base
+install ships only the **spine** (`src/weakincentives/core/`):
 
-**The prompt is the agent.** Prompts are hierarchical documents where sections
-bundle instructions and tools together. No separate tool registry; capabilities
-live in the prompt definition.
+- `errors.py` — stable `WinkError` hierarchy.
+- `prompt.py` — `Section[ParamsT]`, `MarkdownSection`, `Prompt`,
+  `RenderedPrompt`.
+- `tool.py` — `Tool`, `ToolResult`, `ToolContext`, `ToolHandler`, `ToolPolicy`.
+- `session.py` — `Session`, `SliceAccessor`, `Replace`, `Append`, `@reducer`,
+  spine-emitted `PromptRendered` / `ToolInvoked` / `PromptExecuted` events.
+- `snapshot.py` — `Snapshot` (with `to_json` / `from_json`), `TypeRegistry`,
+  `Snapshotable`, `capture`, `restore`.
+- `transactions.py` — `tool_transaction`, `execute_tool`, `PendingToolTracker`.
+- `protocols.py` — `ProviderAdapter`, `EventListener`, `ResourceProvider`,
+  `Deadline`, `Budget`, `Usage`, `ToolCall`, `PromptResponse`.
 
-**Event-driven state.** All mutations flow through pure reducers processing
-typed events. State is immutable and inspectable via snapshots.
+Higher-level features (provider adapters, evals, debug bundles, formal
+verification, skills, …) will land as opt-in extras as they are rebuilt.
+Each must depend only on `weakincentives.core` and other extras.
 
-**Provider-agnostic.** Same agent definition works across OpenAI, LiteLLM, and
-Claude Agent SDK via adapter abstraction.
+The full design is in `specs/SPINE.md`.
 
-______________________________________________________________________
+## Definition of Done
 
-## Guiding Principles
-
-### Definition vs Harness
-
-WINK separates what you own from what the runtime provides:
-
-**Agent Definition (you own):** Prompt, Tools, Policies, Feedback
-
-**Execution Harness (runtime-owned):** Planning loop, sandboxing, retries,
-throttling, crash recovery, deadlines, budgets
-
-The harness keeps changing; your agent definition should not. WINK makes the
-definition a first-class artifact you can version, review, test, and port.
-
-### Policies Over Workflows
-
-**Prefer declarative policies over prescriptive workflows.**
-
-A workflow encodes _how_ to accomplish a goal—a predetermined sequence that
-fractures when encountering unexpected situations. A policy encodes _what_ the
-goal requires—constraints the agent must satisfy while remaining free to find
-any valid path.
-
-| Aspect | Workflow | Policy |
-|--------|----------|--------|
-| Specifies | Steps to execute | Constraints to satisfy |
-| On unexpected | Fails or branches | Agent reasons |
-| Composability | Sequential coupling | Independent conjunction |
-| Agent role | Executor | Reasoner |
-
-**Key policy characteristics:** Declarative, Composable, Fail-closed, Observable
-
-### Transactional Tools
-
-Tool calls are atomic transactions. When a tool fails:
-
-1. Session state rolls back to pre-call state
-1. Filesystem changes revert
-1. Error result returned to LLM with guidance
-
-Failed tools don't leave partial state. This enables aggressive retry and
-recovery strategies.
-
-______________________________________________________________________
-
-## MANDATORY: Definition of Done
-
-**No work is considered complete until `make check` passes with zero errors.**
-
-This is non-negotiable. Do not claim a task is complete, do not move on to the
-next task, and do not commit until:
+No work is considered complete until `make check` passes:
 
 ```bash
-make check  # Must exit 0 with no errors
+make check  # ruff format + lint, pyright strict, ty, markdown, pytest
 ```
 
-If `make check` fails: fix errors, re-run, repeat until all checks pass.
+This runs:
 
-______________________________________________________________________
+- `ruff format --check` and `ruff check` (lint)
+- `pyright` in strict mode + `ty` on `src` and `tests`
+- `mdformat --check` on every `*.md`
+- `pytest` with 100% line and branch coverage required
+
+If any check fails, fix it. Do not lower the bar.
 
 ## Commands
 
 ```bash
-uv sync && ./install-hooks.sh   # Setup - BOTH STEPS ARE MANDATORY
-
-make format      # Ruff format (88-char lines)
-make lint        # Ruff lint --preview
-make typecheck   # ty + pyright (strict)
-make test        # Pytest, 100% coverage required
-make check       # ALL checks - MANDATORY before any commit
+uv sync           # install dependencies
+make format       # auto-format with ruff
+make lint         # ruff check
+make typecheck    # pyright + ty
+make test         # full pytest with coverage
+make markdown-fix # format markdown files
+make check        # everything
 ```
 
-______________________________________________________________________
+## Style
 
-## MANDATORY: Git Hooks Installation
+- 88-character lines, double quotes, ruff-format.
+- Strict pyright + `ty`. Annotations are the source of truth.
+- `@dataclass(frozen=True, slots=True)` for value types.
+- Use `@reducer(on=Event)` on frozen dataclasses for state slices; install
+  them with `session.install(SliceClass)`.
+- Public names listed in `__all__`. Anything not exported is private.
+- Errors must subclass `WinkError`; choose the right category in
+  `core/errors.py`.
 
-**Git hooks MUST be installed in every new development environment.**
+## Spine invariants
 
-```bash
-./install-hooks.sh   # Run this after cloning or in any new environment
-```
+These are enforced by tests and reviewed at every change:
 
-### Why This Matters
+- `weakincentives.core` imports nothing outside the standard library and
+  itself.
+- Top-level `weakincentives.__all__` matches `weakincentives.core.__all__`
+  exactly.
+- Every reachable code path is covered (`pytest --cov-fail-under=100`).
+- Every module is under 720 lines; every function under 120.
 
-The pre-commit hook runs `CI=true make check`, which:
+## Where to read first
 
-1. **Runs the FULL test suite** (not the testmon subset used for local iteration)
-1. **Enforces 100% coverage** on all code paths
-1. **Exactly emulates CI verification** that runs on pull requests
-
-### The Problem Without Hooks
-
-Without hooks, you might:
-
-- Run `make check` locally (uses testmon, runs only affected tests)
-- Commit code that passes local checks
-- **Fail CI** because the full test suite reveals issues testmon skipped
-
-### The Solution
-
-The pre-commit hook automatically runs `CI=true make check` before every
-commit, ensuring:
-
-- ✅ What passes locally **will** pass in CI
-- ✅ No surprises when your PR is reviewed
-- ✅ Coverage gaps are caught immediately
-
-**If hooks aren't installed, install them now:**
-
-```bash
-./install-hooks.sh
-```
-
-______________________________________________________________________
-
-### Efficient Testing Workflow
-
-`make check` and `make test` automatically detect local vs CI execution:
-
-- **In CI:** Full test suite with 100% coverage enforcement
-- **Locally:** Only tests affected by changes (uses testmon coverage database)
-
-The first local run builds a coverage database (`.testmondata`). Subsequent
-runs use this database to identify which tests cover changed code and skip the rest.
-This dramatically reduces iteration time when working on focused changes.
-
-## Architecture
-
-```
-src/weakincentives/
-├── adapters/     # OpenAI, LiteLLM, Claude Agent SDK
-├── contrib/      # Mailbox, optimizers
-├── dbc/          # Design-by-contract decorators
-├── evals/        # Evaluation framework
-├── prompt/       # Section/Prompt composition
-├── resources/    # Dependency injection
-├── runtime/      # Session, events, lifecycle
-├── serde/        # Dataclass serialization
-└── ...
-```
-
-## Style Patterns
-
-### Types & Dataclasses
-
-- Strict pyright; annotations are source of truth—no redundant runtime guards
-- Use `@dataclass(slots=True, frozen=True)` or `@FrozenDataclass()`
-- Use `assert_never()` with `# pragma: no cover` for union exhaustiveness
-- Use `TYPE_CHECKING` blocks to avoid circular imports
-
-### Design-by-Contract
-
-- Public APIs: `@require`, `@ensure`, `@invariant` from `weakincentives.dbc`
-- Preconditions validate input; postconditions validate `result`
-- Messages: return `(bool, message)` tuple for custom diagnostics
-
-### Prompts & Sections
-
-- `PromptTemplate[OutputType]` with `ns`, `key`, `sections`
-- Section keys: `^[a-z0-9][a-z0-9._-]{0,63}$`
-- Tools declared on sections in `tools=(...)` tuple
-- Resources accessed via `with prompt.resources:` context
-
-### Sessions & Reducers
-
-- Pure reducers return `SliceOp[T]` (Append, Replace, Clear)—never mutate
-- All mutations via `session.dispatch(event)` by concrete dataclass type
-- Use `@reducer(on=EventType)` decorator on frozen dataclass methods
-- Access: `session[T].latest()`, `.all()`, `.where(predicate)`
-
-### Tools
-
-- Signature: `def handler(params: P, *, context: ToolContext) -> ToolResult[R]:`
-- Use `ToolResult.ok(value, message="...")` or `ToolResult.error("message")`
-- Tool names: `^[a-z0-9_-]{1,64}$`; descriptions 1-200 chars
-- Failed tools return errors (never abort); rollback is automatic
-
-### Resources
-
-- Scope: `SINGLETON`, `TOOL_CALL`, `PROTOTYPE` per `Binding`
-- Factory: `Binding(protocol, lambda resolver: Value(resolver.get(Dep)))`
-- Lifecycle: implement `Closeable`, `PostConstruct`, `Snapshotable` as needed
-
-### Serialization
-
-- Use `serde.parse(cls, data)` and `serde.dump(obj)`—no Pydantic
-- Constraints via `Annotated[type, {"ge": 0, "pattern": "..."}]`
-- `__type__` field for polymorphic union deserialization
-
-### Time
-
-- Depend on narrow protocols: `WallClock`, `MonotonicClock`, `Sleeper`
-- Inject `clock` parameter (default `SYSTEM_CLOCK`); use `FakeClock` in tests
-- Deadlines use `datetime(..., tzinfo=UTC)`
-
-### Module Layers
-
-- Foundation → Core → Adapters → High-level; no reverse imports
-- Private `_foo.py` modules never imported outside their package
-- Use protocols or `TYPE_CHECKING` to break circular dependencies
-
-### Avoid
-
-- Mutable defaults (`[]`, `{}`)
-- Global state—inject dependencies explicitly
-- Monkeypatching—use FakeClock/FakeFS instead
-- Cross-layer imports outside `TYPE_CHECKING`
-- Redundant type narrowing after type guards
-
-## Testing
-
-- 100% coverage required for `src/weakincentives/`
-- Run focused: `uv run pytest tests/path/to/test.py -v`
-- Always finish with `make check`
-- **10-second timeout enforced per test** (`--timeout=10 --timeout-method=thread`)
-- Every unit test MUST complete in under 10 seconds. If a test exceeds this,
-  refactor it — do not raise the timeout. Use mocks, fakes, or smaller inputs.
-- Use `@pytest.mark.timeout(N)` only for integration tests that genuinely need
-  more time. Never on unit tests.
-
-## Documentation
-
-- **Specs**: `specs/` - design specs (PROMPTS, SESSIONS, TOOLS, ADAPTERS, etc.)
-- **Guides**: `guides/` - how-to material; see `guides/README.md`
-- **Key files**: `README.md`, `llms.md` (API reference), `CHANGELOG.md`
-- **CLI docs**: `wink docs --reference` (API), `--specs` (design), `--guide`
-
-### Key Specs
-
-Read before modifying related code:
-
-| Spec | Topic |
-|------|-------|
-| `PROMPTS.md` | Prompt system, sections, composition |
-| `SESSIONS.md` | Session lifecycle, events, budgets |
-| `TOOLS.md` | Tool registration, tool policies |
-| `GUARDRAILS.md` | Tool policies, feedback providers, task completion |
-| `ADAPTERS.md` | Provider adapters, throttling |
-| `CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
-| `CODEX_APP_SERVER.md` | Codex App Server adapter, stdio JSON-RPC |
-| `ACP_ADAPTER.md` | Generic ACP adapter, protocol flow |
-| `OPENCODE_ADAPTER.md` | OpenCode ACP adapter, quirk handling |
-| `AGENT_LOOP.md` | AgentLoop orchestration |
-| `POLICIES_OVER_WORKFLOWS.md` | Design philosophy |
-| `MODULE_BOUNDARIES.md` | Layer architecture |
-
-## Stability
-
-Alpha software. APIs may change. Delete unused code completely; no
-backward-compatibility shims.
-
-______________________________________________________________________
-
-## Final Checklist
-
-**Before ANY commit or claiming work is done:**
-
-- [ ] `make check` passes with zero errors (MANDATORY)
-- [ ] Tests cover new code paths (100% coverage)
-- [ ] Relevant specs consulted/updated
-- [ ] `CHANGELOG.md` updated for user-visible changes
-
-**If `make check` fails, the work is not done.**
+| Topic | File |
+| --- | --- |
+| Spine design and rationale | `specs/SPINE.md` |
+| Philosophy | `specs/POLICIES_OVER_WORKFLOWS.md` |
+| Public surface | `src/weakincentives/core/__init__.py` |
+| Error hierarchy | `src/weakincentives/core/errors.py` |
+| Extension points | `src/weakincentives/core/protocols.py` |

@@ -10,68 +10,74 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""weakincentives — the WINK toolkit for building reliable agents.
+"""WINK spine: the load-bearing core of weakincentives.
 
-The base install ships only the **spine** (:mod:`weakincentives.core`):
-hierarchical typed prompts that bundle tools, event-sourced sessions with
-pure reducers, snapshot/restore with JSON persistence, transactional tool
-execution, and a small set of extension protocols.
+This package is the only required install. Everything else (provider
+adapters, resource registries, evaluation, debug bundles, …) lives in
+optional extras that depend on the spine and never the other way around.
 
-Provider adapters, resource registries, debug bundles, evaluation, and
-other higher-level features live in optional extras (`pip install
-weakincentives[claude]`, etc.) that depend on this spine.
-
-Symbols re-exported from :mod:`weakincentives.core` are the public,
-semver-frozen surface of the package.
+See ``specs/SPINE.md`` for the full design.
 """
 
 from __future__ import annotations
 
-from .core import (
-    Append,
-    Budget,
+from .errors import (
     BudgetExceededError,
     ContractError,
-    Deadline,
     DeadlineExceededError,
-    EventListener,
-    MarkdownSection,
-    PendingToolTracker,
     PolicyDeniedError,
-    Prompt,
     PromptError,
-    PromptExecuted,
-    PromptRendered,
+    SessionError,
+    SnapshotError,
+    ToolError,
+    TransactionError,
+    WinkError,
+)
+from .prompt import (
+    MarkdownSection,
+    Prompt,
+    RenderedPrompt,
+    Section,
+)
+from .protocols import (
+    Budget,
+    Deadline,
+    EventListener,
     PromptResponse,
     ProviderAdapter,
-    RenderedPrompt,
-    Replace,
     ResourceProvider,
-    Section,
+    ToolCall,
+    Usage,
+)
+from .session import (
+    Append,
+    PromptExecuted,
+    PromptRendered,
+    Replace,
     Session,
-    SessionError,
     SliceAccessor,
     SliceOp,
+    ToolInvoked,
+    TypedReducer,
+    reducer,
+)
+from .snapshot import (
     Snapshot,
     Snapshotable,
-    SnapshotError,
+    TypeRegistry,
+    capture,
+    restore,
+)
+from .tool import (
     Tool,
-    ToolCall,
     ToolContext,
-    ToolError,
     ToolHandler,
-    ToolInvoked,
     ToolPolicy,
     ToolResult,
-    TransactionError,
-    TypedReducer,
-    TypeRegistry,
-    Usage,
-    WinkError,
-    capture,
+)
+from .transactions import (
+    PendingToolTracker,
     execute_tool,
-    reducer,
-    restore,
     tool_transaction,
 )
 
