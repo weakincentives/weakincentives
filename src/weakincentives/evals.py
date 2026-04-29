@@ -21,6 +21,7 @@ The framework is deliberately small: it composes with the existing
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Protocol, final, runtime_checkable
@@ -39,7 +40,10 @@ __all__ = [
     "EvalScore",
     "Evaluator",
     "ExactMatch",
+    "JudgeProtocol",
+    "LlmJudge",
     "PromptFactory",
+    "RegexMatch",
     "ToolCalled",
     "build_noop_factory",
     "run_evaluation",
@@ -206,6 +210,72 @@ class AllToolsSucceeded:
             passed=ok,
             score=1.0 if ok else 0.0,
             detail=f"{len(failures)} tool failures",
+        )
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class RegexMatch:
+    """Pass when ``result.final_response.text`` matches a regex.
+
+    The regex comes from ``case.expected``; cases that don't supply a
+    string fail the score with a clear detail message.
+    """
+
+    flags: int = 0
+
+    def score(
+        self,
+        case: EvalCase,
+        result: AgentLoopResult,
+        transcript: Transcript,
+    ) -> EvalScore:
+        del transcript
+        pattern = case.expected
+        if not isinstance(pattern, str):
+            return EvalScore(passed=False, detail="expected must be a regex string")
+        match = re.search(pattern, result.final_response.text, self.flags)
+        return EvalScore(
+            passed=match is not None,
+            score=1.0 if match is not None else 0.0,
+            detail=f"pattern={pattern!r}",
+        )
+
+
+@runtime_checkable
+class JudgeProtocol(Protocol):
+    """Synchronous LLM-judge facade used by :class:`LlmJudge`."""
+
+    def evaluate(
+        self,
+        *,
+        case: EvalCase,
+        response: str,
+        transcript: Transcript,
+    ) -> EvalScore: ...
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class LlmJudge:
+    """Delegate scoring to a :class:`JudgeProtocol` implementation.
+
+    Tests typically supply a callable wrapped in a tiny class; production
+    callers wire in a real model-backed judge.
+    """
+
+    judge: JudgeProtocol
+
+    def score(
+        self,
+        case: EvalCase,
+        result: AgentLoopResult,
+        transcript: Transcript,
+    ) -> EvalScore:
+        return self.judge.evaluate(
+            case=case,
+            response=result.final_response.text,
+            transcript=transcript,
         )
 
 

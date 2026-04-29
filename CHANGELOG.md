@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+### Operational primitives, visibility, overrides, workspace
+
+Big push toward parity with the original 60k-line package.
+
+- `weakincentives.runcontext` — `RunContext` correlation envelope
+  (trace id, request id, attempt counter, parent linkage, attributes)
+  plus a context-var-backed `use_run_context` / `current_run_context`
+  pair.
+- `weakincentives.lifecycle` — `ShutdownCoordinator` with idempotent
+  shutdown, callback registration after-shutdown that runs immediately,
+  and a `LoopGroup` worker pool that captures failures into
+  `LoopGroupError` on `join`.
+- `weakincentives.watchdog` — `Heartbeat` + `Watchdog` for liveness
+  tracking. `tick()` returns the newly stuck heartbeats, fires the
+  configured `on_stuck` callback exactly once per silence event, and
+  clears stuck state when a heartbeat resumes.
+- `weakincentives.mailbox` — `Mailbox` protocol, in-memory
+  `InMemoryMailbox` with leases, retries, and `DeadLetterQueue`
+  integration, and a thread-driveable `MailboxWorker` that
+  ack/nacks automatically based on handler outcome.
+- `core.SectionVisibility` (FULL / SUMMARY) plus a new `summary` field
+  on `Section`/`MarkdownSection`; sections render their summary instead
+  of the full template when visibility is SUMMARY.
+- `weakincentives.disclosure` — `SectionExpansions` slice plus
+  `open_sections_tool` and `read_section_tool` so models can request
+  the full body of summarised sections.
+  `apply_visibility_overrides` rebuilds the prompt with the requested
+  sections expanded.
+- `weakincentives.task_completion` — `CompletionChecker` protocol with
+  built-in `ToolSucceededChecker`, `AllOfChecker`, `AnyOfChecker`, and
+  a `callable_checker` adapter for plain functions.
+- `weakincentives.overrides` — drift-tracked prompt iteration. Builds
+  a `PromptDescriptor` (recursively, including nested sections) of
+  per-section content hashes; `OverrideStore.resolve(...)` filters out
+  overrides whose hash no longer matches, so stale overrides drop
+  silently.
+- `weakincentives.evals` adds `RegexMatch`, the `JudgeProtocol`
+  protocol, and `LlmJudge` for delegating scoring to an LLM-shaped
+  callable.
+- `weakincentives.workspace` — `Workspace` bundles a `Filesystem` with
+  read-only enforcement, a stable `WorkspaceDigest`, and `Snapshotable`
+  delegation.
+- `wink describe <package.module:attr>` — pretty-prints a `Prompt`
+  defined as an attribute on an importable module.
+
 ### Structured output, feedback, concrete policies, host filesystem, and logging
 
 - `core.Prompt` / `core.RenderedPrompt` carry an optional `output_type`

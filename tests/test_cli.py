@@ -108,3 +108,100 @@ def test_main_requires_subcommand() -> None:
     buffer = io.StringIO()
     with pytest.raises(SystemExit):
         main([], stdout=buffer)
+
+
+# ---------------------------------------------------------------------------
+# describe
+# ---------------------------------------------------------------------------
+
+
+def test_describe_rejects_missing_colon() -> None:
+    buffer = io.StringIO()
+    code = main(["describe", "no_colon"], stdout=buffer)
+    assert code == 1
+    assert "package.module:attr" in buffer.getvalue()
+
+
+def test_describe_reports_unimportable_module() -> None:
+    buffer = io.StringIO()
+    code = main(["describe", "nope_no_such:obj"], stdout=buffer)
+    assert code == 1
+    assert "cannot import" in buffer.getvalue()
+
+
+def test_describe_reports_missing_attribute() -> None:
+    buffer = io.StringIO()
+    code = main(["describe", "weakincentives.core:DoesNotExist"], stdout=buffer)
+    assert code == 1
+    assert "no attribute" in buffer.getvalue()
+
+
+def test_describe_rejects_non_prompt_attribute() -> None:
+    buffer = io.StringIO()
+    code = main(["describe", "weakincentives.core:Session"], stdout=buffer)
+    assert code == 1
+    assert "not a" in buffer.getvalue()
+
+
+def test_describe_prints_prompt_summary() -> None:
+    """Use a fixture module on disk."""
+    import sys
+    from pathlib import Path
+    from textwrap import dedent
+
+    fixture_root = Path("/tmp/_wink_describe_fixture")
+    fixture_root.mkdir(parents=True, exist_ok=True)
+    pkg = fixture_root / "wink_demo"
+    pkg.mkdir(exist_ok=True)
+    _ = (pkg / "__init__.py").write_text("", encoding="utf-8")
+    _ = (pkg / "demo.py").write_text(
+        dedent(
+            """
+            from dataclasses import dataclass
+
+            from weakincentives.core import (
+                MarkdownSection,
+                Prompt,
+                Tool,
+                ToolContext,
+                ToolResult,
+            )
+
+
+            def _noop(params, context):
+                del params, context
+                return ToolResult.ok(None)
+
+
+            tool = Tool(name="echo", description="echo back", handler=_noop)
+            prompt = Prompt(
+                ns="demo",
+                key="hello",
+                sections=(
+                    MarkdownSection[None](
+                        title="System",
+                        key="system",
+                        template="Be helpful.",
+                        tools=(tool,),
+                    ),
+                ),
+            )
+            """
+        ),
+        encoding="utf-8",
+    )
+    sys.path.insert(0, str(fixture_root))
+    try:
+        if "wink_demo" in sys.modules:
+            del sys.modules["wink_demo"]
+        if "wink_demo.demo" in sys.modules:
+            del sys.modules["wink_demo.demo"]
+        buffer = io.StringIO()
+        code = main(["describe", "wink_demo.demo:prompt"], stdout=buffer)
+        output = buffer.getvalue()
+        assert code == 0
+        assert "prompt: demo/hello" in output
+        assert "System" in output
+        assert "echo: echo back" in output
+    finally:
+        sys.path.remove(str(fixture_root))

@@ -57,7 +57,20 @@ Layered extras (all stdlib-only) on top of the spine:
 
 **Layer 6 — CLI:**
 
-- `weakincentives.cli` — the `wink` command (`wink debug <bundle.json>`).
+- `weakincentives.cli` — the `wink` command (`wink debug <bundle.json>`,
+  `wink describe <module:attr>`).
+
+**Cross-cutting / operational extras:**
+
+- `weakincentives.runcontext` — correlation envelope.
+- `weakincentives.lifecycle` — `ShutdownCoordinator` + `LoopGroup`.
+- `weakincentives.watchdog` — `Heartbeat` + `Watchdog`.
+- `weakincentives.mailbox` — message queue + DLQ + worker.
+- `weakincentives.disclosure` — section visibility + progressive
+  disclosure tools.
+- `weakincentives.task_completion` — `CompletionChecker` protocol.
+- `weakincentives.overrides` — drift-tracked prompt overrides.
+- `weakincentives.workspace` — filesystem bundle.
 
 Each subpackage imports only the layers strictly below it. The layered
 rules and migration plan live in `specs/ARCHITECTURE.md`; the spine is

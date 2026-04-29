@@ -62,6 +62,23 @@ Layered extras built on top, all stdlib-only:
   `MaxInvocationsPolicy`, `OnceOnlyPolicy`).
 - `weakincentives.logging` — `StructuredLogger` + `JsonFormatter` for
   one-JSON-object-per-line emission.
+- `weakincentives.runcontext` — `RunContext` correlation envelope with
+  context-var propagation.
+- `weakincentives.lifecycle` — `ShutdownCoordinator` + `LoopGroup` for
+  graceful shutdown.
+- `weakincentives.watchdog` — `Heartbeat` + `Watchdog` liveness
+  tracking.
+- `weakincentives.mailbox` — `Mailbox` protocol with in-memory
+  `InMemoryMailbox`, leases, `DeadLetterQueue`, and `MailboxWorker`.
+- `weakincentives.disclosure` — section visibility + progressive
+  disclosure tools.
+- `weakincentives.task_completion` — programmatic goal verification
+  (`CompletionChecker` protocol + `ToolSucceededChecker`,
+  `AllOfChecker`, `AnyOfChecker`, `callable_checker`).
+- `weakincentives.overrides` — drift-tracked prompt iteration (content
+  hashes per section, overrides drop silently when source moves).
+- `weakincentives.workspace` — `Filesystem` bundle with read-only
+  enforcement and stable `WorkspaceDigest`.
 
 **Layer 5 — provider integrations:**
 

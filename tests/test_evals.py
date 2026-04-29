@@ -283,3 +283,105 @@ def test_all_tools_succeeded_records_failures() -> None:
 
 def test_eval_score_satisfies_protocol_runtime_check() -> None:
     assert isinstance(ToolCalled(tool_name="echo"), Evaluator)
+
+
+# ---------------------------------------------------------------------------
+# RegexMatch
+# ---------------------------------------------------------------------------
+
+
+def test_regex_match_passes_when_pattern_found() -> None:
+    from weakincentives.evals import RegexMatch
+
+    evaluator = RegexMatch()
+    dataset = Dataset(cases=(EvalCase(name="a", expected=r"\b42\b"),))
+    report = run_evaluation(
+        dataset=dataset,
+        prompt_factory=build_noop_factory(_make_prompt()),
+        adapter_for=lambda _: NoopAdapter(
+            responses=(
+                ScriptedResponse(text="answer is 42 done", finish_reason="stop"),
+            )
+        ),
+        evaluator=evaluator,
+    )
+    assert report.passed == 1
+
+
+def test_regex_match_fails_for_non_string_expected() -> None:
+    from weakincentives.evals import RegexMatch
+
+    evaluator = RegexMatch()
+    dataset = Dataset(cases=(EvalCase(name="a", expected=123),))
+    report = run_evaluation(
+        dataset=dataset,
+        prompt_factory=build_noop_factory(_make_prompt()),
+        adapter_for=lambda _: NoopAdapter(
+            responses=(ScriptedResponse(text="x", finish_reason="stop"),)
+        ),
+        evaluator=evaluator,
+    )
+    assert report.scores[0].passed is False
+
+
+def test_regex_match_fails_when_pattern_missing() -> None:
+    from weakincentives.evals import RegexMatch
+
+    evaluator = RegexMatch()
+    dataset = Dataset(cases=(EvalCase(name="a", expected=r"^missing$"),))
+    report = run_evaluation(
+        dataset=dataset,
+        prompt_factory=build_noop_factory(_make_prompt()),
+        adapter_for=lambda _: NoopAdapter(
+            responses=(ScriptedResponse(text="hello", finish_reason="stop"),)
+        ),
+        evaluator=evaluator,
+    )
+    assert report.scores[0].passed is False
+
+
+def test_llm_judge_delegates_to_protocol() -> None:
+    from weakincentives.evals import EvalScore, LlmJudge
+    from weakincentives.transcript import Transcript
+
+    class TruthyJudge:
+        def evaluate(
+            self,
+            *,
+            case: EvalCase,
+            response: str,
+            transcript: Transcript,
+        ) -> EvalScore:
+            del case, response, transcript
+            return EvalScore(passed=True, score=0.9, detail="judge-says-yes")
+
+    evaluator = LlmJudge(judge=TruthyJudge())
+    dataset = Dataset(cases=(EvalCase(name="a"),))
+    report = run_evaluation(
+        dataset=dataset,
+        prompt_factory=build_noop_factory(_make_prompt()),
+        adapter_for=lambda _: NoopAdapter(
+            responses=(ScriptedResponse(text="hello", finish_reason="stop"),)
+        ),
+        evaluator=evaluator,
+    )
+    assert report.passed == 1
+    assert report.scores[0].detail == "judge-says-yes"
+
+
+def test_judge_protocol_is_runtime_checkable() -> None:
+    from weakincentives.evals import EvalScore, JudgeProtocol
+    from weakincentives.transcript import Transcript
+
+    class Anon:
+        def evaluate(
+            self,
+            *,
+            case: EvalCase,
+            response: str,
+            transcript: Transcript,
+        ) -> EvalScore:
+            del case, response, transcript
+            return EvalScore(passed=False)
+
+    assert isinstance(Anon(), JudgeProtocol)

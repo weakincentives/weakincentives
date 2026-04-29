@@ -38,6 +38,7 @@ from .prompt import (
     Prompt,
     RenderedPrompt,
     Section,
+    SectionVisibility,
 )
 from .protocols import (
     Budget,
@@ -102,6 +103,7 @@ __all__ = [
     "Replace",
     "ResourceProvider",
     "Section",
+    "SectionVisibility",
     "Session",
     "SessionError",
     "SliceAccessor",

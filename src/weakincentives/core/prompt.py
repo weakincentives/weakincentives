@@ -19,6 +19,7 @@ construction time.
 
 from __future__ import annotations
 
+import enum
 import re
 import textwrap
 from collections.abc import Callable, Mapping, Sequence
@@ -34,7 +35,16 @@ __all__ = [
     "Prompt",
     "RenderedPrompt",
     "Section",
+    "SectionVisibility",
 ]
+
+
+class SectionVisibility(enum.Enum):
+    """How a section renders by default."""
+
+    FULL = "full"
+    SUMMARY = "summary"
+
 
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
@@ -77,6 +87,8 @@ class Section[ParamsT]:
     params_type: type[ParamsT] | None
     default_params: ParamsT | None
     enabled: Callable[[ParamsT | None], bool] | None
+    visibility: SectionVisibility
+    summary: str | None
 
     def __init__(
         self,
@@ -88,6 +100,8 @@ class Section[ParamsT]:
         children: Sequence[Section[Any]] = (),
         tools: Sequence[Tool[Any, Any]] = (),
         enabled: Callable[[ParamsT | None], bool] | None = None,
+        visibility: SectionVisibility = SectionVisibility.FULL,
+        summary: str | None = None,
     ) -> None:
         super().__init__()
         _check_name(key, kind="section key")
@@ -98,6 +112,8 @@ class Section[ParamsT]:
         self.params_type = params_type
         self.default_params = default_params
         self.enabled = enabled
+        self.visibility = visibility
+        self.summary = summary
 
     def reachable_tools(self) -> tuple[Tool[Any, Any], ...]:
         out: list[Tool[Any, Any]] = list(self.tools)
@@ -130,6 +146,8 @@ class MarkdownSection[ParamsT](Section[ParamsT]):
         children: Sequence[Section[Any]] = (),
         tools: Sequence[Tool[Any, Any]] = (),
         enabled: Callable[[ParamsT | None], bool] | None = None,
+        visibility: SectionVisibility = SectionVisibility.FULL,
+        summary: str | None = None,
     ) -> None:
         super().__init__(
             title=title,
@@ -139,6 +157,8 @@ class MarkdownSection[ParamsT](Section[ParamsT]):
             children=children,
             tools=tools,
             enabled=enabled,
+            visibility=visibility,
+            summary=summary,
         )
         self.template = template
         if template:
@@ -153,6 +173,8 @@ class MarkdownSection[ParamsT](Section[ParamsT]):
 
     @override
     def render_body(self, params: ParamsT | None) -> str:
+        if self.visibility is SectionVisibility.SUMMARY and self.summary is not None:
+            return self.summary.strip()
         if not self.template:
             return ""
         compiled = Template(textwrap.dedent(self.template).strip())
