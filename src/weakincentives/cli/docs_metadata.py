@@ -53,6 +53,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "SESSIONS": "Session lifecycle, events, deadlines, budgets",
     "SKILLS": "Agent Skills specification and WINK skill mounting",
     "SLICES": "Slice storage backends, factory configuration, JSONL persistence",
+    "SPINE": "Industrial-strength core spec, package layout, extension protocols",
     "TESTING": "Test harnesses, fault injection, fuzzing, coverage standards",
     "THREAD_SAFETY": "Concurrency and shared state",
     "TOOLS": "Tool runtime, failure semantics, transactional rollback",
