@@ -256,15 +256,15 @@ importable; pip extras exist for optional third-party deps.
 
 Implementation is staged. Each phase ends green on `make check`.
 
-| Phase | Adds | Notes |
+| Phase | Adds | Status |
 | --- | --- | --- |
 | 0 | spine (`core/`) | shipped |
-| 1 | `clock`, `serde`, `dbc` | foundations, stdlib-only |
-| 2 | `filesystem`, `resources` | state/IO, stdlib-only |
-| 3 | `runtime`, `transcript` | orchestration |
-| 4 | `evals`, `debug` | observability |
-| 5 | `adapters/*` | one provider at a time |
-| 6 | `skills`, `formal`, `cli` | extensions and tooling |
+| 1 | `clock`, `serde`, `dbc` | shipped |
+| 2 | `filesystem`, `resources` | shipped |
+| 3 | `runtime`, `transcript` | shipped |
+| 4 | `evals`, `debug` | shipped |
+| 5 | `adapters/*` | `noop` shipped; real providers pending |
+| 6 | `skills`, `formal`, `cli` | pending |
 
 Each phase is independently shippable. Earlier phases never wait on
 later ones.

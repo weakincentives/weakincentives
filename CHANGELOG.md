@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Orchestration, observability, and a stub adapter
+
+Layers 3, 4, and 5 (stub) of the architecture, all stdlib-only:
+
+- `weakincentives.transcript` — append-only `Transcript` plus
+  `TranscriptListener` (implements `core.EventListener`) that records
+  every published event as a JSON-friendly `TranscriptEntry`.
+- `weakincentives.runtime` — `AgentLoop` driving a `core.ProviderAdapter`
+  through render → call → tool → repeat. Honors optional deadlines and
+  budgets, fires `AgentLoopStarted` / `AgentIterationStarted` /
+  `AgentIterationCompleted` / `AgentLoopFinished` lifecycle events, and
+  enforces a configurable `max_iterations` ceiling
+  (`MaxIterationsExceeded`).
+- `weakincentives.adapters.noop` — `NoopAdapter` + `ScriptedResponse`,
+  the deterministic test adapter that replays scripted replies. Provides
+  the integration point real adapters (OpenAI, Claude, LiteLLM, ACP,
+  Codex) will plug into in their own subpackages with their own pip
+  extras.
+- `weakincentives.evals` — `Dataset`, `EvalCase`, `EvalReport`, the
+  `Evaluator` protocol, and built-in evaluators `ExactMatch`, `Contains`,
+  `ToolCalled`, `AllToolsSucceeded`, plus a `run_evaluation` driver that
+  builds a fresh session + transcript per case.
+- `weakincentives.debug` — `DebugBundle` packaging a session snapshot, a
+  recorded transcript, and a metadata dict, with JSON round-trip via
+  `core.TypeRegistry` and a `from_session(...)` helper.
+
+`AgentLoop` accepts the spine's `Budget` protocol, so concrete budgets
+from `weakincentives.clock` plug in directly.
+
 ### Foundational layer 1 modules
 
 Five stdlib-only foundational extras on top of the spine, each with full

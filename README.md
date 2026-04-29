@@ -16,7 +16,9 @@ The package is layered. The base install ships only the **spine**
   `ResourceProvider`, `Snapshotable`, `ToolPolicy`, `Deadline`, `Budget` — so
   higher-level layers can plug in without forking the core.
 
-Foundational extras layered on top, all stdlib-only:
+Layered extras built on top, all stdlib-only:
+
+**Layer 1 — foundations:**
 
 - `weakincentives.clock` — `SystemClock`, `FakeClock`, concrete `Deadline`,
   `Budget`, `BudgetTracker`.
@@ -29,9 +31,36 @@ Foundational extras layered on top, all stdlib-only:
 - `weakincentives.resources` — scoped DI container that satisfies
   `core.ResourceProvider` (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`).
 
-Higher layers (orchestration, observability, provider adapters, CLI) follow
-the same module-boundary rules and arrive as they are rebuilt. See
-`specs/ARCHITECTURE.md` for the full plan.
+**Layer 2 — state & IO:**
+
+- `weakincentives.filesystem` — `Filesystem` protocol + `InMemoryFilesystem`.
+- `weakincentives.resources` — see above.
+
+**Layer 3 — orchestration:**
+
+- `weakincentives.transcript` — `Transcript`, `TranscriptListener`
+  (implements `core.EventListener`) for unified event logging.
+- `weakincentives.runtime` — `AgentLoop` that drives a
+  `core.ProviderAdapter` through render → call → tool → repeat with
+  optional deadlines, budgets, and tool policies.
+
+**Layer 4 — quality & observability:**
+
+- `weakincentives.evals` — `Dataset`, `Evaluator` protocol, built-in
+  evaluators (`ExactMatch`, `Contains`, `ToolCalled`, `AllToolsSucceeded`)
+  and a `run_evaluation` driver.
+- `weakincentives.debug` — `DebugBundle` (snapshot + transcript +
+  metadata) with JSON round-trip via `core.TypeRegistry`.
+
+**Layer 5 — provider integrations:**
+
+- `weakincentives.adapters.noop` — `NoopAdapter` + `ScriptedResponse` for
+  deterministic tests and demos.
+- Real adapters (`openai`, `claude`, `litellm`, `acp`, `codex`) arrive
+  behind their own pip extras as they are rebuilt.
+
+See `specs/ARCHITECTURE.md` for the full layered design and remaining
+work.
 
 ## Status
 

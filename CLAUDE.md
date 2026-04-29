@@ -19,21 +19,40 @@ install ships only the **spine** (`src/weakincentives/core/`):
 - `protocols.py` — `ProviderAdapter`, `EventListener`, `ResourceProvider`,
   `Deadline`, `Budget`, `Usage`, `ToolCall`, `PromptResponse`.
 
-Foundational layer 1 modules (stdlib-only, depend on `core` only):
+Layered extras (all stdlib-only) on top of the spine:
+
+**Layer 1 — foundations:**
 
 - `weakincentives.clock` — clocks, `Deadline`, `Budget`, `BudgetTracker`.
 - `weakincentives.serde` — `parse`/`dump` for nested dataclasses with
   constraints and polymorphic unions.
 - `weakincentives.dbc` — `@require`, `@ensure`, `@invariant`.
-- `weakincentives.filesystem` — `Filesystem` protocol and snapshot-able
-  `InMemoryFilesystem`.
-- `weakincentives.resources` — scoped DI container satisfying
-  `core.ResourceProvider`.
 
-Higher layers (`runtime`, `transcript`, `evals`, `debug`, `skills`,
-`formal`, provider adapters, CLI) land in their own subpackages as they are
-rebuilt. The layered dependency rules and the migration plan are in
-`specs/ARCHITECTURE.md`. The spine is documented in `specs/SPINE.md`.
+**Layer 2 — state and IO:**
+
+- `weakincentives.filesystem` — `Filesystem` + snapshotable
+  `InMemoryFilesystem`.
+- `weakincentives.resources` — scoped DI container.
+
+**Layer 3 — orchestration:**
+
+- `weakincentives.transcript` — append-only event log.
+- `weakincentives.runtime` — `AgentLoop` driving a `ProviderAdapter`.
+
+**Layer 4 — quality and observability:**
+
+- `weakincentives.evals` — datasets, evaluators, runner.
+- `weakincentives.debug` — `DebugBundle` with JSON round-trip.
+
+**Layer 5 — provider integrations:**
+
+- `weakincentives.adapters.noop` — scripted test adapter.
+- Real adapters (`openai`, `claude`, `litellm`, `acp`, `codex`) arrive
+  behind their own pip extras as they are rebuilt.
+
+Each subpackage imports only the layers strictly below it. The layered
+rules and migration plan live in `specs/ARCHITECTURE.md`; the spine is
+documented in `specs/SPINE.md`.
 
 ## Definition of Done
 
