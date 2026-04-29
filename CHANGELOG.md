@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Structured output, feedback, concrete policies, host filesystem, and logging
+
+- `core.Prompt` / `core.RenderedPrompt` carry an optional `output_type`
+  declaring the dataclass adapters should coerce the model's response
+  into. `serde.extract_json` and `serde.parse_output` do the actual
+  parsing, with a fenced-block-aware extractor that falls back to the
+  whole text.
+- `weakincentives.feedback` — `FeedbackProvider` protocol,
+  `make_feedback_section` factory, and `compose_with_feedback`
+  helper that returns a new `Prompt` with session-aware sections
+  appended. Empty/blank builder returns are skipped automatically and
+  `output_type` is preserved.
+- `weakincentives.policies` — built-in `ToolPolicy` implementations:
+  `SequentialDependencyPolicy` (require `A` before `B`),
+  `ReadBeforeWritePolicy` (write only after a successful read),
+  `MaxInvocationsPolicy` (cap usage of a tool or set of tools), and
+  `OnceOnlyPolicy`.
+- `weakincentives.filesystem` adds `HostFilesystem`, a real
+  disk-backed `Filesystem` constrained to a single `root` directory.
+  Implements `Snapshotable` so on-disk state participates in
+  transactional tool rollback.
+- `weakincentives.logging` — `StructuredLogger` over the standard
+  `logging` module, `JsonFormatter` that emits one JSON object per
+  record (timestamp, level, logger, message, fields, exception), and
+  `configure_logging` for an idempotent default handler install.
+
 ### Skills, formal, CLI, and an OpenAI-compatible adapter
 
 - `weakincentives.skills` — `Skill`, `SkillMount`, `load_skill`,

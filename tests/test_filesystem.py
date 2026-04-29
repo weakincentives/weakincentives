@@ -119,6 +119,116 @@ def test_filesystem_snapshot_to_dict() -> None:
     assert snapshot.to_dict() == {"/a": "1", "/b": "2"}
 
 
+# ---------------------------------------------------------------------------
+# HostFilesystem
+# ---------------------------------------------------------------------------
+
+
+def test_host_filesystem_satisfies_protocols(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from weakincentives.filesystem import HostFilesystem
+
+    root = Path(str(tmp_path))
+    host = HostFilesystem(root)
+    assert isinstance(host, Filesystem)
+    assert isinstance(host, Snapshotable)
+
+
+def test_host_filesystem_rejects_non_directory_root(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from weakincentives.filesystem import HostFilesystem
+
+    target = Path(str(tmp_path)) / "missing"
+    with pytest.raises(FilesystemError, match="not a directory"):
+        HostFilesystem(target)
+
+
+def test_host_filesystem_round_trip(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from weakincentives.filesystem import HostFilesystem
+
+    root = Path(str(tmp_path))
+    host = HostFilesystem(root)
+    host.write_text("/a/b.txt", "hello")
+    assert host.exists("/a/b.txt")
+    assert host.read_text("/a/b.txt") == "hello"
+    assert host.list_dir("/a") == ("b.txt",)
+    assert host.root == root.resolve()
+
+
+def test_host_filesystem_remove_missing_raises(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from weakincentives.filesystem import HostFilesystem
+
+    host = HostFilesystem(Path(str(tmp_path)))
+    with pytest.raises(FilesystemError, match="cannot remove"):
+        host.remove("/nope")
+
+
+def test_host_filesystem_read_missing_raises(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from weakincentives.filesystem import HostFilesystem
+
+    host = HostFilesystem(Path(str(tmp_path)))
+    with pytest.raises(FilesystemError, match="missing file"):
+        host.read_text("/nope")
+
+
+def test_host_filesystem_list_non_dir_raises(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from weakincentives.filesystem import HostFilesystem
+
+    host = HostFilesystem(Path(str(tmp_path)))
+    host.write_text("/file.txt", "x")
+    with pytest.raises(FilesystemError, match="not a directory"):
+        host.list_dir("/file.txt")
+
+
+def test_host_filesystem_rejects_path_escape(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from weakincentives.filesystem import HostFilesystem
+
+    host = HostFilesystem(Path(str(tmp_path)))
+    with pytest.raises(FilesystemError, match="escapes"):
+        host.write_text("/../escape.txt", "x")
+
+
+def test_host_filesystem_snapshot_and_restore(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from weakincentives.filesystem import HostFilesystem
+
+    host = HostFilesystem(Path(str(tmp_path)))
+    host.write_text("/a.txt", "1")
+    host.write_text("/dir/b.txt", "2")
+    snapshot = host.snapshot()
+    host.write_text("/a.txt", "MUTATED")
+    host.write_text("/c.txt", "added")
+    host.remove("/dir/b.txt")
+    host.restore(snapshot)
+    assert host.read_text("/a.txt") == "1"
+    assert host.read_text("/dir/b.txt") == "2"
+    assert not host.exists("/c.txt")
+
+
+def test_host_filesystem_remove_non_file_raises(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from weakincentives.filesystem import HostFilesystem
+
+    host = HostFilesystem(Path(str(tmp_path)))
+    host.write_text("/dir/file.txt", "x")
+    with pytest.raises(FilesystemError, match="cannot remove"):
+        host.remove("/dir")
+
+
 def test_list_dir_skips_unrelated_keys() -> None:
     fs = InMemoryFilesystem()
     fs.write_text("/different/branch.txt", "x")

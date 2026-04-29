@@ -238,6 +238,23 @@ def test_render_collects_tools() -> None:
     assert prompt.render().tools == (tool,)
 
 
+def test_output_type_propagates_through_render_and_bind() -> None:
+    @dataclass(frozen=True)
+    class Answer:
+        value: int
+
+    prompt = Prompt(
+        ns="ns",
+        key="k",
+        sections=(MarkdownSection[None](title="T", key="t", template="hi"),),
+        output_type=Answer,
+    )
+    rendered = prompt.render()
+    assert rendered.output_type is Answer
+    bound = prompt.bind()
+    assert bound.output_type is Answer
+
+
 def test_template_with_escaped_dollar_is_allowed() -> None:
     section = MarkdownSection[None](
         title="T",

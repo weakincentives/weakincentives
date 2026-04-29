@@ -45,6 +45,9 @@ Layered extras (all stdlib-only) on top of the spine:
 - `weakincentives.debug` — `DebugBundle` with JSON round-trip.
 - `weakincentives.skills` — TOML-frontmatter skill loader.
 - `weakincentives.formal` — `@formal_spec` metadata decorator.
+- `weakincentives.feedback` — `FeedbackProvider` + `compose_with_feedback`.
+- `weakincentives.policies` — built-in `ToolPolicy` implementations.
+- `weakincentives.logging` — `StructuredLogger` + `JsonFormatter`.
 
 **Layer 5 — provider integrations:**
 

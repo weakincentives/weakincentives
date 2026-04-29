@@ -52,9 +52,16 @@ Layered extras built on top, all stdlib-only:
 - `weakincentives.debug` — `DebugBundle` (snapshot + transcript +
   metadata) with JSON round-trip via `core.TypeRegistry`.
 - `weakincentives.skills` — `Skill` + `SkillMount`; load skills from
-  markdown files with TOML frontmatter (no third-party dependencies).
+  markdown files with TOML frontmatter.
 - `weakincentives.formal` — `@formal_spec` decorator that attaches
-  metadata for downstream verifiers; ships a registry callers can iterate.
+  metadata for downstream verifiers.
+- `weakincentives.feedback` — session-aware prompt augmentation
+  (`FeedbackProvider`, `compose_with_feedback`).
+- `weakincentives.policies` — built-in `ToolPolicy` implementations
+  (`SequentialDependencyPolicy`, `ReadBeforeWritePolicy`,
+  `MaxInvocationsPolicy`, `OnceOnlyPolicy`).
+- `weakincentives.logging` — `StructuredLogger` + `JsonFormatter` for
+  one-JSON-object-per-line emission.
 
 **Layer 5 — provider integrations:**
 

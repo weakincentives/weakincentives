@@ -425,3 +425,50 @@ def test_dump_dataclass_includes_type_tag() -> None:
 def test_dump_rejects_unknown_value() -> None:
     with pytest.raises(SerdeError, match="cannot dump"):
         dump(complex(1, 2))
+
+
+# ---------------------------------------------------------------------------
+# extract_json / parse_output
+# ---------------------------------------------------------------------------
+
+
+def test_extract_json_from_fenced_block() -> None:
+    from weakincentives.serde import extract_json
+
+    text = 'before\n```json\n{"a": 1}\n```\nafter'
+    assert extract_json(text) == {"a": 1}
+
+
+def test_extract_json_from_uppercase_fence() -> None:
+    from weakincentives.serde import extract_json
+
+    text = "```JSON\n[1, 2]\n```"
+    assert extract_json(text) == [1, 2]
+
+
+def test_extract_json_falls_back_to_whole_text() -> None:
+    from weakincentives.serde import extract_json
+
+    assert extract_json('  {"a": 1}  ') == {"a": 1}
+
+
+def test_extract_json_rejects_empty_text() -> None:
+    from weakincentives.serde import extract_json
+
+    with pytest.raises(ParseError, match="no JSON"):
+        extract_json("   ")
+
+
+def test_extract_json_rejects_invalid_json() -> None:
+    from weakincentives.serde import extract_json
+
+    with pytest.raises(ParseError, match="invalid JSON"):
+        extract_json("{not json}")
+
+
+def test_parse_output_returns_typed_dataclass() -> None:
+    from weakincentives.serde import parse_output
+
+    text = '```json\n{"label": "x", "value": 7}\n```'
+    parsed = parse_output(text, expected=Inner)
+    assert parsed == Inner(label="x", value=7)

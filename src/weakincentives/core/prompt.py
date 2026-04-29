@@ -179,6 +179,7 @@ class RenderedPrompt:
 
     text: str
     tools: tuple[Tool[Any, Any], ...]
+    output_type: type[object] | None = None
 
 
 def _empty_param_map() -> Mapping[str, object]:
@@ -192,12 +193,16 @@ class Prompt:
 
     ``params`` maps section key to a parameter dataclass instance; each
     instance must match the section's declared ``params_type``.
+    ``output_type`` optionally declares the dataclass an adapter should
+    coerce the model's response into; helpers in ``weakincentives.serde``
+    do the actual parsing so the spine stays JSON-walking-only.
     """
 
     ns: str
     key: str
     sections: tuple[Section[Any], ...] = ()
     params: Mapping[str, object] = field(default_factory=_empty_param_map)
+    output_type: type[object] | None = None
 
     def __post_init__(self) -> None:
         _check_name(self.ns, kind="namespace")
@@ -212,7 +217,13 @@ class Prompt:
     def bind(self, **params: object) -> Prompt:
         """Return a new :class:`Prompt` with overridden section parameters."""
         merged: dict[str, object] = {**self.params, **params}
-        return Prompt(ns=self.ns, key=self.key, sections=self.sections, params=merged)
+        return Prompt(
+            ns=self.ns,
+            key=self.key,
+            sections=self.sections,
+            params=merged,
+            output_type=self.output_type,
+        )
 
     def render(self) -> RenderedPrompt:
         chunks: list[str] = []
@@ -220,7 +231,11 @@ class Prompt:
         for index, section in enumerate(self.sections, start=1):
             self._render_section(section, depth=0, number=str(index), out=chunks)
             tools.extend(section.reachable_tools())
-        return RenderedPrompt(text="\n\n".join(chunks), tools=tuple(tools))
+        return RenderedPrompt(
+            text="\n\n".join(chunks),
+            tools=tuple(tools),
+            output_type=self.output_type,
+        )
 
     def _render_section(
         self,

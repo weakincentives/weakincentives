@@ -20,6 +20,7 @@ coercions, and partial-update semantics for tuples / lists / dicts.
 
 from __future__ import annotations
 
+import json
 import re
 import types
 from collections.abc import Callable, Mapping, Sequence
@@ -40,7 +41,9 @@ __all__ = [
     "ParseError",
     "SerdeError",
     "dump",
+    "extract_json",
     "parse",
+    "parse_output",
     "type_identifier",
 ]
 
@@ -313,6 +316,40 @@ def _check_constraint(value: object, name: str, expected: object, *, path: str) 
 # =============================================================================
 # Dumping
 # =============================================================================
+
+
+_FENCE_RE = re.compile(
+    r"```(?:json|JSON)?\s*\n(?P<body>.*?)\n```",
+    flags=re.DOTALL,
+)
+
+
+def extract_json(text: str) -> object:
+    """Pull the first JSON value out of ``text``.
+
+    Looks for a fenced ```json``` block first; falls back to the entire
+    string. Raises :class:`ParseError` when nothing JSON-shaped can be
+    found or parsed.
+    """
+    match = _FENCE_RE.search(text)
+    candidate = match.group("body") if match else text
+    candidate = candidate.strip()
+    if not candidate:
+        raise ParseError("no JSON found in response text")
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError as error:
+        raise ParseError(f"invalid JSON in response: {error.msg}") from error
+
+
+def parse_output[T](text: str, *, expected: type[T]) -> T:
+    """Extract JSON from ``text`` and parse it as ``expected``.
+
+    Pairs with :attr:`weakincentives.core.RenderedPrompt.output_type` so
+    adapters can produce typed responses without coupling to the spine's
+    snapshot encoder.
+    """
+    return parse(expected, extract_json(text))
 
 
 def _dump(value: object) -> object:

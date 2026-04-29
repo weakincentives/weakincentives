@@ -22,13 +22,14 @@ from __future__ import annotations
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Protocol, final, runtime_checkable
 
 __all__ = [
     "Filesystem",
     "FilesystemError",
     "FilesystemSnapshot",
+    "HostFilesystem",
     "InMemoryFilesystem",
 ]
 
@@ -140,3 +141,100 @@ class InMemoryFilesystem:
     def restore(self, state: FilesystemSnapshot) -> None:
         with self._lock:
             self._files = dict(state.files)
+
+
+# =============================================================================
+# HostFilesystem
+# =============================================================================
+
+
+@final
+class HostFilesystem:
+    """Filesystem backed by a real directory on disk.
+
+    Every operation is constrained to a ``root`` directory; paths
+    handed in are resolved relative to ``root`` and rejected if they
+    escape it. ``snapshot()`` captures every file's contents below the
+    root into a :class:`FilesystemSnapshot`; ``restore()`` writes them
+    back, removing any file that was not present at snapshot time.
+    """
+
+    def __init__(self, root: Path | str) -> None:
+        super().__init__()
+        resolved = Path(root).resolve()
+        if not resolved.is_dir():
+            raise FilesystemError(f"root is not a directory: {resolved}")
+        self._root = resolved
+        self._lock = threading.RLock()
+
+    @property
+    def root(self) -> Path:
+        return self._root
+
+    def read_text(self, path: str) -> str:
+        target = self._resolve(path)
+        with self._lock:
+            if not target.is_file():
+                raise FilesystemError(f"missing file: {path}")
+            return target.read_text(encoding="utf-8")
+
+    def write_text(self, path: str, content: str) -> None:
+        target = self._resolve(path)
+        with self._lock:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _ = target.write_text(content, encoding="utf-8")
+
+    def exists(self, path: str) -> bool:
+        target = self._resolve(path)
+        with self._lock:
+            return target.exists()
+
+    def list_dir(self, path: str) -> tuple[str, ...]:
+        target = self._resolve(path)
+        with self._lock:
+            if not target.is_dir():
+                raise FilesystemError(f"not a directory: {path}")
+            return tuple(sorted(child.name for child in target.iterdir()))
+
+    def remove(self, path: str) -> None:
+        target = self._resolve(path)
+        with self._lock:
+            if not target.is_file():
+                raise FilesystemError(f"cannot remove missing file: {path}")
+            target.unlink()
+
+    # Snapshotable -----------------------------------------------------
+
+    def snapshot(self) -> FilesystemSnapshot:
+        with self._lock:
+            captured: list[tuple[str, str]] = []
+            for child in sorted(self._root.rglob("*")):
+                if child.is_file():
+                    rel = child.relative_to(self._root).as_posix()
+                    captured.append((f"/{rel}", child.read_text("utf-8")))
+            return FilesystemSnapshot(files=tuple(captured))
+
+    def restore(self, state: FilesystemSnapshot) -> None:
+        wanted = state.to_dict()
+        with self._lock:
+            for child in sorted(
+                self._root.rglob("*"), key=lambda p: -len(p.as_posix())
+            ):
+                if child.is_file():
+                    rel = "/" + child.relative_to(self._root).as_posix()
+                    if rel not in wanted:
+                        child.unlink()
+            for rel_path, content in wanted.items():
+                target = self._root / rel_path.lstrip("/")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _ = target.write_text(content, encoding="utf-8")
+
+    # Internals --------------------------------------------------------
+
+    def _resolve(self, path: str) -> Path:
+        candidate = (self._root / path.lstrip("/")).resolve()
+        try:
+            _ = candidate.relative_to(self._root)
+        except ValueError as error:
+            raise FilesystemError(f"path escapes filesystem root: {path}") from error
+        return candidate
