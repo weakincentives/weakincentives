@@ -71,6 +71,7 @@ Layered extras (all stdlib-only) on top of the spine:
 - `weakincentives.task_completion` — `CompletionChecker` protocol.
 - `weakincentives.overrides` — drift-tracked prompt overrides.
 - `weakincentives.workspace` — filesystem bundle.
+- `weakincentives.optimizers` — prompt iteration helpers.
 
 Each subpackage imports only the layers strictly below it. The layered
 rules and migration plan live in `specs/ARCHITECTURE.md`; the spine is

@@ -38,13 +38,25 @@ Repository = "https://github.com/weakincentives/weakincentives"
 [project.scripts]
 wink = "weakincentives.cli:main"
 
-# The spine is the only required install. Future extras will appear here as
-# they are built (each declared with its own pip-installable dependency set):
-#
-#   [project.optional-dependencies]
-#   claude = ["claude-agent-sdk>=0.1.59"]
-#   redis  = ["redis>=7.4.0"]
-#   ...
+# The base install is stdlib-only. The extras here pull in third-party SDKs
+# that adapter implementations or future operational backends will need.
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+litellm = ["litellm>=1.0"]
+claude = ["claude-agent-sdk>=0.1"]
+acp = ["agent-client-protocol>=0.9"]
+codex = ["websockets>=13.0"]
+redis = ["redis>=5.0"]
+yaml = ["pyyaml>=6.0"]
+all = [
+    "openai>=1.0",
+    "litellm>=1.0",
+    "claude-agent-sdk>=0.1",
+    "agent-client-protocol>=0.9",
+    "websockets>=13.0",
+    "redis>=5.0",
+    "pyyaml>=6.0",
+]
 
 [build-system]
 requires = ["hatchling>=1.29.0", "hatch-vcs>=0.5.0"]

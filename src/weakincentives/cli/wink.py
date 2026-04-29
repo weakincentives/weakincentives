@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, TextIO, cast
 
 from weakincentives.core import Prompt
+from weakincentives.evals import Dataset, Evaluator, run_evaluation
 
 __all__ = ["main"]
 
@@ -39,6 +40,14 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         return _run_debug(Path(cast("str", args.path)), out=out)
     if args.command == "describe":
         return _run_describe(cast("str", args.target), out=out)
+    if args.command == "eval":
+        return _run_eval(
+            prompt_target=cast("str", args.prompt),
+            dataset_target=cast("str", args.dataset),
+            evaluator_target=cast("str", args.evaluator),
+            adapter_target=cast("str", args.adapter),
+            out=out,
+        )
     parser.print_help(out)  # pragma: no cover - argparse forbids missing
     return 2  # pragma: no cover - argparse exits earlier
 
@@ -58,6 +67,24 @@ def _build_parser() -> argparse.ArgumentParser:
     _ = describe.add_argument(
         "target",
         help="Dotted path to the Prompt object, e.g. 'mypkg.prompts:greeter'.",
+    )
+    eval_cmd = sub.add_parser(
+        "eval",
+        help=(
+            "Run an evaluation: prompt + dataset + evaluator + adapter "
+            "factory, all referenced as 'package.module:attr'."
+        ),
+    )
+    _ = eval_cmd.add_argument("--prompt", required=True)
+    _ = eval_cmd.add_argument("--dataset", required=True)
+    _ = eval_cmd.add_argument("--evaluator", required=True)
+    _ = eval_cmd.add_argument(
+        "--adapter",
+        required=True,
+        help=(
+            "Dotted path to a callable accepting an EvalCase and returning "
+            "a ProviderAdapter."
+        ),
     )
     return parser
 
@@ -144,6 +171,84 @@ def _print_prompt(prompt: Prompt, *, out: TextIO) -> None:
     print(f"tools: {len(rendered.tools)}", file=out)
     for tool in rendered.tools:
         print(f"  - {tool.name}: {tool.description}", file=out)
+
+
+def _run_eval(
+    *,
+    prompt_target: str,
+    dataset_target: str,
+    evaluator_target: str,
+    adapter_target: str,
+    out: TextIO,
+) -> int:
+    resolved = _resolve_many(
+        {
+            "prompt": prompt_target,
+            "dataset": dataset_target,
+            "evaluator": evaluator_target,
+            "adapter": adapter_target,
+        },
+        out=out,
+    )
+    if resolved is None:
+        return 1
+    prompt = resolved["prompt"]
+    dataset = resolved["dataset"]
+    evaluator = resolved["evaluator"]
+    adapter_for = resolved["adapter"]
+    if not isinstance(prompt, Prompt):
+        print(f"wink: {prompt_target} is not a Prompt", file=out)
+        return 1
+    if not isinstance(dataset, Dataset):
+        print(f"wink: {dataset_target} is not a Dataset", file=out)
+        return 1
+    if not isinstance(evaluator, Evaluator):
+        print(f"wink: {evaluator_target} is not an Evaluator", file=out)
+        return 1
+    if not callable(adapter_for):
+        print(f"wink: {adapter_target} is not callable", file=out)
+        return 1
+    report = run_evaluation(
+        dataset=dataset,
+        prompt_factory=lambda _case: prompt,
+        adapter_for=cast("Any", adapter_for),
+        evaluator=evaluator,
+    )
+    print(
+        f"passed: {report.passed}/{report.total} (pass_rate={report.pass_rate:.2%})",
+        file=out,
+    )
+    for case, score in zip(report.cases, report.scores, strict=True):
+        marker = "PASS" if score.passed else "FAIL"
+        detail = f" — {score.detail}" if score.detail else ""
+        print(f"  {marker} {case.name}{detail}", file=out)
+    return 0 if report.passed == report.total else 1
+
+
+def _resolve_many(targets: dict[str, str], *, out: TextIO) -> dict[str, object] | None:
+    resolved: dict[str, object] = {}
+    for label, target in targets.items():
+        if ":" not in target:
+            print(
+                f"wink: --{label} target must look like 'package.module:attr'",
+                file=out,
+            )
+            return None
+        module_name, attr = target.split(":", 1)
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as error:
+            print(f"wink: cannot import {module_name}: {error}", file=out)
+            return None
+        try:
+            resolved[label] = getattr(module, attr)
+        except AttributeError:
+            print(
+                f"wink: {module_name} has no attribute {attr!r}",
+                file=out,
+            )
+            return None
+    return resolved
 
 
 if __name__ == "__main__":  # pragma: no cover - module entry point

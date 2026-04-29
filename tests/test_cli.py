@@ -205,3 +205,238 @@ def test_describe_prints_prompt_summary() -> None:
         assert "echo: echo back" in output
     finally:
         sys.path.remove(str(fixture_root))
+
+
+# ---------------------------------------------------------------------------
+# eval
+# ---------------------------------------------------------------------------
+
+
+def _write_eval_fixture() -> str:
+    import sys
+    from pathlib import Path
+    from textwrap import dedent
+
+    fixture_root = Path("/tmp/_wink_eval_fixture")
+    fixture_root.mkdir(parents=True, exist_ok=True)
+    pkg = fixture_root / "wink_eval_demo"
+    pkg.mkdir(exist_ok=True)
+    _ = (pkg / "__init__.py").write_text("", encoding="utf-8")
+    _ = (pkg / "demo.py").write_text(
+        dedent(
+            """
+            from weakincentives.adapters import NoopAdapter, ScriptedResponse
+            from weakincentives.core import MarkdownSection, Prompt
+            from weakincentives.evals import (
+                Contains,
+                Dataset,
+                EvalCase,
+            )
+
+
+            prompt = Prompt(
+                ns="demo",
+                key="eval",
+                sections=(
+                    MarkdownSection[None](
+                        title="System", key="system", template="Be brief."
+                    ),
+                ),
+            )
+            dataset = Dataset(
+                cases=(
+                    EvalCase(name="greet", expected="hello"),
+                    EvalCase(name="missed", expected="missing"),
+                )
+            )
+            evaluator = Contains()
+
+
+            def adapter_for(case):
+                if case.name == "greet":
+                    text = "hello world"
+                else:
+                    text = "nothing here"
+                return NoopAdapter(
+                    responses=(ScriptedResponse(text=text, finish_reason="stop"),)
+                )
+            """
+        ),
+        encoding="utf-8",
+    )
+    if str(fixture_root) not in sys.path:
+        sys.path.insert(0, str(fixture_root))
+    if "wink_eval_demo" in sys.modules:
+        del sys.modules["wink_eval_demo"]
+    if "wink_eval_demo.demo" in sys.modules:
+        del sys.modules["wink_eval_demo.demo"]
+    return "wink_eval_demo.demo"
+
+
+def test_eval_runs_full_dataset_and_summarises_results() -> None:
+    module = _write_eval_fixture()
+    buffer = io.StringIO()
+    code = main(
+        [
+            "eval",
+            "--prompt",
+            f"{module}:prompt",
+            "--dataset",
+            f"{module}:dataset",
+            "--evaluator",
+            f"{module}:evaluator",
+            "--adapter",
+            f"{module}:adapter_for",
+        ],
+        stdout=buffer,
+    )
+    output = buffer.getvalue()
+    assert code == 1  # one case fails
+    assert "passed: 1/2" in output
+    assert "PASS greet" in output
+    assert "FAIL missed" in output
+
+
+def test_eval_rejects_invalid_target() -> None:
+    buffer = io.StringIO()
+    code = main(
+        [
+            "eval",
+            "--prompt",
+            "no_colon",
+            "--dataset",
+            "x:y",
+            "--evaluator",
+            "x:y",
+            "--adapter",
+            "x:y",
+        ],
+        stdout=buffer,
+    )
+    assert code == 1
+    assert "package.module:attr" in buffer.getvalue()
+
+
+def test_eval_rejects_unimportable_module() -> None:
+    buffer = io.StringIO()
+    code = main(
+        [
+            "eval",
+            "--prompt",
+            "doesnotexist_xyz:prompt",
+            "--dataset",
+            "doesnotexist_xyz:dataset",
+            "--evaluator",
+            "doesnotexist_xyz:evaluator",
+            "--adapter",
+            "doesnotexist_xyz:adapter_for",
+        ],
+        stdout=buffer,
+    )
+    assert code == 1
+    assert "cannot import" in buffer.getvalue()
+
+
+def test_eval_rejects_missing_attribute() -> None:
+    module = _write_eval_fixture()
+    buffer = io.StringIO()
+    code = main(
+        [
+            "eval",
+            "--prompt",
+            f"{module}:nope_no_such",
+            "--dataset",
+            f"{module}:dataset",
+            "--evaluator",
+            f"{module}:evaluator",
+            "--adapter",
+            f"{module}:adapter_for",
+        ],
+        stdout=buffer,
+    )
+    assert code == 1
+    assert "no attribute" in buffer.getvalue()
+
+
+def test_eval_rejects_wrong_typed_targets() -> None:
+    module = _write_eval_fixture()
+    buffer = io.StringIO()
+    code = main(
+        [
+            "eval",
+            "--prompt",
+            f"{module}:dataset",  # wrong type
+            "--dataset",
+            f"{module}:dataset",
+            "--evaluator",
+            f"{module}:evaluator",
+            "--adapter",
+            f"{module}:adapter_for",
+        ],
+        stdout=buffer,
+    )
+    assert code == 1
+    assert "is not a Prompt" in buffer.getvalue()
+
+
+def test_eval_rejects_non_dataset_dataset() -> None:
+    module = _write_eval_fixture()
+    buffer = io.StringIO()
+    code = main(
+        [
+            "eval",
+            "--prompt",
+            f"{module}:prompt",
+            "--dataset",
+            f"{module}:prompt",  # wrong type
+            "--evaluator",
+            f"{module}:evaluator",
+            "--adapter",
+            f"{module}:adapter_for",
+        ],
+        stdout=buffer,
+    )
+    assert code == 1
+    assert "is not a Dataset" in buffer.getvalue()
+
+
+def test_eval_rejects_non_evaluator_evaluator() -> None:
+    module = _write_eval_fixture()
+    buffer = io.StringIO()
+    code = main(
+        [
+            "eval",
+            "--prompt",
+            f"{module}:prompt",
+            "--dataset",
+            f"{module}:dataset",
+            "--evaluator",
+            f"{module}:prompt",  # wrong type
+            "--adapter",
+            f"{module}:adapter_for",
+        ],
+        stdout=buffer,
+    )
+    assert code == 1
+    assert "is not an Evaluator" in buffer.getvalue()
+
+
+def test_eval_rejects_non_callable_adapter_factory() -> None:
+    module = _write_eval_fixture()
+    buffer = io.StringIO()
+    code = main(
+        [
+            "eval",
+            "--prompt",
+            f"{module}:prompt",
+            "--dataset",
+            f"{module}:dataset",
+            "--evaluator",
+            f"{module}:evaluator",
+            "--adapter",
+            f"{module}:dataset",  # wrong type
+        ],
+        stdout=buffer,
+    )
+    assert code == 1
+    assert "is not callable" in buffer.getvalue()

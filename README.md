@@ -79,6 +79,19 @@ Layered extras built on top, all stdlib-only:
   hashes per section, overrides drop silently when source moves).
 - `weakincentives.workspace` — `Filesystem` bundle with read-only
   enforcement and stable `WorkspaceDigest`.
+- `weakincentives.optimizers` — `PromptOptimizer`, `ablate_section`,
+  `evaluate_overrides` for iterating on prompts against an eval set.
+
+## Guides
+
+Runnable, stdlib-only walkthroughs in `guides/`:
+
+- `quickstart.md` — end-to-end agent in 80 lines.
+- `evaluation.md` — building a dataset, scoring, and the `wink eval`
+  CLI.
+- `transactions.md` — filesystem rollback when a tool fails.
+- `progressive-disclosure.md` — summarised sections the model expands
+  on demand.
 
 **Layer 5 — provider integrations:**
 

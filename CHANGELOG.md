@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Optimizers, evaluation CLI, pip extras, guides
+
+- `weakincentives.optimizers` — `PromptOptimizer` runs a baseline plus
+  a list of `(label, mutator)` candidates against a `Dataset` and
+  surfaces the best-scoring candidate. `ablate_section` blanks a
+  section's body to measure how much it contributes; `evaluate_overrides`
+  runs the dataset against a prompt with a fixed override set.
+- `wink eval --prompt --dataset --evaluator --adapter` — the CLI now
+  runs an evaluation end-to-end. Each argument is a `package.module:attr`
+  reference, so the same module can ship the prompt, dataset, scoring
+  evaluator, and adapter factory. Exit code is 0 when every case
+  passes, 1 otherwise — drop-in for CI gates.
+- `pyproject.toml` declares optional dependency groups for the
+  third-party SDKs upcoming adapters need (`openai`, `litellm`,
+  `claude`, `acp`, `codex`, `redis`, `yaml`, plus an `all` aggregate).
+- `guides/` directory — runnable end-to-end walkthroughs:
+  `quickstart.md`, `evaluation.md`, `transactions.md`,
+  `progressive-disclosure.md`. Each is self-contained and runs against
+  the noop adapter so no provider SDK is required.
+
 ### Operational primitives, visibility, overrides, workspace
 
 Big push toward parity with the original 60k-line package.
