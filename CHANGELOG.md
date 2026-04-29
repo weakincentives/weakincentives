@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Foundational layer 1 modules
+
+Five stdlib-only foundational extras on top of the spine, each with full
+coverage:
+
+- `weakincentives.clock` — clock protocols (`WallClock`, `MonotonicClock`,
+  `Sleeper`, `AsyncSleeper`, `Clock`), `SystemClock`, deterministic
+  `FakeClock`, concrete `Deadline.create`, `Budget`, and thread-safe
+  `BudgetTracker`.
+- `weakincentives.serde` — `parse(cls, data)` and `dump(value)` for nested
+  frozen dataclasses with `Annotated` field constraints
+  (`ge`/`le`/`gt`/`lt`/`min_length`/`max_length`/`pattern`) and polymorphic
+  union resolution via a `__type__` discriminator.
+- `weakincentives.dbc` — `@require`, `@ensure`, and `@invariant` decorators
+  for design-by-contract style runtime checks.
+- `weakincentives.filesystem` — `Filesystem` protocol and a thread-safe
+  `InMemoryFilesystem` that implements `core.Snapshotable` so tool
+  transactions roll back filesystem mutations.
+- `weakincentives.resources` — `ResourceRegistry`, `Binding`, scoped
+  lifetimes (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`), `ScopedResourceContext`
+  that satisfies `core.ResourceProvider`, and `Closeable`/`PostConstruct`
+  hooks.
+
+`specs/ARCHITECTURE.md` documents the full layered package design, including
+which extras land in subsequent phases (`runtime`, `transcript`, `evals`,
+`debug`, adapters, …).
+
 ### Reset to spine
 
 The package is rebooted around a small, modular spine

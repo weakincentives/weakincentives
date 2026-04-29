@@ -2,7 +2,8 @@
 
 A small, modular spine for building reliable AI agents in Python.
 
-The base install ships only the **spine** (`weakincentives.core`):
+The package is layered. The base install ships only the **spine**
+(`weakincentives.core`):
 
 - Hierarchical, typed prompts that bundle tools (`Section[ParamsT]`, `Prompt`).
 - Event-sourced sessions with pure reducers and atomic slice access (`Session`,
@@ -15,9 +16,22 @@ The base install ships only the **spine** (`weakincentives.core`):
   `ResourceProvider`, `Snapshotable`, `ToolPolicy`, `Deadline`, `Budget` — so
   higher-level layers can plug in without forking the core.
 
-That's it. Provider integrations, debug bundles, evaluation, formal
-verification, skills, and other higher-level features are extras that depend
-on the spine — install them on demand.
+Foundational extras layered on top, all stdlib-only:
+
+- `weakincentives.clock` — `SystemClock`, `FakeClock`, concrete `Deadline`,
+  `Budget`, `BudgetTracker`.
+- `weakincentives.serde` — `parse(cls, data)` / `dump(value)` with
+  `Annotated` constraints and polymorphic union encoding.
+- `weakincentives.dbc` — `@require`, `@ensure`, `@invariant` runtime
+  contracts.
+- `weakincentives.filesystem` — `InMemoryFilesystem` implementing
+  `Snapshotable` so transactional tools roll filesystem state back too.
+- `weakincentives.resources` — scoped DI container that satisfies
+  `core.ResourceProvider` (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`).
+
+Higher layers (orchestration, observability, provider adapters, CLI) follow
+the same module-boundary rules and arrive as they are rebuilt. See
+`specs/ARCHITECTURE.md` for the full plan.
 
 ## Status
 

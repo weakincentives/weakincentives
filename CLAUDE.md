@@ -19,11 +19,21 @@ install ships only the **spine** (`src/weakincentives/core/`):
 - `protocols.py` — `ProviderAdapter`, `EventListener`, `ResourceProvider`,
   `Deadline`, `Budget`, `Usage`, `ToolCall`, `PromptResponse`.
 
-Higher-level features (provider adapters, evals, debug bundles, formal
-verification, skills, …) will land as opt-in extras as they are rebuilt.
-Each must depend only on `weakincentives.core` and other extras.
+Foundational layer 1 modules (stdlib-only, depend on `core` only):
 
-The full design is in `specs/SPINE.md`.
+- `weakincentives.clock` — clocks, `Deadline`, `Budget`, `BudgetTracker`.
+- `weakincentives.serde` — `parse`/`dump` for nested dataclasses with
+  constraints and polymorphic unions.
+- `weakincentives.dbc` — `@require`, `@ensure`, `@invariant`.
+- `weakincentives.filesystem` — `Filesystem` protocol and snapshot-able
+  `InMemoryFilesystem`.
+- `weakincentives.resources` — scoped DI container satisfying
+  `core.ResourceProvider`.
+
+Higher layers (`runtime`, `transcript`, `evals`, `debug`, `skills`,
+`formal`, provider adapters, CLI) land in their own subpackages as they are
+rebuilt. The layered dependency rules and the migration plan are in
+`specs/ARCHITECTURE.md`. The spine is documented in `specs/SPINE.md`.
 
 ## Definition of Done
 
@@ -80,8 +90,9 @@ These are enforced by tests and reviewed at every change:
 
 | Topic | File |
 | --- | --- |
+| Layered package architecture | `specs/ARCHITECTURE.md` |
 | Spine design and rationale | `specs/SPINE.md` |
 | Philosophy | `specs/POLICIES_OVER_WORKFLOWS.md` |
-| Public surface | `src/weakincentives/core/__init__.py` |
+| Public surface (spine) | `src/weakincentives/core/__init__.py` |
 | Error hierarchy | `src/weakincentives/core/errors.py` |
 | Extension points | `src/weakincentives/core/protocols.py` |
