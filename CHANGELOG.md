@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Skills, formal, CLI, and an OpenAI-compatible adapter
+
+- `weakincentives.skills` — `Skill`, `SkillMount`, `load_skill`,
+  `load_skills`, `render_skill`. Skill files are markdown with TOML
+  frontmatter (`+++ ... +++`); the loader uses only the standard library
+  via `tomllib`.
+- `weakincentives.formal` — `@formal_spec` decorator that attaches a
+  `FormalSpec` metadata dataclass to functions/classes plus a
+  module-level registry (`all_formal_specs`, `reset_registry`). Ships
+  the metadata layer; downstream tooling consumes it.
+- `weakincentives.cli` — the `wink` command, registered as a project
+  script. Today's only subcommand is `wink debug <bundle.json>`, which
+  pretty-prints a debug bundle's metadata, transcript entries, and
+  slice contents without needing a `TypeRegistry`.
+- `weakincentives.adapters.openai_compatible` —
+  `OpenAICompatibleAdapter` against a structural `ChatClient` protocol.
+  Works with the real OpenAI SDK, with Mistral/Together/Fireworks/etc.,
+  or with hand-rolled fakes — the adapter never imports `openai`. Maps
+  `RenderedPrompt` → chat messages, exposes the prompt's tools as
+  function-calling specs, propagates deadlines as request timeouts, and
+  decodes assistant tool calls back into `core.ToolCall`.
+
 ### Orchestration, observability, and a stub adapter
 
 Layers 3, 4, and 5 (stub) of the architecture, all stdlib-only:

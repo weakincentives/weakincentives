@@ -262,9 +262,9 @@ Implementation is staged. Each phase ends green on `make check`.
 | 1 | `clock`, `serde`, `dbc` | shipped |
 | 2 | `filesystem`, `resources` | shipped |
 | 3 | `runtime`, `transcript` | shipped |
-| 4 | `evals`, `debug` | shipped |
-| 5 | `adapters/*` | `noop` shipped; real providers pending |
-| 6 | `skills`, `formal`, `cli` | pending |
+| 4 | `evals`, `debug`, `skills`, `formal` | shipped |
+| 5 | `adapters/*` | `noop` + `openai_compatible` shipped |
+| 6 | `cli` (the `wink` command) | shipped |
 
 Each phase is independently shippable. Earlier phases never wait on
 later ones.

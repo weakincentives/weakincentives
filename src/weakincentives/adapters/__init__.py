@@ -29,8 +29,24 @@ Every adapter implements :class:`weakincentives.core.ProviderAdapter`.
 from __future__ import annotations
 
 from .noop import NoopAdapter, ScriptedResponse
+from .openai_compatible import (
+    ChatClient,
+    ChatCompletion,
+    ChatCompletions,
+    ChatToolCall,
+    ChatToolFunction,
+    ChatUsage,
+    OpenAICompatibleAdapter,
+)
 
 __all__ = [
+    "ChatClient",
+    "ChatCompletion",
+    "ChatCompletions",
+    "ChatToolCall",
+    "ChatToolFunction",
+    "ChatUsage",
     "NoopAdapter",
+    "OpenAICompatibleAdapter",
     "ScriptedResponse",
 ]

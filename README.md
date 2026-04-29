@@ -51,13 +51,24 @@ Layered extras built on top, all stdlib-only:
   and a `run_evaluation` driver.
 - `weakincentives.debug` — `DebugBundle` (snapshot + transcript +
   metadata) with JSON round-trip via `core.TypeRegistry`.
+- `weakincentives.skills` — `Skill` + `SkillMount`; load skills from
+  markdown files with TOML frontmatter (no third-party dependencies).
+- `weakincentives.formal` — `@formal_spec` decorator that attaches
+  metadata for downstream verifiers; ships a registry callers can iterate.
 
 **Layer 5 — provider integrations:**
 
 - `weakincentives.adapters.noop` — `NoopAdapter` + `ScriptedResponse` for
   deterministic tests and demos.
-- Real adapters (`openai`, `claude`, `litellm`, `acp`, `codex`) arrive
-  behind their own pip extras as they are rebuilt.
+- `weakincentives.adapters.openai_compatible` —
+  `OpenAICompatibleAdapter` against a structural `ChatClient` protocol;
+  works with `openai`, `mistralai`, `together`, etc., or with hand-rolled
+  fakes in tests.
+
+**Layer 6 — CLI:**
+
+- `weakincentives.cli` — the `wink` command. Today: `wink debug <bundle.json>` pretty-prints a debug bundle's metadata, transcript,
+  and slice contents.
 
 See `specs/ARCHITECTURE.md` for the full layered design and remaining
 work.

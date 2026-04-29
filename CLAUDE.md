@@ -43,12 +43,18 @@ Layered extras (all stdlib-only) on top of the spine:
 
 - `weakincentives.evals` — datasets, evaluators, runner.
 - `weakincentives.debug` — `DebugBundle` with JSON round-trip.
+- `weakincentives.skills` — TOML-frontmatter skill loader.
+- `weakincentives.formal` — `@formal_spec` metadata decorator.
 
 **Layer 5 — provider integrations:**
 
 - `weakincentives.adapters.noop` — scripted test adapter.
-- Real adapters (`openai`, `claude`, `litellm`, `acp`, `codex`) arrive
-  behind their own pip extras as they are rebuilt.
+- `weakincentives.adapters.openai_compatible` — OpenAI-shaped adapter
+  against a structural `ChatClient` protocol.
+
+**Layer 6 — CLI:**
+
+- `weakincentives.cli` — the `wink` command (`wink debug <bundle.json>`).
 
 Each subpackage imports only the layers strictly below it. The layered
 rules and migration plan live in `specs/ARCHITECTURE.md`; the spine is
