@@ -57,19 +57,19 @@ from ...filesystem import Filesystem
 from ...runtime.logging import StructuredLogger, get_logger
 from ._hook_context import HookConstraints, HookContext, HookStats
 from ._hook_tools import (
-    _check_budget_constraint,  # pyright: ignore[reportPrivateUsage]
-    _check_deadline_constraint,  # pyright: ignore[reportPrivateUsage]
-    _compute_budget_info,  # pyright: ignore[reportPrivateUsage]
-    _dispatch_tool_invoked_event,  # pyright: ignore[reportPrivateUsage]
-    _handle_mcp_tool_post,  # pyright: ignore[reportPrivateUsage]
-    _handle_structured_output_completion,  # pyright: ignore[reportPrivateUsage]
-    _handle_tool_transaction,  # pyright: ignore[reportPrivateUsage]
-    _is_budget_exhausted,  # pyright: ignore[reportPrivateUsage]
-    _is_deadline_exceeded,  # pyright: ignore[reportPrivateUsage]
-    _is_tool_error_response,  # pyright: ignore[reportPrivateUsage,reportUnusedImport]  # noqa: F401 - re-exported for tests
-    _parse_tool_data,  # pyright: ignore[reportPrivateUsage]
-    _run_feedback_providers,  # pyright: ignore[reportPrivateUsage]
-    _setup_tool_execution_state,  # pyright: ignore[reportPrivateUsage]
+    _check_budget_constraint,
+    _check_deadline_constraint,
+    _compute_budget_info,
+    _dispatch_tool_invoked_event,
+    _handle_mcp_tool_post,
+    _handle_structured_output_completion,
+    _handle_tool_transaction,
+    _is_budget_exhausted,
+    _is_deadline_exceeded,
+    _is_tool_error_response,  # pyright: ignore[reportUnusedImport]  # noqa: F401 - re-exported for tests
+    _parse_tool_data,
+    _run_feedback_providers,
+    _setup_tool_execution_state,
 )
 from ._task_completion import (
     TaskCompletionChecker,

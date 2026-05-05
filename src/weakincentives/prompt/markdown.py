@@ -194,7 +194,7 @@ class MarkdownSection(Section[MarkdownParamsT_co]):
             key=self.key,
             default_params=cloned_default,
             children=cloned_children,
-            enabled=self._enabled,  # ty: ignore[invalid-argument-type]  # callback arity
+            enabled=self._enabled,  # callback arity
             tools=self.tools(),
             skills=self.skills(),
             policies=self.policies(),

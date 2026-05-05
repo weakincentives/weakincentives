@@ -38,7 +38,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import field
 from datetime import UTC, datetime
@@ -113,7 +113,7 @@ def collect_all_logs(
     target: str | Path,
     *,
     level: int = logging.DEBUG,
-) -> Iterator[Path]:
+) -> Generator[Path]:
     """Capture all log records and write them to a file.
 
     Internal helper for BundleWriter.capture_logs(). Attaches a handler to the

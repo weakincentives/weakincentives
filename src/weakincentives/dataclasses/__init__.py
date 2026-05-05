@@ -72,7 +72,7 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -101,7 +101,7 @@ class DataclassOptions(TypedDict, total=False):
 
 
 @contextmanager
-def allow_construction() -> Iterator[None]:
+def allow_construction() -> Generator[None]:
     """Temporarily permit direct ``__init__`` on ``Constructable`` subclasses.
 
     Use inside ``create()`` methods and framework code (e.g. ``serde.parse``)

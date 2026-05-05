@@ -77,6 +77,33 @@ Gemini option added to `code_reviewer_example.py`.
 
 ### Changed
 
+#### Dependency upgrades
+
+All Python dependencies upgraded to latest via `uv lock --upgrade` and minimum
+version pins bumped in `pyproject.toml`. Notable direct/dev dependency upgrades:
+
+| Package | Old | New |
+|---------|-----|-----|
+| claude-agent-sdk | 0.1.59 | 0.1.73 |
+| fastapi | 0.135.3 | 0.136.1 |
+| uvicorn | 0.44.0 | 0.46.0 |
+| ruff | 0.15.10 | 0.15.12 |
+| pyright | 1.1.408 | 1.1.409 |
+| ty | 0.0.31 | 0.0.34 |
+| hypothesis | 6.152.1 | 6.152.4 |
+| pytest-randomly | 4.0.1 | 4.1.0 |
+
+Notable transitive upgrades: `cryptography` 46.0.7 → 48.0.0, `pydantic`
+2.13.1 → 2.13.3, `sse-starlette` 3.3.4 → 3.4.1.
+
+To accommodate `pyright` 1.1.409's new deprecation warnings on
+`@contextmanager`/`@asynccontextmanager` return types, all such functions in
+`src/weakincentives/` switched their return annotations from
+`Iterator[T]` / `AsyncIterator[T]` to `Generator[T]` / `AsyncGenerator[T]`.
+A handful of stale `# pyright: ignore[reportPrivateUsage]` and
+`# ty: ignore[invalid-argument-type]` directives were also dropped now that the
+upgraded type checkers no longer require them.
+
 #### `wink debug` UI redesign — oscilloscope aesthetic (#1108)
 
 The debug viewer's entire visual layer is replaced. Changes affect

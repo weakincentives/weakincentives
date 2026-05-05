@@ -220,7 +220,7 @@ def _validate_payload_policies(payload: Mapping[str, JSONValue]) -> PayloadPolic
             policy = SlicePolicy(value)
         except ValueError as error:
             raise SnapshotRestoreError("Snapshot policy value is invalid") from error
-        normalized[key] = policy  # ty: ignore[invalid-assignment]
+        normalized[key] = policy
 
     return cast(PayloadPolicies, types.MappingProxyType(normalized))
 

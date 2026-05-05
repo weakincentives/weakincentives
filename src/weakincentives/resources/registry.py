@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -259,7 +259,7 @@ class ResourceRegistry:
         )
 
     @contextmanager
-    def open(self) -> Iterator[ScopedResourceContext]:
+    def open(self) -> Generator[ScopedResourceContext]:
         """Context manager for resource lifecycle.
 
         Creates a context, starts it, and ensures cleanup on exit.

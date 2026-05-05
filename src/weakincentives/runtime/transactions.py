@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import threading
 import types
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -436,7 +436,7 @@ def tool_transaction(
     resources: ScopedResourceContext,
     *,
     tag: str | None = None,
-) -> Iterator[CompositeSnapshot]:
+) -> Generator[CompositeSnapshot]:
     """Context manager for transactional tool execution.
 
     Takes a snapshot before the block executes. On any exception, the
