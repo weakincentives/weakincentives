@@ -19,7 +19,7 @@ import re
 # discovery.
 import subprocess  # nosec B404
 import tempfile
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
@@ -113,7 +113,7 @@ class OverrideFilesystem:
         return stripped
 
     @contextmanager
-    def locked_override_path(self, file_path: Path) -> Iterator[None]:
+    def locked_override_path(self, file_path: Path) -> Generator[None]:
         lock = self._get_override_path_lock(file_path)
         with lock:
             yield

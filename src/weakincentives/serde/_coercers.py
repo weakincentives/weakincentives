@@ -33,15 +33,15 @@ from uuid import UUID
 
 from ..types import JSONValue
 from ._generics import (
-    _build_typevar_map,  # pyright: ignore[reportPrivateUsage]
-    _is_typevar,  # pyright: ignore[reportPrivateUsage]
+    _build_typevar_map,
+    _is_typevar,
 )
 from ._utils import (
-    _UNION_TYPE,  # pyright: ignore[reportPrivateUsage]
-    _AnyType,  # pyright: ignore[reportPrivateUsage]
-    _apply_constraints,  # pyright: ignore[reportPrivateUsage]
-    _merge_annotated_meta,  # pyright: ignore[reportPrivateUsage]
-    _ParseConfig,  # pyright: ignore[reportPrivateUsage]
+    _UNION_TYPE,
+    _AnyType,
+    _apply_constraints,
+    _merge_annotated_meta,
+    _ParseConfig,
 )
 
 # typing.Union origin (for Optional[X] and Union[X, Y] constructs from type aliases)

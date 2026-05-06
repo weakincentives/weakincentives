@@ -20,7 +20,7 @@ import logging
 import shutil
 import tempfile
 import zipfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -306,7 +306,7 @@ class BundleWriter:
             )
 
     @contextmanager
-    def capture_logs(self) -> Iterator[None]:
+    def capture_logs(self) -> Generator[None]:
         """Context manager to capture logs during execution."""
         if self._temp_dir is None:
             yield

@@ -76,7 +76,7 @@ def supported_option_names(
         options_type, "__dataclass_fields__", None
     )
     if isinstance(dataclass_fields, dict):
-        return set(dataclass_fields.keys())  # ty: ignore[invalid-return-type]
+        return set(dataclass_fields.keys())
 
     try:
         signature = inspect.signature(options_type)

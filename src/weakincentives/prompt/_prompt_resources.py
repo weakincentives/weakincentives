@@ -19,7 +19,7 @@ imports from tool-related modules (via section.py/registry.py), creating a cycle
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import TracebackType
 from typing import TYPE_CHECKING, Protocol, Self
@@ -173,7 +173,7 @@ class PromptResources:
         return self.context.get_optional(protocol)
 
     @contextmanager
-    def tool_scope(self) -> Iterator[ResourceResolver]:
+    def tool_scope(self) -> Generator[ResourceResolver]:
         """Enter a tool-call scope.
 
         Resources with TOOL_CALL scope are fresh within this context

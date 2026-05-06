@@ -186,13 +186,13 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
         while True:
             try:
                 if bridge is not None:
-                    bridge.on_user_message(current_prompt_text)  # ty: ignore[invalid-argument-type]
+                    bridge.on_user_message(current_prompt_text)
                 current_schema = output_schema
                 timeout = deadline_remaining_s(deadline, prompt_name)
                 turn_result = await start_turn(
                     client,
                     thread_id,
-                    current_prompt_text,  # ty: ignore[invalid-argument-type]
+                    current_prompt_text,
                     current_schema,
                     model_config=model_config,
                     timeout=timeout,
@@ -236,7 +236,11 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
                 deadline=deadline,
                 budget_tracker=budget_tracker,
             )
-            if should_continue and continuation_round < max_continuation_rounds:
+            if (
+                should_continue
+                and feedback is not None
+                and continuation_round < max_continuation_rounds
+            ):
                 current_prompt_text = feedback
                 continuation_round += 1
                 continue

@@ -27,10 +27,10 @@ from uuid import UUID
 from ..types import JSONValue
 from ._scope import SerdeScope, is_hidden_in_scope
 from ._utils import (
-    _UNION_TYPE,  # pyright: ignore[reportPrivateUsage]
-    _AnyType,  # pyright: ignore[reportPrivateUsage]
-    _merge_annotated_meta,  # pyright: ignore[reportPrivateUsage]
-    _ordered_values,  # pyright: ignore[reportPrivateUsage]
+    _UNION_TYPE,
+    _AnyType,
+    _merge_annotated_meta,
+    _ordered_values,
 )
 
 NULL_TYPE = type(None)

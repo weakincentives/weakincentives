@@ -34,7 +34,7 @@ from __future__ import annotations
 import os
 import socket
 from abc import abstractmethod
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -283,7 +283,7 @@ class AgentLoop[UserRequestT, OutputT](
         resources: Mapping[type[object], object] | None = None,
         heartbeat: Heartbeat | None = None,
         experiment: Experiment | None = None,
-    ) -> Iterator[BundleContext[OutputT]]:
+    ) -> Generator[BundleContext[OutputT]]:
         """Execute with debug bundling, allowing metadata injection.
 
         Creates a debug bundle with the same artifacts as mailbox-driven execution:

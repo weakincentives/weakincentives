@@ -231,7 +231,7 @@ Functions:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
@@ -268,7 +268,7 @@ def _qualname(target: object) -> str:
 
 
 @contextmanager
-def dbc_suspended() -> Iterator[None]:
+def dbc_suspended() -> Generator[None]:
     """Temporarily suspend DbC checks inside a ``with`` block.
 
     Use this context manager sparingly in performance-sensitive code paths

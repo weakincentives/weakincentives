@@ -26,11 +26,11 @@ from typing import (
 
 from ._coercers import _coerce_to_type  # pyright: ignore[reportPrivateUsage]
 from ._generics import (
-    _build_typevar_map,  # pyright: ignore[reportPrivateUsage]
-    _get_field_types,  # pyright: ignore[reportPrivateUsage]
+    _build_typevar_map,
+    _get_field_types,
 )
 from ._scope import SerdeScope, is_hidden_in_scope
-from ._utils import _ParseConfig  # pyright: ignore[reportPrivateUsage]
+from ._utils import _ParseConfig
 
 
 def _find_key(data: Mapping[str, object], name: str, alias: str | None) -> str | None:

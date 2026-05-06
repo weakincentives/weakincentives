@@ -26,7 +26,7 @@ the lock.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from threading import RLock
@@ -200,7 +200,7 @@ class Session(SessionProtocol):
         self._register_builtin_reducers()
 
     @contextmanager
-    def locked(self) -> Iterator[None]:
+    def locked(self) -> Generator[None]:
         with self._lock:
             yield
 
