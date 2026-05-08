@@ -33,7 +33,7 @@ harness. Its job, in order:
 - **Verify completion.** Run the prompt's completion checker at
   termination; signal continuation if the checker reports incomplete.
 - **Parse.** Convert the harness's final response into a typed result
-  (or a structured-output dataclass when one is declared).
+  (or a structured-output record when one is declared).
 - **Emit.** Publish lifecycle events through the session dispatcher;
   emit transcript entries through the unified emitter; record budgets
   consumed.

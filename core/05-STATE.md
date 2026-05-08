@@ -12,7 +12,7 @@ ______________________________________________________________________
 
 Think of an agent's state as a ledger of events with derived views.
 
-- The **events** are the source of truth. Each is a typed dataclass
+- The **events** are the source of truth. Each is a typed record
   describing something that happened: a prompt was rendered, a tool was
   invoked, a file was read.
 - The **slices** are the derived views. A slice of type `T` answers: *what
@@ -31,11 +31,11 @@ ______________________________________________________________________
 
 ## Events
 
-An event is a frozen dataclass. It carries everything needed to
+An event is an immutable record. It carries everything needed to
 reconstruct the change it represents — including correlation IDs that
 tie it back to the prompt render or tool invocation that produced it.
-Events are not strings. They are not generic dictionaries. They are
-specific named types: `ToolInvoked`, `FileRead`, `PromptRendered`,
+Events are not strings. They are not free-form maps. They are specific
+named types: `ToolInvoked`, `FileRead`, `PromptRendered`,
 `PromptExecuted`, and so on.
 
 Tools publish events through the session dispatcher. Adapters publish
@@ -80,8 +80,8 @@ Operations are:
 - **Replace** — overwrite the entire slice with a new tuple.
 - **Clear** — remove items, optionally filtered by predicate.
 
-Reducers are typically declared *on* the slice's dataclass via a
-decorator, so the data and the rules for transforming it live together.
+Reducers are typically declared *on* the slice's record type as
+methods, so the data and the rules for transforming it live together.
 This mirrors the same co-location principle that puts tools on sections.
 
 ______________________________________________________________________
@@ -166,7 +166,7 @@ ______________________________________________________________________
 
 ## Anti-patterns
 
-- **Mutating dataclasses in place.** Slices are immutable; the framework
+- **Mutating records in place.** Slices are immutable; the framework
   enforces this. Reducers always return new values.
 - **Bypassing the dispatcher.** Tools that mutate session-level
   containers directly defeat snapshotting, audit, and transactional

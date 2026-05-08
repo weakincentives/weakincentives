@@ -30,7 +30,7 @@ ______________________________________________________________________
 Three reasons matter most.
 
 **Testability.** A test substitutes a fake by replacing one binding,
-without monkey-patching modules or threading globals. The same code path
+without ad-hoc runtime patching or threading globals. The same code path
 runs in production and in tests.
 
 **Lifecycle correctness.** When a prompt's resource context exits, every
@@ -73,7 +73,7 @@ through a stable accessor. The handler asks for what it needs:
 - "Give me the budget tracker."
 - "Give me the configured rate limiter."
 
-The handler does not import a module-level singleton. It does not
+The handler does not reach for a process-wide singleton. It does not
 construct its own client. It does not pull anything in from a global. The
 explicit access is what makes scope, lifecycle, and substitution work.
 

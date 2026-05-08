@@ -10,6 +10,15 @@ what WINK is for and how it thinks.
 For implementation depth — class signatures, behaviors, errors — see the
 `specs/` folder. `core/` answers *why* and *what*; `specs/` answers *how*.
 
+**Language- and framework-agnostic.** WINK is currently implemented in
+Python, but every concept in `core/` is described in language-neutral
+terms. "Typed record" means whatever the host language calls a named
+fixed-shape value — `dataclass`, `struct`, `record`, `case class`. The
+ideas port to Rust, TypeScript, Kotlin, Go, or any other language that
+can express typed values, immutability, and dependency injection. If a
+concept here can only be expressed in one language, it is the wrong
+abstraction.
+
 ______________________________________________________________________
 
 ## The thesis in one paragraph

@@ -13,8 +13,8 @@ A tool has:
 
 - A stable name (lowercased, hyphenated identifier).
 - A short description.
-- A typed parameter dataclass (the model's input shape).
-- A typed result dataclass (the value returned to the model and to other
+- A typed parameter record (the model's input shape).
+- A typed result record (the value returned to the model and to other
   tools).
 - A handler — a function that takes typed parameters and a context, and
   returns a typed result.
@@ -114,9 +114,9 @@ Two patterns matter:
 - Tools *publish* events through the session dispatcher. They do not
   mutate session state directly. State changes flow through reducers.
 - Tools *resolve* their dependencies through the resource context, not
-  through module-level globals. A tool that reaches around the resource
-  registry to import its dependencies bypasses scoping, snapshotting, and
-  test substitution.
+  through global state. A tool that reaches around the resource registry
+  to import its dependencies bypasses scoping, snapshotting, and test
+  substitution.
 
 ______________________________________________________________________
 
@@ -125,8 +125,8 @@ ______________________________________________________________________
 A tool may carry zero or more examples — pairs of input and expected
 output. Examples ground the model's understanding of valid usage and serve
 as test fixtures. They are validated against the parameter and result
-dataclasses at construction; an invalid example is a build-time error, not
-a runtime mystery.
+record types at construction; an invalid example is a build-time error,
+not a runtime mystery.
 
 ______________________________________________________________________
 
@@ -159,8 +159,8 @@ ______________________________________________________________________
   prompt.
 - [TRANSACTIONS](11-TRANSACTIONS.md) — atomicity and rollback.
 - [POLICIES](06-POLICIES.md) — gates around tool calls (fail-closed).
-- [TYPED-CONTRACTS](12-TYPED-CONTRACTS.md) — the dataclass discipline
-  that makes parameter and result types reliable.
+- [TYPED-CONTRACTS](12-TYPED-CONTRACTS.md) — the typed-record
+  discipline that makes parameter and result types reliable.
 - [ADAPTERS](13-ADAPTERS.md) — how tools reach a runtime.
 - [STATE](05-STATE.md) — what session state tools can read and what
   events they can publish.

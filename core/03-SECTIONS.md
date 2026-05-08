@@ -63,11 +63,11 @@ ______________________________________________________________________
 
 Two mechanisms control whether a section is in the rendered prompt at all.
 
-**Enabled predicates.** Every section carries a callable returning a
-boolean. If the predicate returns false, the entire section — its text,
-its tools, its skills, its children — is omitted. This is the cleanest way
-to model a capability that should only appear under specific session
-conditions: scope it inside a section and gate the section.
+**Enabled predicates.** Every section carries a predicate function. If
+the predicate returns false, the entire section — its text, its tools,
+its skills, its children — is omitted. This is the cleanest way to model
+a capability that should only appear under specific session conditions:
+scope it inside a section and gate the section.
 
 **Visibility.** A section can render in `FULL` or `SUMMARY` form. In summary
 mode, only the abridged text is shown and the section's tools are withheld.
@@ -153,8 +153,8 @@ ______________________________________________________________________
 
 - [PROMPT-IS-THE-AGENT](02-PROMPT-IS-THE-AGENT.md) — why sections exist
   in the first place.
-- [TOOLS](04-TOOLS.md) — what a section contributes when it has callable
-  capability.
+- [TOOLS](04-TOOLS.md) — what a section contributes when it has
+  invokable capability.
 - [PROGRESSIVE-DISCLOSURE](10-PROGRESSIVE-DISCLOSURE.md) — visibility,
   expansion, and how it interacts with tools.
 - [RESOURCES](09-RESOURCES.md) — what a section can require from the

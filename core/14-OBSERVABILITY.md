@@ -103,7 +103,8 @@ understand, reproduce, and debug a run. Layout is fixed and predictable:
 - The transcript, extracted as its own file for convenience.
 - Configuration: adapter settings, prompt overrides, run context.
 - Metrics: token usage, timing, budget state.
-- Environment: OS, Python version, git commit, installed packages.
+- Environment: OS, language runtime version, version-control commit,
+  installed packages.
 - Error details, when applicable.
 - A workspace filesystem snapshot, when one was used.
 

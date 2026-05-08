@@ -48,9 +48,10 @@ silently violated.
 ## 6. Typed contracts everywhere.
 
 Parameters, tool calls, tool results, structured output, events, and state
-are all typed dataclasses. Type mismatches surface at construction time, not
-mid-response. A strict type checker is the first line of defense, not a
-nice-to-have.
+are all typed records — whatever the host language calls them
+(dataclass, struct, record, case class). Type mismatches surface at
+construction time, not mid-response. A strict static type checker is the
+first line of defense, not a nice-to-have.
 
 ## 7. Inspectability over activity logs.
 
@@ -82,8 +83,8 @@ needs. Keeping context small keeps reasoning sharp and tokens cheap.
 
 Dependencies are injected through bindings with explicit lifetimes
 (singleton, per-tool-call, per-resolution). Tests substitute fakes by
-construction. There are no module-level singletons that have to be
-monkey-patched.
+construction. There are no global singletons that have to be patched at
+runtime.
 
 ## 12. Time is injected.
 

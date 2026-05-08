@@ -13,7 +13,7 @@ Consider what a typical agent framework keeps in separate places:
 
 - The prompt text (a string or markdown file).
 - The tool catalog (a registry of name → handler bindings).
-- The schema for structured output (a JSON Schema or pydantic model).
+- The schema for structured output (a separate schema declaration).
 - The conditions under which sections should appear (config flags).
 - The instructions for using each tool (more text, often in another file).
 
@@ -48,7 +48,7 @@ key, ordered section tree, attached policies, attached feedback providers,
 attached completion checker, attached resources, optional structured output
 type. Templates are shareable and composable.
 
-A **prompt** is a template plus runtime bindings — the dataclass parameter
+A **prompt** is a template plus runtime bindings — the record parameter
 values that fill section placeholders, the resource overrides supplied at
 bind time, and the lifecycle context that owns the resources. Prompts are
 the things you actually evaluate.
@@ -95,11 +95,12 @@ ______________________________________________________________________
 
 ## Typed all the way down
 
-The prompt is a typed object graph. Section parameters are dataclass
-instances. Tool parameters and results are dataclasses. Structured output —
-when the prompt declares one — is a dataclass type. Validation happens at
-construction, not at the boundary with the model. By the time the model
-sees a prompt, every contract has already been checked.
+The prompt is a typed object graph. Section parameters are typed
+records. Tool parameters and results are typed records. Structured
+output — when the prompt declares one — is a typed record type.
+Validation happens at construction, not at the boundary with the model.
+By the time the model sees a prompt, every contract has already been
+checked.
 
 ______________________________________________________________________
 
@@ -108,9 +109,9 @@ ______________________________________________________________________
 Two mechanisms let prompts adapt to runtime state without abandoning the
 "single source of truth" property:
 
-- **Enabled predicates.** Each section carries a callable that returns
-  whether the section is currently active. The whole subtree disappears if
-  it returns false — including its tools.
+- **Enabled predicates.** Each section carries a predicate function
+  that returns whether the section is currently active. The whole
+  subtree disappears if it returns false — including its tools.
 - **Visibility.** Sections may declare themselves as `SUMMARY`, in which
   case only an abridged form renders until the agent explicitly expands
   them. Tools attached to a summarized section are withheld until the
@@ -142,4 +143,4 @@ ______________________________________________________________________
 - [PROGRESSIVE-DISCLOSURE](10-PROGRESSIVE-DISCLOSURE.md) — how visibility
   expansion works.
 - [TYPED-CONTRACTS](12-TYPED-CONTRACTS.md) — why everything is a
-  dataclass.
+  typed record.

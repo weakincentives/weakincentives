@@ -36,7 +36,7 @@ ______________________________________________________________________
 ## Capability surface
 
 - **Tool** — A typed handler for an action with explicit parameter and
-  result dataclasses. The agent's only sanctioned side-effect surface.
+  result record types. The agent's only sanctioned side-effect surface.
   See [Tools](04-TOOLS.md).
 - **ToolResult** — The success-or-failure container returned by every
   tool. Failures never abort the run.
@@ -62,8 +62,8 @@ ______________________________________________________________________
 - **Session** — The container that holds slices, registers reducers, and
   dispatches events. The unit across which all mutations flow. See
   [State](05-STATE.md).
-- **Event** — A typed dataclass describing something that happened.
-  The only mechanism by which state changes.
+- **Event** — A typed record describing something that happened. The
+  only mechanism by which state changes.
 - **Slice** — A typed view of one aspect of session state, addressed by
   type.
 - **Reducer** — A pure function that takes the current slice and an
@@ -105,16 +105,21 @@ ______________________________________________________________________
 
 ## Type discipline
 
-- **Frozen dataclass** — An immutable dataclass with slots. The default
-  shape for almost every type in WINK. See
+- **Typed record** — Any named, fixed-shape value type with declared
+  fields and per-field types — `dataclass`, `struct`, `record`,
+  `case class`, etc., depending on the host language.
+- **Immutable record** — A record type that cannot be mutated after
+  construction. The default shape for almost every type in WINK. See
   [Typed Contracts](12-TYPED-CONTRACTS.md).
-- **Constructable** — A construction-controlled base for types whose
-  invariants must be checked before instances exist.
+- **Validated record** — A record whose direct construction is blocked;
+  a factory enforces invariants before instances exist. The validated
+  tier of [Typed Contracts](12-TYPED-CONTRACTS.md).
 - **Structured output** — A typed return shape declared on the prompt;
-  the framework parses model responses into the dataclass.
-- **Design by contract** — The optional decorator-based layer for
-  preconditions, postconditions, and invariants that types alone cannot
-  express.
+  the framework parses model responses into the record.
+- **Design by contract** — The optional layer for preconditions,
+  postconditions, and invariants attached at function and type
+  declarations. Captures semantic constraints the type system alone
+  cannot express.
 
 ## Harness boundary
 
