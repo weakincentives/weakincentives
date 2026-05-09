@@ -199,5 +199,7 @@ ______________________________________________________________________
   dispatcher.
 - [OBSERVABILITY](14-OBSERVABILITY.md) — the unified transcript and
   debug bundle the adapter feeds.
+- [AGENT-LOOP](15-AGENT-LOOP.md) — the orchestration shell that
+  calls the adapter.
 - [PRINCIPLES](PRINCIPLES.md) §14 — the same definition runs on every
   harness.

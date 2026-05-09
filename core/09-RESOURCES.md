@@ -173,5 +173,7 @@ ______________________________________________________________________
   context.
 - [TRANSACTIONS](11-TRANSACTIONS.md) — how snapshotable resources
   participate in rollback.
+- [AGENT-LOOP](15-AGENT-LOOP.md) — the loop that opens and closes
+  the prompt's resource context per execution.
 - [PRINCIPLES](PRINCIPLES.md) §11–§12 — scoped resources and injected
   time.

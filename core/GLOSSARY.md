@@ -161,12 +161,52 @@ ______________________________________________________________________
 
 - **Prompt overrides** — Hash-validated text replacements for sections
   and tool descriptions, applied without source changes. The hash means
-  overrides apply only to the version they were authored against.
+  overrides apply only to the version they were authored against. See
+  [Prompt Overrides](17-PROMPT-OVERRIDES.md).
+- **Override tag** — A named group of overrides under one prompt
+  namespace/key. Selected at bind time. Used by experiments for A/B.
+- **Descriptor** — The hashed snapshot of a prompt's overridable
+  surface. Compared at load to filter stale overrides.
 - **Experiment** — A named configuration variant — overrides tag plus
   feature flags — used by the evaluation framework for A/B comparison.
-- **Evaluation** — The framework for testing agent behavior with
-  datasets, evaluators (including session-aware ones), and statistical
-  comparison.
+  See [Evaluation](16-EVAL-LOOP.md).
+
+## Orchestration
+
+- **AgentLoop** — The user-facing orchestration shell. Subclass it,
+  implement `prepare()`, get back a typed result. Owns prompt resource
+  lifecycle, visibility-expansion retries, debug bundling. See
+  [AgentLoop](15-AGENT-LOOP.md).
+- **AgentLoopRequest / AgentLoopResult** — The typed envelope around
+  a single execution: budget, deadline, resources, run context in;
+  output, error, session ID, bundle path out.
+- **Direct mode** — Calling `execute(request)` synchronously and
+  receiving a typed result. The default mode for tests and one-shot
+  scripts.
+- **Mailbox-driven mode** — Running `run()` to consume requests from
+  a message queue and reply via the queue's reply channel. The default
+  mode for long-running unattended workers.
+
+## Evaluation
+
+- **Sample** — One test case in a dataset: identifier, input,
+  expected output. Generic over both types. See
+  [Evaluation](16-EVAL-LOOP.md).
+- **Dataset** — An immutable collection of samples, typically loaded
+  from a newline-delimited JSON file.
+- **Score** — A normalized 0.0–1.0 value plus a binary pass/fail and a
+  reason. The output of an evaluator.
+- **Evaluator** — A pure function from output and expected to score.
+  Composable via `all_of` and `any_of`.
+- **Session-aware evaluator** — An evaluator that also receives the
+  session, so it can assert on tool usage, token budgets, or any
+  custom slice state.
+- **EvalLoop** — The orchestrator that wraps AgentLoop, runs each
+  sample under each experiment, scores the output, and returns a
+  report.
+- **EvalReport** — Aggregate statistics across an evaluation run:
+  pass rates, mean scores, per-experiment breakdowns, pairwise
+  comparisons.
 
 ______________________________________________________________________
 

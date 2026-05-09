@@ -52,9 +52,12 @@ PRINCIPLES.md                    The rules every other doc follows.
 09  RESOURCES.md                 Dependency injection with scoped lifetimes.
 10  PROGRESSIVE-DISCLOSURE.md    Token-efficient context expansion.
 11  TRANSACTIONS.md              Atomic tool execution with rollback.
-12  TYPED-CONTRACTS.md           Dataclasses everywhere; strict types.
+12  TYPED-CONTRACTS.md           Records everywhere; strict types.
 13  ADAPTERS.md                  The harness boundary.
 14  OBSERVABILITY.md             Snapshots, transcripts, debug bundles.
+15  AGENT-LOOP.md                The orchestration shell you subclass.
+16  EVAL-LOOP.md                 Datasets, evaluators, experiments, A/B.
+17  PROMPT-OVERRIDES.md          Hash-validated prompt iteration.
 
 GLOSSARY.md                      One-line definitions for fast lookup.
 ```
@@ -67,7 +70,7 @@ ______________________________________________________________________
                        Definition vs. Harness  (01)
                                 │
                                 ▼
-                    Prompt-is-the-Agent  (02)
+                    Prompt-is-the-Agent  (02)  ◄── Prompt Overrides (17)
                                 │
               ┌─────────────────┼──────────────────┐
               ▼                 ▼                  ▼
@@ -89,12 +92,19 @@ ______________________________________________________________________
                 │
                 ▼
             Adapters (13)  ──►  Observability (14)
+                ▲
+                │   uses
+                │
+            AgentLoop (15)  ◄── wraps ──  EvalLoop (16)
 ```
 
 Read the diagram top-down: every concept below the line "Prompt-is-the-Agent"
-is something you declare *on the prompt definition*. The bottom edge —
-adapters and observability — is how the definition reaches a real harness
-and how you see what happened.
+is something you declare *on the prompt definition*. Adapters and
+observability are how the definition reaches a real harness and how you see
+what happened. AgentLoop is the orchestration shell you subclass to actually
+*run* a prompt; EvalLoop wraps it to test prompts against datasets. Prompt
+Overrides are the hash-validated iteration mechanism that feeds tuned text
+back into the prompt without source changes.
 
 ______________________________________________________________________
 

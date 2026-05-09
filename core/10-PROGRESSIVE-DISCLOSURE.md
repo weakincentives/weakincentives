@@ -147,3 +147,5 @@ ______________________________________________________________________
 - [TOOLS](04-TOOLS.md) — why tools must be withheld with their section.
 - [PROMPT-IS-THE-AGENT](02-PROMPT-IS-THE-AGENT.md) — the invariant
   progressive disclosure preserves.
+- [AGENT-LOOP](15-AGENT-LOOP.md) — where the visibility-expansion
+  retry lives.

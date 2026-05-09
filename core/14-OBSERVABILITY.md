@@ -193,4 +193,8 @@ ______________________________________________________________________
 - [TRANSACTIONS](11-TRANSACTIONS.md) — how snapshots wrap tool calls.
 - [ADAPTERS](13-ADAPTERS.md) — how each runtime feeds the unified
   observability stack.
+- [AGENT-LOOP](15-AGENT-LOOP.md) — the loop that produces debug
+  bundles per execution.
+- [EVAL-LOOP](16-EVAL-LOOP.md) — per-sample bundles for evaluation
+  runs.
 - [PRINCIPLES](PRINCIPLES.md) §7 — inspectability over activity logs.

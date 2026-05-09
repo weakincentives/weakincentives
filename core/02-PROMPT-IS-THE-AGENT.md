@@ -144,3 +144,5 @@ ______________________________________________________________________
   expansion works.
 - [TYPED-CONTRACTS](12-TYPED-CONTRACTS.md) — why everything is a
   typed record.
+- [PROMPT-OVERRIDES](17-PROMPT-OVERRIDES.md) — how prompts iterate
+  safely without source changes.
