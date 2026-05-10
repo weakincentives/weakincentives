@@ -143,6 +143,31 @@ diagnostic method, not running the agent again with extra logging.
 
 ______________________________________________________________________
 
+## Across the sandbox boundary
+
+In production, the harness runs in a remote sandbox (see
+[Remote Execution](18-REMOTE-EXECUTION.md)). Observability flows
+across the protocol boundary.
+
+- **Logs stream from the sandbox.** They are emitted as the sandbox
+  runs and ship to the orchestrator over the protocol — not collected
+  at the end.
+- **Transcripts are bridged.** The unified transcript schema is fed
+  by a sandbox-side bridge that translates the runtime's native event
+  stream into the canonical envelope. The orchestrator receives
+  already-normalized entries.
+- **Bundles assemble from both sides.** The orchestrator contributes
+  what it owns: request, configuration, session, run context. The
+  sandbox contributes what it owns: filesystem snapshot, transcript
+  files, resource metrics. The bundle is finalized on the orchestrator
+  side using both contributions.
+
+The bundle layout is identical to local execution. A reader cannot
+tell, from the bundle alone, whether the run was local or remote. The
+diagnostic skill is the same in either case.
+
+______________________________________________________________________
+
 ## Sampling and retention
 
 Producing every event for every run is fine in development but expensive

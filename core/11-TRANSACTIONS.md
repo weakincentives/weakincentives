@@ -64,15 +64,24 @@ Two layers participate.
   state they produced is rolled back.
 
 - **Snapshotable resources.** Resources that implement the snapshotable
-  protocol (the in-memory filesystem, the host filesystem with journaling)
-  capture their state at snapshot time. On rollback, they restore. This
-  is how filesystem mutations participate in rollback.
+  protocol — including the filesystem — capture their state at snapshot
+  time. On rollback, they restore. This is how filesystem mutations
+  participate in rollback.
 
 Resources that are *not* snapshotable do not participate. A network call
 that succeeds before the handler raises has happened in the world; the
 framework cannot un-send it. Use idempotency keys, retry logic, or
-adapter-level guarantees for those cases — transactions are local to the
-process.
+adapter-level guarantees for those cases.
+
+In a production deployment, the filesystem runs in a remote sandbox
+(see [Remote Execution](18-REMOTE-EXECUTION.md)). Snapshotting is then
+a **protocol operation**: the orchestrator signals "snapshot before
+this tool call"; the sandbox captures its filesystem state and returns
+a token; on failure the orchestrator signals rollback with the token.
+The orchestrator never directly inspects or copies the sandbox's
+storage. Snapshots have explicit lifetime semantics — they live until
+commit, rollback, or timeout — so a network failure does not strand
+storage indefinitely.
 
 ______________________________________________________________________
 

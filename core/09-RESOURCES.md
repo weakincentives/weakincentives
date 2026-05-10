@@ -133,14 +133,23 @@ ______________________________________________________________________
 
 ## Snapshotable resources
 
-Two resources matter especially: the in-memory filesystem (used in tests
-and evaluations) and the host filesystem (used in production). Both are
-snapshotable. Their state is captured before each tool call and restored
-on failure as part of transactional execution.
+The filesystem matters especially. Filesystem implementations —
+in-memory (for tests), local journaling (for development), remote
+sandbox-backed (for production) — are all snapshotable. Their state is
+captured before each tool call and restored on failure as part of
+transactional execution.
 
 This is what makes "rollback" mean something tangible. If a tool writes
 files and then fails, the filesystem rolls back too — not just the
 session. The tool leaves no trace of any kind.
+
+In production deployments the filesystem is *remote* (see
+[Remote Execution](18-REMOTE-EXECUTION.md)). The registry abstracts the
+location: a tool asks the resolver for "the filesystem" and gets the
+configured implementation. The local-vs-remote distinction lives in the
+binding, not in the consumer. This is the property that lets the same
+tool handlers run unchanged across development, evaluation, and
+production.
 
 This depends entirely on the resource being managed by the registry.
 Resources constructed inside a tool handler, or pulled in from a global,

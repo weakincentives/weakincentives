@@ -124,13 +124,31 @@ ______________________________________________________________________
 ## Harness boundary
 
 - **Adapter** — The bridge between a prompt and a specific execution
-  harness. See [Adapters](13-ADAPTERS.md).
+  harness. Designed as an RPC client to a remote sandbox. See
+  [Adapters](13-ADAPTERS.md).
 - **Adapter Compatibility Kit (ACK)** — The unified test suite that
   certifies adapters implement the WINK contract correctly.
 - **Throttle policy** — The shared retry-with-backoff configuration
   adapters use to handle rate limits and transient failures.
 - **Bridged tool** — A WINK tool wrapped in transactional execution
   glue, ready to be exposed through whatever protocol the harness uses.
+
+## Remote topology
+
+- **Sandbox** — The remote runtime where the harness and filesystem
+  live. Reachable from the orchestrator only through a protocol. See
+  [Remote Execution](18-REMOTE-EXECUTION.md).
+- **Orchestrator** — The process that hosts the AgentLoop, adapter,
+  session, and observability. Treats sandboxes as fungible workers.
+- **Protocol** — The boundary between orchestrator and sandbox. Same
+  shape regardless of transport (in-memory, stdio, network). Local
+  execution runs the same protocol over an in-memory channel.
+- **Snapshot token** — The opaque handle a sandbox returns when it
+  captures filesystem state. The orchestrator sends it back to commit
+  or roll back; the orchestrator never inspects the storage directly.
+- **Idempotent write** — A write that can be retried after a network
+  failure without producing different observable state. Required for
+  safe retries across the protocol boundary.
 
 ## Observability
 

@@ -58,6 +58,7 @@ PRINCIPLES.md                    The rules every other doc follows.
 15  AGENT-LOOP.md                The orchestration shell you subclass.
 16  EVAL-LOOP.md                 Datasets, evaluators, experiments, A/B.
 17  PROMPT-OVERRIDES.md          Hash-validated prompt iteration.
+18  REMOTE-EXECUTION.md          Adapters and filesystem are remote-first.
 
 GLOSSARY.md                      One-line definitions for fast lookup.
 ```
@@ -92,19 +93,24 @@ ______________________________________________________________________
                 │
                 ▼
             Adapters (13)  ──►  Observability (14)
-                ▲
-                │   uses
-                │
-            AgentLoop (15)  ◄── wraps ──  EvalLoop (16)
+                │ ▲
+   shaped by    │ │   uses
+                ▼ │
+   Remote Execution    AgentLoop (15)  ◄── wraps ──  EvalLoop (16)
+        (18)
 ```
 
-Read the diagram top-down: every concept below the line "Prompt-is-the-Agent"
-is something you declare *on the prompt definition*. Adapters and
-observability are how the definition reaches a real harness and how you see
-what happened. AgentLoop is the orchestration shell you subclass to actually
-*run* a prompt; EvalLoop wraps it to test prompts against datasets. Prompt
-Overrides are the hash-validated iteration mechanism that feeds tuned text
-back into the prompt without source changes.
+Read the diagram top-down: every concept below the line
+"Prompt-is-the-Agent" is something you declare *on the prompt
+definition*. Adapters and observability are how the definition reaches
+a real harness and how you see what happened. AgentLoop is the
+orchestration shell you subclass to actually *run* a prompt; EvalLoop
+wraps it to test prompts against datasets. Prompt Overrides are the
+hash-validated iteration mechanism that feeds tuned text back into the
+prompt without source changes. Remote Execution is the architectural
+posture that shapes the Adapter contract and the filesystem protocol —
+production runs against a remote sandbox, and the design assumes it
+even when running locally.
 
 ______________________________________________________________________
 

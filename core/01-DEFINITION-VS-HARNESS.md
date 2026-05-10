@@ -86,6 +86,13 @@ Several other principles fall out of this split.
 - **The harness is allowed to be opinionated.** Adapters can use whichever
   protocol the runtime provides — MCP for Claude, dynamic tools for Codex,
   ACP for OpenCode. The definition does not change.
+- **The harness is typically remote.** In production, the harness runs in
+  a separate sandbox — a different process, often a different host —
+  reachable only through a protocol. The orchestrator and the sandbox do
+  not share memory, file descriptors, or filesystem paths. The
+  definition layer is designed for this from the start; local
+  in-process execution is a special case for development.
+  (See [Remote Execution](18-REMOTE-EXECUTION.md).)
 - **The harness owns operational guarantees.** Throttling, deadlines,
   crash recovery, and budgets are enforced by the harness layer using
   signals you supply at the boundary; the definition declares limits but

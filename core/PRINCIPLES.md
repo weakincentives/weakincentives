@@ -104,7 +104,18 @@ If a feature only works on one runtime, it doesn't belong in the definition
 layer. Adapter Compatibility Kits exist to *prove* this for each new
 adapter.
 
-## 15. Stability is alpha by intent, not by accident.
+## 15. Remote by design.
+
+A production-usable adapter assumes the harness and the filesystem are
+remote — running in a separate sandbox, reachable only through a
+protocol. The protocol is the boundary; local in-process execution is a
+degenerate case of the same design. Shared memory, shared file
+descriptors, in-process callbacks, and zero-latency assumptions
+silently break the moment the sandbox moves to another host. Design for
+remote; local follows. Design for local and the architecture does not
+transfer.
+
+## 16. Stability is alpha by intent, not by accident.
 
 APIs may still change. We delete unused code rather than carry shims. We do
 not preserve backward compatibility for surfaces nobody uses. Old shapes

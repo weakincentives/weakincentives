@@ -1,13 +1,18 @@
 # Adapters
 
-An **adapter** is the bridge between WINK's portable agent definition and a
-specific execution harness. It is the only place runtime-specific concerns
-appear. Above the adapter, the same prompt, tools, policies, and feedback
-run unchanged. Below the adapter, each runtime gets its native
-representation.
+An **adapter** is the bridge between WINK's portable agent definition
+and a specific execution harness. It is the only place runtime-specific
+concerns appear. Above the adapter, the same prompt, tools, policies,
+and feedback run unchanged. Below the adapter, the harness — and its
+filesystem — runs in a separate sandbox reachable only through a
+protocol.
 
 This is the layer that makes "own the definition, rent the harness"
-operational.
+operational. It is also an **RPC client to a remote runtime**: the
+adapter's contract is shaped by the assumption that the harness is in a
+different process, on a different host, accessible only through
+serialized messages. (See [Remote Execution](18-REMOTE-EXECUTION.md)
+for the full design posture.)
 
 ______________________________________________________________________
 
@@ -61,25 +66,28 @@ ______________________________________________________________________
 
 Several real things differ between runtimes; adapters absorb them.
 
-- **Tool bridging mechanism.** Claude Agent SDK uses an in-process MCP
-  server. Codex App Server uses dynamic tools over stdio. ACP-compatible
-  agents (OpenCode, Gemini CLI) use an MCP HTTP endpoint. Same
-  `Tool` definition, three different transport stories.
-- **Sandbox model.** Claude uses bubblewrap on Linux and seatbelt on
-  macOS. Codex uses workspace-write or read-only profiles. ACP runtimes
-  use their own permission models. Configuration is exposed by the
-  adapter, not the prompt.
+- **Transport.** Claude Agent SDK uses an in-process MCP server. Codex
+  App Server uses dynamic tools over stdio. ACP-compatible agents
+  (OpenCode, Gemini CLI) use an MCP HTTP endpoint. The transport may
+  be in-memory, stdio-piped, or networked, but the adapter contract is
+  the same in every case: serialize a request, send it, receive a
+  reply. The transport is an implementation detail.
+- **Sandbox model.** Each runtime owns its own isolation strategy —
+  process namespaces, OS sandboxes (bubblewrap, seatbelt), workspace
+  permission profiles, container boundaries. The adapter exposes the
+  configuration; the sandbox runs the work.
 - **Native tools.** Each runtime ships its own file, shell, and search
   tools. They do not appear in the WINK prompt definition; they are
-  contributed by the harness. The prompt only declares the WINK-native
-  tools the agent should also have.
+  contributed by the harness inside its sandbox. The prompt only
+  declares the WINK-native tools the agent should also have.
 - **Approval and permission modes.** Prompting modes ("ask", "auto",
   "bypass") are runtime-specific. Adapters expose them as config.
-- **Structured output mechanism.** Some runtimes have native JSON Schema
-  enforcement; others rely on prompt-level instruction. The adapter
-  knows which.
-- **Transcript shape.** Each runtime emits its own event stream; the
-  adapter normalizes it into the unified transcript schema.
+- **Structured output mechanism.** Some runtimes have native JSON
+  Schema enforcement; others rely on prompt-level instruction. The
+  adapter knows which.
+- **Transcript shape.** Each runtime emits its own event stream from
+  the sandbox; the adapter receives it over the protocol and normalizes
+  it into the unified transcript schema.
 
 ______________________________________________________________________
 
@@ -101,6 +109,38 @@ from a vendor runtime, not implemented in-house.
 
 ______________________________________________________________________
 
+## Remote by design
+
+Production-usable adapters are designed for the case where the
+harness — and its filesystem — runs in a remote sandbox, reachable
+only through a protocol. Local in-process execution is a degenerate
+case of the same design. Several properties follow:
+
+- **Every operation is RPC.** Tool params and results serialize
+  across the boundary. There are no shared-memory shortcuts, no
+  in-process callbacks from the harness back into the orchestrator,
+  no shared filesystem paths.
+- **Latency is part of the contract.** Bridged tool dispatch crosses
+  the network on every call. Adapters do not assume free calls;
+  protocols are designed to allow batching and streaming.
+- **Connection management is real work.** Handshake, keepalive,
+  reconnect, and graceful drain are part of the adapter's lifecycle.
+  The adapter does not assume the sandbox is always reachable, always
+  ready, or always responsive.
+- **Network errors are first-class.** They are distinct from tool
+  errors. A tool that returned a failure is different from a request
+  that produced no response. Adapters distinguish, retry safely, and
+  reconcile state.
+- **Streaming is the norm.** Long tool results, verbose transcripts,
+  large file reads — all stream. Buffering everything in memory is a
+  fallback for small payloads, not the default.
+
+The full set of implications — for the filesystem, workspaces, skills,
+transactions, observability, and constraints — lives in
+[Remote Execution](18-REMOTE-EXECUTION.md).
+
+______________________________________________________________________
+
 ## Throttling, retries, and budgets
 
 Adapters absorb operational concerns that are common to all harnesses
@@ -109,17 +149,20 @@ but expressed differently in each.
 - **Throttling.** Backoff on rate-limit signals, with caller-specified
   retry budgets and provider-suggested delays.
 - **Retries.** Network errors, server errors, and transient timeouts
-  retry within the deadline.
+  retry within the deadline. Idempotency is required — a retried
+  request must not double-execute on the sandbox side.
 - **Budget tracking.** Token usage and time elapsed are recorded after
   every response and after every tool call. Budget checks happen at
   defined checkpoints — before the next call, before the next tool —
   and raise a typed exception when exhausted.
 - **Deadlines.** Wall-clock deadlines propagate from the call site
-  through the adapter and into tool contexts. Tools that run
-  long-but-bounded operations can extend their lease via heartbeat.
+  through the adapter and into tool contexts. Both sides honor them:
+  the orchestrator as a client-side timeout, the sandbox as a hard
+  limit. Tools that run long-but-bounded operations can extend their
+  lease via heartbeat.
 
 The definition declares the *constraints* (a budget, a deadline). The
-adapter enforces them.
+adapter and the sandbox enforce them, on both sides of the protocol.
 
 ______________________________________________________________________
 
@@ -157,19 +200,24 @@ ______________________________________________________________________
 ## Implementing a new adapter
 
 The shape is fixed: a class implementing the adapter protocol. The
-required work is mechanical:
+required work is mechanical, but design starts at the protocol — *not*
+at the client code.
 
+- **Define the protocol first.** Decide what the orchestrator sends
+  and what the sandbox returns *before* writing the client. Local-only
+  shortcuts at this stage become technical debt that is hard to remove.
 - Define a client config and a model config.
 - Render the prompt once at evaluation start.
 - Bridge tools through the shared transactional wrapper.
-- Wrap any SDK-specific failures as a typed evaluation error.
+- Wrap any SDK-specific failures as a typed evaluation error,
+  distinguishing tool errors from network errors.
 - Dispatch the four lifecycle events at the right moments.
 - Emit transcript entries through the shared emitter.
 - Pass ACK.
 
 The non-mechanical part — the only adapter-specific work — is the
-translation between the runtime's protocol and WINK's contracts. Everything
-else is infrastructure that already exists.
+translation between the runtime's protocol and WINK's contracts.
+Everything else is infrastructure that already exists.
 
 ______________________________________________________________________
 
@@ -184,9 +232,15 @@ ______________________________________________________________________
 - **Adapters that own state.** State belongs in the session. Adapter
   instance variables that accumulate across calls are usually a sign of
   state that wants to be a slice.
-- **Reinventing throttling per adapter.** The shared throttle policy is
-  there because every adapter needs the same semantics. Extend it
+- **Reinventing throttling per adapter.** The shared throttle policy
+  is there because every adapter needs the same semantics. Extend it
   rather than rolling your own.
+- **Local-only shortcuts.** Sharing filesystem paths between adapter
+  and harness, calling orchestrator-side functions from inside a tool
+  bridge, or assuming the sandbox can read the orchestrator's local
+  disk all bake in local-only assumptions. They will not survive
+  deployment to a remote sandbox. Design as if the sandbox is on
+  another host, even when it is not.
 
 ______________________________________________________________________
 
@@ -194,12 +248,15 @@ ______________________________________________________________________
 
 - [DEFINITION-VS-HARNESS](01-DEFINITION-VS-HARNESS.md) — the boundary
   the adapter implements.
+- [REMOTE-EXECUTION](18-REMOTE-EXECUTION.md) — the design posture that
+  shapes the adapter contract.
 - [TOOLS](04-TOOLS.md) — what gets bridged through the adapter.
 - [STATE](05-STATE.md) — events the adapter publishes to the
   dispatcher.
 - [OBSERVABILITY](14-OBSERVABILITY.md) — the unified transcript and
   debug bundle the adapter feeds.
-- [AGENT-LOOP](15-AGENT-LOOP.md) — the orchestration shell that
-  calls the adapter.
+- [AGENT-LOOP](15-AGENT-LOOP.md) — the orchestration shell that calls
+  the adapter.
 - [PRINCIPLES](PRINCIPLES.md) §14 — the same definition runs on every
   harness.
+- [PRINCIPLES](PRINCIPLES.md) §15 — *Remote by design.*
