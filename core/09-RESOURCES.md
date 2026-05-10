@@ -38,10 +38,10 @@ resource bound to that prompt cleans up — closeables close, temp
 directories disappear, network clients shut down — in reverse
 construction order. There is no "finally" block to forget.
 
-**Snapshot integration.** Some resources (the in-memory filesystem, the
-host filesystem) are *snapshotable*. Their state participates in
-transactional rollback alongside session state. Without explicit
-lifecycle binding, this would not be possible.
+**Snapshot integration.** Some resources — notably the filesystem,
+across all of its implementations — are *snapshotable*. Their state
+participates in transactional rollback alongside session state.
+Without explicit lifecycle binding, this would not be possible.
 
 ______________________________________________________________________
 

@@ -219,10 +219,15 @@ ______________________________________________________________________
 
 ## Anti-patterns
 
-- **Long-lived sessions across requests.** A loop that holds session
-  state from one request to the next leaks state across users.
-  Construct fresh state per `prepare()`, or use slices with explicit
-  scoping rules.
+- **Treating disconnect as cancel.** A loop that aborts work whenever a
+  connection drops creates duplicate execution and lost progress.
+  Reattach using the request identifier; the sandbox preserves work
+  for a bounded grace window.
+- **Sharing session state across unrelated requests.** A session is
+  durable, but it is durable *for one logical thread of work*. A loop
+  that piggybacks on someone else's session leaks state across users.
+  When work is unrelated, give it a fresh session identifier; when
+  work is a continuation, reattach to the existing one deliberately.
 - **Mutating the cached template in `prepare()`.** The template is
   often cached on the loop instance for reuse. Mutating it changes
   the prompt for later requests. Bind parameters to a fresh `Prompt`

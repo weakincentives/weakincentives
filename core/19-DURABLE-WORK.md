@@ -159,52 +159,40 @@ in the middle of valuable work are recoverable, not catastrophic.
 
 ______________________________________________________________________
 
-## Workspaces are durable
+## Workspaces are the long-lived data plane
 
-The sandbox's filesystem is durable in a way that distinguishes it
-from a temp directory.
-
-- **Workspaces survive compute restarts.** Stopping the sandbox does
-  not delete files. Restarting reuses the same workspace.
-- **Workspaces survive transport drops.** Files written before a
-  disconnect are present after a reattach.
-- **Workspaces are tenant-scoped.** A given orchestrator name plus
-  tenant scope addresses a stable workspace; another orchestrator in
-  another tenant cannot see it.
-
-Backed by durable storage rather than ephemeral local disk, the
-workspace is the long-lived data plane. It is the right place for
-everything the agent should be able to read across runs: previous
-artifacts, accumulated knowledge, work-in-progress files. Treating
-the workspace as an ephemeral scratch directory squanders this.
+Because the work lifecycle is independent of compute, the workspace
+that hosts the agent's files is too. Files written in one evaluation
+are still there for the next, even if the sandbox stopped and
+restarted in between. Files written before a disconnect are present
+after a reattach. The workspace is the place for everything the agent
+should be able to read across runs: previous artifacts, accumulated
+knowledge, work-in-progress files. Treating it as an ephemeral
+scratch directory squanders this.
 
 The transactional snapshot/restore semantics from
-[Transactions](11-TRANSACTIONS.md) still apply *within* an
-evaluation: a failed tool rolls back the workspace to its pre-call
-state. The workspace as a whole, though, is durable across
-evaluations.
+[Transactions](11-TRANSACTIONS.md) still apply *within* an evaluation:
+a failed tool rolls back workspace mutations to their pre-call state.
+The workspace as a whole, though, is durable across evaluations.
+
+(See [Remote Execution](18-REMOTE-EXECUTION.md) for staging,
+allowed-roots, and the protocol mechanics.)
 
 ______________________________________________________________________
 
 ## Tools are the only outbound path
 
-Application-level outbound traffic flows through tools, not through
-ambient network access.
+The sandbox's egress is restricted to model and provider traffic.
+Application-level outbound — database lookups, API calls, internal
+service integration — flows through orchestrator-fulfilled tool calls.
+What the agent can reach is exactly what the orchestrator declared
+as a tool. There is no implicit network access; no shadow channel.
 
-- **The sandbox's egress is restricted.** Outbound network reaches
-  only the model provider and a small set of trusted setup endpoints.
-- **Application data, lookups, and integrations** all flow through
-  orchestrator-fulfilled tool calls. The orchestrator handles the
-  call, using whatever credentials and permissions belong to *it*,
-  and returns a typed result.
-- **Capabilities are explicit.** What the agent can reach is exactly
-  what the orchestrator declared as a tool. There is no implicit
-  access via the network.
-
-This makes the surface auditable. A tool call is a record of an
-intentional capability use. There is no shadow channel through which
-the agent could reach data or services the orchestrator did not
-sanction.
+This makes durable work auditable. Every outbound action is a tool
+call, recorded and observable through the same event stream as
+everything else; every call carries the orchestrator's identifiers,
+not the agent's. (See [Tools](04-TOOLS.md) for the full treatment of
+the capability surface.)
 
 ______________________________________________________________________
 

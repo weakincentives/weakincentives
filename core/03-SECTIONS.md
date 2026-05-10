@@ -106,6 +106,42 @@ common pattern of leaking temp directories or open clients across runs.
 
 ______________________________________________________________________
 
+## Skills
+
+A **skill** is a portable capability bundle attached to a section — a
+directory of instructions, optional scripts, and reference material
+that the harness can mount and the agent can use. Skills are
+*declarative* and *external*: they ship as files, follow a public
+manifest format, and require no in-process code on either side.
+
+Skills differ from tools in three ways.
+
+- **Tools are typed handlers; skills are portable bundles.** A tool
+  has typed parameters, a typed result, and a function the framework
+  calls. A skill has a manifest, a directory layout, and content the
+  agent reads.
+- **Tools execute in the orchestrator; skills mount into the
+  sandbox.** When the model calls a tool, the orchestrator runs the
+  handler. When the agent uses a skill, the harness reads files in
+  its sandbox. Skills require no callback to the orchestrator.
+- **Tools are intrinsic to a section; skills are pluggable.** A
+  custom tool is part of the agent definition. A skill is more like
+  a library — published independently, attached where useful,
+  swappable.
+
+Both attach to sections, both follow section visibility (a skill on
+a summarized section is not collected until the section expands), and
+both vanish when the enclosing section is disabled. The "what the
+prompt expresses is what the agent can do" invariant covers them
+identically.
+
+The skill is one of the durable artifacts that travels across the
+remote boundary at evaluation start; see
+[Remote Execution](18-REMOTE-EXECUTION.md) for the upload-and-mount
+mechanics.
+
+______________________________________________________________________
+
 ## Cloning
 
 Sections are immutable but cloneable. Cloning produces a fully decoupled

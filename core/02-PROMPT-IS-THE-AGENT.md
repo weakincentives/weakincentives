@@ -83,7 +83,7 @@ Sections are nested. Rendering walks the tree depth-first, producing
 markdown with deterministic numbered headings. Two prompts with the same
 section tree and same parameters render to byte-identical text. This
 determinism is what makes prompt overrides safe (see
-[Typed Contracts](12-TYPED-CONTRACTS.md)) and snapshots meaningful (see
+[Prompt Overrides](17-PROMPT-OVERRIDES.md)) and snapshots meaningful (see
 [Observability](14-OBSERVABILITY.md)).
 
 The hierarchy is also semantic. Higher-level sections set context;

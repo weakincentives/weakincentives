@@ -164,11 +164,15 @@ ______________________________________________________________________
 
 ## What transactions are not
 
-- **Not distributed.** WINK transactions are in-process. They do not
-  coordinate across machines.
-- **Not a substitute for idempotency.** Outside-the-process effects
+- **Not unlimited.** Transactions cover state that the framework owns:
+  session slices and snapshotable resources (notably the filesystem,
+  whether local or sandbox-backed). Anything outside that scope —
+  network calls to external services, messages already published —
   cannot be rolled back. Tools that touch external systems still need
   idempotency keys, retry semantics, or compensating actions.
+- **Not a substitute for idempotency.** Once an external effect has
+  shipped, it has shipped. Use external idempotency keys for tools
+  that touch the outside world.
 - **Not visible to the model.** The agent does not see "transaction
   began" or "transaction rolled back." It sees a tool succeeded or
   failed. The transactional layer is implementation detail of *how*

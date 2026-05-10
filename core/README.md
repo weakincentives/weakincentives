@@ -21,101 +21,156 @@ abstraction.
 
 ______________________________________________________________________
 
-## The thesis in one paragraph
+## The thesis
 
 An unattended agent has two parts: the **definition** (prompt, tools,
-policies, feedback) and the **execution harness** (planning loop, sandboxing,
-retries, scheduling). The harness is rented from a vendor runtime and will
-keep changing. The definition is what you actually own. WINK is the layer
-that makes the definition a first-class artifact: portable, typed, testable,
-and stable across harness changes. Inside that layer, three commitments do
-most of the work — *the prompt is the agent*, *state is event-driven and
-immutable*, and *constraints are policies, not workflows*.
+policies, feedback, completion criteria) and the **execution harness**
+(planning loop, sandboxing, retries, scheduling). The harness is rented
+from a vendor runtime and will keep changing. The definition is what
+you actually own. WINK is the layer that makes the definition a
+first-class artifact — portable, typed, testable, and stable across
+harness changes.
+
+Five commitments do most of the work.
+
+1. **The prompt is the agent.** A single typed hierarchical document —
+   sections that bundle instructions and tools — fully determines what
+   the agent can think and do. There is no second source of truth.
+2. **Policies, not workflows.** Constraints are declared invariants,
+   not prescribed sequences. The agent reasons; the framework gates.
+3. **Pure transitions, side effects in tools.** State is event-driven
+   and immutable. Tools are the only side-effect surface, and every
+   tool call is transactional. Failed tools leave no trace.
+4. **Definition assets are portable.** The same prompt, tools, policies,
+   feedback, and completion checks run across harnesses. Adapters
+   absorb the runtime differences.
+5. **Designed for remote execution.** The harness and its filesystem
+   live in a separate sandbox, reachable only through a protocol. The
+   orchestrator owns work identity; transport events do not destroy
+   work; compute, work, and connection are three independent
+   lifecycles.
+
+These commitments compose. Together they make the definition durable,
+portable, observable, and testable — the part of an unattended agent
+that should *stay* yours as runtimes evolve.
 
 ______________________________________________________________________
 
 ## How to read this folder
 
-Read top-down for the mental model, or jump to the concept you need.
+The order below is the teaching order. The numbers are stable
+identifiers, not a strict reading sequence — but a top-to-bottom pass
+gives the cleanest mental model. Within each cluster, individual docs
+can be read independently.
 
-```
-PRINCIPLES.md                    The rules every other doc follows.
+### The thesis
 
-01  DEFINITION-VS-HARNESS.md     What you own vs. what you rent.
-02  PROMPT-IS-THE-AGENT.md       Prompts as typed hierarchical documents.
-03  SECTIONS.md                  How prompts are composed.
-04  TOOLS.md                     The capability surface.
-05  STATE.md                     Event-driven state, slices, reducers.
-06  POLICIES.md                  Hard guardrails (fail-closed gates).
-07  FEEDBACK.md                  Soft guidance during execution.
-08  COMPLETION-CHECKING.md       "Done means done" verification.
-09  RESOURCES.md                 Dependency injection with scoped lifetimes.
-10  PROGRESSIVE-DISCLOSURE.md    Token-efficient context expansion.
-11  TRANSACTIONS.md              Atomic tool execution with rollback.
-12  TYPED-CONTRACTS.md           Records everywhere; strict types.
-13  ADAPTERS.md                  The harness boundary.
-14  OBSERVABILITY.md             Snapshots, transcripts, debug bundles.
-15  AGENT-LOOP.md                The orchestration shell you subclass.
-16  EVAL-LOOP.md                 Datasets, evaluators, experiments, A/B.
-17  PROMPT-OVERRIDES.md          Hash-validated prompt iteration.
-18  REMOTE-EXECUTION.md          Adapters and filesystem are remote-first.
-19  DURABLE-WORK.md              Work identity, idempotency, reattach.
+- [01 DEFINITION-VS-HARNESS](01-DEFINITION-VS-HARNESS.md) — what you
+  own vs. what you rent.
 
-GLOSSARY.md                      One-line definitions for fast lookup.
-```
+### The definition surface (what you build)
+
+- [02 PROMPT-IS-THE-AGENT](02-PROMPT-IS-THE-AGENT.md) — prompts as
+  typed hierarchical documents.
+- [03 SECTIONS](03-SECTIONS.md) — how prompts are composed.
+- [04 TOOLS](04-TOOLS.md) — the capability surface and the only
+  outbound path.
+
+### Constraints on behavior (three-tier control)
+
+- [06 POLICIES](06-POLICIES.md) — hard guardrails (fail-closed gates).
+- [07 FEEDBACK](07-FEEDBACK.md) — soft guidance during execution.
+- [08 COMPLETION-CHECKING](08-COMPLETION-CHECKING.md) — "done means
+  done" verification.
+
+### Inside the runtime (state and disciplines)
+
+- [05 STATE](05-STATE.md) — event-driven state, slices, reducers.
+- [09 RESOURCES](09-RESOURCES.md) — dependency injection with scoped
+  lifetimes.
+- [10 PROGRESSIVE-DISCLOSURE](10-PROGRESSIVE-DISCLOSURE.md) —
+  token-efficient context expansion.
+- [11 TRANSACTIONS](11-TRANSACTIONS.md) — atomic tool execution with
+  rollback.
+- [12 TYPED-CONTRACTS](12-TYPED-CONTRACTS.md) — records everywhere;
+  strict types.
+
+### The harness boundary (reaching a runtime)
+
+- [13 ADAPTERS](13-ADAPTERS.md) — the bridge to a specific harness.
+- [18 REMOTE-EXECUTION](18-REMOTE-EXECUTION.md) — the protocol-mediated
+  remote topology that adapters and the filesystem assume.
+- [19 DURABLE-WORK](19-DURABLE-WORK.md) — work identity, idempotent
+  execution, reattach over reconnect, three lifecycles kept distinct.
+
+### Running it (orchestration, iteration, evidence)
+
+- [15 AGENT-LOOP](15-AGENT-LOOP.md) — the orchestration shell you
+  subclass to actually run a prompt.
+- [16 EVAL-LOOP](16-EVAL-LOOP.md) — datasets, evaluators, experiments,
+  A/B comparison.
+- [17 PROMPT-OVERRIDES](17-PROMPT-OVERRIDES.md) — hash-validated
+  prompt iteration without source changes.
+- [14 OBSERVABILITY](14-OBSERVABILITY.md) — events, snapshots,
+  transcripts, debug bundles.
+
+### Reference
+
+- [PRINCIPLES](PRINCIPLES.md) — the rules every other doc follows.
+- [GLOSSARY](GLOSSARY.md) — one-line definitions for fast lookup.
 
 ______________________________________________________________________
 
 ## How the concepts connect
 
 ```
-                       Definition vs. Harness  (01)
-                                │
-                                ▼
-                    Prompt-is-the-Agent  (02)  ◄── Prompt Overrides (17)
-                                │
-              ┌─────────────────┼──────────────────┐
-              ▼                 ▼                  ▼
-         Sections (03)    Three-tier control     Resources (09)
-              │           ┌────┴────┬──────┐       │
-              ▼           ▼         ▼      ▼       ▼
-           Tools (04)  Policies  Feedback Completion
-              │         (06)      (07)    (08)
-              │           │         │      │
-              └────┬──────┴────┬────┴──────┘
-                   ▼           ▼
-            Transactions  State (events,
-               (11)        slices,        ◄──── Progressive
-                │          reducers)             Disclosure (10)
-                │            (05)
-                ▼            │
-          Typed Contracts ◄──┘
-              (12)
-                │
-                ▼
-            Adapters (13)  ──►  Observability (14)
-                │ ▲
-   shaped by    │ │   uses
-                ▼ │
-   Remote Execution    AgentLoop (15)  ◄── wraps ──  EvalLoop (16)
-        (18)
+ ┌──────────────────────────────────────────────────────────┐
+ │  THE DEFINITION  (you author; portable; versioned)       │
+ │                                                          │
+ │      Prompt is the Agent (02)                            │
+ │       ├─ Sections (03) compose the prompt                │
+ │       │   └─ Tools (04) — the capability surface         │
+ │       ├─ Three-tier control                              │
+ │       │   ├─ Policies (06)        — fail-closed gates    │
+ │       │   ├─ Feedback (07)        — advisory nudges      │
+ │       │   └─ Completion (08)      — verify "done"        │
+ │       ├─ Resources (09)           — scoped DI            │
+ │       └─ Progressive Disclosure (10) — context expansion │
+ │                                                          │
+ │      Iterate via Prompt Overrides (17)                   │
+ └────────────────────────────┬─────────────────────────────┘
+                              │
+                Adapter (13)  │ — RPC over a protocol
+                              ▼
+ ┌──────────────────────────────────────────────────────────┐
+ │  THE HARNESS  (rented; runs in a remote sandbox)         │
+ │                                                          │
+ │      Remote Execution (18) — boundary, filesystem,       │
+ │                              workspace, skills           │
+ │      Durable Work     (19) — orchestrator-owned          │
+ │                              identity; three lifecycles; │
+ │                              reattach over reconnect     │
+ └──────────────────────────────────────────────────────────┘
+
+  Cross-cutting disciplines             Drivers
+  ─────────────────────────             ─────────────
+  State            (05)                 AgentLoop (15)
+  Transactions     (11)                 EvalLoop  (16)
+  Typed Contracts  (12)
+  Observability    (14)
 ```
 
-Read the diagram top-down: every concept below the line
-"Prompt-is-the-Agent" is something you declare *on the prompt
-definition*. Adapters and observability are how the definition reaches
-a real harness and how you see what happened. AgentLoop is the
-orchestration shell you subclass to actually *run* a prompt; EvalLoop
-wraps it to test prompts against datasets. Prompt Overrides are the
-hash-validated iteration mechanism that feeds tuned text back into the
-prompt without source changes. Remote Execution is the architectural
-posture that shapes the Adapter contract and the filesystem protocol —
-production runs against a remote sandbox, and the design assumes it
-even when running locally. Durable Work is the matched property on
-the *work* axis: orchestrator-owned identity, idempotent execution,
-and reattach over reconnect — three lifecycles (compute, work,
-transport) kept distinct so transient events don't destroy work
-in progress.
+Read the picture as **two strata** — the definition you author at the
+top, the harness you rent at the bottom — connected by an **adapter**
+that speaks the protocol. The harness lives in a remote sandbox, and
+the system is designed for that posture from the start; local
+in-process execution is a special case of the same model.
+
+The cross-cutting columns apply on both sides. State, transactions,
+typed contracts, and observability are how the system stays
+deterministic, recoverable, and inspectable. AgentLoop is the
+orchestration shell that drives one evaluation through the adapter;
+EvalLoop wraps AgentLoop to run datasets and report results.
 
 ______________________________________________________________________
 
@@ -125,8 +180,8 @@ ______________________________________________________________________
   Map back to `specs/` and the source tree when you need that.
 - **Not a tutorial.** It does not walk you through building an agent. See
   `guides/` and `README.md` at the repo root.
-- **Not a changelog.** Concepts described here are the durable shape of WINK,
-  not the latest delta.
+- **Not a changelog.** Concepts described here are the durable shape of
+  WINK, not the latest delta.
 - **Not exhaustive.** Adapter quirks, debug bundle formats, and other
   implementation-bound details intentionally live in `specs/`.
 
@@ -134,8 +189,8 @@ ______________________________________________________________________
 
 ## Working rule
 
-If a change to the codebase makes a `core/` doc inaccurate, the codebase is
-probably moving away from a foundational idea. Pause and decide whether the
-core idea is shifting (update `core/`) or whether the change is local and
-should be reframed (keep `core/` as the anchor). The `core/` folder is
-deliberately small so it can stay accurate.
+If a change to the codebase makes a `core/` doc inaccurate, the codebase
+is probably moving away from a foundational idea. Pause and decide
+whether the core idea is shifting (update `core/`) or whether the change
+is local and should be reframed (keep `core/` as the anchor). The
+`core/` folder is deliberately small so it can stay accurate.

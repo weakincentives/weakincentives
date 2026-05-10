@@ -173,15 +173,17 @@ ______________________________________________________________________
 
 ## Implications for skills
 
-Skills are **uploaded to the sandbox** before evaluation begins. The
-sandbox mounts them through its own ephemeral-home mechanism. The
-orchestrator does not assume the sandbox can read skill bundles from
-the orchestrator's local disk.
+Skills (defined in [Sections](03-SECTIONS.md#skills)) are **uploaded
+to the sandbox** before evaluation begins. The sandbox mounts them
+through its own ephemeral-home mechanism. The orchestrator does not
+assume the sandbox can read skill bundles from the orchestrator's
+local disk.
 
 The skill format is portable across this boundary precisely because it
 is a directory of files plus a manifest — no native code, no
 in-process state, no cross-process pointers. It ships, mounts, and
-runs.
+runs. This is what lets a custom tool live in the orchestrator while a
+skill that depends on it lives in the sandbox.
 
 ______________________________________________________________________
 
