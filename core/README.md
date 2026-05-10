@@ -59,6 +59,7 @@ PRINCIPLES.md                    The rules every other doc follows.
 16  EVAL-LOOP.md                 Datasets, evaluators, experiments, A/B.
 17  PROMPT-OVERRIDES.md          Hash-validated prompt iteration.
 18  REMOTE-EXECUTION.md          Adapters and filesystem are remote-first.
+19  DURABLE-WORK.md              Work identity, idempotency, reattach.
 
 GLOSSARY.md                      One-line definitions for fast lookup.
 ```
@@ -110,7 +111,11 @@ hash-validated iteration mechanism that feeds tuned text back into the
 prompt without source changes. Remote Execution is the architectural
 posture that shapes the Adapter contract and the filesystem protocol —
 production runs against a remote sandbox, and the design assumes it
-even when running locally.
+even when running locally. Durable Work is the matched property on
+the *work* axis: orchestrator-owned identity, idempotent execution,
+and reattach over reconnect — three lifecycles (compute, work,
+transport) kept distinct so transient events don't destroy work
+in progress.
 
 ______________________________________________________________________
 

@@ -30,6 +30,32 @@ not see partial state from the failed call.
 
 ______________________________________________________________________
 
+## Two atomicity boundaries
+
+WINK has atomicity at two scales, and they compose.
+
+**Per tool call.** The boundary discussed throughout this doc:
+snapshot before, execute, restore on failure. This is what makes
+individual tool calls safe to retry and free of partial state.
+
+**Per request.** A separate idempotency layer at the unit-of-work
+boundary. A request carries an orchestrator-owned identifier plus a
+hash over its contract; a duplicate request with the same identifier
+and the same contract returns the same in-flight or completed result
+rather than re-executing. A duplicate identifier with a *different*
+contract is an explicit conflict, not a silent re-execution.
+
+The two layers compose: an evaluation is identified once at the
+request boundary, and within it, every tool call is atomic. A retry
+of the request does not re-execute work that is already running or
+completed; a retry of a tool call inside an in-flight request
+proceeds normally, with rollback semantics on failure.
+
+(See [Durable Work](19-DURABLE-WORK.md) for the request-identity
+semantics across the orchestrator/sandbox boundary.)
+
+______________________________________________________________________
+
 ## Why this matters
 
 A few important properties fall out.

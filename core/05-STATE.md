@@ -164,6 +164,28 @@ on a controller.
 
 ______________________________________________________________________
 
+## Sessions are orchestrator-named and durable
+
+A session is named by the orchestrator using a stable identifier it
+owns. The name is the durable handle: it survives transport drops,
+compute restarts, and orchestrator handoffs. A new orchestrator (or
+the same orchestrator on a new connection) can attach to an existing
+session by sending its name — the state is already there, on the
+sandbox side.
+
+Backend-native session identifiers — provider trace tokens, harness
+internal handles — stay behind the protocol. Only the orchestrator's
+name crosses the boundary. This is what makes session state portable
+across runtimes and across orchestrator instances. A failover that
+swaps the orchestrator process does not lose work; the new process
+attaches to the same session by name and continues.
+
+Session lifetime is independent of any single connection or compute
+instance. (See [Durable Work](19-DURABLE-WORK.md) for the full
+treatment of work identity, transport, and reattach.)
+
+______________________________________________________________________
+
 ## Anti-patterns
 
 - **Mutating records in place.** Slices are immutable; the framework

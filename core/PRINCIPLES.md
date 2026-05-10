@@ -115,7 +115,30 @@ silently break the moment the sandbox moves to another host. Design for
 remote; local follows. Design for local and the architecture does not
 transfer.
 
-## 16. Stability is alpha by intent, not by accident.
+## 16. Work identity is the orchestrator's.
+
+The orchestrator names every durable unit of work — a session, an
+evaluation, a long-running operation — using a stable identifier it
+owns. The sandbox treats those names as the only public handles for
+that work. Backend session IDs, provider trace tokens, and
+runtime-native handles stay behind the protocol; only orchestrator-
+owned identifiers cross the boundary. Same identifier with the same
+content is the same work. Same identifier with different content is an
+explicit conflict, surfaced loudly. This is what makes idempotency
+explicit, retries deterministic, and observability portable across
+runtimes.
+
+## 17. Transport is not ownership.
+
+A connection is not work. A disconnect does not stop work; a reconnect
+does not start it. Work persists across transport events for a bounded
+grace window; another connection — possibly from a different
+orchestrator instance — can reattach using the orchestrator's own
+identifiers. The lifecycle of compute, the lifecycle of state, and the
+lifecycle of any single connection are three different things. The
+system is designed to keep them distinguishable.
+
+## 18. Stability is alpha by intent, not by accident.
 
 APIs may still change. We delete unused code rather than carry shims. We do
 not preserve backward compatibility for surfaces nobody uses. Old shapes

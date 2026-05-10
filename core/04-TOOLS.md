@@ -140,6 +140,32 @@ rest. (See [Adapters](13-ADAPTERS.md).)
 
 ______________________________________________________________________
 
+## Tools are the only outbound path
+
+In a sandbox that restricts ambient network access — the production
+posture — the agent's only way to reach data, services, or
+integrations outside the sandbox is through a tool call. The
+orchestrator fulfills the call using its own credentials and
+permissions, then returns the result.
+
+Two consequences follow:
+
+- **Auditability.** Every outbound action is a tool call, recorded
+  and observable through the same event stream as everything else.
+  There are no out-of-band fetches the orchestrator did not see.
+- **Permission alignment.** Tool calls execute with the
+  orchestrator's permissions, not the model's. Sensitive operations
+  pass through code the orchestrator owns, where its credentials,
+  rate limits, and audit hooks apply.
+
+The sandbox's own egress is constrained to model and provider
+traffic. Application capability — database lookups, API calls,
+internal service integration — flows through declared tools. What
+the agent can do is exactly what the orchestrator declared. There is
+no shadow channel.
+
+______________________________________________________________________
+
 ## What tools are not
 
 - **Not workflow steps.** A tool is a capability, not a node in a

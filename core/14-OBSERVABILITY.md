@@ -152,10 +152,17 @@ across the protocol boundary.
 - **Logs stream from the sandbox.** They are emitted as the sandbox
   runs and ship to the orchestrator over the protocol — not collected
   at the end.
-- **Transcripts are bridged.** The unified transcript schema is fed
-  by a sandbox-side bridge that translates the runtime's native event
-  stream into the canonical envelope. The orchestrator receives
-  already-normalized entries.
+- **Backend events are normalized, not forwarded.** The sandbox
+  translates its native event stream into the canonical transcript
+  envelope. Backend-specific identifiers and runtime-native event
+  types stay behind the boundary; the orchestrator sees uniform
+  entries regardless of which runtime produced them. This is what
+  makes a single transcript reader work across every adapter.
+- **Identifiers are orchestrator-owned.** Transcript entries carry
+  the orchestrator's session and request identifiers, not backend
+  trace tokens. A reader can correlate transcript entries to the
+  orchestrator's logs without translation. (See
+  [Durable Work](19-DURABLE-WORK.md).)
 - **Bundles assemble from both sides.** The orchestrator contributes
   what it owns: request, configuration, session, run context. The
   sandbox contributes what it owns: filesystem snapshot, transcript

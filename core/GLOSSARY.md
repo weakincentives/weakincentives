@@ -143,12 +143,41 @@ ______________________________________________________________________
 - **Protocol** — The boundary between orchestrator and sandbox. Same
   shape regardless of transport (in-memory, stdio, network). Local
   execution runs the same protocol over an in-memory channel.
+- **Tenant** — Segmentation scope within which sandbox identifiers
+  live. Two orchestrators in different tenants cannot collide on
+  identifiers and cannot reach each other's sandboxes.
 - **Snapshot token** — The opaque handle a sandbox returns when it
   captures filesystem state. The orchestrator sends it back to commit
   or roll back; the orchestrator never inspects the storage directly.
 - **Idempotent write** — A write that can be retried after a network
   failure without producing different observable state. Required for
   safe retries across the protocol boundary.
+
+## Durable work
+
+- **Work identity** — The stable identifier the orchestrator owns for
+  a unit of work (a session, a request, an evaluation). The only
+  durable handle that crosses the protocol boundary. See
+  [Durable Work](19-DURABLE-WORK.md).
+- **Contract hash** — A hash over a request's contract (input,
+  declared tools, model, deadline, structured output type). Combined
+  with the orchestrator's identifier to detect duplicate retries vs.
+  semantic conflicts.
+- **Idempotency conflict** — The result when an identifier is reused
+  with a different contract. Surfaced explicitly so the orchestrator
+  can choose a fresh identifier or accept the original intent.
+- **Detach grace window** — The bounded period after a connection
+  drop during which work is preserved for reattach. Pending tool
+  calls remain pending; sessions remain attached to compute;
+  workspace files stay in place.
+- **Reattach** — A new connection picks up an in-flight unit of work
+  using the same orchestrator-owned identifier. The sandbox returns
+  the current snapshot; the new orchestrator continues from there.
+- **Compute lifecycle** — The lifespan of a sandbox: started, runs,
+  may sleep, may be stopped. Independent of work and connection
+  lifecycles.
+- **Work lifecycle** — The lifespan of a session and its
+  evaluations. Independent of compute and connection lifecycles.
 
 ## Observability
 

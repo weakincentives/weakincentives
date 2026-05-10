@@ -68,6 +68,65 @@ The choice is operational. The agent definition does not change.
 
 ______________________________________________________________________
 
+## Requests are content-addressed
+
+Every request carries an identifier the orchestrator owns. The loop
+treats that identifier as the durable handle for the unit of work.
+
+- **Same identifier + same content = same work.** A retry — whether
+  from the orchestrator's own retry logic, from message-queue
+  redelivery, or from an explicit reattach after a process restart —
+  produces the same response. The sandbox does not re-execute the
+  work; it returns the in-flight or completed result.
+- **Same identifier + different content = explicit conflict.** A
+  request that reuses an identifier but changes any contract field
+  (input, deadline, declared tools, output type) is rejected. The
+  orchestrator must use a fresh identifier or accept the original
+  intent.
+
+The contract hash covers everything that could change behavior. This
+is what makes mailbox-driven mode safe — duplicate deliveries are
+detected and treated as the same work, not as parallel attempts.
+
+(See [Durable Work](19-DURABLE-WORK.md) for the cross-boundary
+semantics.)
+
+______________________________________________________________________
+
+## Reattaching to in-flight work
+
+A loop that crashes or restarts mid-evaluation can resume by sending
+the same request identifier on a new connection. The sandbox returns
+the current state — in-flight, completed, or failed — and the new
+loop continues from there. Long-running evaluations are not bound to
+a single loop instance.
+
+This is what makes the loop robust against orchestrator-side
+failures: a deployment that rolls workers does not abandon work; it
+hands work off. A session is the durable unit; loop instances are
+disposable.
+
+______________________________________________________________________
+
+## Compute and work are different lifecycles
+
+The loop coordinates work; the sandbox runs compute. These are not
+the same lifecycle.
+
+- **Stopping a sandbox does not abandon sessions.** Work is preserved;
+  files in the workspace remain; the loop can reattach to in-flight
+  evaluations after a restart.
+- **Ending an evaluation does not stop compute.** A finished
+  evaluation just means the session is no longer hosting active work.
+  The sandbox continues serving other sessions.
+- **Connection drops are neither.** The loop reconnects; the sandbox
+  preserves work for a bounded grace window.
+
+The loop's job is to push work forward. Lifecycle decisions about
+compute and connections happen at a different layer.
+
+______________________________________________________________________
+
 ## What the loop owns
 
 For each invocation:

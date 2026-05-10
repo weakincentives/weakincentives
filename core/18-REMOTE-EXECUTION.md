@@ -149,12 +149,25 @@ evaluation begins, not a temporary directory on the orchestrator host.
 - **Allowed-roots validation runs before transmission.** The
   orchestrator decides which host files are eligible to ship; the
   sandbox does not see anything else.
+- **Workspaces are durable beyond compute.** The workspace is backed
+  by storage that survives compute restarts. Stopping the sandbox
+  does not delete files; restarting reuses the same workspace. The
+  workspace is the long-lived data plane, not a scratch directory.
+- **Workspaces are tenant-scoped.** A given orchestrator name plus
+  tenant scope addresses a stable workspace. Two orchestrators in
+  different tenants cannot collide on names and cannot see each
+  other's files.
 - **The sandbox owns workspace cleanup.** When the prompt's resource
-  context closes, the sandbox tears down the workspace. The
-  orchestrator does not unlink files on the sandbox host directly.
-- **Reference counting is protocol-level.** When two prompts share a
-  workspace, both ends track the share count via the protocol — not
-  via shared filesystem inodes.
+  context closes, the sandbox tears down the *evaluation-scoped*
+  staging. The durable workspace files remain unless deleted
+  explicitly. The orchestrator does not unlink files on the sandbox
+  host directly.
+- **Reference counting is protocol-level.** When two prompts share
+  a workspace, both ends track the share count via the protocol —
+  not via shared filesystem inodes.
+
+(See [Durable Work](19-DURABLE-WORK.md) for the broader treatment
+of workspace durability across compute and transport events.)
 
 ______________________________________________________________________
 
@@ -296,6 +309,8 @@ ______________________________________________________________________
   harness is rented in the first place.
 - [ADAPTERS](13-ADAPTERS.md) — the adapter contract, designed for
   remote operation.
+- [DURABLE-WORK](19-DURABLE-WORK.md) — work identity, idempotent
+  execution, and reattach across the boundary.
 - [TRANSACTIONS](11-TRANSACTIONS.md) — server-side snapshot and
   rollback semantics.
 - [OBSERVABILITY](14-OBSERVABILITY.md) — sandbox-to-orchestrator
@@ -303,3 +318,6 @@ ______________________________________________________________________
 - [RESOURCES](09-RESOURCES.md) — how remote resources (filesystem,
   workspace) are bound and resolved.
 - [PRINCIPLES](PRINCIPLES.md) §15 — *Remote by design.*
+- [PRINCIPLES](PRINCIPLES.md) §16 — *Work identity is the
+  orchestrator's.*
+- [PRINCIPLES](PRINCIPLES.md) §17 — *Transport is not ownership.*

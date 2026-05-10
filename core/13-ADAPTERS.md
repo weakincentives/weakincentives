@@ -134,10 +134,22 @@ case of the same design. Several properties follow:
 - **Streaming is the norm.** Long tool results, verbose transcripts,
   large file reads — all stream. Buffering everything in memory is a
   fallback for small payloads, not the default.
+- **Only portable primitives cross the boundary.** Backend session
+  IDs, provider trace tokens, and runtime-native event types stay
+  inside the sandbox. The orchestrator sees only the identifiers it
+  supplied and the normalized event shapes the protocol defines.
+  This is what keeps observability and idempotency portable across
+  runtimes. (See [Durable Work](19-DURABLE-WORK.md).)
+- **Transport events are not work events.** A connection drop is not
+  a cancellation; a reconnect is not a new request. The adapter
+  preserves request identity across transport so that work survives
+  what should not destroy it.
 
 The full set of implications — for the filesystem, workspaces, skills,
 transactions, observability, and constraints — lives in
-[Remote Execution](18-REMOTE-EXECUTION.md).
+[Remote Execution](18-REMOTE-EXECUTION.md). The semantics of work
+identity, idempotency, and reattach live in
+[Durable Work](19-DURABLE-WORK.md).
 
 ______________________________________________________________________
 
