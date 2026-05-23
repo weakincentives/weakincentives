@@ -217,8 +217,8 @@ template = PromptTemplate(
 
 A `TaskCompletionChecker` examines the session state and the agent's
 tentative output. It returns either "complete" or "incomplete with
-feedback." All three adapters (Claude Agent SDK, Codex App Server,
-ACP/OpenCode) integrate this at two points:
+feedback." All adapters (Claude Agent SDK, Codex App Server,
+ACP/OpenCode, ACP/Gemini) integrate this at two points:
 
 1. **During execution:** if the agent produces structured output while
    tasks remain, the checker injects feedback as additional context

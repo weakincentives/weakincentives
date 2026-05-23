@@ -10,7 +10,8 @@ definition portable across all supported runtimes:
 
 - **Claude Agent SDK** — Claude Code's runtime with native file/shell tools and MCP bridging
 - **Codex** — OpenAI's Codex runtime via the App Server protocol (stdio JSON-RPC)
-- **OpenCode** — via the vendor-neutral Agent Client Protocol (ACP), which also supports Gemini CLI and future ACP agents
+- **OpenCode** — via the vendor-neutral Agent Client Protocol (ACP)
+- **Gemini CLI** — Google's Gemini CLI (`gemini --experimental-acp`) via the same ACP protocol, defaulting to `gemini-2.5-flash`
 
 > **New to WINK?** If you're like, "I don't want to read, I just want to build!"—point
 > your favorite agent at a clone of https://github.com/weakincentives/starter and prompt
@@ -247,7 +248,7 @@ key, and tag.
 
 WINK integrates with agentic execution harnesses—vendor runtimes that own the
 planning loop, sandboxing, and tool execution. Your agent definition stays the
-same; the adapter bridges it to the harness. Three harnesses are supported today.
+same; the adapter bridges it to the harness. Four harnesses are supported today.
 
 ### Claude Agent SDK
 
@@ -343,17 +344,16 @@ workspace.cleanup()
 
 See [Codex App Server Adapter](specs/CODEX_APP_SERVER.md) for full configuration.
 
-### ACP (Agent Client Protocol)
+### OpenCode (ACP)
 
-The ACP harness delegates execution to any ACP-compatible agent binary (e.g.,
-OpenCode) via JSON-RPC over stdio. The generic `ACPAdapter` handles the full
-protocol flow (initialize, new_session, prompt dispatch, drain); the
-`OpenCodeACPAdapter` subclass adds model validation, empty-response detection,
-and OpenCode-specific quirks.
+The OpenCode harness delegates execution to the OpenCode agent binary via
+JSON-RPC over stdio. The generic `ACPAdapter` handles the full protocol flow;
+the `OpenCodeACPAdapter` subclass adds model validation, empty-response
+detection, and OpenCode-specific quirks.
 
-- **Native tools**: Agent's built-in command execution, file changes, web search
+- **Native tools**: OpenCode's built-in command execution, file changes, web search
 - **MCP bridging**: WINK tools bridged to the agent via an in-process MCP HTTP server
-- **Vendor-neutral**: Same protocol works across OpenCode, Gemini CLI, and future ACP agents
+- **Vendor-neutral**: Same ACP protocol shared with Gemini CLI and future ACP agents
 - **Transcript emission**: Canonical transcript entries via `ACPTranscriptBridge`
 
 ```bash
@@ -387,6 +387,48 @@ workspace.cleanup()
 
 See [ACP Adapter](specs/ACP_ADAPTER.md) and
 [OpenCode Adapter](specs/OPENCODE_ADAPTER.md) for full configuration.
+
+### Gemini CLI (ACP)
+
+The Gemini CLI harness delegates execution to Google's `gemini` CLI binary via
+the same ACP protocol as OpenCode. `GeminiACPAdapter` is a thin subclass of
+`ACPAdapter` with Gemini-specific defaults and CLI flag injection.
+
+- **Native tools**: Gemini's built-in command execution, file changes, web search
+- **MCP bridging**: WINK tools bridged to Gemini via an in-process MCP HTTP server
+- **Default model**: `gemini-2.5-flash` with thought chunk emission enabled
+- **Note**: `--sandbox` is incompatible with `--experimental-acp` in current Gemini CLI
+
+```bash
+uv add "weakincentives[acp]"  # same extra as OpenCode
+```
+
+```python
+from weakincentives.adapters.gemini_acp import (
+    GeminiACPAdapter,
+    GeminiACPAdapterConfig,
+    GeminiACPClientConfig,
+)
+from weakincentives.prompt import WorkspaceSection, HostMount
+
+workspace = WorkspaceSection(
+    session=session,
+    mounts=(HostMount(host_path="src", mount_path="src"),),
+    allowed_host_roots=("/path/to/project",),
+)
+
+adapter = GeminiACPAdapter(
+    adapter_config=GeminiACPAdapterConfig(),
+    client_config=GeminiACPClientConfig(
+        cwd=str(workspace.temp_dir),
+    ),
+)
+
+response = adapter.evaluate(prompt, session=session)
+workspace.cleanup()
+```
+
+See [Gemini ACP Adapter](specs/GEMINI_ACP_ADAPTER.md) for full configuration.
 
 ## Development
 

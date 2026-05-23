@@ -40,13 +40,14 @@ Portable agents across sophisticated execution harnesses
 
 # The Landscape
 
-Three production-grade agentic harnesses:
+Four production-grade agentic harnesses:
 
 | Harness | Provider | Protocol |
 |---------|----------|----------|
 | **Claude Code** | Anthropic | Claude Agent SDK (Python) |
 | **OpenAI Codex** | OpenAI | Codex App Server (stdio JSON-RPC) |
 | **OpenCode** | opencode.ai | ACP (stdio JSON-RPC 2.0) |
+| **Gemini CLI** | Google | ACP (stdio JSON-RPC 2.0) |
 
 Each provides planning loops, native tools, sandboxing, and orchestration.
 
@@ -56,7 +57,7 @@ Each provides planning loops, native tools, sandboxing, and orchestration.
 
 # What These Harnesses Provide
 
-All three are **full agentic runtimes**:
+All four are **full agentic runtimes**:
 
 - Planning and reasoning loops
 - Native file and shell tools
@@ -105,7 +106,7 @@ Your definition is **portable**. The harness is **rented**.
 
 ---
 
-# Three Harnesses, One Definition
+# Four Harnesses, One Definition
 
 ```python
 from weakincentives.adapters.claude_agent_sdk import (
@@ -118,6 +119,10 @@ from weakincentives.adapters.codex_app_server import (
 from weakincentives.adapters.opencode_acp import (
     OpenCodeACPAdapter, OpenCodeACPAdapterConfig,
     OpenCodeACPClientConfig,
+)
+from weakincentives.adapters.gemini_acp import (
+    GeminiACPAdapter, GeminiACPAdapterConfig,
+    GeminiACPClientConfig,
 )
 ```
 
@@ -146,6 +151,12 @@ codex = CodexAppServerAdapter(
 opencode = OpenCodeACPAdapter(
     adapter_config=OpenCodeACPAdapterConfig(model_id="openai/gpt-5.1-codex"),
     client_config=OpenCodeACPClientConfig(permission_mode="auto"),
+)
+
+# Gemini CLI (via ACP)
+gemini = GeminiACPAdapter(
+    adapter_config=GeminiACPAdapterConfig(model_id="gemini-2.5-flash"),
+    client_config=GeminiACPClientConfig(),
 )
 ```
 
@@ -204,6 +215,20 @@ WINK bridges your tools via an MCP HTTP server.
 
 ---
 
+# Gemini CLI (ACP): What It Provides
+
+| Capability | Implementation |
+|------------|----------------|
+| Native tools | Command execution, file edits, web search |
+| Protocol | ACP v1 (vendor-neutral JSON-RPC 2.0) |
+| Default model | `gemini-2.5-flash` (passed as `--model` CLI flag) |
+| Custom tools | MCP passthrough (HTTP, in-process) |
+| Thought chunks | Emitted by default |
+
+WINK bridges your tools via an MCP HTTP server. Note: `--sandbox` is incompatible with `--experimental-acp` in current Gemini CLI.
+
+---
+
 # Why ACP Matters
 
 The Agent Client Protocol is a **vendor-neutral standard**:
@@ -212,11 +237,11 @@ The Agent Client Protocol is a **vendor-neutral standard**:
 - Not tied to any single provider's runtime
 - Sessions, model discovery, and MCP passthrough built-in
 
-WINK's `ACPAdapter` is a reusable base — `OpenCodeACPAdapter` is just the first concrete implementation. Future ACP agents (Gemini CLI, others) plug in via the same base.
+WINK's `ACPAdapter` is a reusable base — `OpenCodeACPAdapter` and `GeminiACPAdapter` are concrete implementations for OpenCode and Gemini CLI respectively. Future ACP agents plug in via the same base.
 
 ---
 
-# Tool Bridging: Three Paths, One Definition
+# Tool Bridging: Four Paths, One Definition
 
 ```python
 def search_handler(
@@ -237,20 +262,20 @@ search = Tool[SearchParams, SearchResult](
 # Automatic Bridging Per Harness
 
 ```
-┌───────────────────────────────────────────────────┐
-│          Tool[SearchParams, SearchResult]          │
-└──────────────────┬────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│              Tool[SearchParams, SearchResult]              │
+└──────────────────┬────────────────────────────────────────┘
                    │
-       ┌───────────┼───────────┐
-       ▼           ▼           ▼
-┌────────────┐ ┌────────┐ ┌───────────┐
-│ Claude Code│ │ Codex  │ │ OpenCode  │
-│(MCP in-proc)│ │(Dynamic│ │(MCP HTTP) │
-│            │ │ Tool)  │ │           │
-└────────────┘ └────────┘ └───────────┘
+       ┌───────────┼──────────────┬──────────┐
+       ▼           ▼              ▼           ▼
+┌────────────┐ ┌────────┐ ┌───────────┐ ┌──────────┐
+│ Claude Code│ │ Codex  │ │ OpenCode  │ │ Gemini   │
+│(MCP in-proc)│ │(Dynamic│ │(MCP HTTP) │ │(MCP HTTP)│
+│            │ │ Tool)  │ │           │ │          │
+└────────────┘ └────────┘ └───────────┘ └──────────┘
 ```
 
-Same tool definition. Three bridging mechanisms. Automatic.
+Same tool definition. Four bridging mechanisms. Automatic.
 
 ---
 
@@ -264,7 +289,7 @@ Your definition includes control at three strengths:
 | **Soft feedback** | Advisory guidance | Nudge behavior |
 | **Completion check** | Block termination | Verify goals |
 
-These work identically across all three harnesses.
+These work identically across all four harnesses.
 
 ---
 
@@ -284,7 +309,7 @@ SequentialDependencyPolicy(
 # -> Blocks deploy until test and build have succeeded
 ```
 
-Same policy definition on all three harnesses.
+Same policy definition on all four harnesses.
 
 ---
 
@@ -409,7 +434,8 @@ Test your definition. No harness mocking required.
 | Claude models, OS-level sandboxing | Claude Code |
 | OpenAI models, native structured output | Codex |
 | Multi-provider model access | OpenCode (ACP) |
-| Vendor-neutral protocol | OpenCode (ACP) |
+| Gemini models, ACP protocol | Gemini CLI (ACP) |
+| Vendor-neutral protocol | OpenCode or Gemini (ACP) |
 | Redundancy / failover | Mix adapters |
 
 Your definition works on any of them.
@@ -418,7 +444,7 @@ Your definition works on any of them.
 
 # What You Get
 
-- **Portability** — same definition on Claude Code, Codex, and OpenCode
+- **Portability** — same definition on Claude Code, Codex, OpenCode, and Gemini CLI
 - **Hard guardrails** — fail-closed policies across all harnesses
 - **Soft feedback** — advisory guidance across all harnesses
 - **Completion checking** — goal verification across all harnesses
@@ -430,7 +456,7 @@ Your definition works on any of them.
 # What WINK Is
 
 - A Python library for **portable agent definitions**
-- Adapters for **Claude Code**, **Codex**, and **OpenCode (ACP)**
+- Adapters for **Claude Code**, **Codex**, **OpenCode**, and **Gemini CLI** (via ACP)
 - **Three-tier control**: policies, feedback, completion checking
 - A philosophy: **own the definition, rent the harness**
 
@@ -440,7 +466,7 @@ Your definition works on any of them.
 
 - Not a planning loop (the harness provides that)
 - Not a sandboxing system (the harness provides that)
-- Not trying to replace Claude Code, Codex, or OpenCode
+- Not trying to replace Claude Code, Codex, OpenCode, or Gemini CLI
 
 WINK is the **definition layer** that makes your agent portable across these harnesses.
 
@@ -458,7 +484,7 @@ You want to own the definition: your prompts, your tools, your policies, your co
 
 # Key Takeaways
 
-1. **Three harnesses today** — Claude Code, Codex, OpenCode (ACP)
+1. **Four harnesses today** — Claude Code, Codex, OpenCode, Gemini CLI (all via adapters)
 2. **Agent definitions should be portable** across all of them
 3. **Hard guardrails** (policies) fail-closed on every harness
 4. **Soft feedback** nudges on every harness

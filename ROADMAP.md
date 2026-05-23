@@ -2,6 +2,17 @@
 
 ## Near-Term Initiatives
 
+### Gemini CLI ACP Adapter — Completed
+
+- ~~Integrate Google's Gemini CLI (`gemini --experimental-acp`) as a fourth supported runtime via ACP.~~
+- ~~Add `GeminiACPAdapter` as a thin subclass of `ACPAdapter` with Gemini-specific defaults and CLI flag injection.~~
+- ~~Validate against the Adapter Compatibility Kit (ACK) alongside Claude, Codex, and OpenCode adapters.~~
+
+`GeminiACPAdapter` defaults to `gemini-2.5-flash` with thought chunk emission
+enabled. Model selection passes via `--model` CLI flag at spawn time (Gemini
+does not support `session/setModel`). Sandbox mode is incompatible with
+`--experimental-acp` in current Gemini CLI versions.
+
 ### ACP Integration — Completed in v0.26.0
 
 - ~~Integrate with OpenCode via the Agent Communication Protocol (ACP) to enable WINK agents within the OpenCode harness.~~
@@ -9,8 +20,9 @@
 - ~~Define clear boundaries between agent definition (WINK-owned) and harness concerns (ACP-mediated).~~
 
 Generic `ACPAdapter` handles the full ACP protocol flow; `OpenCodeACPAdapter`
-adds OpenCode-specific quirks. Unified integration testing via the Adapter
-Compatibility Kit (ACK) validates all three adapters against a shared contract.
+adds OpenCode-specific quirks; `GeminiACPAdapter` adds Gemini CLI defaults.
+Unified integration testing via the Adapter Compatibility Kit (ACK) validates
+all four adapters against a shared contract.
 
 ### Codex App Server Integration — Completed in v0.25.0
 
