@@ -25,6 +25,7 @@ from typing import (
     Final,
     Literal,
     Protocol,
+    TypeGuard,
     TypeVar,
     cast,
     get_args,
@@ -78,6 +79,16 @@ ParamsT_contra = TypeVar(
     "ParamsT_contra", bound=SupportsDataclassOrNone, contravariant=True
 )
 ResultT = TypeVar("ResultT", bound=SupportsToolResult)
+
+
+def _is_params_type(x: object) -> TypeGuard[ParamsType]:
+    """Type guard narrowing *x* to ``ParamsType`` when it is a concrete type."""
+    return isinstance(x, type)
+
+
+def _is_result_type(x: object) -> TypeGuard[ResultType]:
+    """Type guard narrowing *x* to ``ResultType`` when it is a concrete type."""
+    return isinstance(x, type)
 
 
 @dataclass(slots=True, frozen=True)
@@ -181,7 +192,8 @@ class ToolContext:
 def _normalize_specialization(item: object) -> tuple[object, object]:
     if not isinstance(item, tuple):
         raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
-    normalized = cast(SequenceABC[object], item)
+    # isinstance narrows to tuple[Unknown, ...]; cast to provide element types
+    normalized = cast("tuple[object, ...]", item)
     if len(normalized) != _EXPECTED_TYPE_ARGUMENTS:
         raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
     return _coerce_none_type(normalized[0]), _coerce_none_type(normalized[1])
@@ -242,14 +254,26 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
     @property
     def result_type(self) -> type[SupportsDataclass | None]:
         """The concrete dataclass type for tool results."""
-        return cast(
-            "type[SupportsDataclass | None]", type(self)._specialized_result_type
-        )
+        rt = type(self)._specialized_result_type
+        if _is_result_type(rt):
+            return rt
+        return _NONE_TYPE
 
     @property
     def result_container(self) -> Literal["object", "array"]:
         """Whether the result is a single object or array of objects."""
         return type(self)._specialized_result_container
+
+    @classmethod
+    def _require_params_type(cls) -> ParamsType:
+        """Return the specialized params type or raise if unspecialized."""
+        pt = cls._specialized_params_type
+        if _is_params_type(pt):
+            return pt
+        raise PromptValidationError(
+            "Tool must be instantiated with concrete type arguments.",
+            placeholder="type_arguments",
+        )
 
     @classmethod
     def create(
@@ -262,12 +286,19 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
         accepts_overrides: bool = True,
     ) -> Tool[ParamsT, ResultT]:
         """Create a validated Tool instance."""
-        params_type, raw_result_annotation = cls._resolve_type_arguments()
+        params_type = cls._require_params_type()
+        raw_result_annotation = cls._specialized_result_annotation
+        if raw_result_annotation is None:
+            raise PromptValidationError(
+                "Tool must be instantiated with concrete type arguments.",
+                placeholder="type_arguments",
+            )
 
         # Use pre-computed values from __class_getitem__ if available,
         # otherwise normalize now (deferred from abstract specialization).
-        if cls._specialized_result_type is not None:
-            result_type = cast(ResultType, cls._specialized_result_type)
+        rt = cls._specialized_result_type
+        if _is_result_type(rt):
+            result_type = rt
             result_container = cls._specialized_result_container
         else:
             result_type, result_container = cls._normalize_result_annotation(
@@ -285,23 +316,6 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
                 ),
                 accepts_overrides=accepts_overrides,
             )
-
-    @classmethod
-    def _resolve_type_arguments(
-        cls,
-    ) -> tuple[ParamsType, ResultT]:
-        params_attr = getattr(cls, "_specialized_params_type", None)
-        params_type: ParamsType | None = (
-            cast(ParamsType, params_attr) if isinstance(params_attr, type) else None
-        )
-        raw_result_annotation = getattr(cls, "_specialized_result_annotation", None)
-        if params_type is None or raw_result_annotation is None:
-            raise PromptValidationError(
-                "Tool must be instantiated with concrete type arguments.",
-                placeholder="type_arguments",
-            )
-
-        return params_type, cast(ResultT, raw_result_annotation)
 
     @staticmethod
     def _validate_name(name: str, params_type: ParamsType) -> str:
@@ -423,7 +437,8 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
                     placeholder="examples",
                 )
 
-            sequence_output = cast(SequenceABC[object], example_output)
+            # isinstance narrows to Sequence[Unknown]; cast to provide element type
+            sequence_output = cast("SequenceABC[object]", example_output)
             for item in sequence_output:
                 if not is_dataclass_instance(item) or type(item) is not result_type:
                     raise PromptValidationError(
@@ -450,12 +465,11 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
         result_type: ResultType,
         result_container: Literal["object", "array"],
     ) -> tuple[ToolExample[ParamsT, ResultT], ...]:
-        examples_value = cast(tuple[object, ...], examples)
-        if not examples_value:
+        if not examples:
             return ()
 
         normalized_examples: list[ToolExample[ParamsT, ResultT]] = []
-        for example in examples_value:
+        for example in examples:
             if not isinstance(example, ToolExample):
                 raise PromptValidationError(
                     "Tool examples must be ToolExample instances.",
@@ -502,13 +516,13 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
 
     @staticmethod
     def _normalize_result_annotation(
-        annotation: ResultT,
+        annotation: object,
         params_type: ParamsType,
     ) -> tuple[ResultType, Literal["object", "array"]]:
         if annotation is None:
             return _NONE_TYPE, "object"
-        if isinstance(annotation, type):
-            return cast(ResultType, annotation), "object"
+        if _is_result_type(annotation):
+            return annotation, "object"
 
         origin = get_origin(annotation)
         if origin not in {list, tuple, SequenceABC}:
@@ -530,24 +544,24 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
         # list[T] and Sequence[T] always have exactly one type arg
         element = args[0]
 
-        if not isinstance(element, type):
+        if not _is_result_type(element):
             raise PromptValidationError(
                 "Tool ResultT must be a dataclass type or a sequence of dataclasses.",
                 dataclass_type=params_type,
                 placeholder="ResultT",
             )
 
-        return cast(ResultType, element), "array"
+        return element, "array"
 
     @classmethod
     def __class_getitem__(
         cls, item: object
     ) -> type[Tool[SupportsDataclassOrNone, SupportsToolResult]]:
         params_candidate, result_candidate = _normalize_specialization(item)
-        if not isinstance(params_candidate, type):
+        if not _is_params_type(params_candidate):
             raise TypeError("Tool ParamsT type argument must be a type.")
-        params_type = cast(ParamsType, params_candidate)
-        result_annotation = cast(ResultT, result_candidate)
+        params_type = params_candidate
+        result_annotation = result_candidate
 
         # Try to normalize eagerly.  This succeeds for concrete types
         # (e.g. Tool[MyParams, MyResult]) but can fail for abstract type
@@ -609,14 +623,20 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
             literal_args = get_args(params_annotation)
             params_annotation = literal_args[0] if literal_args else params_annotation
 
-        return cast(ParamsType, _coerce_none_type(params_annotation))
+        coerced = _coerce_none_type(params_annotation)
+        if _is_params_type(coerced):
+            return coerced
+        raise PromptValidationError(
+            "Tool handler parameter must be annotated with ParamsT.",
+            placeholder="handler",
+        )
 
     @staticmethod
     def _resolve_wrapped_result_annotation(
         signature: inspect.Signature,
         hints: dict[str, object],
         params_type: ParamsType,
-    ) -> SupportsToolResult:
+    ) -> object:
         return_annotation = hints.get("return", signature.return_annotation)
         if return_annotation is inspect.Signature.empty:
             raise PromptValidationError(
@@ -635,10 +655,9 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
                 placeholder="return",
             )
 
+        result_args = get_args(result_annotation)
         try:
-            result_arg = next(
-                iter(cast(tuple[object, ...], get_args(result_annotation)))
-            )
+            result_arg = next(iter(result_args))
         except StopIteration as error:
             raise PromptValidationError(
                 "Tool handler return annotation must be ToolResult[ResultT].",
@@ -646,7 +665,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
                 placeholder="return",
             ) from error
 
-        return cast(SupportsToolResult, _coerce_none_type(result_arg))
+        return _coerce_none_type(result_arg)
 
     @staticmethod
     def wrap[
@@ -667,13 +686,10 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
 
         hints = Tool._resolve_annotations(fn)
         params_type: ParamsType = Tool._resolve_wrapped_params_type(parameter, hints)
-        normalized_result = cast(
-            ResultT_runtime,
-            Tool._resolve_wrapped_result_annotation(
-                signature,
-                hints,
-                params_type,
-            ),
+        normalized_result = Tool._resolve_wrapped_result_annotation(
+            signature,
+            hints,
+            params_type,
         )
 
         tool_type = Tool.__class_getitem__((params_type, normalized_result))
