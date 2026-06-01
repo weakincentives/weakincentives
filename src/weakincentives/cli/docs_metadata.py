@@ -47,6 +47,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "OPENCODE_ADAPTER": "OpenCode ACP adapter, model validation, quirk handling",
     "POLICIES_OVER_WORKFLOWS": "Philosophy of declarative policies vs rigid workflows",
     "PROMPTS": "Prompt system, composition, overrides, structured output, resources",
+    "REMOTE_FILESYSTEM": "Remote filesystem sandbox, adapter-as-factory, exec channel, all-tool-call targeting",
     "RESOURCE_REGISTRY": "Dependency injection, resource scopes, transactional snapshots",
     "RUN_CONTEXT": "Execution metadata, request correlation, distributed tracing",
     "SESSIONS": "Session lifecycle, events, deadlines, budgets",
