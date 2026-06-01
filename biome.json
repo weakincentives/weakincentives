@@ -1,8 +1,6 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-  "organizeImports": {
-    "enabled": true
-  },
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
     "rules": {
@@ -15,20 +13,23 @@
           }
         },
         "noForEach": "off",
-        "useSimplifiedLogicExpression": "warn"
+        "useSimplifiedLogicExpression": "warn",
+        "noImportantStyles": "off"
       },
       "correctness": {
         "noUnusedVariables": "error",
         "noUnusedImports": "error",
         "useExhaustiveDependencies": "warn",
-        "useHookAtTopLevel": "error"
+        "useHookAtTopLevel": "error",
+        "useValidTypeof": "error"
       },
       "performance": {
         "noAccumulatingSpread": "warn",
         "noDelete": "warn"
       },
       "security": {
-        "noDangerouslySetInnerHtml": "error"
+        "noDangerouslySetInnerHtml": "error",
+        "noSecrets": "warn"
       },
       "style": {
         "noNegationElse": "warn",
@@ -37,14 +38,15 @@
         "useConst": "error",
         "useExponentiationOperator": "warn",
         "useNamingConvention": "off",
-        "useShorthandArrayType": "warn",
         "useSingleVarDeclarator": "warn",
-        "useTemplate": "warn"
+        "useTemplate": "warn",
+        "useConsistentArrayType": { "level": "warn", "options": { "syntax": "shorthand" } },
+        "noCommonJs": "off",
+        "noDescendingSpecificity": "off"
       },
       "suspicious": {
         "noAssignInExpressions": "error",
         "noConfusingVoidType": "error",
-        "noConsoleLog": "off",
         "noDoubleEquals": "error",
         "noDuplicateObjectKeys": "error",
         "noEmptyBlockStatements": "warn",
@@ -55,12 +57,9 @@
         "noRedeclare": "error",
         "noShadowRestrictedNames": "error",
         "useAwait": "warn",
-        "useValidTypeof": "error"
+        "noConsole": { "level": "off", "options": { "allow": ["log"] } }
       },
-      "nursery": {
-        "noCommonJs": "off",
-        "noSecrets": "warn"
-      }
+      "nursery": {}
     }
   },
   "formatter": {
@@ -89,7 +88,13 @@
     }
   },
   "files": {
-    "include": ["src/weakincentives/cli/static/**/*.js", "src/weakincentives/cli/static/**/*.css"],
-    "ignore": ["node_modules", "dist", "build", ".git"]
+    "includes": [
+      "**/src/weakincentives/cli/static/**/*.js",
+      "**/src/weakincentives/cli/static/**/*.css",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/build",
+      "!**/.git"
+    ]
   }
 }

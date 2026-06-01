@@ -43,20 +43,20 @@ skills = [
     "pyyaml>=6.0.3",
 ]
 redis = [
-    "redis>=7.4.0",
+    "redis>=8.0.0",
 ]
 claude-agent-sdk = [
-    "claude-agent-sdk>=0.1.73",
+    "claude-agent-sdk>=0.2.87",
 ]
 acp = [
-    "agent-client-protocol>=0.9.0",
-    "mcp>=1.27.0",
-    "uvicorn>=0.46.0",
+    "agent-client-protocol>=0.10.1",
+    "mcp>=1.27.2",
+    "uvicorn>=0.48.0",
 ]
 wink = [
-    "fastapi>=0.136.1",
-    "markdown-it-py[linkify]>=4.0.0",
-    "uvicorn>=0.46.0",
+    "fastapi>=0.136.3",
+    "markdown-it-py[linkify]>=4.2.0",
+    "uvicorn>=0.48.0",
 ]
 codex-ws = [
     "websockets>=13.0",
@@ -95,13 +95,13 @@ dev = [
     "pytest-timeout>=2.4.0",
     "pytest-cov>=7.1.0",
     "pytest-randomly>=4.1.0",
-    "pytest-rerunfailures>=16.1",
+    "pytest-rerunfailures>=16.3",
     "pip-audit>=2.10.0",
-    "ruff>=0.15.12",
+    "ruff>=0.15.15",
     "pyright>=1.1.409",
-    "ty>=0.0.34",
+    "ty>=0.0.40",
     "mdformat>=1.0.0",
-    "hypothesis>=6.152.4",
+    "hypothesis>=6.155.1",
     "vulture>=2.16",
     "pytest-testmon>=2.2.0",
 ]
@@ -137,6 +137,8 @@ extend-ignore = [
     "RUF067",
     # New preview rules from ruff 0.15.7 upgrade - suppress for now
     "BLE001",   # blind exception catches (intentional in adapters/resources)
+    # New preview rule from ruff 0.15.15 upgrade - suppress for now
+    "RUF075",   # fallible context manager: post-yield cleanup is success-only by design
 ]
 fixable = ["I001", "F401", "RUF100"]
 

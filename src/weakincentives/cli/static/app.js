@@ -317,12 +317,16 @@ commandPaletteInput.addEventListener("keydown", (e) => {
   if (e.key === "ArrowDown") {
     e.preventDefault();
     selectedCommandIndex = Math.min(selectedCommandIndex + 1, results.length - 1);
-    results.forEach((r, i) => r.classList.toggle("selected", i === selectedCommandIndex));
+    results.forEach((r, i) => {
+      r.classList.toggle("selected", i === selectedCommandIndex);
+    });
     results[selectedCommandIndex]?.scrollIntoView({ block: "nearest" });
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
     selectedCommandIndex = Math.max(selectedCommandIndex - 1, 0);
-    results.forEach((r, i) => r.classList.toggle("selected", i === selectedCommandIndex));
+    results.forEach((r, i) => {
+      r.classList.toggle("selected", i === selectedCommandIndex);
+    });
     results[selectedCommandIndex]?.scrollIntoView({ block: "nearest" });
   } else if (e.key === "Enter") {
     e.preventDefault();
@@ -411,6 +415,7 @@ const requestId = document.getElementById("request-id");
 const bundleSelect = document.getElementById("bundle-select");
 const reloadButton = document.getElementById("reload-button");
 
+// biome-ignore lint/security/noSecrets: CSS selector string, not a secret
 const transcriptTab = document.querySelector('.main-tab[data-view="transcript"]');
 
 function renumberTabShortcuts() {

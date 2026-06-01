@@ -218,7 +218,11 @@ def _apply_union_metadata(
             _ = schema_data.setdefault("title", title)
         required = subschemas[0].get("required")
         if isinstance(required, (list, tuple)):  # pragma: no cover - defensive
-            _ = schema_data.setdefault("required", list(required))
+            # ty narrows isinstance(list | tuple) to list[object], which is not
+            # assignable to JSONValue; the values are JSONValue by construction.
+            _ = schema_data.setdefault(  # ty: ignore[no-matching-overload]
+                "required", list(required)
+            )
 
 
 def _schema_for_union(base_type: object, origin: object) -> dict[str, JSONValue] | None:

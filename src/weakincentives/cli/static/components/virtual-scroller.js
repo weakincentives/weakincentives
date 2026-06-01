@@ -317,7 +317,9 @@ export class VirtualScroller {
     this.loadMoreObserver.disconnect();
 
     // Explicitly remove rendered elements from DOM to prevent memory leaks
-    this.renderedItems.forEach((element) => element.remove());
+    this.renderedItems.forEach((element) => {
+      element.remove();
+    });
     this.renderedItems.clear();
     this.itemHeights.clear();
 

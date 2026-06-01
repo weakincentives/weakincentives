@@ -25,10 +25,7 @@ async function isEventSlice(entry, fetchJSON) {
     const detail = await fetchJSON(`/api/slices/${encoded}?limit=1`);
     const sample = detail.items[0];
     if (sample && typeof sample === "object") {
-      return (
-        Object.prototype.hasOwnProperty.call(sample, "event_id") &&
-        Object.prototype.hasOwnProperty.call(sample, "created_at")
-      );
+      return Object.hasOwn(sample, "event_id") && Object.hasOwn(sample, "created_at");
     }
   } catch (e) {
     console.warn("Failed to classify slice", entry.slice_type, e);
@@ -90,12 +87,18 @@ function applyDepth(state, items, depth) {
       setOpen(state, path, true);
     }
     if (Array.isArray(value)) {
-      value.forEach((c, i) => walk(c, path.concat(String(i)), d + 1));
+      value.forEach((c, i) => {
+        walk(c, path.concat(String(i)), d + 1);
+      });
     } else {
-      Object.entries(value).forEach(([k, v]) => walk(v, path.concat(k), d + 1));
+      Object.entries(value).forEach(([k, v]) => {
+        walk(v, path.concat(k), d + 1);
+      });
     }
   };
-  items.forEach((item, i) => walk(item, [`item-${i}`], 0));
+  items.forEach((item, i) => {
+    walk(item, [`item-${i}`], 0);
+  });
 }
 
 function setOpenForAll(state, items, open) {
@@ -107,12 +110,18 @@ function setOpenForAll(state, items, open) {
     }
     setOpen(state, path, open);
     if (Array.isArray(value)) {
-      value.forEach((c, i) => update(c, path.concat(String(i))));
+      value.forEach((c, i) => {
+        update(c, path.concat(String(i)));
+      });
     } else {
-      Object.entries(value).forEach(([k, v]) => update(v, path.concat(k)));
+      Object.entries(value).forEach(([k, v]) => {
+        update(v, path.concat(k));
+      });
     }
   };
-  items.forEach((item, i) => update(item, [`item-${i}`]));
+  items.forEach((item, i) => {
+    update(item, [`item-${i}`]);
+  });
 }
 
 function getFilteredItems(state) {
@@ -222,7 +231,7 @@ function renderSimpleArrayChips(container, value) {
 function populateTreeChildren(container, value, path, depth, state, renderItemsFn) {
   const childCount = Array.isArray(value) ? value.length : Object.keys(value).length;
   if (childCount === 0) {
-    // biome-ignore lint/nursery/noSecrets: HTML string, not a secret
+    // biome-ignore lint/security/noSecrets: HTML string, not a secret
     container.innerHTML = '<span class="muted">(empty)</span>';
     return;
   }
@@ -458,7 +467,9 @@ export function initSessionsView({ state, fetchJSON, showToast }) {
     }
     const newIndex = Math.max(0, Math.min(index, items.length - 1));
     state.focusedItemIndex = newIndex;
-    items.forEach((item, i) => item.classList.toggle("focused", i === newIndex));
+    items.forEach((item, i) => {
+      item.classList.toggle("focused", i === newIndex);
+    });
     items[newIndex].scrollIntoView({ behavior: "smooth", block: "center" });
   }
 

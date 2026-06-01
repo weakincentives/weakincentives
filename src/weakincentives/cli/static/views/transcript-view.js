@@ -120,7 +120,7 @@ function formatStringContent(entry) {
 function prettyJson(value) {
   if (typeof value === "string") {
     const obj = tryParseJson(value);
-    return obj !== null ? JSON.stringify(obj, null, 2) : value;
+    return obj === null ? value : JSON.stringify(obj, null, 2);
   }
   return JSON.stringify(value, null, 2);
 }
@@ -164,7 +164,7 @@ function createTranscriptMetadataHtml(entry) {
   const source = entry.transcript_source || "";
   if (source) {
     const seq =
-      entry.sequence_number != null ? `#${escapeHtml(String(entry.sequence_number))}` : "";
+      entry.sequence_number == null ? "" : `#${escapeHtml(String(entry.sequence_number))}`;
     html += `<span class="transcript-source clickable" data-source="${escapeHtml(source)}">${escapeHtml(source)}${seq}</span>`;
   }
   if (entry.prompt_name) {
