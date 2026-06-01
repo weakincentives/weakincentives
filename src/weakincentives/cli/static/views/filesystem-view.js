@@ -64,6 +64,7 @@ export function initFilesystemView({ state, fetchJSON, showToast }) {
     els.list.innerHTML = "";
 
     if (filtered.length === 0) {
+      // biome-ignore lint/security/noSecrets: HTML string, not a secret
       els.list.innerHTML = '<p class="muted">No files match filter</p>';
       return;
     }
@@ -212,7 +213,7 @@ export function initFilesystemView({ state, fetchJSON, showToast }) {
     } else if (result.type === "markdown") {
       renderMarkdownFile(result);
     } else if (result.type === "binary") {
-      // biome-ignore lint/nursery/noSecrets: HTML string, not a secret
+      // biome-ignore lint/security/noSecrets: HTML string, not a secret
       els.viewer.innerHTML = '<p class="muted">Binary file cannot be displayed</p>';
       state.fileContent = null;
     } else {

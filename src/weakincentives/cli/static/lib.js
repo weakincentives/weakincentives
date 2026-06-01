@@ -91,7 +91,7 @@ export function getMarkdownPayload(value, markdownKey = "__markdown__") {
     !value ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    !Object.prototype.hasOwnProperty.call(value, markdownKey)
+    !Object.hasOwn(value, markdownKey)
   ) {
     return null;
   }

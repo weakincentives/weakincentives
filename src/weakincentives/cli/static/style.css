@@ -961,7 +961,9 @@ button.ghost.small {
   border-left: 1px solid var(--color-border);
   padding-left: 10px;
   margin-top: 2px;
-  transition: max-height 0.2s var(--ease-out), opacity 0.15s;
+  transition:
+    max-height 0.2s var(--ease-out),
+    opacity 0.15s;
 }
 
 .tree-leaf {

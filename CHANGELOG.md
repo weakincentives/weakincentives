@@ -79,22 +79,38 @@ Gemini option added to `code_reviewer_example.py`.
 
 #### Dependency upgrades
 
-All Python dependencies upgraded to latest via `uv lock --upgrade` and minimum
-version pins bumped in `pyproject.toml`. Notable direct/dev dependency upgrades:
+All Python dependencies upgraded to latest via `uv lock --upgrade`, with minimum
+version pins in `pyproject.toml` bumped to match. Notable direct/dev dependency
+upgrades since v0.27.0:
 
 | Package | Old | New |
 |---------|-----|-----|
-| claude-agent-sdk | 0.1.59 | 0.1.73 |
-| fastapi | 0.135.3 | 0.136.1 |
-| uvicorn | 0.44.0 | 0.46.0 |
-| ruff | 0.15.10 | 0.15.12 |
+| claude-agent-sdk | 0.1.35 | 0.2.87 |
+| redis | 7.1.1 | 8.0.0 |
+| agent-client-protocol | 0.8.0 | 0.10.1 |
+| mcp | 1.26.0 | 1.27.2 |
+| fastapi | 0.129.0 | 0.136.3 |
+| uvicorn | 0.40.0 | 0.48.0 |
+| ruff | 0.15.1 | 0.15.15 |
 | pyright | 1.1.408 | 1.1.409 |
-| ty | 0.0.31 | 0.0.34 |
-| hypothesis | 6.152.1 | 6.152.4 |
+| ty | 0.0.16 | 0.0.40 |
+| hypothesis | 6.151.6 | 6.155.1 |
 | pytest-randomly | 4.0.1 | 4.1.0 |
 
-Notable transitive upgrades: `cryptography` 46.0.7 → 48.0.0, `pydantic`
-2.13.1 → 2.13.3, `sse-starlette` 3.3.4 → 3.4.1.
+`redis` 7→8 and `claude-agent-sdk` 0.1→0.2 are major/minor jumps that pass the
+full suite unchanged. The `websockets` pin is intentionally left at `>=13.0`
+(loose, for codex-ws compatibility). Notable transitive upgrades:
+`starlette` 1.0.0 → 1.2.1, `rpds-py` 0.30.0 → 2026.5.1 (date-based versioning),
+`pydantic` 2.13.1 → 2.13.4, `sse-starlette` 3.3.4 → 3.4.4, `cryptography`
+46.0.7 → 48.0.0.
+
+The frontend linter `@biomejs/biome` was upgraded across its major boundary,
+`^1.9.4` → `^2.4.16`. The config was migrated to the 2.x schema; the two new CSS
+recommended rules (`noImportantStyles`, `noDescendingSpecificity`) are disabled
+to preserve the existing stylesheet. New `useIterableCallbackReturn` errors were
+fixed by giving `forEach` callbacks block bodies, `noSecrets` suppression
+comments moved to the `lint/security/*` namespace, and safe autofixes were
+applied (`Object.hasOwn`, de-negated ternaries).
 
 To accommodate `pyright` 1.1.409's new deprecation warnings on
 `@contextmanager`/`@asynccontextmanager` return types, all such functions in
@@ -102,7 +118,11 @@ To accommodate `pyright` 1.1.409's new deprecation warnings on
 `Iterator[T]` / `AsyncIterator[T]` to `Generator[T]` / `AsyncGenerator[T]`.
 A handful of stale `# pyright: ignore[reportPrivateUsage]` and
 `# ty: ignore[invalid-argument-type]` directives were also dropped now that the
-upgraded type checkers no longer require them.
+upgraded type checkers no longer require them. The `ruff` 0.15.15 preview rule
+`RUF075` (fallible-context-manager) is suppressed, `ty` 0.0.40's stricter
+`setdefault` overload resolution required a `no-matching-overload` ignore in
+`serde/schema.py`, and a now-unused `ty` ignore in `adapters/config.py` was
+removed.
 
 #### `wink debug` UI redesign — oscilloscope aesthetic (#1108)
 
