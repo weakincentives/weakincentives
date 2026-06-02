@@ -4,233 +4,318 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-*Commits reviewed: 2026-02-17 (898b799e) through 2026-02-22 (128079d4)*
+*Commits reviewed: 2026-02-17 (`898b799e`, oldest) through 2026-05-31
+(`74e28929`, most recent) — all 30 commits since v0.27.0, reviewed at the diff
+level. Commit titles were not taken at face value; several bury behavior changes
+(see Breaking Changes and Fixed).*
 
 ### TL;DR
 
-**Gemini CLI joins the adapter family.** A new `GeminiACPAdapter` wraps the
-generic `ACPAdapter` to run agents against Google's Gemini CLI
-(`gemini --experimental-acp`), defaulting to `gemini-2.5-flash` with thought
-chunk emission enabled. It follows the same thin-wrapper pattern as
-`OpenCodeACPAdapter` and hooks into the ACK integration suite.
+**Construction got stricter — this is the headline.** Core value objects now
+require factory construction and are fully immutable. Direct constructor calls on
+`PromptTemplate`, `Tool`, `Deadline`, `BundleConfig`, `Snapshot`, and
+`DispatchResult` now raise `TypeError` — you must call `.create(...)`. `Tool`,
+`ToolResult`, and `TaskCompletionContext` are frozen, so post-construction
+attribute assignment raises `FrozenInstanceError`. The old `update()` / `merge()`
+/ `map()` helpers on frozen dataclasses are gone; use `replace()`. Two new public
+symbols — `Constructable` and `allow_construction()` — anchor the pattern.
 
-**`wink debug` gets a complete UI overhaul.** The oscilloscope-inspired redesign
-replaces glassmorphism with flat dark surfaces, adds a `Cmd+K` command palette
-for cross-view search, a transcript minimap for jump-to-position navigation,
-resizable sidebar with `localStorage` persistence, line-number gutters and
-basic syntax highlighting in the filesystem view, and vim-style `G`/`gg`
-jump shortcuts.
+**Two new ways to run agents.** A **Gemini CLI ACP adapter** (`GeminiACPAdapter`)
+joins as a fourth runtime, and the **Codex App Server adapter gains a WebSocket
+transport** (managed-subprocess or fully remote) alongside the stdio default.
 
-**Toolchain check output becomes self-diagnosing.** Check failures that lack
-structured diagnostics now always surface their raw output inline — no more
-re-running with `--verbose` — and include an exact `Reproduce:` command so the
-fix is one paste away.
+**New default model: `gpt-5.4`** for the Codex App Server adapter (was
+`gpt-5.3-codex`).
 
-**Filesystem streaming and multiple large test suites are decomposed** into
-single-responsibility modules, cutting individual files from 1,000+ to a few
-hundred lines each while preserving all public APIs through re-exports.
+**Notable fixes.** A real hang in `OpenCodeEphemeralHome` (it was copying a live,
+multi-gigabyte SQLite database) is fixed; `make demo-claude` — crashing since the
+construction refactor — works again; and the Codex continuation loop no longer
+forwards a `None` feedback value as the next prompt.
+
+**`wink debug` is now dark-first** with a `Cmd+K` command palette, a clickable
+transcript minimap, a resizable/persisted sidebar, and JSON/Python syntax
+highlighting.
+
+**Under the hood: a large type-safety and tooling push.** The Claude Agent SDK,
+ACP, and OpenCode adapter packages are now fully type-checked after ~40+
+suppressions were removed and the Codex JSON-RPC protocol got real `TypedDict`s.
+Many lint rules were re-enabled, `vulture` dead-code detection is wired into
+`make check`, dependencies were upgraded with four CVE fixes (major jumps:
+`redis` 7→8, `claude-agent-sdk` 0.1→0.2, `rich` 14→15, Biome 1→2), and large
+source/test files were decomposed. `FakeClock.async_sleep()` now genuinely
+suspends async callers.
+
+---
+
+### ⚠️ Breaking Changes
+
+This is alpha software with no compatibility shims; the changes below require
+call-site updates.
+
+#### Validated construction via `.create()` and the `Constructable` base (#1138)
+
+The dataclass layer moved from an `Immutable`-style base (which auto-attached
+`update()` / `merge()` / `map()` helpers and a `__pre_init__` hook to frozen
+dataclasses) to a two-tier system:
+
+- Plain `@FrozenDataclass()` for simple value objects.
+- A new public **`Constructable`** base for types requiring validated
+  construction. Its `__init__` is blocked at runtime by a `ContextVar` guard, so
+  **direct construction raises `TypeError`** — use the `create()` classmethod. A
+  new public **`allow_construction()`** context manager unlocks `__init__` inside
+  `create()` and framework code (`serde.parse()` was updated to use it
+  automatically). Both symbols are exported from the top-level `weakincentives`
+  package.
+
+Migrated classes — **update call sites to `.create()`**:
+
+| Before | After |
+|--------|-------|
+| `PromptTemplate(ns=..., key=...)` | `PromptTemplate.create(ns=..., key=...)` |
+| `Tool[P, R](name=..., ...)` | `Tool[P, R].create(name=..., ...)` |
+| `Deadline(expires_at=...)` | `Deadline.create(expires_at=...)` |
+| `BundleConfig(target=...)` | `BundleConfig.create(target=...)` |
+| `Snapshot(...)` / `DispatchResult(...)` | `.create(...)` |
+
+The `update()` / `merge()` / `map()` functional-update helpers are **removed**
+from all frozen dataclasses; use `replace()` on `Constructable` subclasses for
+copy-with-changes. `Deadline.started_at` is no longer optional — `create()`
+always populates it. (`src/weakincentives/dataclasses/__init__.py`,
+`prompt/prompt.py`, `prompt/tool.py`, `deadlines.py`, `debug/bundle.py`,
+`runtime/session/snapshots.py`, `runtime/events/types.py`, `serde/parse.py`;
+138 files total; `llms.md` and `specs/DATACLASSES.md` updated.)
+
+#### Frozen `Tool`, `ToolResult`, and `TaskCompletionContext` (#1135, #1140)
+
+`Tool` (#1135) and then `ToolResult` and `TaskCompletionContext` (#1140) changed
+from mutable `@dataclass(slots=True)` to frozen `@FrozenDataclass()`. **Mutating
+any field after construction now raises `dataclasses.FrozenInstanceError`.** Use
+`dataclasses.replace()` for modified copies (already used internally by prompt
+rendering); constructor signatures are unchanged. #1140 also froze four internal
+config types (`SectionValidationConfig`, `ToolValidationConfig`,
+`HookConstraints`, `ReducerRegistration`).
+
+#### `FormalSpec.to_tla_config(next=...)` renamed to `next_formula=` (#1134)
+
+The keyword argument `next` on public
+`weakincentives.formal.FormalSpec.to_tla_config()` was renamed to `next_formula`
+(it shadowed the builtin). Update any keyword call. This shipped *inside a commit
+titled "remove stale ruff per-file-ignores,"* so it is easy to miss.
+
+#### `FakeClock.async_sleep()` now suspends (#1146)
+
+`await fake_clock.async_sleep(n)` for `n > 0` now **registers a waiter and
+suspends the coroutine** until monotonic time is advanced past the deadline
+(previously it advanced time and returned immediately). Async tests using
+`FakeClock` must now drive time forward or they will hang. `async_sleep(0)` still
+returns immediately; negative values still raise `ValueError`. `FakeClock` is a
+shipped utility, so this affects consumers using it in their own async tests.
+Cross-thread waiters resolve via `loop.call_soon_threadsafe()`.
+(`src/weakincentives/clock.py`)
+
+#### Default Codex model is now `gpt-5.4` (#1154)
+
+`CodexAppServerModelConfig` and the `make demo` / ACK defaults now default to
+`gpt-5.4` instead of `gpt-5.3-codex`. Pass an explicit `model=` to pin the old
+value.
+
+#### ACP adapter realigned to `agent-client-protocol` 0.9/0.10 (#1141)
+
+Alongside the new Codex JSON-RPC `TypedDict`s, the ACP adapter was updated to the
+current `agent-client-protocol` API: the permission response changed from a
+boolean `approved` to `RequestPermissionResponse(outcome=AllowedOutcome(...) |
+DeniedOutcome(...))`; `SessionNotification` now takes `session_id=` (was
+`sessionId=`); `FileSystemCapability` → `FileSystemCapabilities`; and
+`RequestError` takes positional `(code, message)`. These require
+`agent-client-protocol >= 0.9` (pin bumped to `>= 0.10.1`).
 
 ---
 
 ### Added
 
-#### Gemini CLI ACP adapter (`adapters/gemini_acp`)
+#### Gemini CLI ACP adapter (`adapters/gemini_acp`) (#1117)
 
 A new `GeminiACPAdapter` integrates Google's Gemini CLI as a fourth supported
-runtime. It is a thin subclass of `ACPAdapter` (the same pattern as
-`OpenCodeACPAdapter`) with the following Gemini-specific behavior:
+runtime — a thin subclass of `ACPAdapter` (the `OpenCodeACPAdapter` pattern):
 
-- **Config defaults**: `agent_bin="gemini"`, startup args
-  `("--experimental-acp",)`, `startup_timeout_s=15.0`,
-  `model_id="gemini-2.5-flash"`, `quiet_period_ms=200`,
+- **Config defaults** (`GeminiACPClientConfig` / `GeminiACPAdapterConfig`):
+  `agent_bin="gemini"`, startup args `("--experimental-acp",)`,
+  `startup_timeout_s=15.0`, `model_id="gemini-2.5-flash"`, `quiet_period_ms=200`,
   `emit_thought_chunks=True`.
-- **CLI flag injection**: overrides the new `_agent_spawn_args()` hook on
-  `ACPAdapter` to append `--model`, `--approval-mode`, and `--sandbox`
-  flags from config fields.
-- **Empty response detection**: raises `PromptEvaluationError` when Gemini
-  returns zero `AgentMessageChunk` objects (invalid model or configuration).
-- **Session setup no-op**: `_configure_session()` is a no-op because Gemini
-  does not implement `session/setModel` or `session/setMode`.
-- **Model validation no-op**: `_validate_model()` is a no-op because Gemini
-  does not return available model lists.
-- **Seatbelt sandbox support**: `_prepare_execution_env()` injects the
-  `SEATBELT_PROFILE` environment variable when `sandbox_profile` is set,
-  enabling macOS seatbelt profile selection.
-- **Sandbox+ACP incompatibility documented**: `--sandbox` re-launches
-  `gemini` via `sandbox-exec`, breaking ACP's stdio pipe protocol.
-  Experimentally verified on Gemini CLI v0.29.5; the `GeminiACPAdapterConfig`
-  docstring and `GEMINI_ACP_ADAPTER.md` warn against using both flags together.
+- **CLI flag injection** via a new `_agent_spawn_args()` hook on the base
+  `ACPAdapter`, appending `--model`, `--approval-mode`, and `--sandbox`.
+- **Empty-response detection** raises `PromptEvaluationError` when Gemini returns
+  no message chunks; `_validate_model()` and `_configure_session()` are no-ops
+  (Gemini exposes neither a model list nor `session/setModel`/`setMode`).
+- **Seatbelt sandbox**: `_prepare_execution_env()` injects `SEATBELT_PROFILE`
+  when `sandbox_profile` is set.
+- **Documented caveat**: `--sandbox` re-launches `gemini` via `sandbox-exec`,
+  which breaks ACP's stdio pipe — verified on Gemini CLI v0.29.5; do not combine
+  `--sandbox` with `--experimental-acp`.
+- New public constant `GEMINI_ACP_ADAPTER_NAME`. New `specs/GEMINI_ACP_ADAPTER.md`,
+  a `make demo-gemini` target, an ACK fixture (with a hardened `is_available()`
+  check — see Fixed), 31 unit tests, and a Gemini option in
+  `code_reviewer_example.py`. (`src/weakincentives/adapters/gemini_acp/`,
+  `specs/ADAPTERS.md`, `specs/ACP_ADAPTER.md`, `Makefile`)
 
-`ACPAdapter` gains a new `_agent_spawn_args()` override point that returns
-`self._client_config.agent_args` by default; subclasses can replace it to
-inject additional CLI arguments without touching spawn logic.
+#### WebSocket transport for the Codex App Server adapter (#1150)
 
-New files: `src/weakincentives/adapters/gemini_acp/__init__.py`,
-`adapter.py`, `config.py`; 31 unit tests in `tests/adapters/gemini_acp/`;
-`specs/GEMINI_ACP_ADAPTER.md` (509 lines); ACK fixture in
-`integration-tests/ack/adapters/gemini_acp.py`; `make demo-gemini` target;
-Gemini option added to `code_reviewer_example.py`.
-(`src/weakincentives/adapters/gemini_acp/`, `specs/GEMINI_ACP_ADAPTER.md`,
-`specs/ADAPTERS.md`, `specs/ACP_ADAPTER.md`, `Makefile`)
+`CodexAppServerClientConfig` gains a public `Transport = Literal["stdio",
+"websocket"]` selector plus `remote_url` and `ws_auth_token` fields, enabling
+three modes:
+
+- **stdio** (default, unchanged): spawns `codex app-server`, NDJSON over
+  stdin/stdout.
+- **managed WebSocket** (`transport="websocket"`): spawns `codex app-server
+  --listen ws://127.0.0.1:<port>` on a free port (with port-collision retries),
+  waits for TCP readiness, then connects.
+- **external WebSocket** (`remote_url="ws://…"`): connects to an already-running
+  server with no subprocess spawned. `ws_auth_token` is sent as
+  `Authorization: Bearer …` and is `repr`-hidden.
+
+WebSocket support requires the new optional extra **`weakincentives[codex-ws]`**
+(`websockets >= 13.0`); using it without the package raises `CodexClientError`
+with install guidance. (`src/weakincentives/adapters/codex_app_server/`,
+`specs/CODEX_APP_SERVER.md`; 25 new unit tests, 7 new transport integration tests)
+
+#### `vulture` dead-code detection wired into `make check` (#1118)
+
+`vulture` (already a dev dependency) is now a first-class `dead-code` checker in
+the unified toolchain via a new `parse_vulture()` parser and
+`create_dead_code_checker()` factory, so unused code surfaces as a structured
+`make check` failure rather than a standalone Make target. Shared guardrail
+helpers (`accumulate_usage`, `resolve_filesystem`) were also de-duplicated into a
+private `adapters/_shared/_guardrails.py`. (`toolchain/`,
+`src/weakincentives/adapters/_shared/`)
+
+#### `wink debug` command palette, minimap, and navigation (#1108)
+
+New interactive features in the debug viewer (see also the visual redesign under
+Changed):
+
+- **Command palette** (`Cmd+K` / `Ctrl+K`): fuzzy search across views, slices,
+  and filesystem files; keyboard-navigable.
+- **Transcript minimap**: a clickable colored scrubber that jumps to any entry.
+- **Resizable sidebar**: drag handle (180–500 px), width persisted to
+  `localStorage` (`wink-sidebar-width`).
+- **Filesystem view**: line-number gutter and basic JSON/Python syntax
+  highlighting.
+- **Keyboard nav**: `G` jumps to end, `gg` to start; the `?` shortcuts modal
+  documents all bindings. (`src/weakincentives/cli/static/`)
 
 ---
 
 ### Changed
 
-#### Dependency upgrades
+#### `wink debug` UI redesign — oscilloscope aesthetic (#1108)
 
-All Python dependencies upgraded to latest via `uv lock --upgrade`, with minimum
-version pins in `pyproject.toml` bumped to match. Notable direct/dev dependency
-upgrades since v0.27.0:
+The debug viewer's visual layer was rewritten: a **dark-first** signal-color
+palette (the default theme flips from light to dark), IBM Plex Mono / DM Sans
+typography, and flat surfaces replacing glassmorphism. The "Copy filtered"
+buttons were removed from the transcript and logs views. (`cli/static/{app.js,
+index.html,store.js,style.css}` and view modules)
 
-| Package | Old | New |
-|---------|-----|-----|
+#### Toolchain check failures surface raw output + a reproduce command (#1116)
+
+When a `make check` step fails without structured diagnostics, both
+`ConsoleFormatter` (≤50 lines) and `QuietFormatter` (≤30 lines) now print the raw
+output inline followed by an exact `Reproduce: <command>` line — no more
+re-running with `-v`. `CheckResult` gained a `command: tuple[str, ...]` field
+populated across all exit paths. (This is the dev/CI toolchain, not the shipped
+library.) (`toolchain/result.py`, `checker.py`, `output.py`)
+
+#### Adapter packages are now fully type-checked (#1141)
+
+The Claude Agent SDK, ACP, and OpenCode adapter packages were removed from the
+pyright/ty `exclude` lists and brought to zero suppressions where practical. This
+required real `TypedDict` definitions for the Codex App Server JSON-RPC protocol
+(18 new types in `adapters/codex_app_server/_types.py`) and a batch of `cast()`
+conversions, plus the ACP realignment noted under Breaking Changes.
+
+#### Dependency upgrades (#1130, #1139, #1154, #1157, #1161)
+
+Cumulative since v0.27.0 (minimum pins in `pyproject.toml`, resolved in
+`uv.lock`):
+
+| Package | v0.27.0 | Now |
+|---------|---------|-----|
 | claude-agent-sdk | 0.1.35 | 0.2.87 |
 | redis | 7.1.1 | 8.0.0 |
 | agent-client-protocol | 0.8.0 | 0.10.1 |
 | mcp | 1.26.0 | 1.27.2 |
 | fastapi | 0.129.0 | 0.136.3 |
 | uvicorn | 0.40.0 | 0.48.0 |
+| rich | 14.3.2 | 15.0.0 |
 | ruff | 0.15.1 | 0.15.15 |
 | pyright | 1.1.408 | 1.1.409 |
 | ty | 0.0.16 | 0.0.40 |
-| hypothesis | 6.151.6 | 6.155.1 |
-| pytest-randomly | 4.0.1 | 4.1.0 |
+| @biomejs/biome | 1.9.4 | 2.4.16 |
 
-`redis` 7→8 and `claude-agent-sdk` 0.1→0.2 are major/minor jumps that pass the
-full suite unchanged. The `websockets` pin is intentionally left at `>=13.0`
-(loose, for codex-ws compatibility). Notable transitive upgrades:
-`starlette` 1.0.0 → 1.2.1, `rpds-py` 0.30.0 → 2026.5.1 (date-based versioning),
-`pydantic` 2.13.1 → 2.13.4, `sse-starlette` 3.3.4 → 3.4.4, `cryptography`
-46.0.7 → 48.0.0.
-
-The frontend linter `@biomejs/biome` was upgraded across its major boundary,
-`^1.9.4` → `^2.4.16`. The config was migrated to the 2.x schema; the two new CSS
-recommended rules (`noImportantStyles`, `noDescendingSpecificity`) are disabled
-to preserve the existing stylesheet. New `useIterableCallbackReturn` errors were
-fixed by giving `forEach` callbacks block bodies, `noSecrets` suppression
-comments moved to the `lint/security/*` namespace, and safe autofixes were
-applied (`Object.hasOwn`, de-negated ternaries).
-
-To accommodate `pyright` 1.1.409's new deprecation warnings on
-`@contextmanager`/`@asynccontextmanager` return types, all such functions in
-`src/weakincentives/` switched their return annotations from
-`Iterator[T]` / `AsyncIterator[T]` to `Generator[T]` / `AsyncGenerator[T]`.
-A handful of stale `# pyright: ignore[reportPrivateUsage]` and
-`# ty: ignore[invalid-argument-type]` directives were also dropped now that the
-upgraded type checkers no longer require them. The `ruff` 0.15.15 preview rule
-`RUF075` (fallible-context-manager) is suppressed, `ty` 0.0.40's stricter
-`setdefault` overload resolution required a `no-matching-overload` ignore in
-`serde/schema.py`, and a now-unused `ty` ignore in `adapters/config.py` was
-removed.
-
-#### `wink debug` UI redesign — oscilloscope aesthetic (#1108)
-
-The debug viewer's entire visual layer is replaced. Changes affect
-`cli/static/{app.js,index.html,store.js,style.css}` and all view modules
-(~2,500 line net change):
-
-- **Dark-first theme**: signal-color palette (cyan/green/amber/red/violet),
-  IBM Plex Mono + DM Sans typography, tighter spacing, flat surfaces —
-  glassmorphism card shadows and frosted-glass panels are removed.
-- **Command palette** (`Cmd+K`): full-text search across slices, files, and
-  navigation commands. Items are ranked and keyboard-navigable; pressing Enter
-  executes the selected action and closes the overlay.
-- **Transcript minimap**: a horizontal colored scrubber rendered below the
-  transcript pane shows entry types as colored ticks. Clicking a tick scrolls
-  the transcript to that position.
-- **Resizable sidebar**: a drag handle on the right edge of the sidebar lets
-  users resize it between 180 px and 500 px. The chosen width is stored in
-  `localStorage` under `wink-sidebar-width` and restored on next open.
-- **Filesystem enhancements**: line-number gutter added to file content view;
-  basic syntax highlighting for `.json` files (key/value coloring) and `.py`
-  files (keyword coloring); `.md` files expand to full panel height.
-- **Keyboard shortcuts**: `G` jumps to end of transcript/logs; `gg` (double
-  keystroke) jumps to start. The `?` shortcuts modal is updated to include all
-  new bindings.
-- **UI polish**: redundant panel headings removed; "Copy filtered" buttons
-  dropped; Environment tab shortcut fixed.
-
-#### Toolchain: check failures surface raw output and reproduce commands (#1116)
-
-Previously, understanding why a check failed without structured diagnostics
-required re-running `python check.py <name> -v`. Now the output formatters
-always show the root cause inline:
-
-- `CheckResult` gains a `command: tuple[str, ...]` field (defaults to empty
-  tuple for backward compatibility) populated by `SubprocessChecker` and
-  `AutoFormatChecker` across all exit paths (success, failure, timeout,
-  `FileNotFoundError`).
-- `ConsoleFormatter`: when `result.diagnostics` is empty and `result.output`
-  is non-empty, displays up to 50 lines of raw output followed by a count of
-  remaining lines and a `Reproduce: <command>` line (using `shlex.join`).
-- `QuietFormatter`: same behavior, but truncates at 30 lines.
-- Structured diagnostics continue to take priority; the raw-output path is
-  only reached when `diagnostics` is empty.
-(`toolchain/checker.py`, `toolchain/output.py`, `toolchain/result.py`)
+`redis` 7→8, `claude-agent-sdk` 0.1→0.2, `rich` 14→15, and Biome 1→2 are
+major-version jumps that pass the full suite. **Security:** the upgrades pulled in
+fixes for CVE-2026-40347 (`python-multipart`), CVE-2026-39892 (`cryptography`),
+CVE-2026-4539 (`pygments`), and CVE-2025-71176 (`pytest`); CVE-2026-4539 was also
+added to the `pip-audit` ignore list. The Biome 2 upgrade migrated `biome.json`
+to the 2.x schema (CSS `noImportantStyles`/`noDescendingSpecificity` left
+disabled) and applied mechanical JS fixes (`Object.hasOwn`, block-body `forEach`
+callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
+`@asynccontextmanager` return types across `src/` moved from
+`Iterator`/`AsyncIterator` to `Generator`/`AsyncGenerator`.
 
 ---
 
-### Internal / Refactoring
+### Fixed
 
-#### Filesystem streaming decomposed into four modules (#1112)
+- **`OpenCodeEphemeralHome` hang (#1142).** Ephemeral-home setup copied the entire
+  `~/.local/share/opencode/` directory — including a live, multi-gigabyte SQLite
+  database held open by the running agent — via `shutil.copytree`, which blocked
+  indefinitely (macOS `fcopyfile`). It now copies only `auth.json` via
+  `shutil.copy2`.
+- **`make demo-claude` crash (#1144).** The code-review demo called
+  `PromptTemplate[…](…)` directly, which began raising `TypeError` after the
+  `Constructable` migration (#1138); switched to `.create()`.
+- **Codex App Server continuation loop (#1157).** Added a `feedback is not None`
+  guard so a `None` feedback value is no longer forwarded as the next prompt text
+  when the loop continues. (Shipped *inside a commit titled "type annotations for
+  pyright 1.1.409."*)
+- **Gemini availability check (#1142).** The ACK fixture's `is_available()` now
+  runs `gemini --version` (not just `shutil.which`) so a present-but-broken
+  install (e.g. a Node version mismatch) skips cleanly instead of erroring.
+  (Test infrastructure.)
 
-`src/weakincentives/filesystem/_streams.py` (previously ~1,034 lines) is
-split into focused single-responsibility modules while `_streams.py` becomes a
-thin re-export layer for backward compatibility:
+---
 
-- `_stream_protocols.py`: `ByteReader`, `ByteWriter`, `TextReader` protocol
-  definitions.
-- `_stream_host.py`: `HostByteReader`, `HostByteWriter` — native file-handle
-  implementations.
-- `_stream_memory.py`: `MemoryByteReader`, `MemoryByteWriter` — in-memory
-  buffer implementations.
-- `_stream_text.py`: `DefaultTextReader` — lazy UTF-8 decoding over any
-  `ByteReader`.
+### Internal / Refactoring / Tests / Docs
 
-#### ACP adapter helpers extracted (#1112)
-
-Two helper modules are extracted from the monolithic `adapters/acp/adapter.py`
-and exported through `adapters/acp/__init__.py`:
-
-- `adapters/acp/_env.py`: `build_env()` helper for subprocess environment
-  construction (also used by the new `GeminiACPAdapter`).
-- `adapters/acp/_prompt_loop.py`: `drain_quiet_period()` and related prompt
-  loop helpers.
-
-#### Additional source decompositions (#1112)
-
-- `runtime/session/_session_helpers.py` extracted from `session.py` /
-  `session_dispatch.py` with session-level constants and helpers.
-- `contrib/tools/_memory_types.py` and `_memory_writer.py` extracted from
-  `filesystem_memory.py`.
-
-#### Comprehensive test suite reorganization (#1112)
-
-~30 large monolithic test files are split into focused modules (each ~300–700
-lines) across every major subsystem. Representative decompositions:
-
-- **Codex App Server**: `test_adapter.py` → `test_adapter_schema.py`,
-  `test_adapter_session.py`, `test_adapter_loop.py`, `test_client_io.py`,
-  `test_protocol_and_skills.py`.
-- **Claude Agent SDK bridge**: `test_bridge.py` → `test_bridge_session.py`,
-  `test_bridge_mcp.py`, `test_bridge_resources.py`.
-- **Claude Agent SDK isolation**: `test_isolation.py` → six focused modules
-  (`test_isolation_ephemeral.py`, `test_isolation_auth.py`,
-  `test_isolation_aws.py`, `test_isolation_skills.py`, `test_isolation_2.py`,
-  `test_isolation_3.py`).
-- **Transcript collector**: `test_transcript_collector.py` →
-  `test_transcript_collector_pending.py`, `test_transcript_fallback.py`,
-  `test_transcript_text_extraction.py`.
-- **ACP adapter**: `test_adapter_protocol.py` → `test_adapter_session.py`.
-- **CLI debug app**: `test_wink_debug_app.py` → `test_wink_debug_environment.py`,
-  `test_wink_debug_logs.py`, `test_wink_debug_transcript.py`.
-- **Evals loop**: `test_loop.py` → `test_loop_bundles.py`, `test_loop_dlq.py`,
-  `test_session_evaluator_combinators.py`.
-- Multiple other suites (runtime lifecycle, mailbox, serde, prompts, resources,
-  toolchain parsers/checkers) receive the same treatment.
-
-No behavior changes; all public APIs are preserved through re-exports.
+- **Type-suppression cleanup.** ~41 suppressions removed from the SDK/Codex
+  adapters via `TypeGuard` predicates and `cast()` (#1143); blanket pyright
+  suppressions removed from `serde` (#1136); further type-ignore cleanup across
+  the tree (#1139, #1131).
+- **Lint hardening.** Re-enabled many ruff rules and fixed the underlying
+  violations, removing stale per-file-ignores (#1131, #1133, #1134);
+  modernizations include `Self` return types, `str.removesuffix`,
+  tuple-`startswith`, and set-literal membership. (#1134 also carries the public
+  `to_tla_config` rename — see Breaking Changes.)
+- **Source decomposition (#1112).** `filesystem/_streams.py` was split into
+  `_stream_protocols` / `_stream_host` / `_stream_memory` / `_stream_text` (kept
+  as a re-export shim); ACP `_env.py` (now exported, reused by the Gemini adapter)
+  and `_prompt_loop.py` were extracted; `runtime/session/_session_helpers.py` and
+  `contrib/tools/_memory_types.py` / `_memory_writer.py` were carved out. Public
+  APIs preserved via re-exports.
+- **Test suite reorganization.** ~30 monolithic test files split into focused
+  modules across every subsystem (#1112); oversized test functions decomposed into
+  ≤50-line tests (#1145).
+- **Deterministic time in tests.** `time.sleep()` replaced with `FakeClock` /
+  `os.utime` in watchdog and CLI tests (#1148, #1125); a reaper-thread cleanup
+  test added (#1149); waiter-based `FakeClock.async_sleep` rolled through async
+  tests (#1146 — see Breaking Changes for the shipped behavior change).
+- **Dependency injection for testability (#1124).** Added underscore-prefixed
+  injection seams to shipped code — `jittered_backoff(_uniform=…)` and
+  `LocalPromptOverridesStore(_git_toplevel_fn=…)` — replacing monkeypatching in
+  tests.
+- **Spec docs trimmed (#1121).** Verbose code examples and boilerplate removed
+  from 26 `specs/*.md` files (net ~−2,800 lines); despite the "consolidate" title,
+  no specs were merged or deleted.
 
 ---
 
