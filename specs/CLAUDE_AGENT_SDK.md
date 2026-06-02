@@ -118,9 +118,16 @@ where AWS credentials are mounted (e.g., `/mnt/aws` instead of `~/.aws`).
 
 ## Isolation Behavior
 
-When `isolation` is set:
+Isolation is **always active**. When `isolation` is `None` on the client config,
+the adapter creates a default `IsolationConfig()` — it does not run against the
+host environment. The default config enables the sandbox and blocks all tool
+network access.
+
+For any `IsolationConfig` (explicit or default):
 
 - Creates ephemeral `HOME` with `$HOME/.claude/settings.json`
+- Applies `SandboxConfig()` defaults (enabled) when `sandbox` is `None`
+- Applies `NetworkPolicy.no_network()` when `network_policy` is `None`
 - Passes `env` and `setting_sources=["user"]` to SDK
 
 **Notes:**
