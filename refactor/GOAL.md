@@ -166,3 +166,13 @@ ______________________________________________________________________
 | [M6](M6.md) | Remote facets over a transport | `RemoteBackend`/`RemoteShell`/`RemoteSandbox`; loopback-tested |
 | [M7](M7.md) | Remote provider — Codex in a container | The reference topology, end-to-end |
 | [M8](M8.md) | (Optional) Unify the tool surface | Every tool call funnels through the sandbox; transactional totality |
+
+______________________________________________________________________
+
+## Beyond M8 — Continuous Review
+
+The sandbox arc (M1–M8) is the seed, not the whole ambition. [REVIEW.md](REVIEW.md)
+is a repeatable workflow that audits the entire library against a quality rubric
+and emits further milestones (`M9.md`+) to level up code quality, cut technical
+debt, and keep this best-in-class. Its living output — a prioritized,
+evidence-based candidate list — is [BACKLOG.md](BACKLOG.md).
