@@ -175,4 +175,11 @@ The sandbox arc (M1–M8) is the seed, not the whole ambition. [REVIEW.md](REVIE
 is a repeatable workflow that audits the entire library against a quality rubric
 and emits further milestones (`M9.md`+) to level up code quality, cut technical
 debt, and keep this best-in-class. Its living output — a prioritized,
-evidence-based candidate list — is [BACKLOG.md](BACKLOG.md).
+evidence-based list — is [BACKLOG.md](BACKLOG.md).
+
+Its first run (2026-06-03, a 7-agent reviewer team over all of
+`src/weakincentives/`) produced **M9–M18** from ~56 evidence-cited findings. Wave 1
+is promoted to files — [M9](M9.md) (dead-code sweep), [M10](M10.md) (typed
+boundaries / `session_id`), [M11](M11.md) (spec reconciliation) — with M12–M18
+(adapter consolidation, runtime de-leaking, CLI/bundle consolidation, type-escape
+burn-down) scoped in the backlog.
