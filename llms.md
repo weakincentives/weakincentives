@@ -344,7 +344,6 @@ from weakincentives.adapters.acp import (
     ACPAdapterConfig,
     ACPClient,
     ACPClientConfig,
-    ACPSessionState,
     McpServerConfig,
 )
 ```

@@ -41,11 +41,11 @@ from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.transcript import TranscriptEmitter
 from ...runtime.watchdog import Heartbeat
 from ...types import ACP_ADAPTER_NAME, AdapterName
+from .._shared import run_async
 from .._shared._bridge import BridgedTool, create_bridged_tools
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
-from ._async import run_async
 from ._env import build_env
 from ._guardrails import append_feedback as _append_feedback
 from ._mcp_http import MCPHttpServer, create_mcp_tool_server

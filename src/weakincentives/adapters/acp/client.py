@@ -47,7 +47,6 @@ class ACPClient:
         self._config = config
         self._workspace_root = workspace_root
         self._clock = clock
-        self._accumulator: Any = None  # Lazy: SessionAccumulator
         self._transcript_bridge: ACPTranscriptBridge | None = None
         self._last_update_time: float | None = None
         self._message_chunks: list[Any] = []
@@ -63,10 +62,6 @@ class ACPClient:
         self._thought_chunks = []
         self._tool_call_tracker = {}
         self._last_update_time = None
-
-    def set_accumulator(self, accumulator: Any) -> None:
-        """Set the SessionAccumulator instance."""
-        self._accumulator = accumulator
 
     def set_transcript_bridge(self, bridge: ACPTranscriptBridge) -> None:
         """Set the transcript bridge for emitting transcript entries."""
@@ -94,14 +89,7 @@ class ACPClient:
 
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
         """Handle ``session/update`` notification."""
-        from acp.schema import SessionNotification
-
         self._last_update_time = self._clock.monotonic()
-
-        # Wrap in SessionNotification for accumulator
-        notification = SessionNotification(session_id=session_id, update=update)
-        if self._accumulator is not None:
-            self._accumulator.apply(notification)
 
         # Emit transcript entry
         if self._transcript_bridge is not None:

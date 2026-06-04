@@ -47,6 +47,7 @@ from uuid import UUID, uuid4
 from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ..errors import RestoreFailedError
+from ..resources.protocols import Snapshotable
 from ..serde import dump, parse, resolve_type_identifier, type_identifier
 from ..types import JSONValue
 from .session.protocols import SessionProtocol
@@ -55,7 +56,6 @@ from .session.snapshots import (
     SnapshotRestoreError,
     SnapshotSerializationError,
 )
-from .snapshotable import Snapshotable
 
 if TYPE_CHECKING:
     from ..resources.context import ScopedResourceContext

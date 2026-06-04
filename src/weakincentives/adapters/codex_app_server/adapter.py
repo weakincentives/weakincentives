@@ -35,11 +35,11 @@ from ...runtime.session.protocols import SessionProtocol
 from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.watchdog import Heartbeat
 from ...types import AdapterName
+from .._shared import run_async
 from .._shared._bridge import create_bridged_tools
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
-from ._async import run_async
 from ._ephemeral_home import CodexEphemeralHome
 from ._protocol import execute_protocol
 from ._response import build_response

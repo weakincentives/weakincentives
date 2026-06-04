@@ -316,6 +316,14 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
 - **Spec docs trimmed (#1121).** Verbose code examples and boilerplate removed
   from 26 `specs/*.md` files (net ~−2,800 lines); despite the "consolidate" title,
   no specs were merged or deleted.
+- **Dead-code and backcompat-shim sweep.** Removed code kept alive only by its own
+  tests or bridging completed moves (~400 LOC, no behavior change): `Tool.wrap` (use
+  `Tool[...].create()`); the unused `safe_hook_wrapper` SDK hook helper; the
+  never-dispatched `ACPSessionState` slice and the dead ACP client accumulator branch
+  (`ACPSessionState` dropped from the `acp`/`opencode_acp`/`gemini_acp` exports); and
+  several re-export shims — `runtime/snapshotable.py` (`Snapshotable` now lives in
+  `resources`), `runtime/session/dataclasses.py`, and the `acp`/`codex_app_server`
+  `_async.py` stubs.
 
 ---
 
