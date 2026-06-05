@@ -174,6 +174,15 @@ class TaskExample(Section[TaskExampleParamsT_co]):
                     section_path=(key,),
                     placeholder="steps",
                 )
+            # Annotations don't guarantee a real ToolExample at runtime, and
+            # downstream validation dereferences example.input/.output directly.
+            example_obj = cast(object, step.example)
+            if not isinstance(example_obj, ToolExample):
+                raise PromptValidationError(
+                    f"Step {idx} example must be a ToolExample instance",
+                    section_path=(key,),
+                    placeholder="steps",
+                )
             # Validate tool name format
             _ = _validate_tool_name(step.tool_name, section_path=(key,))
             validated_steps.append(step)

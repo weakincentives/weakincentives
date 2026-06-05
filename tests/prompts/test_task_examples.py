@@ -329,6 +329,27 @@ class TestTaskExample:
 
         assert "must be a TaskStep instance" in str(exc.value)
 
+    def test_taskexample_validates_example_type(self) -> None:
+        """Test that a step whose example is not a ToolExample raises an error."""
+        # Cast to bypass static type checking for this runtime validation test
+        from typing import Any, cast
+
+        bad_example: Any = {"input": None, "output": None}
+        step = TaskStep(
+            tool_name="test",
+            example=cast("ToolExample[Any, Any]", bad_example),
+        )
+
+        with pytest.raises(PromptValidationError) as exc:
+            TaskExample(
+                key="bad-example",
+                objective="Valid objective",
+                outcome="Done",
+                steps=[step],
+            )
+
+        assert "example must be a ToolExample instance" in str(exc.value)
+
     def test_taskexample_children_is_empty(self) -> None:
         example = TaskExample(
             key="no-children",
