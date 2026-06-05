@@ -23,12 +23,13 @@ wink debug [bundle-path]
     │
     ├── HTTP Server (localhost:8000)
     │   ├── /api/meta          - Bundle metadata
+    │   ├── /api/manifest      - Full bundle manifest
     │   ├── /api/slices/:type  - Session slice data
     │   ├── /api/logs          - Log entries (paginated)
     │   ├── /api/logs/facets   - Logger/event/level facets for filters
     │   ├── /api/transcript    - Transcript entries (paginated)
     │   ├── /api/transcript/facets - Source/type facets for filters
-    │   ├── /api/request/*     - Task input/output
+    │   ├── /api/environment   - Captured environment metadata
     │   ├── /api/files         - Filesystem listing
     │   └── /api/files/:path   - File content
     │

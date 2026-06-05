@@ -32,7 +32,7 @@ expected outputs for single operations.
 | `steps` | `tuple[TaskStep, ...]` | Ordered tool invocations |
 | `title` | `str \| None` | Display title (auto-derived) |
 | `enabled` | `EnabledPredicate \| None`| Conditional inclusion |
-| `visibility`| `VisibilitySelector` | FULL, SUMMARY, or HIDDEN |
+| `visibility`| `VisibilitySelector` | FULL or SUMMARY |
 | `summary` | `str \| None` | Abbreviated version for SUMMARY |
 
 ### TaskExamplesSection

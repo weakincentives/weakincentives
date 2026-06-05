@@ -311,18 +311,20 @@ Options:
 |-------|-------------|
 | `/api/meta` | Bundle metadata summary |
 | `/api/manifest` | Full bundle manifest |
-| `/api/request/input` | Request input data |
-| `/api/request/output` | Request output data |
 | `/api/slices/{type}` | Slice items (paginated) |
-| `/api/logs` | Log entries (paginated, filterable by level) |
-| `/api/files` | Filesystem listing |
-| `/api/files/{path}` | File content |
+| `/api/logs` | Log entries (paginated, filterable) |
+| `/api/logs/facets` | Logger/event/level facets for log filters |
+| `/api/transcript` | Transcript entries (paginated, filterable) |
+| `/api/transcript/facets` | Source/type facets for transcript filters |
+| `/api/environment` | Captured environment (system, python, git, container, env vars) |
 | `/api/config` | Configuration |
 | `/api/metrics` | Metrics |
 | `/api/error` | Error details |
+| `/api/files` | Filesystem listing |
+| `/api/files/{path}` | File content |
 | `/api/bundles` | List bundles in directory |
-| `/api/switch` | Switch to different bundle |
-| `/api/reload` | Reload current bundle |
+| `/api/switch` | Switch to a different bundle (POST) |
+| `/api/reload` | Reload the current bundle (POST) |
 
 ## Bundle Naming
 

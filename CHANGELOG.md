@@ -348,6 +348,18 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
   and the `acp`/`codex_app_server` `_async.py` stubs. The removals that change public
   call surfaces — `Tool.wrap()` and the `ACPSessionState` export — are called out
   under Breaking Changes.
+- **Spec ↔ code reconciliation (docs only).** Erased doc/spec claims with no
+  implementation behind them (these render through `wink debug` and `wink docs`):
+  the `serde` docstrings now describe `__type__` polymorphism as *manual*
+  discriminator helpers — `parse()`/`dump()` never read or write the discriminator;
+  the `prompt` docs drop the non-existent `HIDDEN` visibility level (sections are
+  excluded via an `enabled` predicate, not a third level — also fixed in
+  `specs/EXAMPLES.md`); the `wink debug` API-route tables in `DEBUG_BUNDLE.md` /
+  `WINK_DEBUG.md` now match `debug_app.py` (dropped the phantom `/api/request/*`;
+  added `/api/manifest`, `/api/logs/facets`, `/api/transcript`,
+  `/api/transcript/facets`, `/api/environment`); and the ACP/Codex specs drop the
+  removed `ACPSessionState` session-reuse section plus the stale `_state.py` /
+  `_async.py` module entries.
 
 ---
 

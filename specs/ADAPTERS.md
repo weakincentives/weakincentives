@@ -140,9 +140,9 @@ other's private modules.
 | `VisibilityExpansionSignal` | `_shared/_visibility_signal.py` | Thread-safe signal for progressive disclosure |
 | `run_async()` | `_shared/_async_utils.py` | Async/sync bridging via `asyncio.run()` |
 
-Both the Claude Agent SDK adapter and Codex App Server adapter re-export from
-`_shared` via thin compatibility modules (`claude_agent_sdk/_bridge.py`,
-`codex_app_server/_async.py`, etc.).
+The Claude Agent SDK adapter re-exports several `_shared` helpers via thin
+compatibility modules (e.g. `claude_agent_sdk/_bridge.py`); the ACP and Codex
+App Server adapters import from `_shared` directly.
 
 ## Guardrails
 

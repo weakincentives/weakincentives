@@ -108,13 +108,13 @@ src/weakincentives/adapters/acp/
   adapter.py               # ACPAdapter (full ACP protocol flow)
   config.py                # ACPClientConfig, ACPAdapterConfig
   client.py                # ACPClient (generic Client implementation)
-  _state.py                # ACPSessionState slice
+  _env.py                  # Environment variable helpers (build_env)
   _events.py               # ACP updates → WINK events mapping
+  _prompt_loop.py          # Prompt loop helpers extracted from ACPAdapter
   _structured_output.py    # structured_output MCP tool
   _mcp_http.py             # HTTP transport for in-process MCP server
   _guardrails.py           # Tool policies, feedback, task completion helpers
   _transcript.py           # ACP transcript bridge
-  _async.py                # asyncio helpers (re-export run_async)
 ```
 
 ## Configuration
@@ -363,12 +363,6 @@ maps ACP `Usage` to WINK `TokenUsage`:
 | `cached_read_tokens` | `cached_tokens` |
 | `thought_tokens` | (logged, not mapped) |
 
-## Session State
-
-`ACPSessionState` at `src/weakincentives/adapters/acp/_state.py:23`:
-frozen dataclass with `session_id`, `cwd`, `workspace_fingerprint` for
-session reuse.
-
 ## Subclass Hooks
 
 `ACPAdapter` exposes four protected methods for agent-specific behavior:
@@ -434,7 +428,6 @@ Tests at `tests/adapters/acp/`:
 | `test_events.py` | Event dispatch and token usage extraction |
 | `test_mcp_http.py` | `MCPHttpServer` lifecycle tests |
 | `test_structured_output.py` | `StructuredOutputTool` tests |
-| `test_state.py` | `ACPSessionState` tests |
 | `conftest.py` | Mock ACP types and fixtures |
 
 ## Agent-Specific Behaviors

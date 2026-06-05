@@ -15,7 +15,7 @@
 This package provides type-safe serialization (dump) and deserialization (parse)
 for Python dataclasses without external dependencies like Pydantic. It supports
 automatic type coercion, constraint validation via ``Annotated`` metadata, and
-polymorphic union handling via ``__type__`` discriminators.
+manual ``__type__`` discriminator helpers for polymorphic unions.
 
 Core Functions
 --------------
@@ -176,16 +176,25 @@ Parse generic dataclasses by providing concrete type arguments:
     assert result.value == 42
     assert result.items == [1, 2, 3]
 
-Polymorphic Unions with __type__
---------------------------------
-For union types where the concrete type must be determined at runtime, use the
-``__type__`` field as a discriminator. The type identifier is the fully
-qualified path ``module:ClassName``.
+Polymorphic Unions with __type__ (Manual)
+-----------------------------------------
+``parse()`` and ``dump()`` do not read or write a discriminator automatically:
+``parse()`` treats an incoming ``__type__`` key as an extra field (ignored by
+default, rejected when ``extra="forbid"``) and ``dump()`` never emits one. For
+union types whose concrete type must be recovered at runtime, the caller wires
+the discriminator manually with the helpers below. The type identifier is the
+fully qualified path ``module:ClassName``.
 
 ::
 
     from dataclasses import dataclass
-    from weakincentives.serde import parse, dump, type_identifier, resolve_type_identifier
+    from weakincentives.serde import (
+        TYPE_REF_KEY,
+        dump,
+        parse,
+        resolve_type_identifier,
+        type_identifier,
+    )
 
     @dataclass
     class TextMessage:
@@ -197,19 +206,14 @@ qualified path ``module:ClassName``.
         width: int
         height: int
 
-    # Get the type identifier for a class
-    type_id = type_identifier(TextMessage)
-    # Returns: "mymodule:TextMessage"
+    # On the way out, the caller adds the discriminator explicitly.
+    msg = TextMessage(content="Hello, world!")
+    data = {TYPE_REF_KEY: type_identifier(type(msg)), **dump(msg)}
+    # data == {"__type__": "mymodule:TextMessage", "content": "Hello, world!"}
 
-    # Include __type__ in serialized data for polymorphic deserialization
-    data = {
-        "__type__": "mymodule:TextMessage",
-        "content": "Hello, world!",
-    }
-
-    # Resolve the type and parse
-    cls = resolve_type_identifier(data["__type__"])
-    message = parse(cls, data)
+    # On the way in, the caller resolves the type, then parses the payload.
+    cls = resolve_type_identifier(data[TYPE_REF_KEY])
+    restored = parse(cls, data)
 
 The ``TYPE_REF_KEY`` constant holds the discriminator field name (``"__type__"``).
 
