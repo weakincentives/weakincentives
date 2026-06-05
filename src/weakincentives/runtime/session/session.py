@@ -160,7 +160,7 @@ class Session(SessionProtocol):
             msg = "Session created_at must be timezone-aware."
             raise ValueError(msg)
 
-        self.session_id: UUID = resolved_session_id
+        self._session_id: UUID = resolved_session_id
         self.created_at: datetime = resolved_created_at.astimezone(UTC)
 
         if dispatcher is None:
@@ -443,6 +443,13 @@ class Session(SessionProtocol):
     # ──────────────────────────────────────────────────────────────────────
     # Properties
     # ──────────────────────────────────────────────────────────────────────
+
+    @property
+    @override
+    def session_id(self) -> UUID:
+        """Return the unique identifier assigned to this session."""
+
+        return self._session_id
 
     @property
     @override

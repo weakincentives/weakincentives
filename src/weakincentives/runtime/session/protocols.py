@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, Self
+from uuid import UUID
 
 from ...types.dataclass import SupportsDataclass
 from ..events.types import DispatchResult, TelemetryDispatcher
@@ -64,6 +65,11 @@ class SessionProtocol(Protocol):
         policies: frozenset[SlicePolicy] = DEFAULT_SNAPSHOT_POLICIES,
         include_all: bool = False,
     ) -> SnapshotProtocol: ...
+
+    @property
+    def session_id(self) -> UUID | None:
+        """Unique identifier assigned to this session, when available."""
+        ...
 
     @property
     def dispatcher(self) -> TelemetryDispatcher: ...

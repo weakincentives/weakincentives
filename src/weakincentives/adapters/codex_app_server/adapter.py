@@ -161,7 +161,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         prompt_text = rendered.text
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
 
-        session_id = getattr(session, "session_id", None)
+        session_id = session.session_id
         render_event_id = uuid4()
         created_at = _utcnow()
 

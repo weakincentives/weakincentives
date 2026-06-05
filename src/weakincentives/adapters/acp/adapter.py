@@ -165,7 +165,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
         adapter_name = self._adapter_name()
 
-        session_id = getattr(session, "session_id", None)
+        session_id = session.session_id
         render_event_id = uuid4()
         created_at = _utcnow()
 
@@ -306,7 +306,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         )
 
         # Create transcript bridge for debug bundle visibility.
-        session_id = getattr(session, "session_id", None)
+        session_id = session.session_id
         emitter = TranscriptEmitter(
             prompt_name=prompt_name,
             adapter=str(adapter_name),
@@ -438,7 +438,7 @@ class ACPAdapter(ProviderAdapter[Any]):
                 prompt_name=prompt_name,
                 adapter=adapter_name,
                 result=response,
-                session_id=getattr(session, "session_id", None),
+                session_id=session.session_id,
                 created_at=_utcnow(),
                 usage=usage,
                 run_context=run_context,

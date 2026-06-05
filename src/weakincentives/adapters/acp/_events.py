@@ -68,7 +68,7 @@ def dispatch_tool_invoked(  # noqa: PLR0913
         name=f"acp:{title}",
         params={},
         result=result,
-        session_id=getattr(session, "session_id", None),
+        session_id=session.session_id,
         created_at=SYSTEM_CLOCK.utcnow(),
         usage=None,
         rendered_output=rendered_output,

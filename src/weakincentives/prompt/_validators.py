@@ -30,6 +30,8 @@ from .tool import Tool
 if TYPE_CHECKING:
     from .registry import PromptRegistry, SectionNode
     from .section import Section
+    from .task_examples import TaskExample, TaskStep
+    from .tool import ToolExample
 
 
 # ---------------------------------------------------------------------------
@@ -345,12 +347,12 @@ def validate_task_examples(
 
 
 def _validate_task_example_outcome(
-    task_example: object,
+    task_example: TaskExample[Any],
     path: SectionPath,
     structured_output_type: type[SupportsDataclass] | None,
 ) -> None:
     """Validate that task example outcome matches prompt's output type."""
-    outcome = getattr(task_example, "outcome", None)
+    outcome = task_example.outcome
 
     if structured_output_type is None:
         # Prompt has no structured output - outcome must be a string
@@ -379,17 +381,17 @@ def _validate_task_example_outcome(
 
 
 def _validate_task_example_steps(
-    task_example: object,
+    task_example: TaskExample[Any],
     path: SectionPath,
     tool_name_registry: Mapping[str, SectionPath],
     tool_instances: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
 ) -> None:
     """Validate steps in a task example."""
     available_tools = sorted(tool_name_registry.keys())
-    steps = getattr(task_example, "steps", ())
+    steps = task_example.steps
 
     for step_idx, step in enumerate(steps):
-        tool_name = getattr(step, "tool_name", "")
+        tool_name = step.tool_name
 
         # Check tool name exists
         if tool_name not in tool_name_registry:
@@ -415,14 +417,14 @@ def _validate_task_example_steps(
 
 
 def _validate_step_type_coherence(
-    step: object,
+    step: TaskStep[Any, Any],
     step_idx: int,
     tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
     path: SectionPath,
 ) -> None:
     """Validate that step example types match the tool's types."""
-    example = getattr(step, "example", None)
-    tool_name = getattr(step, "tool_name", "unknown")
+    example = step.example
+    tool_name = step.tool_name
 
     _validate_step_input_type(example, step_idx, tool_name, tool.params_type, path)
     _validate_step_output_type(
@@ -431,16 +433,16 @@ def _validate_step_type_coherence(
 
 
 def _validate_step_input_type(
-    example: object,
+    example: ToolExample[Any, Any],
     step_idx: int,
     tool_name: str,
     expected_type: type[SupportsDataclass | None],
     path: SectionPath,
 ) -> None:
     """Validate step input matches expected params type."""
-    example_input = getattr(example, "input", None)
+    example_input = example.input
 
-    if expected_type is type(None):  # pragma: no cover
+    if expected_type is type(None):
         if example_input is not None:
             msg = (
                 f'Task example step {step_idx} input type mismatch for tool "{tool_name}". '
@@ -464,7 +466,7 @@ def _validate_step_input_type(
 
 
 def _validate_step_output_type(  # noqa: PLR0913, PLR0917
-    example: object,
+    example: ToolExample[Any, Any],
     step_idx: int,
     tool_name: str,
     expected_type: type[SupportsDataclass | None],
@@ -472,9 +474,9 @@ def _validate_step_output_type(  # noqa: PLR0913, PLR0917
     path: SectionPath,
 ) -> None:
     """Validate step output matches expected result type."""
-    example_output = getattr(example, "output", None)
+    example_output = example.output
 
-    if expected_type is type(None):  # pragma: no cover
+    if expected_type is type(None):
         if example_output is not None:
             msg = (
                 f'Task example step {step_idx} output type mismatch for tool "{tool_name}". '
@@ -483,7 +485,7 @@ def _validate_step_output_type(  # noqa: PLR0913, PLR0917
             raise PromptValidationError(msg, section_path=path, placeholder="steps")
         return
 
-    if container == "array":  # pragma: no cover
+    if container == "array":
         _validate_array_output(example_output, step_idx, tool_name, expected_type, path)
         return
 

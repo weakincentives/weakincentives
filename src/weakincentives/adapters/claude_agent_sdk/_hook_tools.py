@@ -297,7 +297,7 @@ def _dispatch_tool_invoked_event(
         name=data.tool_name,
         params=data.tool_input,
         result=data.result_raw,
-        session_id=getattr(hook_context.session, "session_id", None),
+        session_id=hook_context.session.session_id,
         created_at=_utcnow(),
         usage=None,
         rendered_output=data.output_text[:1000] if data.output_text else "",
