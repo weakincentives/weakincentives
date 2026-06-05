@@ -32,8 +32,6 @@ from .conftest import (
     MockReadTextFileResponse,
     MockRequestError,
     MockRequestPermissionResponse,
-    MockSessionAccumulator,
-    MockSessionNotification,
     MockToolCallProgress,
     MockToolCallStart,
     MockWriteTextFileResponse,
@@ -44,7 +42,6 @@ def _mock_acp_modules() -> dict[str, Any]:
     mock_acp = MagicMock()
     mock_acp.RequestError = MockRequestError
     mock_schema = MagicMock()
-    mock_schema.SessionNotification = MockSessionNotification
     mock_schema.RequestPermissionResponse = MockRequestPermissionResponse
     mock_schema.AllowedOutcome = MockAllowedOutcome
     mock_schema.DeniedOutcome = MockDeniedOutcome
@@ -71,22 +68,6 @@ def _make_client(
 
 
 class TestACPClientSessionUpdate:
-    def test_wraps_in_session_notification(self) -> None:
-        async def _run() -> None:
-            client = _make_client()
-            acc = MockSessionAccumulator()
-            client.set_accumulator(acc)
-            update = MockAgentMessageChunk(content="hello")
-            await client.session_update("sess-1", update)
-            assert len(acc._notifications) == 1
-            notif = acc._notifications[0]
-            assert isinstance(notif, MockSessionNotification)
-            assert notif.session_id == "sess-1"
-            assert notif.update is update
-
-        with patch.dict(sys.modules, _mock_acp_modules()):
-            asyncio.run(_run())
-
     def test_tracks_message_chunks(self) -> None:
         async def _run() -> None:
             client = _make_client()
@@ -263,16 +244,6 @@ class TestACPClientSessionUpdate:
             await client.session_update("sess-1", MagicMock())
             assert client.last_update_time is not None
             assert client.last_update_time > 0.0
-
-        with patch.dict(sys.modules, _mock_acp_modules()):
-            asyncio.run(_run())
-
-    def test_no_accumulator(self) -> None:
-        async def _run() -> None:
-            client = _make_client()
-            msg = MockAgentMessageChunk(content="hello")
-            await client.session_update("sess-1", msg)
-            assert len(client.message_chunks) == 1
 
         with patch.dict(sys.modules, _mock_acp_modules()):
             asyncio.run(_run())

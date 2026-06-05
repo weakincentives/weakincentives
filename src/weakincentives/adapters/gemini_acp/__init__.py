@@ -14,13 +14,12 @@
 
 from __future__ import annotations
 
-from ..acp import ACPClient, ACPSessionState, McpServerConfig
+from ..acp import ACPClient, McpServerConfig
 from .adapter import GeminiACPAdapter
 from .config import GeminiACPAdapterConfig, GeminiACPClientConfig
 
 __all__ = [
     "ACPClient",
-    "ACPSessionState",
     "GeminiACPAdapter",
     "GeminiACPAdapterConfig",
     "GeminiACPClientConfig",

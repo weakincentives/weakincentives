@@ -37,7 +37,7 @@ hooks in the Python SDK. Only the hook types listed above are available.
 
 from __future__ import annotations
 
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard
 
 from claude_agent_sdk.types import (
     HookCallback,
@@ -46,7 +46,6 @@ from claude_agent_sdk.types import (
     PostToolUseHookInput,
     PreCompactHookInput,
     PreToolUseHookInput,
-    PreToolUseHookSpecificOutput,
     StopHookInput,
     SubagentStopHookInput,
     SyncHookJSONOutput,
@@ -89,7 +88,6 @@ __all__ = [
     "create_subagent_stop_hook",
     "create_task_completion_stop_hook",
     "create_user_prompt_submit_hook",
-    "safe_hook_wrapper",
 ]
 
 
@@ -579,89 +577,3 @@ def create_pre_compact_hook(
         return {}
 
     return pre_compact_hook
-
-
-def safe_hook_wrapper(
-    hook_fn: HookCallback,
-    input_data: HookInput,
-    tool_use_id: str | None,
-    context: HookContext,
-) -> SyncHookJSONOutput:
-    """Wrap a hook to catch exceptions and convert to responses.
-
-    Prevents hook errors from crashing the SDK execution by catching
-    exceptions and returning appropriate denial responses for constraint
-    violations. Tracks error statistics for debugging.
-
-    Args:
-        hook_fn: The hook function to wrap.
-        input_data: Data passed to the hook.
-        tool_use_id: Optional tool use identifier.
-        context: Hook context.
-
-    Returns:
-        Hook response dict, potentially with denial for errors.
-    """
-    # Note: This function wraps async hooks but runs synchronously.
-    # It's used for error handling at the boundary, not for actual hook execution.
-    # The SDK handles async execution of hooks internally.
-    try:
-        import asyncio
-
-        return cast(
-            SyncHookJSONOutput,
-            asyncio.get_event_loop().run_until_complete(
-                hook_fn(input_data, tool_use_id, {"signal": None})
-            ),
-        )
-    except Exception as error:
-        error_name = type(error).__name__
-        context.stats.hook_errors += 1
-
-        if error_name in {"DeadlineExceededError", "DeadlineExpired"}:
-            logger.debug(
-                "claude_agent_sdk.hook.deadline_error_caught",
-                event="hook.deadline_error_caught",
-                context={
-                    "error_type": error_name,
-                    "hook_errors": context.stats.hook_errors,
-                    "elapsed_ms": context.elapsed_ms,
-                },
-            )
-            output: PreToolUseHookSpecificOutput = {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": "Deadline exceeded",
-            }
-            return {"hookSpecificOutput": output}
-
-        if error_name in {"BudgetExhaustedError", "BudgetExceeded"}:
-            logger.debug(
-                "claude_agent_sdk.hook.budget_error_caught",
-                event="hook.budget_error_caught",
-                context={
-                    "error_type": error_name,
-                    "hook_errors": context.stats.hook_errors,
-                    "elapsed_ms": context.elapsed_ms,
-                },
-            )
-            output_budget: PreToolUseHookSpecificOutput = {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": "Budget exhausted",
-            }
-            return {"hookSpecificOutput": output_budget}
-
-        logger.exception(
-            "claude_agent_sdk.hook.error",
-            event="hook.error",
-            context={
-                "error": str(error),
-                "error_type": error_name,
-                "hook_errors": context.stats.hook_errors,
-                "elapsed_ms": context.elapsed_ms,
-                "tool_count": context.stats.tool_count,
-            },
-        )
-
-        return {}

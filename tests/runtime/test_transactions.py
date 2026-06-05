@@ -22,10 +22,10 @@ from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.errors import RestoreFailedError
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
+from weakincentives.runtime import Snapshotable
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot, SnapshotRestoreError
-from weakincentives.runtime.snapshotable import Snapshotable
 from weakincentives.runtime.transactions import (
     CompositeSnapshot,
     PendingToolTracker,

@@ -189,7 +189,7 @@ At `runtime/events/types.py`:
 
 ## Snapshotable Protocol
 
-At `src/weakincentives/runtime/snapshotable.py`:
+At `src/weakincentives/resources/protocols.py`:
 
 Generic protocol for state containers that support snapshot and restore.
 Implementations include `Session` (`Snapshotable[Snapshot]`) and

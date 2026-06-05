@@ -36,14 +36,6 @@ class MockRequestError(Exception):
 
 
 @dataclass
-class MockSessionNotification:
-    """Mock of acp.schema.SessionNotification."""
-
-    session_id: str
-    update: Any
-
-
-@dataclass
 class AgentMessageChunk:
     """Mock of an AgentMessageChunk update.
 
@@ -218,30 +210,6 @@ class MockWriteTextFileResponse:
 
 
 @dataclass
-class MockSessionSnapshot:
-    """Mock of SessionAccumulator snapshot."""
-
-    session_id: str = "test-session-123"
-    tool_calls: dict[str, Any] = field(default_factory=dict)
-    agent_messages: tuple[Any, ...] = ()
-    agent_thoughts: tuple[Any, ...] = ()
-
-
-class MockSessionAccumulator:
-    """Mock of acp.contrib.session_state.SessionAccumulator."""
-
-    def __init__(self) -> None:
-        self._notifications: list[Any] = []
-        self._snapshot = MockSessionSnapshot()
-
-    def apply(self, notification: Any) -> None:
-        self._notifications.append(notification)
-
-    def snapshot(self) -> MockSessionSnapshot:
-        return self._snapshot
-
-
-@dataclass
 class MockHttpHeader:
     """Mock of acp.schema.HttpHeader."""
 
@@ -304,8 +272,3 @@ def mock_conn() -> AsyncMock:
 @pytest.fixture
 def mock_proc() -> MagicMock:
     return make_mock_process()
-
-
-@pytest.fixture
-def mock_accumulator() -> MockSessionAccumulator:
-    return MockSessionAccumulator()

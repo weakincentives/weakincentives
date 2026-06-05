@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from ._env import build_env
-from ._state import ACPSessionState
 from .adapter import ACPAdapter
 from .client import ACPClient
 from .config import ACPAdapterConfig, ACPClientConfig, McpServerConfig
@@ -25,7 +24,6 @@ __all__ = [
     "ACPAdapterConfig",
     "ACPClient",
     "ACPClientConfig",
-    "ACPSessionState",
     "McpServerConfig",
     "build_env",
 ]

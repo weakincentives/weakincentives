@@ -14,13 +14,12 @@
 
 from __future__ import annotations
 
-from ..acp import ACPClient, ACPSessionState, McpServerConfig
+from ..acp import ACPClient, McpServerConfig
 from .adapter import OpenCodeACPAdapter
 from .config import OpenCodeACPAdapterConfig, OpenCodeACPClientConfig
 
 __all__ = [
     "ACPClient",
-    "ACPSessionState",
     "McpServerConfig",
     "OpenCodeACPAdapter",
     "OpenCodeACPAdapterConfig",

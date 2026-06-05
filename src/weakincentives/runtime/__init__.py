@@ -165,6 +165,7 @@ Subpackages
 
 from __future__ import annotations
 
+from ..resources.protocols import Snapshotable
 from . import (
     agent_loop,
     agent_loop_types,
@@ -245,7 +246,6 @@ from .session import (
     replace_latest_by,
     upsert_by,
 )
-from .snapshotable import Snapshotable
 from .transactions import (
     CompositeSnapshot,
     PendingToolExecution,

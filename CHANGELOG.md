@@ -129,6 +129,18 @@ DeniedOutcome(...))`; `SessionNotification` now takes `session_id=` (was
 `RequestError` takes positional `(code, message)`. These require
 `agent-client-protocol >= 0.9` (pin bumped to `>= 0.10.1`).
 
+#### Removed public `Tool.wrap()` and `ACPSessionState` (#1163)
+
+The dead-code sweep deletes two public names with **no shim**, so downstream
+imports or calls now raise `ImportError` / `AttributeError`:
+
+- **`Tool.wrap(handler)`** — the docstring/annotation-driven constructor on the
+  public `Tool` class is gone. Use `Tool[P, R].create(name=..., description=...,
+  handler=...)` instead.
+- **`ACPSessionState`** — dropped from the `weakincentives.adapters.acp`,
+  `opencode_acp`, and `gemini_acp` exports (and from `llms.md`). The slice was
+  never dispatched; there is no replacement.
+
 ---
 
 ### Added
@@ -316,6 +328,14 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
 - **Spec docs trimmed (#1121).** Verbose code examples and boilerplate removed
   from 26 `specs/*.md` files (net ~−2,800 lines); despite the "consolidate" title,
   no specs were merged or deleted.
+- **Dead-code and backcompat-shim sweep.** Removed code kept alive only by its own
+  tests or bridging completed moves (~400 LOC): the unused `safe_hook_wrapper` SDK
+  hook helper; the never-dispatched `ACPSessionState` slice and the dead ACP client
+  accumulator branch; and several re-export shims — `runtime/snapshotable.py`
+  (`Snapshotable` now sourced from `resources`), `runtime/session/dataclasses.py`,
+  and the `acp`/`codex_app_server` `_async.py` stubs. The removals that change public
+  call surfaces — `Tool.wrap()` and the `ACPSessionState` export — are called out
+  under Breaking Changes.
 
 ---
 
