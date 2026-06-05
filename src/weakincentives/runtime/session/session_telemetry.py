@@ -23,9 +23,10 @@ route events to the session's internal dispatch mechanism.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, cast
 
+from ...prompt.tool_result import ToolResult
 from ...types.dataclass import SupportsDataclass, is_dataclass_instance
 from ..events import PromptExecuted, PromptRendered, ToolInvoked
 from ._types import ReducerEvent
@@ -65,16 +66,11 @@ def handle_tool_invoked(session: Session, event: ToolInvoked) -> None:
         cast(ReducerEvent, event),
     )
 
-    # Extract payload from ToolResult for slice dispatch
-    result = event.result
-    if hasattr(result, "value"):
-        # ToolResult dataclass
-        payload = result.value
-    elif isinstance(result, dict):
-        # Raw dict from SDK native tools - no typed value
-        payload = None
-    else:
-        payload = None
+    # Extract payload from ToolResult for slice dispatch. A typed ToolResult
+    # carries the payload in ``value``; raw dicts from SDK-native tools (or any
+    # other untyped result) have no payload to route.
+    result: ToolResult[object] | Mapping[str, object] | None = event.result
+    payload = result.value if isinstance(result, ToolResult) else None
 
     # Dispatch payload directly to slice reducers
     if is_dataclass_instance(payload):

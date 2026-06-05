@@ -34,7 +34,7 @@ import contextlib
 import json
 import logging
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, is_dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast, get_origin
@@ -335,7 +335,7 @@ class RedisMailbox[T, R]:
         """Serialize message body to JSON string."""
         try:
             # dump() works with dataclasses, for primitives use json.dumps
-            if hasattr(body, "__dataclass_fields__"):
+            if is_dataclass(body):
                 return json.dumps(dump(body))
             return json.dumps(body)
         except Exception as e:
@@ -354,9 +354,11 @@ class RedisMailbox[T, R]:
                 origin = get_origin(self.body_type)
                 if is_dataclass(origin if origin is not None else self.body_type):
                     return parse(self.body_type, json_data)
-                # For primitive types (str, int, etc.), construct directly
-                body_type: Any = self.body_type
-                return body_type(json_data)
+                # For primitive types (str, int, etc.), construct directly.
+                # ``type[T]`` for an unbounded ``T`` is opaque to the checker, so
+                # narrow it to a precise primitive constructor returning ``T``.
+                primitive_type = cast(Callable[[object], T], self.body_type)
+                return primitive_type(json_data)
             # Without a type hint, return raw JSON data
             return cast(T, json_data)
         except Exception as e:

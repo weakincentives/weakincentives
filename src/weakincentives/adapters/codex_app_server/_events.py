@@ -92,7 +92,7 @@ def dispatch_item_tool_invoked(
     else:
         result = ToolResult[None].error(rendered_output or f"Item {status}")
 
-    session_id: UUID | None = getattr(session, "session_id", None)
+    session_id: UUID | None = session.session_id
 
     event = ToolInvoked(
         prompt_name=prompt_name,

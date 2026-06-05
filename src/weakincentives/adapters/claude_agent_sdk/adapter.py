@@ -98,7 +98,7 @@ def _dispatch_render_events(
 ) -> None:
     """Dispatch PromptRendered and RenderedTools events."""
     render_event_id = uuid4()
-    session_id = getattr(session, "session_id", None)
+    session_id = session.session_id
     created_at = _utcnow()
 
     _ = session.dispatcher.dispatch(
@@ -263,7 +263,7 @@ def _build_and_dispatch_response[OutputT](
             prompt_name=prompt_name,
             adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             result=response,
-            session_id=getattr(session, "session_id", None),
+            session_id=session.session_id,
             created_at=_utcnow(),
             usage=usage,
             run_context=run_context,
@@ -581,7 +581,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         transcript_config = self._client_config.transcript_collection
         collector: TranscriptCollector | None = None
         if transcript_config is not None:
-            session_id = getattr(session, "session_id", None)
+            session_id = session.session_id
             collector = TranscriptCollector(
                 prompt_name=prompt_name,
                 config=transcript_config,

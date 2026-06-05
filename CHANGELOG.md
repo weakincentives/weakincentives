@@ -303,6 +303,18 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
   adapters via `TypeGuard` predicates and `cast()` (#1143); blanket pyright
   suppressions removed from `serde` (#1136); further type-ignore cleanup across
   the tree (#1139, #1131).
+- **Typed `session_id` boundary + de-dynamic access.** `SessionProtocol` now
+  declares a `session_id: UUID | None` property (with `Session.session_id`
+  becoming a read-only property), so the ~13 `getattr(session, "session_id",
+  None)` probes scattered through the Claude Agent SDK, ACP, and Codex App Server
+  adapters are now plain attribute access. Companion cleanups dropped
+  `getattr`/`hasattr` on statically-known attributes elsewhere: task-example
+  validators in `prompt/_validators.py` are typed against the concrete
+  `TaskExample`/`TaskStep`/`ToolExample` (and their previously-uncovered
+  `None`-typed-step branches are now tested rather than `# pragma: no cover`'d),
+  `WorkspaceDigest.section_key` access in `contrib/tools/digests.py`, mailbox
+  serde now uses `is_dataclass()` uniformly, and `ToolInvoked` telemetry narrows
+  the result with `isinstance(..., ToolResult)`.
 - **Lint hardening.** Re-enabled many ruff rules and fixed the underlying
   violations, removing stale per-file-ignores (#1131, #1133, #1134);
   modernizations include `Self` return types, `str.removesuffix`,

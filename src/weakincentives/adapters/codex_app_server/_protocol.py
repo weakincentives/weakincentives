@@ -80,7 +80,7 @@ def _create_bridge(
     """Create and start a transcript bridge if transcription is enabled."""
     if not client_config.transcript:
         return None
-    session_id = getattr(session, "session_id", None)
+    session_id = session.session_id
     emitter = TranscriptEmitter(
         prompt_name=prompt_name,
         adapter="codex_app_server",

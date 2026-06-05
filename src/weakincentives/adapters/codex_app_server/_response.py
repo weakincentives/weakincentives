@@ -90,7 +90,7 @@ def build_response[OutputT](  # noqa: PLR0913
             prompt_name=prompt_name,
             adapter=adapter_name,
             result=response,
-            session_id=getattr(session, "session_id", None),
+            session_id=session.session_id,
             created_at=utcnow,
             usage=usage,
             run_context=run_context,
