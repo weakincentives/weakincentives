@@ -182,13 +182,15 @@ ______________________________________________________________________
 | `tests/` LOC | ~92,700 |
 | Largest packages | `adapters` 14.5k · `runtime` 12.6k · `prompt` 10.9k |
 | Largest modules | several ~700 LOC (`codex…/_protocol.py` 741, `runtime/agent_loop.py` 719, `prompt/tool.py` 700) |
-| `cast(` | 320 |
+| `cast(` | 316 |
 | `Any]` / `: Any` | 354 / 79 |
 | `# pyright: ignore` / `# ty: ignore` | 82 / 14 |
 | `# pragma: no cover` | 137 |
 | `# nosec` | 36 |
 | `getattr(` | 138 |
-| Type-escapes by package | `adapters` 109 · `prompt` 107 · `runtime` 78 · `serde` 44 |
+| Type-escapes by package | `adapters` 107 · `prompt` 103 · `runtime` 78 · `serde` 45 |
 | Code-length debt ledger | 1 grandfathered entry (`codex_app_server/_protocol.py`) |
 
-Refresh with the Phase 0 commands on each run.
+Refresh with the Phase 0 commands on each run. Numbers above are post-rebase onto
+`main` (#1161–#1165); Wave 1 (M9–M11) landed upstream, so the counts barely moved
+— the residual escapes are the classifier/protocol-shaped ones M16 targets.

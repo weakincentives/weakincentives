@@ -54,9 +54,10 @@ SandboxSpec ──► SandboxProvider.open() ──► Sandbox ──┬── f
 
 | Concept | Kind | Responsibility |
 |---------|------|----------------|
-| `SandboxSpec` | frozen value (in the prompt) | Desired environment: mounts, network (ingress/egress), env, setup, read-only |
+| `SandboxSpec` | frozen value (in the prompt) | Desired environment: mounts, **egress policy**, env, setup, read-only |
 | `SandboxProvider` | factory (held by the adapter) | `open(spec) -> Sandbox`; pools/manages connections |
-| `Sandbox` | aggregate root | Vends `filesystem` + `shell`; `snapshot`/`restore`; `close`. The unit of isolation and rollback |
+| `Sandbox` | aggregate root | Vends `filesystem` + `shell`; `snapshot`/`restore`; `configure_egress`; `close`. The unit of isolation and rollback |
+| `EgressPolicy` | frozen value | Default-deny allowlist of outbound destinations; enforced by a reconfigurable proxy sidecar |
 | `Filesystem` | **facade** (one concrete class) | Ergonomic file API (text, bytes, pagination, streaming) over any backend |
 | `FilesystemBackend` | narrow protocol | The ~10 primitives a storage backend implements |
 | `Shell` | facet | `run(argv, …) -> CommandResult` inside the sandbox |
@@ -114,8 +115,30 @@ class Sandbox(Protocol):
     def shell(self) -> Shell: ...
     def snapshot(self, *, tag: str | None = None) -> SnapshotRef: ...   # delegates to fs backend
     def restore(self, ref: SnapshotRef) -> None: ...
+    @property
+    def egress(self) -> EgressPolicy: ...
+    def configure_egress(self, policy: EgressPolicy) -> None: ...  # control-plane; reconfigures the proxy sidecar live
     def close(self) -> None: ...
 ```
+
+______________________________________________________________________
+
+## Egress Control (Proxy Sidecar)
+
+Every `Sandbox` routes outbound traffic through a **proxy sidecar** it owns.
+Egress is **default-deny**; `SandboxSpec.egress` seeds the initial allowlist and
+`Sandbox.configure_egress(policy)` reconfigures the sidecar **live, at any time** —
+no restart — so the orchestrator can tighten or widen network access per phase
+(e.g. open a package registry for a build step, then revoke).
+
+This is a **control-plane** capability: it is driven by the harness and policies,
+**not** exposed to the model through `ToolContext` (an agent cannot widen its own
+egress). Locally the sidecar may be a local proxy or a documented no-op; remotely
+it is one `SandboxTransport` call (M6), and in the Codex-in-a-container topology
+(M7) the proxy is the container's egress chokepoint. `EgressPolicy` is a frozen
+value — a default action (deny) plus an allowlist of `EgressRule`s (host/domain
+glob, ports, protocol). It composes with the sandbox's ingress isolation, which
+the container/runtime owns.
 
 ______________________________________________________________________
 
@@ -160,11 +183,11 @@ ______________________________________________________________________
 |---|-----------|---------|
 | [M1](M1.md) | Filesystem: narrow backend + one facade | Delete per-backend streaming/text dup; backends become primitives |
 | [M2](M2.md) | Shell facet | A first-class command surface |
-| [M3](M3.md) | Sandbox aggregate + provider | Materialization moves out of the section into a factory |
+| [M3](M3.md) | Sandbox aggregate + provider | Materialization moves into a factory; egress policy + `configure_egress` |
 | [M4](M4.md) | Sandbox as execution context | `ToolContext.sandbox`; transactions over (session, sandbox); drop FS-as-resource |
 | [M5](M5.md) | Dissolve `WorkspaceSection`; unify adapters | Prompt declares a spec; one `cwd` path; per-adapter logic deleted |
 | [M6](M6.md) | Remote facets over a transport | `RemoteBackend`/`RemoteShell`/`RemoteSandbox`; loopback-tested |
-| [M7](M7.md) | Remote provider — Codex in a container | The reference topology, end-to-end |
+| [M7](M7.md) | Remote provider — Codex in a container | The reference topology, end-to-end, incl. the egress proxy sidecar |
 | [M8](M8.md) | (Optional) Unify the tool surface | Every tool call funnels through the sandbox; transactional totality |
 
 ______________________________________________________________________
@@ -178,8 +201,8 @@ debt, and keep this best-in-class. Its living output — a prioritized,
 evidence-based list — is [BACKLOG.md](BACKLOG.md).
 
 Its first run (2026-06-03, a 7-agent reviewer team over all of
-`src/weakincentives/`) produced **M9–M18** from ~56 evidence-cited findings. Wave 1
-is promoted to files — [M9](M9.md) (dead-code sweep), [M10](M10.md) (typed
-boundaries / `session_id`), [M11](M11.md) (spec reconciliation) — with M12–M18
-(adapter consolidation, runtime de-leaking, CLI/bundle consolidation, type-escape
-burn-down) scoped in the backlog.
+`src/weakincentives/`) produced **M9–M18** from ~56 evidence-cited findings.
+**Wave 1 shipped on `main`** (PRs #1163–#1165: dead-code sweep, `session_id` /
+de-dynamic access, spec reconciliation), so its milestone files are retired.
+**M12–M18 remain** — adapter consolidation, runtime de-leaking, CLI/bundle
+consolidation, type-escape burn-down — scoped in [BACKLOG.md](BACKLOG.md).
