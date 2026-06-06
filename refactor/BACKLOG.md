@@ -1,90 +1,70 @@
-# BACKLOG — Proposed Refactoring Milestones
+# BACKLOG — Continuous Hardening & Horizon
 
-> Output of [REVIEW.md](REVIEW.md). Ground rules from [GOAL.md](GOAL.md): first
-> principles, simplify, no back-compat, each milestone independently shippable and
-> green. The sandbox arc `M1`–`M8` is not repeated here.
+> The **release** milestones (R1–R3, `M1`–`M16`) live in the [GOAL.md](GOAL.md)
+> roadmap. This file is the **hardening track** that runs alongside them — the
+> review-driven cleanups governed by [REVIEW.md](REVIEW.md) — plus amendments to
+> R1, what already landed on `main`, and the post-release horizon. Ground rules
+> from GOAL: first principles, simplify, no back-compat, each item green.
 
 ## Review run — 2026-06-03 (refreshed after rebasing onto `main`)
 
-Phase 1–2 was executed by a **7-agent reviewer team** (one per package cluster),
-read-only and evidence-based, over all of `src/weakincentives/`. ~56 findings.
+Phase 1–2 was a **7-agent reviewer team** over all of `src/weakincentives/`, ~56
+evidence-cited findings. Post-rebase metrics: **316** `cast(`, **82**
+`# pyright: ignore`, **14** `# ty: ignore` (adapters 107 · prompt 103 · runtime 78
+· serde 45). Wave 1 shipped upstream (below). The remaining cleanups don't each
+warrant a release slot but materially raise quality, so they ride the hardening
+track and feed specific releases.
 
-**Refresh:** since the run, `main` merged PRs #1161–#1165. Three of them implement
-the entire **Wave 1**, which is now retired (see *Landed* below). Re-measured
-metrics: **316** `cast(`, **82** `# pyright: ignore`, **14** `# ty: ignore`
-(barely moved — #1162 did construction-validation/frozen-dataclass hardening, not
-the classifier/protocol work M16 targets). M12–M18 were re-verified present on the
-rebased tree and remain open.
+## Hardening track (continuous; feeds releases)
 
-## Wave plan
+| ID | Item | Feeds | Size | Evidence |
+|----|------|-------|------|----------|
+| H1 | Adapter orchestration consolidation | R1, M11 | L | triplicated turn-loop (`acp/_prompt_loop.py`, `codex…/_protocol.py`, `claude…/_sdk_execution.py`); `acp/_guardrails.py` ≡ `codex…/_guardrails.py` (~110 LOC); **three** ephemeral homes (`_ephemeral_home.py` in claude/codex/opencode); bridge logs hardcode `claude_agent_sdk.bridge.*` |
+| H2 | Type-escape burn-down (ratchet) | M9 | L | 316 `cast(` + 96 ignores; serde `schema.py`↔`_coercers.py` taxonomy dup; event-type cast blocks; `MappingProxyType` cluster in `snapshots.py`; three generic-specialization mechanisms (`Tool`/`PromptTemplate`/`Section`) |
+| H3 | Prompt selection/render DRY | R1 | S–M | `_enabled_predicate.py` ≡ `_visibility.py` normalizer (~120 LOC); `Section.render` vs `MarkdownSection.render_override` duplicate assembly |
+| H4 | Error-handling & concurrency + coverage masks | R3/M14 | M | `RedisMailbox._lock` decorative + reaper swallows all; `codex…/adapter.py:268 except BaseException`; coverage-masked token-aggregation/feedback paths; unescaped SQL identifiers (`_query_tables.py:114-133`) |
 
-| ID | Milestone | Wave | Dims | Size | Status |
-|----|-----------|------|------|------|--------|
-| M9 | Dead-code & backcompat-shim sweep | 1 | 12,13 | S | **landed** (#1163) |
-| M10 | Typed boundaries: `session_id` + de-dynamic | 1 | 4,13,3 | S–M | **landed** (#1164) |
-| M11 | Spec ↔ code reconciliation | 1 | 11 | S | **landed** (#1165) |
-| [M12](M12.md) | Unify adapter turn-loop + guardrails in `_shared` | 2 | 5,1 | L | proposed |
-| [M13](M13.md) | Shared adapter primitives (home/MCP/bridge/errors) | 2 | 5,6,13 | M–L | proposed |
-| [M14](M14.md) | De-leak runtime decomposition | 2 | 1,2,4 | M | proposed |
-| [M15](M15.md) | CLI/debug bundle & query consolidation | 2 | 1,5,8 | L | proposed |
-| [M16](M16.md) | Type-escape reduction (cast/ignore burn-down) | 3 | 4 | L | proposed |
-| [M17](M17.md) | Prompt selection/render DRY | 3 | 5,6 | S–M | proposed |
-| [M18](M18.md) | Error-handling & concurrency + coverage-mask audit | 3 | 6,7,9,10 | M | proposed |
+**H1** is a co-requisite of R1 (the sandbox arc edits adapters) and the foundation
+of the M11 conformance kit — do it early. **H2** is an ongoing ratchet (add a
+per-package `cast`/`ignore` baseline like `code_length_baseline.txt`) and lifts the
+quality of the M9 serialization work. Each H-item is independently shippable and
+green; promote to a numbered milestone only if it grows past a single PR.
 
-Wave 2/3 milestone bodies are promoted to files (`M12.md`–`M18.md`).
+## Amendments to R1 (M1–M8) — do not create new milestones
 
-## Landed on `main` (Wave 1)
+Findings that strengthen the sandbox arc; fold in when those land:
 
-- **M9 — dead-code & shim sweep** (#1163): deleted `Tool.wrap`,
-  `safe_hook_wrapper`, `ACPSessionState` + accumulator, `session/dataclasses.py`,
-  `runtime/snapshotable.py` (dup `Snapshotable`), and the `acp`/`codex` `_async.py`
-  stubs. Verified gone on the rebased tree.
-- **M10 — typed boundaries** (#1164): `SessionProtocol.session_id` now exists
-  (`runtime/session/protocols.py:70`); **0** `getattr(session, "session_id")` sites
-  remain; validators/mailbox/digests de-dynamicized.
-- **M11 — spec reconciliation** (#1165): serde `__type__`, prompt `HIDDEN`, and ACP
-  session-reuse docs reconciled. (Residual: the *bundled* docs copies under
-  `src/weakincentives/docs/` still mention `ACPSessionState`; they regenerate from
-  source — verify the next `wink docs` build.)
-
-## Sandbox abstraction update — reconfigurable egress
-
-New requirement folded into the sandbox arc (not a standalone milestone): the
-`Sandbox` gains **egress configuration** backed by a **proxy sidecar that can be
-reconfigured at any time**. `SandboxSpec.egress: EgressPolicy` seeds a default-deny
-allowlist; `Sandbox.configure_egress(policy)` hot-reloads the sidecar (control
-plane — runtime/policy-driven, not model-facing). Threaded through [GOAL.md](GOAL.md)
-(concept + sketch + *Egress Control*), [M3](M3.md) (`EgressPolicy`,
-`configure_egress`), [M6](M6.md) (transport op), and [M7](M7.md) (the container
-egress chokepoint). Replaces the earlier vague `network: NetworkPolicy | None`
-field on `SandboxSpec`.
-
-______________________________________________________________________
-
-## Amendments to M1–M8 (do not create new milestones)
-
-Findings that strengthen the existing sandbox arc — fold in when those land:
-
-- **M1** ← filesystem path-validation is write-only (`_host.py` validates on write
-  but not read; `_resolve_path` is the real guard); `_resolve_path` re-resolves
-  root every call (`_host.py:116`); `FilesystemSnapshot` hard-codes git internals
-  (`commit_ref`/`git_dir`) → use the planned opaque `SnapshotRef`.
-- **M3/M18** ← `git clean -xfd` on restore (`_git_ops.py:255`) deletes *ignored*
-  files; document `HostFilesystem` single-instance threading.
-- **M4** ← collapse the three `Filesystem | None` context shortcuts
-  (`ToolContext`/`FeedbackContext`/`TaskCompletionContext`); the M4 text should
-  name the latter two twins. Drop the `singleton_cache` snapshot scan
-  (`transactions.py`) and the `_instantiation_order` rebuild in
-  `resources/context.py:257-291`.
+- **M1** ← filesystem path-validation is write-only (`_resolve_path` is the real
+  guard); `_resolve_path` re-resolves root every call (`_host.py:116`);
+  `FilesystemSnapshot` hard-codes git internals → opaque `SnapshotRef`.
+- **M3** ← `git clean -xfd` on restore (`_git_ops.py:255`) deletes *ignored* files;
+  document `HostFilesystem` single-instance threading.
+- **M4** ← collapse the three `Filesystem | None` shortcuts
+  (`ToolContext`/`FeedbackContext`/`TaskCompletionContext`); drop the
+  `singleton_cache` snapshot scan and the `_instantiation_order` rebuild
+  (`resources/context.py:257-291`).
 - **M5** ← `WorkspaceDigestSection` (`contrib/tools/digests.py`) is the same
-  god-object smell as `WorkspaceSection` (with a `summary` setter that swallows the
-  parent write); fold into the auto-preview/selector mechanism.
+  god-object smell as `WorkspaceSection`; fold into the auto-preview mechanism.
 
-______________________________________________________________________
+## Landed on `main`
+
+The first review run's Wave 1 shipped upstream (#1161–#1165): dead-code &
+backcompat-shim sweep (`Tool.wrap`, `safe_hook_wrapper`, `ACPSessionState`,
+`_async.py` stubs, `snapshotable.py`, `session/dataclasses.py`); type-safe
+`session_id` + validator/mailbox/digests de-dynamicization; and spec/doc
+reconciliation. Verified gone/resolved on the rebased tree.
+
+## Horizon (past R3)
+
+- **Sub-agent orchestration as a definition primitive** — an `AgentDefinition`
+  (M9) may declare sub-agents; the harness fans them out. Builds on M9 + M14.
+- **Multi-harness routing / fallback** — pick (or fail over) the best harness per
+  task using `HarnessCapabilities` (M10) and eval scores (M15).
 
 ## Status log
 
 | Date | Action |
 |------|--------|
-| 2026-06-03 | REVIEW.md Phase 1–6 by a 7-agent team. ~56 findings → M9–M18; Wave 1 promoted to files; M12–M18 scoped; M1–M8 amendments recorded. |
-| 2026-06-03 | Rebased onto `main` (#1161–#1165). Wave 1 (M9–M11) landed upstream — files retired, status set to *landed*. Metrics re-measured. Folded the reconfigurable-egress requirement into M3/M6/M7 + GOAL. Promoted M12–M18 to files. |
+| 2026-06-03 | REVIEW.md run by a 7-agent team; ~56 findings. |
+| 2026-06-03 | Rebased onto `main`; Wave 1 (#1163–#1165) landed upstream; metrics re-measured; reconfigurable-egress folded into R1. |
+| 2026-06-03 | Re-derived the plan from first principles around the agent-definition-over-harnesses mission: R1 (One Environment, M1–M8), R2 (Portable Definitions & Parity, M9–M12), R3 (Trustworthy Runs, M13–M16); cleanups moved to this hardening track (H1–H4); `*Spec` taxonomy adopted in GOAL. |

@@ -1,9 +1,10 @@
 # REVIEW — Library Review & Milestone-Generation Workflow
 
 > A **repeatable process** for auditing the whole library *and* this refactor
-> plan, then emitting prioritized, well-formed refactoring milestones (`M9.md`+)
-> that drive toward best-in-class. Findings and proposals land in
-> [BACKLOG.md](BACKLOG.md); accepted items are promoted to `M*.md` files.
+> plan, then emitting prioritized, well-formed refactoring work that drives toward
+> best-in-class. Findings land in [BACKLOG.md](BACKLOG.md)'s hardening track and
+> graduate to a numbered release milestone (see [GOAL.md](GOAL.md)) when one grows
+> past a single PR.
 >
 > Same ground rules as [GOAL.md](GOAL.md): think from first principles, prefer
 > deletion/simplification, **backwards compatibility is a non-goal**, and every
@@ -124,8 +125,9 @@ priority = (impact × reach) / (cost × risk)
 
 ## Phase 6 — Record & iterate
 
-Append proposals to `BACKLOG.md`; promote the top of each wave to `M9.md`+; mark
-landed milestones; refresh the metrics snapshot. Re-run on cadence.
+Append findings to `BACKLOG.md`'s hardening track; graduate an item to a numbered
+release milestone when it grows past a single PR; mark landed work; refresh the
+metrics snapshot. Re-run on cadence.
 
 ______________________________________________________________________
 
