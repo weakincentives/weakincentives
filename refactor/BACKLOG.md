@@ -19,10 +19,11 @@ track and feed specific releases.
 
 | ID | Item | Feeds | Size | Evidence |
 |----|------|-------|------|----------|
-| H1 | Adapter orchestration consolidation | R1, M11 | L | triplicated turn-loop (`acp/_prompt_loop.py`, `codex…/_protocol.py`, `claude…/_sdk_execution.py`); `acp/_guardrails.py` ≡ `codex…/_guardrails.py` (~110 LOC); **three** ephemeral homes (`_ephemeral_home.py` in claude/codex/opencode); bridge logs hardcode `claude_agent_sdk.bridge.*` |
-| H2 | Type-escape burn-down (ratchet) | M9 | L | 316 `cast(` + 96 ignores; serde `schema.py`↔`_coercers.py` taxonomy dup; event-type cast blocks; `MappingProxyType` cluster in `snapshots.py`; three generic-specialization mechanisms (`Tool`/`PromptTemplate`/`Section`) |
+| H1 | Adapter orchestration consolidation | R1, M12 | L | triplicated turn-loop (`acp/_prompt_loop.py`, `codex…/_protocol.py`, `claude…/_sdk_execution.py`); `acp/_guardrails.py` ≡ `codex…/_guardrails.py` (~110 LOC); **three** ephemeral homes (`_ephemeral_home.py` in claude/codex/opencode); bridge logs hardcode `claude_agent_sdk.bridge.*` |
+| H2 | Type-escape burn-down (ratchet) | R2 | L | 316 `cast(` + 96 ignores; serde `schema.py`↔`_coercers.py` taxonomy dup; event-type cast blocks; `MappingProxyType` cluster in `snapshots.py` (the generic-specialization unification itself is M9) |
 | H3 | Prompt selection/render DRY | R1 | S–M | `_enabled_predicate.py` ≡ `_visibility.py` normalizer (~120 LOC); `Section.render` vs `MarkdownSection.render_override` duplicate assembly |
 | H4 | Error-handling & concurrency + coverage masks | R3/M14 | M | `RedisMailbox._lock` decorative + reaper swallows all; `codex…/adapter.py:268 except BaseException`; coverage-masked token-aggregation/feedback paths; unescaped SQL identifiers (`_query_tables.py:114-133`) |
+| H5 | Runtime de-leak & encapsulation | R2 | M | `session.py:602-644` backcompat block + 6 file-level `reportPrivateUsage` waivers; `_agent_loop_bundle.py:57 _LoopLike` mirror protocol; give `SliceStore`/`ReducerRegistry` real internal APIs — clean boundaries help modular, testable definitions |
 
 **H1** is a co-requisite of R1 (the sandbox arc edits adapters) and the foundation
 of the M11 conformance kit — do it early. **H2** is an ongoing ratchet (add a
@@ -67,4 +68,5 @@ reconciliation. Verified gone/resolved on the rebased tree.
 |------|--------|
 | 2026-06-03 | REVIEW.md run by a 7-agent team; ~56 findings. |
 | 2026-06-03 | Rebased onto `main`; Wave 1 (#1163–#1165) landed upstream; metrics re-measured; reconfigurable-egress folded into R1. |
-| 2026-06-03 | Re-derived the plan from first principles around the agent-definition-over-harnesses mission: R1 (One Environment, M1–M8), R2 (Portable Definitions & Parity, M9–M12), R3 (Trustworthy Runs, M13–M16); cleanups moved to this hardening track (H1–H4); `*Spec` taxonomy adopted in GOAL. |
+| 2026-06-03 | Re-derived the plan from first principles around the agent-definition-over-harnesses mission: R1 (One Environment, M1–M8), R2 (M9–M12), R3 (Trustworthy Runs, M13–M16); cleanups moved to this hardening track (H1–H4); `*Spec` taxonomy adopted in GOAL. |
+| 2026-06-03 | Corrected R2: definition is **versioned, modular code** (not serialized data) and portability is **contract-level, not output-level**. R2 rebuilt as Modular / Testable-in-isolation / Capability-negotiation / Realize-ACK (M9–M12); runtime de-leak moved here as H5; M13 replay reframed (diff expects differences). |
