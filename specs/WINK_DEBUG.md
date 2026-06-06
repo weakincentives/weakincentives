@@ -46,8 +46,8 @@ wink debug [bundle-path]
 | **Sessions** | Inspect session state slices | Slice list with filter | Tree viewer with search, depth control |
 | **Transcript** | Browse transcript entries | Source/type filters, search | Chat-like transcript stream with details |
 | **Logs** | Browse execution logs | Level filters, search | Scrollable log entries |
-| **Task** | View request input/output | Input/Output toggle | Tree viewer with depth control |
 | **Filesystem** | Browse workspace snapshot | File list with filter | File content viewer |
+| **Environment** | Inspect captured environment | None | System, Python, git, container, and env-var sections |
 
 ### Navigation
 
