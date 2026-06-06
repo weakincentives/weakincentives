@@ -40,7 +40,8 @@ Core Concepts
     - Render markdown content with optional parameter substitution
     - Declare tools available to the model
     - Support hierarchical nesting via ``children``
-    - Control visibility (FULL, SUMMARY, HIDDEN)
+    - Control visibility (FULL or SUMMARY)
+    - Include or exclude themselves via an ``enabled`` predicate
     - Accept parameter overrides at runtime
 
 **Tool**
@@ -70,17 +71,20 @@ digits, underscores, or hyphens (1-64 characters).
 Visibility System
 -----------------
 
-Sections support three visibility levels:
+Sections support two visibility levels:
 
 - **FULL**: Render complete section content
 - **SUMMARY**: Render abbreviated content (requires ``summary`` template)
-- **HIDDEN**: Exclude section from rendered output
 
 Visibility can be controlled via:
 
 1. Section constructor defaults
 2. Session state overrides (VisibilityOverrides)
 3. Callable selectors that inspect parameters or session
+
+To exclude a section from the rendered output entirely, give it an ``enabled``
+predicate that returns ``False`` (visibility has no third "hidden" level); a
+disabled section contributes neither content nor tools.
 
 Progressive disclosure tools (``open_sections``, ``read_section``) are
 automatically injected when sections are rendered with SUMMARY visibility.

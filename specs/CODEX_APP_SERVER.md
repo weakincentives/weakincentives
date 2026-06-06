@@ -173,9 +173,9 @@ src/weakincentives/adapters/codex_app_server/
   _schema.py                # Schema transforms (DynamicToolSpec, OpenAI strict schema)
   _protocol.py              # JSON-RPC protocol orchestration (init, auth, thread, turn, stream)
   _response.py              # Response building and structured output parsing
+  _types.py                 # TypedDict shapes for Codex JSON-RPC messages
   _events.py                # Codex item/turn notifications → WINK ToolInvoked mapping
   _transcript.py            # Transcript bridging for Codex notifications
-  _async.py                 # asyncio helpers
   _guardrails.py            # Feedback providers, task completion checking
   _ephemeral_home.py        # CodexEphemeralHome (skill installation)
 ```

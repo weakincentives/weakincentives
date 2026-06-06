@@ -91,7 +91,8 @@ runtime
 serde
     Stdlib dataclass serialization utilities. Use ``parse(cls, data)`` for
     deserialization and ``dump(obj)`` for serialization. Supports constraints
-    via ``Annotated`` and polymorphic unions via ``__type__`` field.
+    via ``Annotated`` and manual ``__type__`` discriminator helpers for
+    polymorphic unions.
 
 skills
     Agent skills following the Agent Skills specification. Skills are folders

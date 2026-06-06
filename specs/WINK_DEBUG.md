@@ -23,12 +23,13 @@ wink debug [bundle-path]
     │
     ├── HTTP Server (localhost:8000)
     │   ├── /api/meta          - Bundle metadata
+    │   ├── /api/manifest      - Full bundle manifest
     │   ├── /api/slices/:type  - Session slice data
     │   ├── /api/logs          - Log entries (paginated)
     │   ├── /api/logs/facets   - Logger/event/level facets for filters
     │   ├── /api/transcript    - Transcript entries (paginated)
     │   ├── /api/transcript/facets - Source/type facets for filters
-    │   ├── /api/request/*     - Task input/output
+    │   ├── /api/environment   - Captured environment metadata
     │   ├── /api/files         - Filesystem listing
     │   └── /api/files/:path   - File content
     │
@@ -45,8 +46,8 @@ wink debug [bundle-path]
 | **Sessions** | Inspect session state slices | Slice list with filter | Tree viewer with search, depth control |
 | **Transcript** | Browse transcript entries | Source/type filters, search | Chat-like transcript stream with details |
 | **Logs** | Browse execution logs | Level filters, search | Scrollable log entries |
-| **Task** | View request input/output | Input/Output toggle | Tree viewer with depth control |
 | **Filesystem** | Browse workspace snapshot | File list with filter | File content viewer |
+| **Environment** | Inspect captured environment | None | System, Python, git, container, and env-var sections |
 
 ### Navigation
 
