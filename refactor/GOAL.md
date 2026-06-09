@@ -1,55 +1,110 @@
-# GOAL — WINK: the Agent-Definition Library for Provider Harnesses
+# GOAL — A Core That Ages Well
 
-> North star for the refactor. The milestones (`M1.md` … `M16.md`) realize it,
-> grouped into releases. **Backwards compatibility is a non-goal**; we improve
-> abstractions, delete weight, and accept partial rewrites. Every milestone is
-> independently shippable and lands green (`make check`, 100% coverage).
+> North star for the refactor. WINK's durable value is a small set of
+> well-designed cores; everything volatile lives at the edges. The milestones
+> (`M1.md` … `M9.md`) strengthen the cores in dependency order, grouped into
+> three releases. **Backwards compatibility is a non-goal**; we improve
+> abstractions, delete weight, and accept partial rewrites. Every milestone lands
+> green (`make check`, 100% coverage).
 
 ______________________________________________________________________
 
 ## Mission
 
-WINK makes the agent **definition** — prompt, tools, policies, feedback, and the
-execution environment — **versioned, modular code** that is structured for reuse,
+WINK makes the agent **definition** — prompt, tools, policies, feedback, and
+environment intent — **versioned, modular code** that is structured for reuse,
 **testable in isolation**, and runs on top of any provider agent **harness**
 (Claude Agent SDK, Codex App Server, ACP / OpenCode / Gemini).
 
-> You own the **definition**. The harness owns **execution** (planning loop,
-> sandboxing, retries, crash recovery, deadlines, budgets). WINK is the seam.
-
-This is already the repo's stated intent — `CLAUDE.md`: the definition is "a
-first-class artifact you can **version, review, test, and port**," and `prompt/`
-imports no adapter (harness-independence is enforced by the 4-layer architecture
-checker). The releases make it *strong*: the definition targets **one consistent
-environment** (R1), it is **modular, unit-testable, and portable** across harnesses
-(R2), and its runs are **observable, reproducible, and policy-governed** (R3).
+> You own the **definition**. The harness owns **execution**. WINK is the seam —
+> and the seam is deliberately narrow.
 
 ______________________________________________________________________
 
-## First Principles
+## The 2–3 Year Bet
 
-1. **Definition vs Harness.** Anything the harness can own (execution, isolation,
-   recovery) is *not* in the definition. Anything that defines agent behavior
-   (prompt, tools, policies, environment intent) *is*.
-1. **The definition is code, not data.** It lives in version control as
-   structured, modular Python (`PromptTemplate` + sections + tools + policies +
-   `SandboxSpec`), reviewed and **unit-tested in isolation from any harness** — not
-   serialized to a data format. Harness-independence is an invariant, not a hope.
-1. **Portability is contract-level, not output-level.** The same definition *code*
-   runs on any adapter unchanged; the adapter honors the WINK **contract** (tools
-   bridged, policies enforced, structured output requested, events/transcripts
-   emitted, transactions rolled back). **Results differ** by harness and model —
-   that is what evals measure, not conformance. Differences are made explicit
-   through declared capabilities, not pretended away.
-1. **Policies over workflows.** Behavior is governed by composable, declarative,
-   fail-closed policies evaluated at decision points — not prescriptive scripts.
-1. **One environment, one truth.** Every tool call — WINK-bridged and
-   harness-native — targets one `Sandbox` (filesystem, shell, egress), local or
-   remote, behind one interface.
-1. **Narrow capabilities, ergonomic facades.** Backends implement the smallest
-   primitive set; convenience composes once on top, never per backend.
-1. **Reproducible by construction.** Inject clocks; record runs; replay against
-   recorded responses deterministically.
+**What will keep changing:** models (context length, reasoning, computer use),
+harnesses (absorbing planning, sub-agents, skills, memory, hosted sandboxes),
+and protocols (MCP, ACP, app-server — all young and churning).
+
+**What will not:** an agent needs instructions, capabilities, and constraints
+expressed somewhere; side effects must land somewhere controllable; state must be
+inspectable and recoverable; runs must be explainable after the fact; and someone
+must decide what is allowed.
+
+WINK bets on the second list. The strategy:
+
+1. **Confine volatility.** Everything that changes with model/harness generations
+   lives in adapter leaves and *declared capabilities* — never in the cores. A new
+   harness is a leaf package plus a capability declaration, nothing else.
+1. **Build the durable concerns as five small cores** (below), each with a narrow
+   protocol, strict invariants, and isolation tests.
+1. **Design to shrink.** When a harness absorbs something WINK used to emulate
+   (hosted sandboxes, native sub-agents, native planning), the move is: declare it
+   in `AdapterCapabilities`, route the core through it, **delete the emulation**.
+   The library gets smaller as platforms mature — that is the aging plan, not a
+   failure mode.
+
+______________________________________________________________________
+
+## The Five Cores
+
+| Core | One responsibility | Invariant | Today (to fix) |
+|------|--------------------|-----------|----------------|
+| **Definition** (`prompt/`) | Express what the agent should do: sections, tools, policies, `SandboxSpec`, success criteria | Pure; renders deterministically; **imports no adapter** (checker-enforced) | Independence holds but is incidental; 3 parallel generic-specialization mechanisms; no isolation-test surface |
+| **State** (`runtime/session`) | Event-sourced session: pure reducers, snapshots, restore | All mutation via events; snapshot/restore total | Strong design; leaky encapsulation (backcompat shims, `_LoopLike` mirror — hardening H5) |
+| **Environment** (`sandbox/`, `filesystem/`) | Where effects land: filesystem, shell, egress — local or remote | Every tool effect lands in one `Sandbox`; rollback = (session, sandbox); egress **default-deny** | The missing core: no shell, no egress, FS-as-DI-resource, harness `cwd` diverges remotely |
+| **Contract** (`adapters/`) | The seam: one adapter protocol + declared capabilities + shared turn machinery | No adapter-name conditionals; capability negotiation; new harness = leaf | Largest package (14.5k LOC); turn-loop ×3, guardrails ×2, ephemeral home ×3; no capability negotiation at runtime |
+| **Evidence** (`debug/`, transcript, evals) | What happened: events → transcript → bundle → replay → score | Every decision/effect emits one schema'd record; bundles replayable | Three readers of one zip; env schema typed 3×; ~600 LOC duplicated SQL builders; no replay |
+
+Substrate underneath (`types`, `serde`, `dataclasses`, `dbc`, `clock`,
+`resources`) is small and healthy; the 4-layer module checker
+(`toolchain/checkers/architecture.py`) remains the mechanical enforcement of the
+dependency rule: substrate → cores → adapter leaves → CLI/debug tooling.
+
+```
+DEFINITION  (code you own)     sections · tools · policies · SandboxSpec
+      │ bind / negotiate capabilities
+CONTRACT    (the narrow seam)  ProviderAdapter + AdapterCapabilities + bridged tools
+      │ drives                        │ every effect lands in
+STATE       (event-sourced)  ◄──────► ENVIRONMENT  (Sandbox: fs · shell · egress)
+      │                               │
+      └────────── both emit into ─────┘
+EVIDENCE    (one record)       events → transcript → bundle → replay → eval
+```
+
+______________________________________________________________________
+
+## Design Tenets (how abstractions age)
+
+Each tenet has a test; a change that fails the test is wrong even if convenient.
+
+1. **Volatility at the edges.** Model/harness-generation churn touches only
+   adapter leaves and capability declarations. *Test: a new harness ships — which
+   files change? Only `adapters/<new>/` and its capability declaration.*
+1. **Narrow waists.** Each core exposes one small protocol; breadth lives in
+   facades composed on top, never re-implemented per backend. *Test: a fake can
+   implement the protocol in under ~100 lines.*
+1. **Capabilities, not conditionals.** Harness differences are declared data,
+   negotiated at bind; degrade gracefully or fail closed. *Test:
+   `grep 'adapter_name =='` matches nothing outside telemetry.*
+1. **Pure core, effects at the edge.** Rendering and reducers are pure; all I/O
+   flows through the `Sandbox` or the adapter. *Test: definition unit tests need
+   no network and no real disk.*
+1. **Data at the boundaries, code inside.** Whatever crosses a boundary —
+   `SandboxSpec`, events, transcripts, traces, capabilities — is a serde value
+   with a schema. The definition itself is code.
+1. **One concept per concern.** The naming taxonomy below; no overloaded suffixes.
+1. **Delete over deprecate.** Alpha rule, already repo law (`CLAUDE.md`); the
+   shrink strategy depends on it.
+
+### Non-goals (restraint is an aging strategy)
+
+- **No workflow/DAG engine** — policies over workflows (`POLICIES_OVER_WORKFLOWS.md`).
+- **No raw model-API clients** — harnesses only (`ADAPTERS.md` already says this).
+- **No bespoke planning loop** — the harness plans; `AgentLoop` stays a thin driver.
+- **No prompt templating DSL** — sections compose in Python; no string-template empire.
+- **No second sandbox under a harness's own** — trust one perimeter; compose, don't stack.
 
 ______________________________________________________________________
 
@@ -59,120 +114,74 @@ Suffixes carry meaning. One idiom per concept, no overlaps:
 
 | Suffix | Means | Examples |
 |--------|-------|----------|
-| **`*Spec`** | Immutable, declarative description of a resource a **provider/factory materializes** (desired state); lives in the definition | `SandboxSpec` (→ any provisionable resource) |
+| **`*Spec`** | Immutable, declarative description of a resource a **provider/factory materializes** (desired state); lives in the definition | `SandboxSpec` |
 | **`*Config`** | Tuning knobs for a **component you construct/inject** | `LLMConfig`, `…ClientConfig` |
-| **`*Policy`** | **Rules/constraints** evaluated at runtime (fail-closed) | `EgressPolicy`, `NetworkPolicy`, `ThrottlePolicy` |
+| **`*Policy`** | **Rules/constraints** evaluated at runtime (fail-closed) | `EgressPolicy`, `ThrottlePolicy` |
 | **`*Params`** | Typed input to a **tool/section handler** | `ParamsT` dataclasses |
-| **`*Request` / `*Result`** | A unit of **work** through a loop + its outcome | `AgentLoopRequest`/`Result`, `EvalRequest`, `ToolResult` |
+| **`*Request` / `*Result`** | A unit of **work** through a loop + its outcome | `AgentLoopRequest`/`Result`, `ToolResult` |
 | **`*Descriptor`** | Lightweight **metadata about an existing thing** | tool/section descriptors |
 
 **Rule for `*Spec`:** if a provider/factory turns it into a live resource
-(`provider.open(spec) -> Resource`), it is a `*Spec`. It is *not* a `*Config`
-(component knobs), `*Policy` (rules — a spec may *contain* policies, e.g.
-`SandboxSpec.egress: EgressPolicy`), `*Params` (tool input), or `*Request` (a
-task). The existing `claude_agent_sdk` `SandboxConfig` (OS-isolation knobs) is a
-`*Config`; it folds into the sandbox model in R1 (see M4) — there will not be both
-a `SandboxSpec` and a `SandboxConfig`.
+(`provider.open(spec) -> Resource`), it is a `*Spec`. A spec may *contain*
+policies (`SandboxSpec.egress: EgressPolicy`). The existing `claude_agent_sdk`
+`SandboxConfig` (OS-isolation knobs) is a `*Config` and folds into the sandbox
+model in [M3](M3.md) — there will never be both a `SandboxSpec` and a
+`SandboxConfig`.
 
 ______________________________________________________________________
 
-## End-State Architecture
-
-```
-        DEFINITION  (you own — versioned code: modular · harness-independent · unit-tested)
-        ┌───────────────────────────────────────────────────────────┐
-        │ PromptTemplate · sections · tools · policies ·             │
-        │ SandboxSpec · feedback · structured-output type            │
-        └───────────────────────────┬───────────────────────────────┘
-                                     │ bind + negotiate capabilities
-        HARNESS  (runtime owns — swappable adapter)
-        ┌───────────────────────────▼───────────────────────────────┐
-        │ ProviderAdapter  ⟷  AdapterCapabilities (declared/negotiated)│
-        │   opens ▶ Sandbox{ filesystem · shell · egress }            │
-        │   bridges ▶ tools/policies   enforces ▶ Policy engine       │
-        │   honors the WINK contract (results differ; evals judge)    │
-        └───────────────────────────┬───────────────────────────────┘
-                                     │ every decision/effect emits events
-        OBSERVABILITY  (record · replay · evaluate)
-        └─ transcript → debug bundle → ReplayTrace → eval score
-```
-
-Key models (detailed in the milestones):
-
-| Concept | Kind | Role | Milestone |
-|---------|------|------|-----------|
-| `Sandbox` (+`SandboxSpec`, `Filesystem`, `Shell`, `EgressPolicy`) | aggregate + facets | The one environment all tool calls target | R1 (M1–M8) |
-| Agent definition | versioned code | `PromptTemplate` + sections + tools + policies + `SandboxSpec`; modular, harness-independent, unit-tested | R2 (M9, M10) |
-| `AdapterCapabilities` | declared + negotiated | What a harness supports ⟷ what a definition requires; gates ACK and degrades at runtime | M11 |
-| Conformance Kit (ACK) | contract test suite | One behavioral contract every adapter honors (not output equality) | M12 |
-| `Policy` (engine) | runtime rules | Composable, fail-closed gating: tools, egress, budget, completion | M14 |
-| `ReplayTrace` | recorded artifact | Deterministic replay against recorded responses | M13 |
-
-### Egress control (proxy sidecar)
+## Egress Control (proxy sidecar)
 
 Every `Sandbox` routes outbound traffic through a **proxy sidecar** it owns.
 Egress is **default-deny**; `SandboxSpec.egress` seeds the allowlist and
 `Sandbox.configure_egress(policy)` reconfigures the sidecar **live, at any time** —
 no restart — so the orchestrator can tighten/widen access per phase. It is a
-**control-plane** capability (harness/policy-driven, *not* model-facing) and, in
-R3, one policy kind in the unified engine (M14).
+**control-plane** capability (harness/policy-driven, *not* model-facing) and
+becomes one policy kind in the unified control plane ([M8](M8.md)).
 
 ______________________________________________________________________
 
-## Release Roadmap
+## Roadmap
 
-### R1 — One Environment
+### R1 — The Environment Core (M1–M4)
 
-Every tool call targets one consistent, swappable environment (filesystem, shell,
-egress), local or remote; the foundational simplification that makes it clean.
+The missing core, built once: every tool call targets one consistent, swappable
+environment — local or remote — and rollback becomes (session, sandbox).
 
-| # | Milestone |
-|---|-----------|
-| [M1](M1.md) | Filesystem: narrow backend + one facade |
-| [M2](M2.md) | Shell facet |
-| [M3](M3.md) | Sandbox aggregate + provider + `SandboxSpec` (incl. egress) |
-| [M4](M4.md) | Sandbox as execution context; transactions over (session, sandbox) |
-| [M5](M5.md) | Dissolve `WorkspaceSection`; unify adapters on the sandbox |
-| [M6](M6.md) | Remote facets over `SandboxTransport` |
-| [M7](M7.md) | Remote provider — Codex in a container + egress proxy |
-| [M8](M8.md) | (Optional) Funnel every tool call through the sandbox |
+| # | Milestone | Outcome |
+|---|-----------|---------|
+| [M1](M1.md) | Filesystem narrow waist | One backend protocol + one facade; per-backend duplication deleted |
+| [M2](M2.md) | Sandbox aggregate | `Shell` facet, `Sandbox`, `SandboxSpec` (incl. egress), local provider |
+| [M3](M3.md) | Sandbox as execution context | `ToolContext.sandbox`; transactions = (session, sandbox); `WorkspaceSection` dissolved; adapters unified |
+| [M4](M4.md) | Remote sandbox | `SandboxTransport`, remote facets, Codex-in-container + egress sidecar |
 
-### R2 — Modular, Testable, Portable Definitions
+### R2 — The Definition & Contract Cores (M5–M6)
 
-The definition becomes modular code you can compose, **unit-test without a real
-harness**, and run on any adapter — with differences declared and negotiated, not
-pretended away. (This is the repo's own "version · review · test · port," made
-strong.)
+Definitions become composable code you unit-test without a harness; the seam
+becomes small, declared, and proven.
 
-| # | Milestone |
-|---|-----------|
-| [M9](M9.md) | Definition modularity & composition (reusable, harness-independent units) |
-| [M10](M10.md) | Test definitions in isolation (`FakeHarness` + render/assert + drive tools) |
-| [M11](M11.md) | Capability declaration & negotiation (graceful degradation, fail-closed) |
-| [M12](M12.md) | Realize the ACK contract suite (capability-gated; contract, not output) |
+| # | Milestone | Outcome |
+|---|-----------|---------|
+| [M5](M5.md) | Definition composition & isolation testing | Reusable packs; one specialization mechanism; boundary checker; `FakeHarness` |
+| [M6](M6.md) | The harness contract | Seam consolidated in `_shared`; `AdapterCapabilities` negotiation; ACK realized |
 
-### R3 — Trustworthy Runs
+### R3 — The Evidence Core & Control Plane (M7–M9)
 
-Runs are reproducible, measurable, durable, and policy-governed.
+Runs become explainable, replayable, governable, measurable, durable.
 
-| # | Milestone |
-|---|-----------|
-| [M13](M13.md) | Deterministic replay against recorded responses |
-| [M14](M14.md) | Policy engine generalization (tools · egress · budget · completion) |
-| [M15](M15.md) | Eval & resumable sessions |
-| [M16](M16.md) | Observability consolidation (debug bundle / query) |
+| # | Milestone | Outcome |
+|---|-----------|---------|
+| [M7](M7.md) | One evidence pipeline | Bundle/query consolidated; `ReplayTrace` + deterministic replay |
+| [M8](M8.md) | Policies as the one control plane | Tools · egress · budget · completion on one fail-closed engine; decisions are events |
+| [M9](M9.md) | Measure & resume | Evals over definitions; checkpoint/resume = (session, sandbox, cursor) |
 
-### Continuous & horizon
+### Continuous
 
 A **hardening track** runs alongside, governed by [REVIEW.md](REVIEW.md) and
-tracked in [BACKLOG.md](BACKLOG.md): adapter-orchestration consolidation
-(co-requisite of R1), runtime de-leak & encapsulation, type-escape burn-down,
-prompt-render DRY, and error-handling/concurrency hygiene. **Already shipped on
-`main`** (PRs #1163–#1165): dead-code sweep, `session_id`/de-dynamic access, spec
-reconciliation. **Horizon**, past these releases: sub-agent orchestration as a
-definition primitive, and multi-harness routing/fallback that picks the best
-harness per task using `AdapterCapabilities` (M11) and eval scores (M15) — routing,
-not identical execution.
+tracked in [BACKLOG.md](BACKLOG.md): type-escape ratchet, prompt-render DRY,
+error/concurrency hygiene, runtime de-leak. **Horizon** (post-R3): sub-agent
+orchestration as a definition primitive; multi-harness routing using
+`AdapterCapabilities` + eval scores — routing, not identical execution.
 
 ______________________________________________________________________
 
@@ -181,4 +190,5 @@ ______________________________________________________________________
 - **No backwards-compatibility shims.** Delete replaced code outright.
 - **Partial rewrites are fine** when they yield a simpler whole.
 - **Every milestone lands green** (`make check`, 100% coverage, 10 s/test, 4-layer
-  boundaries). Bold within a milestone; never leave the tree broken between them.
+  boundaries). Milestones contain ordered **stages**; each stage is independently
+  shippable and green.

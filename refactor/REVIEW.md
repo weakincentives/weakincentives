@@ -24,7 +24,7 @@ not duplicate accepted milestones.
 | | |
 |---|---|
 | **Inputs** | `src/weakincentives/`, `tests/`, `specs/`, `refactor/GOAL.md` + `M*.md`, `toolchain/checkers/`, the metrics from Phase 0 |
-| **Outputs** | A findings log; a prioritized [BACKLOG.md](BACKLOG.md); promoted milestone files `M9.md`, `M10.md`, … |
+| **Outputs** | A findings log; hardening-track items in [BACKLOG.md](BACKLOG.md); amendments folded into the milestone files |
 
 ## Roles
 
@@ -37,7 +37,8 @@ ______________________________________________________________________
 
 ## Phase 0 — Calibrate & baseline
 
-1. Read `GOAL.md`, `M1.md`–`M8.md`, `CLAUDE.md`, and the specs touching the area
+1. Read `GOAL.md` (the five cores + tenets), the milestone files (`M*.md`),
+   `CLAUDE.md`, and the specs touching the area
    under review. Record the **target architecture** and the **quality bar**
    (strict typing, 100% coverage, 10 s/test, 4-layer boundaries, DbC on public
    APIs, serde over Pydantic, injected clocks, no monkeypatching).
@@ -105,7 +106,7 @@ Reject anything without evidence or a root cause. Prefer findings whose fix
 ## Phase 4 — Form milestones
 
 Cluster related findings into milestone proposals using the **template** below
-(consistent with `M1`–`M8`, plus priority metadata). De-duplicate against the
+(consistent with the milestone files, plus priority metadata). De-duplicate against the
 existing milestones and `GOAL.md`; if a finding strengthens an existing milestone,
 amend it rather than adding one.
 
@@ -194,5 +195,6 @@ ______________________________________________________________________
 | Code-length debt ledger | 1 grandfathered entry (`codex_app_server/_protocol.py`) |
 
 Refresh with the Phase 0 commands on each run. Numbers above are post-rebase onto
-`main` (#1161–#1165); Wave 1 (M9–M11) landed upstream, so the counts barely moved
-— the residual escapes are the classifier/protocol-shaped ones M16 targets.
+`main` (#1161–#1165); the first run's quick wins landed upstream, so the counts
+barely moved — the residual escapes are the classifier/protocol-shaped ones the
+H1 ratchet targets.
