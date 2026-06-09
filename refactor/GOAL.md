@@ -130,14 +130,28 @@ model in [M3](M3.md) — there will never be both a `SandboxSpec` and a
 
 ______________________________________________________________________
 
-## Egress Control (proxy sidecar)
+## Egress & Credentials (proxy sidecar)
 
-Every `Sandbox` routes outbound traffic through a **proxy sidecar** it owns.
-Egress is **default-deny**; `SandboxSpec.egress` seeds the allowlist and
-`Sandbox.configure_egress(policy)` reconfigures the sidecar **live, at any time** —
-no restart — so the orchestrator can tighten/widen access per phase. It is a
-**control-plane** capability (harness/policy-driven, *not* model-facing) and
-becomes one policy kind in the unified control plane ([M8](M8.md)).
+Every `Sandbox` routes outbound traffic through a **proxy sidecar** it owns. The
+sidecar has two jobs, both reconfigurable **live, at any time** — no restart:
+
+- **Egress** — default-deny. `SandboxSpec.egress` seeds the allowlist;
+  `Sandbox.configure_egress(policy)` tightens/widens access per phase (e.g. open
+  a package registry for a build step, then revoke).
+- **Credential injection** — secrets **never enter the sandbox**: not in env
+  vars, not on disk, never visible to the model or tools. An `EgressRule` may
+  name a credential and how to inject it (e.g. `Authorization: Bearer {secret}`
+  toward `api.github.com`); the secret *material* is bound at runtime via
+  `Sandbox.configure_credentials(bindings)`, held only in the proxy, and attached
+  to allowed outbound requests on the way through. The agent can **use** a
+  credential without ever being able to **read** it; rotation is a control-plane
+  call. By construction, material never appears in `SandboxSpec` (serde values
+  carry credential *names* only) nor in evidence (transcripts/bundles).
+
+Both surfaces are **control-plane** capabilities (harness/policy-driven, *not*
+model-facing — an agent cannot widen its own egress or mint its own credentials)
+and become policy-governed decision points in the unified control plane
+([M8](M8.md)).
 
 ______________________________________________________________________
 
