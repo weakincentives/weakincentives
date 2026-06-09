@@ -57,4 +57,5 @@ Verified resolved on the rebased tree.
 | 2026-06-03 | REVIEW.md run by a 7-agent team; ~56 findings. |
 | 2026-06-03 | Rebased onto `main`; quick wins (#1163–#1165) landed upstream; metrics re-measured; reconfigurable egress folded into the sandbox arc. |
 | 2026-06-03 | Plan re-derived around the agent-definition mission; `*Spec` taxonomy adopted; R2 corrected (definition = modular code; portability = contract-level). |
+| 2026-06-03 | Naming: dropped the separate `*Spec` suffix — `*Config` is the single declarative-input idiom; `SandboxSpec` → `SandboxConfig`; the SDK's isolation `SandboxConfig` is renamed `IsolationConfig` and folded into provider config at M3. |
 | 2026-06-03 | **Core-strengthening rewrite:** plan reorganized around five cores (Definition · State · Environment · Contract · Evidence) with aging tenets and non-goals; 16 milestones consolidated to 9 (stages preserved); adapter consolidation absorbed into M6, review amendments inlined into M1–M3; hardening track renumbered H1–H4. |
