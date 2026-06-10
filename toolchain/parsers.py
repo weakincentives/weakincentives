@@ -21,7 +21,10 @@ to and understand the issue without reading raw output.
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
+from typing import Literal
 
 from .result import Diagnostic, Location
 
@@ -32,17 +35,173 @@ MAX_TRACEBACK_LINES = 5  # Max traceback lines per test failure
 MAX_OUTPUT_PREVIEW_LINES = 5  # Max raw output lines in fallback messages
 
 
-def parse_ruff(output: str, _code: int) -> tuple[Diagnostic, ...]:
-    """Parse ruff output format: file:line:col: CODE message."""
-    diagnostics = []
-    pattern = re.compile(r"^(.+?):(\d+):(\d+): (\w+) (.+)$", re.MULTILINE)
+def relativize_path(filename: str) -> str:
+    """Make an absolute tool path relative to the working directory.
 
-    for match in pattern.finditer(output):
-        file, line, col, code, message = match.groups()
+    Tools like ruff and pyright report absolute paths; relative paths are
+    shorter and remain clickable in terminals.
+    """
+    try:
+        return str(Path(filename).relative_to(Path.cwd()))
+    except ValueError:
+        return filename
+
+
+def _decode_json_list(output: str) -> list[object] | None:
+    """Decode a leading JSON array from tool output, tolerating trailing noise.
+
+    Output may have warnings appended after the JSON payload (stderr is merged
+    into stdout by the checker); raw_decode parses the leading JSON value and
+    ignores the rest.
+    """
+    text = output.lstrip()
+    if not text:
+        return None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(value, list):
+        return None
+    return value
+
+
+def _ruff_json_diagnostic(item: dict[str, object]) -> tuple[Diagnostic, bool] | None:
+    """Build one Diagnostic from a ruff JSON entry; returns (diag, fixable)."""
+    filename = item.get("filename")
+    if not isinstance(filename, str):
+        return None
+    message = item.get("message")
+    if not isinstance(message, str):
+        return None
+    rule = item.get("code")
+    location = item.get("location")
+    row = location.get("row") if isinstance(location, dict) else None
+    column = location.get("column") if isinstance(location, dict) else None
+    fix = item.get("fix")
+    fixable = isinstance(fix, dict) and fix.get("applicability") == "safe"
+
+    prefix = f"[{rule}] " if isinstance(rule, str) else ""
+    suffix = " (fixable)" if fixable else ""
+    diagnostic = Diagnostic(
+        message=f"{prefix}{message}{suffix}",
+        location=Location(
+            file=relativize_path(filename),
+            line=row if isinstance(row, int) else None,
+            column=column if isinstance(column, int) else None,
+        ),
+    )
+    return diagnostic, fixable
+
+
+def parse_ruff_json(output: str, code: int) -> tuple[Diagnostic, ...]:
+    """Parse `ruff check --output-format=json` output.
+
+    JSON is ruff's stable machine-readable format; the human-readable text
+    formats have changed across releases. Emits one diagnostic per issue,
+    preceded by a summary of how many are auto-fixable via `make lint-fix`.
+    """
+    if code == 0:
+        return ()
+
+    data = _decode_json_list(output)
+    if data is None:
+        return ()
+
+    diagnostics: list[Diagnostic] = []
+    fixable_count = 0
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        parsed = _ruff_json_diagnostic(item)
+        if parsed is None:
+            continue
+        diagnostic, fixable = parsed
+        diagnostics.append(diagnostic)
+        if fixable:
+            fixable_count += 1
+
+    if fixable_count:
+        summary = (
+            f"{fixable_count} of {len(diagnostics)} issue(s) auto-fixable: "
+            "run `make lint-fix`"
+        )
+        diagnostics.insert(0, Diagnostic(message=summary, severity="info"))
+
+    return tuple(diagnostics)
+
+
+_WOULD_REFORMAT_PREFIX = "Would reformat: "
+
+
+def parse_ruff_format_files(output: str) -> list[str]:
+    """Extract file paths from `ruff format --check` text output.
+
+    Each unformatted file is reported as a `Would reformat: <path>` line.
+    """
+    return sorted(
+        relativize_path(line[len(_WOULD_REFORMAT_PREFIX) :].strip())
+        for line in output.splitlines()
+        if line.startswith(_WOULD_REFORMAT_PREFIX)
+    )
+
+
+def parse_ruff_format(output: str, code: int) -> tuple[Diagnostic, ...]:
+    """Parse `ruff format --check` output into per-file diagnostics."""
+    if code == 0:
+        return ()
+
+    return tuple(
+        Diagnostic(
+            message="File needs formatting\nFix: run `make format`",
+            location=Location(file=file),
+        )
+        for file in parse_ruff_format_files(output)
+    )
+
+
+_BIOME_PATTERN = re.compile(
+    r"^::(error|warning|notice) title=([^,]*),file=([^,]+),"
+    r"line=(\d+),endLine=(\d+),col=(\d+),endColumn=(\d+)::(.*)$",
+    re.MULTILINE,
+)
+
+
+def parse_biome_files(output: str) -> list[str]:
+    """Extract the affected file paths from biome's GitHub reporter output."""
+    return sorted({match.group(3) for match in _BIOME_PATTERN.finditer(output)})
+
+
+def parse_biome(output: str, code: int) -> tuple[Diagnostic, ...]:
+    """Parse `biome check --reporter=github` workflow-command output.
+
+    Format: ::error title=<rule>,file=<path>,line=N,endLine=N,col=N,endColumn=N::<msg>
+    """
+    if code == 0:
+        return ()
+
+    diagnostics: list[Diagnostic] = []
+    for match in _BIOME_PATTERN.finditer(output):
+        level, title, file, line, end_line, col, end_col, message = match.groups()
+        severity: Literal["error", "warning", "info"]
+        if level == "error":
+            severity = "error"
+        elif level == "warning":
+            severity = "warning"
+        else:
+            severity = "info"
+        prefix = f"[{title}] " if title else ""
         diagnostics.append(
             Diagnostic(
-                message=f"[{code}] {message}",
-                location=Location(file=file, line=int(line), column=int(col)),
+                message=f"{prefix}{message}",
+                location=Location(
+                    file=file,
+                    line=int(line),
+                    column=int(col),
+                    end_line=int(end_line),
+                    end_column=int(end_col),
+                ),
+                severity=severity,
             )
         )
 
@@ -563,8 +722,10 @@ def parse_mdformat(output: str, code: int) -> tuple[Diagnostic, ...]:
     diagnostics = []
 
     # mdformat outputs in format: Error: File "path/to/file.md" is not formatted.
-    # or just the file path on older versions
-    error_pattern = re.compile(r'Error: File "([^"]+\.md)" is not formatted\.')
+    # or just the file path on older versions. Long messages word-wrap at
+    # arbitrary points depending on path length, so every inter-token gap must
+    # tolerate newlines.
+    error_pattern = re.compile(r'Error:\s+File\s+"([^"]+\.md)"\s+is\s+not\s+formatted\.')
     for match in error_pattern.finditer(output):
         file_path = match.group(1)
         diagnostics.append(

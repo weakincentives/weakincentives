@@ -42,32 +42,37 @@ class Runner:
         """Return list of (name, description) for all registered checkers."""
         return [(c.name, c.description) for c in self.checkers.values()]
 
-    def run(self, names: list[str] | None = None) -> Report:
+    def run(
+        self,
+        names: list[str] | None = None,
+        skip: list[str] | None = None,
+    ) -> Report:
         """Run specified checkers (or all if none specified).
 
         Args:
             names: List of checker names to run. If None, runs all checkers.
+            skip: Checker names to exclude from the selection.
 
         Returns:
             Report containing results from all executed checkers.
         """
         start = time.monotonic()
 
-        if names:
-            # Validate requested names
-            unknown = set(names) - set(self.checkers.keys())
-            if unknown:
-                available = sorted(self.checkers.keys())
-                msg = (
-                    f"Unknown checker(s): {', '.join(sorted(unknown))}\n"
-                    f"Available checkers: {', '.join(available)}\n"
-                    f"Run all: make check\n"
-                    f"Run specific: uv run python check.py <checker-name>"
-                )
-                raise ValueError(msg)
-            to_run = [self.checkers[n] for n in names]
-        else:
-            to_run = list(self.checkers.values())
+        requested = list(names) if names else list(self.checkers.keys())
+        skip_set = set(skip) if skip else set()
+
+        unknown = (set(requested) | skip_set) - set(self.checkers.keys())
+        if unknown:
+            available = sorted(self.checkers.keys())
+            msg = (
+                f"Unknown checker(s): {', '.join(sorted(unknown))}\n"
+                f"Available checkers: {', '.join(available)}\n"
+                f"Run all: make check\n"
+                f"Run specific: uv run python check.py <checker-name>"
+            )
+            raise ValueError(msg)
+
+        to_run = [self.checkers[n] for n in requested if n not in skip_set]
 
         results = []
         for checker in to_run:

@@ -29,7 +29,7 @@ check.py                  # Entry point at repository root
 toolchain/                # Framework (excluded from package)
 ├── __init__.py           # Public exports
 ├── result.py             # Location, Diagnostic, CheckResult, Report
-├── checker.py            # Checker protocol, SubprocessChecker base
+├── checker.py            # Checker protocol, SubprocessChecker base, drift detection
 ├── runner.py             # Orchestrates checker execution
 ├── output.py             # Formatters (Console, JSON, Quiet)
 ├── parsers.py            # Tool output parsers
@@ -37,12 +37,20 @@ toolchain/                # Framework (excluded from package)
 └── checkers/             # Checker implementations
     ├── __init__.py       # Factory functions for all checkers
     ├── architecture.py   # Four-layer module boundary model
+    ├── typecheck.py      # Merged ty + pyright checker
     ├── private_imports.py # Cross-package private module import check
     ├── banned_time_imports.py # Direct time module usage ban
     ├── code_length.py    # Function/file length limits
     ├── code_length_baseline.txt # Baseline for grandfathered lengths
     └── docs.py           # Documentation verification
 ```
+
+`make check` is a thin alias for a **single** `check.py` invocation that runs
+every registered checker. There is exactly one source of truth for what gets
+verified: the checker registry in `toolchain/checkers/__init__.py`. The CI
+workflow runs the same registry (`check.py --skip test`, with tests covered by
+parallel test-group jobs), and the pre-commit hook runs `CI=true make check`,
+so local, hook, and CI verification cannot drift apart.
 
 ## Result Types
 
@@ -87,7 +95,7 @@ Dual-mode checker for formatting tools. Detects CI vs local environment via
 | Environment | Behavior |
 |-------------|----------|
 | **CI** (`CI=true` or `GITHUB_ACTIONS=true`) | Runs check command only; fails if changes needed |
-| **Local** | Runs formatter to auto-fix; reports changed files as info diagnostics |
+| **Local** | Runs check, then formatter to auto-fix; reports changed files as info diagnostics |
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -95,12 +103,51 @@ Dual-mode checker for formatting tools. Detects CI vs local environment via
 | `description` | `str` | (required) | Human-readable description |
 | `check_command` | `list[str]` | (required) | Command for check-only mode |
 | `fix_command` | `list[str]` | (required) | Command for auto-fix mode |
-| `json_check_command` | `list[str] \| None` | `None` | JSON output variant for file list |
-| `file_list_parser` | `FileListParser` | `_no_file_list_parse` | Text-based file list parser |
-| `parser` | `DiagnosticParser` | `_no_parse` | Diagnostic parser |
+| `file_list_parser` | `FileListParser` | (required) | Extracts affected files from check output |
+| `parser` | `DiagnosticParser` | `_no_parse` | Diagnostic parser (CI mode) |
 | `timeout` | `int` | `300` | Timeout in seconds |
 
-Used by the `format` checker (ruff format) and `markdown` checker (mdformat).
+Used by the `format` checker (ruff format, parsing `Would reformat:` lines),
+the `markdown` checker (mdformat), and the `biome` checker (GitHub-reporter
+file list; the fix command applies biome's safe fixes).
+
+After a local auto-fix, the info diagnostic lists the reformatted files and
+states that the fixes are **new uncommitted changes in the working tree**, so
+callers (humans and agents) know to include them in their commit. When the
+fix command exits non-zero, its output is parsed for structured diagnostics
+first - tools like biome apply what they can and report the remaining
+unfixable issues - falling back to the raw output otherwise.
+
+### TypecheckChecker
+
+Custom checker (`toolchain/checkers/typecheck.py`) that runs **both** ty and
+pyright on every invocation - never chained with `&&`, so a failing ty run
+cannot hide pyright's errors. All type errors are therefore visible in a
+single fix iteration instead of two.
+
+Diagnostics from the two tools are merged: when both flag the same file and
+line, one entry tagged `[ty+pyright]` survives; tool-specific findings keep
+their `[ty]` / `[pyright]` tag. Absolute paths (pyright reports them) are
+relativized to the working directory.
+
+### Parser drift detection
+
+Human-readable tool output is an unstable API - tools change their formats
+across releases. The toolchain defends in two layers:
+
+1. **Machine-readable formats where available.** The lint checker uses
+   `ruff check --output-format=json`; biome uses `--reporter=github`.
+1. **Zero-parse warnings at runtime.** When a command fails (exit != 0) but
+   its parser extracts zero diagnostics, the result carries a `warning`
+   diagnostic stating that the output format may have drifted, plus the raw
+   output tail - so the failure stays actionable and the toolchain reports
+   its own degradation instead of silently dumping raw text.
+
+Additionally, `tests/toolchain/test_tool_contracts.py` runs the real tools
+(ruff, ty, pytest, mdformat, vulture, bandit, biome) on tiny fixtures with
+known violations and asserts that the parsers extract structured diagnostics.
+A tool release that changes its output format fails those tests instead of
+silently degrading check output.
 
 ## Available Checkers
 
@@ -109,8 +156,8 @@ See `toolchain/checkers/__init__.py` for factory functions and execution order.
 | Checker | Type | Description | What It Checks |
 |---------|------|-------------|----------------|
 | `format` | `AutoFormatChecker` | Code formatting | `ruff format` (auto-fix locally, check in CI) |
-| `lint` | `SubprocessChecker` | Code style | `ruff check --preview` |
-| `typecheck` | `SubprocessChecker` | Type safety | `ty check src && pyright` (diagnostics prefixed with tool name) |
+| `lint` | `SubprocessChecker` | Code style | `ruff check --preview --output-format=json` (stable JSON output; fixable issues marked, with a `make lint-fix` summary) |
+| `typecheck` | `TypecheckChecker` | Type safety | ty + pyright, both always run, same-line findings merged as `[ty+pyright]` |
 | `bandit` | `SubprocessChecker` | Security | Bandit security scanner |
 | `deptry` | `SubprocessChecker` | Dependencies | Unused/missing dependencies |
 | `pip-audit` | `SubprocessChecker` | Vulnerabilities | Known CVEs in dependencies |
@@ -118,10 +165,12 @@ See `toolchain/checkers/__init__.py` for factory functions and execution order.
 | `private-imports` | `PrivateImportChecker` | Import boundaries | Cross-package `_`-prefixed module import check |
 | `banned-time-imports` | `BannedTimeImportsChecker` | Import hygiene | Direct `import time` / `from time import` ban (`clock.py` exempt) |
 | `code-length` | `CodeLengthChecker` | Code size | Function/method and file length limits with baseline |
+| `dead-code` | `SubprocessChecker` | Unused code | vulture at the confidence level from `[tool.vulture]` |
 | `docs` | `DocsChecker` | Documentation | Examples, links, references |
 | `markdown` | `AutoFormatChecker` | Markdown format | `mdformat` (auto-fix locally, check in CI) |
+| `biome` | `AutoFormatChecker` | Frontend lint | `biome check --reporter=github` on CLI static files (auto-fix locally, check in CI; skips if npx not installed) |
 | `bun-test` | `SubprocessChecker` | JavaScript tests | `bun test --coverage` (skips if bun not installed) |
-| `test` | `SubprocessChecker` | Python tests | pytest with 100% coverage, 10s timeout per test |
+| `test` | `SubprocessChecker` | Python tests | pytest: full coverage in CI, testmon-affected subset locally, 10s timeout per test |
 
 ## Failure Reporting
 
@@ -149,10 +198,11 @@ The toolchain is designed to make debugging immediate. Every failure includes:
 
 ```
 ✓ format               (1.2s)
-✗ lint                 (2.3s)
+✗ lint (ruff)          (2.3s)
+  2 of 3 issue(s) auto-fixable: run `make lint-fix`
+  src/bar.py:17:1: [F401] `os` imported but unused (fixable)
+  src/baz.py:8:5: [E721] Do not compare types, use isinstance() (fixable)
   src/foo.py:42:10: [E501] Line too long (120 > 88)
-  src/bar.py:17:1: [F401] 'os' imported but unused
-  src/baz.py:8:5: [E721] Do not compare types, use isinstance()
 ✓ typecheck            (12.5s)
 ✗ test                 (45.2s)
   tests/test_foo.py: Test failed: test_addition
@@ -178,6 +228,10 @@ Where location is one of:
 
 This format is recognized by most terminals and IDEs, enabling click-to-navigate.
 
+Multi-line messages (e.g., `Fix:` hints) indent their continuation lines two
+extra spaces, so the `<location>: <message>` grammar holds line-by-line: a
+line starting at the diagnostic indent level is always a new diagnostic.
+
 ### Test Failures
 
 Tests run to completion, reporting ALL failures (not just the first). This ensures
@@ -190,6 +244,24 @@ you see the full scope of issues in a single run:
   tests/test_prompt.py: Test failed: test_render_with_tools
   tests/test_adapter.py: Test failed: test_structured_output
 ```
+
+### Full Reports on Truncation
+
+Display output is capped (diagnostics per checker, raw-output lines). When a
+result is truncated, the complete untruncated report - every diagnostic, the
+full raw tool output, and the reproduce command - is written to
+`.check-logs/<checker>.log`, and the truncation line names that path plus the
+command to re-run just the failed check for quick feedback:
+
+```
+✗ lint                 (2.3s)
+  src/foo.py:42:10: [F401] `os` imported but unused (fixable)
+  ... and 7 more (full report: .check-logs/lint.log)
+  Re-run just this check: uv run python check.py lint
+```
+
+`.check-logs/` is cleared at the start of every run, so a log there always
+describes the current run. The directory is git-ignored.
 
 ### Verbose Mode
 
@@ -212,6 +284,9 @@ uv run python check.py
 
 # Run specific checks
 uv run python check.py lint test
+
+# Run everything except named checkers (repeatable)
+uv run python check.py --skip test --skip bun-test
 
 # List available checks
 uv run python check.py --list
@@ -240,7 +315,9 @@ make bun-test # Just JavaScript tests
 
 ## Efficient Testing with pytest-testmon
 
-`make check` and `make test` automatically detect local vs CI execution:
+The `test` checker detects local vs CI execution itself (via
+`is_ci_environment()`), so `make check`, `make test`, and `check.py test`
+all behave identically:
 
 | Environment | Behavior |
 |-------------|----------|
@@ -266,7 +343,8 @@ pytest -p no:cov -o addopts= --testmon --strict-config --strict-markers \
   --timeout=10 --timeout-method=thread --tb=short --reruns=2 tests
 ```
 
-See `Makefile` for the `test` target implementation.
+See `create_test_checker()` in `toolchain/checkers/__init__.py` for the
+implementation.
 
 ## Pre-commit Hooks
 
@@ -316,11 +394,19 @@ Coverage is enabled via `--coverage`. The `parse_bun_test` parser in
 
 See existing checkers for patterns:
 
-- `create_format_checker()` for `AutoFormatChecker` with JSON output parsing
-- `create_markdown_checker()` for `AutoFormatChecker` with text file list parsing
-- `create_bun_test_checker()` for `SubprocessChecker` with graceful skip
+- `create_format_checker()` / `create_markdown_checker()` for
+  `AutoFormatChecker` with text file list parsing
+- `create_lint_checker()` for `SubprocessChecker` over machine-readable
+  (JSON) tool output
+- `create_bun_test_checker()` / `create_biome_checker()` for
+  `SubprocessChecker` with graceful skip when the tool is missing
+- `TypecheckChecker` for a multi-tool checker with diagnostic merging
 - `ArchitectureChecker` for custom logic checker
 - `CodeLengthChecker` for AST-based analysis with baseline support
+
+When adding a parser for a new external tool, also add a contract test in
+`tests/toolchain/test_tool_contracts.py` that runs the real tool on a fixture
+and asserts the parser extracts diagnostics (see Parser drift detection).
 
 ## Output Formatters
 
@@ -450,6 +536,14 @@ python check.py lint          # Just lint
 python check.py typecheck     # Just types
 python check.py test          # Just tests
 ```
+
+### Truncated Output
+
+When a failure shows `... and N more (full report: .check-logs/<name>.log)`,
+read that file - it holds every diagnostic and the full raw tool output from
+the run that just happened, so no re-run is needed to see the rest. After
+fixing, use the accompanying `Re-run just this check:` command to verify
+without paying for the full suite.
 
 ### Verbose Mode for Context
 

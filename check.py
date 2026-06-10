@@ -37,6 +37,7 @@ from toolchain import (
     Runner,
 )
 from toolchain.checkers import create_all_checkers
+from toolchain.output import clear_full_reports
 from toolchain.utils import patch_ast_for_bandit
 
 
@@ -57,6 +58,13 @@ Examples:
         "checks",
         nargs="*",
         help="Specific checks to run (default: all)",
+    )
+    parser.add_argument(
+        "--skip",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Skip a checker (repeatable; e.g. --skip test in CI jobs that run tests separately)",
     )
     parser.add_argument(
         "-l",
@@ -92,6 +100,10 @@ Examples:
     # Patch AST for bandit compatibility
     patch_ast_for_bandit()
 
+    # Drop full reports from previous runs so stale logs never describe an
+    # earlier failure.
+    clear_full_reports()
+
     # Create runner with all checkers
     runner = Runner()
     for checker in create_all_checkers():
@@ -106,7 +118,7 @@ Examples:
 
     # Run checks
     try:
-        report = runner.run(args.checks if args.checks else None)
+        report = runner.run(args.checks if args.checks else None, skip=args.skip)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1

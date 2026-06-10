@@ -84,12 +84,16 @@ class TestArchitectureChecker:
             contrib = pkg / "contrib"
             contrib.mkdir()
             (contrib / "__init__.py").write_text("")
-            (contrib / "tools.py").write_text("from weakincentives.contrib import other")
+            (contrib / "tools.py").write_text(
+                "from weakincentives.contrib import other"
+            )
 
             checker = ArchitectureChecker(src_dir=Path(tmpdir))
             result = checker.run()
             # Should pass - contrib can import contrib
-            assert not any("layer violation" in d.message.lower() for d in result.diagnostics)
+            assert not any(
+                "layer violation" in d.message.lower() for d in result.diagnostics
+            )
 
     def test_handles_syntax_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -150,7 +154,9 @@ class TestArchitectureChecker:
             checker = ArchitectureChecker(src_dir=Path(tmpdir))
             result = checker.run()
             assert result.status == "failed"
-            assert any("layer violation" in d.message.lower() for d in result.diagnostics)
+            assert any(
+                "layer violation" in d.message.lower() for d in result.diagnostics
+            )
 
     def test_allows_type_checking_imports_across_layers(self) -> None:
         """TYPE_CHECKING imports are exempt from layer checks."""
@@ -188,9 +194,7 @@ class TestArchitectureChecker:
             runtime = pkg / "runtime"
             runtime.mkdir()
             (runtime / "__init__.py").write_text("")
-            (runtime / "loop.py").write_text(
-                "from weakincentives.prompt import Prompt"
-            )
+            (runtime / "loop.py").write_text("from weakincentives.prompt import Prompt")
 
             prompt = pkg / "prompt"
             prompt.mkdir()
@@ -234,7 +238,9 @@ class TestArchitectureChecker:
             checker = ArchitectureChecker(src_dir=Path(tmpdir))
             result = checker.run()
             assert result.status == "failed"
-            assert any("layer violation" in d.message.lower() for d in result.diagnostics)
+            assert any(
+                "layer violation" in d.message.lower() for d in result.diagnostics
+            )
 
     def test_allows_adapters_importing_core(self) -> None:
         """Adapters (layer 3) can import from Core (layer 2)."""
@@ -268,9 +274,7 @@ class TestArchitectureChecker:
             adapters = pkg / "adapters"
             adapters.mkdir()
             (adapters / "__init__.py").write_text("")
-            (adapters / "sdk.py").write_text(
-                "from weakincentives.contrib import tool"
-            )
+            (adapters / "sdk.py").write_text("from weakincentives.contrib import tool")
 
             contrib = pkg / "contrib"
             contrib.mkdir()
@@ -279,7 +283,9 @@ class TestArchitectureChecker:
             checker = ArchitectureChecker(src_dir=Path(tmpdir))
             result = checker.run()
             assert result.status == "failed"
-            assert any("layer violation" in d.message.lower() for d in result.diagnostics)
+            assert any(
+                "layer violation" in d.message.lower() for d in result.diagnostics
+            )
 
     def test_real_codebase_passes(self) -> None:
         """The actual codebase must pass layer checks after violation fixes."""

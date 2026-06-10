@@ -305,6 +305,40 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
   with step-by-step recipes for the common change shapes (tool, event +
   reducer, section type, adapter, resource binding); `llms.md` gains a table
   of contents for targeted section reads.
+- **Verification toolchain overhaul: one source of truth, structured
+  diagnostics restored, parser-drift defense.** `make check` is now a single
+  `check.py` invocation that runs every registered checker and reports all
+  failures together — previously it chained ~12 separate invocations, stopped
+  at the first failing category, and silently skipped `private-imports`,
+  `banned-time-imports`, and `dead-code`; CI's static-analysis job now runs
+  the same registry via `check.py --skip test` (newly gating PRs on bandit,
+  deptry, pip-audit, markdown, architecture, code-length, dead-code, docs,
+  and the import checkers). The lint checker parses `ruff check
+  --output-format=json` — the old text parser had silently stopped matching
+  ruff's new output format, dumping raw code frames instead of structured
+  `file:line: [code] message` diagnostics — and now marks auto-fixable issues
+  with a `make lint-fix` summary. `typecheck` runs ty **and** pyright
+  unconditionally (no more `&&` short-circuit hiding pyright errors behind ty
+  failures) and merges same-line findings as `[ty+pyright]`. Biome is a
+  registered checker (GitHub-reporter output parsed into structured
+  diagnostics) that now auto-fixes locally like format/markdown — and every
+  local auto-fix reports the touched files plus an explicit note that the
+  working tree has new uncommitted changes — and the `test` checker picks CI
+  (full coverage) vs local (testmon) mode itself. New drift defenses: a
+  failing tool whose parser
+  extracts zero diagnostics now yields an explicit warning plus the raw
+  output tail, and contract tests run the real tools (ruff, ty, pytest,
+  mdformat, vulture, bandit, biome) against fixtures so format changes fail
+  loudly — these immediately caught mdformat wrapping long error messages
+  across lines. Multi-line diagnostic continuation lines are now indented so
+  the `location: message` grammar holds line-by-line, and truncated results
+  save the complete untruncated report to `.check-logs/<checker>.log` (cleared
+  at the start of each run), with the truncation message naming that path and
+  the `uv run python check.py <name>` command to re-run just the failed check.
+  Also fixed: ruff's
+  `extend-exclude = ["toolchain"]` pattern matched any directory named
+  `toolchain`, so `tests/toolchain/` had never been linted or formatted; the
+  pattern is now root-anchored (`toolchain/`) and the test suite cleaned up.
 - **Type-suppression cleanup.** ~41 suppressions removed from the SDK/Codex
   adapters via `TypeGuard` predicates and `cast()` (#1143); blanket pyright
   suppressions removed from `serde` (#1136); further type-ignore cleanup across

@@ -234,3 +234,6 @@ dump.rdb
 tla2tools.jar
 node_modules
 scratch/
+
+# Full untruncated check reports (written by check.py on truncation)
+.check-logs/

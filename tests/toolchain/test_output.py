@@ -16,11 +16,17 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
-from toolchain.output import ConsoleFormatter, JSONFormatter, QuietFormatter, _supports_color
+from toolchain.output import (
+    ConsoleFormatter,
+    JSONFormatter,
+    _supports_color,
+    clear_full_reports,
+)
 
 if TYPE_CHECKING:
     pass
@@ -125,7 +131,10 @@ class TestConsoleFormatter:
 
         # Raw output shown without verbose flag
         result = CheckResult(
-            name="lint", status="failed", duration_ms=100, diagnostics=(),
+            name="lint",
+            status="failed",
+            duration_ms=100,
+            diagnostics=(),
             output="crash: unexpected null\nsecond line",
             command=("uv", "run", "ruff", "."),
         )
@@ -135,39 +144,63 @@ class TestConsoleFormatter:
 
         # No reproduce line when structured diagnostics are present
         result2 = CheckResult(
-            name="lint", status="failed", duration_ms=100,
+            name="lint",
+            status="failed",
+            duration_ms=100,
             diagnostics=(Diagnostic(message="Type error"),),
-            output="raw", command=("uv", "run", "ruff", "."),
+            output="raw",
+            command=("uv", "run", "ruff", "."),
         )
         out2 = formatter.format(Report(results=(result2,), total_duration_ms=100))
         assert "Reproduce:" not in out2
 
         # No reproduce line when output is empty (e.g. timeout already in diagnostics)
-        result3 = CheckResult(name="lint", status="failed", duration_ms=100, diagnostics=(), output="")
+        result3 = CheckResult(
+            name="lint", status="failed", duration_ms=100, diagnostics=(), output=""
+        )
         out3 = formatter.format(Report(results=(result3,), total_duration_ms=100))
         assert "✗ lint" in out3
         assert "Reproduce:" not in out3
 
-    def test_raw_output_truncated_at_50_lines(self) -> None:
-        """Raw output is truncated at 50 lines with a count of remaining lines."""
+        # Raw output without a recorded command: no reproduce line either
+        result4 = CheckResult(
+            name="lint", status="failed", duration_ms=100, diagnostics=(), output="raw"
+        )
+        out4 = formatter.format(Report(results=(result4,), total_duration_ms=100))
+        assert "raw" in out4
+        assert "Reproduce:" not in out4
+
+    def test_raw_output_truncated_at_50_lines(self, tmp_path: Path) -> None:
+        """Raw output is truncated at 50 lines; the full version is saved."""
         long_output = "\n".join(f"line {i}" for i in range(60))
         report = Report(
             results=(
                 CheckResult(
-                    name="test", status="failed", duration_ms=100,
-                    diagnostics=(), output=long_output,
+                    name="test",
+                    status="failed",
+                    duration_ms=100,
+                    diagnostics=(),
+                    output=long_output,
+                    command=("uv", "run", "pytest", "tests"),
                 ),
             ),
             total_duration_ms=100,
         )
-        formatter = ConsoleFormatter(color=False)
+        formatter = ConsoleFormatter(color=False, log_dir=tmp_path)
         output = formatter.format(report)
         assert "line 0" in output
         assert "line 49" in output
-        assert "line 50" not in output
-        assert "10 more lines" in output
+        assert "line 50\n" not in output
+        assert "10 more output lines" in output
+        # Full version saved, path and re-run hint included
+        log_file = tmp_path / "test.log"
+        assert f"full report: {log_file}" in output
+        assert "Re-run just this check: uv run python check.py test" in output
+        saved = log_file.read_text(encoding="utf-8")
+        assert "line 59" in saved  # beyond the display cap
+        assert "reproduce: uv run pytest tests" in saved
 
-    def test_max_diagnostics_truncation(self) -> None:
+    def test_max_diagnostics_truncation(self, tmp_path: Path) -> None:
         diagnostics = tuple(Diagnostic(message=f"Error {i}") for i in range(15))
         report = Report(
             results=(
@@ -180,10 +213,43 @@ class TestConsoleFormatter:
             ),
             total_duration_ms=100,
         )
-        formatter = ConsoleFormatter(color=False, max_diagnostics=10)
+        formatter = ConsoleFormatter(color=False, max_diagnostics=10, log_dir=tmp_path)
         output = formatter.format(report)
         assert "... and 5 more" in output
-        assert "Run: python check.py lint -v" in output
+        # Full version saved, path and re-run hint included
+        log_file = tmp_path / "lint.log"
+        assert f"full report: {log_file}" in output
+        assert "Re-run just this check: uv run python check.py lint" in output
+        saved = log_file.read_text(encoding="utf-8")
+        assert "diagnostics (15):" in saved
+        assert "Error 14" in saved  # beyond the display cap
+        # No command on this result: no reproduce line in the report
+        assert "reproduce:" not in saved
+
+    def test_truncation_note_omitted_when_report_unwritable(
+        self, tmp_path: Path
+    ) -> None:
+        """When the log dir can't be created, truncation degrades gracefully."""
+        blocker = tmp_path / "blocker"
+        blocker.write_text("a file, not a directory", encoding="utf-8")
+        diagnostics = tuple(Diagnostic(message=f"Error {i}") for i in range(15))
+        report = Report(
+            results=(
+                CheckResult(
+                    name="lint",
+                    status="failed",
+                    duration_ms=100,
+                    diagnostics=diagnostics,
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = ConsoleFormatter(
+            color=False, max_diagnostics=10, log_dir=blocker / "sub"
+        )
+        output = formatter.format(report)
+        assert "... and 5 more" in output
+        assert "full report:" not in output
 
     def test_checker_hint_shown_on_failure(self) -> None:
         report = Report(
@@ -290,9 +356,7 @@ class TestConsoleFormatter:
                     name="format",
                     status="passed",
                     duration_ms=100,
-                    diagnostics=(
-                        Diagnostic(message="Auto-fixed", severity="info"),
-                    ),
+                    diagnostics=(Diagnostic(message="Auto-fixed", severity="info"),),
                 ),
             ),
             total_duration_ms=100,
@@ -300,7 +364,6 @@ class TestConsoleFormatter:
         formatter = ConsoleFormatter(color=True)
         output = formatter.format(report)
         assert "\033[36m" in output  # Cyan color code
-
 
     def test_passed_result_shows_warnings(self) -> None:
         report = Report(
@@ -348,7 +411,7 @@ class TestConsoleFormatter:
         assert "\033[33m" in output  # Yellow color code
         assert "700 lines" in output
 
-    def test_passed_result_truncates_many_warnings(self) -> None:
+    def test_passed_result_truncates_many_warnings(self, tmp_path: Path) -> None:
         diagnostics = tuple(
             Diagnostic(
                 message=f"File has {700 + i} lines",
@@ -367,9 +430,58 @@ class TestConsoleFormatter:
             ),
             total_duration_ms=50,
         )
-        formatter = ConsoleFormatter(color=False, max_diagnostics=3)
+        formatter = ConsoleFormatter(color=False, max_diagnostics=3, log_dir=tmp_path)
         output = formatter.format(report)
         assert "... and 2 more warnings" in output
+        log_file = tmp_path / "code-length.log"
+        assert f"full report: {log_file}" in output
+        saved = log_file.read_text(encoding="utf-8")
+        assert "File has 704 lines" in saved  # beyond the display cap
+
+    def test_clear_full_reports(self, tmp_path: Path) -> None:
+        """Logs from previous runs are removed; a missing dir is a no-op."""
+        (tmp_path / "lint.log").write_text("stale", encoding="utf-8")
+        (tmp_path / "keep.txt").write_text("not a log", encoding="utf-8")
+        clear_full_reports(tmp_path)
+        assert not (tmp_path / "lint.log").exists()
+        assert (tmp_path / "keep.txt").exists()
+
+        clear_full_reports(tmp_path / "never-created")  # no error
+
+    def test_multiline_diagnostics_indent_continuation_lines(self) -> None:
+        """Continuation lines stay indented under their diagnostic.
+
+        Without the extra indent a `Fix: ...` hint lands at column 0 and
+        visually detaches from the diagnostic it belongs to.
+        """
+        report = Report(
+            results=(
+                CheckResult(
+                    name="code-length",
+                    status="passed",
+                    duration_ms=50,
+                    diagnostics=(
+                        Diagnostic(
+                            message="File has 741 lines (max 720)\nFix: Split into smaller modules",
+                            location=Location(file="src/big.py"),
+                            severity="warning",
+                        ),
+                    ),
+                ),
+                CheckResult(
+                    name="lint",
+                    status="failed",
+                    duration_ms=50,
+                    diagnostics=(Diagnostic(message="first line\nsecond line"),),
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = ConsoleFormatter(color=False)
+        output = formatter.format(report)
+        assert "  src/big.py: File has 741 lines (max 720)" in output
+        assert "\n    Fix: Split into smaller modules" in output
+        assert "  first line\n    second line" in output
 
 
 class TestJSONFormatter:
@@ -425,7 +537,9 @@ class TestSupportsColor:
 
         assert _supports_color(NoIsatty()) is False  # type: ignore[arg-type]
 
-    def test_no_color_environment_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_color_environment_variable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Mock a TTY stream
         class MockTTY:
             def isatty(self) -> bool:
@@ -441,224 +555,3 @@ class TestSupportsColor:
 
         monkeypatch.delenv("NO_COLOR", raising=False)
         assert _supports_color(MockTTY()) is True  # type: ignore[arg-type]
-
-
-class TestQuietFormatter:
-    """Tests for QuietFormatter."""
-
-    def test_passing_report_empty_output(self) -> None:
-        formatter = QuietFormatter(color=False)
-        output = formatter.format(_make_passing_report())
-        assert output == ""
-
-    def test_failing_report_shows_failures(self) -> None:
-        formatter = QuietFormatter(color=False)
-        output = formatter.format(_make_failing_report())
-        assert "test" in output
-        assert "tests/test_foo.py:42" in output
-        assert "lint" not in output  # Passing check not shown
-
-    def test_failing_report_with_color(self) -> None:
-        formatter = QuietFormatter(color=True)
-        output = formatter.format(_make_failing_report())
-        assert "\033[31m" in output  # Red color code
-
-    def test_truncates_diagnostics(self) -> None:
-        diagnostics = tuple(Diagnostic(message=f"Error {i}") for i in range(15))
-        report = Report(
-            results=(
-                CheckResult(
-                    name="lint",
-                    status="failed",
-                    duration_ms=100,
-                    diagnostics=diagnostics,
-                ),
-            ),
-            total_duration_ms=100,
-        )
-        formatter = QuietFormatter(color=False)
-        output = formatter.format(report)
-        assert "... and 5 more" in output
-        assert "Run: python check.py lint -v" in output
-
-    def test_reproduction_hint_not_shown_when_no_truncation(self) -> None:
-        report = Report(
-            results=(
-                CheckResult(
-                    name="lint",
-                    status="failed",
-                    duration_ms=100,
-                    diagnostics=(Diagnostic(message="Error 1"),),
-                ),
-            ),
-            total_duration_ms=100,
-        )
-        formatter = QuietFormatter(color=False)
-        output = formatter.format(report)
-        assert "Run: python check.py" not in output
-
-    def test_auto_color_detection(self) -> None:
-        stream = io.StringIO()
-        formatter = QuietFormatter(stream=stream)
-        assert formatter._use_color() is False
-
-    def test_info_diagnostics_shown_for_passed_checks(self) -> None:
-        """Info diagnostics should be shown even in quiet mode for passed checks."""
-        report = Report(
-            results=(
-                CheckResult(
-                    name="format",
-                    status="passed",
-                    duration_ms=100,
-                    diagnostics=(
-                        Diagnostic(
-                            message="Automatically reformatted 2 files",
-                            severity="info",
-                        ),
-                    ),
-                ),
-            ),
-            total_duration_ms=100,
-        )
-        formatter = QuietFormatter(color=False)
-        output = formatter.format(report)
-        assert "Automatically reformatted" in output
-
-    def test_info_diagnostics_with_color(self) -> None:
-        """Info diagnostics should use cyan color in quiet mode."""
-        report = Report(
-            results=(
-                CheckResult(
-                    name="format",
-                    status="passed",
-                    duration_ms=100,
-                    diagnostics=(
-                        Diagnostic(message="Auto-fixed", severity="info"),
-                    ),
-                ),
-            ),
-            total_duration_ms=100,
-        )
-        formatter = QuietFormatter(color=True)
-        output = formatter.format(report)
-        assert "\033[36m" in output  # Cyan color code
-
-    def test_warning_diagnostics_shown_for_passed_checks(self) -> None:
-        """Warning diagnostics should be shown in quiet mode for passed checks."""
-        report = Report(
-            results=(
-                CheckResult(
-                    name="code-length",
-                    status="passed",
-                    duration_ms=50,
-                    diagnostics=(
-                        Diagnostic(
-                            message="File has 700 lines (max 620)",
-                            location=Location(file="src/big.py"),
-                            severity="warning",
-                        ),
-                    ),
-                ),
-            ),
-            total_duration_ms=50,
-        )
-        formatter = QuietFormatter(color=False)
-        output = formatter.format(report)
-        assert "700 lines" in output
-
-    def test_warning_diagnostics_with_color(self) -> None:
-        """Warning diagnostics should use yellow color in quiet mode."""
-        report = Report(
-            results=(
-                CheckResult(
-                    name="code-length",
-                    status="passed",
-                    duration_ms=50,
-                    diagnostics=(
-                        Diagnostic(
-                            message="File has 700 lines (max 620)",
-                            location=Location(file="src/big.py"),
-                            severity="warning",
-                        ),
-                    ),
-                ),
-            ),
-            total_duration_ms=50,
-        )
-        formatter = QuietFormatter(color=True)
-        output = formatter.format(report)
-        assert "\033[33m" in output  # Yellow color code
-
-    def test_mixed_severity_diagnostics_in_passed_check(self) -> None:
-        """Only info and warning diagnostics are shown for passed checks."""
-        report = Report(
-            results=(
-                CheckResult(
-                    name="code-length",
-                    status="passed",
-                    duration_ms=50,
-                    diagnostics=(
-                        Diagnostic(message="Info msg", severity="info"),
-                        Diagnostic(message="Warn msg", severity="warning"),
-                        Diagnostic(message="Err msg", severity="error"),
-                    ),
-                ),
-            ),
-            total_duration_ms=50,
-        )
-        formatter = QuietFormatter(color=False)
-        output = formatter.format(report)
-        assert "Info msg" in output
-        assert "Warn msg" in output
-        assert "Err msg" not in output
-
-    def test_raw_output_surfaced_when_no_diagnostics(self) -> None:
-        """Raw output and reproduce command shown when no structured diagnostics.
-
-        Same guarantee as ConsoleFormatter: root cause is immediately visible,
-        structured diagnostics take priority, and empty output is handled safely.
-        """
-        formatter = QuietFormatter(color=False)
-
-        # Raw output + command shown
-        result = CheckResult(
-            name="lint", status="failed", duration_ms=100, diagnostics=(),
-            output="crash: null\nsecond line",
-            command=("uv", "run", "ruff", "."),
-        )
-        out = formatter.format(Report(results=(result,), total_duration_ms=100))
-        assert "crash: null" in out
-        assert "Reproduce: uv run ruff ." in out
-
-        # No reproduce when diagnostics present
-        result2 = CheckResult(
-            name="lint", status="failed", duration_ms=100,
-            diagnostics=(Diagnostic(message="Type error"),),
-            command=("uv", "run", "ruff", "."),
-        )
-        assert "Reproduce:" not in formatter.format(Report(results=(result2,), total_duration_ms=100))
-
-        # No reproduce when output empty
-        result3 = CheckResult(name="lint", status="failed", duration_ms=100, diagnostics=(), output="")
-        out3 = formatter.format(Report(results=(result3,), total_duration_ms=100))
-        assert "✗ lint" in out3
-        assert "Reproduce:" not in out3
-
-    def test_raw_output_truncated_at_30_lines(self) -> None:
-        """Raw output is truncated at 30 lines with a count of remaining lines."""
-        long_output = "\n".join(f"line {i}" for i in range(40))
-        report = Report(
-            results=(
-                CheckResult(
-                    name="test", status="failed", duration_ms=100,
-                    diagnostics=(), output=long_output,
-                ),
-            ),
-            total_duration_ms=100,
-        )
-        formatter = QuietFormatter(color=False)
-        output = formatter.format(report)
-        assert "line 0" in output
-        assert "line 29" in output
-        assert "line 30" not in output
-        assert "10 more lines" in output

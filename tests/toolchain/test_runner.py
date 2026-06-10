@@ -85,8 +85,34 @@ class TestRunner:
         runner = Runner()
         runner.register(MockChecker(_name="lint", _description="Lint"))
 
-        with pytest.raises(ValueError, match="Unknown checker.*nonexistent"):
+        with pytest.raises(ValueError, match=r"Unknown checker.*nonexistent"):
             runner.run(["lint", "nonexistent"])
+
+    def test_skip_excludes_checker(self) -> None:
+        runner = Runner()
+        runner.register(MockChecker(_name="lint", _description="Lint"))
+        runner.register(MockChecker(_name="test", _description="Test"))
+        runner.register(MockChecker(_name="typecheck", _description="Types"))
+
+        report = runner.run(skip=["test"])
+        names = [r.name for r in report.results]
+        assert names == ["lint", "typecheck"]
+
+    def test_skip_applies_to_explicit_names(self) -> None:
+        runner = Runner()
+        runner.register(MockChecker(_name="lint", _description="Lint"))
+        runner.register(MockChecker(_name="test", _description="Test"))
+
+        report = runner.run(["lint", "test"], skip=["test"])
+        names = [r.name for r in report.results]
+        assert names == ["lint"]
+
+    def test_skip_unknown_checker_raises(self) -> None:
+        runner = Runner()
+        runner.register(MockChecker(_name="lint", _description="Lint"))
+
+        with pytest.raises(ValueError, match=r"Unknown checker.*nonexistent"):
+            runner.run(skip=["nonexistent"])
 
     def test_run_preserves_order(self) -> None:
         runner = Runner()
@@ -106,9 +132,15 @@ class TestRunner:
 
     def test_report_tracks_failures(self) -> None:
         runner = Runner()
-        runner.register(MockChecker(_name="pass1", _description="Pass", _status="passed"))
-        runner.register(MockChecker(_name="fail1", _description="Fail", _status="failed"))
-        runner.register(MockChecker(_name="pass2", _description="Pass", _status="passed"))
+        runner.register(
+            MockChecker(_name="pass1", _description="Pass", _status="passed")
+        )
+        runner.register(
+            MockChecker(_name="fail1", _description="Fail", _status="failed")
+        )
+        runner.register(
+            MockChecker(_name="pass2", _description="Pass", _status="passed")
+        )
 
         report = runner.run()
         assert report.passed is False

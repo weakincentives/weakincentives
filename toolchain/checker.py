@@ -72,6 +72,39 @@ def _no_parse(_output: str, _code: int) -> tuple[Diagnostic, ...]:
     return ()
 
 
+def merge_output(stdout: str, stderr: str) -> str:
+    """Combine captured stdout and stderr into one block."""
+    if stdout and stderr:
+        return f"{stdout}\n{stderr}"
+    return stdout or stderr
+
+
+_DRIFT_TAIL_LINES = 15
+
+
+def output_tail(output: str, max_lines: int = _DRIFT_TAIL_LINES) -> str:
+    """Return the last *max_lines* lines of output."""
+    return "\n".join(output.strip().splitlines()[-max_lines:])
+
+
+def parser_drift_warning(checker_name: str, output: str) -> Diagnostic:
+    """Build a warning for a failing tool whose output could not be parsed.
+
+    A failure with zero structured diagnostics usually means the tool's
+    output format changed and the parser silently stopped matching. Surface
+    the raw tail so the failure stays actionable while flagging that the
+    toolchain itself needs attention.
+    """
+    message = (
+        f"{checker_name}: command failed but the parser extracted no "
+        "structured diagnostics - the tool's output format may have drifted "
+        "from what the parser expects.\n"
+        "Raw output tail:\n"
+        f"{output_tail(output)}"
+    )
+    return Diagnostic(message=message, severity="warning")
+
+
 @dataclass
 class SubprocessChecker:
     """Base checker that runs a shell command.
@@ -107,11 +140,11 @@ class SubprocessChecker:
             )
             duration_ms = int((time.monotonic() - start) * 1000)
 
-            output = result.stdout
-            if result.stderr:
-                output = f"{output}\n{result.stderr}" if output else result.stderr
+            output = merge_output(result.stdout, result.stderr)
 
             diagnostics = self.parser(output, result.returncode)
+            if result.returncode != 0 and not diagnostics and self.parser is not _no_parse:
+                diagnostics = (parser_drift_warning(self.name, output),)
 
             return CheckResult(
                 name=self.name,
@@ -161,11 +194,6 @@ class SubprocessChecker:
 FileListParser = Callable[[str], list[str]]
 
 
-def _no_file_list_parse(_output: str) -> list[str]:
-    """Default file list parser that returns empty list."""
-    return []
-
-
 @dataclass
 class AutoFormatChecker:
     """A checker that auto-fixes formatting locally but only checks in CI.
@@ -173,16 +201,15 @@ class AutoFormatChecker:
     In local environments: runs the formatter to apply fixes, reports changes.
     In CI environments: runs the formatter in check mode, fails if changes needed.
 
-    Uses JSON output format internally for reliable file path extraction.
-    Alternatively, can use a text-based file list parser for tools without JSON output.
+    The check command's text output is parsed with file_list_parser to report
+    which files needed formatting.
     """
 
     name: str
     description: str
     check_command: list[str]
     fix_command: list[str]
-    json_check_command: list[str] | None = None  # For JSON output parsing
-    file_list_parser: FileListParser = _no_file_list_parse  # For text output parsing
+    file_list_parser: FileListParser
     parser: DiagnosticParser = _no_parse
     timeout: int = 300
 
@@ -205,11 +232,11 @@ class AutoFormatChecker:
             )
             duration_ms = int((time.monotonic() - start) * 1000)
 
-            output = result.stdout
-            if result.stderr:
-                output = f"{output}\n{result.stderr}" if output else result.stderr
+            output = merge_output(result.stdout, result.stderr)
 
             diagnostics = self.parser(output, result.returncode)
+            if result.returncode != 0 and not diagnostics and self.parser is not _no_parse:
+                diagnostics = (parser_drift_warning(self.name, output),)
 
             return CheckResult(
                 name=self.name,
@@ -250,65 +277,29 @@ class AutoFormatChecker:
     def _run_with_autofix(self, start: float) -> CheckResult:
         """Run with auto-fix and report changes (local behavior).
 
-        Uses JSON check command (if available) to get precise file list,
-        or text-based file list parser for tools without JSON support,
-        then runs fix command to apply changes.
+        Runs the check command to learn which files need formatting, then the
+        fix command to apply changes, reporting the affected files.
         """
         try:
-            # First, check what files need formatting
-            files_to_format: list[str] = []
-
-            # Option 1: JSON check command (e.g., ruff with --output-format=json)
-            if self.json_check_command:
-                check_result = subprocess.run(
-                    self.json_check_command,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout,
+            check_result = subprocess.run(
+                self.check_command,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+            if check_result.returncode == 0:
+                duration_ms = int((time.monotonic() - start) * 1000)
+                return CheckResult(
+                    name=self.name,
+                    status="passed",
+                    duration_ms=duration_ms,
+                    diagnostics=(),
+                    output="",
                 )
-                # If check passed, nothing needs formatting
-                if check_result.returncode == 0:
-                    duration_ms = int((time.monotonic() - start) * 1000)
-                    return CheckResult(
-                        name=self.name,
-                        status="passed",
-                        duration_ms=duration_ms,
-                        diagnostics=(),
-                        output="",
-                    )
-                # Check failed - parse JSON output to get file list
-                files_to_format = self._parse_json_output(check_result.stdout)
 
-            # Option 2: Text-based file list parser (e.g., mdformat)
-            elif self.file_list_parser is not _no_file_list_parse:
-                check_result = subprocess.run(
-                    self.check_command,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout,
-                )
-                # If check passed, nothing needs formatting
-                if check_result.returncode == 0:
-                    duration_ms = int((time.monotonic() - start) * 1000)
-                    return CheckResult(
-                        name=self.name,
-                        status="passed",
-                        duration_ms=duration_ms,
-                        diagnostics=(),
-                        output="",
-                    )
-                # Check failed - parse text output to get file list
-                output = check_result.stdout
-                if check_result.stderr:
-                    output = f"{output}\n{check_result.stderr}" if output else check_result.stderr
-                files_to_format = self.file_list_parser(output)
+            check_output = merge_output(check_result.stdout, check_result.stderr)
+            files_to_format = self.file_list_parser(check_output)
 
-            # Run fix command to apply formatting.
-            # At this point, either:
-            # 1. json_check_command or file_list_parser confirmed files need formatting
-            # 2. Neither was provided (fallback) - fix runs directly and we parse its output
-            #    for the count (e.g., "2 files reformatted"). This is intentional for tools
-            #    that don't support check-mode file listing but do report reformatted counts.
             fix_result = subprocess.run(
                 self.fix_command,
                 capture_output=True,
@@ -317,69 +308,53 @@ class AutoFormatChecker:
             )
             duration_ms = int((time.monotonic() - start) * 1000)
 
-            # Check if fix command failed (e.g., syntax error, internal crash)
+            # Fix command failed: either a hard error (syntax error, crash) or
+            # issues remain that have no auto-fix. Parse its output so the
+            # remaining issues surface as structured diagnostics.
             if fix_result.returncode != 0:
-                output = fix_result.stdout
-                if fix_result.stderr:
-                    output = f"{output}\n{fix_result.stderr}" if output else fix_result.stderr
+                output = merge_output(fix_result.stdout, fix_result.stderr)
+                diagnostics = self.parser(output, fix_result.returncode)
+                if not diagnostics:
+                    diagnostics = (Diagnostic("Auto-fix command failed"),)
                 return CheckResult(
                     name=self.name,
                     status="failed",
                     duration_ms=duration_ms,
-                    diagnostics=(Diagnostic("Auto-fix command failed"),),
+                    diagnostics=diagnostics,
                     output=output.strip(),
                     command=tuple(self.fix_command),
                 )
 
-            # Report which files were reformatted
             if files_to_format:
                 message = self._format_file_message(files_to_format)
                 return CheckResult(
                     name=self.name,
                     status="passed",
                     duration_ms=duration_ms,
-                    diagnostics=(
-                        Diagnostic(message=message, severity="info"),
-                    ),
+                    diagnostics=(Diagnostic(message=message, severity="info"),),
                     output=fix_result.stdout.strip(),
                 )
 
-            # No JSON check command - fall back to parsing fix output
-            reformat_count = self._parse_reformat_count(fix_result.stdout)
-            if reformat_count > 0:
-                if reformat_count == 1:
-                    message = "Automatically reformatted 1 file"
-                else:
-                    message = f"Automatically reformatted {reformat_count} files"
-
-                return CheckResult(
-                    name=self.name,
-                    status="passed",
-                    duration_ms=duration_ms,
-                    diagnostics=(
-                        Diagnostic(message=message, severity="info"),
-                    ),
-                    output=fix_result.stdout.strip(),
-                )
-
-            # No files reformatted - everything was already formatted
+            # Check reported issues but the file list parser matched nothing:
+            # the fix was applied, but the parser likely drifted.
             return CheckResult(
                 name=self.name,
                 status="passed",
                 duration_ms=duration_ms,
-                diagnostics=(),
-                output="",
+                diagnostics=(parser_drift_warning(self.name, check_output),),
+                output=fix_result.stdout.strip(),
             )
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
             duration_ms = int((time.monotonic() - start) * 1000)
+            timed_out_command = tuple(str(part) for part in e.cmd)
             return CheckResult(
                 name=self.name,
                 status="failed",
                 duration_ms=duration_ms,
                 diagnostics=(Diagnostic(f"Timed out after {self.timeout}s"),),
                 output="",
-                command=tuple(self.fix_command),
+                command=timed_out_command,
             )
         except FileNotFoundError as e:
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -399,40 +374,15 @@ class AutoFormatChecker:
                 command=tuple(self.fix_command),
             )
 
-    def _parse_json_output(self, output: str) -> list[str]:
-        """Parse file paths from ruff JSON output.
-
-        Expected format is a JSON array of objects with 'filename' field.
-        """
-        import json
-
-        try:
-            data = json.loads(output)
-            if isinstance(data, list):
-                # Extract unique filenames
-                filenames = {item.get("filename") for item in data if isinstance(item, dict)}
-                return sorted(f for f in filenames if f)
-        except json.JSONDecodeError:
-            pass
-        return []
-
     def _format_file_message(self, files: list[str]) -> str:
         """Format a human-readable message about reformatted files."""
         if len(files) == 1:
-            return f"Automatically reformatted 1 file: {files[0]}"
-        file_list = ", ".join(files)
-        return f"Automatically reformatted {len(files)} files: {file_list}"
-
-    def _parse_reformat_count(self, output: str) -> int:
-        """Parse the number of reformatted files from ruff text output.
-
-        Fallback for when JSON output is not available.
-        Looks for patterns like "1 file reformatted" or "3 files reformatted".
-        """
-        import re
-
-        for line in output.strip().split("\n"):
-            match = re.search(r"(\d+)\s+files?\s+reformatted", line)
-            if match:
-                return int(match.group(1))
-        return 0
+            summary = f"Automatically reformatted 1 file: {files[0]}"
+        else:
+            file_list = ", ".join(files)
+            summary = f"Automatically reformatted {len(files)} files: {file_list}"
+        return (
+            f"{summary}\n"
+            "These fixes are new uncommitted changes in the working tree - "
+            "include them in your commit."
+        )

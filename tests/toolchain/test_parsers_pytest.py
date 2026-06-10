@@ -35,7 +35,9 @@ class TestParsePytest:
         assert len(diagnostics) == 0
 
     def test_parses_failed_test(self) -> None:
-        output = "FAILED tests/test_foo.py::test_something - AssertionError: assert 1 == 2"
+        output = (
+            "FAILED tests/test_foo.py::test_something - AssertionError: assert 1 == 2"
+        )
         diagnostics = parse_pytest(output, 1)
         assert len(diagnostics) == 1
         assert "test_something" in diagnostics[0].message
@@ -66,7 +68,9 @@ SyntaxError: invalid syntax"""
         assert "Collection error" in diagnostics[0].message
 
     def test_parses_coverage_failure(self) -> None:
-        output = "FAIL Required test coverage of 100% not reached. Total coverage: 95.5%"
+        output = (
+            "FAIL Required test coverage of 100% not reached. Total coverage: 95.5%"
+        )
         diagnostics = parse_pytest(output, 1)
         assert len(diagnostics) == 1
         assert "95.5%" in diagnostics[0].message
@@ -129,7 +133,10 @@ Also failed: test_baz.py"""
         assert len(diagnostics) == 1
         assert "Tests failed" in diagnostics[0].message
         assert "Files involved" in diagnostics[0].message
-        assert "test_foo.py" in diagnostics[0].message or "tests/test_foo.py" in diagnostics[0].message
+        assert (
+            "test_foo.py" in diagnostics[0].message
+            or "tests/test_foo.py" in diagnostics[0].message
+        )
 
     def test_generic_failure_limits_test_files_to_five(self) -> None:
         """Test that more than 5 test files are truncated."""
@@ -164,7 +171,10 @@ _ test_other _"""
         assert len(diagnostics) == 1
         assert "test_something" in diagnostics[0].message
         # Should include traceback details
-        assert ("assert" in diagnostics[0].message or "AssertionError" in diagnostics[0].message)
+        assert (
+            "assert" in diagnostics[0].message
+            or "AssertionError" in diagnostics[0].message
+        )
 
 
 class TestFindTestFailureLine:
@@ -173,17 +183,21 @@ class TestFindTestFailureLine:
     def test_finds_line_in_traceback(self) -> None:
         output = """tests/test_foo.py:42: in test_something
 >       assert x == y"""
-        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
+        line, _msg = _find_test_failure_line(
+            output, "tests/test_foo.py", "test_something"
+        )
         assert line == 42
 
     def test_finds_assertion_line(self) -> None:
         output = """tests/test_foo.py:42: AssertionError"""
-        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_other")
+        line, _msg = _find_test_failure_line(output, "tests/test_foo.py", "test_other")
         assert line == 42
 
     def test_returns_none_when_not_found(self) -> None:
         output = "no traceback here"
-        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
+        line, _msg = _find_test_failure_line(
+            output, "tests/test_foo.py", "test_something"
+        )
         assert line is None
 
     def test_extracts_traceback_message(self) -> None:
@@ -193,7 +207,9 @@ tests/test_foo.py:42: in test_something
 >   assert x == y
 E   AssertionError: x != y
 _ test_other _"""
-        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
+        line, msg = _find_test_failure_line(
+            output, "tests/test_foo.py", "test_something"
+        )
         assert line == 42
         assert msg is not None
         assert "assert x == y" in msg or "AssertionError" in msg
@@ -204,7 +220,9 @@ _ test_other _"""
 tests/test_foo.py:42: in test_something
 Some other output
 _ test_other _"""
-        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
+        line, msg = _find_test_failure_line(
+            output, "tests/test_foo.py", "test_something"
+        )
         assert line == 42
         assert msg is None
 
@@ -266,7 +284,9 @@ TOTAL                                        200     11    95%"""
             "-------------------------------------------------------------",
         ]
         for i in range(15):
-            lines.append(f"src/module{i}.py                           100     10    90%")
+            lines.append(
+                f"src/module{i}.py                           100     10    90%"
+            )
         lines.append("TOTAL                                        1500    150    90%")
         output = "\n".join(lines)
         result = _extract_uncovered_files(output)
@@ -626,6 +646,28 @@ docs/guide.md"""
         assert diagnostics[0].location.file == "/home/user/project/README.md"
         assert "Markdown formatting required" in diagnostics[0].message
         assert "mdformat /home/user/project/README.md" in diagnostics[0].message
+
+    def test_parses_error_format_wrapped_after_path(self) -> None:
+        """mdformat word-wraps long messages; the wrap can fall after the path."""
+        output = 'Error: File "/tmp/some/long/path/to/bad.md"\nis not formatted.'
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 1
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "/tmp/some/long/path/to/bad.md"
+
+    def test_parses_error_format_wrapped_before_path_and_in_suffix(self) -> None:
+        """With longer paths the wrap falls before the path and inside the suffix."""
+        output = (
+            "Error: File\n"
+            '"/tmp/pytest-of-runner/pytest-0/test_mdformat_check_contract2/bad.md" is not\n'
+            "formatted."
+        )
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 1
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == (
+            "/tmp/pytest-of-runner/pytest-0/test_mdformat_check_contract2/bad.md"
+        )
 
     def test_parses_multiple_error_format_files(self) -> None:
         """Test parsing multiple Error: File lines."""
