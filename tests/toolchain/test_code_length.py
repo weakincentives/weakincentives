@@ -139,9 +139,7 @@ class TestCodeLengthChecker:
     def test_new_method_violation_is_error(self, tmp_path: Path) -> None:
         src = tmp_path / "src"
         src.mkdir()
-        lines = ["class Foo:\n", "    def bar(self):\n"] + [
-            "        x = 1\n"
-        ] * 125
+        lines = ["class Foo:\n", "    def bar(self):\n"] + ["        x = 1\n"] * 125
         (src / "cls.py").write_text("".join(lines))
         bl = _write_baseline(tmp_path, [])
         checker = CodeLengthChecker(
@@ -305,11 +303,7 @@ class TestCodeLengthChecker:
         src = tmp_path / "src"
         src.mkdir()
         code = (
-            "class Foo:\n"
-            "    def short(self):\n"
-            "        pass\n"
-            "\n"
-            "def standalone():\n"
+            "class Foo:\n    def short(self):\n        pass\n\ndef standalone():\n"
         ) + "    x = 1\n" * 130
         (src / "mixed.py").write_text(code)
         bl = _write_baseline(tmp_path, [])
@@ -355,9 +349,7 @@ class TestCodeLengthChecker:
             result = checker.run()
 
         func_diags = [
-            d
-            for d in result.diagnostics
-            if "lines" in d.message and "max" in d.message
+            d for d in result.diagnostics if "lines" in d.message and "max" in d.message
         ]
         assert len(func_diags) == 0
 

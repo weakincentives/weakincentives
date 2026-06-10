@@ -50,9 +50,7 @@ class TestFindPrivateSegment:
         assert _find_private_segment(["weakincentives", "prompt", "section"]) is None
 
     def test_finds_first_private_segment(self) -> None:
-        assert (
-            _find_private_segment(["weakincentives", "serde", "_scope"]) == 2
-        )
+        assert _find_private_segment(["weakincentives", "serde", "_scope"]) == 2
 
     def test_finds_first_when_multiple(self) -> None:
         parts = ["weakincentives", "adapters", "_shared", "_types"]
@@ -125,9 +123,7 @@ class TestPrivateImportChecker:
             # Create serde package with private module
             serde = pkg / "serde"
             serde.mkdir()
-            (serde / "__init__.py").write_text(
-                "from ._scope import SerdeScope"
-            )
+            (serde / "__init__.py").write_text("from ._scope import SerdeScope")
             (serde / "_scope.py").write_text("class SerdeScope: pass")
             (serde / "parse.py").write_text(
                 "from weakincentives.serde._scope import SerdeScope"
@@ -185,9 +181,7 @@ class TestPrivateImportChecker:
 
             pycache = pkg / "__pycache__"
             pycache.mkdir()
-            (pycache / "bad.py").write_text(
-                "from weakincentives.serde._scope import X"
-            )
+            (pycache / "bad.py").write_text("from weakincentives.serde._scope import X")
 
             checker = PrivateImportChecker(src_dir=Path(tmpdir))
             result = checker.run()
@@ -245,9 +239,7 @@ class TestPrivateImportChecker:
             prompt = pkg / "prompt"
             prompt.mkdir()
             (prompt / "__init__.py").write_text("")
-            (prompt / "output.py").write_text(
-                "from ..serde._scope import Scope"
-            )
+            (prompt / "output.py").write_text("from ..serde._scope import Scope")
 
             checker = PrivateImportChecker(src_dir=Path(tmpdir))
             result = checker.run()
