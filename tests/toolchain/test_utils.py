@@ -45,7 +45,9 @@ class TestGitTrackedFiles:
 
     def test_excludes_directories(self) -> None:
         root = Path(__file__).parents[2]
-        files = git_tracked_files(root, "*.md", exclude=frozenset({"test-repositories"}))
+        files = git_tracked_files(
+            root, "*.md", exclude=frozenset({"test-repositories"})
+        )
         for f in files:
             assert "test-repositories" not in str(f)
 

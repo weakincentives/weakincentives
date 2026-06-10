@@ -109,7 +109,10 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-extend-exclude = ["test-repositories", "toolchain"]
+# "toolchain/" (with slash) anchors to the repo root: a bare "toolchain"
+# pattern also matched tests/toolchain, silently excluding the toolchain
+# test suite from lint and format.
+extend-exclude = ["test-repositories", "toolchain/"]
 
 [tool.ruff.lint]
 extend-select = [

@@ -55,6 +55,8 @@ jobs:
           fi
 
   # Static analysis - always runs (fast and high value)
+  # Runs every registered checker except `test` (the test groups below cover
+  # tests) in one toolchain invocation, so CI and `make check` cannot drift.
   static-analysis:
     runs-on: ubuntu-latest
     steps:
@@ -64,18 +66,8 @@ jobs:
         with:
           checkout: 'false'
           sync-args: --all-extras --frozen
-      - name: Run format check
-        run: make format-check
-      - name: Run linter
-        run: make lint
-      - name: Run ty
-        run: make ty
-      - name: Run pyright
-        run: make pyright
-      - name: Run Biome (JS/CSS lint)
-        run: make biome
-      - name: Run JavaScript tests
-        run: make bun-test
+      - name: Run all checks except tests
+        run: uv run --all-extras python check.py --skip test
 
   # Parallel test jobs - full suite runs on every PR
   test:

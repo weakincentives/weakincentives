@@ -59,6 +59,13 @@ Examples:
         help="Specific checks to run (default: all)",
     )
     parser.add_argument(
+        "--skip",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Skip a checker (repeatable; e.g. --skip test in CI jobs that run tests separately)",
+    )
+    parser.add_argument(
         "-l",
         "--list",
         action="store_true",
@@ -106,7 +113,7 @@ Examples:
 
     # Run checks
     try:
-        report = runner.run(args.checks if args.checks else None)
+        report = runner.run(args.checks if args.checks else None, skip=args.skip)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1

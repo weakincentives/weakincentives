@@ -26,9 +26,7 @@ lint-fix:
 
 # Run Biome linter and formatter check on frontend static files
 biome:
-	@if [ ! -d node_modules ]; then npm install --silent; fi
-	@output=$$(npx biome check src/weakincentives/cli/static/ 2>&1) || \
-		{ echo "$$output"; exit 1; }
+	@uv run --quiet --all-extras python check.py -q biome
 
 # Run Biome with auto-fix
 biome-fix:
@@ -87,15 +85,11 @@ typecheck:
 # Testing
 # =============================================================================
 
-# Run tests. In CI: full coverage (100% required). Locally: only tests affected by changes.
-# Local mode uses testmon coverage database for fast iteration. First run builds the
-# database, subsequent runs skip tests unaffected by changes.
+# Run tests. In CI: full coverage (100% required). Locally: only tests affected by
+# changes (the test checker detects the environment and uses the testmon database;
+# the first run builds it, subsequent runs skip tests unaffected by changes).
 test:
-	@if [ -n "$$CI" ]; then \
-		uv run --quiet --all-extras python check.py -q test; \
-	else \
-		uv run --quiet --all-extras pytest -p no:cov -o addopts= --testmon --strict-config --strict-markers --timeout=10 --timeout-method=thread --tb=short --no-header --reruns=2 --reruns-delay=0.5 tests; \
-	fi
+	@uv run --quiet --all-extras python check.py -q test
 
 # =============================================================================
 # Parallel Test Groups (for CI)
@@ -287,10 +281,12 @@ demo: demo-claude
 # Main Check Target
 # =============================================================================
 
-# Run all checks (format, lint, typecheck, security, dependencies, architecture, docs, tests)
-# In CI: full test coverage required. Locally: only tests affected by changes (via testmon).
-check: format-check lint typecheck bandit deptry pip-audit markdown-check biome bun-test test
-	@uv run --quiet --all-extras python check.py -q architecture code-length docs
+# Run ALL checks in a single toolchain invocation. Every registered checker runs
+# and all failures are reported together (no stop-at-first-failure), so one round
+# trip surfaces everything. In CI: full test coverage required. Locally: only
+# tests affected by changes (via testmon).
+check:
+	@uv run --quiet --all-extras python check.py -q
 	@echo "✓ All checks passed"
 
 # Synchronize documentation files into package

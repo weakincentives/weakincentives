@@ -10,18 +10,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for DocsChecker, typecheck parsing, factory functions, and mdformat helpers."""
+"""Tests for DocsChecker, the typecheck checker, factory functions, and mdformat helpers."""
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from toolchain.checkers import (
     create_all_checkers,
     create_architecture_checker,
     create_bandit_checker,
     create_banned_time_imports_checker,
+    create_biome_checker,
     create_dead_code_checker,
     create_deptry_checker,
     create_docs_checker,
@@ -37,6 +40,7 @@ from toolchain.checkers.architecture import ArchitectureChecker
 from toolchain.checkers.banned_time_imports import BannedTimeImportsChecker
 from toolchain.checkers.docs import DocsChecker
 from toolchain.checkers.private_imports import PrivateImportChecker
+from toolchain.checkers.typecheck import TypecheckChecker
 
 
 class TestDocsChecker:
@@ -66,8 +70,10 @@ class TestDocsChecker:
             # Initialize as git repo with the file tracked
             import subprocess
 
-            subprocess.run(["git", "init"], cwd=root, capture_output=True)
-            subprocess.run(["git", "add", "README.md"], cwd=root, capture_output=True)
+            subprocess.run(["git", "init"], cwd=root, capture_output=True, check=False)
+            subprocess.run(
+                ["git", "add", "README.md"], cwd=root, capture_output=True, check=False
+            )
 
             checker = DocsChecker(root=root)
             result = checker.run()
@@ -129,8 +135,10 @@ def example():
 
             import subprocess
 
-            subprocess.run(["git", "init"], cwd=root, capture_output=True)
-            subprocess.run(["git", "add", "."], cwd=root, capture_output=True)
+            subprocess.run(["git", "init"], cwd=root, capture_output=True, check=False)
+            subprocess.run(
+                ["git", "add", "."], cwd=root, capture_output=True, check=False
+            )
 
             checker = DocsChecker(root=root)
             result = checker.run()
@@ -169,8 +177,10 @@ def example():
             readme = root / "README.md"
             readme.write_text("```python\nx = 1\n```")
 
-            subprocess.run(["git", "init"], cwd=root, capture_output=True)
-            subprocess.run(["git", "add", "."], cwd=root, capture_output=True)
+            subprocess.run(["git", "init"], cwd=root, capture_output=True, check=False)
+            subprocess.run(
+                ["git", "add", "."], cwd=root, capture_output=True, check=False
+            )
 
             # Mock subprocess.run to return malformed JSON from pyright
             original_run = subprocess.run
@@ -193,10 +203,13 @@ def example():
 
             # Should have a diagnostic about JSON parse failure
             assert any(
-                "Failed to parse pyright output" in d.message for d in result.diagnostics
+                "Failed to parse pyright output" in d.message
+                for d in result.diagnostics
             )
             assert any("exit code 1" in d.message for d in result.diagnostics)
-            assert any("This is not valid JSON" in d.message for d in result.diagnostics)
+            assert any(
+                "This is not valid JSON" in d.message for d in result.diagnostics
+            )
 
     def test_handles_pyright_failure_no_output(self) -> None:
         """Test that pyright failures with no output are properly reported."""
@@ -208,8 +221,10 @@ def example():
             readme = root / "README.md"
             readme.write_text("```python\nx = 1\n```")
 
-            subprocess.run(["git", "init"], cwd=root, capture_output=True)
-            subprocess.run(["git", "add", "."], cwd=root, capture_output=True)
+            subprocess.run(["git", "init"], cwd=root, capture_output=True, check=False)
+            subprocess.run(
+                ["git", "add", "."], cwd=root, capture_output=True, check=False
+            )
 
             # Mock subprocess.run to return empty output but non-zero exit code
             original_run = subprocess.run
@@ -232,70 +247,155 @@ def example():
 
             # Should have a diagnostic about pyright failure
             assert any(
-                "Pyright failed with exit code 2" in d.message for d in result.diagnostics
+                "Pyright failed with exit code 2" in d.message
+                for d in result.diagnostics
             )
             assert any(
                 "pyright: command not found" in d.message for d in result.diagnostics
             )
 
 
-class TestParseTypecheck:
-    """Tests for _parse_typecheck helper."""
+def _fake_tool(output: str, exit_code: int, to_stderr: bool = False) -> list[str]:
+    """Build a bash command that emits *output* and exits with *exit_code*."""
+    redirect = " >&2" if to_stderr else ""
+    return [
+        "bash",
+        "-c",
+        f"cat <<'TOOL_OUTPUT'{redirect}\n{output}\nTOOL_OUTPUT\nexit {exit_code}",
+    ]
 
-    def test_parses_combined_output(self) -> None:
-        from toolchain.checkers import _parse_typecheck
 
-        # Combined ty + pyright output
-        output = """error[invalid-type]: Type mismatch
-  --> src/foo.py:10:5
-  src/bar.py:20:10 - error: Cannot assign str to int"""
-        diagnostics = _parse_typecheck(output, 1)
-        assert len(diagnostics) == 2
+_TY_ERROR = "error[invalid-type]: Type mismatch\n --> src/foo.py:10:5"
+_PYRIGHT_SAME_LINE = '  src/foo.py:10:5 - error: Cannot assign "str" to "int"'
+_PYRIGHT_OTHER_LINE = '  src/bar.py:20:10 - error: Cannot assign "str" to "int"'
 
-    def test_prefixes_ty_diagnostics(self) -> None:
-        from toolchain.checkers import _parse_typecheck
 
-        # ty-style output
-        output = """error[invalid-type]: Type mismatch
-  --> src/foo.py:10:5"""
-        diagnostics = _parse_typecheck(output, 1)
-        assert len(diagnostics) == 1
-        assert diagnostics[0].message.startswith("[ty] ")
-        assert "Type mismatch" in diagnostics[0].message
+class TestTypecheckChecker:
+    """Tests for TypecheckChecker (merged ty + pyright)."""
 
-    def test_prefixes_pyright_diagnostics(self) -> None:
-        from toolchain.checkers import _parse_typecheck
+    def test_name_and_description(self) -> None:
+        checker = TypecheckChecker()
+        assert checker.name == "typecheck"
+        assert "ty" in checker.description
+        assert "pyright" in checker.description
 
-        # pyright-style output (note: pyright parser expects 2 leading spaces)
-        output = """  src/bar.py:20:10 - error: Cannot assign str to int"""
-        diagnostics = _parse_typecheck(output, 1)
-        assert len(diagnostics) == 1
-        assert diagnostics[0].message.startswith("[pyright] ")
-        assert "Cannot assign str to int" in diagnostics[0].message
+    def test_passes_when_both_tools_pass(self) -> None:
+        checker = TypecheckChecker(
+            ty_command=_fake_tool("All checks passed!", 0),
+            pyright_command=_fake_tool("0 errors", 0),
+        )
+        result = checker.run()
+        assert result.status == "passed"
+        assert result.diagnostics == ()
 
-    def test_combined_output_has_both_prefixes(self) -> None:
-        from toolchain.checkers import _parse_typecheck
+    def test_both_tools_run_when_first_fails(self) -> None:
+        """A ty failure must not hide pyright's errors (no && short-circuit)."""
+        checker = TypecheckChecker(
+            ty_command=_fake_tool(_TY_ERROR, 1),
+            pyright_command=_fake_tool(_PYRIGHT_OTHER_LINE, 1),
+        )
+        result = checker.run()
+        assert result.status == "failed"
+        messages = [d.message for d in result.diagnostics]
+        assert any(m.startswith("[ty] ") for m in messages)
+        assert any(m.startswith("[pyright] ") for m in messages)
 
-        # Combined ty + pyright output
-        output = """error[invalid-type]: Type mismatch
-  --> src/foo.py:10:5
-  src/bar.py:20:10 - error: Cannot assign str to int"""
-        diagnostics = _parse_typecheck(output, 1)
-        assert len(diagnostics) == 2
-        # Find the ty diagnostic
-        ty_diags = [d for d in diagnostics if d.message.startswith("[ty] ")]
-        assert len(ty_diags) == 1
-        assert "Type mismatch" in ty_diags[0].message
-        # Find the pyright diagnostic
-        pyright_diags = [d for d in diagnostics if d.message.startswith("[pyright] ")]
-        assert len(pyright_diags) == 1
-        assert "Cannot assign str to int" in pyright_diags[0].message
+    def test_same_line_findings_merged(self) -> None:
+        """Same file:line findings collapse into one [ty+pyright] entry."""
+        checker = TypecheckChecker(
+            ty_command=_fake_tool(_TY_ERROR, 1),
+            pyright_command=_fake_tool(_PYRIGHT_SAME_LINE, 1),
+        )
+        result = checker.run()
+        assert result.status == "failed"
+        assert len(result.diagnostics) == 1
+        assert result.diagnostics[0].message.startswith("[ty+pyright] ")
+        assert "Type mismatch" in result.diagnostics[0].message
 
-    def test_empty_output(self) -> None:
-        from toolchain.checkers import _parse_typecheck
+    def test_pyright_only_failure(self) -> None:
+        checker = TypecheckChecker(
+            ty_command=_fake_tool("All checks passed!", 0),
+            pyright_command=_fake_tool(_PYRIGHT_OTHER_LINE, 1),
+        )
+        result = checker.run()
+        assert result.status == "failed"
+        assert len(result.diagnostics) == 1
+        assert result.diagnostics[0].message.startswith("[pyright] ")
 
-        diagnostics = _parse_typecheck("", 0)
-        assert len(diagnostics) == 0
+    def test_pyright_absolute_paths_relativized(self) -> None:
+        absolute = str(Path.cwd() / "src" / "bar.py")
+        output = f'  {absolute}:20:10 - error: Cannot assign "str" to "int"'
+        checker = TypecheckChecker(
+            ty_command=_fake_tool("ok", 0),
+            pyright_command=_fake_tool(output, 1),
+        )
+        result = checker.run()
+        assert result.diagnostics[0].location is not None
+        assert result.diagnostics[0].location.file == str(Path("src") / "bar.py")
+
+    def test_diagnostics_without_location_kept(self) -> None:
+        """Locationless diagnostics never dedupe against each other."""
+        from toolchain.checkers.typecheck import _merge_diagnostics
+        from toolchain.result import Diagnostic
+
+        merged = _merge_diagnostics(
+            (Diagnostic(message="ty summary"),),
+            (Diagnostic(message="pyright summary"),),
+        )
+        assert len(merged) == 2
+        assert merged[0].message == "[ty] ty summary"
+        assert merged[1].message == "[pyright] pyright summary"
+
+    def test_drift_warning_when_nothing_parsed(self) -> None:
+        checker = TypecheckChecker(
+            ty_command=_fake_tool("completely new output format", 1),
+            pyright_command=_fake_tool("ok", 0),
+        )
+        result = checker.run()
+        assert result.status == "failed"
+        assert len(result.diagnostics) == 1
+        assert result.diagnostics[0].severity == "warning"
+        assert "may have drifted" in result.diagnostics[0].message
+
+    def test_stderr_merged_into_output(self) -> None:
+        checker = TypecheckChecker(
+            ty_command=_fake_tool("warning on stderr", 0, to_stderr=True),
+            pyright_command=_fake_tool("ok", 0),
+        )
+        result = checker.run()
+        assert result.status == "passed"
+        assert "warning on stderr" in result.output
+
+    def test_timeout_reported_per_tool(self) -> None:
+        checker = TypecheckChecker(
+            ty_command=["sleep", "10"],
+            pyright_command=_fake_tool("ok", 0),
+            timeout=1,
+        )
+        result = checker.run()
+        assert result.status == "failed"
+        assert any("Timed out" in d.message for d in result.diagnostics)
+
+    def test_command_not_found_reported_per_tool(self) -> None:
+        checker = TypecheckChecker(
+            ty_command=["nonexistent_typechecker_xyz"],
+            pyright_command=_fake_tool("ok", 0),
+        )
+        result = checker.run()
+        assert result.status == "failed"
+        assert any("Command not found" in d.message for d in result.diagnostics)
+        assert any("uv sync" in d.message for d in result.diagnostics)
+
+    def test_output_includes_both_commands(self) -> None:
+        """The raw output labels each tool's section for -v debugging."""
+        checker = TypecheckChecker(
+            ty_command=_fake_tool("ty says hi", 0),
+            pyright_command=_fake_tool("pyright says hi", 0),
+        )
+        result = checker.run()
+        assert "ty says hi" in result.output
+        assert "pyright says hi" in result.output
+        assert result.command[0] == "bash"
 
 
 class TestFactoryFunctions:
@@ -308,23 +408,58 @@ class TestFactoryFunctions:
         assert "ruff" in checker.fix_command
         assert "--check" in checker.check_command
         assert "--check" not in checker.fix_command
+        # File list comes from `Would reformat:` lines in the check output
+        assert checker.file_list_parser("Would reformat: a.py") == ["a.py"]
 
     def test_create_lint_checker(self) -> None:
         checker = create_lint_checker()
         assert checker.name == "lint"
         assert "--preview" in checker.command
+        # JSON is ruff's stable machine-readable output format
+        assert "--output-format=json" in checker.command
 
     def test_create_typecheck_checker(self) -> None:
         checker = create_typecheck_checker()
         assert checker.name == "typecheck"
-        assert "ty" in str(checker.command)
-        assert "pyright" in str(checker.command)
+        assert isinstance(checker, TypecheckChecker)
+        assert "ty" in checker.ty_command
+        assert "pyright" in checker.pyright_command
 
-    def test_create_test_checker(self) -> None:
-        checker = create_test_checker()
+    def test_create_test_checker_in_ci(self) -> None:
+        with mock.patch.dict(os.environ, {"CI": "true"}, clear=True):
+            checker = create_test_checker()
         assert checker.name == "test"
         assert "pytest" in checker.command
+        assert "--cov-fail-under=100" in checker.command
+        assert "--testmon" not in checker.command
         assert checker.timeout == 600  # 10 minutes
+
+    def test_create_test_checker_locally(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            checker = create_test_checker()
+        assert checker.name == "test"
+        assert "--testmon" in checker.command
+        assert "--cov-fail-under=100" not in checker.command
+        assert "testmon" in checker.description
+
+    def test_create_biome_checker(self) -> None:
+        checker = create_biome_checker()
+        assert checker.name == "biome"
+        check_script = checker.check_command[-1]
+        fix_script = checker.fix_command[-1]
+        assert "biome check" in check_script
+        assert "--reporter=github" in check_script
+        assert "--write" not in check_script
+        # Local mode applies biome's fixes
+        assert "--write" in fix_script
+        # Gracefully skips when npx is unavailable
+        assert "npx not installed" in check_script
+        assert "npx not installed" in fix_script
+        # File list comes from the GitHub reporter output
+        files = checker.file_list_parser(
+            "::error title=x,file=a.js,line=1,endLine=1,col=1,endColumn=2::m"
+        )
+        assert files == ["a.js"]
 
     def test_create_bandit_checker(self) -> None:
         checker = create_bandit_checker()
@@ -389,6 +524,7 @@ class TestFactoryFunctions:
         assert "banned-time-imports" in names
         assert "docs" in names
         assert "dead-code" in names
+        assert "biome" in names
 
 
 class TestParseMdformatFileList:

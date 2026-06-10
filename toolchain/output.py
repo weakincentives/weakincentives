@@ -50,6 +50,19 @@ def _supports_color(stream: IO[str]) -> bool:
     return True
 
 
+def _indent_block(text: str, first: str, rest: str) -> str:
+    """Indent a possibly multi-line string.
+
+    The first line gets the *first* prefix; continuation lines get *rest* so
+    they stay visually attached to their diagnostic and never collide with
+    the `file:line: message` grammar of the following entry.
+    """
+    lines = text.split("\n")
+    indented = [f"{first}{lines[0]}"]
+    indented.extend(f"{rest}{line}" for line in lines[1:])
+    return "\n".join(indented)
+
+
 @dataclass
 class ConsoleFormatter:
     """Formats reports for terminal output.
@@ -67,12 +80,14 @@ class ConsoleFormatter:
         "lint": "ruff",
         "typecheck": "ty + pyright",
         "test": "pytest",
+        "biome": "biome",
         "bun-test": "bun test",
         "bandit": "bandit",
         "deptry": "deptry",
         "pip-audit": "pip-audit",
         "markdown": "mdformat",
         "architecture": "core/contrib",
+        "dead-code": "vulture",
         "docs": "examples, links",
     }
 
@@ -112,20 +127,22 @@ class ConsoleFormatter:
             # Show info diagnostics (e.g., auto-format messages)
             info_diags = [d for d in result.diagnostics if d.severity == "info"]
             for diag in info_diags:
+                text = _indent_block(diag.message, "  ", "    ")
                 if use_color:
-                    lines.append(f"  \033[36m{diag.message}\033[0m")
+                    lines.append(f"\033[36m{text}\033[0m")
                 else:
-                    lines.append(f"  {diag.message}")
+                    lines.append(text)
 
             # Show warning diagnostics (e.g., code length warnings)
             warn_diags = [d for d in result.diagnostics if d.severity == "warning"]
             if warn_diags:
                 shown = warn_diags[: self.max_diagnostics]
                 for diag in shown:
+                    text = _indent_block(str(diag), "  ", "    ")
                     if use_color:
-                        lines.append(f"  \033[33m{diag}\033[0m")
+                        lines.append(f"\033[33m{text}\033[0m")
                     else:
-                        lines.append(f"  {diag}")
+                        lines.append(text)
                 remaining = len(warn_diags) - len(shown)
                 if remaining > 0:
                     lines.append(f"  ... and {remaining} more warnings")
@@ -143,11 +160,11 @@ class ConsoleFormatter:
             if result.diagnostics:
                 shown = result.diagnostics[: self.max_diagnostics]
                 for diag in shown:
-                    prefix = "  "
+                    text = _indent_block(str(diag), "  ", "    ")
                     if use_color:
-                        lines.append(f"{prefix}\033[90m{diag}\033[0m")
+                        lines.append(f"\033[90m{text}\033[0m")
                     else:
-                        lines.append(f"{prefix}{diag}")
+                        lines.append(text)
 
                 remaining = len(result.diagnostics) - len(shown)
                 if remaining > 0:
@@ -250,15 +267,17 @@ class QuietFormatter:
             if result.passed:
                 for diag in result.diagnostics:
                     if diag.severity == "info":
+                        text = _indent_block(diag.message, "", "  ")
                         if use_color:
-                            lines.append(f"\033[36m{diag.message}\033[0m")
+                            lines.append(f"\033[36m{text}\033[0m")
                         else:
-                            lines.append(diag.message)
+                            lines.append(text)
                     elif diag.severity == "warning":
+                        text = _indent_block(str(diag), "", "  ")
                         if use_color:
-                            lines.append(f"\033[33m{diag}\033[0m")
+                            lines.append(f"\033[33m{text}\033[0m")
                         else:
-                            lines.append(str(diag))
+                            lines.append(text)
 
         if report.passed:
             return "\n".join(lines) if lines else ""
@@ -271,7 +290,7 @@ class QuietFormatter:
 
             if result.diagnostics:
                 for diag in result.diagnostics[:10]:
-                    lines.append(f"  {diag}")
+                    lines.append(_indent_block(str(diag), "  ", "    "))
 
                 if len(result.diagnostics) > 10:
                     lines.append(f"  ... and {len(result.diagnostics) - 10} more")

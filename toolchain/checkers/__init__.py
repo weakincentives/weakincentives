@@ -18,17 +18,24 @@ for the weakincentives project.
 
 from __future__ import annotations
 
-from ..checker import AutoFormatChecker, Checker, SubprocessChecker
+from ..checker import (
+    AutoFormatChecker,
+    Checker,
+    SubprocessChecker,
+    is_ci_environment,
+)
 from ..parsers import (
     parse_bandit,
+    parse_biome,
+    parse_biome_files,
     parse_bun_test,
     parse_deptry,
     parse_mdformat,
     parse_pip_audit,
-    parse_pyright,
     parse_pytest,
-    parse_ruff,
-    parse_ty,
+    parse_ruff_format,
+    parse_ruff_format_files,
+    parse_ruff_json,
     parse_vulture,
 )
 from .architecture import ArchitectureChecker
@@ -36,6 +43,7 @@ from .banned_time_imports import BannedTimeImportsChecker
 from .code_length import CodeLengthChecker
 from .docs import DocsChecker
 from .private_imports import PrivateImportChecker
+from .typecheck import TypecheckChecker
 
 
 def create_format_checker() -> AutoFormatChecker:
@@ -44,83 +52,53 @@ def create_format_checker() -> AutoFormatChecker:
     In local environments: auto-fixes formatting and reports changes.
     In CI environments: checks formatting without modifications.
 
-    Uses JSON output internally for precise file path reporting.
+    File paths are extracted from the `Would reformat: <path>` check output.
     """
     return AutoFormatChecker(
         name="format",
         description="Check code formatting with ruff",
         check_command=["uv", "run", "ruff", "format", "--check", "."],
         fix_command=["uv", "run", "ruff", "format", "."],
-        json_check_command=[
-            "uv", "run", "ruff", "format",
-            "--check", "--output-format=json", ".",
-        ],
-        parser=parse_ruff,
+        file_list_parser=parse_ruff_format_files,
+        parser=parse_ruff_format,
     )
 
 
 def create_lint_checker() -> SubprocessChecker:
-    """Create the linting checker (ruff check)."""
+    """Create the linting checker (ruff check).
+
+    Uses JSON output - ruff's stable machine-readable format - so diagnostics
+    survive changes to the human-readable output across ruff releases.
+    """
     return SubprocessChecker(
         name="lint",
         description="Check code style with ruff",
-        command=["uv", "run", "ruff", "check", "--preview", "."],
-        parser=parse_ruff,
-    )
-
-
-def create_typecheck_checker() -> SubprocessChecker:
-    """Create the type checking checker (ty + pyright)."""
-    # ty checks src/ with warnings as errors, pyright uses pyproject.toml config.
-    return SubprocessChecker(
-        name="typecheck",
-        description="Check types with ty and pyright",
         command=[
-            "bash",
-            "-c",
-            "uv run ty check --error-on-warning src && uv run pyright",
+            "uv", "run", "ruff", "check",
+            "--preview", "--output-format=json", ".",
         ],
-        parser=_parse_typecheck,
+        parser=parse_ruff_json,
     )
 
 
-def _parse_typecheck(output: str, code: int) -> tuple:
-    """Parse combined ty + pyright output.
+def create_typecheck_checker() -> TypecheckChecker:
+    """Create the type checking checker (ty + pyright).
 
-    Each diagnostic's message is prefixed with the tool name ([ty] or [pyright])
-    to indicate which type checker produced the error.
+    Both tools always run - one failing tool does not hide the other's
+    errors - and same-line findings are merged into [ty+pyright] entries.
     """
-    from ..result import Diagnostic
-
-    diagnostics: list[Diagnostic] = []
-
-    # Try ty parser - prefix messages with [ty]
-    for diag in parse_ty(output, code):
-        prefixed = Diagnostic(
-            message=f"[ty] {diag.message}",
-            location=diag.location,
-            severity=diag.severity,
-        )
-        diagnostics.append(prefixed)
-
-    # Try pyright parser - prefix messages with [pyright]
-    for diag in parse_pyright(output, code):
-        prefixed = Diagnostic(
-            message=f"[pyright] {diag.message}",
-            location=diag.location,
-            severity=diag.severity,
-        )
-        diagnostics.append(prefixed)
-
-    return tuple(diagnostics)
+    return TypecheckChecker()
 
 
 def create_test_checker() -> SubprocessChecker:
-    """Create the test checker (pytest)."""
-    return SubprocessChecker(
-        name="test",
-        description="Run tests with pytest and coverage",
-        command=[
+    """Create the test checker (pytest).
+
+    In CI: full test suite with 100% coverage enforcement.
+    Locally: only tests affected by changes, via the testmon database
+    (the first run builds it; later runs skip unaffected tests).
+    """
+    if is_ci_environment():
+        command = [
             "uv",
             "run",
             "--all-extras",
@@ -134,7 +112,34 @@ def create_test_checker() -> SubprocessChecker:
             "--no-header",
             "--cov-report=term-missing",
             "tests",
-        ],
+        ]
+        description = "Run tests with pytest and coverage"
+    else:
+        command = [
+            "uv",
+            "run",
+            "--all-extras",
+            "pytest",
+            "-p",
+            "no:cov",
+            "-o",
+            "addopts=",
+            "--testmon",
+            "--strict-config",
+            "--strict-markers",
+            "--timeout=10",
+            "--timeout-method=thread",
+            "--tb=short",
+            "--no-header",
+            "--reruns=2",
+            "--reruns-delay=0.5",
+            "tests",
+        ]
+        description = "Run tests affected by changes (testmon)"
+    return SubprocessChecker(
+        name="test",
+        description=description,
+        command=command,
         parser=parse_pytest,
         timeout=600,  # 10 minutes for tests
     )
@@ -157,6 +162,41 @@ def create_bun_test_checker() -> SubprocessChecker:
         ],
         parser=parse_bun_test,
         timeout=120,  # 2 minutes for JS tests
+    )
+
+
+# Guard shared by the biome commands: skip when npx is unavailable, install
+# node_modules on first run.
+_BIOME_GUARD = (
+    'command -v npx >/dev/null 2>&1 || { echo "npx not installed, skipping"; exit 0; }; '
+    "[ -d node_modules ] || npm install --silent; "
+)
+_BIOME_TARGET = "src/weakincentives/cli/static/"
+
+
+def create_biome_checker() -> AutoFormatChecker:
+    """Create the frontend lint checker (biome).
+
+    In local environments: applies biome's safe fixes (formatting and lint)
+    and reports the affected files; issues without an auto-fix still fail the
+    check with structured diagnostics. In CI environments: check-only.
+
+    Exits 0 with a skip message when npx is unavailable. The GitHub reporter
+    gives stable one-line-per-issue output that parses into structured
+    diagnostics.
+    """
+    check_script = f"{_BIOME_GUARD}npx biome check --reporter=github {_BIOME_TARGET}"
+    fix_script = (
+        f"{_BIOME_GUARD}npx biome check --write --reporter=github {_BIOME_TARGET}"
+    )
+    return AutoFormatChecker(
+        name="biome",
+        description="Lint frontend static files with Biome",
+        check_command=["bash", "-c", check_script],
+        fix_command=["bash", "-c", fix_script],
+        file_list_parser=parse_biome_files,
+        parser=parse_biome,
+        timeout=120,
     )
 
 
@@ -203,11 +243,13 @@ def _parse_mdformat_file_list(output: str) -> list[str]:
     """Parse file paths from mdformat check output.
 
     mdformat outputs: Error: File "path/to/file.md" is not formatted.
+    Long messages wrap across lines, so whitespace between the path and the
+    suffix may include newlines.
     """
     import re
 
     files = []
-    error_pattern = re.compile(r'Error: File "([^"]+)" is not formatted\.')
+    error_pattern = re.compile(r'Error: File "([^"]+)"\s+is not formatted\.')
     for match in error_pattern.finditer(output):
         files.append(match.group(1))
     return sorted(files)
@@ -306,6 +348,7 @@ def create_all_checkers() -> list[Checker]:
         create_dead_code_checker(),
         create_docs_checker(),
         create_markdown_checker(),
+        create_biome_checker(),
         create_bun_test_checker(),
         create_test_checker(),
     ]
@@ -317,6 +360,7 @@ __all__ = [
     "create_lint_checker",
     "create_typecheck_checker",
     "create_test_checker",
+    "create_biome_checker",
     "create_bun_test_checker",
     "create_bandit_checker",
     "create_deptry_checker",
