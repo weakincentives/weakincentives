@@ -212,6 +212,7 @@ weakincentives.contrib.mailbox    # RedisMailbox
 weakincentives.resources          # Dependency injection
 weakincentives.debug              # Debug bundles, environment capture
 weakincentives.filesystem         # Filesystem protocol
+weakincentives.sandbox            # Sandbox aggregate: filesystem + shell + egress
 weakincentives.evals              # Evaluation framework
 weakincentives.serde              # Dataclass serialization
 weakincentives.dbc                # Design-by-contract decorators
@@ -293,6 +294,18 @@ from weakincentives.filesystem import (
     HostBackend,
     MemoryBackend,
     SnapshotRef,
+)
+
+# Sandbox (environment aggregate: filesystem + shell + egress)
+from weakincentives.sandbox import (
+    CommandResult,
+    EgressPolicy,
+    EgressRule,
+    HostMount,
+    LocalSandboxProvider,
+    Sandbox,
+    SandboxConfig,
+    Shell,
 )
 
 # Serde
@@ -951,6 +964,28 @@ with fs.open_text("logs.txt") as text:     # TextReader (lazy UTF-8)
         handle(line)
 ```
 
+**Sandbox**: the aggregate naming the environment. A `SandboxConfig` (serde
+value) declares mounts, env, setup commands, and a default-deny `EgressPolicy`;
+`LocalSandboxProvider.open(config)` materializes it into a `Sandbox` vending
+the two effect facets — `filesystem` and `shell` — with snapshot/restore and
+one idempotent `close()`. Egress/credential reconfiguration is control-plane
+only (never reachable from tools).
+
+```python
+from weakincentives.sandbox import HostMount, LocalSandboxProvider, SandboxConfig
+
+provider = LocalSandboxProvider()
+sandbox = provider.open(
+    SandboxConfig(mounts=(HostMount(host_path="/path/to/project"),))
+)
+try:
+    listing = sandbox.shell.run(["ls", "-la"])    # argv vector, no /bin/sh
+    ref = sandbox.snapshot(tag="before-build")
+    sandbox.restore(ref)
+finally:
+    sandbox.close()
+```
+
 **Note:** Tool sections for filesystem operations, planning, and shell execution
 are provided by the execution harness (e.g., Claude Agent SDK) rather than
 defined in WINK. This keeps agent definitions portable across runtimes.
@@ -1204,6 +1239,7 @@ src/weakincentives/
 │   ├── mailbox/        # Message queue protocol
 │   └── session/        # Session, slices, reducers
 │       └── slices/     # MemorySlice, JsonlSlice
+├── sandbox/            # Sandbox aggregate, Shell facet, providers
 ├── serde/              # dump, parse, schema, clone
 ├── skills/             # Agent Skills support
 └── types/              # JSONValue, type aliases
@@ -1227,6 +1263,7 @@ Read before modifying related code:
 | `specs/ACP_ADAPTER.md` | Generic ACP adapter, protocol flow |
 | `specs/OPENCODE_ACP_ADAPTER.md` | OpenCode ACP adapter, quirk handling |
 | `specs/WORKSPACE.md` | Workspace sections, host mounts |
+| `specs/SANDBOX.md` | Sandbox aggregate, shell facet, egress control plane |
 | `specs/TRANSCRIPT.md` | Unified transcript format, adapter mapping |
 | `specs/DEBUG_BUNDLE.md` | Debug bundle format, BundleConfig |
 | `specs/DBC.md` | Design-by-contract patterns |

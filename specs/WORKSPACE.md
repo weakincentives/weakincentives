@@ -35,7 +35,9 @@ section description.
 ### Host Mounts
 
 Host mounts copy files from the host filesystem into the workspace temp directory.
-See `HostMount` and `HostMountPreview` dataclasses in `weakincentives.prompt.workspace`.
+The `HostMount` and `HostMountPreview` dataclasses and the mount machinery live
+in `weakincentives.sandbox` (see `specs/SANDBOX.md`) and are re-exported by
+`weakincentives.prompt.workspace`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

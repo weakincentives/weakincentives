@@ -49,6 +49,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "PROMPTS": "Prompt system, composition, overrides, structured output, resources",
     "RESOURCE_REGISTRY": "Dependency injection, resource scopes, transactional snapshots",
     "RUN_CONTEXT": "Execution metadata, request correlation, distributed tracing",
+    "SANDBOX": "Sandbox aggregate, shell facet, egress and credential control plane",
     "SESSIONS": "Session lifecycle, events, deadlines, budgets",
     "SKILLS": "Agent Skills specification and WINK skill mounting",
     "SLICES": "Slice storage backends, factory configuration, JSONL persistence",
