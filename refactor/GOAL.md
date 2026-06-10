@@ -193,7 +193,8 @@ Runs become explainable, replayable, governable, measurable, durable.
 
 A **hardening track** runs alongside, governed by [REVIEW.md](REVIEW.md) and
 tracked in [BACKLOG.md](BACKLOG.md): type-escape ratchet, prompt-render DRY,
-error/concurrency hygiene, runtime de-leak. **Horizon** (post-R3): sub-agent
+error/concurrency hygiene, runtime de-leak, fail-closed session dispatch,
+evals simplification, foundation tidy. **Horizon** (post-R3): sub-agent
 orchestration as a definition primitive; multi-harness routing using
 `AdapterCapabilities` + eval scores — routing, not identical execution.
 
