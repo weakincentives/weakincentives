@@ -61,8 +61,71 @@ class FilesystemStreamingValidationSuite:
         ...
 
     # -------------------------------------------------------------------------
-    # Streaming Read lifecycle (open_read - continued from FilesystemValidationSuite)
+    # Streaming Read Operations (open_read)
     # -------------------------------------------------------------------------
+
+    def test_open_read_basic(self, fs: Filesystem) -> None:
+        """open_read() should return a ByteReader for reading file content."""
+        fs.write_bytes("file.bin", b"hello world")
+        with fs.open_read("file.bin") as reader:
+            content = reader.read()
+            assert content == b"hello world"
+            assert reader.path == "file.bin"
+            assert reader.size == 11
+
+    def test_open_read_chunks(self, fs: Filesystem) -> None:
+        """open_read() should support chunk iteration."""
+        data = b"a" * 100000  # 100KB
+        fs.write_bytes("large.bin", data)
+        with fs.open_read("large.bin") as reader:
+            chunks = list(reader.chunks(size=10000))  # 10KB chunks
+            assert len(chunks) == 10
+            assert b"".join(chunks) == data
+
+    def test_open_read_default_iteration(self, fs: Filesystem) -> None:
+        """open_read() should support default chunk iteration via __iter__."""
+        data = b"x" * 1000
+        fs.write_bytes("file.bin", data)
+        with fs.open_read("file.bin") as reader:
+            chunks = list(reader)
+            assert b"".join(chunks) == data
+
+    def test_open_read_seek(self, fs: Filesystem) -> None:
+        """open_read() should support seek operations."""
+        fs.write_bytes("file.bin", b"0123456789")
+        with fs.open_read("file.bin") as reader:
+            pos = reader.seek(5)
+            assert pos == 5
+            assert reader.position == 5
+            content = reader.read()
+            assert content == b"56789"
+
+    def test_open_read_seek_from_end(self, fs: Filesystem) -> None:
+        """open_read() should support seeking from end."""
+        fs.write_bytes("file.bin", b"0123456789")
+        with fs.open_read("file.bin") as reader:
+            pos = reader.seek(-3, 2)  # whence=2 is from end
+            assert pos == 7
+            content = reader.read()
+            assert content == b"789"
+
+    def test_open_read_seek_invalid_whence_raises(self, fs: Filesystem) -> None:
+        """open_read() should raise ValueError for invalid whence."""
+        fs.write_bytes("file.bin", b"content")
+        with fs.open_read("file.bin") as reader:
+            with pytest.raises(ValueError, match="whence"):
+                reader.seek(0, 99)  # Invalid whence value
+
+    def test_open_read_missing_file_raises(self, fs: Filesystem) -> None:
+        """open_read() should raise FileNotFoundError for missing files."""
+        with pytest.raises(FileNotFoundError):
+            fs.open_read("missing.bin")
+
+    def test_open_read_directory_raises(self, fs: Filesystem) -> None:
+        """open_read() should raise IsADirectoryError for directories."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.open_read("mydir")
 
     def test_open_read_closed_raises(self, fs: Filesystem) -> None:
         """Reading from closed reader should raise ValueError."""
@@ -145,6 +208,12 @@ class FilesystemStreamingValidationSuite:
         """open_write() should raise ValueError when trying to write to root."""
         with pytest.raises(ValueError, match="root"):
             fs.open_write(".")
+
+    def test_open_write_directory_raises(self, fs: Filesystem) -> None:
+        """open_write() should raise IsADirectoryError for directory paths."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.open_write("mydir")
 
     def test_open_write_closed_raises(self, fs: Filesystem) -> None:
         """Writing to closed writer should raise ValueError."""

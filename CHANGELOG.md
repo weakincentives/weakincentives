@@ -91,6 +91,11 @@ under 100 lines (`tests/filesystem/fake_backend.py`).
 - **Uniform root-delete behavior.** `delete("/")` now raises
   `PermissionError` on every backend (the in-memory implementation previously
   allowed it).
+- **Writes targeting an existing directory now raise `IsADirectoryError` on
+  every backend.** The old in-memory implementation accepted such writes and
+  silently corrupted its state (file and directory sharing one key); the
+  facade now rejects them uniformly and `MemoryBackend` also checks
+  defensively.
 
 #### Validated construction via `.create()` and the `Constructable` base (#1138)
 

@@ -97,6 +97,38 @@ class TestMemoryBackendSpecific:
         assert len(matches) == 2
         assert all(m.is_file for m in matches)
 
+    def test_backend_write_to_directory_raises_defensively(self) -> None:
+        """The backend itself rejects directory targets, not only the facade."""
+        from weakincentives.filesystem import MemoryBackend
+
+        backend = MemoryBackend()
+        backend.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            backend.write("mydir", b"x", mode="overwrite")
+
+    def test_backend_mkdir_through_file_raises_defensively(self) -> None:
+        """The backend rejects directory chains crossing a file."""
+        from weakincentives.filesystem import MemoryBackend
+
+        backend = MemoryBackend()
+        backend.write("blocker", b"x", mode="overwrite")
+        with pytest.raises(NotADirectoryError):
+            backend.mkdir("blocker/sub")
+        # The file is intact and no shadow directory entry was recorded
+        assert backend.stat("blocker").is_file
+        with pytest.raises(NotADirectoryError):
+            backend.write("blocker/child.txt", b"y", mode="overwrite")
+
+    def test_streaming_write_commit_rejects_path_turned_directory(self) -> None:
+        """A directory created between open_write and close fails the commit."""
+        fs = Filesystem.in_memory()
+        writer = fs.open_write("out.bin")
+        _ = writer.write(b"data")
+        fs.mkdir("out.bin")
+        with pytest.raises(IsADirectoryError):
+            writer.close()
+        assert fs.stat("out.bin").is_directory
+
     def test_overwrite_preserves_created_at(self) -> None:
         fs = Filesystem.in_memory()
         fs.write("file.txt", "v1")

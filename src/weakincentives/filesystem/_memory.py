@@ -226,6 +226,12 @@ class MemoryBackend:
 
     def write(self, path: str, data: bytes, *, mode: WriteMode) -> None:
         """Write bytes to a file, creating parent directories as needed."""
+        if path in self._directories:
+            # Defensive: files and directories share one namespace here, so a
+            # write aimed at a directory would corrupt state (the host backend
+            # gets the equivalent error from the OS).
+            msg = f"Is a directory: {path}"
+            raise IsADirectoryError(msg)
         existing = self._files.get(path)
         if mode == "create" and existing is not None:
             raise FileExistsError(f"File already exists: {path}")
@@ -270,10 +276,20 @@ class MemoryBackend:
         )
 
     def mkdir(self, path: str) -> None:
-        """Create a directory and any missing parents (idempotent)."""
+        """Create a directory and any missing parents (idempotent).
+
+        Raises:
+            NotADirectoryError: A file occupies a segment of the chain
+                (defensive: files and directories share one namespace here,
+                so a directory entry would shadow the file).
+        """
         segments = path.split("/")
         for index in range(len(segments)):
-            self._directories.add("/".join(segments[: index + 1]))
+            candidate = "/".join(segments[: index + 1])
+            if candidate in self._files:
+                msg = f"Not a directory: {candidate}"
+                raise NotADirectoryError(msg)
+            self._directories.add(candidate)
 
     # --- Snapshots ------------------------------------------------------------
 

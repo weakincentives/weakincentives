@@ -128,7 +128,28 @@ class Filesystem:
         if not norm:
             msg = "Cannot write to root directory"
             raise ValueError(msg)
+        existing = self._stat_or_none(norm)
+        if existing is not None and existing.is_directory:
+            msg = f"Is a directory: {path}"
+            raise IsADirectoryError(msg)
+        self._check_ancestors(norm)
         return norm
+
+    def _check_ancestors(self, norm: str) -> None:
+        """Reject paths whose ancestor chain crosses an existing file.
+
+        Walks up from the immediate parent to the nearest existing entry;
+        creating entries beneath a file raises ``NotADirectoryError``
+        uniformly, before any backend mutates state.
+        """
+        parent = norm.rsplit("/", 1)[0] if "/" in norm else ""
+        while parent:
+            existing = self._stat_or_none(parent)
+            if existing is not None:
+                if existing.is_file:
+                    raise NotADirectoryError(f"Not a directory: {parent}")
+                return
+            parent = parent.rsplit("/", 1)[0] if "/" in parent else ""
 
     def _check_parent(self, norm: str, create_parents: bool) -> None:
         """Raise FileNotFoundError when the parent must exist but does not."""
@@ -398,6 +419,7 @@ class Filesystem:
             if not exist_ok:
                 raise FileExistsError(f"Directory already exists: {path}")
             return
+        self._check_ancestors(norm)
         self._check_parent(norm, parents)
         self._backend.mkdir(norm)
 

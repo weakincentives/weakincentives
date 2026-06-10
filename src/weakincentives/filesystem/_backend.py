@@ -131,8 +131,13 @@ class FilesystemBackend(Protocol):
     def write(self, path: str, data: bytes, *, mode: WriteMode) -> None:
         """Write bytes to a file, creating parent directories as needed.
 
+        The facade rejects writes targeting an existing directory before
+        calling this; backends whose files and directories share a namespace
+        should still raise ``IsADirectoryError`` defensively.
+
         Raises:
             FileExistsError: ``mode="create"`` and the file exists.
+            IsADirectoryError: A directory occupies the path.
         """
         ...
 
@@ -146,7 +151,12 @@ class FilesystemBackend(Protocol):
         ...
 
     def mkdir(self, path: str) -> None:
-        """Create a directory and any missing parents (idempotent)."""
+        """Create a directory and any missing parents (idempotent).
+
+        The facade rejects chains that cross an existing file before calling
+        this; backends whose files and directories share a namespace should
+        still raise ``NotADirectoryError`` defensively.
+        """
         ...
 
     def snapshot(self, *, tag: str | None) -> SnapshotRef:
