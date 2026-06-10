@@ -24,7 +24,7 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     create_post_tool_use_hook,
 )
-from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.prompt.task_completion import FileOutputChecker
 from weakincentives.runtime.events.types import ToolInvoked
@@ -299,7 +299,7 @@ class TestPostToolUseHook:
         self, session: Session
     ) -> None:
         """PostToolUse returns additionalContext for StructuredOutput when files missing."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Don't create the required file
 
         context = HookContext(
@@ -333,7 +333,7 @@ class TestPostToolUseHook:
         self, session: Session
     ) -> None:
         """PostToolUse stops after StructuredOutput when all required files exist."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("output.txt", "done")
 
         context = HookContext(

@@ -21,15 +21,8 @@ Tool Categories
     Caching layer for workspace summaries. Renders cached digest content
     from session state, with dynamic visibility (summary vs full body).
 
-**In-Memory Filesystem** (``InMemoryFilesystem``)
-    Session-scoped in-memory filesystem implementation for testing and
-    evaluation scenarios. Implements the Filesystem protocol.
-
 Public Exports
 --------------
-
-Workspace Digest
-~~~~~~~~~~~~~~~~
 
 WorkspaceDigestSection
     Prompt section that renders cached workspace digests from session
@@ -40,12 +33,6 @@ WorkspaceDigest
 
 set_workspace_digest, clear_workspace_digest, latest_workspace_digest
     Session state management functions for digests.
-
-In-Memory Filesystem
-~~~~~~~~~~~~~~~~~~~~
-
-InMemoryFilesystem
-    In-memory implementation of the Filesystem protocol.
 
 Example Usage
 -------------
@@ -68,15 +55,6 @@ Workspace digest caching::
     )
 
     # Section now renders the cached digest
-
-In-memory filesystem for testing::
-
-    from weakincentives.contrib.tools import InMemoryFilesystem
-
-    fs = InMemoryFilesystem()
-    fs.write("test.txt", "Hello, world!")
-    result = fs.read("test.txt")
-    print(result.content)  # "Hello, world!"
 """
 
 from __future__ import annotations
@@ -88,10 +66,8 @@ from .digests import (
     latest_workspace_digest,
     set_workspace_digest,
 )
-from .filesystem_memory import InMemoryFilesystem
 
 __all__ = [
-    "InMemoryFilesystem",
     "WorkspaceDigest",
     "WorkspaceDigestSection",
     "clear_workspace_digest",

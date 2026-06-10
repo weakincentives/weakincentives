@@ -45,7 +45,6 @@ class TestContribLazyImports:
         assert tools is not None
         # Check for remaining exports after cleanup
         assert hasattr(tools, "WorkspaceDigestSection")
-        assert hasattr(tools, "InMemoryFilesystem")
 
     def test_getattr_loads_optimizers(self) -> None:
         """Verify __getattr__ lazily loads optimizers submodule."""

@@ -285,11 +285,8 @@ class FilesystemValidationSuite:
         self, fs: Filesystem, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """write() should fail if content exceeds max length."""
-        # Patch both implementations since we don't know which one is being tested
-        monkeypatch.setattr(
-            "weakincentives.contrib.tools.filesystem_memory.MAX_WRITE_LENGTH", 100
-        )
-        monkeypatch.setattr("weakincentives.filesystem._host.MAX_WRITE_LENGTH", 100)
+        # The cap lives in one place: the facade
+        monkeypatch.setattr("weakincentives.filesystem._facade.MAX_WRITE_LENGTH", 100)
         with pytest.raises(ValueError, match=r"[Cc]ontent exceeds maximum"):
             fs.write("file.txt", "x" * 101)
 
@@ -359,11 +356,8 @@ class FilesystemValidationSuite:
         self, fs: Filesystem, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """write_bytes() should fail if content exceeds max size."""
-        # Patch both implementations since we don't know which one is being tested
-        monkeypatch.setattr(
-            "weakincentives.contrib.tools.filesystem_memory.MAX_WRITE_BYTES", 100
-        )
-        monkeypatch.setattr("weakincentives.filesystem._host.MAX_WRITE_BYTES", 100)
+        # The cap lives in one place: the facade
+        monkeypatch.setattr("weakincentives.filesystem._facade.MAX_WRITE_BYTES", 100)
         with pytest.raises(ValueError, match=r"[Cc]ontent exceeds maximum"):
             fs.write_bytes("file.bin", b"x" * 101)
 

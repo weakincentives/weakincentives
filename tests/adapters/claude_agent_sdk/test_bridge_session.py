@@ -107,10 +107,9 @@ class TestCreateBridgedToolsWithSession:
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
         """Test that create_bridged_tools passes session to BridgedTool."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
-        test_fs = InMemoryFilesystem()
+        test_fs = Filesystem.in_memory()
         test_fs.write("/test.txt", "initial content")
 
         prompt = _make_prompt_with_resources({Filesystem: test_fs})

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -26,10 +27,10 @@ class TestFilesystemArchiving:
     """Tests for filesystem archiving functionality."""
 
     def test_writer_archives_filesystem(self, tmp_path: Path) -> None:
-        """Test filesystem archiving with InMemoryFilesystem."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        """Test filesystem archiving with an in-memory filesystem."""
+        from weakincentives.filesystem import Filesystem
 
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         _ = fs.write("/test.txt", "Hello, World!")
         _ = fs.write("/subdir/nested.txt", "Nested content")
 
@@ -63,9 +64,9 @@ class TestFilesystemArchiving:
 
     def test_writer_respects_max_file_size(self, tmp_path: Path) -> None:
         """Test files larger than max_file_size are skipped."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
 
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Write a small file
         _ = fs.write("/small.txt", "Small content")
         # Write a large file
@@ -85,9 +86,9 @@ class TestFilesystemArchiving:
 
     def test_writer_respects_max_total_size(self, tmp_path: Path) -> None:
         """Test filesystem capture stops at max_total_size."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
 
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Write multiple files
         for i in range(10):
             _ = fs.write(f"/file{i}.txt", "x" * 100)
@@ -112,15 +113,17 @@ class TestFilesystemEdgeCases:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test filesystem archiving handles PermissionError gracefully."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem, MemoryBackend
 
-        class PermissionErrorFilesystem(InMemoryFilesystem):
-            """Filesystem that raises PermissionError on read."""
+        class PermissionErrorBackend(MemoryBackend):
+            """Backend that raises PermissionError on read."""
 
-            def read_bytes(self, path: str) -> object:
+            def read_range(
+                self, path: str, *, offset: int, length: int | None
+            ) -> bytes:
                 raise PermissionError("No permission")
 
-        fs = PermissionErrorFilesystem()
+        fs = Filesystem(PermissionErrorBackend())
         _ = fs.write("/test.txt", "content")
 
         config = BundleConfig.create(target=tmp_path)
@@ -138,15 +141,17 @@ class TestFilesystemEdgeCases:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test filesystem archiving handles FileNotFoundError gracefully."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import FileStat, Filesystem, MemoryBackend
 
-        class DisappearingFilesystem(InMemoryFilesystem):
-            """Filesystem where files disappear between list and read."""
+        class DisappearingBackend(MemoryBackend):
+            """Backend where files disappear between list and stat."""
 
-            def stat(self, path: str) -> object:
-                raise FileNotFoundError("File gone")
+            def stat(self, path: str) -> FileStat:
+                if path:
+                    raise FileNotFoundError("File gone")
+                return super().stat(path)
 
-        fs = DisappearingFilesystem()
+        fs = Filesystem(DisappearingBackend())
         _ = fs.write("/test.txt", "content")
 
         config = BundleConfig.create(target=tmp_path)
@@ -158,15 +163,17 @@ class TestFilesystemEdgeCases:
 
     def test_filesystem_handles_is_a_directory_error(self, tmp_path: Path) -> None:
         """Test filesystem archiving handles IsADirectoryError gracefully."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem, MemoryBackend
 
-        class DirectoryAsFileFilesystem(InMemoryFilesystem):
-            """Filesystem where read fails with IsADirectoryError."""
+        class DirectoryAsFileBackend(MemoryBackend):
+            """Backend where read fails with IsADirectoryError."""
 
-            def read_bytes(self, path: str) -> object:
+            def read_range(
+                self, path: str, *, offset: int, length: int | None
+            ) -> bytes:
                 raise IsADirectoryError("Is a directory")
 
-        fs = DirectoryAsFileFilesystem()
+        fs = Filesystem(DirectoryAsFileBackend())
         _ = fs.write("/test.txt", "content")
 
         config = BundleConfig.create(target=tmp_path)
@@ -178,15 +185,15 @@ class TestFilesystemEdgeCases:
 
     def test_collect_files_handles_file_not_found_on_list(self, tmp_path: Path) -> None:
         """Test _collect_files handles FileNotFoundError gracefully."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import FileEntry, Filesystem, MemoryBackend
 
-        class ListFailsFilesystem(InMemoryFilesystem):
-            """Filesystem where list fails with FileNotFoundError."""
+        class ListFailsBackend(MemoryBackend):
+            """Backend where list fails with FileNotFoundError."""
 
-            def list(self, path: str) -> list:
+            def list(self, path: str) -> Sequence[FileEntry]:
                 raise FileNotFoundError("Directory gone")
 
-        fs = ListFailsFilesystem()
+        fs = Filesystem(ListFailsBackend())
 
         config = BundleConfig.create(target=tmp_path)
 
@@ -197,15 +204,15 @@ class TestFilesystemEdgeCases:
 
     def test_collect_files_handles_not_a_directory_error(self, tmp_path: Path) -> None:
         """Test _collect_files handles NotADirectoryError gracefully."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import FileEntry, Filesystem, MemoryBackend
 
-        class NotADirFilesystem(InMemoryFilesystem):
-            """Filesystem where list fails with NotADirectoryError."""
+        class NotADirBackend(MemoryBackend):
+            """Backend where list fails with NotADirectoryError."""
 
-            def list(self, path: str) -> list:
+            def list(self, path: str) -> Sequence[FileEntry]:
                 raise NotADirectoryError("Not a directory")
 
-        fs = NotADirFilesystem()
+        fs = Filesystem(NotADirBackend())
 
         config = BundleConfig.create(target=tmp_path)
 
@@ -216,9 +223,9 @@ class TestFilesystemEdgeCases:
 
     def test_collect_files_recurses_directories(self, tmp_path: Path) -> None:
         """Test _collect_files recursively collects from subdirectories."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
 
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         _ = fs.write("/level1/level2/deep.txt", "deep content")
 
         config = BundleConfig.create(target=tmp_path)

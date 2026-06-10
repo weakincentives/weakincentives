@@ -79,7 +79,6 @@ def test_loop_with_debug_bundle_enabled(tmp_path: Path) -> None:
 
 def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
     """AgentLoop includes filesystem snapshot in debug bundle when provided."""
-    from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
     from weakincentives.debug import DebugBundle
     from weakincentives.debug.bundle import BundleConfig
     from weakincentives.filesystem import Filesystem
@@ -92,7 +91,7 @@ def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
     ] = InMemoryMailbox(name="requests")
     try:
         # Create filesystem with some files
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         _ = fs.write("/test.txt", "Hello, World!")
         _ = fs.write("/subdir/nested.txt", "Nested content")
 

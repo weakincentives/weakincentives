@@ -163,12 +163,11 @@ class TestShouldTriggerWithFileCreated:
         files: dict[str, str] | None = None,
         fired_filenames: frozenset[str] | None = None,
     ) -> FeedbackContext:
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
         from weakincentives.prompt import FileCreatedTriggerState
 
         session = make_session()
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
 
         # Create files in filesystem
         if files:
@@ -249,11 +248,10 @@ class TestRunFeedbackProvidersWithFileCreated:
     def _make_context_with_filesystem(
         self, files: dict[str, str] | None = None
     ) -> FeedbackContext:
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
         session = make_session()
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
 
         if files:
             for path, content in files.items():

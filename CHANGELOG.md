@@ -52,6 +52,46 @@ suspends async callers.
 This is alpha software with no compatibility shims; the changes below require
 call-site updates.
 
+#### Filesystem narrow waist: one `Filesystem` facade over a ~10-primitive backend protocol
+
+The fat `Filesystem` protocol — previously reimplemented in full by every
+backend — is replaced by a narrow **`FilesystemBackend`** protocol (`root`,
+`read_only`, `stat`, `list`, `glob`, `grep`, `read_range`, `write`, `delete`,
+`mkdir`, `snapshot`, `restore`) and **one concrete `Filesystem` facade** that
+composes text decoding, line pagination, streaming, validation, and limits
+once over any backend. Custom backends are now cheap: a complete fake fits in
+under 100 lines (`tests/filesystem/fake_backend.py`).
+
+- **`HostFilesystem(_root=...)` → `Filesystem.host(root)`** (backend:
+  `HostBackend`). **`InMemoryFilesystem()` → `Filesystem.in_memory()`**
+  (backend: `MemoryBackend`, moved out of `weakincentives.contrib.tools` into
+  the core `filesystem` package). Backend-specific surface (`cleanup()`,
+  `git_dir`) lives on the backend: reach it via `fs.backend`.
+- **`FilesystemSnapshot` → `SnapshotRef`.** The snapshot type no longer
+  hard-codes git internals (`commit_ref`, `git_dir`, `root_path`); refs carry
+  an opaque backend-private `token`. `SnapshotableFilesystem` is gone — the
+  facade always exposes `snapshot()`/`restore()`, and restoring a ref on the
+  wrong backend raises `SnapshotRestoreError`.
+- **Streaming consolidated.** The per-backend stream stack (`ByteReader`/
+  `ByteWriter` protocols plus Host/Memory implementations and
+  `DefaultTextReader`) collapsed into three concrete classes that work over
+  any backend. `ByteWriter` now buffers and commits through a single backend
+  write on `close()`, so aborted writes never touch the backend — including
+  `append` mode, which was previously non-transactional on host.
+- **Host backend hardening.** The sandbox root is resolved once at
+  construction; path validation (depth/segment limits and escape checks) now
+  applies to **every** operation, including reads — previously only writes
+  were validated. `read()`/`read_bytes()` reject negative offsets/limits.
+- **Documented strict-rollback snapshot contract.** Host snapshots now
+  capture *all* files, including `.gitignore`-matched ones (`git add --all
+  --force`), and restore still runs `git clean -xfd`. Restore therefore
+  returns the workspace to the exact snapshot-time state: ignored files that
+  existed at snapshot time are no longer destroyed by restore, and ignored
+  files created afterwards are removed.
+- **Uniform root-delete behavior.** `delete("/")` now raises
+  `PermissionError` on every backend (the in-memory implementation previously
+  allowed it).
+
 #### Validated construction via `.create()` and the `Constructable` base (#1138)
 
 The dataclass layer moved from an `Immutable`-style base (which auto-attached

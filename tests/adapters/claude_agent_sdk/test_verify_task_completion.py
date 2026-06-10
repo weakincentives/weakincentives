@@ -22,7 +22,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
-from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.prompt.task_completion import (
@@ -91,7 +90,7 @@ class TestVerifyTaskCompletion:
         self, session: Session, caplog: pytest.LogCaptureFixture
     ) -> None:
         """When required files are missing, logs warning but doesn't raise error."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Don't create any files
 
         checker = FileOutputChecker(files=("output.txt",))
@@ -115,7 +114,7 @@ class TestVerifyTaskCompletion:
 
     def test_passes_when_files_exist(self, session: Session) -> None:
         """When all required files exist, verification passes."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("output.txt", "done")
         fs.write("summary.md", "# Summary")
 
@@ -258,7 +257,7 @@ class TestVerifyTaskCompletion:
         from weakincentives.budget import Budget, BudgetTracker
         from weakincentives.runtime.events.types import TokenUsage
 
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Don't create the required file
 
         checker = FileOutputChecker(files=("output.txt",))
@@ -328,7 +327,7 @@ class TestCheckTaskCompletion:
             check_task_completion,
         )
 
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("output.txt", "done")
 
         checker = FileOutputChecker(files=("output.txt",))

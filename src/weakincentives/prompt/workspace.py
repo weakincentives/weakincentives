@@ -36,7 +36,7 @@ from typing import Any, Final, override
 from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
-from ..filesystem import Filesystem, HostFilesystem
+from ..filesystem import Filesystem, HostBackend
 from ..resources import ResourceRegistry
 from ..runtime.session import Session
 from .markdown import MarkdownSection
@@ -403,19 +403,19 @@ class WorkspaceSection(MarkdownSection[_WorkspaceSectionParams]):
             self._filesystem: Filesystem = (
                 _filesystem
                 if _filesystem is not None
-                else HostFilesystem(_root=str(self._temp_dir))
+                else Filesystem.host(self._temp_dir)
             )
         elif mounts:
             self._temp_dir, self._mount_previews = _create_workspace(
                 mounts, allowed_host_roots=self._allowed_host_roots
             )
             self._created_at = _utcnow()
-            self._filesystem = HostFilesystem(_root=str(self._temp_dir))
+            self._filesystem = Filesystem.host(self._temp_dir)
         else:
             self._temp_dir = Path(tempfile.mkdtemp(prefix="wink-workspace-"))
             self._mount_previews = ()
             self._created_at = _utcnow()
-            self._filesystem = HostFilesystem(_root=str(self._temp_dir))
+            self._filesystem = Filesystem.host(self._temp_dir)
 
         self._ref_lock = _ref_lock if _ref_lock is not None else threading.Lock()
         self._ref_count = _ref_count if _ref_count is not None else [1]
@@ -470,8 +470,9 @@ class WorkspaceSection(MarkdownSection[_WorkspaceSectionParams]):
                 return
         if self._temp_dir.exists():
             shutil.rmtree(self._temp_dir, ignore_errors=True)
-        if isinstance(self._filesystem, HostFilesystem):  # pragma: no branch
-            self._filesystem.cleanup()
+        backend = self._filesystem.backend
+        if isinstance(backend, HostBackend):  # pragma: no branch
+            backend.cleanup()
 
     @override
     def resources(self) -> ResourceRegistry:

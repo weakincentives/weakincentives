@@ -136,7 +136,7 @@ Defined at `src/weakincentives/adapters/acp/config.py:29`.
 | `mcp_servers` | `tuple[Any, ...]` | `()` | Additional MCP servers (WINK server always added first) |
 
 > **CWD requirement:** ACP requires `cwd` to be an absolute path. If `None`, the
-> adapter resolves to the prompt's `HostFilesystem` root or `Path.cwd().resolve()`.
+> adapter resolves to the prompt's host-backed filesystem root or `Path.cwd().resolve()`.
 
 > **Capability alignment:** Advertised capabilities in `initialize` must match
 > implemented methods in `ACPClient`.
@@ -277,7 +277,7 @@ Create `BudgetTracker` if budget provided. Derive deadline from argument or
 ### 2. Render Prompt
 
 `_evaluate_async()` at `src/weakincentives/adapters/acp/adapter.py:129`:
-renders the prompt, resolves CWD, binds `HostFilesystem` if needed, dispatches
+renders the prompt, resolves CWD, binds a host-backed `Filesystem` if needed, dispatches
 `PromptRendered`.
 
 ### 3. Resolve CWD
@@ -285,7 +285,7 @@ renders the prompt, resolves CWD, binds `HostFilesystem` if needed, dispatches
 `_resolve_cwd()` at `src/weakincentives/adapters/acp/adapter.py:185`:
 
 1. Use config `cwd` if set
-1. Else use prompt's `HostFilesystem` root
+1. Else use the prompt's host-backed filesystem root
 1. Else fall back to `Path.cwd().resolve()`
 1. Create temp directory if no cwd source and no filesystem
 

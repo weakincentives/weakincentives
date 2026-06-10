@@ -172,13 +172,17 @@ class TestWorkspaceSectionCleanup:
         section.cleanup()  # Should not raise
 
     def test_cleanup_removes_filesystem_git_directory(self, session: Session) -> None:
+        from weakincentives.filesystem import HostBackend
+
         section = WorkspaceSection(session=session)
         fs = section.filesystem
 
         _ = fs.write("test.txt", "content")
         _ = fs.snapshot(tag="test-snapshot")
 
-        git_dir = fs.git_dir
+        backend = fs.backend
+        assert isinstance(backend, HostBackend)
+        git_dir = backend.git_dir
         assert git_dir is not None
         assert Path(git_dir).exists()
 
@@ -189,13 +193,13 @@ class TestWorkspaceSectionCleanup:
         assert not Path(git_dir).exists()
 
     def test_cleanup_handles_non_host_filesystem(self, session: Session) -> None:
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
 
         section = WorkspaceSection(session=session)
         temp_dir = section.temp_dir
         assert temp_dir.exists()
 
-        section._filesystem = InMemoryFilesystem()
+        section._filesystem = Filesystem.in_memory()
 
         section.cleanup()
         assert not temp_dir.exists()

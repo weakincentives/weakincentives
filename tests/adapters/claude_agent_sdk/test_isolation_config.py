@@ -417,13 +417,13 @@ class TestIsolationConfig:
         self, session: Session, tmp_path: Path
     ) -> None:
         """When workspace filesystem is not HostFilesystem, cwd stays None."""
-        from weakincentives.contrib.tools import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt import WorkspaceSection
 
         MockSDKQuery.reset()
         MockSDKQuery.set_results([MockResultMessage(result="Done")])
 
-        mem_fs = InMemoryFilesystem()
+        mem_fs = Filesystem.in_memory()
         workspace = WorkspaceSection(
             session=session,
             _temp_dir=tmp_path,

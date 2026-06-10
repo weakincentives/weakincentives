@@ -161,6 +161,8 @@ combine-as-imports = true
 "src/weakincentives/prompt/feedback_providers.py" = ["PLR6301"]
 "src/weakincentives/prompt/section.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/runtime/session/slices/_memory.py" = ["PLR6301"]
+# PLR0904: The facade deliberately concentrates the whole filesystem surface
+"src/weakincentives/filesystem/_facade.py" = ["PLR0904"]
 # PLR0913: Public APIs with many keyword arguments by design
 "src/weakincentives/prompt/overrides/_section_overrides.py" = ["PLR0913"]
 "src/weakincentives/prompt/overrides/_tool_overrides.py" = ["PLR0913"]

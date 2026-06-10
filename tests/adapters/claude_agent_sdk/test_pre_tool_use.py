@@ -25,8 +25,8 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     create_pre_tool_use_hook,
 )
 from weakincentives.budget import Budget, BudgetTracker
-from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.deadlines import Deadline
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.runtime.events.types import TokenUsage
 from weakincentives.runtime.session import Session
@@ -127,7 +127,7 @@ class TestPreToolUseHookTransactional:
 
     def test_takes_snapshot_with_session_and_prompt(self, session: Session) -> None:
         """Pre-tool hook takes snapshot when session and prompt are present."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "initial")
         prompt = _make_prompt_with_fs(fs)
 
@@ -154,7 +154,7 @@ class TestPreToolUseHookTransactional:
 
     def test_skips_snapshot_for_mcp_wink_tools(self, session: Session) -> None:
         """Pre-tool hook skips snapshot for MCP WINK tools."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         prompt = _make_prompt_with_fs(fs)
 
         context = HookContext(

@@ -193,7 +193,7 @@ At `src/weakincentives/resources/protocols.py`:
 
 Generic protocol for state containers that support snapshot and restore.
 Implementations include `Session` (`Snapshotable[Snapshot]`) and
-`InMemoryFilesystem` (`Snapshotable[FilesystemSnapshot]`).
+`Filesystem` (`Snapshotable[SnapshotRef]`).
 
 ## Snapshots
 

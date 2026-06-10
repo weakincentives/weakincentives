@@ -107,15 +107,15 @@ class Snapshotable[SnapshotT](Protocol):
     Example::
 
         @dataclass
-        class FileSystemSnapshot:
-            files: Mapping[str, bytes]
+        class StoreSnapshot:
+            entries: Mapping[str, bytes]
 
-        class InMemoryFilesystem(Snapshotable[FileSystemSnapshot]):
-            def snapshot(self, *, tag: str | None = None) -> FileSystemSnapshot:
-                return FileSystemSnapshot(files=dict(self._files))
+        class InMemoryStore(Snapshotable[StoreSnapshot]):
+            def snapshot(self, *, tag: str | None = None) -> StoreSnapshot:
+                return StoreSnapshot(entries=dict(self._entries))
 
-            def restore(self, snapshot: FileSystemSnapshot) -> None:
-                self._files = dict(snapshot.files)
+            def restore(self, snapshot: StoreSnapshot) -> None:
+                self._entries = dict(snapshot.entries)
     """
 
     def snapshot(self, *, tag: str | None = None) -> SnapshotT:

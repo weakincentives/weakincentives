@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import (
     CompositeChecker,
     FileOutputChecker,
@@ -36,8 +36,8 @@ def session() -> Session:
 
 
 @pytest.fixture
-def fs() -> InMemoryFilesystem:
-    return InMemoryFilesystem()
+def fs() -> Filesystem:
+    return Filesystem.in_memory()
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ class TestFileOutputChecker:
         assert result.complete is True
         assert "No files required" in result.feedback
 
-    def test_all_files_exist(self, session: Session, fs: InMemoryFilesystem) -> None:
+    def test_all_files_exist(self, session: Session, fs: Filesystem) -> None:
         """All required files present => ok."""
         fs.write("a.txt", "data")
         fs.write("b.txt", "data")
@@ -102,7 +102,7 @@ class TestFileOutputChecker:
         assert result.complete is True
         assert "2" in result.feedback
 
-    def test_some_files_missing(self, session: Session, fs: InMemoryFilesystem) -> None:
+    def test_some_files_missing(self, session: Session, fs: Filesystem) -> None:
         """Some files missing => incomplete with listing."""
         fs.write("a.txt", "data")
 
@@ -115,7 +115,7 @@ class TestFileOutputChecker:
         assert "b.txt" in result.feedback
         assert "1 required" in result.feedback
 
-    def test_all_files_missing(self, session: Session, fs: InMemoryFilesystem) -> None:
+    def test_all_files_missing(self, session: Session, fs: Filesystem) -> None:
         """All files missing => incomplete."""
         checker = FileOutputChecker(files=("x.txt", "y.txt"))
         context = TaskCompletionContext(session=session, filesystem=fs)
@@ -126,7 +126,7 @@ class TestFileOutputChecker:
         assert "x.txt" in result.feedback
         assert "y.txt" in result.feedback
 
-    def test_empty_files_list(self, session: Session, fs: InMemoryFilesystem) -> None:
+    def test_empty_files_list(self, session: Session, fs: Filesystem) -> None:
         """Empty file list => ok (vacuously true)."""
         checker = FileOutputChecker(files=())
         context = TaskCompletionContext(session=session, filesystem=fs)
@@ -135,9 +135,7 @@ class TestFileOutputChecker:
 
         assert result.complete is True
 
-    def test_truncates_at_three_files(
-        self, session: Session, fs: InMemoryFilesystem
-    ) -> None:
+    def test_truncates_at_three_files(self, session: Session, fs: Filesystem) -> None:
         """Missing file list truncated to 3 with ellipsis."""
         files = tuple(f"f{i}.txt" for i in range(6))
         checker = FileOutputChecker(files=files)
@@ -174,9 +172,7 @@ class TestCompositeChecker:
         assert result.complete is True
         assert "No checkers configured" in result.feedback
 
-    def test_all_must_pass_all_pass(
-        self, session: Session, fs: InMemoryFilesystem
-    ) -> None:
+    def test_all_must_pass_all_pass(self, session: Session, fs: Filesystem) -> None:
         """AND mode: all pass => ok."""
         fs.write("a.txt", "data")
         fs.write("b.txt", "data")
@@ -194,9 +190,7 @@ class TestCompositeChecker:
 
         assert result.complete is True
 
-    def test_all_must_pass_one_fails(
-        self, session: Session, fs: InMemoryFilesystem
-    ) -> None:
+    def test_all_must_pass_one_fails(self, session: Session, fs: Filesystem) -> None:
         """AND mode: first failure short-circuits."""
         fs.write("a.txt", "data")
         # b.txt missing
@@ -215,9 +209,7 @@ class TestCompositeChecker:
         assert result.complete is False
         assert "b.txt" in result.feedback
 
-    def test_any_pass_first_passes(
-        self, session: Session, fs: InMemoryFilesystem
-    ) -> None:
+    def test_any_pass_first_passes(self, session: Session, fs: Filesystem) -> None:
         """OR mode: first success short-circuits."""
         fs.write("a.txt", "data")
 
@@ -234,7 +226,7 @@ class TestCompositeChecker:
 
         assert result.complete is True
 
-    def test_any_pass_none_pass(self, session: Session, fs: InMemoryFilesystem) -> None:
+    def test_any_pass_none_pass(self, session: Session, fs: Filesystem) -> None:
         """OR mode: all fail => incomplete."""
         checker = CompositeChecker(
             checkers=(

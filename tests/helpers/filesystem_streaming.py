@@ -39,11 +39,7 @@ from uuid import UUID
 
 import pytest
 
-from weakincentives.filesystem import (
-    Filesystem,
-    FilesystemSnapshot,
-    SnapshotableFilesystem,
-)
+from weakincentives.filesystem import Filesystem, SnapshotRef
 
 
 class FilesystemStreamingValidationSuite:
@@ -345,42 +341,33 @@ class ReadOnlyFilesystemValidationSuite:
 
 
 class SnapshotableFilesystemValidationSuite:
-    """Test suite for SnapshotableFilesystem protocol compliance.
+    """Test suite for snapshot/restore behavior.
 
     Subclasses must implement the ``fs_snapshotable`` fixture to provide
-    a snapshotable filesystem instance to test.
+    a filesystem instance whose backend supports snapshots.
     """
 
     @pytest.fixture
     @abstractmethod
-    def fs_snapshotable(self) -> SnapshotableFilesystem:
-        """Provide a snapshotable filesystem instance for testing."""
+    def fs_snapshotable(self) -> Filesystem:
+        """Provide a snapshot-capable filesystem instance for testing."""
         ...
 
-    def test_implements_snapshotable_protocol(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
-        """Filesystem should implement SnapshotableFilesystem protocol."""
-        assert isinstance(fs_snapshotable, SnapshotableFilesystem)
-
-    def test_snapshot_returns_filesystem_snapshot(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
-        """snapshot() should return a FilesystemSnapshot."""
+    def test_snapshot_returns_snapshot_ref(self, fs_snapshotable: Filesystem) -> None:
+        """snapshot() should return an opaque SnapshotRef."""
         fs_snapshotable.write("file.txt", "content")
         snapshot = fs_snapshotable.snapshot()
-        assert isinstance(snapshot, FilesystemSnapshot)
+        assert isinstance(snapshot, SnapshotRef)
         assert isinstance(snapshot.snapshot_id, UUID)
+        assert snapshot.token
 
-    def test_snapshot_with_tag(self, fs_snapshotable: SnapshotableFilesystem) -> None:
+    def test_snapshot_with_tag(self, fs_snapshotable: Filesystem) -> None:
         """snapshot() should accept an optional tag."""
         fs_snapshotable.write("file.txt", "content")
         snapshot = fs_snapshotable.snapshot(tag="my-tag")
         assert snapshot.tag == "my-tag"
 
-    def test_snapshot_and_restore_roundtrip(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
+    def test_snapshot_and_restore_roundtrip(self, fs_snapshotable: Filesystem) -> None:
         """Basic snapshot and restore should preserve file contents."""
         fs_snapshotable.write("config.py", "DEBUG = True")
         snapshot_v1 = fs_snapshotable.snapshot(tag="initial")
@@ -393,9 +380,7 @@ class SnapshotableFilesystemValidationSuite:
         fs_snapshotable.restore(snapshot_v1)
         assert fs_snapshotable.read("config.py").content == "DEBUG = True"
 
-    def test_restore_removes_new_files(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
+    def test_restore_removes_new_files(self, fs_snapshotable: Filesystem) -> None:
         """restore() should remove files created after snapshot."""
         fs_snapshotable.write("original.txt", "original")
         snapshot = fs_snapshotable.snapshot()
@@ -409,9 +394,7 @@ class SnapshotableFilesystemValidationSuite:
         assert not fs_snapshotable.exists("new.txt")
         assert fs_snapshotable.exists("original.txt")
 
-    def test_restore_restores_deleted_files(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
+    def test_restore_restores_deleted_files(self, fs_snapshotable: Filesystem) -> None:
         """restore() should bring back deleted files."""
         fs_snapshotable.write("file.txt", "content")
         snapshot = fs_snapshotable.snapshot()
@@ -425,7 +408,7 @@ class SnapshotableFilesystemValidationSuite:
         assert fs_snapshotable.exists("file.txt")
         assert fs_snapshotable.read("file.txt").content == "content"
 
-    def test_multiple_snapshots(self, fs_snapshotable: SnapshotableFilesystem) -> None:
+    def test_multiple_snapshots(self, fs_snapshotable: Filesystem) -> None:
         """Multiple snapshots can be restored independently."""
         fs_snapshotable.write("file.txt", "v1")
         snapshot_v1 = fs_snapshotable.snapshot(tag="v1")
@@ -443,7 +426,7 @@ class SnapshotableFilesystemValidationSuite:
         fs_snapshotable.restore(snapshot_v2)
         assert fs_snapshotable.read("file.txt").content == "v2"
 
-    def test_restore_directories(self, fs_snapshotable: SnapshotableFilesystem) -> None:
+    def test_restore_directories(self, fs_snapshotable: Filesystem) -> None:
         """restore() should restore directory structure."""
         fs_snapshotable.mkdir("a/b/c", parents=True)
         fs_snapshotable.write("a/b/c/file.txt", "content")

@@ -443,7 +443,6 @@ class TestVisibilityExpansionRequiredPropagation:
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
         """Test that filesystem is accessed via prompt resources."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
         captured_filesystem: list[object] = []
@@ -462,7 +461,7 @@ class TestVisibilityExpansionRequiredPropagation:
             handler=capture_context_handler,
         )
 
-        test_filesystem = InMemoryFilesystem()
+        test_filesystem = Filesystem.in_memory()
         prompt = _make_prompt_with_resources({Filesystem: test_filesystem})
 
         bridged = BridgedTool(

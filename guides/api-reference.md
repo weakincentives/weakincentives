@@ -200,10 +200,14 @@ copy = clone(my_dataclass)                   # Deep copy frozen dataclass
 
 ```python nocheck
 from weakincentives.filesystem import (
-    Filesystem,                # Protocol for file operations
-    SnapshotableFilesystem,    # Extended protocol with snapshot/restore
-    HostFilesystem,            # Host filesystem with git-based snapshots
+    Filesystem,                # Concrete facade over a narrow backend
+    FilesystemBackend,         # Backend protocol (~10 storage primitives)
+    HostBackend,               # Sandboxed host directory, git snapshots
+    MemoryBackend,             # Session-scoped in-memory backend
+    SnapshotRef,               # Opaque snapshot reference
 )
+
+fs = Filesystem.host("/workspace")   # or Filesystem.in_memory()
 
 # Binary operations
 content = fs.read_bytes("image.png", offset=0, limit=1024)

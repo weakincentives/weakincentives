@@ -99,8 +99,8 @@ At `src/weakincentives/resources/context.py`:
 ### Snapshotable
 
 At `src/weakincentives/resources/protocols.py`. `snapshot(tag=)` / `restore(snapshot)`
-for rollback. Used by `InMemoryFilesystem` (structural sharing) and `HostFilesystem`
-(git commits).
+for rollback. Used by `Filesystem`, whose backends implement snapshots via
+structural sharing (`MemoryBackend`) or git commits (`HostBackend`).
 
 ### Closeable
 
