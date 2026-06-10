@@ -82,7 +82,7 @@ from weakincentives.resources import ResourceRegistry, Binding
 registry = ResourceRegistry.of(
     Binding(Config, lambda r: Config.from_env()),
     Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-    Binding(Filesystem, lambda r: InMemoryFilesystem()),
+    Binding(Filesystem, lambda r: Filesystem.in_memory()),
 )
 
 # From pre-constructed instances (auto-wrapped as SINGLETON)
@@ -186,7 +186,7 @@ Resources supporting transactional rollback implement `Snapshotable`:
 from weakincentives.resources import Snapshotable
 
 @dataclass
-class InMemoryFilesystem(Snapshotable[FSSnapshot]):
+class InMemoryStore(Snapshotable[FSSnapshot]):
     def snapshot(self, *, tag: str | None = None) -> FSSnapshot:
         """Capture current state."""
         return FSSnapshot(files=self._files.copy())
@@ -238,7 +238,7 @@ prompt = Prompt(template).bind(
     Params(...),
     resources={
         Clock: SystemClock(),
-        Filesystem: InMemoryFilesystem(),
+        Filesystem: Filesystem.in_memory(),
     },
 )
 
@@ -286,13 +286,13 @@ Inject test doubles without changing production code:
 # Production registry
 prod_registry = ResourceRegistry.of(
     Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-    Binding(Filesystem, lambda r: HostFilesystem()),
+    Binding(Filesystem, lambda r: Filesystem.host(workspace_dir)),
 )
 
 # Test registry with mocks
 test_registry = ResourceRegistry.build({
     HTTPClient: MockHTTPClient(responses={"GET /api": "ok"}),
-    Filesystem: InMemoryFilesystem(),
+    Filesystem: Filesystem.in_memory(),
     Config: Config(url="http://test"),
 })
 

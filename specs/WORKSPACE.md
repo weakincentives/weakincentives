@@ -10,7 +10,7 @@ are provided by the execution harness (e.g., Claude Agent SDK, Codex App Server)
 **Implementation:**
 
 - Workspace digests: `src/weakincentives/contrib/tools/digests.py`
-- In-memory filesystem: `src/weakincentives/contrib/tools/filesystem_memory.py`
+- In-memory filesystem: `src/weakincentives/filesystem/_memory.py`
 - Public API: `src/weakincentives/contrib/tools/__init__.py`
 - Workspace section: `src/weakincentives/prompt/workspace.py`
 
@@ -64,7 +64,7 @@ See `HostMount` and `HostMountPreview` dataclasses in `weakincentives.prompt.wor
 ### Resources
 
 Both workspace sections contribute a `Filesystem` resource (backed by
-`HostFilesystem`) to the prompt's resource registry.
+`HostBackend`) to the prompt's resource registry.
 
 ## Workspace Digest
 
@@ -121,22 +121,23 @@ digest = latest_workspace_digest(session, "workspace-digest")
 
 Session-scoped filesystem for testing and evaluation scenarios.
 
-**Implementation:** `src/weakincentives/contrib/tools/filesystem_memory.py`
+**Implementation:** `src/weakincentives/filesystem/_memory.py` (facade:
+`Filesystem.in_memory()`)
 
 ### Data Model
 
 | Type | Description |
 |------|-------------|
-| `InMemoryFilesystem` | In-memory implementation of `Filesystem` protocol |
+| `Filesystem.in_memory()` | Filesystem facade over the in-memory backend |
 | `ReadResult` | Result of read operations with content and metadata |
 | `WriteResult` | Result of write operations with path and size |
 
 ### Usage
 
 ```python
-from weakincentives.contrib.tools import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
 
-fs = InMemoryFilesystem()
+fs = Filesystem.in_memory()
 fs.write("test.txt", "Hello, world!")
 result = fs.read("test.txt")
 print(result.content)  # "Hello, world!"

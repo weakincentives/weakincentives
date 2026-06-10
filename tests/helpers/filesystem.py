@@ -285,13 +285,31 @@ class FilesystemValidationSuite:
         self, fs: Filesystem, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """write() should fail if content exceeds max length."""
-        # Patch both implementations since we don't know which one is being tested
-        monkeypatch.setattr(
-            "weakincentives.contrib.tools.filesystem_memory.MAX_WRITE_LENGTH", 100
-        )
-        monkeypatch.setattr("weakincentives.filesystem._host.MAX_WRITE_LENGTH", 100)
+        # The cap lives in one place: the facade
+        monkeypatch.setattr("weakincentives.filesystem._facade.MAX_WRITE_LENGTH", 100)
         with pytest.raises(ValueError, match=r"[Cc]ontent exceeds maximum"):
             fs.write("file.txt", "x" * 101)
+
+    def test_write_to_directory_raises(self, fs: Filesystem) -> None:
+        """write() should raise IsADirectoryError when a directory occupies the path."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.write("mydir", "content")
+        assert fs.stat("mydir").is_directory
+
+    def test_write_beneath_file_raises(self, fs: Filesystem) -> None:
+        """write() beneath an existing file should raise NotADirectoryError."""
+        fs.write("blocker", "content")
+        with pytest.raises(NotADirectoryError):
+            fs.write("blocker/child.txt", "content")
+        assert fs.stat("blocker").is_file
+
+    def test_write_beneath_file_deep_chain_raises(self, fs: Filesystem) -> None:
+        """write() with a file anywhere in the ancestor chain should fail."""
+        fs.write("blocker", "content")
+        with pytest.raises(NotADirectoryError):
+            fs.write("blocker/a/b/child.txt", "content")
+        assert fs.stat("blocker").is_file
 
     def test_write_validates_path_depth(self, fs: Filesystem) -> None:
         """write() should validate path depth."""
@@ -359,11 +377,8 @@ class FilesystemValidationSuite:
         self, fs: Filesystem, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """write_bytes() should fail if content exceeds max size."""
-        # Patch both implementations since we don't know which one is being tested
-        monkeypatch.setattr(
-            "weakincentives.contrib.tools.filesystem_memory.MAX_WRITE_BYTES", 100
-        )
-        monkeypatch.setattr("weakincentives.filesystem._host.MAX_WRITE_BYTES", 100)
+        # The cap lives in one place: the facade
+        monkeypatch.setattr("weakincentives.filesystem._facade.MAX_WRITE_BYTES", 100)
         with pytest.raises(ValueError, match=r"[Cc]ontent exceeds maximum"):
             fs.write_bytes("file.bin", b"x" * 101)
 
@@ -371,6 +386,13 @@ class FilesystemValidationSuite:
         """write_bytes() to root directory should fail."""
         with pytest.raises(ValueError, match=r"[Cc]annot write to root"):
             fs.write_bytes(".", b"content")
+
+    def test_write_bytes_to_directory_raises(self, fs: Filesystem) -> None:
+        """write_bytes() should raise IsADirectoryError for directory paths."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.write_bytes("mydir", b"content")
+        assert fs.stat("mydir").is_directory
 
     def test_write_bytes_without_parents_fails(self, fs: Filesystem) -> None:
         """write_bytes() with create_parents=False should fail if parent missing."""
@@ -613,6 +635,13 @@ class FilesystemValidationSuite:
         with pytest.raises(FileExistsError):
             fs.mkdir("file")
 
+    def test_mkdir_beneath_file_raises(self, fs: Filesystem) -> None:
+        """mkdir() beneath an existing file should raise NotADirectoryError."""
+        fs.write("blocker", "content")
+        with pytest.raises(NotADirectoryError):
+            fs.mkdir("blocker/sub", parents=True)
+        assert fs.stat("blocker").is_file
+
     def test_mkdir_root_is_noop(self, fs: Filesystem) -> None:
         """mkdir() on root should be a no-op."""
         fs.mkdir(".")  # Should not raise
@@ -640,73 +669,6 @@ class FilesystemValidationSuite:
         assert fs.exists("café/日本語/файл.txt")
         result = fs.read("café/日本語/файл.txt")
         assert result.content == "content with émojis 🎉"
-
-    # -------------------------------------------------------------------------
-    # Streaming Read Operations (open_read)
-    # -------------------------------------------------------------------------
-
-    def test_open_read_basic(self, fs: Filesystem) -> None:
-        """open_read() should return a ByteReader for reading file content."""
-        fs.write_bytes("file.bin", b"hello world")
-        with fs.open_read("file.bin") as reader:
-            content = reader.read()
-            assert content == b"hello world"
-            assert reader.path == "file.bin"
-            assert reader.size == 11
-
-    def test_open_read_chunks(self, fs: Filesystem) -> None:
-        """open_read() should support chunk iteration."""
-        data = b"a" * 100000  # 100KB
-        fs.write_bytes("large.bin", data)
-        with fs.open_read("large.bin") as reader:
-            chunks = list(reader.chunks(size=10000))  # 10KB chunks
-            assert len(chunks) == 10
-            assert b"".join(chunks) == data
-
-    def test_open_read_default_iteration(self, fs: Filesystem) -> None:
-        """open_read() should support default chunk iteration via __iter__."""
-        data = b"x" * 1000
-        fs.write_bytes("file.bin", data)
-        with fs.open_read("file.bin") as reader:
-            chunks = list(reader)
-            assert b"".join(chunks) == data
-
-    def test_open_read_seek(self, fs: Filesystem) -> None:
-        """open_read() should support seek operations."""
-        fs.write_bytes("file.bin", b"0123456789")
-        with fs.open_read("file.bin") as reader:
-            pos = reader.seek(5)
-            assert pos == 5
-            assert reader.position == 5
-            content = reader.read()
-            assert content == b"56789"
-
-    def test_open_read_seek_from_end(self, fs: Filesystem) -> None:
-        """open_read() should support seeking from end."""
-        fs.write_bytes("file.bin", b"0123456789")
-        with fs.open_read("file.bin") as reader:
-            pos = reader.seek(-3, 2)  # whence=2 is from end
-            assert pos == 7
-            content = reader.read()
-            assert content == b"789"
-
-    def test_open_read_seek_invalid_whence_raises(self, fs: Filesystem) -> None:
-        """open_read() should raise ValueError for invalid whence."""
-        fs.write_bytes("file.bin", b"content")
-        with fs.open_read("file.bin") as reader:
-            with pytest.raises(ValueError, match="whence"):
-                reader.seek(0, 99)  # Invalid whence value
-
-    def test_open_read_missing_file_raises(self, fs: Filesystem) -> None:
-        """open_read() should raise FileNotFoundError for missing files."""
-        with pytest.raises(FileNotFoundError):
-            fs.open_read("missing.bin")
-
-    def test_open_read_directory_raises(self, fs: Filesystem) -> None:
-        """open_read() should raise IsADirectoryError for directories."""
-        fs.mkdir("mydir")
-        with pytest.raises(IsADirectoryError):
-            fs.open_read("mydir")
 
 
 __all__ = [

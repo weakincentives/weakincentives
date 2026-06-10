@@ -10,312 +10,139 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Host filesystem backend for workspace operations.
+"""Host directory backend for the filesystem facade.
 
-This module provides a filesystem implementation backed by a host directory,
-with path restrictions to prevent escaping the sandbox root.
+Implements :class:`~weakincentives.filesystem.FilesystemBackend` primitives
+over a sandboxed host directory. The root is resolved once at construction
+and every operation re-validates that its (symlink-resolved) target stays
+inside the sandbox.
 
-Example usage::
-
-    from weakincentives.filesystem import HostFilesystem
-
-    # Create a host filesystem with sandbox root
-    fs = HostFilesystem(_root="/path/to/workspace")
-
-    # Write and read files
-    fs.write("src/main.py", "print('hello')")
-    result = fs.read("src/main.py")
-    assert result.content == "print('hello')"
+Snapshots follow the strict rollback contract documented in ``_git_ops``:
+they capture every file (including ``.gitignore``-matched ones) and restore
+removes everything that was not present at snapshot time.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from uuid import uuid4
 
+from ..clock import SYSTEM_CLOCK
+from ._backend import SnapshotRef
 from ._git_ops import (
     cleanup_git_dir,
     create_snapshot,
     init_git_repo,
     restore_snapshot,
 )
-from ._streams import (
-    DefaultTextReader,
-    HostByteReader,
-    HostByteWriter,
-    TextReader,
-)
 from ._types import (
-    DEFAULT_READ_LIMIT,
-    MAX_GREP_MATCHES,
-    MAX_WRITE_BYTES,
-    MAX_WRITE_LENGTH,
-    READ_ENTIRE_FILE,
     FileEntry,
     FileStat,
-    FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
-    ReadBytesResult,
-    ReadResult,
-    WriteResult,
+    WriteMode,
     glob_match,
-    normalize_path,
-    validate_path,
 )
 
-__all__ = ["HostFilesystem"]
+__all__ = ["HostBackend"]
 
 
-# ---------------------------------------------------------------------------
-# HostFilesystem Implementation
-# ---------------------------------------------------------------------------
+class HostBackend:
+    """Filesystem primitives over a sandboxed host directory.
 
-
-@dataclass(slots=True)
-class HostFilesystem:
-    """Filesystem backed by a host directory with path restrictions.
-
-    Provides sandboxed access to a root directory on the host filesystem.
-    All paths are resolved relative to the root and validated to ensure
-    they cannot escape the sandbox via symlinks or path traversal.
-    Supports snapshot and restore operations via git commits.
-
-    The git repository used for snapshots is stored outside the workspace
-    root to prevent agents from accessing or modifying it. By default,
-    a temporary directory is created using Python's ``tempfile.mkdtemp()``
-    (e.g., ``/tmp/wink-git-abc12345``).
+    All paths are facade-normalized relative strings (``""`` is the root).
+    Each operation resolves its target and rejects paths that escape the
+    root via symlinks with ``PermissionError``. Snapshot/restore is backed
+    by an external git repository kept outside the workspace so agents
+    cannot reach it.
     """
 
-    _root: str
-    _read_only: bool = False
-    _git_initialized: bool = False
-    _git_dir: str | None = None
+    def __init__(
+        self,
+        root: str | os.PathLike[str],
+        *,
+        read_only: bool = False,
+        git_dir: str | None = None,
+    ) -> None:
+        super().__init__()
+        self._root = Path(root).resolve()
+        self._read_only = read_only
+        self._git_dir = git_dir
+        self._git_initialized = False
 
     @property
     def root(self) -> str:
-        """Workspace root path."""
-        return self._root
+        """Workspace root path (resolved)."""
+        return str(self._root)
 
     @property
     def read_only(self) -> bool:
-        """True if write operations are disabled."""
+        """True if write operations are disabled (enforced by the facade)."""
         return self._read_only
 
-    def _resolve_path(self, path: str) -> Path:
-        """Resolve a relative path to an absolute path within root.
+    def _resolve(self, path: str) -> Path:
+        """Resolve a normalized relative path inside the sandbox root.
 
         Raises:
-            PermissionError: If resolved path escapes root directory.
+            PermissionError: If the resolved path escapes the root (e.g.,
+                through a symlink).
         """
-        root_path = Path(self._root).resolve()
-
-        # Handle empty/root path
-        if not path or path in {".", "/"}:
-            return root_path
-
-        # Join path with root and resolve to handle .. segments
-        candidate = (root_path / path).resolve()
-
-        # Ensure the resolved path is within root
+        if not path:
+            return self._root
+        candidate = (self._root / path).resolve()
         try:
-            _ = candidate.relative_to(root_path)
+            _ = candidate.relative_to(self._root)
         except ValueError:
             msg = f"Path escapes root directory: {path}"
             raise PermissionError(msg) from None
-
         return candidate
 
-    def read(
-        self,
-        path: str,
-        *,
-        offset: int = 0,
-        limit: int | None = None,
-        encoding: str = "utf-8",
-    ) -> ReadResult:
-        """Read file content with optional pagination."""
-        resolved = self._resolve_path(path)
-
-        if not resolved.exists():
-            raise FileNotFoundError(path)
-
-        if resolved.is_dir():
-            msg = f"Is a directory: {path}"
-            raise IsADirectoryError(msg)
-
-        try:
-            with resolved.open(encoding=encoding) as f:
-                lines = f.readlines()
-        except UnicodeDecodeError as err:
-            msg = (
-                f"Cannot read '{path}' as text: file contains binary content that "
-                f"cannot be decoded as {encoding}. Use read_bytes() for binary files."
-            )
-            raise ValueError(msg) from err
-
-        total_lines = len(lines)
-        # READ_ENTIRE_FILE (-1) reads all lines; None uses default window
-        if limit == READ_ENTIRE_FILE:
-            actual_limit = total_lines
-        else:
-            actual_limit = limit if limit is not None else DEFAULT_READ_LIMIT
-        start = min(offset, total_lines)
-        end = min(start + actual_limit, total_lines)
-        selected_lines = lines[start:end]
-        content = "".join(selected_lines)
-
-        # Remove trailing newline for consistency
-        content = content.removesuffix("\n")
-
-        # Return path relative to root
-        rel_path = normalize_path(path) or "/"
-
-        return ReadResult(
-            content=content,
-            path=rel_path,
-            total_lines=total_lines,
-            offset=start,
-            limit=end - start,
-            truncated=end < total_lines,
-        )
-
-    def read_bytes(
-        self,
-        path: str,
-        *,
-        offset: int = 0,
-        limit: int | None = None,
-    ) -> ReadBytesResult:
-        """Read file content as raw bytes with optional pagination."""
-        if offset < 0:
-            msg = f"offset must be non-negative, got {offset}"
-            raise ValueError(msg)
-        if limit is not None and limit < 0:
-            msg = f"limit must be non-negative, got {limit}"
-            raise ValueError(msg)
-
-        resolved = self._resolve_path(path)
-
-        if not resolved.exists():
-            raise FileNotFoundError(path)
-
-        if resolved.is_dir():
-            msg = f"Is a directory: {path}"
-            raise IsADirectoryError(msg)
-
-        file_size = resolved.stat().st_size
-
-        with resolved.open("rb") as f:
-            if offset > 0:
-                _ = f.seek(offset)
-            data = f.read(limit) if limit is not None else f.read()
-
-        # Calculate actual positions after read
-        actual_offset = min(offset, file_size)
-        bytes_read = len(data)
-        truncated = actual_offset + bytes_read < file_size
-
-        rel_path = normalize_path(path) or "/"
-
-        return ReadBytesResult(
-            content=data,
-            path=rel_path,
-            size_bytes=file_size,
-            offset=actual_offset,
-            limit=bytes_read,
-            truncated=truncated,
-        )
-
-    def exists(self, path: str) -> bool:
-        """Check if a path exists."""
-        try:
-            resolved = self._resolve_path(path)
-            return resolved.exists()
-        except PermissionError:
-            return False
+    # --- Primitives ---------------------------------------------------------
 
     def stat(self, path: str) -> FileStat:
         """Get metadata for a path."""
-        resolved = self._resolve_path(path)
-
+        resolved = self._resolve(path)
         if not resolved.exists():
             raise FileNotFoundError(path)
-
         st = resolved.stat()
         is_dir = resolved.is_dir()
-        rel_path = normalize_path(path) or "/"
-
         return FileStat(
-            path=rel_path,
+            path=path or "/",
             is_file=not is_dir,
             is_directory=is_dir,
-            size_bytes=st.st_size if not is_dir else 0,
+            size_bytes=0 if is_dir else st.st_size,
             created_at=datetime.fromtimestamp(st.st_ctime, tz=UTC),
             modified_at=datetime.fromtimestamp(st.st_mtime, tz=UTC),
         )
 
-    def list(self, path: str = ".") -> Sequence[FileEntry]:
-        """List directory contents."""
-        resolved = self._resolve_path(path)
-
-        if not resolved.exists():
-            raise FileNotFoundError(path)
-
-        if not resolved.is_dir():
-            msg = f"Not a directory: {path}"
-            raise NotADirectoryError(msg)
-
-        entries: list[FileEntry] = []
-        base_path = normalize_path(path)
-
-        for item in resolved.iterdir():
-            is_dir = item.is_dir()
-            rel_path = f"{base_path}/{item.name}" if base_path else item.name
-
-            entries.append(
-                FileEntry(
-                    name=item.name,
-                    path=rel_path,
-                    is_file=not is_dir,
-                    is_directory=is_dir,
-                )
+    def list(self, path: str) -> Sequence[FileEntry]:
+        """List entries of an existing directory, sorted by name."""
+        resolved = self._resolve(path)
+        entries = [
+            FileEntry(
+                name=item.name,
+                path=f"{path}/{item.name}" if path else item.name,
+                is_file=not item.is_dir(),
+                is_directory=item.is_dir(),
             )
-
+            for item in resolved.iterdir()
+        ]
         entries.sort(key=lambda e: e.name)
         return entries
 
-    def glob(
-        self,
-        pattern: str,
-        *,
-        path: str = ".",
-    ) -> Sequence[GlobMatch]:
-        """Match files by glob pattern."""
-        resolved_base = self._resolve_path(path)
-        root_path = Path(self._root)
-
-        if not resolved_base.exists():
-            return []
-
-        matches: list[GlobMatch] = []
-
-        for file_path in resolved_base.rglob("*"):
-            if not file_path.is_file():
-                continue
-            # Get path relative to root filesystem
-            rel_to_fs_root = str(file_path.relative_to(root_path))
-            # Get path relative to search base
-            rel_to_base = str(file_path.relative_to(resolved_base))
-
-            if glob_match(rel_to_base, pattern, ""):
-                matches.append(GlobMatch(path=rel_to_fs_root, is_file=True))
-
+    def glob(self, pattern: str, *, path: str) -> Sequence[GlobMatch]:
+        """Match files under a base directory, sorted by path."""
+        base = self._resolve(path)
+        matches = [
+            GlobMatch(path=str(item.relative_to(self._root)), is_file=True)
+            for item in base.rglob("*")
+            if item.is_file() and glob_match(str(item.relative_to(base)), pattern, "")
+        ]
         matches.sort(key=lambda m: m.path)
         return matches
 
@@ -323,44 +150,31 @@ class HostFilesystem:
         self,
         pattern: str,
         *,
-        path: str = ".",
-        glob: str | None = None,
-        max_matches: int | None = None,
+        path: str,
+        glob: str | None,
+        max_matches: int,
     ) -> Sequence[GrepMatch]:
-        """Search file contents by regex."""
-        resolved_base = self._resolve_path(path)
-        root_path = Path(self._root)
-
-        try:
-            regex = re.compile(pattern)
-        except re.error as err:
-            msg = f"Invalid regex pattern: {err}"
-            raise ValueError(msg) from err
-
-        actual_max = max_matches if max_matches is not None else MAX_GREP_MATCHES
+        """Regex-search file contents under a base directory."""
+        base = self._resolve(path)
+        regex = re.compile(pattern)
         matches: list[GrepMatch] = []
-
-        if not resolved_base.exists():
-            return []
-
-        for file_path in sorted(resolved_base.rglob("*")):
-            if not file_path.is_file():
+        for item in sorted(base.rglob("*")):
+            if not item.is_file():
                 continue
-
-            rel_to_fs_root = str(file_path.relative_to(root_path))
-            rel_to_base = str(file_path.relative_to(resolved_base))
-
-            # Apply glob filter if provided
-            if glob is not None and not glob_match(rel_to_base, glob, ""):
+            if glob is not None and not glob_match(
+                str(item.relative_to(base)), glob, ""
+            ):
                 continue
-
-            grep_matches = self._grep_file(
-                file_path, regex, rel_to_fs_root, actual_max - len(matches)
+            matches.extend(
+                self._grep_file(
+                    item,
+                    regex,
+                    str(item.relative_to(self._root)),
+                    max_matches - len(matches),
+                )
             )
-            matches.extend(grep_matches)
-            if len(matches) >= actual_max:
+            if len(matches) >= max_matches:
                 break
-
         return matches
 
     @staticmethod
@@ -391,250 +205,65 @@ class HostFilesystem:
             pass
         return matches
 
-    def write(
-        self,
-        path: str,
-        content: str,
-        *,
-        mode: Literal["create", "overwrite", "append"] = "overwrite",
-        create_parents: bool = True,
-    ) -> WriteResult:
-        """Write content to a file."""
-        if self._read_only:
-            msg = "Filesystem is read-only"
-            raise PermissionError(msg)
-
-        normalized = normalize_path(path)
-        if not normalized:
-            msg = "Cannot write to root directory"
-            raise ValueError(msg)
-
-        validate_path(normalized)
-
-        if len(content) > MAX_WRITE_LENGTH:
-            msg = f"Content exceeds maximum length of {MAX_WRITE_LENGTH} characters."
-            raise ValueError(msg)
-
-        resolved = self._resolve_path(path)
-        parent_dir = resolved.parent
-
-        # Check parent directory
-        if not parent_dir.exists():
-            if not create_parents:
-                raise FileNotFoundError(
-                    f"Parent directory does not exist: {parent_dir}"
-                )
-            parent_dir.mkdir(parents=True, exist_ok=True)
-
-        exists = resolved.exists()
-
-        if mode == "create" and exists:
-            raise FileExistsError(f"File already exists: {path}")
-
-        file_mode = "a" if mode == "append" else "w"
-
-        with resolved.open(file_mode, encoding="utf-8") as f:
-            _ = f.write(content)
-
-        # Calculate bytes written (actual bytes written, not total file size)
-        bytes_written = len(content.encode("utf-8"))
-
-        return WriteResult(
-            path=normalized,
-            bytes_written=bytes_written,
-            mode=mode,
-        )
-
-    def write_bytes(
-        self,
-        path: str,
-        content: bytes,
-        *,
-        mode: Literal["create", "overwrite", "append"] = "overwrite",
-        create_parents: bool = True,
-    ) -> WriteResult:
-        """Write raw bytes to a file."""
-        if self._read_only:
-            msg = "Filesystem is read-only"
-            raise PermissionError(msg)
-
-        normalized = normalize_path(path)
-        if not normalized:
-            msg = "Cannot write to root directory"
-            raise ValueError(msg)
-
-        validate_path(normalized)
-
-        if len(content) > MAX_WRITE_BYTES:
-            msg = f"Content exceeds maximum size of {MAX_WRITE_BYTES} bytes."
-            raise ValueError(msg)
-
-        resolved = self._resolve_path(path)
-        parent_dir = resolved.parent
-
-        # Check parent directory
-        if not parent_dir.exists():
-            if not create_parents:
-                raise FileNotFoundError(
-                    f"Parent directory does not exist: {parent_dir}"
-                )
-            parent_dir.mkdir(parents=True, exist_ok=True)
-
-        exists = resolved.exists()
-
-        if mode == "create" and exists:
-            raise FileExistsError(f"File already exists: {path}")
-
-        file_mode = "ab" if mode == "append" else "wb"
-
-        with resolved.open(file_mode) as f:
-            _ = f.write(content)
-
-        # Calculate bytes written (actual bytes written, not total file size)
-        bytes_written = len(content)
-
-        return WriteResult(
-            path=normalized,
-            bytes_written=bytes_written,
-            mode=mode,
-        )
-
-    def delete(
+    def read_range(
         self,
         path: str,
         *,
-        recursive: bool = False,
-    ) -> None:
-        """Delete a file or directory."""
-        if self._read_only:
-            msg = "Filesystem is read-only"
-            raise PermissionError(msg)
+        offset: int,
+        length: int | None,
+    ) -> bytes:
+        """Read up to ``length`` bytes starting at ``offset``."""
+        resolved = self._resolve(path)
+        try:
+            with resolved.open("rb") as f:
+                if offset:
+                    _ = f.seek(offset)
+                return f.read(length) if length is not None else f.read()
+        except FileNotFoundError:
+            raise FileNotFoundError(path) from None
+        except IsADirectoryError:
+            msg = f"Is a directory: {path}"
+            raise IsADirectoryError(msg) from None
 
-        normalized = normalize_path(path)
-        if not normalized:
-            msg = "Cannot delete root directory"
-            raise PermissionError(msg)
+    def write(self, path: str, data: bytes, *, mode: WriteMode) -> None:
+        """Write bytes to a file, creating parent directories as needed."""
+        resolved = self._resolve(path)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        if mode == "create":
+            # "xb" atomically fails if the file exists (no TOCTOU race)
+            try:
+                handle = resolved.open("xb")
+            except FileExistsError:
+                raise FileExistsError(f"File already exists: {path}") from None
+        else:
+            handle = resolved.open("ab" if mode == "append" else "wb")
+        with handle:
+            _ = handle.write(data)
 
-        resolved = self._resolve_path(path)
-
+    def delete(self, path: str, *, recursive: bool) -> None:
+        """Delete a file, or a directory when empty or ``recursive=True``."""
+        resolved = self._resolve(path)
         if not resolved.exists():
             raise FileNotFoundError(path)
-
         if resolved.is_file():
             resolved.unlink()
             return
-
-        # It's a directory
-        if any(resolved.iterdir()) and not recursive:
-            msg = f"Directory not empty: {path}"
-            raise IsADirectoryError(msg)
-
         if recursive:
             shutil.rmtree(resolved)
-        else:
-            resolved.rmdir()
-
-    def mkdir(
-        self,
-        path: str,
-        *,
-        parents: bool = True,
-        exist_ok: bool = True,
-    ) -> None:
-        """Create a directory."""
-        if self._read_only:
-            msg = "Filesystem is read-only"
-            raise PermissionError(msg)
-
-        normalized = normalize_path(path)
-        if not normalized:
-            return  # Root always exists
-
-        validate_path(normalized)
-        resolved = self._resolve_path(path)
-
-        if resolved.exists():
-            if resolved.is_file():
-                raise FileExistsError(f"A file exists at path: {path}")
-            if not exist_ok:
-                raise FileExistsError(f"Directory already exists: {path}")
             return
+        if any(resolved.iterdir()):
+            msg = f"Directory not empty: {path}"
+            raise IsADirectoryError(msg)
+        resolved.rmdir()
 
-        if parents:
-            resolved.mkdir(parents=True, exist_ok=True)
-        else:
-            if not resolved.parent.exists():
-                raise FileNotFoundError(
-                    f"Parent directory does not exist: {resolved.parent}"
-                )
-            resolved.mkdir()
+    def mkdir(self, path: str) -> None:
+        """Create a directory and any missing parents (idempotent)."""
+        self._resolve(path).mkdir(parents=True, exist_ok=True)
 
-    # --- Streaming Operations ---
-
-    def open_read(self, path: str) -> HostByteReader:
-        """Open a file for streaming byte reads.
-
-        Returns a ByteReader context manager for chunked reading.
-        """
-        normalized = normalize_path(path) or "/"
-        resolved = self._resolve_path(path)
-        return HostByteReader.open(resolved, normalized)
-
-    def open_write(
-        self,
-        path: str,
-        *,
-        mode: Literal["create", "overwrite", "append"] = "overwrite",
-        create_parents: bool = True,
-    ) -> HostByteWriter:
-        """Open a file for streaming byte writes.
-
-        Returns a ByteWriter context manager for chunked writing.
-        """
-        if self._read_only:
-            msg = "Filesystem is read-only"
-            raise PermissionError(msg)
-
-        normalized = normalize_path(path)
-        if not normalized:
-            msg = "Cannot write to root directory"
-            raise ValueError(msg)
-
-        validate_path(normalized)
-        resolved = self._resolve_path(path)
-
-        return HostByteWriter.open(
-            resolved,
-            normalized,
-            mode=mode,
-            create_parents=create_parents,
-        )
-
-    def open_text(
-        self,
-        path: str,
-        *,
-        encoding: str = "utf-8",
-    ) -> TextReader:
-        """Open a file for streaming text reads with lazy decoding.
-
-        Returns a TextReader context manager that decodes bytes lazily.
-        """
-        if encoding != "utf-8":
-            msg = f"Only 'utf-8' encoding is supported, got: {encoding}"
-            raise ValueError(msg)
-
-        byte_reader = self.open_read(path)
-        return DefaultTextReader.wrap(byte_reader, encoding=encoding)
-
-    # --- Snapshot Operations ---
+    # --- Snapshots ------------------------------------------------------------
 
     def _ensure_git(self) -> str:
-        """Initialize git repository if needed for snapshot support.
-
-        Returns:
-            The git directory path (guaranteed non-None).
-        """
+        """Initialize the external git repository if needed."""
         if not self._git_initialized:
             self._git_dir = init_git_repo(self._git_dir)
             self._git_initialized = True
@@ -644,45 +273,40 @@ class HostFilesystem:
             raise RuntimeError(msg)
         return git_dir
 
-    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
-        """Capture current filesystem state as a git commit.
+    def snapshot(self, *, tag: str | None = None) -> SnapshotRef:
+        """Capture the workspace as a git commit (strict rollback contract).
 
-        Uses git's content-addressed storage for copy-on-write semantics.
-        Identical files share storage automatically between snapshots.
-
-        Args:
-            tag: Optional human-readable label for the snapshot.
-
-        Returns:
-            Immutable snapshot that can be stored in session state.
+        Every file is captured, including ``.gitignore``-matched ones, so
+        :meth:`restore` returns the workspace to this exact state.
         """
         git_dir = self._ensure_git()
-        return create_snapshot(self._root, git_dir, tag=tag)
+        commit_ref = create_snapshot(self.root, git_dir, tag=tag)
+        return SnapshotRef(
+            snapshot_id=uuid4(),
+            created_at=SYSTEM_CLOCK.utcnow(),
+            token=f"{commit_ref}:{git_dir}",
+            tag=tag,
+        )
 
-    def restore(self, snapshot: FilesystemSnapshot) -> None:
-        """Restore filesystem to a previous git commit.
+    def restore(self, ref: SnapshotRef) -> None:
+        """Restore the workspace to a snapshot's exact state.
 
-        Performs a hard reset to the snapshot's commit and removes any
-        untracked files (including ignored files) for a strict rollback.
-
-        Args:
-            snapshot: The snapshot to restore.
+        Files created after the snapshot are removed regardless of ignore
+        rules; files present at snapshot time (ignored or not) come back.
 
         Raises:
-            SnapshotRestoreError: If git reset fails (e.g., invalid commit).
+            SnapshotRestoreError: The ref does not name a commit known to
+                this backend's git repository.
         """
-        # Use git_dir from snapshot if available and we don't have one yet
-        if snapshot.git_dir is not None and self._git_dir is None:
-            self._git_dir = snapshot.git_dir
+        commit_ref, _, ref_git_dir = ref.token.partition(":")
+        # Adopt the ref's git dir for cross-instance restore
+        if self._git_dir is None and ref_git_dir:
+            self._git_dir = ref_git_dir
         git_dir = self._ensure_git()
-        restore_snapshot(self._root, git_dir, snapshot)
+        restore_snapshot(self.root, git_dir, commit_ref)
 
     def cleanup(self) -> None:
-        """Remove the external git directory.
-
-        Call this when the filesystem is no longer needed to clean up
-        the snapshot storage. Safe to call multiple times.
-        """
+        """Remove the external git directory. Safe to call multiple times."""
         if cleanup_git_dir(self._git_dir):
             self._git_initialized = False
 

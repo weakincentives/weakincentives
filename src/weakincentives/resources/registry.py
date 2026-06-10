@@ -40,7 +40,7 @@ class ResourceRegistry:
 
         # Pre-constructed instances (common case)
         registry = ResourceRegistry.build({
-            Filesystem: InMemoryFilesystem(),
+            Filesystem: Filesystem.in_memory(),
             BudgetTracker: tracker,
         })
 

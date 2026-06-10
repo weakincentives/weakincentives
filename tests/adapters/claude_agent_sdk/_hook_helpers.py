@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import (
     Feedback,
@@ -36,7 +35,7 @@ def _make_prompt() -> Prompt[object]:
 
 
 def _make_prompt_with_fs(
-    fs: InMemoryFilesystem,
+    fs: Filesystem,
     *,
     task_completion_checker: TaskCompletionChecker | None = None,
 ) -> Prompt[object]:

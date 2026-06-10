@@ -36,7 +36,7 @@ Basic usage with pre-constructed instances::
 
     # Register pre-constructed instances
     config = Config.from_env()
-    filesystem = InMemoryFilesystem()
+    filesystem = Filesystem.in_memory()
 
     registry = ResourceRegistry.build({
         Config: config,
@@ -196,12 +196,12 @@ Resources can implement protocols for lifecycle hooks:
 **Snapshotable**:
     Resources can capture and restore state for transactional operations::
 
-        class InMemoryFilesystem(Snapshotable[FileSystemSnapshot]):
-            def snapshot(self, *, tag: str | None = None) -> FileSystemSnapshot:
-                return FileSystemSnapshot(files=dict(self._files))
+        class InMemoryStore(Snapshotable[StoreSnapshot]):
+            def snapshot(self, *, tag: str | None = None) -> StoreSnapshot:
+                return StoreSnapshot(entries=dict(self._entries))
 
-            def restore(self, snapshot: FileSystemSnapshot) -> None:
-                self._files = dict(snapshot.files)
+            def restore(self, snapshot: StoreSnapshot) -> None:
+                self._entries = dict(snapshot.entries)
 
 Error Handling
 --------------

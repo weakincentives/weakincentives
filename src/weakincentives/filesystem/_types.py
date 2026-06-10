@@ -22,7 +22,6 @@ import fnmatch
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, Literal
-from uuid import UUID
 
 from ..clock import SYSTEM_CLOCK
 from ._path import (
@@ -123,29 +122,6 @@ class WriteResult:
     mode: WriteMode
 
 
-@dataclass(slots=True, frozen=True)
-class FilesystemSnapshot:
-    """Immutable capture of filesystem state, storable in session.
-
-    Snapshots capture the state of a workspace at a point in time, enabling
-    rollback after failed tool invocations or exploratory changes.
-
-    The ``commit_ref`` field stores a git commit hash for disk-backed
-    filesystems (HostFilesystem) or an internal version identifier for
-    in-memory filesystems (InMemoryFilesystem).
-
-    For HostFilesystem, ``git_dir`` stores the external git repository
-    location to enable cross-session restore.
-    """
-
-    snapshot_id: UUID
-    created_at: datetime
-    commit_ref: str
-    root_path: str
-    git_dir: str | None = None
-    tag: str | None = None
-
-
 # ---------------------------------------------------------------------------
 # Shared Utility Functions
 # ---------------------------------------------------------------------------
@@ -195,7 +171,6 @@ __all__ = [
     "FileEncoding",
     "FileEntry",
     "FileStat",
-    "FilesystemSnapshot",
     "GlobMatch",
     "GrepMatch",
     "ReadBytesResult",

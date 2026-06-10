@@ -131,13 +131,12 @@ class TestDuckTypingConformance:
 
     def test_custom_implementation_passes_isinstance(self) -> None:
         """Custom class implementing protocol passes isinstance."""
-        from weakincentives.contrib.tools import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
         class CustomWorkspaceSection:
             def __init__(self, session: Session) -> None:
                 self._session = session
-                self._fs = InMemoryFilesystem()
+                self._fs = Filesystem.in_memory()
 
             @property
             def session(self) -> Session:

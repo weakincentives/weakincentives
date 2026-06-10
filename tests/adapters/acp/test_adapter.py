@@ -28,6 +28,7 @@ from weakincentives.adapters.acp.adapter import ACPAdapter
 from weakincentives.adapters.acp.config import ACPAdapterConfig, ACPClientConfig
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.clock import SYSTEM_CLOCK
+from weakincentives.filesystem import Filesystem
 from weakincentives.runtime.events import InProcessDispatcher
 
 from .conftest import (
@@ -173,22 +174,18 @@ class TestResolveCwd:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_resolve_cwd_filesystem_root_used_when_no_config(self) -> None:
-        from weakincentives.filesystem import HostFilesystem
-
         adapter = ACPAdapter(client_config=ACPClientConfig(cwd=None))
         prompt = _make_mock_prompt()
-        fs = HostFilesystem(_root="/tmp/fs-root")
+        fs = Filesystem.host("/tmp/fs-root")
         prompt.filesystem.return_value = fs
         effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
         assert effective_cwd == "/tmp/fs-root"
         assert temp_dir is None
 
     def test_resolve_cwd_config_takes_precedence_over_filesystem(self) -> None:
-        from weakincentives.filesystem import HostFilesystem
-
         adapter = ACPAdapter(client_config=ACPClientConfig(cwd="/tmp/configured"))
         prompt = _make_mock_prompt()
-        fs = HostFilesystem(_root="/tmp/fs-root")
+        fs = Filesystem.host("/tmp/fs-root")
         prompt.filesystem.return_value = fs
         effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
         assert effective_cwd == "/tmp/configured"

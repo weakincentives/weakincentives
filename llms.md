@@ -243,10 +243,18 @@ from weakincentives.runtime.transcript import (
 from weakincentives.contrib.tools import (
     WorkspaceDigestSection,
     WorkspaceDigest,
-    InMemoryFilesystem,
     set_workspace_digest,
     clear_workspace_digest,
     latest_workspace_digest,
+)
+
+# Filesystem (one facade over narrow backends)
+from weakincentives.filesystem import (
+    Filesystem,
+    FilesystemBackend,
+    HostBackend,
+    MemoryBackend,
+    SnapshotRef,
 )
 
 # Serde
@@ -870,16 +878,22 @@ if digest:
     print(digest.summary)
 ```
 
-**In-Memory Filesystem**: Session-scoped filesystem for testing.
+**Filesystem**: one concrete facade composed over a narrow backend
+protocol (`FilesystemBackend`, ~10 primitives). `Filesystem.host(root)` gives
+sandboxed host access with git snapshots; `Filesystem.in_memory()` gives a
+session-scoped virtual filesystem for tests and evals.
 
 ```python
-from weakincentives.contrib.tools import InMemoryFilesystem
-from weakincentives.filesystem import ReadResult
+from weakincentives.filesystem import Filesystem, ReadResult
 
-fs = InMemoryFilesystem()
+fs = Filesystem.in_memory()
 fs.write("test.txt", "Hello, world!")
 read_result: ReadResult = fs.read("test.txt")
 print(read_result.content)  # "Hello, world!"
+
+ref = fs.snapshot()        # opaque SnapshotRef
+fs.write("test.txt", "broken")
+fs.restore(ref)            # exact rollback
 ```
 
 **Streaming API** for memory-bounded operations on large files:
@@ -1034,7 +1048,7 @@ OpenCode ACP agent?            → OpenCodeACPAdapter
 
 ```text
 Any adapter (Claude/Codex)?    → WorkspaceSection
-Testing/evaluation?            → InMemoryFilesystem
+Testing/evaluation?            → Filesystem.in_memory()
 ```
 
 **Note:** Filesystem and shell execution tools are provided by the execution

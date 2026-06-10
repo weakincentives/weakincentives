@@ -1,53 +1,96 @@
-# Filesystem Protocol Specification
+# Filesystem Specification
 
 ## Purpose
 
-Unified `Filesystem` protocol that tools access through `ToolContext`. Abstracts
-over workspace backends (in-memory VFS, Podman containers, host filesystem) so
-handlers can perform file operations without coupling to storage implementation.
+One concrete `Filesystem` facade that tools access through `ToolContext`,
+composed over a **narrow backend protocol** (`FilesystemBackend`, ~10 storage
+primitives). Handlers program against the facade and stay portable; backends
+implement primitives only, so a remote backend is cheap and a usable fake fits
+in under 100 lines.
 
 **Implementation:** `src/weakincentives/filesystem/`
 
 ## Guiding Principles
 
-- **Single access pattern**: Tools use one protocol regardless of backend
+- **Narrow waist**: Backends implement ~10 primitives; everything ergonomic
+  (text, pagination, streaming, limits, validation) lives once in the facade
+- **Single access pattern**: Tools use one concrete class regardless of backend
 - **Context-scoped**: Filesystem on `ToolContext` and `Prompt`, not global
-- **Immutable snapshots**: Reads return immutable data; writes may be journaled
-- **Backend-managed state**: Backends manage persistence; no session slice coupling
-- **Backend-agnostic tools**: Handlers call `context.filesystem.*` and remain portable
-- **Bytes-first**: Core operations work with raw bytes; text is a higher-level concern
-- **Streaming by default**: Operations use iterators for fixed memory footprint
-- **Lazy encoding**: UTF-8 conversion deferred until explicitly requested
+- **Server-side search**: `glob`/`grep` are backend primitives so remote
+  backends can run them where the data lives
+- **Opaque snapshots**: `SnapshotRef` tokens are backend-private; no git
+  details leak into shared types
+- **Fail-closed**: Path validation, read-only, and root guards apply uniformly
+  to every operation in the facade
 
 ## Architecture Overview
 
-The filesystem is structured in three layers:
-
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Convenience Layer                        │
-│   read(), write() - text-oriented, buffered convenience      │
-├─────────────────────────────────────────────────────────────┤
-│                     Streaming Layer                          │
-│   open_read(), open_write() - chunk-based byte streams       │
-├─────────────────────────────────────────────────────────────┤
-│                      Core Layer                              │
-│   exists(), stat(), list(), glob(), grep(), delete(), mkdir()│
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    Filesystem (facade, concrete)              │
+│  read()/write() text + pagination · read_bytes()/write_bytes()│
+│  open_read()/open_write()/open_text() streaming · exists()    │
+│  normalization + validation + read-only/root/size guards      │
+├──────────────────────────────────────────────────────────────┤
+│              FilesystemBackend (protocol, ~10 primitives)     │
+│  root · read_only · stat · list · glob · grep · read_range    │
+│  write · delete · mkdir · snapshot · restore                  │
+├──────────────────┬──────────────────┬────────────────────────┤
+│   HostBackend    │   MemoryBackend  │   (your backend here)   │
+└──────────────────┴──────────────────┴────────────────────────┘
 ```
 
-Streaming is the primary API. Convenience methods buffer bounded reads/writes
-for callers that don't need chunk-level control.
+## Backend Protocol
 
-## Protocol Definition
+`FilesystemBackend` at `src/weakincentives/filesystem/_backend.py`. Paths
+arriving at a backend are already normalized by the facade (relative,
+`/`-separated, no `.`/`..`; `""` is the root). The facade is the only
+intended caller.
 
-Streaming type protocols at `src/weakincentives/filesystem/_types.py`:
+| Primitive | Contract |
+|-----------|----------|
+| `root` | Workspace root path (`"/"` for virtual backends) |
+| `read_only` | Whether writes are disabled (enforced by the facade) |
+| `stat(path)` | Metadata; raises `FileNotFoundError` |
+| `list(path)` | Entries of an existing directory, sorted by name |
+| `glob(pattern, path)` | Files under an existing base, sorted by path |
+| `grep(pattern, path, glob, max_matches)` | Matches ordered by `(path, line)`; binary files skipped |
+| `read_range(path, offset, length)` | Bytes slice; `length=None` reads to EOF; raises `FileNotFoundError`/`IsADirectoryError` |
+| `write(path, data, mode)` | Writes bytes, creating parents; raises `FileExistsError` for `mode="create"` |
+| `delete(path, recursive)` | Removes file or directory; raises `FileNotFoundError`/`IsADirectoryError` |
+| `mkdir(path)` | Creates directory and missing parents (idempotent) |
+| `snapshot(tag)` | Returns an opaque `SnapshotRef` |
+| `restore(ref)` | Restores; raises `SnapshotRestoreError` for unknown refs |
 
-| Type | Description |
-|------|-------------|
-| `ByteReader` | Context manager yielding byte chunks via iteration; supports `seek()`, `position`, `size` |
-| `ByteWriter` | Context manager accepting byte chunks via `write()`; tracks `bytes_written` |
-| `TextReader` | Wrapper over `ByteReader` with lazy UTF-8 decoding; line-oriented iteration |
+## Facade Surface
+
+`Filesystem` at `src/weakincentives/filesystem/_facade.py`. Construct as
+`Filesystem(backend)`, `Filesystem.host(root)`, or `Filesystem.in_memory()`.
+The wrapped backend is reachable via the `backend` property (e.g., adapters
+check `isinstance(fs.backend, HostBackend)`).
+
+**Streaming Operations** (`_streams.py`; one implementation over any backend):
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `open_read(path)` | `ByteReader` | Chunked reads via backend `read_range`; `seek()`, `position`, `size` |
+| `open_write(path, mode, create_parents)` | `ByteWriter` | Buffers and commits via one backend `write` on `close()`; abort discards |
+| `open_text(path, encoding)` | `TextReader` | Lazy UTF-8 line decoding over `ByteReader` |
+
+**Convenience Operations:**
+
+| Method | Description |
+|--------|-------------|
+| `read(path, offset, limit, encoding)` | Text with line pagination (default 2000 lines; `READ_ENTIRE_FILE`) |
+| `read_bytes(path, offset, limit)` | Bytes with byte pagination |
+| `write(path, content, mode, create_parents)` | Text write, 32 MB cap |
+| `write_bytes(path, content, mode, create_parents)` | Byte write, 32 MB cap |
+
+**Metadata and Mutations:** `exists`, `stat`, `list`, `glob`, `grep`,
+`delete(recursive)`, `mkdir(parents, exist_ok)`, plus `root` and `read_only`
+properties.
+
+**Write modes:** `"create"`, `"overwrite"`, `"append"`
 
 ### Result Types
 
@@ -57,154 +100,86 @@ Streaming type protocols at `src/weakincentives/filesystem/_types.py`:
 | `FileEntry` | `name`, `path`, `is_file`, `is_directory` |
 | `GlobMatch` | `path`, `is_file` |
 | `GrepMatch` | `path`, `line_number`, `line_content`, `match_start`, `match_end` |
+| `ReadResult` / `ReadBytesResult` | content plus pagination metadata |
 | `WriteResult` | `path`, `bytes_written`, `mode` |
+| `SnapshotRef` | `snapshot_id`, `created_at`, `token` (backend-private), `tag` |
 
-### Filesystem Protocol
-
-**Streaming Operations (Primary API):**
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `open_read(path)` | `ByteReader` | Open file for streaming byte reads |
-| `open_write(path, mode, create_parents)` | `ByteWriter` | Open file for streaming byte writes |
-| `open_text(path, encoding)` | `TextReader` | Open file for streaming text reads |
-
-**Convenience Operations (Built on Streaming):**
-
-| Method | Parameters | Description |
-|--------|------------|-------------|
-| `read_bytes(path, offset, limit)` | `path`, `offset`, `limit` | Read bytes with pagination |
-| `read(path, offset, limit, encoding)` | `path`, `offset`, `limit`, `encoding` | Read text with line pagination |
-| `write_bytes(path, content, mode, create_parents)` | `path`, `content`, `mode`, `create_parents` | Write bytes in one shot |
-| `write(path, content, mode, create_parents)` | `path`, `content`, `mode`, `create_parents` | Write text in one shot |
-
-**Metadata Operations:**
-
-| Method | Parameters | Description |
-|--------|------------|-------------|
-| `exists(path)` | `path` | Check existence |
-| `stat(path)` | `path` | Get metadata |
-| `list(path)` | `path` | List directory |
-| `glob(pattern, path)` | `pattern`, `path` | Match by glob pattern |
-| `grep(pattern, path, glob, max_matches)` | `pattern`, `path`, `glob`, `max_matches` | Regex search |
-
-**Mutating Operations:**
-
-| Method | Parameters | Description |
-|--------|------------|-------------|
-| `delete(path, recursive)` | `path`, `recursive` | Delete file/directory |
-| `mkdir(path, parents, exist_ok)` | `path`, `parents`, `exist_ok` | Create directory |
-
-**Write modes:** `"create"`, `"overwrite"`, `"append"`
-
-**Metadata Properties:**
-
-- `root`: Workspace root path
-- `read_only`: Whether writes disabled
-
-## Memory Guarantees
-
-| Operation | Memory Usage |
-|-----------|--------------|
-| `open_read()` iteration | O(chunk_size), default 64KB |
-| `open_text()` iteration | O(line_length), typically < 1KB |
-| `open_write()` | O(1), writes immediately |
-| `read_bytes(limit=N)` | O(N) |
-| `read(limit=N)` | O(N × avg_line_length) |
-
-Backends MUST NOT buffer entire files in memory for streaming operations.
-Streaming operations have no inherent size limits. Convenience methods cap at
-32MB to prevent accidental memory exhaustion.
-
-## ToolContext Integration
-
-`ToolContext` includes `filesystem: Filesystem | None`. Handlers access via
-`context.filesystem.*`. The filesystem is scoped to the current tool call and
-backed by whatever workspace section is active.
-
-`Prompt.filesystem()` locates the workspace section and returns its filesystem.
-Adapters construct `ToolContext` with filesystem from prompt.
-
-## Backend Implementations
+## Backends
 
 | Backend | Description | Implementation |
 |---------|-------------|----------------|
-| `InMemoryFilesystem` | Session-scoped in-memory with structural sharing | `contrib/tools/filesystem_memory.py` |
-| `HostFilesystem` | Sandboxed host directory with path validation, git snapshots | `src/weakincentives/filesystem/_host.py` |
-| `PodmanSandboxSection` | Containerized workspace using overlay + HostFilesystem | `contrib/tools/podman.py` |
+| `HostBackend` | Sandboxed host directory; root resolved once at construction; every operation re-validates its symlink-resolved target stays inside the root; git snapshots | `filesystem/_host.py` |
+| `MemoryBackend` | Session-scoped dictionaries with structural-sharing snapshots | `filesystem/_memory.py` |
 
-All backends share: standard Python exception mapping, path normalization
-relative to root, streaming support, and read-only mode.
-
-| Backend | Streaming Implementation |
-|---------|-------------------------|
-| `HostFilesystem` | Wraps native file handles with buffered I/O |
-| `InMemoryFilesystem` | `io.BytesIO` over stored bytes with copy-on-read |
-| `PodmanSandboxSection` | Delegates to internal HostFilesystem |
+Custom backends implement the protocol and wrap themselves in the facade:
+`Filesystem(MyBackend(...))`. The validation suites in
+`tests/helpers/filesystem.py` and `tests/helpers/filesystem_streaming.py`
+run against any backend through the facade;
+`tests/filesystem/fake_backend.py` is a complete example under 100 lines.
 
 ## Limits
 
 | Limit | Value | Notes |
 |-------|-------|-------|
-| Default chunk size | 65,536 bytes (64KB) | Configurable per-read |
-| Max path depth | 16 segments | Enforced on all paths |
+| Default chunk size | 65,536 bytes (64KB) | Streaming iteration |
+| Max path depth | 16 segments | Enforced on every operation |
 | Max segment length | 80 chars | Per path segment |
 | Max grep matches | 1,000 | Default, configurable |
-| Max convenience read | 32MB | For `read_bytes()`/`read()` |
 | Max convenience write | 32MB | For `write_bytes()`/`write()` |
+| Default read window | 2,000 lines | For `read()` |
 
 ## Error Handling
 
-| Backend Error | Python Exception |
-|---------------|------------------|
+| Condition | Python Exception |
+|-----------|------------------|
 | File not found | `FileNotFoundError` |
 | Path is directory | `IsADirectoryError` |
-| Path is file | `NotADirectoryError` |
-| Access denied | `PermissionError` |
-| File exists | `FileExistsError` |
-| Invalid content | `ValueError` |
-| Backend unavailable | `RuntimeError` |
-| Decode error | `UnicodeDecodeError` |
+| Path is file (list) | `NotADirectoryError` |
+| Sandbox escape / read-only write / root delete | `PermissionError` |
+| File exists (`mode="create"`) | `FileExistsError` |
+| Binary content via `read()`, invalid regex, root write, size cap, path constraints | `ValueError` |
+| Read/write after close | `ValueError: I/O operation on closed file` |
+| Unknown/foreign snapshot ref | `SnapshotRestoreError` |
 
-| Error Condition | Behavior |
-|-----------------|----------|
-| Read after close | `ValueError: I/O operation on closed file` |
-| Write after close | `ValueError: I/O operation on closed file` |
-| Decode failure | `UnicodeDecodeError` with position info |
-| Seek on write-only | `OSError: Illegal seek` |
+## ToolContext Integration
 
-## Filesystem Snapshots
+`ToolContext` includes `filesystem: Filesystem | None`. Handlers access via
+`context.filesystem.*`. `Prompt.filesystem()` locates the workspace section
+and returns its filesystem. Adapters construct `ToolContext` with the
+filesystem from the prompt.
 
-Capture workspace state for rollback after failed tools or exploratory changes.
-`FilesystemSnapshot` at `src/weakincentives/filesystem/_types.py` records
-`snapshot_id`, `created_at`, `commit_ref`, `root_path`, `git_dir`, and `tag`.
+## Snapshots
 
-`SnapshotableFilesystem` protocol extends `Filesystem` with:
+`snapshot()` returns an opaque `SnapshotRef`; `restore(ref)` is all-or-nothing.
+Refs are only meaningful to the backend kind that created them.
 
-| Method | Description |
-|--------|-------------|
-| `snapshot(tag)` | Capture current state |
-| `restore(snapshot)` | Restore to previous state |
+| Backend | Strategy |
+|---------|----------|
+| `MemoryBackend` | Structural sharing via frozen dictionaries; token is a version key |
+| `HostBackend` | Git commits in an external `--git-dir` outside the workspace; token embeds commit and git dir |
 
-Implementation strategies:
+### Host restore contract (strict rollback)
 
-- **InMemoryFilesystem**: Structural sharing via frozen dictionaries
-- **HostFilesystem**: Git commits with external `--git-dir`
-- **PodmanSandboxSection**: Delegates to internal HostFilesystem
+Snapshots capture **every** file, including `.gitignore`-matched ones
+(`git add --all --force`). Restore hard-resets to the snapshot commit and
+removes all untracked files including ignored ones (`git clean -xfd`).
+Together: `restore(ref)` returns the workspace to the exact state observed at
+`snapshot()` time — ignored files present at snapshot time come back; files
+created afterwards are removed regardless of ignore rules.
 
 ## Testing
 
-`FilesystemValidationSuite` at `tests/filesystem/` validates all protocol
-methods including streaming, memory bounds, seek/position tracking, text
-decoding, and error handling on closed streams. Test fixtures at
-`tests/helpers/filesystem.py`.
+`FilesystemValidationSuite` (`tests/helpers/filesystem.py`) plus streaming,
+read-only, and snapshot suites (`tests/helpers/filesystem_streaming.py`) are
+backend-agnostic and run over `HostBackend`, `MemoryBackend`, and the toy
+`FakeBackend` in `tests/filesystem/test_validation.py`.
 
 ## Limitations
 
-- **No symlinks**: Not followed by default
+- **No symlinks**: Not followed outside the sandbox; host backend rejects
+  escaping targets
 - **No permissions model**: Beyond read-only flag
 - **Single-threaded**: Not thread-safe; one per session
-- **Path normalization**: Original casing may not be preserved
-- **Git dependency**: Disk snapshots require git
+- **Git dependency**: Host snapshots require git
 - **No partial restore**: All-or-nothing
 - **UTF-8 only**: Text operations support only UTF-8 encoding

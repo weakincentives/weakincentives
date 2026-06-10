@@ -556,7 +556,7 @@ At `src/weakincentives/prompt/workspace.py` (exported from `weakincentives.promp
 - Renders a provider-agnostic summary of mounts and budgets
 - Exposes cleanup via `.cleanup()` with reference counting for cloned sections
 - Provides `workspace_fingerprint` for session reuse validation
-- Binds a `HostFilesystem` resource scoped to the temp directory
+- Binds a host-backed `Filesystem` resource scoped to the temp directory
 
 > **Remote servers:** When using WebSocket mode to connect to a remote Codex
 > App Server, `cwd` refers to a directory on the remote machine. Workspace
@@ -576,7 +576,7 @@ At `src/weakincentives/prompt/workspace.py` (exported from `weakincentives.promp
 ### 2. Render Prompt
 
 1. `prompt.render(session=session)` → `RenderedPrompt` (text + tools + output_type)
-1. Resolve CWD and bind `HostFilesystem` resource if prompt has no filesystem
+1. Resolve CWD and bind a host-backed `Filesystem` resource if prompt has no filesystem
 1. Emit `PromptRendered`
 
 ### 3. Build Dynamic Tool Specs

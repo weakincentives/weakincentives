@@ -27,7 +27,7 @@ from uuid import uuid4
 from ...budget import Budget, BudgetTracker
 from ...clock import SYSTEM_CLOCK, AsyncSleeper, MonotonicClock
 from ...deadlines import Deadline
-from ...filesystem import Filesystem, HostFilesystem
+from ...filesystem import Filesystem, HostBackend
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.protocols import PromptProtocol
@@ -240,11 +240,11 @@ class ACPAdapter(ProviderAdapter[Any]):
             if effective_cwd is None:
                 temp_workspace_dir = tempfile.mkdtemp(prefix="wink-acp-")
                 effective_cwd = temp_workspace_dir
-            filesystem = HostFilesystem(_root=effective_cwd)
+            filesystem = Filesystem.host(effective_cwd)
             prompt = prompt.bind(resources={Filesystem: filesystem})
         elif effective_cwd is None:
             fs = prompt.filesystem()
-            if isinstance(fs, HostFilesystem):
+            if fs is not None and isinstance(fs.backend, HostBackend):
                 effective_cwd = fs.root
 
         if effective_cwd is None:

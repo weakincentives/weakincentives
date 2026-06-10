@@ -22,7 +22,7 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     create_post_tool_use_hook,
     create_pre_tool_use_hook,
 )
-from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.runtime.events.types import ToolInvoked
 from weakincentives.runtime.session import Session
@@ -156,7 +156,7 @@ class TestPostToolUseHookTransactional:
 
     def test_restores_state_on_tool_failure(self, session: Session) -> None:
         """Post-tool hook restores state when tool fails."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "initial")
         prompt = _make_prompt_with_fs(fs)
 
@@ -201,7 +201,7 @@ class TestPostToolUseHookTransactional:
 
     def test_no_restore_on_success(self, session: Session) -> None:
         """Post-tool hook doesn't restore state on success."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "initial")
         prompt = _make_prompt_with_fs(fs)
 

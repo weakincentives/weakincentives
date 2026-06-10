@@ -18,7 +18,6 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.contrib.tools import InMemoryFilesystem
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import (
     PolicyDecision,
@@ -303,7 +302,7 @@ def _file_handler(params: FileParams, *, context: ToolContext) -> ToolResult[Non
 
 class TestReadBeforeWritePolicy:
     def _make_context(
-        self, session: Session, *, filesystem: InMemoryFilesystem | None = None
+        self, session: Session, *, filesystem: Filesystem | None = None
     ) -> ToolContext:
         """Create a ToolContext with optional filesystem."""
         if filesystem is not None:
@@ -376,7 +375,7 @@ class TestReadBeforeWritePolicy:
         assert decision.allowed is True
 
     def test_allows_new_file_creation(self) -> None:
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # File does not exist
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
@@ -388,7 +387,7 @@ class TestReadBeforeWritePolicy:
         assert decision.allowed is True
 
     def test_denies_overwrite_without_read(self) -> None:
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/existing.txt", "content")
 
         policy = ReadBeforeWritePolicy()
@@ -404,7 +403,7 @@ class TestReadBeforeWritePolicy:
         assert "read" in decision.reason.lower()
 
     def test_allows_overwrite_after_read(self) -> None:
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("existing.txt", "content")
 
         policy = ReadBeforeWritePolicy()
@@ -510,7 +509,7 @@ class TestReadBeforeWritePolicy:
             read_tools=frozenset({"fetch_file"}),
             write_tools=frozenset({"save_file"}),
         )
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("data.json", "{}")  # Use normalized path for filesystem
 
         dispatcher = InProcessDispatcher()
@@ -541,12 +540,12 @@ class TestReadBeforeWritePolicy:
         """Policy should normalize paths before checking fs.exists().
 
         This tests the fix for the issue where /workspace/file.txt would
-        bypass read-before-write because HostFilesystem rejects absolute
+        bypass read-before-write because the host filesystem rejects absolute
         paths outside its root.
         """
         # Policy with mount_point matching the tool's virtual mount
         policy = ReadBeforeWritePolicy(mount_point="/workspace")
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("config.yaml", "existing content")  # Relative path in fs
 
         dispatcher = InProcessDispatcher()
@@ -566,7 +565,7 @@ class TestReadBeforeWritePolicy:
     def test_mount_point_normalizes_paths_when_recording_reads(self) -> None:
         """on_result should normalize paths so check() can match them."""
         policy = ReadBeforeWritePolicy(mount_point="/workspace")
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("config.yaml", "content")
 
         dispatcher = InProcessDispatcher()
@@ -594,7 +593,7 @@ class TestReadBeforeWritePolicy:
     def test_mount_point_allows_write_after_normalized_read(self) -> None:
         """Full flow: read with mount path, then write with mount path."""
         policy = ReadBeforeWritePolicy(mount_point="/workspace")
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("config.yaml", "content")
 
         dispatcher = InProcessDispatcher()
@@ -627,7 +626,7 @@ class TestReadBeforeWritePolicy:
     def test_no_mount_point_strips_leading_slashes_only(self) -> None:
         """Without mount_point, only leading slashes are stripped."""
         policy = ReadBeforeWritePolicy()  # No mount_point
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("workspace/config.yaml", "content")
 
         dispatcher = InProcessDispatcher()

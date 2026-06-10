@@ -10,12 +10,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Git operations for filesystem snapshots.
+"""Git operations for host filesystem snapshots.
 
 Provides functions for initializing a git repository, creating snapshots
-via git commits, restoring to previous snapshots, and cleaning up.
-These are used by :class:`~weakincentives.filesystem.HostFilesystem` to
-implement :class:`~weakincentives.filesystem.SnapshotableFilesystem`.
+via git commits, restoring to previous snapshots, and cleaning up. Used by
+:class:`~weakincentives.filesystem.HostBackend`.
+
+Restore contract (strict rollback)
+----------------------------------
+
+Snapshots capture **every** file in the workspace, including files matched
+by ``.gitignore`` patterns (``git add --all --force``). Restore performs a
+hard reset to the snapshot commit and removes all untracked files,
+including ignored ones (``git clean -xfd``). Together these make
+``restore(snapshot)`` return the workspace to the exact state observed at
+``snapshot()`` time: ignored files present at snapshot time come back,
+and files created afterwards are removed regardless of ignore rules.
 """
 
 from __future__ import annotations
@@ -26,12 +36,9 @@ import subprocess  # nosec: B404
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from uuid import uuid4
 
 from weakincentives.clock import SYSTEM_CLOCK
 from weakincentives.errors import SnapshotError, SnapshotRestoreError
-
-from ._types import FilesystemSnapshot
 
 __all__: list[str] = []
 
@@ -152,13 +159,12 @@ def init_git_repo(git_dir: str | None) -> str:
     return git_dir
 
 
-def create_snapshot(
-    root: str, git_dir: str, *, tag: str | None = None
-) -> FilesystemSnapshot:
+def create_snapshot(root: str, git_dir: str, *, tag: str | None = None) -> str:
     """Capture current filesystem state as a git commit.
 
     Uses git's content-addressed storage for copy-on-write semantics.
-    Identical files share storage automatically between snapshots.
+    Identical files share storage automatically between snapshots. All
+    files are captured, including ignored ones (see module docstring).
 
     Args:
         root: Workspace root path.
@@ -166,10 +172,10 @@ def create_snapshot(
         tag: Optional human-readable label for the snapshot.
 
     Returns:
-        Immutable snapshot that can be stored in session state.
+        The commit hash identifying the snapshot.
     """
-    # Stage all changes (including new and deleted files)
-    _ = run_git(["add", "-A"], git_dir=git_dir, root=root)
+    # Stage all changes, forcing ignored files in for strict rollback
+    _ = run_git(["add", "--all", "--force"], git_dir=git_dir, root=root)
 
     # Commit (allow empty for idempotent snapshots)
     # Use --no-gpg-sign to avoid issues in environments with signing hooks
@@ -212,35 +218,27 @@ def create_snapshot(
 
     # Get commit hash (text=True guarantees str stdout)
     result = run_git(["rev-parse", "HEAD"], git_dir=git_dir, root=root, text=True)
-    commit_ref = str(result.stdout).strip()
-
-    return FilesystemSnapshot(
-        snapshot_id=uuid4(),
-        created_at=SYSTEM_CLOCK.utcnow(),
-        commit_ref=commit_ref,
-        root_path=root,
-        git_dir=git_dir,
-        tag=tag,
-    )
+    return str(result.stdout).strip()
 
 
-def restore_snapshot(root: str, git_dir: str, snapshot: FilesystemSnapshot) -> None:
+def restore_snapshot(root: str, git_dir: str, commit_ref: str) -> None:
     """Restore filesystem to a previous git commit.
 
-    Performs a hard reset to the snapshot's commit and removes any
-    untracked files (including ignored files) for a strict rollback.
+    Performs a hard reset to the commit and removes any untracked files
+    (including ignored files); see the module docstring for the strict
+    rollback contract.
 
     Args:
         root: Workspace root path.
         git_dir: External git directory path (must be initialized).
-        snapshot: The snapshot to restore.
+        commit_ref: The commit hash to restore.
 
     Raises:
         SnapshotRestoreError: If git reset fails (e.g., invalid commit).
     """
     # Hard reset to the commit (restores tracked files)
     result = run_git(
-        ["reset", "--hard", snapshot.commit_ref],
+        ["reset", "--hard", commit_ref],
         git_dir=git_dir,
         root=root,
         check=False,
@@ -250,8 +248,9 @@ def restore_snapshot(root: str, git_dir: str, snapshot: FilesystemSnapshot) -> N
         msg = f"Failed to restore snapshot: {result.stderr}"
         raise SnapshotRestoreError(msg)
 
-    # Remove untracked files and directories for strict rollback
-    # -x removes ignored files too (e.g., cache, logs) for full restore
+    # Remove untracked files and directories for strict rollback.
+    # -x removes ignored files too; snapshots force-add them, so anything
+    # ignored that existed at snapshot time is tracked and survives.
     _ = run_git(["clean", "-xfd"], git_dir=git_dir, root=root, check=False)
 
 

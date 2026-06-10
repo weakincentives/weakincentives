@@ -92,7 +92,7 @@ class Binding[T]:
 
             # Pre-constructed instance
             config = Config.from_env()
-            filesystem = InMemoryFilesystem()
+            filesystem = Filesystem.in_memory()
 
             # Register using Binding.instance()
             registry = ResourceRegistry.of(

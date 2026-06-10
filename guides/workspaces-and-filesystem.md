@@ -155,16 +155,17 @@ tooling commands (test, lint, format), and known caveats.
 
 ## Filesystem Backends
 
-The `Filesystem` protocol has two backend implementations:
+`Filesystem` is one concrete facade composed over a narrow backend protocol
+(`FilesystemBackend`, ~10 primitives). Two backends ship with WINK:
 
 | Backend | Storage | Use Case |
 |---------|---------|----------|
-| `InMemoryFilesystem` | Python dicts | Tests, evals, lightweight agents |
-| `HostFilesystem` | Sandboxed host directory | Production workspace access |
+| `MemoryBackend` | Python dicts | Tests, evals, lightweight agents |
+| `HostBackend` | Sandboxed host directory | Production workspace access |
 
-### When to Use InMemoryFilesystem
+### When to Use the In-Memory Backend
 
-Use `InMemoryFilesystem` when you do not need real files on disk:
+Use `Filesystem.in_memory()` when you do not need real files on disk:
 
 - **Unit tests**: Fast, no cleanup, deterministic
 - **Evaluations**: Reproducible file state without host dependencies
@@ -172,9 +173,9 @@ Use `InMemoryFilesystem` when you do not need real files on disk:
   needing host access
 
 ```python nocheck
-from weakincentives.contrib.tools import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
 
-fs = InMemoryFilesystem()
+fs = Filesystem.in_memory()
 fs.write("analysis.md", "# Results\n...")
 result = fs.read("analysis.md")
 ```
@@ -183,17 +184,17 @@ In-memory filesystems enforce the same limits as host filesystems
 (32MB per convenience write, 16-segment path depth, UTF-8 text only). This
 means tests exercise the same validation paths as production.
 
-### When to Use HostFilesystem
+### When to Use the Host Backend
 
-Use `HostFilesystem` when the agent needs access to real files:
+Use `Filesystem.host(root)` when the agent needs access to real files:
 
 - **Code review**: Reading actual source code
 - **Code generation**: Writing files that will be committed
 - **Build tasks**: Running commands against real project files
 
-`HostFilesystem` validates all paths relative to a root directory and
-rejects any attempt to escape. It also supports git-based snapshots for
-transactional rollback.
+The host backend resolves its root once at construction, validates every
+operation against it (including symlink targets), and rejects any attempt
+to escape. It also supports git-based snapshots for transactional rollback.
 
 ## Snapshots and Transactional File Operations
 
@@ -202,18 +203,17 @@ changes. WINK handles this through filesystem snapshots.
 
 ### How Snapshots Work
 
-The `SnapshotableFilesystem` protocol adds two methods to the base
-`Filesystem`:
+`Filesystem` exposes two methods, delegated to its backend:
 
-- `snapshot(tag)`: Capture the current state
-- `restore(snapshot)`: Roll back to a previous state
+- `snapshot(tag)`: Capture the current state as an opaque `SnapshotRef`
+- `restore(ref)`: Roll back to a previous state
 
 Each backend implements snapshots differently:
 
 | Backend | Snapshot Strategy |
 |---------|-------------------|
-| `InMemoryFilesystem` | Structural sharing via frozen dicts |
-| `HostFilesystem` | Git commits with external `--git-dir` |
+| `MemoryBackend` | Structural sharing via frozen dicts |
+| `HostBackend` | Git commits with external `--git-dir`; captures ignored files too, so restore is an exact rollback |
 
 ### Why Snapshots Matter
 
@@ -239,13 +239,13 @@ handles it. This is covered in more detail in the
 Snapshots are recorded in session state for auditability:
 
 ```python nocheck
-from weakincentives.filesystem import FilesystemSnapshot
+from weakincentives.filesystem import SnapshotRef
 
-fs_snapshot = filesystem.snapshot(tag="before-refactor")
-session[FilesystemSnapshot].append(fs_snapshot)
+fs_ref = filesystem.snapshot(tag="before-refactor")
+session[SnapshotRef].append(fs_ref)
 
 # Later, if needed:
-filesystem.restore(fs_snapshot)
+filesystem.restore(fs_ref)
 ```
 
 Each snapshot records: a unique ID, creation timestamp, git commit ref
@@ -298,8 +298,8 @@ For files larger than the convenience limits, use the streaming API.
 ## Limitations
 
 - **Ephemeral**: All workspace data dies with the session
-- **Text-focused**: `InMemoryFilesystem` is text-only; use
-  `read_bytes`/`write_bytes` on host backends for binary
+- **UTF-8 text reads**: `read()` requires UTF-8; use
+  `read_bytes`/`write_bytes` for binary content
 - **Single-threaded**: Filesystem instances are not thread-safe
 - **Git dependency**: Host filesystem snapshots require git
 - **All-or-nothing restore**: No partial rollback of individual files
@@ -311,4 +311,4 @@ For files larger than the convenience limits, use the streaming API.
 - [Tools](tools.md): How tool handlers access the filesystem via
   `ToolContext`
 - [Sessions](sessions.md): How snapshots integrate with session state
-- [Testing](testing.md): Using `InMemoryFilesystem` in tests
+- [Testing](testing.md): Using `Filesystem.in_memory()` in tests

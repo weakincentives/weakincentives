@@ -108,7 +108,6 @@ class TestCreateBridgedToolsWithFilesystem:
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
         """Test that create_bridged_tools passes filesystem via prompt resources."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
         captured_filesystem: list[object] = []
@@ -127,7 +126,7 @@ class TestCreateBridgedToolsWithFilesystem:
             handler=capture_context_handler,
         )
 
-        test_filesystem = InMemoryFilesystem()
+        test_filesystem = Filesystem.in_memory()
         prompt = _make_prompt_with_resources({Filesystem: test_filesystem})
 
         bridged_tools = create_bridged_tools(
@@ -253,10 +252,9 @@ class TestBridgedToolTransactionalExecution:
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
         """Test that state is restored when tool returns success=False."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
-        test_fs = InMemoryFilesystem()
+        test_fs = Filesystem.in_memory()
         test_fs.write("/test.txt", "initial content")
 
         prompt = _make_prompt_with_resources({Filesystem: test_fs})
@@ -305,10 +303,9 @@ class TestBridgedToolTransactionalExecution:
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
         """Test that state is restored when tool raises exception."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
-        test_fs = InMemoryFilesystem()
+        test_fs = Filesystem.in_memory()
         test_fs.write("/test.txt", "initial content")
 
         prompt = _make_prompt_with_resources({Filesystem: test_fs})
@@ -353,10 +350,9 @@ class TestBridgedToolTransactionalExecution:
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
         """Test that state is restored when validation fails."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
-        test_fs = InMemoryFilesystem()
+        test_fs = Filesystem.in_memory()
         test_fs.write("/test.txt", "initial content")
 
         prompt = _make_prompt_with_resources({Filesystem: test_fs})
@@ -390,10 +386,9 @@ class TestBridgedToolTransactionalExecution:
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
         """Test that state is restored when VisibilityExpansionRequired is raised."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
-        test_fs = InMemoryFilesystem()
+        test_fs = Filesystem.in_memory()
         test_fs.write("/test.txt", "initial content")
 
         prompt = _make_prompt_with_resources({Filesystem: test_fs})

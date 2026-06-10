@@ -24,8 +24,8 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     create_task_completion_stop_hook,
 )
 from weakincentives.budget import Budget, BudgetTracker
-from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.deadlines import Deadline
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.prompt.task_completion import (
     CompositeChecker,
@@ -56,7 +56,7 @@ class TestTaskCompletionStopHook:
 
     def test_allows_stop_when_all_files_exist(self, session: Session) -> None:
         """Stop is allowed when all required files exist."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("output.txt", "done")
         fs.write("summary.md", "# Summary")
 
@@ -80,7 +80,7 @@ class TestTaskCompletionStopHook:
 
     def test_signals_continue_when_files_missing(self, session: Session) -> None:
         """Stop hook signals continuation when required files are missing."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("output.txt", "done")
         # Don't create summary.md
 
@@ -143,7 +143,7 @@ class TestTaskCompletionStopHook:
 
     def test_handles_empty_files_list(self, session: Session) -> None:
         """Stop is allowed when checker has no required files."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
 
         context = HookContext(
             session=session,
@@ -163,7 +163,7 @@ class TestTaskCompletionStopHook:
 
     def test_reminder_message_truncates_long_file_list(self, session: Session) -> None:
         """Reminder message truncates file paths when many are missing."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Don't create any of the required files
 
         context = HookContext(
@@ -217,7 +217,7 @@ class TestTaskCompletionStopHook:
         """Stop hook skips task completion check when deadline expired."""
         from weakincentives.clock import FakeClock
 
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Don't create required file
 
         # Create expired deadline using fake clock
@@ -248,7 +248,7 @@ class TestTaskCompletionStopHook:
 
     def test_skips_check_when_budget_exhausted(self, session: Session) -> None:
         """Stop hook skips task completion check when budget exhausted."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Don't create required file
 
         # Create exhausted budget tracker
@@ -297,7 +297,7 @@ class TestCompositeChecker:
 
     def test_all_must_pass_short_circuits_on_failure(self, session: Session) -> None:
         """Composite checker short-circuits on first failure when all_must_pass=True."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Don't create required file
 
         checker = CompositeChecker(
@@ -321,7 +321,7 @@ class TestCompositeChecker:
 
     def test_all_must_pass_all_succeed(self, session: Session) -> None:
         """Composite checker returns ok when all checkers pass."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("a.txt", "data")
         fs.write("b.txt", "data")
 
@@ -345,7 +345,7 @@ class TestCompositeChecker:
 
     def test_any_pass_short_circuits_on_success(self, session: Session) -> None:
         """Composite checker short-circuits on first success when all_must_pass=False."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("a.txt", "data")
         # Don't create b.txt
 
@@ -369,7 +369,7 @@ class TestCompositeChecker:
 
     def test_any_pass_all_fail(self, session: Session) -> None:
         """Composite checker returns incomplete when all checkers fail in any mode."""
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         # Don't create any files
 
         checker = CompositeChecker(

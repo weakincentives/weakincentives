@@ -33,12 +33,10 @@ contrib.mailbox
     Requires: ``redis`` package (``pip install weakincentives[redis]``)
 
 contrib.tools
-    Utilities for LLM agents, including workspace digest caching and
-    in-memory filesystem for testing.
+    Utilities for LLM agents, including workspace digest caching.
 
     Key exports:
         - ``WorkspaceDigestSection``: Renders cached workspace digests
-        - ``InMemoryFilesystem``: In-memory filesystem implementation
 
 contrib.optimizers
     Prompt optimization workflows using the Claude Agent SDK.

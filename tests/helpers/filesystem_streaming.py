@@ -39,11 +39,7 @@ from uuid import UUID
 
 import pytest
 
-from weakincentives.filesystem import (
-    Filesystem,
-    FilesystemSnapshot,
-    SnapshotableFilesystem,
-)
+from weakincentives.filesystem import Filesystem, SnapshotRef
 
 
 class FilesystemStreamingValidationSuite:
@@ -65,8 +61,71 @@ class FilesystemStreamingValidationSuite:
         ...
 
     # -------------------------------------------------------------------------
-    # Streaming Read lifecycle (open_read - continued from FilesystemValidationSuite)
+    # Streaming Read Operations (open_read)
     # -------------------------------------------------------------------------
+
+    def test_open_read_basic(self, fs: Filesystem) -> None:
+        """open_read() should return a ByteReader for reading file content."""
+        fs.write_bytes("file.bin", b"hello world")
+        with fs.open_read("file.bin") as reader:
+            content = reader.read()
+            assert content == b"hello world"
+            assert reader.path == "file.bin"
+            assert reader.size == 11
+
+    def test_open_read_chunks(self, fs: Filesystem) -> None:
+        """open_read() should support chunk iteration."""
+        data = b"a" * 100000  # 100KB
+        fs.write_bytes("large.bin", data)
+        with fs.open_read("large.bin") as reader:
+            chunks = list(reader.chunks(size=10000))  # 10KB chunks
+            assert len(chunks) == 10
+            assert b"".join(chunks) == data
+
+    def test_open_read_default_iteration(self, fs: Filesystem) -> None:
+        """open_read() should support default chunk iteration via __iter__."""
+        data = b"x" * 1000
+        fs.write_bytes("file.bin", data)
+        with fs.open_read("file.bin") as reader:
+            chunks = list(reader)
+            assert b"".join(chunks) == data
+
+    def test_open_read_seek(self, fs: Filesystem) -> None:
+        """open_read() should support seek operations."""
+        fs.write_bytes("file.bin", b"0123456789")
+        with fs.open_read("file.bin") as reader:
+            pos = reader.seek(5)
+            assert pos == 5
+            assert reader.position == 5
+            content = reader.read()
+            assert content == b"56789"
+
+    def test_open_read_seek_from_end(self, fs: Filesystem) -> None:
+        """open_read() should support seeking from end."""
+        fs.write_bytes("file.bin", b"0123456789")
+        with fs.open_read("file.bin") as reader:
+            pos = reader.seek(-3, 2)  # whence=2 is from end
+            assert pos == 7
+            content = reader.read()
+            assert content == b"789"
+
+    def test_open_read_seek_invalid_whence_raises(self, fs: Filesystem) -> None:
+        """open_read() should raise ValueError for invalid whence."""
+        fs.write_bytes("file.bin", b"content")
+        with fs.open_read("file.bin") as reader:
+            with pytest.raises(ValueError, match="whence"):
+                reader.seek(0, 99)  # Invalid whence value
+
+    def test_open_read_missing_file_raises(self, fs: Filesystem) -> None:
+        """open_read() should raise FileNotFoundError for missing files."""
+        with pytest.raises(FileNotFoundError):
+            fs.open_read("missing.bin")
+
+    def test_open_read_directory_raises(self, fs: Filesystem) -> None:
+        """open_read() should raise IsADirectoryError for directories."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.open_read("mydir")
 
     def test_open_read_closed_raises(self, fs: Filesystem) -> None:
         """Reading from closed reader should raise ValueError."""
@@ -149,6 +208,12 @@ class FilesystemStreamingValidationSuite:
         """open_write() should raise ValueError when trying to write to root."""
         with pytest.raises(ValueError, match="root"):
             fs.open_write(".")
+
+    def test_open_write_directory_raises(self, fs: Filesystem) -> None:
+        """open_write() should raise IsADirectoryError for directory paths."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.open_write("mydir")
 
     def test_open_write_closed_raises(self, fs: Filesystem) -> None:
         """Writing to closed writer should raise ValueError."""
@@ -345,42 +410,33 @@ class ReadOnlyFilesystemValidationSuite:
 
 
 class SnapshotableFilesystemValidationSuite:
-    """Test suite for SnapshotableFilesystem protocol compliance.
+    """Test suite for snapshot/restore behavior.
 
     Subclasses must implement the ``fs_snapshotable`` fixture to provide
-    a snapshotable filesystem instance to test.
+    a filesystem instance whose backend supports snapshots.
     """
 
     @pytest.fixture
     @abstractmethod
-    def fs_snapshotable(self) -> SnapshotableFilesystem:
-        """Provide a snapshotable filesystem instance for testing."""
+    def fs_snapshotable(self) -> Filesystem:
+        """Provide a snapshot-capable filesystem instance for testing."""
         ...
 
-    def test_implements_snapshotable_protocol(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
-        """Filesystem should implement SnapshotableFilesystem protocol."""
-        assert isinstance(fs_snapshotable, SnapshotableFilesystem)
-
-    def test_snapshot_returns_filesystem_snapshot(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
-        """snapshot() should return a FilesystemSnapshot."""
+    def test_snapshot_returns_snapshot_ref(self, fs_snapshotable: Filesystem) -> None:
+        """snapshot() should return an opaque SnapshotRef."""
         fs_snapshotable.write("file.txt", "content")
         snapshot = fs_snapshotable.snapshot()
-        assert isinstance(snapshot, FilesystemSnapshot)
+        assert isinstance(snapshot, SnapshotRef)
         assert isinstance(snapshot.snapshot_id, UUID)
+        assert snapshot.token
 
-    def test_snapshot_with_tag(self, fs_snapshotable: SnapshotableFilesystem) -> None:
+    def test_snapshot_with_tag(self, fs_snapshotable: Filesystem) -> None:
         """snapshot() should accept an optional tag."""
         fs_snapshotable.write("file.txt", "content")
         snapshot = fs_snapshotable.snapshot(tag="my-tag")
         assert snapshot.tag == "my-tag"
 
-    def test_snapshot_and_restore_roundtrip(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
+    def test_snapshot_and_restore_roundtrip(self, fs_snapshotable: Filesystem) -> None:
         """Basic snapshot and restore should preserve file contents."""
         fs_snapshotable.write("config.py", "DEBUG = True")
         snapshot_v1 = fs_snapshotable.snapshot(tag="initial")
@@ -393,9 +449,7 @@ class SnapshotableFilesystemValidationSuite:
         fs_snapshotable.restore(snapshot_v1)
         assert fs_snapshotable.read("config.py").content == "DEBUG = True"
 
-    def test_restore_removes_new_files(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
+    def test_restore_removes_new_files(self, fs_snapshotable: Filesystem) -> None:
         """restore() should remove files created after snapshot."""
         fs_snapshotable.write("original.txt", "original")
         snapshot = fs_snapshotable.snapshot()
@@ -409,9 +463,7 @@ class SnapshotableFilesystemValidationSuite:
         assert not fs_snapshotable.exists("new.txt")
         assert fs_snapshotable.exists("original.txt")
 
-    def test_restore_restores_deleted_files(
-        self, fs_snapshotable: SnapshotableFilesystem
-    ) -> None:
+    def test_restore_restores_deleted_files(self, fs_snapshotable: Filesystem) -> None:
         """restore() should bring back deleted files."""
         fs_snapshotable.write("file.txt", "content")
         snapshot = fs_snapshotable.snapshot()
@@ -425,7 +477,7 @@ class SnapshotableFilesystemValidationSuite:
         assert fs_snapshotable.exists("file.txt")
         assert fs_snapshotable.read("file.txt").content == "content"
 
-    def test_multiple_snapshots(self, fs_snapshotable: SnapshotableFilesystem) -> None:
+    def test_multiple_snapshots(self, fs_snapshotable: Filesystem) -> None:
         """Multiple snapshots can be restored independently."""
         fs_snapshotable.write("file.txt", "v1")
         snapshot_v1 = fs_snapshotable.snapshot(tag="v1")
@@ -443,7 +495,7 @@ class SnapshotableFilesystemValidationSuite:
         fs_snapshotable.restore(snapshot_v2)
         assert fs_snapshotable.read("file.txt").content == "v2"
 
-    def test_restore_directories(self, fs_snapshotable: SnapshotableFilesystem) -> None:
+    def test_restore_directories(self, fs_snapshotable: Filesystem) -> None:
         """restore() should restore directory structure."""
         fs_snapshotable.mkdir("a/b/c", parents=True)
         fs_snapshotable.write("a/b/c/file.txt", "content")

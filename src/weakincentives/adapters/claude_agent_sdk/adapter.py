@@ -24,7 +24,7 @@ from uuid import uuid4
 from ...budget import Budget, BudgetTracker
 from ...clock import SYSTEM_CLOCK
 from ...deadlines import Deadline
-from ...filesystem import Filesystem, HostFilesystem
+from ...filesystem import Filesystem, HostBackend
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.protocols import PromptProtocol
@@ -156,7 +156,7 @@ def _resolve_workspace(
                 event="evaluate.temp_workspace_created",
                 context={"temp_workspace_dir": temp_workspace_dir},
             )
-        filesystem = HostFilesystem(_root=effective_cwd)
+        filesystem = Filesystem.host(effective_cwd)
         prompt = prompt.bind(resources={Filesystem: filesystem})
         logger.debug(
             "claude_agent_sdk.evaluate.filesystem_bound",
@@ -165,7 +165,7 @@ def _resolve_workspace(
         )
     elif effective_cwd is None:
         fs = prompt.filesystem()
-        if isinstance(fs, HostFilesystem):
+        if fs is not None and isinstance(fs.backend, HostBackend):
             effective_cwd = fs.root
             logger.debug(
                 "claude_agent_sdk.evaluate.cwd_from_workspace",

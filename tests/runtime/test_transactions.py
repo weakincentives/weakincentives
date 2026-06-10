@@ -18,7 +18,6 @@ import json
 
 import pytest
 
-from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.errors import RestoreFailedError
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
@@ -35,7 +34,7 @@ from weakincentives.runtime.transactions import (
 )
 
 
-def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
+def _make_prompt_with_fs(fs: Filesystem) -> Prompt[object]:
     """Create a prompt with filesystem bound in active context."""
     prompt: Prompt[object] = Prompt(
         PromptTemplate.create(ns="tests", key="transactions-test")
@@ -61,7 +60,7 @@ class TestCompositeSnapshotSerialization:
         """Test serializing a composite snapshot to JSON."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "content")
         prompt = _make_prompt_with_fs(fs)
 
@@ -109,7 +108,7 @@ class TestCompositeSnapshotSerialization:
         """Test deserializing a composite snapshot from JSON."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -264,7 +263,7 @@ class TestCompositeSnapshotSerialization:
         """Test full roundtrip serialization with filesystem resource."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -308,7 +307,7 @@ class TestRestoreSnapshotErrors:
         """Test that restore skips resources not in current context."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "original")
         prompt_with_fs = _make_prompt_with_fs(fs)
 
@@ -358,7 +357,7 @@ class TestPendingToolTracker:
         """Test that abort_tool_execution restores state."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -436,7 +435,7 @@ class TestPendingToolTracker:
         """Test that end_tool_execution restores state on failure."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -459,7 +458,7 @@ class TestPendingToolTracker:
         """Test that end_tool_execution preserves state on success."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -486,7 +485,7 @@ class TestToolTransaction:
         """Test that tool_transaction restores state on exception."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -501,7 +500,7 @@ class TestToolTransaction:
         """Test that tool_transaction preserves state on success."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -514,7 +513,7 @@ class TestToolTransaction:
         """Test that tool_transaction yields snapshot for manual restore."""
         dispatcher = InProcessDispatcher()
         session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        fs = Filesystem.in_memory()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
