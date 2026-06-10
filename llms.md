@@ -4,6 +4,44 @@ Dense technical guide for AI coding agents. WINK is a Python 3.12+ library for
 building deterministic, side-effect-free background agents with typed prompts,
 immutable sessions, and provider-agnostic adapters.
 
+## Contents
+
+This file is long; read the section you need rather than the whole file.
+
+- [Core Philosophy](#core-philosophy)
+- [Guiding Principles](#guiding-principles)
+- [Accessing Documentation](#accessing-documentation) — `wink docs` CLI
+- [Module Map](#module-map) — package → purpose, one line each
+- [Import Cheatsheet](#import-cheatsheet) — copy-paste imports for every subsystem
+- [Minimal Working Example](#minimal-working-example)
+- [Core Patterns](#core-patterns)
+  1. [Prompt Construction](#1-prompt-construction)
+  1. [Sections](#2-sections)
+  1. [Tools](#3-tools)
+  1. [Tool Examples](#4-tool-examples)
+  1. [Sessions](#5-sessions)
+  1. [Adapters](#6-adapters)
+  1. [Claude Agent SDK Adapter](#7-claude-agent-sdk-adapter)
+  1. [Tool Policies](#8-tool-policies)
+  1. [Feedback Providers](#9-feedback-providers)
+  1. [Task Completion Checkers](#10-task-completion-checkers)
+  1. [Contrib Tools](#11-contrib-tools)
+  1. [Resources](#12-resources)
+  1. [Serialization](#13-serialization)
+  1. [Design-by-Contract](#14-design-by-contract)
+- [Best Practices](#best-practices)
+- [Decision Trees](#decision-trees) — which adapter / workspace tool / reducer
+- [Common Pitfalls](#common-pitfalls)
+- [Event Types](#event-types)
+- [Error Hierarchy](#error-hierarchy)
+- [Development Commands](#development-commands)
+- [File Layout](#file-layout)
+- [Key Specs](#key-specs)
+- [Quick Reference](#quick-reference) — signatures for core classes
+- [Example: Complete Agent](#example-complete-agent)
+
+______________________________________________________________________
+
 ## Core Philosophy
 
 **The prompt is the agent.** Prompts are hierarchical documents where sections

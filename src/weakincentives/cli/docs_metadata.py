@@ -85,6 +85,7 @@ GUIDE_DESCRIPTIONS: dict[str, str] = {
     "query": "SQL-based exploration of debug bundles",
     "testing": "Test prompts, tools, and reducers",
     "code-quality": "Types, contracts, coverage, security",
+    "contributing-playbooks": "Recipes for common contributor change shapes",
     "recipes": "Common patterns for agents",
     "troubleshooting": "Debug common errors",
     "api-reference": "Quick lookup for key types",

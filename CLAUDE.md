@@ -13,53 +13,24 @@ live in the prompt definition.
 **Event-driven state.** All mutations flow through pure reducers processing
 typed events. State is immutable and inspectable via snapshots.
 
-**Provider-agnostic.** Same agent definition works across OpenAI, LiteLLM, and
-Claude Agent SDK via adapter abstraction.
+**Provider-agnostic.** Same agent definition works across agentic harnesses
+(Claude Agent SDK, Codex App Server, ACP) via adapter abstraction.
 
 ______________________________________________________________________
 
 ## Guiding Principles
 
-### Definition vs Harness
+Full rationale lives in `llms.md` (Guiding Principles) and
+`specs/POLICIES_OVER_WORKFLOWS.md`. The short version:
 
-WINK separates what you own from what the runtime provides:
-
-**Agent Definition (you own):** Prompt, Tools, Policies, Feedback
-
-**Execution Harness (runtime-owned):** Planning loop, sandboxing, retries,
-throttling, crash recovery, deadlines, budgets
-
-The harness keeps changing; your agent definition should not. WINK makes the
-definition a first-class artifact you can version, review, test, and port.
-
-### Policies Over Workflows
-
-**Prefer declarative policies over prescriptive workflows.**
-
-A workflow encodes _how_ to accomplish a goal—a predetermined sequence that
-fractures when encountering unexpected situations. A policy encodes _what_ the
-goal requires—constraints the agent must satisfy while remaining free to find
-any valid path.
-
-| Aspect | Workflow | Policy |
-|--------|----------|--------|
-| Specifies | Steps to execute | Constraints to satisfy |
-| On unexpected | Fails or branches | Agent reasons |
-| Composability | Sequential coupling | Independent conjunction |
-| Agent role | Executor | Reasoner |
-
-**Key policy characteristics:** Declarative, Composable, Fail-closed, Observable
-
-### Transactional Tools
-
-Tool calls are atomic transactions. When a tool fails:
-
-1. Session state rolls back to pre-call state
-1. Filesystem changes revert
-1. Error result returned to LLM with guidance
-
-Failed tools don't leave partial state. This enables aggressive retry and
-recovery strategies.
+- **Definition vs harness.** You own the agent definition (prompt, tools,
+  policies, feedback); the runtime owns the harness (planning loop,
+  sandboxing, retries, budgets). Keep definitions portable across runtimes.
+- **Policies over workflows.** Encode constraints to satisfy, not steps to
+  execute. Policies are declarative, composable, fail-closed, observable.
+- **Transactional tools.** A failed tool call rolls back session and
+  filesystem state and returns an error result to the LLM; partial state
+  never leaks.
 
 ______________________________________________________________________
 
@@ -100,64 +71,75 @@ ______________________________________________________________________
 ./install-hooks.sh   # Run this after cloning or in any new environment
 ```
 
-### Why This Matters
-
-The pre-commit hook runs `CI=true make check`, which:
-
-1. **Runs the FULL test suite** (not the testmon subset used for local iteration)
-1. **Enforces 100% coverage** on all code paths
-1. **Exactly emulates CI verification** that runs on pull requests
-
-### The Problem Without Hooks
-
-Without hooks, you might:
-
-- Run `make check` locally (uses testmon, runs only affected tests)
-- Commit code that passes local checks
-- **Fail CI** because the full test suite reveals issues testmon skipped
-
-### The Solution
-
-The pre-commit hook automatically runs `CI=true make check` before every
-commit, ensuring:
-
-- ✅ What passes locally **will** pass in CI
-- ✅ No surprises when your PR is reviewed
-- ✅ Coverage gaps are caught immediately
-
-**If hooks aren't installed, install them now:**
-
-```bash
-./install-hooks.sh
-```
+The pre-commit hook runs `CI=true make check`: the full test suite with 100%
+coverage enforcement, exactly what CI runs on pull requests. A plain local
+`make check` uses testmon to run only tests affected by your changes (the
+first run builds the `.testmondata` database), so code can pass locally yet
+fail CI — the hook closes that gap.
 
 ______________________________________________________________________
 
-### Efficient Testing Workflow
+## Repository Map
 
-`make check` and `make test` automatically detect local vs CI execution:
+Where each area lives. Source paths are relative to `src/weakincentives/`,
+test paths to `tests/`, specs to `specs/`. Read the spec before modifying
+the code it covers.
 
-- **In CI:** Full test suite with 100% coverage enforcement
-- **Locally:** Only tests affected by changes (uses testmon coverage database)
+| Area | Source | Tests | Spec |
+|------|--------|-------|------|
+| Prompts, sections, rendering | `prompt/` (`prompt.py`, `section.py`, `markdown.py`) | `prompts/`, `prompt/` | `PROMPTS.md` |
+| Tools | `prompt/tool.py`, `prompt/tool_result.py` | `prompt/` | `TOOLS.md` |
+| Policies, feedback, task completion | `prompt/policy.py`, `prompt/feedback.py`, `prompt/task_completion.py` | `prompt/` | `GUARDRAILS.md` |
+| Task examples | `prompt/task_examples.py` | `prompts/` | `EXAMPLES.md` |
+| Workspace sections, digest tools | `prompt/workspace.py`, `contrib/tools/` | `prompt/`, `tools/` | `WORKSPACE.md` |
+| Sessions, events, budgets | `runtime/session/`, `runtime/events/`, `budget.py`, `deadlines.py` | `runtime/`, `test_budget.py`, `test_deadlines.py` | `SESSIONS.md` |
+| Slice storage | `runtime/session/slices/` | `runtime/test_slices.py`, `runtime/test_state_slice.py` | `SLICES.md` |
+| Agent loop | `runtime/agent_loop.py` | `runtime/agent_loop/` | `AGENT_LOOP.md` |
+| Mailbox, DLQ | `runtime/mailbox/`, `runtime/dlq.py`, `contrib/mailbox/` | `runtime/`, `contrib/` | `MAILBOX.md`, `DLQ.md` |
+| Lifecycle, health, watchdog | `runtime/lifecycle.py`, `runtime/watchdog.py` | `runtime/` | `LIFECYCLE.md`, `HEALTH.md` |
+| Lease extender | `runtime/lease_extender.py` | `runtime/` | `LEASE_EXTENDER.md` |
+| Transcript | `runtime/transcript.py` | `runtime/` | `TRANSCRIPT.md` |
+| Run context | `runtime/run_context.py` | `runtime/` | `RUN_CONTEXT.md` |
+| Logging | `runtime/logging.py` | `runtime/` | `LOGGING.md` |
+| Adapter core, throttling | `adapters/` (`core.py`, `config.py`, `_shared/`) | `adapters/` | `ADAPTERS.md` |
+| Claude Agent SDK adapter | `adapters/claude_agent_sdk/` | `adapters/claude_agent_sdk/` | `CLAUDE_AGENT_SDK.md` |
+| Codex App Server adapter | `adapters/codex_app_server/` | `adapters/codex_app_server/` | `CODEX_APP_SERVER.md` |
+| ACP adapters (generic, Gemini, OpenCode) | `adapters/acp/`, `adapters/gemini_acp/`, `adapters/opencode_acp/` | `adapters/acp/`, `adapters/gemini_acp/`, `adapters/opencode_acp/` | `ACP_ADAPTER.md`, `GEMINI_ACP_ADAPTER.md`, `OPENCODE_ACP_ADAPTER.md` |
+| Resources (DI) | `resources/` | `resources/` | `RESOURCE_REGISTRY.md` |
+| Filesystem | `filesystem/` | `filesystem/` | `FILESYSTEM.md` |
+| Serde, dataclasses | `serde/`, `dataclasses/`, `types/` | `serde/`, `test_dataclass_serialization.py` | `DATACLASSES.md` |
+| Design-by-contract | `dbc/` | `test_dbc_contracts.py` | `DBC.md` |
+| Clock | `clock.py` | `test_clock.py` | `CLOCK.md` |
+| Evals, experiments | `evals/`, `experiment.py` | `evals/` | `EVALS.md`, `EXPERIMENTS.md` |
+| Debug bundles | `debug/` | `debug/` | `DEBUG_BUNDLE.md` |
+| CLI (`wink`) | `cli/` | `cli/` | `WINK_DOCS.md`, `WINK_QUERY.md`, `WINK_DEBUG.md` |
+| Skills | `skills/` | `skills/` | `SKILLS.md` |
+| Formal verification (TLA+) | `formal/` | `formal/` | `FORMAL_VERIFICATION.md`, `VERIFICATION.md` |
 
-The first local run builds a coverage database (`.testmondata`). Subsequent
-runs use this database to identify which tests cover changed code and skip the rest.
-This dramatically reduces iteration time when working on focused changes.
+Process/design specs without a single code home: `POLICIES_OVER_WORKFLOWS.md`
+(philosophy), `MODULE_BOUNDARIES.md` (layering), `TESTING.md`,
+`THREAD_SAFETY.md`, `VERIFICATION_TOOLBOX.md` (`check.py`, `toolchain/`),
+`ACK.md` (`integration-tests/ack/`), `ANALYSIS_LOOP.md` (not yet implemented).
 
-## Architecture
+### Layout Conventions
 
-```
-src/weakincentives/
-├── adapters/     # OpenAI, LiteLLM, Claude Agent SDK
-├── contrib/      # Mailbox, optimizers
-├── dbc/          # Design-by-contract decorators
-├── evals/        # Evaluation framework
-├── prompt/       # Section/Prompt composition
-├── resources/    # Dependency injection
-├── runtime/      # Session, events, lifecycle
-├── serde/        # Dataclass serialization
-└── ...
-```
+- `tests/` mirrors `src/weakincentives/` package-for-package, with
+  exceptions: small foundation modules (`dbc`, `clock`, `budget`,
+  `deadlines`, `dataclasses`) are covered by top-level `tests/test_*.py`
+  files; prompt tests are split across `tests/prompt/` and `tests/prompts/`;
+  `tests/helpers/` and `tests/plugins/` are shared fixtures and pytest
+  plugins, not mirrors.
+- Every top-level `src/weakincentives/` package is covered by at least one
+  spec — find it in the table above.
+
+______________________________________________________________________
+
+## Change Playbooks
+
+`guides/contributing-playbooks.md` has step-by-step recipes — files to
+touch, canonical example to copy, test pattern to follow — for the common
+change shapes: add a tool, an event + reducer, a prompt section type, a
+provider adapter, or a resource binding. Start there before exploring.
 
 ## Style Patterns
 
@@ -240,29 +222,12 @@ src/weakincentives/
 
 ## Documentation
 
-- **Specs**: `specs/` - design specs (PROMPTS, SESSIONS, TOOLS, ADAPTERS, etc.)
+- **Specs**: `specs/` - design contracts; mapped to code in the
+  [Repository Map](#repository-map) above
 - **Guides**: `guides/` - how-to material; see `guides/README.md`
-- **Key files**: `README.md`, `llms.md` (API reference), `CHANGELOG.md`
+- **Key files**: `README.md`, `llms.md` (agent-oriented API reference with a
+  table of contents — read sections, not the whole file), `CHANGELOG.md`
 - **CLI docs**: `wink docs --reference` (API), `--specs` (design), `--guide`
-
-### Key Specs
-
-Read before modifying related code:
-
-| Spec | Topic |
-|------|-------|
-| `PROMPTS.md` | Prompt system, sections, composition |
-| `SESSIONS.md` | Session lifecycle, events, budgets |
-| `TOOLS.md` | Tool registration, tool policies |
-| `GUARDRAILS.md` | Tool policies, feedback providers, task completion |
-| `ADAPTERS.md` | Provider adapters, throttling |
-| `CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
-| `CODEX_APP_SERVER.md` | Codex App Server adapter, stdio JSON-RPC |
-| `ACP_ADAPTER.md` | Generic ACP adapter, protocol flow |
-| `OPENCODE_ADAPTER.md` | OpenCode ACP adapter, quirk handling |
-| `AGENT_LOOP.md` | AgentLoop orchestration |
-| `POLICIES_OVER_WORKFLOWS.md` | Design philosophy |
-| `MODULE_BOUNDARIES.md` | Layer architecture |
 
 ## Stability
 

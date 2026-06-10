@@ -299,6 +299,12 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
 
 ### Internal / Refactoring / Tests / Docs
 
+- **Navigation docs for AI assistants.** `CLAUDE.md` gains a Repository Map
+  (spec ↔ source ↔ tests table), explicit test-layout conventions, and trims
+  rationale duplicated from `llms.md`; new `guides/contributing-playbooks.md`
+  with step-by-step recipes for the common change shapes (tool, event +
+  reducer, section type, adapter, resource binding); `llms.md` gains a table
+  of contents for targeted section reads.
 - **Type-suppression cleanup.** ~41 suppressions removed from the SDK/Codex
   adapters via `TypeGuard` predicates and `cast()` (#1143); blanket pyright
   suppressions removed from `serde` (#1136); further type-ignore cleanup across
