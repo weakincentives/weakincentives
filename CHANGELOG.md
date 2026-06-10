@@ -344,6 +344,12 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
 
 ### Internal / Refactoring / Tests / Docs
 
+- **Navigation docs for AI assistants.** `CLAUDE.md` gains a Repository Map
+  (spec ↔ source ↔ tests table), explicit test-layout conventions, and trims
+  rationale duplicated from `llms.md`; new `guides/contributing-playbooks.md`
+  with step-by-step recipes for the common change shapes (tool, event +
+  reducer, section type, adapter, resource binding); `llms.md` gains a table
+  of contents for targeted section reads.
 - **Verification toolchain overhaul: one source of truth, structured
   diagnostics restored, parser-drift defense.** `make check` is now a single
   `check.py` invocation that runs every registered checker and reports all
@@ -378,7 +384,6 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
   `extend-exclude = ["toolchain"]` pattern matched any directory named
   `toolchain`, so `tests/toolchain/` had never been linted or formatted; the
   pattern is now root-anchored (`toolchain/`) and the test suite cleaned up.
-
 - **Type-suppression cleanup.** ~41 suppressions removed from the SDK/Codex
   adapters via `TypeGuard` predicates and `cast()` (#1143); blanket pyright
   suppressions removed from `serde` (#1136); further type-ignore cleanup across

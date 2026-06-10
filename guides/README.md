@@ -45,6 +45,7 @@ debug issues when they arise.
 
 ### For Contributors
 
+1. [Contributing Playbooks](contributing-playbooks.md) - Recipes for common changes: tools, reducers, sections, adapters, bindings
 1. [Code Quality](code-quality.md) - Standards and tooling
 1. [Module Boundaries](module-boundaries.md) - Layer architecture and dependency rules
 1. [Testing](testing.md) - How to test prompts, tools, reducers
