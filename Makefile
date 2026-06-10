@@ -130,9 +130,9 @@ test-group-5:
 
 # Group 6: Tools + Root tests + Misc (~540 tests)
 test-group-6:
-	@$(PYTEST_COMMON) tests/tools tests/filesystem tests/resources tests/skills \
-		tests/optimizers tests/toolchain tests/debug tests/formal formal-tests \
-		tests/test_*.py --cov-report=
+	@$(PYTEST_COMMON) tests/tools tests/filesystem tests/sandbox tests/resources \
+		tests/skills tests/optimizers tests/toolchain tests/debug tests/formal \
+		formal-tests tests/test_*.py --cov-report=
 	@mv .coverage .coverage.6
 
 # Run all test groups locally and combine coverage

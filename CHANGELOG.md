@@ -190,6 +190,45 @@ imports or calls now raise `ImportError` / `AttributeError`:
 
 ### Added
 
+#### Sandbox aggregate: one environment owner for filesystem + shell (M2)
+
+New core package `weakincentives.sandbox` names the environment an agent acts
+on (`refactor/M2.md`; builds on the M1 filesystem narrow waist):
+
+- **`Shell` facet** (`CommandResult`, `LocalShell`): runs an `argv` vector —
+  never `/bin/sh` — rooted at a directory, with per-stream output caps
+  (1 MiB), a default timeout (60 s), and `GIT_*`-stripped env hygiene. Launch
+  failures map to shell-conventional exit codes instead of raising: 127
+  missing executable, 126 not executable, 124 timeout (with `timed_out=True`
+  and partial output preserved).
+- **`Sandbox` aggregate** (`LocalSandbox`): vends `filesystem` + `shell` over
+  one root, `snapshot`/`restore` delegating to the filesystem backend, and
+  idempotent `close()` that removes the root and snapshot storage. Facet
+  access after close raises `SandboxClosedError`.
+- **Intent + factory**: `SandboxConfig` (frozen serde value: mounts,
+  `allowed_host_roots`, `read_only`, `egress`, `env`, `setup`) and
+  `SandboxProvider.open(config)` with `LocalSandboxProvider`. The host-mount
+  machinery (`HostMount`, symlink/byte-budget guards,
+  `compute_workspace_fingerprint`) moved verbatim from `prompt/workspace.py`
+  into `sandbox/`; `prompt.workspace` re-exports it, and the existing
+  workspace-mount tests pass unchanged as the parity oracle. Setup commands
+  are `shlex`-split argv (no shell); a failure fails the open and removes the
+  partially-built sandbox.
+- **Egress & credential control plane**: default-deny `EgressPolicy` with
+  `EgressRule(host_glob, ports, protocol, credential)` allow entries and
+  `CredentialInjection` carrying credential *names* only. `configure_egress`
+  replaces the policy live; `configure_credentials(bindings)` binds names to
+  secret material held in process memory only — redacted from `repr`, never
+  serialized, logged, or written into the sandbox env or filesystem, and
+  cleared on close. Control-plane only: never reachable from `ToolContext`.
+  Locally a documented no-op beyond bookkeeping; enforcing proxies arrive
+  with the remote sandbox (M4).
+
+Not yet wired into prompts or adapters (that is M3). New `specs/SANDBOX.md`;
+`sandbox` registered as a core-layer package. (`src/weakincentives/sandbox/`,
+`tests/sandbox/` — 138 tests, including the mount parity suite moved from
+`tests/prompt/`)
+
 #### Gemini CLI ACP adapter (`adapters/gemini_acp`) (#1117)
 
 A new `GeminiACPAdapter` integrates Google's Gemini CLI as a fourth supported

@@ -29,8 +29,8 @@ dependency flow, minimal coupling, and maintainable growth.
 ┌─────────────────────────────────────┐
 │       CORE (Layer 2)                │  Library primitives
 │  runtime, prompt, resources,        │
-│  filesystem, serde, skills, formal, │
-│  debug, optimizers                  │
+│  filesystem, sandbox, serde,        │
+│  skills, formal, debug, optimizers  │
 └─────────────────────────────────────┘
             ↓ depends on
 ┌─────────────────────────────────────┐

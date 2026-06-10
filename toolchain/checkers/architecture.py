@@ -16,8 +16,8 @@ Enforces the four-layer module boundary model:
 
     Layer 4  HIGH-LEVEL   contrib, evals, cli, docs
     Layer 3  ADAPTERS     adapters
-    Layer 2  CORE         runtime, prompt, resources, filesystem, serde,
-                          skills, formal, debug, optimizers
+    Layer 2  CORE         runtime, prompt, resources, filesystem, sandbox,
+                          serde, skills, formal, debug, optimizers
     Layer 1  FOUNDATION   types, errors, dataclasses, dbc, deadlines,
                           budget, clock, experiment
 
@@ -68,6 +68,7 @@ _PACKAGE_LAYER: dict[str, int] = {
     "prompt": CORE,
     "resources": CORE,
     "filesystem": CORE,
+    "sandbox": CORE,
     "serde": CORE,
     "skills": CORE,
     "formal": CORE,

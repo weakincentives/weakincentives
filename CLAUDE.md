@@ -107,6 +107,7 @@ the code it covers.
 | ACP adapters (generic, Gemini, OpenCode) | `adapters/acp/`, `adapters/gemini_acp/`, `adapters/opencode_acp/` | `adapters/acp/`, `adapters/gemini_acp/`, `adapters/opencode_acp/` | `ACP_ADAPTER.md`, `GEMINI_ACP_ADAPTER.md`, `OPENCODE_ACP_ADAPTER.md` |
 | Resources (DI) | `resources/` | `resources/` | `RESOURCE_REGISTRY.md` |
 | Filesystem | `filesystem/` | `filesystem/` | `FILESYSTEM.md` |
+| Sandbox (env aggregate, shell, egress) | `sandbox/` | `sandbox/` | `SANDBOX.md` |
 | Serde, dataclasses | `serde/`, `dataclasses/`, `types/` | `serde/`, `test_dataclass_serialization.py` | `DATACLASSES.md` |
 | Design-by-contract | `dbc/` | `test_dbc_contracts.py` | `DBC.md` |
 | Clock | `clock.py` | `test_clock.py` | `CLOCK.md` |
