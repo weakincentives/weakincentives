@@ -245,6 +245,24 @@ you see the full scope of issues in a single run:
   tests/test_adapter.py: Test failed: test_structured_output
 ```
 
+### Full Reports on Truncation
+
+Display output is capped (diagnostics per checker, raw-output lines). When a
+result is truncated, the complete untruncated report - every diagnostic, the
+full raw tool output, and the reproduce command - is written to
+`.check-logs/<checker>.log`, and the truncation line names that path plus the
+command to re-run just the failed check for quick feedback:
+
+```
+✗ lint                 (2.3s)
+  src/foo.py:42:10: [F401] `os` imported but unused (fixable)
+  ... and 7 more (full report: .check-logs/lint.log)
+  Re-run just this check: uv run python check.py lint
+```
+
+`.check-logs/` is cleared at the start of every run, so a log there always
+describes the current run. The directory is git-ignored.
+
 ### Verbose Mode
 
 Use `-v` to see full tool output for failed checks:
@@ -518,6 +536,14 @@ python check.py lint          # Just lint
 python check.py typecheck     # Just types
 python check.py test          # Just tests
 ```
+
+### Truncated Output
+
+When a failure shows `... and N more (full report: .check-logs/<name>.log)`,
+read that file - it holds every diagnostic and the full raw tool output from
+the run that just happened, so no re-run is needed to see the rest. After
+fixing, use the accompanying `Re-run just this check:` command to verify
+without paying for the full suite.
 
 ### Verbose Mode for Context
 

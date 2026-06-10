@@ -325,7 +325,11 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
   mdformat, vulture, bandit, biome) against fixtures so format changes fail
   loudly — these immediately caught mdformat wrapping long error messages
   across lines. Multi-line diagnostic continuation lines are now indented so
-  the `location: message` grammar holds line-by-line. Also fixed: ruff's
+  the `location: message` grammar holds line-by-line, and truncated results
+  save the complete untruncated report to `.check-logs/<checker>.log` (cleared
+  at the start of each run), with the truncation message naming that path and
+  the `uv run python check.py <name>` command to re-run just the failed check.
+  Also fixed: ruff's
   `extend-exclude = ["toolchain"]` pattern matched any directory named
   `toolchain`, so `tests/toolchain/` had never been linted or formatted; the
   pattern is now root-anchored (`toolchain/`) and the test suite cleaned up.

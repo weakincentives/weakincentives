@@ -37,6 +37,7 @@ from toolchain import (
     Runner,
 )
 from toolchain.checkers import create_all_checkers
+from toolchain.output import clear_full_reports
 from toolchain.utils import patch_ast_for_bandit
 
 
@@ -98,6 +99,10 @@ Examples:
 
     # Patch AST for bandit compatibility
     patch_ast_for_bandit()
+
+    # Drop full reports from previous runs so stale logs never describe an
+    # earlier failure.
+    clear_full_reports()
 
     # Create runner with all checkers
     runner = Runner()

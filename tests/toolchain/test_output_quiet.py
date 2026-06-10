@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 from toolchain.output import QuietFormatter
 from toolchain.result import CheckResult, Diagnostic, Location, Report
@@ -74,7 +75,7 @@ class TestQuietFormatter:
         output = formatter.format(_make_failing_report())
         assert "\033[31m" in output  # Red color code
 
-    def test_truncates_diagnostics(self) -> None:
+    def test_truncates_diagnostics(self, tmp_path: Path) -> None:
         diagnostics = tuple(Diagnostic(message=f"Error {i}") for i in range(15))
         report = Report(
             results=(
@@ -87,10 +88,15 @@ class TestQuietFormatter:
             ),
             total_duration_ms=100,
         )
-        formatter = QuietFormatter(color=False)
+        formatter = QuietFormatter(color=False, log_dir=tmp_path)
         output = formatter.format(report)
         assert "... and 5 more" in output
-        assert "Run: python check.py lint -v" in output
+        # Full version saved, path and re-run hint included
+        log_file = tmp_path / "lint.log"
+        assert f"full report: {log_file}" in output
+        assert "Re-run just this check: uv run python check.py lint" in output
+        saved = log_file.read_text(encoding="utf-8")
+        assert "Error 14" in saved  # beyond the display cap
 
     def test_reproduction_hint_not_shown_when_no_truncation(self) -> None:
         report = Report(
@@ -262,8 +268,8 @@ class TestQuietFormatter:
         assert "✗ lint" in out3
         assert "Reproduce:" not in out3
 
-    def test_raw_output_truncated_at_30_lines(self) -> None:
-        """Raw output is truncated at 30 lines with a count of remaining lines."""
+    def test_raw_output_truncated_at_30_lines(self, tmp_path: Path) -> None:
+        """Raw output is truncated at 30 lines; the full version is saved."""
         long_output = "\n".join(f"line {i}" for i in range(40))
         report = Report(
             results=(
@@ -277,12 +283,18 @@ class TestQuietFormatter:
             ),
             total_duration_ms=100,
         )
-        formatter = QuietFormatter(color=False)
+        formatter = QuietFormatter(color=False, log_dir=tmp_path)
         output = formatter.format(report)
         assert "line 0" in output
         assert "line 29" in output
-        assert "line 30" not in output
-        assert "10 more lines" in output
+        assert "line 30\n" not in output
+        assert "10 more output lines" in output
+        # Full version saved, path and re-run hint included
+        log_file = tmp_path / "test.log"
+        assert f"full report: {log_file}" in output
+        assert "Re-run just this check: uv run python check.py test" in output
+        saved = log_file.read_text(encoding="utf-8")
+        assert "line 39" in saved  # beyond the display cap
 
     def test_multiline_diagnostics_indent_in_quiet_mode(self) -> None:
         report = Report(

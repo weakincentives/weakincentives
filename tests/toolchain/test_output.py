@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,6 +25,7 @@ from toolchain.output import (
     ConsoleFormatter,
     JSONFormatter,
     _supports_color,
+    clear_full_reports,
 )
 
 if TYPE_CHECKING:
@@ -160,8 +162,16 @@ class TestConsoleFormatter:
         assert "✗ lint" in out3
         assert "Reproduce:" not in out3
 
-    def test_raw_output_truncated_at_50_lines(self) -> None:
-        """Raw output is truncated at 50 lines with a count of remaining lines."""
+        # Raw output without a recorded command: no reproduce line either
+        result4 = CheckResult(
+            name="lint", status="failed", duration_ms=100, diagnostics=(), output="raw"
+        )
+        out4 = formatter.format(Report(results=(result4,), total_duration_ms=100))
+        assert "raw" in out4
+        assert "Reproduce:" not in out4
+
+    def test_raw_output_truncated_at_50_lines(self, tmp_path: Path) -> None:
+        """Raw output is truncated at 50 lines; the full version is saved."""
         long_output = "\n".join(f"line {i}" for i in range(60))
         report = Report(
             results=(
@@ -171,18 +181,26 @@ class TestConsoleFormatter:
                     duration_ms=100,
                     diagnostics=(),
                     output=long_output,
+                    command=("uv", "run", "pytest", "tests"),
                 ),
             ),
             total_duration_ms=100,
         )
-        formatter = ConsoleFormatter(color=False)
+        formatter = ConsoleFormatter(color=False, log_dir=tmp_path)
         output = formatter.format(report)
         assert "line 0" in output
         assert "line 49" in output
-        assert "line 50" not in output
-        assert "10 more lines" in output
+        assert "line 50\n" not in output
+        assert "10 more output lines" in output
+        # Full version saved, path and re-run hint included
+        log_file = tmp_path / "test.log"
+        assert f"full report: {log_file}" in output
+        assert "Re-run just this check: uv run python check.py test" in output
+        saved = log_file.read_text(encoding="utf-8")
+        assert "line 59" in saved  # beyond the display cap
+        assert "reproduce: uv run pytest tests" in saved
 
-    def test_max_diagnostics_truncation(self) -> None:
+    def test_max_diagnostics_truncation(self, tmp_path: Path) -> None:
         diagnostics = tuple(Diagnostic(message=f"Error {i}") for i in range(15))
         report = Report(
             results=(
@@ -195,10 +213,43 @@ class TestConsoleFormatter:
             ),
             total_duration_ms=100,
         )
-        formatter = ConsoleFormatter(color=False, max_diagnostics=10)
+        formatter = ConsoleFormatter(color=False, max_diagnostics=10, log_dir=tmp_path)
         output = formatter.format(report)
         assert "... and 5 more" in output
-        assert "Run: python check.py lint -v" in output
+        # Full version saved, path and re-run hint included
+        log_file = tmp_path / "lint.log"
+        assert f"full report: {log_file}" in output
+        assert "Re-run just this check: uv run python check.py lint" in output
+        saved = log_file.read_text(encoding="utf-8")
+        assert "diagnostics (15):" in saved
+        assert "Error 14" in saved  # beyond the display cap
+        # No command on this result: no reproduce line in the report
+        assert "reproduce:" not in saved
+
+    def test_truncation_note_omitted_when_report_unwritable(
+        self, tmp_path: Path
+    ) -> None:
+        """When the log dir can't be created, truncation degrades gracefully."""
+        blocker = tmp_path / "blocker"
+        blocker.write_text("a file, not a directory", encoding="utf-8")
+        diagnostics = tuple(Diagnostic(message=f"Error {i}") for i in range(15))
+        report = Report(
+            results=(
+                CheckResult(
+                    name="lint",
+                    status="failed",
+                    duration_ms=100,
+                    diagnostics=diagnostics,
+                ),
+            ),
+            total_duration_ms=100,
+        )
+        formatter = ConsoleFormatter(
+            color=False, max_diagnostics=10, log_dir=blocker / "sub"
+        )
+        output = formatter.format(report)
+        assert "... and 5 more" in output
+        assert "full report:" not in output
 
     def test_checker_hint_shown_on_failure(self) -> None:
         report = Report(
@@ -360,7 +411,7 @@ class TestConsoleFormatter:
         assert "\033[33m" in output  # Yellow color code
         assert "700 lines" in output
 
-    def test_passed_result_truncates_many_warnings(self) -> None:
+    def test_passed_result_truncates_many_warnings(self, tmp_path: Path) -> None:
         diagnostics = tuple(
             Diagnostic(
                 message=f"File has {700 + i} lines",
@@ -379,9 +430,23 @@ class TestConsoleFormatter:
             ),
             total_duration_ms=50,
         )
-        formatter = ConsoleFormatter(color=False, max_diagnostics=3)
+        formatter = ConsoleFormatter(color=False, max_diagnostics=3, log_dir=tmp_path)
         output = formatter.format(report)
         assert "... and 2 more warnings" in output
+        log_file = tmp_path / "code-length.log"
+        assert f"full report: {log_file}" in output
+        saved = log_file.read_text(encoding="utf-8")
+        assert "File has 704 lines" in saved  # beyond the display cap
+
+    def test_clear_full_reports(self, tmp_path: Path) -> None:
+        """Logs from previous runs are removed; a missing dir is a no-op."""
+        (tmp_path / "lint.log").write_text("stale", encoding="utf-8")
+        (tmp_path / "keep.txt").write_text("not a log", encoding="utf-8")
+        clear_full_reports(tmp_path)
+        assert not (tmp_path / "lint.log").exists()
+        assert (tmp_path / "keep.txt").exists()
+
+        clear_full_reports(tmp_path / "never-created")  # no error
 
     def test_multiline_diagnostics_indent_continuation_lines(self) -> None:
         """Continuation lines stay indented under their diagnostic.

@@ -23,6 +23,7 @@ import json
 import shlex
 import sys
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import IO, ClassVar, Protocol
 
 from .result import CheckResult, Report
@@ -34,6 +35,59 @@ class Formatter(Protocol):
     def format(self, report: Report) -> str:
         """Format a report as a string."""
         ...
+
+
+# Full untruncated reports for truncated results land here, one file per
+# checker, cleared at the start of every run.
+FULL_REPORT_DIR = Path(".check-logs")
+
+
+def clear_full_reports(log_dir: Path = FULL_REPORT_DIR) -> None:
+    """Remove full-report logs from previous runs.
+
+    Called at the start of each run so a stale report never describes an
+    earlier failure.
+    """
+    if not log_dir.is_dir():
+        return
+    for log_file in log_dir.glob("*.log"):
+        log_file.unlink(missing_ok=True)
+
+
+def _rerun_hint(name: str) -> str:
+    """Command to re-run just one checker for quick feedback."""
+    return f"Re-run just this check: uv run python check.py {name}"
+
+
+def _write_full_report(result: CheckResult, log_dir: Path) -> str | None:
+    """Write the complete, untruncated result to ``<log_dir>/<name>.log``.
+
+    Returns the path for inclusion in truncation hints, or None when the
+    file cannot be written (the truncated display output stays the only
+    record).
+    """
+    lines = [f"check: {result.name}", f"status: {result.status}"]
+    if result.command:
+        lines.append(f"reproduce: {shlex.join(result.command)}")
+    lines.append(_rerun_hint(result.name))
+    lines.append("")
+    lines.append(f"diagnostics ({len(result.diagnostics)}):")
+    lines.extend(str(diag) for diag in result.diagnostics)
+    if result.output:
+        lines.extend(["", "raw output:", result.output])
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        path = log_dir / f"{result.name}.log"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        return None
+    return str(path)
+
+
+def _truncation_note(result: CheckResult, log_dir: Path) -> str:
+    """Suffix pointing at the full report, or empty when it can't be saved."""
+    path = _write_full_report(result, log_dir)
+    return f" (full report: {path})" if path else ""
 
 
 def _supports_color(stream: IO[str]) -> bool:
@@ -95,6 +149,7 @@ class ConsoleFormatter:
     color: bool | None = None  # None = auto-detect
     stream: IO[str] | None = None
     max_diagnostics: int = 100  # Max diagnostics to show per checker
+    log_dir: Path = FULL_REPORT_DIR  # Where full reports land on truncation
 
     def _use_color(self) -> bool:
         if self.color is not None:
@@ -145,7 +200,8 @@ class ConsoleFormatter:
                         lines.append(text)
                 remaining = len(warn_diags) - len(shown)
                 if remaining > 0:
-                    lines.append(f"  ... and {remaining} more warnings")
+                    note = _truncation_note(result, self.log_dir)
+                    lines.append(f"  ... and {remaining} more warnings{note}")
         elif result.status == "skipped":
             mark = "\033[33m○\033[0m" if use_color else "○"
             lines.append(f"{mark} {result.name:<20} (skipped)")
@@ -168,8 +224,9 @@ class ConsoleFormatter:
 
                 remaining = len(result.diagnostics) - len(shown)
                 if remaining > 0:
-                    lines.append(f"  ... and {remaining} more")
-                    lines.append(f"  Run: python check.py {result.name} -v")
+                    note = _truncation_note(result, self.log_dir)
+                    lines.append(f"  ... and {remaining} more{note}")
+                    lines.append(f"  {_rerun_hint(result.name)}")
             elif result.output:
                 # No structured diagnostics: always show raw output so the
                 # root cause is immediately visible without re-running with -v.
@@ -177,7 +234,11 @@ class ConsoleFormatter:
                 for line in output_lines[:50]:
                     lines.append(f"  {line}")
                 if len(output_lines) > 50:
-                    lines.append(f"  ... ({len(output_lines) - 50} more lines)")
+                    note = _truncation_note(result, self.log_dir)
+                    lines.append(
+                        f"  ... and {len(output_lines) - 50} more output lines{note}"
+                    )
+                    lines.append(f"  {_rerun_hint(result.name)}")
                 if result.command:
                     cmd_str = shlex.join(result.command)
                     lines.append(f"  Reproduce: {cmd_str}")
@@ -250,6 +311,7 @@ class QuietFormatter:
 
     color: bool | None = None
     stream: IO[str] | None = None
+    log_dir: Path = FULL_REPORT_DIR  # Where full reports land on truncation
 
     def _use_color(self) -> bool:
         if self.color is not None:
@@ -293,8 +355,9 @@ class QuietFormatter:
                     lines.append(_indent_block(str(diag), "  ", "    "))
 
                 if len(result.diagnostics) > 10:
-                    lines.append(f"  ... and {len(result.diagnostics) - 10} more")
-                    lines.append(f"  Run: python check.py {result.name} -v")
+                    note = _truncation_note(result, self.log_dir)
+                    lines.append(f"  ... and {len(result.diagnostics) - 10} more{note}")
+                    lines.append(f"  {_rerun_hint(result.name)}")
             elif result.output:
                 # No structured diagnostics: always show raw output so the
                 # root cause is immediately visible without re-running with -v.
@@ -302,7 +365,11 @@ class QuietFormatter:
                 for line in output_lines[:30]:
                     lines.append(f"  {line}")
                 if len(output_lines) > 30:
-                    lines.append(f"  ... ({len(output_lines) - 30} more lines)")
+                    note = _truncation_note(result, self.log_dir)
+                    lines.append(
+                        f"  ... and {len(output_lines) - 30} more output lines{note}"
+                    )
+                    lines.append(f"  {_rerun_hint(result.name)}")
                 if result.command:
                     cmd_str = shlex.join(result.command)
                     lines.append(f"  Reproduce: {cmd_str}")
