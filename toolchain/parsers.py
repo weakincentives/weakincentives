@@ -722,9 +722,10 @@ def parse_mdformat(output: str, code: int) -> tuple[Diagnostic, ...]:
     diagnostics = []
 
     # mdformat outputs in format: Error: File "path/to/file.md" is not formatted.
-    # or just the file path on older versions. Long messages wrap across lines,
-    # so match any whitespace (including newlines) between path and suffix.
-    error_pattern = re.compile(r'Error: File "([^"]+\.md)"\s+is not formatted\.')
+    # or just the file path on older versions. Long messages word-wrap at
+    # arbitrary points depending on path length, so every inter-token gap must
+    # tolerate newlines.
+    error_pattern = re.compile(r'Error:\s+File\s+"([^"]+\.md)"\s+is\s+not\s+formatted\.')
     for match in error_pattern.finditer(output):
         file_path = match.group(1)
         diagnostics.append(

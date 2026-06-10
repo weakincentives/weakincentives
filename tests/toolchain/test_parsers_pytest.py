@@ -647,6 +647,28 @@ docs/guide.md"""
         assert "Markdown formatting required" in diagnostics[0].message
         assert "mdformat /home/user/project/README.md" in diagnostics[0].message
 
+    def test_parses_error_format_wrapped_after_path(self) -> None:
+        """mdformat word-wraps long messages; the wrap can fall after the path."""
+        output = 'Error: File "/tmp/some/long/path/to/bad.md"\nis not formatted.'
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 1
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == "/tmp/some/long/path/to/bad.md"
+
+    def test_parses_error_format_wrapped_before_path_and_in_suffix(self) -> None:
+        """With longer paths the wrap falls before the path and inside the suffix."""
+        output = (
+            "Error: File\n"
+            '"/tmp/pytest-of-runner/pytest-0/test_mdformat_check_contract2/bad.md" is not\n'
+            "formatted."
+        )
+        diagnostics = parse_mdformat(output, 1)
+        assert len(diagnostics) == 1
+        assert diagnostics[0].location is not None
+        assert diagnostics[0].location.file == (
+            "/tmp/pytest-of-runner/pytest-0/test_mdformat_check_contract2/bad.md"
+        )
+
     def test_parses_multiple_error_format_files(self) -> None:
         """Test parsing multiple Error: File lines."""
         output = """Error: File "docs/api.md" is not formatted.

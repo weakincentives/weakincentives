@@ -243,13 +243,13 @@ def _parse_mdformat_file_list(output: str) -> list[str]:
     """Parse file paths from mdformat check output.
 
     mdformat outputs: Error: File "path/to/file.md" is not formatted.
-    Long messages wrap across lines, so whitespace between the path and the
-    suffix may include newlines.
+    Long messages word-wrap at arbitrary points depending on path length, so
+    every inter-token gap must tolerate newlines.
     """
     import re
 
     files = []
-    error_pattern = re.compile(r'Error: File "([^"]+)"\s+is not formatted\.')
+    error_pattern = re.compile(r'Error:\s+File\s+"([^"]+)"\s+is\s+not\s+formatted\.')
     for match in error_pattern.finditer(output):
         files.append(match.group(1))
     return sorted(files)

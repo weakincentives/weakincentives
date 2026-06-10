@@ -178,9 +178,16 @@ def test_pytest_contract(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(_MDFORMAT is None, reason="mdformat not on PATH")
 def test_mdformat_check_contract(tmp_path: Path) -> None:
-    """`mdformat --check` failure output yields the unformatted file list."""
+    """`mdformat --check` failure output yields the unformatted file list.
+
+    The fixture path is deliberately long: mdformat word-wraps its error
+    message, and the wrap points shift with path length, so a long path
+    exercises the wrapping behavior on every environment.
+    """
     assert _MDFORMAT is not None
-    bad = tmp_path / "bad.md"
+    nested = tmp_path / "a-rather-long-directory-name-to-force-message-wrapping"
+    nested.mkdir()
+    bad = nested / "bad.md"
     bad.write_text("# Title\n* bullet\n", encoding="utf-8")
 
     output, code = _run([_MDFORMAT, "--check", str(bad)])

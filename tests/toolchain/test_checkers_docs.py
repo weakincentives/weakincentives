@@ -583,3 +583,23 @@ class TestParseMdformatFileList:
         output = 'Error: File "docs/my guide.md" is not formatted.'
         files = _parse_mdformat_file_list(output)
         assert files == ["docs/my guide.md"]
+
+    def test_handles_word_wrapped_messages(self) -> None:
+        """mdformat word-wraps long error messages at arbitrary points.
+
+        Observed in CI: the wrap can fall after `Error: File`, after the
+        quoted path, and inside `is not formatted` - all must parse.
+        """
+        from toolchain.checkers import _parse_mdformat_file_list
+
+        wrapped_after_path = 'Error: File "/tmp/long/path/a.md"\nis not formatted.'
+        assert _parse_mdformat_file_list(wrapped_after_path) == ["/tmp/long/path/a.md"]
+
+        wrapped_everywhere = (
+            "Error: File\n"
+            '"/tmp/pytest-of-runner/pytest-0/test_mdformat_check_contract2/bad.md" is not\n'
+            "formatted."
+        )
+        assert _parse_mdformat_file_list(wrapped_everywhere) == [
+            "/tmp/pytest-of-runner/pytest-0/test_mdformat_check_contract2/bad.md"
+        ]
