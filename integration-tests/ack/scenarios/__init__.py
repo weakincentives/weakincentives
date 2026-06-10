@@ -24,7 +24,6 @@ from weakincentives.prompt import (
     Tool,
     ToolContext,
     ToolResult,
-    WorkspaceSection,
 )
 from weakincentives.skills import SkillMount
 
@@ -282,7 +281,6 @@ def build_transactional_prompt(
     ns: str,
     write_succeed_tool: Tool[object, object],
     write_fail_tool: Tool[object, object],
-    workspace_section: WorkspaceSection,
 ) -> PromptTemplate[object]:
     """Build a transactional prompt whose tools are executed via bridge wrappers."""
     section = MarkdownSection[TransactionPromptParams](
@@ -298,7 +296,7 @@ def build_transactional_prompt(
         ns=ns,
         key="ack-transactional",
         name="ack_transactional_tools",
-        sections=[workspace_section, section],
+        sections=[section],
     )
 
 

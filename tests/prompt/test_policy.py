@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import (
     PolicyDecision,
@@ -31,7 +32,6 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.prompt.policy import _extract_path, _normalize_path
-from weakincentives.resources import Binding, ResourceRegistry
 from weakincentives.runtime import InProcessDispatcher, Session
 
 # --- Test Parameters ---
@@ -304,30 +304,21 @@ class TestReadBeforeWritePolicy:
     def _make_context(
         self, session: Session, *, filesystem: Filesystem | None = None
     ) -> ToolContext:
-        """Create a ToolContext with optional filesystem."""
-        if filesystem is not None:
-            # Register with Filesystem protocol as key
-            registry = ResourceRegistry.of(
-                Binding(Filesystem, lambda _: filesystem)  # type: ignore[type-abstract]
-            )
-            template: PromptTemplate[None] = PromptTemplate.create(
-                ns="test", key="test-prompt", name="test", resources=registry
-            )
-            prompt: Prompt[None] = Prompt(template)
-            prompt = prompt.bind(resources={Filesystem: filesystem})  # type: ignore[type-abstract]
-        else:
-            template = PromptTemplate.create(ns="test", key="test-prompt", name="test")
-            prompt = Prompt(template)
-
-        # Always enter resource context
+        """Create a ToolContext with an optional sandbox-backed filesystem."""
+        template: PromptTemplate[None] = PromptTemplate.create(
+            ns="test", key="test-prompt", name="test"
+        )
+        prompt: Prompt[None] = Prompt(template)
         prompt.resources.__enter__()
 
+        sandbox = make_memory_sandbox(filesystem) if filesystem is not None else None
         return ToolContext(
             prompt=prompt,
             rendered_prompt=None,  # type: ignore[arg-type]
             adapter=None,  # type: ignore[arg-type]
             session=session,
             deadline=None,
+            sandbox=sandbox,
         )
 
     def _make_tool(self, name: str) -> Tool[FileParams, None]:

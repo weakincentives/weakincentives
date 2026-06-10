@@ -43,10 +43,10 @@ class TestGeminiAdapterDefaults:
     def test_custom_configs(self) -> None:
         adapter = GeminiACPAdapter(
             adapter_config=GeminiACPAdapterConfig(model_id="gemini-2.5-flash"),
-            client_config=GeminiACPClientConfig(cwd="/tmp/work"),
+            client_config=GeminiACPClientConfig(env={"FOO": "bar"}),
         )
         assert adapter._adapter_config.model_id == "gemini-2.5-flash"
-        assert adapter._client_config.cwd == "/tmp/work"
+        assert adapter._client_config.env == {"FOO": "bar"}
 
 
 class TestValidateModel:

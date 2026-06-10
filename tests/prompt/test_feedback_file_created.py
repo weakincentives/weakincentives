@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.prompt import (
     Feedback,
     FeedbackContext,
@@ -204,12 +205,11 @@ class TestShouldTriggerWithFileCreated:
             name="test",
         )
         prompt: Prompt[None] = Prompt(template)
-        prompt = prompt.bind(resources={Filesystem: fs})
-
-        # We need to enter the resource context for the filesystem to be available
         prompt.resources.__enter__()
 
-        return FeedbackContext(session=session, prompt=prompt)
+        return FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox(fs)
+        )
 
     def test_file_trigger_fires_when_file_exists(self) -> None:
         from weakincentives.prompt import FeedbackTrigger, FileCreatedTrigger
@@ -281,10 +281,11 @@ class TestRunFeedbackProvidersWithFileCreated:
             name="test",
         )
         prompt: Prompt[None] = Prompt(template)
-        prompt = prompt.bind(resources={Filesystem: fs})
         prompt.resources.__enter__()
 
-        return FeedbackContext(session=session, prompt=prompt)
+        return FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox(fs)
+        )
 
     def test_marks_file_trigger_as_fired(self) -> None:
         from weakincentives.prompt import (

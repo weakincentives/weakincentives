@@ -73,7 +73,6 @@ class OpenCodeACPFixture:
         return OpenCodeACPAdapter(
             adapter_config=OpenCodeACPAdapterConfig(model_id=model_id),
             client_config=OpenCodeACPClientConfig(
-                cwd=str(tmp_path),
                 allow_file_reads=True,
                 allow_file_writes=True,
                 permission_mode="auto",

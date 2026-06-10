@@ -18,6 +18,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import cast
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._bridge import MCPToolExecutionState
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookConstraints,
@@ -307,6 +308,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
         )
         hook = create_post_tool_use_hook(
             context,
@@ -341,6 +343,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
         )
         hook = create_post_tool_use_hook(
             context,

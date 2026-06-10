@@ -358,15 +358,13 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKModelConfig,
     IsolationConfig,
     NetworkPolicy,
-    SandboxConfig,
     ReasoningEffort,
     # Transcript collection
     TranscriptCollector,
     TranscriptCollectorConfig,
 )
+from weakincentives.sandbox import HostMount, SandboxConfig
 from weakincentives.prompt import (
-    WorkspaceSection,
-    HostMount,
     # Task completion (canonical location; also re-exported from adapters.claude_agent_sdk)
     TaskCompletionChecker,
     TaskCompletionContext,
@@ -387,10 +385,7 @@ from weakincentives.adapters.codex_app_server import (
     SandboxMode,
     ApprovalPolicy,
 )
-from weakincentives.prompt import (
-    WorkspaceSection,
-    HostMount,
-)
+from weakincentives.sandbox import HostMount, SandboxConfig
 ```
 
 ### ACP Adapter (Generic)
@@ -728,27 +723,31 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKModelConfig,
     IsolationConfig,
     NetworkPolicy,
-    SandboxConfig,
     TranscriptCollectorConfig,
 )
-from weakincentives.prompt import WorkspaceSection, HostMount
+from weakincentives.prompt import PromptTemplate
 from weakincentives.runtime import Session
+from weakincentives.sandbox import HostMount, SandboxConfig
 
 session = Session()
 
-# Create workspace (materializes files to temp dir)
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(
-        HostMount(
-            host_path="/path/to/project",
-            mount_path="project",
-            include_glob=("*.py", "*.md"),
-            exclude_glob=("__pycache__/*",),
-            max_bytes=5_000_000,
+# Declare the environment on the template; the adapter opens one sandbox
+# per evaluation and points the SDK cwd at its root.
+template = PromptTemplate.create(
+    ns="docs",
+    key="sandboxed",
+    sandbox=SandboxConfig(
+        mounts=(
+            HostMount(
+                host_path="/path/to/project",
+                mount_path="project",
+                include_glob=("*.py", "*.md"),
+                exclude_glob=("__pycache__/*",),
+                max_bytes=5_000_000,
+            ),
         ),
+        allowed_host_roots=("/path/to",),
     ),
-    allowed_host_roots=("/path/to",),
 )
 
 # Configure isolation and model
@@ -759,20 +758,17 @@ adapter = ClaudeAgentSDKAdapter(
     ),
     client_config=ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",  # Auto-approve tools
-        cwd=str(workspace.temp_dir),
         isolation=IsolationConfig(
             api_key=os.environ["ANTHROPIC_API_KEY"],
             network_policy=NetworkPolicy.no_network(),  # API only
-            sandbox=SandboxConfig(enabled=True),
+            sandbox_enabled=True,
         ),
         # Transcript collection enabled by default
         transcript_collection=TranscriptCollectorConfig(),
     ),
 )
 
-# Use and cleanup
-# response = adapter.evaluate(prompt, session=session)
-workspace.cleanup()
+# response = adapter.evaluate(Prompt(template), session=session)
 ```
 
 **Isolation modes**:
@@ -1117,10 +1113,10 @@ Generic ACP agent binary?      → ACPAdapter
 OpenCode ACP agent?            → OpenCodeACPAdapter
 ```
 
-### Which Workspace Tool?
+### Which Environment?
 
 ```text
-Any adapter (Claude/Codex)?    → WorkspaceSection
+Any adapter (Claude/Codex)?    → PromptTemplate.create(sandbox=SandboxConfig(...))
 Testing/evaluation?            → Filesystem.in_memory()
 ```
 

@@ -25,8 +25,8 @@ from weakincentives.contrib.optimizers import (
     WorkspaceDigestResult,
 )
 from weakincentives.contrib.tools.digests import latest_workspace_digest
-from weakincentives.prompt import HostMount
 from weakincentives.runtime import InProcessDispatcher, Session
+from weakincentives.sandbox import HostMount
 
 
 @pytest.fixture
@@ -173,7 +173,8 @@ class TestWorkspaceDigestOptimizer:
         """Optimizer builds prompt containing workspace section."""
         optimizer = WorkspaceDigestOptimizer(mounts=[])
 
-        prompt = optimizer._build_optimization_prompt(session)
+        del session
+        prompt = optimizer._build_optimization_prompt()
 
         # Check the prompt has expected sections
         rendered = prompt.render()
@@ -212,10 +213,12 @@ class TestWorkspaceDigestOptimizerIntegration:
 
         optimizer = WorkspaceDigestOptimizer(mounts=[mount])
 
-        # Verify prompt is built correctly with mounts
-        session = Session(dispatcher=InProcessDispatcher())
-        prompt = optimizer._build_optimization_prompt(session)
+        # Verify prompt declares the mounts as sandbox intent
+        prompt = optimizer._build_optimization_prompt()
 
-        # The workspace section should have the mount
+        assert prompt.template.sandbox is not None
+        assert prompt.template.sandbox.mounts == (mount,)
+
+        # The workspace preview section renders a placeholder until opened
         rendered = prompt.render()
         assert "Workspace" in rendered.text

@@ -27,6 +27,7 @@ from ._bridge import (
     create_bridged_tools,
     create_mcp_server,
 )
+from ._sandbox import open_prompt_sandbox
 from ._visibility_signal import VisibilityExpansionSignal
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "VisibilityExpansionSignal",
     "create_bridged_tools",
     "create_mcp_server",
+    "open_prompt_sandbox",
     "run_async",
 ]

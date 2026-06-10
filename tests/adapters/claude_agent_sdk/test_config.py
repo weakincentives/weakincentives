@@ -31,7 +31,6 @@ class TestClaudeAgentSDKClientConfig:
     def test_defaults(self) -> None:
         config = ClaudeAgentSDKClientConfig()
         assert config.permission_mode == "bypassPermissions"
-        assert config.cwd is None
         assert config.max_turns is None
         assert config.max_budget_usd is None
         assert config.suppress_stderr is True
@@ -60,7 +59,6 @@ class TestClaudeAgentSDKClientConfig:
         isolation = IsolationConfig(network_policy=NetworkPolicy.no_network())
         config = ClaudeAgentSDKClientConfig(
             permission_mode="acceptEdits",
-            cwd="/home/user/project",
             max_turns=10,
             max_budget_usd=5.0,
             suppress_stderr=False,
@@ -69,7 +67,6 @@ class TestClaudeAgentSDKClientConfig:
             betas=("extended-thinking", "computer-use"),
         )
         assert config.permission_mode == "acceptEdits"
-        assert config.cwd == "/home/user/project"
         assert config.max_turns == 10
         assert config.max_budget_usd == 5.0
         assert config.suppress_stderr is False

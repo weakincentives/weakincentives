@@ -28,15 +28,16 @@ from ...adapters.claude_agent_sdk import (
     ClaudeAgentSDKClientConfig,
 )
 from ...dataclasses import FrozenDataclass
-from ...prompt import MarkdownSection, Prompt, PromptTemplate, WorkspaceSection
+from ...prompt import MarkdownSection, Prompt, PromptTemplate
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
+from ...sandbox import SandboxConfig
 from ..tools.digests import set_workspace_digest
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from ...prompt.workspace import HostMount
+    from ...sandbox import HostMount
 
 __all__ = [
     "WorkspaceDigestOptimizer",
@@ -87,8 +88,8 @@ class WorkspaceDigestOptimizer:
     Example::
 
         from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
-        from weakincentives.prompt import HostMount
         from weakincentives.runtime import Session
+        from weakincentives.sandbox import HostMount
 
         session = Session()
         optimizer = WorkspaceDigestOptimizer(
@@ -117,13 +118,8 @@ class WorkspaceDigestOptimizer:
             )
         )
 
-    def _build_optimization_prompt(self, session: Session) -> Prompt[_DigestResponse]:
+    def _build_optimization_prompt(self) -> Prompt[_DigestResponse]:
         """Build the prompt for workspace exploration and digest generation."""
-        workspace = WorkspaceSection(
-            session=session,
-            mounts=self.mounts,
-        )
-
         template = PromptTemplate[_DigestResponse].create(
             ns="weakincentives.optimization",
             key="workspace-digest-generator",
@@ -152,7 +148,6 @@ class WorkspaceDigestOptimizer:
                     """).strip(),
                     key="expectations",
                 ),
-                workspace,
                 MarkdownSection(
                     title="Output Format",
                     template=textwrap.dedent("""
@@ -169,6 +164,7 @@ class WorkspaceDigestOptimizer:
                     key="output-format",
                 ),
             ),
+            sandbox=SandboxConfig(mounts=tuple(self.mounts)),
         )
 
         return Prompt(template)
@@ -196,7 +192,7 @@ class WorkspaceDigestOptimizer:
 
         try:
             adapter = self._create_adapter()
-            prompt = self._build_optimization_prompt(session)
+            prompt = self._build_optimization_prompt()
 
             # Evaluate the prompt to explore the workspace
             response = adapter.evaluate(prompt, session=session)

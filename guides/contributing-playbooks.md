@@ -71,9 +71,9 @@ ______________________________________________________________________
 
 Spec: `specs/PROMPTS.md`. Canonical examples:
 `src/weakincentives/prompt/markdown.py` (`MarkdownSection`, the simple
-case) and `src/weakincentives/prompt/workspace.py` (`WorkspaceSection`,
-which contributes resources and needs cleanup). Tests:
-`tests/prompts/test_text_section.py` and `tests/prompt/test_workspace.py`.
+case) and `src/weakincentives/contrib/tools/digests.py`
+(`WorkspaceDigestSection`, which renders from session state). Tests:
+`tests/prompts/test_text_section.py` and `tests/test_prompt_utils.py`.
 
 1. Subclass `Section` (from `src/weakincentives/prompt/section.py`) and
    call `super().__init__(title=..., key=..., tools=(...))`. Keys must
@@ -83,8 +83,7 @@ which contributes resources and needs cleanup). Tests:
 1. Implement `clone(**kwargs)` so the section can be reused across prompts.
 1. Override `resources()` to contribute bindings
    (`ResourceRegistry.build({Protocol: instance})`) and `cleanup()` —
-   idempotent — if the section owns external state. `WorkspaceSection`
-   shows both.
+   idempotent — if the section owns external state.
 1. Export the class from `src/weakincentives/prompt/__init__.py`
    (`__all__`).
 1. Test rendering output directly (`section.render(...)`), and test

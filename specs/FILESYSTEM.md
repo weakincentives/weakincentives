@@ -143,10 +143,10 @@ run against any backend through the facade;
 
 ## ToolContext Integration
 
-`ToolContext` includes `filesystem: Filesystem | None`. Handlers access via
-`context.filesystem.*`. `Prompt.filesystem()` locates the workspace section
-and returns its filesystem. Adapters construct `ToolContext` with the
-filesystem from the prompt.
+`ToolContext.filesystem` is the sandbox's filesystem facet
+(`context.sandbox.filesystem`); it is `None` when no sandbox is attached.
+Handlers access it via `context.filesystem.*`. Adapters open one sandbox
+per evaluation and thread it into every `ToolContext`.
 
 ## Snapshots
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import (
     CompositeChecker,
@@ -71,7 +72,7 @@ class TestFileOutputChecker:
     def test_no_filesystem_returns_incomplete(self, session: Session) -> None:
         """Fail-closed: when no filesystem is available and files required, checker returns incomplete."""
         checker = FileOutputChecker(files=("report.md",))
-        context = TaskCompletionContext(session=session, filesystem=None)
+        context = TaskCompletionContext(session=session, sandbox=None)
 
         result = checker.check(context)
 
@@ -82,7 +83,7 @@ class TestFileOutputChecker:
     def test_no_filesystem_empty_files_returns_ok(self, session: Session) -> None:
         """No filesystem but no files required => ok (vacuously true)."""
         checker = FileOutputChecker(files=())
-        context = TaskCompletionContext(session=session, filesystem=None)
+        context = TaskCompletionContext(session=session, sandbox=None)
 
         result = checker.check(context)
 
@@ -95,7 +96,9 @@ class TestFileOutputChecker:
         fs.write("b.txt", "data")
 
         checker = FileOutputChecker(files=("a.txt", "b.txt"))
-        context = TaskCompletionContext(session=session, filesystem=fs)
+        context = TaskCompletionContext(
+            session=session, sandbox=make_memory_sandbox(fs)
+        )
 
         result = checker.check(context)
 
@@ -107,7 +110,9 @@ class TestFileOutputChecker:
         fs.write("a.txt", "data")
 
         checker = FileOutputChecker(files=("a.txt", "b.txt"))
-        context = TaskCompletionContext(session=session, filesystem=fs)
+        context = TaskCompletionContext(
+            session=session, sandbox=make_memory_sandbox(fs)
+        )
 
         result = checker.check(context)
 
@@ -118,7 +123,9 @@ class TestFileOutputChecker:
     def test_all_files_missing(self, session: Session, fs: Filesystem) -> None:
         """All files missing => incomplete."""
         checker = FileOutputChecker(files=("x.txt", "y.txt"))
-        context = TaskCompletionContext(session=session, filesystem=fs)
+        context = TaskCompletionContext(
+            session=session, sandbox=make_memory_sandbox(fs)
+        )
 
         result = checker.check(context)
 
@@ -129,7 +136,9 @@ class TestFileOutputChecker:
     def test_empty_files_list(self, session: Session, fs: Filesystem) -> None:
         """Empty file list => ok (vacuously true)."""
         checker = FileOutputChecker(files=())
-        context = TaskCompletionContext(session=session, filesystem=fs)
+        context = TaskCompletionContext(
+            session=session, sandbox=make_memory_sandbox(fs)
+        )
 
         result = checker.check(context)
 
@@ -139,7 +148,9 @@ class TestFileOutputChecker:
         """Missing file list truncated to 3 with ellipsis."""
         files = tuple(f"f{i}.txt" for i in range(6))
         checker = FileOutputChecker(files=files)
-        context = TaskCompletionContext(session=session, filesystem=fs)
+        context = TaskCompletionContext(
+            session=session, sandbox=make_memory_sandbox(fs)
+        )
 
         result = checker.check(context)
 
@@ -184,7 +195,9 @@ class TestCompositeChecker:
             ),
             all_must_pass=True,
         )
-        context = TaskCompletionContext(session=session, filesystem=fs)
+        context = TaskCompletionContext(
+            session=session, sandbox=make_memory_sandbox(fs)
+        )
 
         result = checker.check(context)
 
@@ -202,7 +215,9 @@ class TestCompositeChecker:
             ),
             all_must_pass=True,
         )
-        context = TaskCompletionContext(session=session, filesystem=fs)
+        context = TaskCompletionContext(
+            session=session, sandbox=make_memory_sandbox(fs)
+        )
 
         result = checker.check(context)
 
@@ -220,7 +235,9 @@ class TestCompositeChecker:
             ),
             all_must_pass=False,
         )
-        context = TaskCompletionContext(session=session, filesystem=fs)
+        context = TaskCompletionContext(
+            session=session, sandbox=make_memory_sandbox(fs)
+        )
 
         result = checker.check(context)
 
@@ -235,7 +252,9 @@ class TestCompositeChecker:
             ),
             all_must_pass=False,
         )
-        context = TaskCompletionContext(session=session, filesystem=fs)
+        context = TaskCompletionContext(
+            session=session, sandbox=make_memory_sandbox(fs)
+        )
 
         result = checker.check(context)
 

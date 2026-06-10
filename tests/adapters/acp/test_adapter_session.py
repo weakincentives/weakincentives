@@ -177,7 +177,7 @@ class TestHandshakeAndConfigure:
                 mode_id="build",
                 quiet_period_ms=0,
             ),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -211,7 +211,7 @@ class TestHandshakeAndConfigure:
                 model_id="test-model",
                 quiet_period_ms=0,
             ),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -248,7 +248,7 @@ class TestHandshakeAndConfigure:
                 mode_id="plan",
                 quiet_period_ms=0,
             ),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -268,7 +268,7 @@ class TestHandshakeAndConfigure:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp", env={"FOO": "bar"}),
+            client_config=ACPClientConfig(env={"FOO": "bar"}),
         )
 
         prompt = _make_mock_prompt()
@@ -413,7 +413,7 @@ class TestProtocolImportError:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         original_import = builtins.__import__
@@ -474,7 +474,7 @@ class TestHandshakeTimeout:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -509,7 +509,7 @@ class TestHandshakeTimeout:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp", startup_timeout_s=0.05),
+            client_config=ACPClientConfig(startup_timeout_s=0.05),
         )
 
         prompt = _make_mock_prompt()

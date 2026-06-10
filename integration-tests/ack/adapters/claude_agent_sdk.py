@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
 from weakincentives.adapters.core import ProviderAdapter
@@ -79,7 +80,6 @@ class ClaudeAgentSDKFixture:
             model=self.get_model(),
             client_config=ClaudeAgentSDKClientConfig(
                 permission_mode="bypassPermissions",
-                cwd=str(tmp_path),
                 isolation=IsolationConfig.inherit_host_auth(),
             ),
         )
@@ -95,35 +95,32 @@ class ClaudeAgentSDKFixture:
             ClaudeAgentSDKClientConfig,
             IsolationConfig,
             NetworkPolicy,
-            SandboxConfig,
         )
 
         if sandbox_mode == "read-only":
-            sandbox = SandboxConfig(enabled=True, writable_paths=())
+            writable_paths: tuple[str, ...] = ()
             network_policy = NetworkPolicy.no_network()
             # acceptEdits respects sandbox boundaries; bypassPermissions
             # skips all permission checks and overrides the sandbox.
             permission_mode = "acceptEdits"
         elif sandbox_mode == "workspace-write":
-            sandbox = SandboxConfig(
-                enabled=True,
-                writable_paths=(str(tmp_path),),
-            )
+            writable_paths = (str(tmp_path),)
             network_policy = None
             permission_mode = "bypassPermissions"
         else:
             msg = f"Unsupported sandbox_mode: {sandbox_mode}"
             raise ValueError(msg)
 
+        isolation = replace(
+            IsolationConfig.inherit_host_auth(network_policy=network_policy),
+            sandbox_enabled=True,
+            writable_paths=writable_paths,
+        )
         return ClaudeAgentSDKAdapter(
             model=self.get_model(),
             client_config=ClaudeAgentSDKClientConfig(
                 permission_mode=permission_mode,
-                cwd=str(tmp_path),
-                isolation=IsolationConfig.inherit_host_auth(
-                    sandbox=sandbox,
-                    network_policy=network_policy,
-                ),
+                isolation=isolation,
             ),
         )
 
@@ -143,7 +140,6 @@ class ClaudeAgentSDKFixture:
             model=self.get_model(),
             client_config=ClaudeAgentSDKClientConfig(
                 permission_mode="bypassPermissions",
-                cwd=str(tmp_path),
                 isolation=IsolationConfig.inherit_host_auth(env=dict(env)),
             ),
         )

@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from ..filesystem import Filesystem
     from ..runtime.events import ToolInvoked
     from ..runtime.session.protocols import SessionProtocol
+    from ..sandbox import Sandbox
     from ._prompt_resources import PromptResources
     from .protocols import PromptProtocol
 
@@ -170,11 +171,13 @@ class FeedbackContext:
         session: The current session for state access.
         prompt: The prompt being executed.
         deadline: Optional deadline for time-aware feedback.
+        sandbox: Execution environment, when one is open.
     """
 
     session: SessionProtocol
     prompt: PromptProtocol[Any]
     deadline: Deadline | None = None
+    sandbox: Sandbox | None = None
 
     @property
     def prompt_name(self) -> str:
@@ -192,10 +195,8 @@ class FeedbackContext:
 
     @property
     def filesystem(self) -> Filesystem | None:
-        """Return the filesystem resource if available, otherwise None."""
-        from ..filesystem import Filesystem
-
-        return self.resources.get_optional(Filesystem)
+        """Return the sandbox's filesystem facet, if a sandbox is present."""
+        return self.sandbox.filesystem if self.sandbox is not None else None
 
     def _feedback_for_prompt(self) -> Sequence[Feedback]:
         """Return all feedback for the current prompt."""
@@ -587,6 +588,7 @@ def collect_feedback(
     prompt: PromptProtocol[Any],
     session: SessionProtocol,
     deadline: Deadline | None = None,
+    sandbox: Sandbox | None = None,
 ) -> str | None:
     """Collect feedback from providers configured on the prompt.
 
@@ -597,6 +599,7 @@ def collect_feedback(
         prompt: The prompt with feedback_providers configured.
         session: The current session for state access and feedback storage.
         deadline: Optional deadline for time-aware feedback providers.
+        sandbox: Execution environment for filesystem-aware triggers.
 
     Returns:
         Rendered feedback text if a provider triggered, None otherwise.
@@ -615,6 +618,7 @@ def collect_feedback(
         session=session,
         prompt=prompt,
         deadline=deadline,
+        sandbox=sandbox,
     )
     return run_feedback_providers(
         providers=prompt.feedback_providers,

@@ -179,7 +179,8 @@ guidance without tools is toothless**.
 Examples:
 
 - `WorkspaceDigestSection` — Renders cached workspace digest
-- `WorkspaceSection` — Workspace with file tools (works with all adapters)
+- The workspace preview section — appended by
+  `PromptTemplate.create(sandbox=...)`, rendered from the opened sandbox
 
 Each section bundles the instructions ("here's how to use these tools") with the
 tools themselves. The model sees them together.

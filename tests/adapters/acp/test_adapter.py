@@ -28,7 +28,6 @@ from weakincentives.adapters.acp.adapter import ACPAdapter
 from weakincentives.adapters.acp.config import ACPAdapterConfig, ACPClientConfig
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.clock import SYSTEM_CLOCK
-from weakincentives.filesystem import Filesystem
 from weakincentives.runtime.events import InProcessDispatcher
 
 from .conftest import (
@@ -150,59 +149,6 @@ class TestExpiredDeadline:
 
         with pytest.raises(PromptEvaluationError, match="Deadline expired"):
             acp_adapter.evaluate(mock_prompt, session=session, deadline=deadline)
-
-
-class TestResolveCwd:
-    def test_resolve_cwd_config_cwd_returns_configured_path(self) -> None:
-        adapter = ACPAdapter(client_config=ACPClientConfig(cwd="/tmp/work"))
-        prompt = _make_mock_prompt()
-        effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-        assert effective_cwd == "/tmp/work"
-        assert temp_dir is None
-
-    def test_resolve_cwd_no_cwd_creates_temp_dir(self) -> None:
-        adapter = ACPAdapter(client_config=ACPClientConfig(cwd=None))
-        prompt = _make_mock_prompt()
-        effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-        assert effective_cwd is not None
-        assert temp_dir is not None
-        assert effective_cwd == temp_dir
-
-        # Clean up
-        import shutil
-
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-    def test_resolve_cwd_filesystem_root_used_when_no_config(self) -> None:
-        adapter = ACPAdapter(client_config=ACPClientConfig(cwd=None))
-        prompt = _make_mock_prompt()
-        fs = Filesystem.host("/tmp/fs-root")
-        prompt.filesystem.return_value = fs
-        effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-        assert effective_cwd == "/tmp/fs-root"
-        assert temp_dir is None
-
-    def test_resolve_cwd_config_takes_precedence_over_filesystem(self) -> None:
-        adapter = ACPAdapter(client_config=ACPClientConfig(cwd="/tmp/configured"))
-        prompt = _make_mock_prompt()
-        fs = Filesystem.host("/tmp/fs-root")
-        prompt.filesystem.return_value = fs
-        effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-        assert effective_cwd == "/tmp/configured"
-        assert temp_dir is None
-
-    def test_resolve_cwd_non_host_filesystem_falls_back_to_cwd(self) -> None:
-        from pathlib import Path
-
-        adapter = ACPAdapter(client_config=ACPClientConfig(cwd=None))
-        prompt = _make_mock_prompt()
-        mock_fs = MagicMock()
-        mock_fs.__class__.__name__ = "SomeOtherFilesystem"
-        prompt.filesystem.return_value = mock_fs
-        effective_cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-        assert effective_cwd is not None
-        assert temp_dir is None
-        assert effective_cwd == str(Path.cwd().resolve())
 
 
 class TestExtractText:
@@ -437,6 +383,7 @@ def _prepare_tools_common(
         "heartbeat": None,
         "run_context": None,
         "visibility_signal": MagicMock(),
+        "sandbox": MagicMock(),
     }
 
 

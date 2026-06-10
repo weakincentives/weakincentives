@@ -154,7 +154,7 @@ class TestContinuationLoop:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         session = _make_mock_session()
@@ -206,7 +206,7 @@ class TestContinuationLoop:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         session = _make_mock_session()
@@ -257,7 +257,7 @@ class TestContinuationLoop:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         session = _make_mock_session()
@@ -284,7 +284,7 @@ class TestContinuationLoop:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         session = _make_mock_session()
@@ -342,7 +342,7 @@ class TestContinuationLoop:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         session = _make_mock_session()
@@ -376,7 +376,7 @@ class TestContinuationLoop:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         session = _make_mock_session()
@@ -447,7 +447,7 @@ class TestContinuationLoop:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
             clock=clock,
         )
 

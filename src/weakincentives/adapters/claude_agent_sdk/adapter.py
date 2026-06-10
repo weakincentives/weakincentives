@@ -15,16 +15,13 @@
 from __future__ import annotations
 
 import contextlib
-import shutil
-import tempfile
 from datetime import datetime
-from typing import Any, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 from uuid import uuid4
 
 from ...budget import Budget, BudgetTracker
 from ...clock import SYSTEM_CLOCK
 from ...deadlines import Deadline
-from ...filesystem import Filesystem, HostBackend
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.protocols import PromptProtocol
@@ -34,7 +31,9 @@ from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.watchdog import Heartbeat
+from ...sandbox import LocalSandboxProvider, SandboxProvider
 from ...types import AdapterName
+from .._shared._sandbox import open_prompt_sandbox
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
 from ._async_utils import run_async
@@ -58,6 +57,9 @@ from ._transcript_collector import TranscriptCollector
 from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import IsolationConfig, get_default_model
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
@@ -139,47 +141,10 @@ def _dispatch_render_events(
         )
 
 
-def _resolve_workspace(
-    prompt: Prompt[Any],
-    client_config: ClaudeAgentSDKClientConfig,
-) -> tuple[Prompt[Any], str | None, str | None]:
-    """Resolve workspace cwd and filesystem binding."""
-    temp_workspace_dir: str | None = None
-    effective_cwd: str | None = client_config.cwd
-
-    if prompt.filesystem() is None:
-        if effective_cwd is None:
-            temp_workspace_dir = tempfile.mkdtemp(prefix="wink-sdk-")
-            effective_cwd = temp_workspace_dir
-            logger.debug(
-                "claude_agent_sdk.evaluate.temp_workspace_created",
-                event="evaluate.temp_workspace_created",
-                context={"temp_workspace_dir": temp_workspace_dir},
-            )
-        filesystem = Filesystem.host(effective_cwd)
-        prompt = prompt.bind(resources={Filesystem: filesystem})
-        logger.debug(
-            "claude_agent_sdk.evaluate.filesystem_bound",
-            event="evaluate.filesystem_bound",
-            context={"effective_cwd": effective_cwd},
-        )
-    elif effective_cwd is None:
-        fs = prompt.filesystem()
-        if fs is not None and isinstance(fs.backend, HostBackend):
-            effective_cwd = fs.root
-            logger.debug(
-                "claude_agent_sdk.evaluate.cwd_from_workspace",
-                event="evaluate.cwd_from_workspace",
-                context={"effective_cwd": effective_cwd},
-            )
-
-    return prompt, effective_cwd, temp_workspace_dir
-
-
 def _setup_ephemeral_home(
     client_config: ClaudeAgentSDKClientConfig,
     rendered: RenderedPrompt[Any],
-    effective_cwd: str | None,
+    effective_cwd: str,
 ) -> tuple[IsolationConfig, EphemeralHome]:
     """Create and configure ephemeral home for hermetic isolation."""
     isolation = client_config.isolation or IsolationConfig()
@@ -200,15 +165,30 @@ def _setup_ephemeral_home(
             "ephemeral_home_path": str(ephemeral_home.home_path),
             "workspace_path": effective_cwd,
             "network_policy": network_policy_repr,
-            "sandbox_enabled": (
-                isolation.sandbox.enabled if isolation.sandbox else True
-            ),
+            "sandbox_enabled": isolation.sandbox_enabled,
             "has_api_key_override": isolation.api_key is not None,
             "include_host_env": isolation.include_host_env,
             "skill_count": len(skills),
         },
     )
     return isolation, ephemeral_home
+
+
+def _make_transcript_collector(
+    client_config: ClaudeAgentSDKClientConfig,
+    prompt_name: str,
+    session: SessionProtocol,
+) -> TranscriptCollector | None:
+    """Build a transcript collector when collection is configured."""
+    transcript_config = client_config.transcript_collection
+    if transcript_config is None:
+        return None
+    session_id = session.session_id
+    return TranscriptCollector(
+        prompt_name=prompt_name,
+        config=transcript_config,
+        session_id=str(session_id) if session_id else None,
+    )
 
 
 def _build_and_dispatch_response[OutputT](
@@ -226,6 +206,7 @@ def _build_and_dispatch_response[OutputT](
     prompt: Prompt[OutputT],
     run_context: RunContext | None,
     duration_ms: int,
+    sandbox: Sandbox | None = None,
 ) -> PromptResponse[OutputT]:
     """Extract result, validate, dispatch events, and return response."""
     result_text, output, usage = extract_result(
@@ -250,6 +231,7 @@ def _build_and_dispatch_response[OutputT](
         budget_tracker=budget_tracker,
         prompt=cast("PromptProtocol[Any]", prompt),
         adapter=adapter,
+        sandbox=sandbox,
     )
 
     response = PromptResponse(
@@ -301,6 +283,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         model_config: ClaudeAgentSDKModelConfig | None = None,
         allowed_tools: tuple[str, ...] | None = None,
         disallowed_tools: tuple[str, ...] = (),
+        sandbox_provider: SandboxProvider | None = None,
     ) -> None:
         """Initialize the Claude Agent SDK adapter.
 
@@ -313,10 +296,15 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             model_config: Model parameter configuration.
             allowed_tools: Tools Claude can use (None = all available).
             disallowed_tools: Tools to explicitly block.
+            sandbox_provider: Provider materializing the prompt's sandbox
+                config. Defaults to :class:`LocalSandboxProvider`.
         """
         resolved_model = model if model is not None else get_default_model()
         self._model = resolved_model
         self._client_config = client_config or ClaudeAgentSDKClientConfig()
+        self._sandbox_provider = (
+            sandbox_provider if sandbox_provider is not None else LocalSandboxProvider()
+        )
         self._model_config = model_config or ClaudeAgentSDKModelConfig(
             model=resolved_model
         )
@@ -331,7 +319,6 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             context={
                 "model": resolved_model,
                 "permission_mode": self._client_config.permission_mode,
-                "cwd": self._client_config.cwd,
                 "max_turns": self._client_config.max_turns,
                 "max_budget_usd": self._client_config.max_budget_usd,
                 "suppress_stderr": self._client_config.suppress_stderr,
@@ -427,6 +414,34 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         sdk = _import_sdk()
         self._stderr_buffer.clear()
 
+        sandbox = open_prompt_sandbox(prompt, self._sandbox_provider)
+        try:
+            return await self._evaluate_in_sandbox(
+                sdk=sdk,
+                prompt=prompt,
+                session=session,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=heartbeat,
+                run_context=run_context,
+                sandbox=sandbox,
+            )
+        finally:
+            sandbox.close()
+
+    async def _evaluate_in_sandbox(
+        self,
+        *,
+        sdk: Any,
+        prompt: Prompt[OutputT],
+        session: SessionProtocol,
+        deadline: Deadline | None,
+        budget_tracker: BudgetTracker | None,
+        heartbeat: Heartbeat | None,
+        run_context: RunContext | None,
+        sandbox: Sandbox,
+    ) -> PromptResponse[OutputT]:
+        """Evaluate against an opened sandbox."""
         rendered = prompt.render(session=session)
         prompt_text = rendered.text
 
@@ -451,29 +466,22 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         output_format = build_output_format(rendered)
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
-        prompt, effective_cwd, temp_workspace_dir = _resolve_workspace(
-            prompt, self._client_config
-        )
 
-        try:
-            with prompt.resources:
-                return await self._run_with_prompt_context(
-                    sdk=sdk,
-                    prompt=prompt,
-                    prompt_name=prompt_name,
-                    prompt_text=prompt_text,
-                    rendered=rendered,
-                    session=session,
-                    output_format=output_format,
-                    deadline=deadline,
-                    budget_tracker=budget_tracker,
-                    effective_cwd=effective_cwd,
-                    heartbeat=heartbeat,
-                    run_context=run_context,
-                )
-        finally:
-            if temp_workspace_dir:
-                shutil.rmtree(temp_workspace_dir, ignore_errors=True)
+        with prompt.resources:
+            return await self._run_with_prompt_context(
+                sdk=sdk,
+                prompt=prompt,
+                prompt_name=prompt_name,
+                prompt_text=prompt_text,
+                rendered=rendered,
+                session=session,
+                output_format=output_format,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=heartbeat,
+                run_context=run_context,
+                sandbox=sandbox,
+            )
 
     def _create_hook_context_and_tools[OutputT](  # pyright: ignore[reportGeneralTypeIssues]  # ty: ignore[shadowed-type-variable]
         self,
@@ -486,6 +494,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat | None,
         run_context: RunContext | None,
+        sandbox: Sandbox,
     ) -> tuple[HookContext, VisibilityExpansionSignal, tuple[Any, ...]]:
         """Create hook context, visibility signal, and bridged tools."""
         mcp_tool_state = MCPToolExecutionState()
@@ -495,6 +504,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             heartbeat=heartbeat,
             run_context=run_context,
             mcp_tool_state=mcp_tool_state,
+            sandbox=sandbox,
         )
         hook_context = HookContext(
             session=session,
@@ -518,6 +528,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             run_context=run_context,
             visibility_signal=visibility_signal,
             mcp_tool_state=mcp_tool_state,
+            sandbox=sandbox,
         )
         logger.debug(
             "claude_agent_sdk.run_context.bridged_tools",
@@ -543,11 +554,12 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         output_format: dict[str, Any] | None,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
-        effective_cwd: str | None,
         heartbeat: Heartbeat | None,
         run_context: RunContext | None,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Run SDK query within prompt context."""
+        effective_cwd = sandbox.root
         hook_context, visibility_signal, bridged_tools = (
             self._create_hook_context_and_tools(
                 prompt=prompt,
@@ -558,6 +570,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
+                sandbox=sandbox,
             )
         )
 
@@ -578,15 +591,9 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             self._client_config, rendered, effective_cwd
         )
 
-        transcript_config = self._client_config.transcript_collection
-        collector: TranscriptCollector | None = None
-        if transcript_config is not None:
-            session_id = session.session_id
-            collector = TranscriptCollector(
-                prompt_name=prompt_name,
-                config=transcript_config,
-                session_id=str(session_id) if session_id else None,
-            )
+        collector = _make_transcript_collector(
+            self._client_config, prompt_name, session
+        )
 
         try:
             async with collector.run() if collector else contextlib.nullcontext():
@@ -650,6 +657,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             prompt=prompt,
             run_context=run_context,
             duration_ms=duration_ms,
+            sandbox=sandbox,
         )
 
     async def _run_sdk_query(
@@ -661,7 +669,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         hook_context: HookContext,
         bridged_tools: tuple[Any, ...],
         ephemeral_home: EphemeralHome,
-        effective_cwd: str | None = None,
+        effective_cwd: str,
         visibility_signal: VisibilityExpansionSignal,
         collector: TranscriptCollector | None,
     ) -> list[Any]:

@@ -52,7 +52,6 @@ from claude_agent_sdk.types import (
     UserPromptSubmitHookInput,
 )
 
-from ...filesystem import Filesystem
 from ...runtime.logging import StructuredLogger, get_logger
 from ._hook_context import HookConstraints, HookContext, HookStats
 from ._hook_tools import (
@@ -223,18 +222,12 @@ def create_post_tool_use_hook(
         An async hook callback function matching SDK signature.
     """
 
-    def _get_filesystem() -> Filesystem | None:
-        try:
-            return hook_context.resources.get(Filesystem)
-        except (LookupError, AttributeError):
-            return None
-
     def _check_task_completion(tool_input: dict[str, Any]) -> TaskCompletionResult:
         context = TaskCompletionContext(
             session=hook_context.session,
             tentative_output=tool_input.get("output"),
             stop_reason="structured_output",
-            filesystem=_get_filesystem(),
+            sandbox=hook_context.sandbox,
         )
         return task_completion_checker.check(context)  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
 
@@ -431,12 +424,6 @@ def create_task_completion_stop_hook(
         >>> hook = create_task_completion_stop_hook(hook_context, checker=checker)
     """
 
-    def _get_filesystem() -> Filesystem | None:
-        try:
-            return hook_context.resources.get(Filesystem)
-        except (LookupError, AttributeError):
-            return None
-
     async def task_completion_stop_hook(
         input_data: HookInput,
         tool_use_id: str | None,
@@ -460,7 +447,7 @@ def create_task_completion_stop_hook(
             session=hook_context.session,
             tentative_output=None,
             stop_reason=stop_reason,
-            filesystem=_get_filesystem(),
+            sandbox=hook_context.sandbox,
         )
         result = checker.check(context)
 

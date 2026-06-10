@@ -172,9 +172,9 @@ class ReferenceParams:
 
    - Renders cached workspace summary from session state
 
-1. **Workspace Tools** (`WorkspaceSection`)
+1. **Sandbox** (`SandboxConfig` on the template)
 
-   - Provides file tools via Claude Agent SDK
+   - The adapter opens it per evaluation; native file tools act on its root
    - Uses configured host mounts
 
 1. **Review Request** (`MarkdownSection[ReviewTurnParams]`)

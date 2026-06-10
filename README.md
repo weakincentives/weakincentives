@@ -52,9 +52,8 @@ PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
 ├── WorkspaceDigestSection     ← auto-generated codebase summary
 ├── MarkdownSection (reference docs, progressive disclosure)
-├── WorkspaceSection            ← contributes file tools via SDK
-│   └── (nested workspace docs)
-└── MarkdownSection (user request)
+├── MarkdownSection (user request)
+└── workspace preview           ← rendered from the opened sandbox
 ```
 
 Each section can render instructions, contribute tools, nest child sections, and
@@ -101,10 +100,10 @@ capabilities once, in one place, and the definition ports across runtimes.
 - **Transactional execution.** Tool calls are atomic transactions. When a tool
   fails, WINK automatically rolls back session state and filesystem changes to
   their pre-call state. Failed tools don't leave traces in mutable state.
-- **Workspace integration.** Mount host directories into agent workspaces with
-  configurable include/exclude patterns. The Claude Agent SDK adapter provides
-  sandboxed file tools with automatic cleanup.
-  See [Workspace](specs/WORKSPACE.md).
+- **Sandboxed environments.** Declare environment intent on the template via
+  `SandboxConfig` (mounts with include/exclude patterns, egress policy, setup
+  commands); the adapter materializes one sandbox per evaluation and points the
+  harness at its root. See [Sandbox](specs/SANDBOX.md).
 
 ### Policies
 
@@ -271,30 +270,21 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKClientConfig,
     IsolationConfig,
     NetworkPolicy,
-    SandboxConfig,
-)
-from weakincentives.prompt import WorkspaceSection, HostMount
-
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(HostMount(host_path="src", mount_path="src"),),
-    allowed_host_roots=("/path/to/project",),
 )
 
 adapter = ClaudeAgentSDKAdapter(
     model="claude-opus-4-6",
     client_config=ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
-        cwd=str(workspace.temp_dir),
         isolation=IsolationConfig(
             network_policy=NetworkPolicy(allowed_domains=("docs.python.org",)),
-            sandbox=SandboxConfig(enabled=True),
+            sandbox_enabled=True,
         ),
     ),
 )
 
+# `prompt` declares its environment via PromptTemplate.create(sandbox=...)
 response = adapter.evaluate(prompt, session=session)
-workspace.cleanup()
 ```
 
 See [Claude Agent SDK Adapter](specs/CLAUDE_AGENT_SDK.md) for full configuration.
@@ -321,24 +311,16 @@ from weakincentives.adapters.codex_app_server import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
 )
-from weakincentives.prompt import WorkspaceSection, HostMount
-
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(HostMount(host_path="src", mount_path="src"),),
-    allowed_host_roots=("/path/to/project",),
-)
 
 adapter = CodexAppServerAdapter(
     model_config=CodexAppServerModelConfig(model="gpt-5.4"),
     client_config=CodexAppServerClientConfig(
-        cwd=str(workspace.temp_dir),
         approval_policy="never",
     ),
 )
 
+# `prompt` declares its environment via PromptTemplate.create(sandbox=...)
 response = adapter.evaluate(prompt, session=session)
-workspace.cleanup()
 ```
 
 See [Codex App Server Adapter](specs/CODEX_APP_SERVER.md) for full configuration.
@@ -366,23 +348,14 @@ from weakincentives.adapters.opencode_acp import (
     OpenCodeACPAdapterConfig,
     OpenCodeACPClientConfig,
 )
-from weakincentives.prompt import WorkspaceSection, HostMount
-
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(HostMount(host_path="src", mount_path="src"),),
-    allowed_host_roots=("/path/to/project",),
-)
 
 adapter = OpenCodeACPAdapter(
     adapter_config=OpenCodeACPAdapterConfig(),
-    client_config=OpenCodeACPClientConfig(
-        cwd=str(workspace.temp_dir),
-    ),
+    client_config=OpenCodeACPClientConfig(),
 )
 
+# `prompt` declares its environment via PromptTemplate.create(sandbox=...)
 response = adapter.evaluate(prompt, session=session)
-workspace.cleanup()
 ```
 
 See [ACP Adapter](specs/ACP_ADAPTER.md) and

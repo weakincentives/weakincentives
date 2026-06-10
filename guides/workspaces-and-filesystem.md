@@ -31,14 +31,15 @@ knowing whether the backend is an in-memory store, a sandboxed temp
 directory, or a Podman container. The protocol handles path validation,
 size limits, and snapshot/restore.
 
-## The Workspace Mental Model
+## The Sandbox Mental Model
 
-A workspace is a temporary directory on the host that contains a
-controlled subset of files the agent needs. Think of it as a sandbox:
+The agent acts on a sandbox: a temporary directory materialized from the
+`SandboxConfig` declared on the prompt template. Think of it as the one
+environment every effect lands in:
 
 ```
-Host filesystem             Workspace (temp dir)
-/repos/project/             /tmp/wink-abc123/
+Host filesystem             Sandbox (temp dir)
+/repos/project/             /tmp/wink-sandbox-abc123/
   src/                        code/
   tests/                        src/
   .git/           -- mount -->    tests/
@@ -46,9 +47,9 @@ Host filesystem             Workspace (temp dir)
   node_modules/
 ```
 
-The workspace copies files from the host into a temp directory according
-to mount rules you define. The agent sees only what you explicitly mount.
-Everything else is invisible.
+The sandbox provider copies files from the host into a temp directory
+according to mount rules you declare. The agent sees only what you
+explicitly mount. Everything else is invisible.
 
 This is the core security boundary. The agent cannot read `/etc/passwd`
 or your `.env` file because those paths were never mounted. Even if the
@@ -57,10 +58,10 @@ protocol rejects them.
 
 ## Host Mounts
 
-A `HostMount` defines what gets copied from the host into the workspace:
+A `HostMount` defines what gets copied from the host into the sandbox:
 
 ```python nocheck
-from weakincentives.prompt import HostMount
+from weakincentives.sandbox import HostMount
 
 mount = HostMount(
     host_path="/repos/project",
@@ -84,10 +85,16 @@ This prevents path traversal attacks, especially important when mount
 paths come from user input.
 
 ```python nocheck
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(mount,),
-    allowed_host_roots=("/repos",),  # Only /repos/** allowed
+from weakincentives.sandbox import SandboxConfig
+
+template = PromptTemplate.create(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    sandbox=SandboxConfig(
+        mounts=(mount,),
+        allowed_host_roots=("/repos",),  # Only /repos/** allowed
+    ),
 )
 ```
 
@@ -95,22 +102,22 @@ Symlinks are rejected by default. This prevents symlink-based escapes
 where a link inside the mounted directory points outside the allowed
 roots.
 
-## Workspace Lifecycle
+## Sandbox Lifecycle
 
-Workspaces follow a predictable lifecycle:
+The adapter owns the sandbox lifecycle, one sandbox per evaluation:
 
-1. **Create**: Temp directory created, files copied per mount config
-1. **Use**: Agent reads and writes files within the workspace
-1. **Clone**: Sub-agents can share the workspace via reference counting
-1. **Cleanup**: Last reference deletes the temp directory
-
-The workspace section implements context manager protocol. When used
-with `Prompt.resources`, cleanup is automatic:
+1. **Open**: The adapter's provider materializes the template's
+   `SandboxConfig` (temp directory, files copied per mount config)
+1. **Preview**: The workspace preview section renders a listing of the
+   opened sandbox into the prompt
+1. **Use**: The harness runs with `cwd = sandbox.root`; tool handlers see
+   the same environment via `context.filesystem` / `context.shell`
+1. **Close**: The sandbox (and its temp directory) is removed when
+   evaluation completes, even on error
 
 ```python nocheck
-with prompt.resources:
-    response = adapter.evaluate(prompt, session=session)
-# Workspace temp dir cleaned up here
+response = adapter.evaluate(prompt, session=session)
+# Sandbox opened, used, and closed inside evaluate()
 ```
 
 For full adapter integration patterns, see the
@@ -161,7 +168,7 @@ tooling commands (test, lint, format), and known caveats.
 | Backend | Storage | Use Case |
 |---------|---------|----------|
 | `MemoryBackend` | Python dicts | Tests, evals, lightweight agents |
-| `HostBackend` | Sandboxed host directory | Production workspace access |
+| `HostBackend` | Sandboxed host directory | Production sandbox access |
 
 ### When to Use the In-Memory Backend
 

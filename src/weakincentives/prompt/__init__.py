@@ -315,7 +315,6 @@ from .protocols import (
     ProviderAdapterProtocol,
     RenderedPromptProtocol,
     ToolSuiteSection,
-    WorkspaceSectionProtocol,
 )
 from .rendering import RenderedPrompt
 from .section import Section, SectionVisibility
@@ -335,15 +334,14 @@ from .task_examples import TaskExample, TaskExamplesSection, TaskStep
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 from .workspace import (
-    HostMount,
-    HostMountPreview,
-    WorkspaceBudgetExceededError,
-    WorkspaceSection,
-    WorkspaceSecurityError,
-    compute_workspace_fingerprint,
+    WORKSPACE_PREVIEW_KEY,
+    WorkspacePreviewParams,
+    workspace_preview_params,
+    workspace_preview_section,
 )
 
 __all__ = [
+    "WORKSPACE_PREVIEW_KEY",
     "CompositeChecker",
     "DeadlineFeedback",
     "Feedback",
@@ -354,8 +352,6 @@ __all__ = [
     "FileCreatedTrigger",
     "FileCreatedTriggerState",
     "FileOutputChecker",
-    "HostMount",
-    "HostMountPreview",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "Observation",
@@ -408,17 +404,15 @@ __all__ = [
     "ToolResult",
     "ToolSuiteSection",
     "VisibilityExpansionRequired",
-    "WorkspaceBudgetExceededError",
-    "WorkspaceSection",
-    "WorkspaceSectionProtocol",
-    "WorkspaceSecurityError",
+    "WorkspacePreviewParams",
     "collect_feedback",
-    "compute_workspace_fingerprint",
     "hash_json",
     "hash_text",
     "normalize_component_key",
     "parse_structured_output",
     "run_feedback_providers",
+    "workspace_preview_params",
+    "workspace_preview_section",
 ]
 
 

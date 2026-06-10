@@ -29,9 +29,9 @@ from weakincentives.prompt import (
     Tool,
     ToolContext,
     ToolResult,
-    WorkspaceSection,
 )
 from weakincentives.runtime.session import Replace, Session, SliceOp, reducer
+from weakincentives.sandbox import LocalSandboxProvider, Sandbox, SandboxConfig
 
 from ..adapters import AdapterFixture
 from . import TransactionPromptParams, build_transactional_prompt, make_adapter_ns
@@ -237,7 +237,7 @@ def _run_tool_sequence(
     *,
     adapter_fixture: AdapterFixture,
     session: Session,
-    workspace: WorkspaceSection,
+    sandbox: Sandbox,
     write_succeed_tool: Tool[WriteAndSucceedParams, WriteAndSucceedResult],
     write_fail_tool: Tool[WriteAndFailParams, WriteAndFailResult],
 ) -> None:
@@ -246,12 +246,11 @@ def _run_tool_sequence(
             make_adapter_ns(adapter_fixture.adapter_name),
             write_succeed_tool,
             write_fail_tool,
-            workspace,
         )
     ).bind(TransactionPromptParams())
 
     with prompt.resources:
-        adapter = adapter_fixture.create_adapter(workspace.temp_dir)
+        adapter = adapter_fixture.create_adapter(Path(sandbox.root))
         bridged = create_bridged_tools(
             (write_succeed_tool, write_fail_tool),
             session=session,
@@ -262,6 +261,7 @@ def _run_tool_sequence(
             budget_tracker=None,
             adapter_name=adapter_fixture.adapter_name,
             prompt_name=prompt.name,
+            sandbox=sandbox,
         )
 
         write_succeed = bridged[0]
@@ -290,7 +290,7 @@ def _run_mixed_tool_sequence(
     *,
     adapter_fixture: AdapterFixture,
     session: Session,
-    workspace: WorkspaceSection,
+    sandbox: Sandbox,
     write_succeed_tool: Tool[WriteAndSucceedParams, WriteAndSucceedResult],
     write_fail_tool: Tool[WriteAndFailParams, WriteAndFailResult],
 ) -> None:
@@ -299,12 +299,11 @@ def _run_mixed_tool_sequence(
             make_adapter_ns(adapter_fixture.adapter_name),
             write_succeed_tool,
             write_fail_tool,
-            workspace,
         )
     ).bind(TransactionPromptParams())
 
     with prompt.resources:
-        adapter = adapter_fixture.create_adapter(workspace.temp_dir)
+        adapter = adapter_fixture.create_adapter(Path(sandbox.root))
         bridged = create_bridged_tools(
             (write_succeed_tool, write_fail_tool),
             session=session,
@@ -315,6 +314,7 @@ def _run_mixed_tool_sequence(
             budget_tracker=None,
             adapter_name=adapter_fixture.adapter_name,
             prompt_name=prompt.name,
+            sandbox=sandbox,
         )
 
         write_succeed = bridged[0]
@@ -352,9 +352,9 @@ def test_tool_failure_rolls_back_filesystem(
     adapter_fixture: AdapterFixture,
     session: Session,
 ) -> None:
-    """Failed tool calls roll back filesystem changes while successes persist."""
+    """Failed tool calls roll back sandbox changes while successes persist."""
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    workspace = WorkspaceSection(session=session)
+    sandbox = LocalSandboxProvider().open(SandboxConfig())
 
     try:
         write_succeed_tool = _build_write_and_succeed_tool()
@@ -363,15 +363,15 @@ def test_tool_failure_rolls_back_filesystem(
         _run_tool_sequence(
             adapter_fixture=adapter_fixture,
             session=session,
-            workspace=workspace,
+            sandbox=sandbox,
             write_succeed_tool=write_succeed_tool,
             write_fail_tool=write_fail_tool,
         )
 
-        assert workspace.filesystem.exists("success.txt")
-        assert not workspace.filesystem.exists("rollback.txt")
+        assert sandbox.filesystem.exists("success.txt")
+        assert not sandbox.filesystem.exists("rollback.txt")
     finally:
-        workspace.cleanup()
+        sandbox.close()
 
 
 def test_tool_failure_rolls_back_session_state(
@@ -380,7 +380,7 @@ def test_tool_failure_rolls_back_session_state(
 ) -> None:
     """Failed tool calls roll back session slice mutations."""
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    workspace = WorkspaceSection(session=session)
+    sandbox = LocalSandboxProvider().open(SandboxConfig())
 
     try:
         write_succeed_tool = _build_write_and_succeed_tool()
@@ -389,7 +389,7 @@ def test_tool_failure_rolls_back_session_state(
         _run_tool_sequence(
             adapter_fixture=adapter_fixture,
             session=session,
-            workspace=workspace,
+            sandbox=sandbox,
             write_succeed_tool=write_succeed_tool,
             write_fail_tool=write_fail_tool,
         )
@@ -398,7 +398,7 @@ def test_tool_failure_rolls_back_session_state(
         assert "op_success" in operation_ids
         assert "op_failure" not in operation_ids
     finally:
-        workspace.cleanup()
+        sandbox.close()
 
 
 def test_sequential_operations_isolation(
@@ -407,7 +407,7 @@ def test_sequential_operations_isolation(
 ) -> None:
     """Rollback affects only failed operations in mixed success/failure sequences."""
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    workspace = WorkspaceSection(session=session)
+    sandbox = LocalSandboxProvider().open(SandboxConfig())
 
     try:
         write_succeed_tool = _build_write_and_succeed_tool()
@@ -416,21 +416,21 @@ def test_sequential_operations_isolation(
         _run_mixed_tool_sequence(
             adapter_fixture=adapter_fixture,
             session=session,
-            workspace=workspace,
+            sandbox=sandbox,
             write_succeed_tool=write_succeed_tool,
             write_fail_tool=write_fail_tool,
         )
 
-        assert workspace.filesystem.exists("first.txt")
-        assert not workspace.filesystem.exists("second.txt")
-        assert workspace.filesystem.exists("third.txt")
+        assert sandbox.filesystem.exists("first.txt")
+        assert not sandbox.filesystem.exists("second.txt")
+        assert sandbox.filesystem.exists("third.txt")
 
         operation_ids = _operation_ids(session)
         assert "op1" in operation_ids
         assert "op2" not in operation_ids
         assert "op3" in operation_ids
     finally:
-        workspace.cleanup()
+        sandbox.close()
 
 
 def test_rollback_verified_in_debug_bundle(
@@ -440,7 +440,7 @@ def test_rollback_verified_in_debug_bundle(
 ) -> None:
     """Debug bundles reflect transactional rollback in filesystem and session data."""
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    workspace = WorkspaceSection(session=session)
+    sandbox = LocalSandboxProvider().open(SandboxConfig())
     bundle_dir = tmp_path / "bundles"
     bundle_dir.mkdir()
 
@@ -451,7 +451,7 @@ def test_rollback_verified_in_debug_bundle(
         _run_mixed_tool_sequence(
             adapter_fixture=adapter_fixture,
             session=session,
-            workspace=workspace,
+            sandbox=sandbox,
             write_succeed_tool=write_succeed_tool,
             write_fail_tool=write_fail_tool,
         )
@@ -467,7 +467,7 @@ def test_rollback_verified_in_debug_bundle(
                 adapter=adapter_fixture.adapter_name,
             )
             writer.write_session_after(session)
-            writer.write_filesystem(workspace.filesystem)
+            writer.write_filesystem(sandbox.filesystem)
 
         bundle = DebugBundle.load(writer.path)
 
@@ -484,4 +484,4 @@ def test_rollback_verified_in_debug_bundle(
         assert "op2" not in operation_ids
         assert "op3" in operation_ids
     finally:
-        workspace.cleanup()
+        sandbox.close()

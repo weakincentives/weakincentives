@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Adapter-specific ACK scenarios for workspace isolation behavior."""
+"""Adapter-specific ACK scenarios for sandbox isolation behavior."""
 
 from __future__ import annotations
 
@@ -19,97 +19,86 @@ from pathlib import Path
 import pytest
 
 from weakincentives.prompt import (
-    HostMount,
     MarkdownSection,
     Prompt,
     PromptTemplate,
-    WorkspaceSection,
 )
 from weakincentives.runtime.session import Session
+from weakincentives.sandbox import HostMount, SandboxConfig
 
 from ..adapters import AdapterFixture
 
 pytestmark = pytest.mark.ack_capability("workspace_isolation")
 
 
-def test_workspace_section_mounts_host_files(
+def test_sandbox_mounts_host_files(
     adapter_fixture: AdapterFixture,
     session: Session,
     tmp_path: Path,
 ) -> None:
-    """Workspace mounts expose host files to the adapter execution sandbox."""
+    """Sandbox mounts expose host files to the adapter execution environment."""
     host_dir = tmp_path / "host"
     host_dir.mkdir()
     source_file = host_dir / "mounted_file.txt"
     source_file.write_text("mounted content from host")
 
-    workspace = WorkspaceSection(
-        session=session,
-        mounts=[HostMount(host_path=str(host_dir), mount_path="data")],
-        allowed_host_roots=[tmp_path],
+    adapter = adapter_fixture.create_adapter(tmp_path)
+    prompt = Prompt(
+        PromptTemplate.create(
+            ns="integration.ack.workspace",
+            key="host-mount",
+            name="ack_workspace_mount",
+            sections=[
+                MarkdownSection(
+                    title="Task",
+                    key="task",
+                    template=(
+                        "Read data/mounted_file.txt and reply with its exact content."
+                    ),
+                ),
+            ],
+            sandbox=SandboxConfig(
+                mounts=(HostMount(host_path=str(host_dir), mount_path="data"),),
+                allowed_host_roots=(str(tmp_path),),
+            ),
+        )
     )
 
-    try:
-        adapter = adapter_fixture.create_adapter(workspace.temp_dir)
-        prompt = Prompt(
-            PromptTemplate.create(
-                ns="integration.ack.workspace",
-                key="host-mount",
-                name="ack_workspace_mount",
-                sections=[
-                    workspace,
-                    MarkdownSection(
-                        title="Task",
-                        key="task",
-                        template=(
-                            "Read data/mounted_file.txt and reply with its exact content."
-                        ),
-                    ),
-                ],
-            )
-        )
+    response = adapter.evaluate(prompt, session=session)
 
-        response = adapter.evaluate(prompt, session=session)
-
-        assert response.text is not None
-        assert "mounted content from host" in response.text
-    finally:
-        workspace.cleanup()
+    assert response.text is not None
+    assert "mounted content from host" in response.text
 
 
-def test_workspace_uses_temp_dir_as_cwd(
+def test_sandbox_root_is_cwd(
     adapter_fixture: AdapterFixture,
     session: Session,
+    tmp_path: Path,
 ) -> None:
-    """Workspace temp_dir is used as effective cwd during execution."""
-    workspace = WorkspaceSection(session=session)
-
-    try:
-        adapter = adapter_fixture.create_adapter(workspace.temp_dir)
-        prompt = Prompt(
-            PromptTemplate.create(
-                ns="integration.ack.workspace",
-                key="cwd",
-                name="ack_workspace_cwd",
-                sections=[
-                    workspace,
-                    MarkdownSection(
-                        title="Task",
-                        key="task",
-                        template=(
-                            "Run `pwd` and reply with the current directory path only."
-                        ),
+    """The opened sandbox root is used as effective cwd during execution."""
+    adapter = adapter_fixture.create_adapter(tmp_path)
+    prompt = Prompt(
+        PromptTemplate.create(
+            ns="integration.ack.workspace",
+            key="cwd",
+            name="ack_workspace_cwd",
+            sections=[
+                MarkdownSection(
+                    title="Task",
+                    key="task",
+                    template=(
+                        "Run `pwd` and reply with the current directory path only."
                     ),
-                ],
-            )
+                ),
+            ],
+            sandbox=SandboxConfig(),
         )
+    )
 
-        response = adapter.evaluate(prompt, session=session)
+    response = adapter.evaluate(prompt, session=session)
 
-        assert response.text is not None
-        assert str(workspace.temp_dir) in response.text
-    finally:
-        workspace.cleanup()
+    assert response.text is not None
+    assert "wink-sandbox-" in response.text
 
 
 @pytest.mark.ack_capability("custom_env_forwarding")

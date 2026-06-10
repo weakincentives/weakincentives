@@ -18,7 +18,7 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -154,7 +154,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt(text="Hello ACP")
@@ -183,7 +183,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt(text="Hello ACP")
@@ -215,6 +215,7 @@ class TestEvaluateProtocol:
                 prompt=prompt,
                 session=session,
                 deadline=None,
+                sandbox=ANY,
             )
 
     def test_evaluate_with_token_usage(self) -> None:
@@ -237,7 +238,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -273,7 +274,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -307,7 +308,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -337,7 +338,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -379,7 +380,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -418,7 +419,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -456,7 +457,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -489,7 +490,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -542,7 +543,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -571,7 +572,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd=None),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -611,7 +612,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()
@@ -646,7 +647,7 @@ class TestEvaluateProtocol:
 
         adapter = ACPAdapter(
             adapter_config=ACPAdapterConfig(quiet_period_ms=0),
-            client_config=ACPClientConfig(cwd="/tmp"),
+            client_config=ACPClientConfig(),
         )
 
         prompt = _make_mock_prompt()

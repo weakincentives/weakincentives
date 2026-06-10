@@ -89,7 +89,6 @@ class GeminiACPFixture:
                 approval_mode="yolo",
             ),
             client_config=GeminiACPClientConfig(
-                cwd=str(tmp_path),
                 allow_file_reads=True,
                 allow_file_writes=True,
                 permission_mode="auto",
@@ -128,7 +127,6 @@ class GeminiACPFixture:
                 approval_mode="yolo",
             ),
             client_config=GeminiACPClientConfig(
-                cwd=str(tmp_path),
                 allow_file_reads=True,
                 allow_file_writes=True,
                 permission_mode="auto",

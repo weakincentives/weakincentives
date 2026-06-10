@@ -19,13 +19,12 @@ This module provides protocols for prompt-related types:
 - **ProviderAdapterProtocol**: Interface for adapters
 - **RenderedPromptProtocol**: Interface for rendered prompt snapshots
 - **ToolSuiteSection**: Protocol for sections exposing tool suites
-- **WorkspaceSectionProtocol**: Protocol for workspace sections managing a filesystem
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Literal, Protocol, override, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from ..deadlines import Deadline
 from ._overrides_protocols import PromptOverridesStore
@@ -33,9 +32,9 @@ from ._types import SupportsDataclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..budget import Budget, BudgetTracker
-    from ..filesystem import Filesystem
     from ..runtime.session import Session
     from ..runtime.session.protocols import SessionProtocol
+    from ..sandbox import SandboxConfig
     from ._prompt_resources import PromptResources
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
@@ -91,6 +90,7 @@ class PromptTemplateProtocol[TemplateOutputT](Protocol):
     ns: str
     key: str
     name: str | None
+    sandbox: SandboxConfig | None
 
     @property
     def sections(self) -> tuple[Any, ...]: ...
@@ -231,33 +231,6 @@ class ToolSuiteSection(Protocol):
         ...
 
 
-@runtime_checkable
-class WorkspaceSectionProtocol(ToolSuiteSection, Protocol):
-    """Protocol for workspace sections that manage a filesystem.
-
-    Extends ToolSuiteSection with a filesystem property.  Any section
-    implementing this protocol can be discovered by ``Prompt.filesystem()``
-    without importing a concrete class.
-
-    The core library provides :class:`~weakincentives.prompt.workspace.WorkspaceSection`
-    as the standard concrete implementation.
-
-    Additional requirement beyond ToolSuiteSection:
-
-    - **filesystem**: Property returning the Filesystem managed by this section
-    """
-
-    @property
-    def filesystem(self) -> Filesystem:
-        """Return the filesystem managed by this workspace section."""
-        ...
-
-    @override
-    def clone(self, **kwargs: object) -> WorkspaceSectionProtocol:
-        """Clone the section with new session/dispatcher."""
-        ...
-
-
 __all__ = [
     "PromptProtocol",
     "PromptResponseProtocol",
@@ -265,5 +238,4 @@ __all__ = [
     "ProviderAdapterProtocol",
     "RenderedPromptProtocol",
     "ToolSuiteSection",
-    "WorkspaceSectionProtocol",
 ]

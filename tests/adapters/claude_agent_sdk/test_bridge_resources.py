@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._bridge import (
     BridgedTool,
     create_bridged_tools,
@@ -103,11 +104,11 @@ def mock_adapter() -> MagicMock:
     return MagicMock()
 
 
-class TestCreateBridgedToolsWithFilesystem:
-    def test_passes_filesystem_to_bridged_tools(
+class TestCreateBridgedToolsWithSandbox:
+    def test_passes_sandbox_filesystem_to_bridged_tools(
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
-        """Test that create_bridged_tools passes filesystem via prompt resources."""
+        """Test that create_bridged_tools threads the sandbox into contexts."""
         from weakincentives.filesystem import Filesystem
 
         captured_filesystem: list[object] = []
@@ -127,7 +128,8 @@ class TestCreateBridgedToolsWithFilesystem:
         )
 
         test_filesystem = Filesystem.in_memory()
-        prompt = _make_prompt_with_resources({Filesystem: test_filesystem})
+        sandbox = make_memory_sandbox(test_filesystem)
+        prompt = _make_prompt_with_resources({})
 
         bridged_tools = create_bridged_tools(
             (capture_tool,),
@@ -137,6 +139,7 @@ class TestCreateBridgedToolsWithFilesystem:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=sandbox,
         )
 
         assert len(bridged_tools) == 1

@@ -25,7 +25,6 @@ class TestACPClientConfig:
         cfg = ACPClientConfig()
         assert cfg.agent_bin == "opencode"
         assert cfg.agent_args == ("acp",)
-        assert cfg.cwd is None
         assert cfg.env is None
         assert cfg.startup_timeout_s == 10.0
         assert cfg.permission_mode == "auto"
@@ -37,7 +36,6 @@ class TestACPClientConfig:
         cfg = ACPClientConfig(
             agent_bin="/usr/local/bin/myagent",
             agent_args=("serve", "--port", "8080"),
-            cwd="/tmp/work",
             env={"API_KEY": "secret"},
             startup_timeout_s=30.0,
             permission_mode="deny",
@@ -47,7 +45,6 @@ class TestACPClientConfig:
         )
         assert cfg.agent_bin == "/usr/local/bin/myagent"
         assert cfg.agent_args == ("serve", "--port", "8080")
-        assert cfg.cwd == "/tmp/work"
         assert cfg.env is not None
         assert cfg.env["API_KEY"] == "secret"
         assert cfg.startup_timeout_s == 30.0

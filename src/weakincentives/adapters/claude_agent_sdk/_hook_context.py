@@ -35,6 +35,7 @@ from ._bridge import MCPToolExecutionState
 
 if TYPE_CHECKING:
     from ...prompt.prompt import PromptResources
+    from ...sandbox import Sandbox
 
 __all__ = [
     "HookConstraints",
@@ -101,6 +102,9 @@ class HookConstraints:
     mcp_tool_state: MCPToolExecutionState | None = None
     """Shared state for passing tool_use_id from hooks to MCP bridge."""
 
+    sandbox: Sandbox | None = None
+    """Execution environment participating in tool transactions."""
+
 
 class HookContext:
     """Context passed to hook callbacks for state access.
@@ -135,6 +139,7 @@ class HookContext:
         self.heartbeat = constraints.heartbeat if constraints else None
         self.run_context = constraints.run_context if constraints else None
         self.mcp_tool_state = constraints.mcp_tool_state if constraints else None
+        self.sandbox = constraints.sandbox if constraints else None
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
@@ -175,7 +180,7 @@ class HookContext:
         if self._tool_tracker is None:
             self._tool_tracker = PendingToolTracker(
                 session=self._session,
-                resources=self._prompt.resources.context,
+                sandbox=self.sandbox,
             )
         return self._tool_tracker
 

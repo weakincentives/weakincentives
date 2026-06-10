@@ -83,9 +83,10 @@ At `src/weakincentives/prompt/markdown.py`: Dedents, strips, runs `Template.subs
 | `template` | Template string with `$field` placeholders |
 | `summary` | Optional summary for progressive disclosure |
 
-### WorkspaceSection
+### Workspace preview
 
-Provides filesystem access, contributes to prompt resources via `resources()` method.
+Templates created with `sandbox=SandboxConfig(...)` carry a workspace
+preview section rendered from the opened sandbox (see `specs/WORKSPACE.md`).
 
 ## Prompt Lifecycle
 
@@ -117,7 +118,7 @@ been captured. Section implementations override `cleanup()` for resource release
 
 Via `runtime/transactions.py`:
 
-- `tool_transaction(session, resource_context, tag)` context manager
+- `tool_transaction(session, sandbox, tag=...)` context manager
 - `create_snapshot()` / `restore_snapshot()` for manual control
 
 ## Rendering

@@ -127,7 +127,6 @@ Defined at `src/weakincentives/adapters/acp/config.py:29`.
 |-------|------|---------|-------------|
 | `agent_bin` | `str` | `"opencode"` | Executable to spawn |
 | `agent_args` | `tuple[str, ...]` | `("acp",)` | Arguments for the agent binary |
-| `cwd` | `str \| None` | `None` | Working directory (absolute; defaults to `Path.cwd().resolve()`) |
 | `env` | `Mapping[str, str] \| None` | `None` | Extra environment variables (merged with `os.environ`) |
 | `startup_timeout_s` | `float` | `10.0` | Max time for initialize/session/new |
 | `permission_mode` | `Literal["auto", "deny", "prompt"]` | `"auto"` | Response to permission requests |
@@ -135,8 +134,9 @@ Defined at `src/weakincentives/adapters/acp/config.py:29`.
 | `allow_file_writes` | `bool` | `False` | Advertise `writeTextFile` capability |
 | `mcp_servers` | `tuple[Any, ...]` | `()` | Additional MCP servers (WINK server always added first) |
 
-> **CWD requirement:** ACP requires `cwd` to be an absolute path. If `None`, the
-> adapter resolves to the prompt's host-backed filesystem root or `Path.cwd().resolve()`.
+> **CWD:** The agent always runs with `cwd = sandbox.root` — the sandbox the
+> adapter opens for the evaluation from the prompt template's `SandboxConfig`
+> (an empty sandbox when none is declared).
 
 > **Capability alignment:** Advertised capabilities in `initialize` must match
 > implemented methods in `ACPClient`.
@@ -277,17 +277,18 @@ Create `BudgetTracker` if budget provided. Derive deadline from argument or
 ### 2. Render Prompt
 
 `_evaluate_async()` at `src/weakincentives/adapters/acp/adapter.py:129`:
-renders the prompt, resolves CWD, binds a host-backed `Filesystem` if needed, dispatches
-`PromptRendered`.
+opens the sandbox, binds the workspace preview, renders the prompt, and
+dispatches `PromptRendered`.
 
-### 3. Resolve CWD
+### 3. Open Sandbox
 
-`_resolve_cwd()` at `src/weakincentives/adapters/acp/adapter.py:185`:
+`open_prompt_sandbox()` at `src/weakincentives/adapters/_shared/_sandbox.py`:
 
-1. Use config `cwd` if set
-1. Else use the prompt's host-backed filesystem root
-1. Else fall back to `Path.cwd().resolve()`
-1. Create temp directory if no cwd source and no filesystem
+1. Read the template's `SandboxConfig` (empty config when none declared)
+1. Materialize it via the adapter's sandbox provider (default
+   `LocalSandboxProvider`)
+1. Bind workspace preview params from the opened sandbox
+1. `cwd = sandbox.root`; the sandbox closes when evaluation completes
 
 ### 4. Build Tools and MCP Server
 

@@ -35,7 +35,6 @@ class TestGeminiACPClientConfig:
     def test_inherited_defaults_match_base(self) -> None:
         base = ACPClientConfig()
         gemini = GeminiACPClientConfig()
-        assert gemini.cwd == base.cwd
         assert gemini.env == base.env
         assert gemini.permission_mode == base.permission_mode
         assert gemini.allow_file_reads == base.allow_file_reads

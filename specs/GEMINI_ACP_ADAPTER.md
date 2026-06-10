@@ -404,7 +404,6 @@ adapter = GeminiACPAdapter(
         model_id="gemini-2.5-flash",
     ),
     client_config=GeminiACPClientConfig(
-        cwd="/absolute/path/to/workspace",
         permission_mode="auto",
         allow_file_reads=True,
     ),
@@ -424,9 +423,7 @@ adapter = GeminiACPAdapter(
         model_id="gemini-2.5-pro",
         approval_mode="yolo",  # Auto-approve all tools
     ),
-    client_config=GeminiACPClientConfig(
-        cwd="/absolute/path/to/workspace",
-    ),
+    client_config=GeminiACPClientConfig(),
 )
 ```
 
@@ -439,9 +436,7 @@ adapter = GeminiACPAdapter(
         approval_mode="yolo",
         sandbox=True,  # Enable OS-level sandboxing
     ),
-    client_config=GeminiACPClientConfig(
-        cwd="/absolute/path/to/workspace",  # Writes restricted to this dir
-    ),
+    client_config=GeminiACPClientConfig(),  # Writes restricted to sandbox root
 )
 ```
 
@@ -453,9 +448,7 @@ adapter = GeminiACPAdapter(
         sandbox=True,
         sandbox_profile="strict-open",  # Restrict reads + writes
     ),
-    client_config=GeminiACPClientConfig(
-        cwd="/absolute/path/to/workspace",
-    ),
+    client_config=GeminiACPClientConfig(),
 )
 ```
 

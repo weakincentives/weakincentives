@@ -24,13 +24,12 @@ understand the individual pieces.
 **Pattern**:
 
 ```python nocheck
-from weakincentives.prompt import WorkspaceSection, HostMount
 from weakincentives.contrib.tools import WorkspaceDigestSection
 from weakincentives.prompt import PromptTemplate, MarkdownSection
+from weakincentives.sandbox import HostMount, SandboxConfig
 
 
 def build_qa_template(*, session):
-    mounts = [HostMount(host_path=".")]
     return PromptTemplate(
         ns="qa",
         key="repo-qa",
@@ -41,17 +40,17 @@ def build_qa_template(*, session):
                 template=(
                     "Answer questions about this repository.\n\n"
                     "Start by reviewing the workspace digest. "
-                    "Use the workspace tools to find specific details."
+                    "Use the harness file tools to find specific details."
                 ),
             ),
             WorkspaceDigestSection(session=session),
-            WorkspaceSection(session=session, mounts=mounts),
             MarkdownSection(
                 title="Question",
                 key="question",
                 template="${question}",
             ),
         ),
+        sandbox=SandboxConfig(mounts=(HostMount(host_path="."),)),
     )
 ```
 
@@ -91,13 +90,13 @@ def build_patch_template(*, session):
                     "be applied with `patch -p1`."
                 ),
             ),
-            WorkspaceSection(session=session, mounts=mounts),
             MarkdownSection(
                 title="Change Request",
                 key="request",
                 template="${request}",
             ),
         ),
+        sandbox=SandboxConfig(mounts=mounts),
     )
 ```
 

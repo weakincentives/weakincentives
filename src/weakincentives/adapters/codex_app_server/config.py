@@ -105,7 +105,6 @@ class CodexAppServerClientConfig:
             ``ws://10.0.1.5:4500``).  When set, no subprocess is spawned.
         ws_auth_token: Bearer token for WebSocket auth. Sent as
             ``Authorization: Bearer TOKEN`` during upgrade.
-        cwd: Working directory (must be absolute; defaults to Path.cwd()).
         env: Extra environment variables merged into the subprocess env
             (managed modes only).
         suppress_stderr: Capture stderr for debugging instead of printing
@@ -124,7 +123,6 @@ class CodexAppServerClientConfig:
     codex_bin: str = "codex"
     remote_url: str | None = None
     ws_auth_token: str | None = field(default=None, repr=False)
-    cwd: str | None = None
     env: Mapping[str, str] | None = None
     suppress_stderr: bool = True
     startup_timeout_s: float = 10.0

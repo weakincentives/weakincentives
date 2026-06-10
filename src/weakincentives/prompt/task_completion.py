@@ -39,6 +39,7 @@ from ..runtime.logging import get_logger
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
     from ..runtime.session import SessionProtocol
+    from ..sandbox import Sandbox
 
 __all__ = [
     "CompositeChecker",
@@ -83,16 +84,21 @@ class TaskCompletionContext:
     Attributes:
         session: The session containing state slices.
         tentative_output: The output the agent is attempting to produce.
-        filesystem: Optional filesystem for checking file-based completion.
+        sandbox: Execution environment for file-based completion checks.
         adapter: Optional adapter for LLM-based verification.
         stop_reason: The reason for the stop attempt.
     """
 
     session: SessionProtocol
     tentative_output: Any = None
-    filesystem: Filesystem | None = None
+    sandbox: Sandbox | None = None
     adapter: object | None = None
     stop_reason: str | None = None
+
+    @property
+    def filesystem(self) -> Filesystem | None:
+        """Return the sandbox's filesystem facet, if a sandbox is present."""
+        return self.sandbox.filesystem if self.sandbox is not None else None
 
 
 @runtime_checkable

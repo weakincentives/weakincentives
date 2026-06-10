@@ -48,12 +48,13 @@ Controls how much thinking Claude allocates to each request:
 class ClaudeAgentSDKClientConfig:
     """Client-level configuration for Claude Agent SDK.
 
+    The SDK working directory is not configurable here: it is always the
+    root of the sandbox opened for the evaluation (declared via the prompt
+    template's ``SandboxConfig``).
+
     Attributes:
         permission_mode: Tool permission handling mode. Defaults to
             ``"bypassPermissions"`` for programmatic access.
-        cwd: Working directory for SDK operations. When None and no workspace
-            section is present, an empty temporary folder is created. This
-            prevents agents from inheriting the host's current working directory.
         max_turns: Maximum number of conversation turns. None means unlimited.
         max_budget_usd: Maximum budget in USD for the session. None means
             unlimited budget. When set, the SDK will stop execution if the
@@ -76,7 +77,6 @@ class ClaudeAgentSDKClientConfig:
     """
 
     permission_mode: PermissionMode = "bypassPermissions"
-    cwd: str | None = None
     max_turns: int | None = None
     max_budget_usd: float | None = None
     suppress_stderr: bool = True

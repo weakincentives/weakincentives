@@ -42,9 +42,9 @@ from .structured_output import StructuredOutputConfig
 from .task_completion import TaskCompletionChecker
 
 if TYPE_CHECKING:
-    from ..filesystem import Filesystem
     from ..resources.context import ScopedResourceContext
     from ..runtime.session.protocols import SessionProtocol
+    from ..sandbox import SandboxConfig
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
 
@@ -100,6 +100,12 @@ class PromptTemplate[OutputT](Constructable):
     All derived state (registry snapshot, structured output config) is
     computed by :class:`Prompt` at bind time.
 
+    Environment intent is declared via ``sandbox``: a
+    :class:`~weakincentives.sandbox.SandboxConfig` the evaluating adapter
+    materializes through its sandbox provider. Templates with a sandbox
+    config carry a workspace preview section that adapters populate from
+    the opened sandbox.
+
     Resources can be declared at the template level and will be combined with
     resources contributed by individual sections.
     """
@@ -113,6 +119,7 @@ class PromptTemplate[OutputT](Constructable):
     task_completion_checker: TaskCompletionChecker | None = None
     allow_extra_keys: bool = False
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
+    sandbox: SandboxConfig | None = None
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -152,8 +159,14 @@ class PromptTemplate[OutputT](Constructable):
         task_completion_checker: TaskCompletionChecker | None = None,
         allow_extra_keys: bool = False,
         resources: ResourceRegistry | None = None,
+        sandbox: SandboxConfig | None = None,
     ) -> PromptTemplate[OutputT]:
-        """Create a validated PromptTemplate instance."""
+        """Create a validated PromptTemplate instance.
+
+        When ``sandbox`` is provided, a workspace preview section is
+        appended so adapters can render the opened environment into the
+        prompt.
+        """
         try:
             stripped_ns = normalize_component_key(ns, owner="Prompt namespace")
         except ValueError as exc:
@@ -163,17 +176,27 @@ class PromptTemplate[OutputT](Constructable):
         except ValueError as exc:
             raise PromptValidationError(str(exc)) from exc
 
+        all_sections = tuple(sections)
+        if sandbox is not None:
+            from .workspace import workspace_preview_section
+
+            all_sections = (
+                *all_sections,
+                cast(Section[SupportsDataclass], workspace_preview_section()),
+            )
+
         with allow_construction():
             return cls(
                 ns=stripped_ns,
                 key=stripped_key,
                 name=name,
-                sections=tuple(sections),
+                sections=all_sections,
                 policies=tuple(policies),
                 feedback_providers=tuple(feedback_providers),
                 task_completion_checker=task_completion_checker,
                 allow_extra_keys=allow_extra_keys,
                 resources=resources if resources is not None else ResourceRegistry(),
+                sandbox=sandbox,
             )
 
 
@@ -415,22 +438,6 @@ class Prompt[OutputT]:
             f"{self.template.ns}:{self.template.key}."
         )
         raise KeyError(msg)
-
-    def filesystem(self) -> Filesystem | None:
-        """Return the filesystem from the workspace section, if present.
-
-        Searches the template's section tree for a section implementing
-        WorkspaceSectionProtocol and returns its filesystem property.
-
-        Returns None if no workspace section exists in the template.
-        """
-        from .protocols import WorkspaceSectionProtocol
-
-        for node in self._snapshot.sections:
-            section = node.section
-            if isinstance(section, WorkspaceSectionProtocol):
-                return section.filesystem  # pragma: no cover
-        return None
 
     def cleanup(self) -> None:
         """Clean up resources held by prompt sections.

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol
     from ...runtime.run_context import RunContext
     from ...runtime.session.protocols import SessionProtocol
+    from ...sandbox import Sandbox
     from .._shared._visibility_signal import VisibilityExpansionSignal
     from .client import ACPClient
 
@@ -174,6 +175,7 @@ async def run_prompt_loop(
     clock: MonotonicClock,
     async_sleeper: AsyncSleeper,
     detect_empty_response: Callable[[ACPClient, Any], None],
+    sandbox: Sandbox | None = None,
 ) -> tuple[str | None, TokenUsage | None]:
     """Run the prompt turn + task completion continuation loop."""
     from acp.schema import TextContentBlock
@@ -235,6 +237,7 @@ async def run_prompt_loop(
             accumulated_text=accumulated_text,
             deadline=deadline,
             budget_tracker=budget_tracker,
+            sandbox=sandbox,
         )
         if should_continue and continuation_round < max_continuation_rounds:
             current_prompt_text = feedback or ""

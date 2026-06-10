@@ -18,6 +18,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookConstraints,
     HookContext,
@@ -65,6 +66,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
         )
 
         hook = create_task_completion_stop_hook(
@@ -89,6 +91,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
         )
 
         hook = create_task_completion_stop_hook(
@@ -150,6 +153,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
         )
 
         hook = create_task_completion_stop_hook(
@@ -171,6 +175,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
         )
 
         files = tuple(f"file_{i}.txt" for i in range(1, 10))
@@ -311,7 +316,7 @@ class TestCompositeChecker:
             session=session,
             tentative_output=None,
             stop_reason="end_turn",
-            filesystem=fs,
+            sandbox=make_memory_sandbox(fs),
         )
 
         result = checker.check(context)
@@ -336,7 +341,7 @@ class TestCompositeChecker:
             session=session,
             tentative_output=None,
             stop_reason="end_turn",
-            filesystem=fs,
+            sandbox=make_memory_sandbox(fs),
         )
 
         result = checker.check(context)
@@ -360,7 +365,7 @@ class TestCompositeChecker:
             session=session,
             tentative_output=None,
             stop_reason="end_turn",
-            filesystem=fs,
+            sandbox=make_memory_sandbox(fs),
         )
 
         result = checker.check(context)
@@ -383,7 +388,7 @@ class TestCompositeChecker:
             session=session,
             tentative_output=None,
             stop_reason="end_turn",
-            filesystem=fs,
+            sandbox=make_memory_sandbox(fs),
         )
 
         result = checker.check(context)

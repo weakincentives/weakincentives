@@ -217,13 +217,15 @@ error results (never abort).
 
 ### Transactional Tool Execution
 
-Tool execution is transactional via `src/weakincentives/runtime/transactions.py`:
+Tool execution is transactional over the (session, sandbox) pair via
+`src/weakincentives/runtime/transactions.py`:
 
-- `create_snapshot(session, resource_context, tag)` - Capture state
-- `restore_snapshot(session, resource_context, snapshot)` - Rollback
+- `create_snapshot(session, sandbox, tag=...)` - Capture state
+- `restore_snapshot(session, sandbox, snapshot)` - Rollback
 - `tool_transaction` context manager for simpler cases
 
-Failed or aborted tools leave no trace in mutable state.
+Failed or aborted tools leave no trace in mutable state — neither in the
+session nor in the sandbox filesystem.
 
 ## Error Handling
 

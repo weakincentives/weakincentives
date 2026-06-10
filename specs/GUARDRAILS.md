@@ -233,9 +233,11 @@ Factory methods: `TaskCompletionResult.ok()`, `TaskCompletionResult.incomplete(f
 |-------|------|-------------|
 | `session` | `SessionProtocol` | Session containing state |
 | `tentative_output` | `Any` | Output being produced |
-| `filesystem` | `Filesystem \| None` | Optional filesystem |
+| `sandbox` | `Sandbox \| None` | Execution environment (exposes `filesystem`) |
 | `adapter` | `ProviderAdapter \| None` | Optional adapter |
 | `stop_reason` | `str \| None` | Why agent is stopping |
+
+`context.filesystem` is a property over `sandbox.filesystem`.
 
 ### Built-in Implementations
 
@@ -268,8 +270,8 @@ into their native hook/stop mechanism:
 
 - **PostToolUse Hook**: If incomplete, adds feedback context
 - **Stop Hook**: Returns `needsMoreTurns: True` if incomplete
-- **Continuation Loop**: Resolves filesystem from prompt resources so
-  file-based checkers can verify output during the message stream
+- **Continuation Loop**: Threads the evaluation's sandbox into the context
+  so file-based checkers can verify output during the message stream
 - **Final Verification**: Logs warning if incomplete after execution
 
 ### ACK Integration

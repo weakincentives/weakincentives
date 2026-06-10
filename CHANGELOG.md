@@ -4,6 +4,51 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### M3 — Sandbox as the Execution Context
+
+**One environment model.** The sandbox introduced in M2 is now the execution
+context everywhere:
+
+- **`PromptTemplate.create(..., sandbox=SandboxConfig(...))`** declares
+  environment intent on the definition. Templates with a sandbox config carry a
+  workspace preview section (key `workspace`) rendered from the *opened*
+  sandbox via `filesystem.list` — not copy-time bookkeeping.
+- **`ToolContext.sandbox`** exposes the environment to tool handlers;
+  `context.filesystem` and the new `context.shell` are facets of it. The same
+  applies to `FeedbackContext` and `TaskCompletionContext` (whose `filesystem`
+  field is now a `sandbox` field plus a property), so policies
+  (`ReadBeforeWritePolicy`) and checkers (`FileOutputChecker`) read one shared
+  source.
+- **Transactions are (session, sandbox).** `tool_transaction`,
+  `create_snapshot`, `restore_snapshot`, and `PendingToolTracker` take a
+  `Sandbox | None` instead of a resource context; `CompositeSnapshot` carries a
+  single optional `SnapshotRef` (schema version 2). The generic
+  singleton-`Snapshotable` resource scan is gone, as is the per-tool-scope
+  rebuilding of the resource instantiation order.
+- **Adapters open the sandbox.** Claude Agent SDK, Codex App Server, and ACP
+  (incl. Gemini/OpenCode) adapters follow one flow: read the template's config →
+  `sandbox_provider.open(config)` (default `LocalSandboxProvider`; injectable
+  via the new `sandbox_provider` constructor argument) → harness
+  `cwd = sandbox.root` → `finally: sandbox.close()`.
+
+**Breaking changes:**
+
+- `WorkspaceSection` is gone. Declare mounts via
+  `SandboxConfig(mounts=(HostMount(...),))` on the template instead. The
+  refcount/clone machinery and the `Filesystem`-as-resource binding died with
+  it; `Prompt.filesystem()` and `WorkspaceSectionProtocol` are removed.
+- `cwd` is removed from `ClaudeAgentSDKClientConfig`,
+  `CodexAppServerClientConfig`, and `ACPClientConfig`: the harness working
+  directory is always the sandbox root.
+- The Claude Agent SDK's OS-isolation `SandboxConfig` is folded into
+  `IsolationConfig` (`sandbox_enabled`, `writable_paths`, `readable_paths`,
+  `excluded_commands`, ...) — the environment `SandboxConfig` is the only class
+  with that name.
+- `weakincentives.prompt` no longer re-exports `HostMount`/mount machinery;
+  import from `weakincentives.sandbox`.
+- `collect_feedback(...)` and the adapter guardrail helpers accept a `sandbox`
+  argument; `resolve_filesystem(prompt)` is removed.
+
 *Commits reviewed: 2026-02-17 (`898b799e`, oldest) through 2026-05-31
 (`74e28929`, most recent) — all 30 commits since v0.27.0, reviewed at the diff
 level. Commit titles were not taken at face value; several bury behavior changes

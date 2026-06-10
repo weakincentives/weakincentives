@@ -224,11 +224,8 @@ capabilities relevant to the current context.
 Some sections are **pure**: they depend only on params and render the same text
 every time. You can safely store those in a module-level `PromptTemplate`.
 
-Other sections are **session-bound**: they capture runtime resources (a session,
-workspace connection, etc.). Examples:
-
-- `WorkspaceSection(session=..., mounts=...)`
-- `WorkspaceDigestSection(session=...)`
+Other sections are **session-bound**: they capture runtime resources (a
+session, etc.). Example: `WorkspaceDigestSection(session=...)`.
 
 For those, prefer one of these patterns:
 
@@ -236,21 +233,22 @@ For those, prefer one of these patterns:
 
 ```python nocheck
 from typing import Any
-from weakincentives.prompt import WorkspaceSection, HostMount
 from weakincentives.contrib.tools import WorkspaceDigestSection
 from weakincentives.prompt import PromptTemplate, MarkdownSection
 from weakincentives.runtime import Session
+from weakincentives.sandbox import HostMount, SandboxConfig
 
 
 def build_prompt_template(*, session: Session) -> PromptTemplate[Any]:
-    mounts = [HostMount(host_path="/path/to/project")]
     return PromptTemplate(
         ns="example",
         key="session-bound",
         sections=(
             MarkdownSection(title="Instructions", key="instructions"),
             WorkspaceDigestSection(session=session),
-            WorkspaceSection(session=session, mounts=mounts),
+        ),
+        sandbox=SandboxConfig(
+            mounts=(HostMount(host_path="/path/to/project"),),
         ),
     )
 ```
@@ -275,7 +273,7 @@ Sections that manage external resources should override
 `Section.cleanup()`:
 
 ```python nocheck
-class MyWorkspaceSection(Section):
+class MyTempDirSection(Section):
     def cleanup(self) -> None:
         # Release temporary workspace directory
         if self._temp_dir is not None:

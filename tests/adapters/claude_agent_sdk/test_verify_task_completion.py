@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
@@ -106,6 +107,7 @@ class TestVerifyTaskCompletion:
             stop_reason="structured_output",
             prompt_name="test_prompt",
             prompt=prompt,
+            sandbox=make_memory_sandbox(fs),
         )
 
         assert any("incomplete_tasks" in record.message for record in caplog.records), (
@@ -129,6 +131,7 @@ class TestVerifyTaskCompletion:
             stop_reason="structured_output",
             prompt_name="test_prompt",
             prompt=prompt,
+            sandbox=make_memory_sandbox(fs),
         )
 
     def test_skips_when_deadline_exceeded(self, session: Session) -> None:
@@ -183,8 +186,8 @@ class TestVerifyTaskCompletion:
             prompt=prompt,
         )
 
-    def test_passes_filesystem_and_adapter_to_context(self, session: Session) -> None:
-        """Filesystem and adapter are passed to TaskCompletionContext."""
+    def test_passes_sandbox_and_adapter_to_context(self, session: Session) -> None:
+        """Sandbox and adapter are passed to TaskCompletionContext."""
         captured_context: list[TaskCompletionContext] = []
 
         class CapturingChecker(TaskCompletionChecker):
@@ -194,12 +197,9 @@ class TestVerifyTaskCompletion:
 
         capturing_checker = CapturingChecker()
         adapter = ClaudeAgentSDKAdapter()
+        sandbox = make_memory_sandbox()
 
-        mock_filesystem = MagicMock(spec=Filesystem)
-        mock_resources = MagicMock()
-        mock_resources.get.return_value = mock_filesystem
         mock_prompt = MagicMock()
-        mock_prompt.resources = mock_resources
         mock_prompt.task_completion_checker = capturing_checker
 
         self._call_verify(
@@ -209,17 +209,17 @@ class TestVerifyTaskCompletion:
             stop_reason="structured_output",
             prompt_name="test_prompt",
             prompt=mock_prompt,
+            sandbox=sandbox,
         )
 
         assert len(captured_context) == 1
         ctx = captured_context[0]
-        assert ctx.filesystem is mock_filesystem
+        assert ctx.sandbox is sandbox
+        assert ctx.filesystem is sandbox.filesystem
         assert ctx.adapter is adapter
 
-    def test_handles_filesystem_lookup_failure(self, session: Session) -> None:
-        """When filesystem lookup fails, context still gets adapter but no filesystem."""
-        from weakincentives.resources.errors import UnboundResourceError
-
+    def test_no_sandbox_means_no_filesystem(self, session: Session) -> None:
+        """Without a sandbox, the context has no filesystem (fail-closed)."""
         captured_context: list[TaskCompletionContext] = []
 
         class CapturingChecker(TaskCompletionChecker):
@@ -230,10 +230,7 @@ class TestVerifyTaskCompletion:
         capturing_checker = CapturingChecker()
         adapter = ClaudeAgentSDKAdapter()
 
-        mock_resources = MagicMock()
-        mock_resources.get.side_effect = UnboundResourceError(object)
         mock_prompt = MagicMock()
-        mock_prompt.resources = mock_resources
         mock_prompt.task_completion_checker = capturing_checker
 
         self._call_verify(
@@ -278,6 +275,7 @@ class TestVerifyTaskCompletion:
             prompt_name="test_prompt",
             budget_tracker=tracker,
             prompt=prompt,
+            sandbox=make_memory_sandbox(fs),
         )
 
         assert any("incomplete_tasks" in record.message for record in caplog.records), (
@@ -317,8 +315,8 @@ class TestCheckTaskCompletion:
         assert result == (False, None)
         checker.check.assert_not_called()
 
-    def test_resolves_filesystem_from_prompt(self, session: Session) -> None:
-        """check_task_completion resolves filesystem from prompt resources."""
+    def test_uses_sandbox_filesystem(self, session: Session) -> None:
+        """check_task_completion reads the hook context's sandbox filesystem."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
             HookConstraints,
             HookContext,
@@ -332,7 +330,7 @@ class TestCheckTaskCompletion:
 
         checker = FileOutputChecker(files=("output.txt",))
         prompt = _make_prompt_with_fs(fs)
-        constraints = HookConstraints()
+        constraints = HookConstraints(sandbox=make_memory_sandbox(fs))
         hook_context = HookContext(
             prompt=prompt,
             session=session,
@@ -385,31 +383,3 @@ class TestCheckTaskCompletion:
         assert should_continue is True
         assert feedback is not None
         assert "No filesystem" in feedback
-
-    def test_filesystem_resolution_failure_returns_none(self, session: Session) -> None:
-        """When filesystem lookup raises, context gets filesystem=None."""
-        from weakincentives.adapters.claude_agent_sdk._hooks import (
-            HookConstraints,
-            HookContext,
-        )
-        from weakincentives.adapters.claude_agent_sdk._sdk_execution import (
-            _resolve_filesystem,
-        )
-
-        # Prompt without resources context entered → resources.get raises RuntimeError
-        template: PromptTemplate[None] = PromptTemplate.create(
-            ns="test", key="test", name="test"
-        )
-        prompt: Prompt[None] = Prompt(template)
-        constraints = HookConstraints()
-        hook_context = HookContext(
-            prompt=prompt,
-            session=session,
-            adapter_name="test",
-            prompt_name="test",
-            constraints=constraints,
-        )
-
-        result = _resolve_filesystem(hook_context)
-
-        assert result is None
