@@ -93,8 +93,9 @@ multi-tenant environments where mount paths might come from user input.
 
 ### Sandbox Lifecycle
 
-The adapter opens one sandbox per evaluation and runs Claude Code with
-`cwd = sandbox.root`:
+Evaluation always runs against a sandbox lease with
+`cwd = sandbox.root`. By default the adapter opens and releases one per
+`evaluate()` call:
 
 ```python nocheck
 adapter = ClaudeAgentSDKAdapter()
@@ -102,6 +103,20 @@ response = adapter.evaluate(prompt, session=session)
 # The sandbox is materialized, previewed in the prompt, and removed
 # inside evaluate() — even on error.
 ```
+
+To span one environment across multiple evaluations, or to inspect the
+agent's output files before the sandbox is removed, hold the lease
+explicitly:
+
+```python nocheck
+with adapter.open_sandbox(prompt) as sandbox:
+    response = adapter.evaluate(prompt, session=session, sandbox=sandbox)
+    report = sandbox.filesystem.read("report.md")
+# Lease released here: the sandbox directory is removed.
+```
+
+`AgentLoop` does this automatically: one lease spans visibility-expansion
+retries, `finalize()`, and debug-bundle filesystem capture.
 
 ## Adapter Configuration
 

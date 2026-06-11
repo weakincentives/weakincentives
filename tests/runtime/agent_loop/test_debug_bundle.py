@@ -78,10 +78,44 @@ def test_loop_with_debug_bundle_enabled(tmp_path: Path) -> None:
 
 
 def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
-    """AgentLoop includes filesystem snapshot in debug bundle when provided."""
+    """AgentLoop captures the still-open sandbox filesystem into the bundle."""
+    from weakincentives.adapters.core import Budget, BudgetTracker, PromptResponse
+    from weakincentives.deadlines import Deadline
     from weakincentives.debug import DebugBundle
     from weakincentives.debug.bundle import BundleConfig
-    from weakincentives.filesystem import Filesystem
+    from weakincentives.prompt import Prompt
+    from weakincentives.runtime.run_context import RunContext
+    from weakincentives.runtime.session.protocols import SessionProtocol
+    from weakincentives.sandbox import Sandbox
+
+    class _SandboxWritingAdapter(MockAdapter):
+        """Writes files into the sandbox during evaluation, like a harness."""
+
+        def _evaluate(
+            self,
+            prompt: Prompt[SampleOutput],
+            *,
+            session: SessionProtocol,
+            deadline: Deadline | None = None,
+            budget: Budget | None = None,
+            budget_tracker: BudgetTracker | None = None,
+            heartbeat: object = None,
+            run_context: RunContext | None = None,
+            sandbox: object = None,
+        ) -> PromptResponse[SampleOutput]:
+            assert isinstance(sandbox, Sandbox)
+            _ = sandbox.filesystem.write("test.txt", "Hello, World!")
+            _ = sandbox.filesystem.write("subdir/nested.txt", "Nested content")
+            return super()._evaluate(
+                prompt,
+                session=session,
+                deadline=deadline,
+                budget=budget,
+                budget_tracker=budget_tracker,
+                heartbeat=heartbeat,
+                run_context=run_context,
+                sandbox=sandbox,
+            )
 
     results: InMemoryMailbox[AgentLoopResult[SampleOutput], None] = InMemoryMailbox(
         name="results"
@@ -90,17 +124,9 @@ def test_loop_with_debug_bundle_includes_filesystem(tmp_path: Path) -> None:
         AgentLoopRequest[SampleRequest], AgentLoopResult[SampleOutput]
     ] = InMemoryMailbox(name="requests")
     try:
-        # Create filesystem with some files
-        fs = Filesystem.in_memory()
-        _ = fs.write("/test.txt", "Hello, World!")
-        _ = fs.write("/subdir/nested.txt", "Nested content")
-
-        adapter = MockAdapter()
+        adapter = _SandboxWritingAdapter()
         bundle_config = BundleConfig.create(target=tmp_path)
-        config = AgentLoopConfig(
-            debug_bundle=bundle_config,
-            resources={Filesystem: fs},
-        )
+        config = AgentLoopConfig(debug_bundle=bundle_config)
         loop = SampleLoop(adapter=adapter, requests=requests, config=config)
 
         request = AgentLoopRequest(request=SampleRequest(message="hello with fs"))

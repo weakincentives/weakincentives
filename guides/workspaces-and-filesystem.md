@@ -104,23 +104,36 @@ roots.
 
 ## Sandbox Lifecycle
 
-The adapter owns the sandbox lifecycle, one sandbox per evaluation:
+A sandbox is a **lease** on an environment. The lifecycle:
 
-1. **Open**: The adapter's provider materializes the template's
-   `SandboxConfig` (temp directory, files copied per mount config)
+1. **Open**: A provider materializes the template's `SandboxConfig`
+   (temp directory, files copied per mount config)
 1. **Preview**: The workspace preview section renders a listing of the
-   opened sandbox into the prompt
+   open sandbox into the prompt — refreshed on every evaluation round
 1. **Use**: The harness runs with `cwd = sandbox.root`; tool handlers see
    the same environment via `context.filesystem` / `context.shell`
-1. **Close**: The sandbox (and its temp directory) is removed when
-   evaluation completes, even on error
+1. **Release**: Whoever opened the lease closes it; locally provisioned
+   sandboxes are removed on release, even on error
+
+By default `evaluate()` opens and releases a lease per call:
 
 ```python nocheck
 response = adapter.evaluate(prompt, session=session)
-# Sandbox opened, used, and closed inside evaluate()
+# Sandbox opened, used, and released inside evaluate()
 ```
 
-For full adapter integration patterns, see the
+Hold the lease yourself to span multiple evaluations or inspect output
+files before release:
+
+```python nocheck
+with adapter.open_sandbox(prompt) as sandbox:
+    response = adapter.evaluate(prompt, session=session, sandbox=sandbox)
+    report = sandbox.filesystem.read("report.md")
+```
+
+`AgentLoop` holds one lease per request — spanning visibility-expansion
+retries and debug-bundle capture — so re-rendered rounds see files written
+in earlier rounds. For full adapter integration patterns, see the
 [Claude Agent SDK guide](claude-agent-sdk.md).
 
 ## Workspace Digests

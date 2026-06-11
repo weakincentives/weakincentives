@@ -146,6 +146,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -171,6 +172,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({})
@@ -198,6 +200,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"wrong_field": "value"})
@@ -225,6 +228,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -253,6 +257,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -296,6 +301,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -342,6 +348,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -368,6 +375,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         assert len(bridged) == 1
@@ -390,6 +398,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         assert len(bridged) == 1
@@ -411,6 +420,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         schema = bridged[0].input_schema
@@ -441,6 +451,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         assert len(bridged) == 1
@@ -475,6 +486,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({})
@@ -496,6 +508,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         assert bridged == ()

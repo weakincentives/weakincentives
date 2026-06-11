@@ -194,6 +194,7 @@ class TestBudgetTrackerInResourceRegistry:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,  # Now unused; tracker is in resources
+            sandbox=None,
         )
 
         _ = bridged({"query": "test"})
@@ -239,6 +240,7 @@ class TestBudgetTrackerInResourceRegistry:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,  # Now unused; tracker is in resources
+            sandbox=None,
         )
 
         assert len(bridged_tools) == 1
@@ -294,6 +296,7 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -341,6 +344,7 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -374,6 +378,7 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         # Pass invalid args to trigger validation error
@@ -432,6 +437,7 @@ class TestBridgedToolTransactionalExecution:
             deadline=None,
             budget_tracker=None,
             visibility_signal=visibility_signal,
+            sandbox=None,
         )
 
         # Should return success response (tool worked correctly)
@@ -485,6 +491,7 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})

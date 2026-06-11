@@ -103,8 +103,10 @@ class MockAdapter(ProviderAdapter[SampleOutput]):
         # Track run_context passed during evaluate
         self._last_run_context: RunContext | None = None
         self._run_contexts: list[RunContext | None] = []
+        # Track the sandbox lease received per evaluation round
+        self._sandboxes: list[object] = []
 
-    def evaluate(
+    def _evaluate(
         self,
         prompt: Prompt[SampleOutput],
         *,
@@ -114,9 +116,11 @@ class MockAdapter(ProviderAdapter[SampleOutput]):
         budget_tracker: BudgetTracker | None = None,
         heartbeat: object = None,
         run_context: RunContext | None = None,
+        sandbox: object = None,
     ) -> PromptResponse[SampleOutput]:
         del budget, heartbeat
         self._call_count += 1
+        self._sandboxes.append(sandbox)
         self._last_run_context = run_context
         self._run_contexts.append(run_context)
         self._last_budget_tracker = budget_tracker

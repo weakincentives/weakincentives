@@ -31,7 +31,8 @@ harnesses. The harness owns execution; you own the definition.
 
 ## Adapter Protocol
 
-All adapters implement `ProviderAdapter` at `src/weakincentives/adapters/core.py`:
+All adapters extend `ProviderAdapter` at `src/weakincentives/adapters/core.py`.
+`evaluate()` parameters:
 
 | Parameter | Description |
 | --- | --- |
@@ -42,12 +43,35 @@ All adapters implement `ProviderAdapter` at `src/weakincentives/adapters/core.py
 | `budget_tracker` | Optional shared budget tracker |
 | `heartbeat` | Optional heartbeat for liveness monitoring |
 | `run_context` | Optional execution context with correlation identifiers |
+| `sandbox` | Optional borrowed sandbox lease (see below) |
 
 | Property | Description |
 | --- | --- |
 | `adapter_name` | Canonical name (e.g., `"claude_agent_sdk"`, `"codex_app_server"`, `"acp"`). Default: `type(self).__name__`. |
 
 Returns `PromptResponse[OutputT]` at `src/weakincentives/adapters/core.py`.
+
+### Sandbox Lease
+
+The base class owns the sandbox lifecycle as a **lease**:
+
+- `open_sandbox(prompt)` — context manager materializing the template's
+  `SandboxConfig` (empty config when none is declared) through the
+  adapter's injectable `sandbox_provider` (default `LocalSandboxProvider`).
+  Exiting the block releases the lease: locally provisioned sandboxes are
+  closed and removed.
+- `evaluate(..., sandbox=...)` — a supplied sandbox is **borrowed**: the
+  caller holds the lease and the adapter never closes it. Use this to span
+  one environment across multiple evaluations or to inspect the filesystem
+  before release. When omitted, `evaluate` opens a lease for the duration
+  of the call.
+- `_evaluate(...)` — the abstract core contract concrete adapters
+  implement. It always receives an open sandbox, runs the harness with
+  `cwd = sandbox.root`, and contains no lifecycle code.
+
+"Whoever opens closes" is decided at exactly one fork (the `sandbox is None` check in `evaluate`). Providers may pool or attach to remote
+environments underneath the lease without changing this contract
+(`refactor/M4.md`).
 
 ### Configuration
 

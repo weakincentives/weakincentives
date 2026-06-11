@@ -139,6 +139,7 @@ class TestCreateBridgedToolsWithSession:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         assert len(bridged_tools) == 1
@@ -181,6 +182,7 @@ class TestMCPToolExecutionState:
             deadline=None,
             budget_tracker=None,
             mcp_tool_state=mcp_state,
+            sandbox=None,
         )
 
         bridged({"query": "test"})
@@ -214,6 +216,7 @@ class TestMCPToolExecutionState:
             deadline=None,
             budget_tracker=None,
             # No mcp_tool_state
+            sandbox=None,
         )
 
         bridged({"query": "test"})
@@ -360,6 +363,7 @@ class TestBridgedToolPolicyEnforcement:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -445,6 +449,7 @@ class TestBridgedToolPolicyEnforcement:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -518,6 +523,7 @@ class TestBridgedToolPolicyEnforcement:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         bridged({"query": "test"})
@@ -590,6 +596,7 @@ class TestBridgedToolPolicyEnforcement:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -664,6 +671,7 @@ class TestBridgedToolPolicyEnforcement:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})
@@ -696,6 +704,7 @@ class TestBridgedToolPolicyEnforcement:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         result = bridged({"query": "test"})

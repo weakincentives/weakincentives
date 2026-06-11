@@ -157,11 +157,30 @@ sandbox.close()        # idempotent: rm root, rm snapshot storage, clear binding
 ```
 
 The sandbox is the execution context (`refactor/M3.md`): prompt templates
-declare intent via `PromptTemplate.create(sandbox=...)`, adapters open one
-sandbox per evaluation through their provider and run the harness with
-`cwd = sandbox.root`, `ToolContext.sandbox` exposes the facets to handlers
-and policies, and tool transactions snapshot/restore the
-(session, sandbox) pair atomically.
+declare intent via `PromptTemplate.create(sandbox=...)`, adapters run the
+harness with `cwd = sandbox.root`, `ToolContext.sandbox` exposes the
+facets to handlers and policies, and tool transactions snapshot/restore
+the (session, sandbox) pair atomically.
+
+**Lease semantics.** A `Sandbox` handle is a *lease* on an environment:
+`close()` releases the caller's claim — for locally provisioned sandboxes
+that destroys the directory; future providers may pool environments or
+attach to harness-provided ones, where release means detach. The adapter
+base class owns the lease fork: `ProviderAdapter.open_sandbox(prompt)`
+opens one explicitly (callers hold it across multiple `evaluate` calls and
+inspect the filesystem before release), and `evaluate()` without a
+sandbox opens one for the duration of the call. `AgentLoop` holds one
+lease per request, spanning visibility-expansion retries and debug-bundle
+capture.
+
+**Environment vs. workspace.** Today the sandbox conflates two roles that
+local execution makes indistinguishable: the *workspace* (root, filesystem
+facet, snapshots — cheap, per-run) and the *execution substrate* (the
+place where the harness process runs — expensive, reusable, owner of
+shell transport and egress). The harness currently runs on the host with
+`cwd = sandbox.root`; when the environment becomes a container or SSH box
+(`refactor/M4.md`), the substrate moves behind the provider and the lease
+abstraction is the seam that keeps `evaluate` unchanged.
 
 ## Testing
 

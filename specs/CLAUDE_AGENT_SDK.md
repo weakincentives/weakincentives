@@ -34,10 +34,12 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 At `src/weakincentives/adapters/claude_agent_sdk/config.py`:
 `ClaudeAgentSDKClientConfig`.
 
-The SDK working directory is not configurable: the adapter opens one
-sandbox per evaluation from the prompt template's
-`SandboxConfig` (see `specs/SANDBOX.md`) and sets `cwd = sandbox.root`.
-A failed bridged tool rolls back session and sandbox in one transaction.
+The SDK working directory is not configurable: evaluation always runs
+against a sandbox lease materialized from the prompt template's
+`SandboxConfig` (see `specs/SANDBOX.md`) with `cwd = sandbox.root`.
+Callers may hold the lease across evaluations via
+`adapter.open_sandbox(prompt)` and `evaluate(..., sandbox=...)`. A failed
+bridged tool rolls back session and sandbox in one transaction.
 
 ### ClaudeAgentSDKModelConfig
 

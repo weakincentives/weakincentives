@@ -78,7 +78,7 @@ class _MockAdapter(ProviderAdapter[_Output]):
         self._error = error
         self.call_count = 0
 
-    def evaluate(
+    def _evaluate(
         self,
         prompt: Prompt[_Output],
         *,
@@ -88,6 +88,7 @@ class _MockAdapter(ProviderAdapter[_Output]):
         budget_tracker: BudgetTracker | None = None,
         heartbeat: object = None,
         run_context: object = None,
+        sandbox: object = None,
     ) -> PromptResponse[_Output]:
         del prompt, session, deadline, budget, budget_tracker, heartbeat, run_context
         self.call_count += 1

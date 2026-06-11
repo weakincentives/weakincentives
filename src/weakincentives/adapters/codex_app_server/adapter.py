@@ -30,11 +30,11 @@ from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.watchdog import Heartbeat
-from ...sandbox import LocalSandboxProvider, SandboxProvider
+from ...sandbox import SandboxProvider
 from ...types import AdapterName
 from .._shared import run_async
 from .._shared._bridge import create_bridged_tools
-from .._shared._sandbox import open_prompt_sandbox
+from .._shared._sandbox import bind_workspace_preview
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
@@ -85,13 +85,10 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
         sandbox_provider: SandboxProvider | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(sandbox_provider=sandbox_provider)
         self._model_config = model_config or CodexAppServerModelConfig()
         self._client_config = client_config or CodexAppServerClientConfig()
         self._async_sleeper = async_sleeper
-        self._sandbox_provider = (
-            sandbox_provider if sandbox_provider is not None else LocalSandboxProvider()
-        )
 
         logger.debug(
             "codex_app_server.adapter.init",
@@ -114,7 +111,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         return CODEX_APP_SERVER_ADAPTER_NAME
 
     @override
-    def evaluate[OutputT](
+    def _evaluate[OutputT](
         self,
         prompt: Prompt[OutputT],
         *,
@@ -124,8 +121,9 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
-        """Evaluate prompt using the Codex App Server."""
+        """Evaluate prompt using the Codex App Server against the open sandbox."""
         if budget and not budget_tracker:
             budget_tracker = BudgetTracker(budget)
 
@@ -147,6 +145,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
+                sandbox=sandbox,
             )
         )
 
@@ -159,72 +158,70 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat | None,
         run_context: RunContext | None,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
-        sandbox = open_prompt_sandbox(prompt, self._sandbox_provider)
-        try:
-            rendered = prompt.render(session=session)
-            prompt_text = rendered.text
-            prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
+        bind_workspace_preview(prompt, sandbox)
+        rendered = prompt.render(session=session)
+        prompt_text = rendered.text
+        prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
 
-            session_id = session.session_id
-            render_event_id = uuid4()
-            created_at = _utcnow()
+        session_id = session.session_id
+        render_event_id = uuid4()
+        created_at = _utcnow()
 
-            # Dispatch PromptRendered
-            _ = session.dispatcher.dispatch(
-                PromptRendered(
-                    prompt_ns=prompt.ns,
-                    prompt_key=prompt.key,
-                    prompt_name=prompt.name,
-                    adapter=CODEX_APP_SERVER_ADAPTER_NAME,
-                    session_id=session_id,
-                    render_inputs=(),
-                    rendered_prompt=prompt_text,
-                    created_at=created_at,
-                    descriptor=None,
-                    run_context=run_context,
-                    event_id=render_event_id,
-                )
+        # Dispatch PromptRendered
+        _ = session.dispatcher.dispatch(
+            PromptRendered(
+                prompt_ns=prompt.ns,
+                prompt_key=prompt.key,
+                prompt_name=prompt.name,
+                adapter=CODEX_APP_SERVER_ADAPTER_NAME,
+                session_id=session_id,
+                render_inputs=(),
+                rendered_prompt=prompt_text,
+                created_at=created_at,
+                descriptor=None,
+                run_context=run_context,
+                event_id=render_event_id,
+            )
+        )
+
+        # Dispatch RenderedTools
+        tool_schemas = tuple(extract_tool_schema(tool) for tool in rendered.tools)
+        tools_result = session.dispatcher.dispatch(
+            RenderedTools(
+                prompt_ns=prompt.ns,
+                prompt_key=prompt.key,
+                tools=tool_schemas,
+                render_event_id=render_event_id,
+                session_id=session_id,
+                created_at=created_at,
+            )
+        )
+        if not tools_result.ok:
+            logger.error(
+                "codex_app_server.evaluate.rendered_tools_dispatch_failed",
+                event="rendered_tools_dispatch_failed",
+                context={
+                    "failure_count": len(tools_result.errors),
+                    "tool_count": len(tool_schemas),
+                },
             )
 
-            # Dispatch RenderedTools
-            tool_schemas = tuple(extract_tool_schema(tool) for tool in rendered.tools)
-            tools_result = session.dispatcher.dispatch(
-                RenderedTools(
-                    prompt_ns=prompt.ns,
-                    prompt_key=prompt.key,
-                    tools=tool_schemas,
-                    render_event_id=render_event_id,
-                    session_id=session_id,
-                    created_at=created_at,
-                )
+        with prompt.resources:
+            return await self._run_codex(
+                prompt=prompt,
+                prompt_name=prompt_name,
+                prompt_text=prompt_text,
+                rendered=rendered,
+                session=session,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=heartbeat,
+                run_context=run_context,
+                sandbox=sandbox,
             )
-            if not tools_result.ok:
-                logger.error(
-                    "codex_app_server.evaluate.rendered_tools_dispatch_failed",
-                    event="rendered_tools_dispatch_failed",
-                    context={
-                        "failure_count": len(tools_result.errors),
-                        "tool_count": len(tool_schemas),
-                    },
-                )
-
-            with prompt.resources:
-                return await self._run_codex(
-                    prompt=prompt,
-                    prompt_name=prompt_name,
-                    prompt_text=prompt_text,
-                    rendered=rendered,
-                    session=session,
-                    deadline=deadline,
-                    budget_tracker=budget_tracker,
-                    heartbeat=heartbeat,
-                    run_context=run_context,
-                    sandbox=sandbox,
-                )
-        finally:
-            sandbox.close()
 
     @staticmethod
     def _setup_skill_env(

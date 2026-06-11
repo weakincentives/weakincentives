@@ -86,6 +86,7 @@ def test_invalid_tool_params_returns_error(
             budget_tracker=None,
             adapter_name=adapter_fixture.adapter_name,
             prompt_name=prompt.name,
+            sandbox=None,
         )
 
         uppercase = bridged[0]

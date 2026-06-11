@@ -24,6 +24,7 @@ number of parameters that are passed explicitly.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
     from ..debug.bundle import BundleConfig
     from ..experiment import Experiment
     from ..prompt import Prompt
+    from ..sandbox import Sandbox
     from .dlq import DLQPolicy
     from .mailbox import Mailbox, Message
     from .session.visibility_overrides import VisibilityOverrides
@@ -97,6 +99,7 @@ class _LoopLike(Protocol):
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat,
+        sandbox: Sandbox,
         run_context: RunContext | None = ...,
     ) -> PromptResponse[Any]: ...
 
@@ -222,15 +225,17 @@ def write_bundle_artifacts(  # noqa: PLR0913
     ended_at: datetime,
     budget_tracker: BudgetTracker | None,
     config: AgentLoopConfig,
+    sandbox: Sandbox,
 ) -> None:
     """Write bundle artifacts after execution.
 
     Shared by ``execute_with_bundle`` and ``handle_message_with_bundle``.
+    The sandbox is still open at this point — the loop owns the lease —
+    so its filesystem is captured into the bundle.
 
     Note: ``run_context`` is written by the caller before execution
     (not here) to avoid duplicate entries in the manifest files list.
     """
-    from ..filesystem import Filesystem
     from .session.visibility_overrides import VisibilityOverrides
 
     writer.write_session_after(session)
@@ -252,9 +257,7 @@ def write_bundle_artifacts(  # noqa: PLR0913
             format_visibility_overrides(visibility_overrides, session)
         )
 
-    fs = prompt.resources.get_optional(Filesystem)
-    if fs is not None:
-        writer.write_filesystem(fs)
+    writer.write_filesystem(sandbox.filesystem)
 
     writer.write_environment()
 
@@ -393,28 +396,32 @@ def handle_message_with_bundle(  # noqa: PLR0913, PLR0917
                 adapter=get_adapter_name(loop._adapter),
             )
 
-            # Resolve effective settings and execute
-            response, budget_tracker = _execute_with_bundled_settings(
-                loop,
-                request_event=request_event,
-                prompt=prompt,
-                session=session,
-                run_context=run_context,
-                writer=writer,
-            )
+            # Resolve effective settings and execute against one sandbox
+            # lease spanning the retry loop and bundle capture.
+            with loop._adapter.open_sandbox(prompt) as sandbox:
+                response, budget_tracker = _execute_with_bundled_settings(
+                    loop,
+                    request_event=request_event,
+                    prompt=prompt,
+                    session=session,
+                    run_context=run_context,
+                    writer=writer,
+                    sandbox=sandbox,
+                )
 
-            ended_at = SYSTEM_CLOCK.utcnow()
+                ended_at = SYSTEM_CLOCK.utcnow()
 
-            write_bundle_artifacts(
-                writer=writer,
-                response=response,
-                session=session,
-                prompt=prompt,
-                started_at=started_at,
-                ended_at=ended_at,
-                budget_tracker=budget_tracker,
-                config=loop._config,
-            )
+                write_bundle_artifacts(
+                    writer=writer,
+                    response=response,
+                    session=session,
+                    prompt=prompt,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    budget_tracker=budget_tracker,
+                    config=loop._config,
+                    sandbox=sandbox,
+                )
 
             prompt_cleaned_up = True
             prompt.cleanup()
@@ -437,6 +444,7 @@ def _execute_with_bundled_settings(  # noqa: PLR0913
     session: Session,
     run_context: RunContext,
     writer: BundleWriter,
+    sandbox: Sandbox,
 ) -> tuple[PromptResponse[Any], BudgetTracker | None]:
     """Execute prompt with settings resolved and log capture enabled."""
     prompt, budget_tracker, eff_deadline = loop._resolve_settings(
@@ -453,7 +461,62 @@ def _execute_with_bundled_settings(  # noqa: PLR0913
             deadline=eff_deadline,
             budget_tracker=budget_tracker,
             heartbeat=loop._heartbeat,
+            sandbox=sandbox,
             run_context=run_context,
         )
 
     return response, budget_tracker
+
+
+def execute_for_bundle(  # noqa: PLR0913
+    loop: _LoopLike,
+    *,
+    budget: Budget | None,
+    deadline: Deadline | None,
+    resources: Mapping[type[object], object] | None,
+    heartbeat: Heartbeat | None,
+    experiment: Experiment | None,
+    writer: BundleWriter,
+    request_event: AgentLoopRequest[Any],
+    sandbox_stack: ExitStack,
+) -> tuple[
+    PromptResponse[Any],
+    Session,
+    Prompt[Any],
+    BudgetTracker | None,
+    Sandbox,
+]:
+    """Execute within bundle context with log capture.
+
+    This was previously ``AgentLoop._execute_for_bundle``. The sandbox
+    lease is entered on ``sandbox_stack`` so it outlives this call: the
+    caller captures its filesystem into the bundle before the stack
+    releases it.
+    """
+    prompt, session = loop.prepare(request_event.request, experiment=experiment)
+
+    # Publish request state to session after prepare()
+    _ = session.dispatch(LoopRequestState(request=request_event))
+
+    writer.write_session_before(session)
+    writer.set_prompt_info(
+        ns=prompt.ns, key=prompt.key, adapter=get_adapter_name(loop._adapter)
+    )
+
+    prompt, budget_tracker, eff_deadline = loop._resolve_settings(
+        prompt, budget=budget, deadline=deadline, resources=resources
+    )
+    eff_heartbeat = heartbeat if heartbeat is not None else loop._heartbeat
+
+    sandbox = sandbox_stack.enter_context(loop._adapter.open_sandbox(prompt))
+    with writer.capture_logs():
+        response = loop._evaluate_with_retries(
+            prompt=prompt,
+            session=session,
+            deadline=eff_deadline,
+            budget_tracker=budget_tracker,
+            heartbeat=eff_heartbeat,
+            sandbox=sandbox,
+        )
+
+    return response, session, prompt, budget_tracker, sandbox

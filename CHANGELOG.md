@@ -4,6 +4,29 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Sandbox Lifecycle: Explicit Leases
+
+The sandbox lifecycle from the M3 refactor (below) is reworked as an
+explicit **lease** owned by the base `ProviderAdapter`:
+
+- `ProviderAdapter.open_sandbox(prompt)` opens a lease on the prompt's
+  declared environment; `evaluate(..., sandbox=...)` borrows it without
+  closing. `evaluate()` without a sandbox opens one for the duration of
+  the call (previous behavior). Concrete adapters now implement
+  `_evaluate(..., sandbox: Sandbox)` — the explicit core contract with no
+  lifecycle code; subclasses overriding `evaluate` directly must migrate.
+- **`AgentLoop` holds one lease per request**: a visibility-expansion
+  retry now reuses the same sandbox (files written before the expansion
+  survive into the next round), and debug bundles capture the still-open
+  sandbox filesystem again (`write_bundle_artifacts(sandbox=...)`).
+- The workspace preview rebinds from the open sandbox at the start of
+  every evaluation round (`bind_workspace_preview`, replacing
+  `open_prompt_sandbox`), so re-rendered prompts list files written in
+  earlier rounds.
+- `create_bridged_tools`/`BridgedTool` now require the `sandbox` argument
+  (still nullable) so call sites opt out explicitly instead of silently
+  running without rollback.
+
 ### M3 — Sandbox as the Execution Context
 
 **One environment model.** The sandbox introduced in M2 is now the execution
@@ -90,7 +113,7 @@ Many lint rules were re-enabled, `vulture` dead-code detection is wired into
 source/test files were decomposed. `FakeClock.async_sleep()` now genuinely
 suspends async callers.
 
----
+______________________________________________________________________
 
 ### ⚠️ Breaking Changes
 
@@ -128,8 +151,7 @@ under 100 lines (`tests/filesystem/fake_backend.py`).
   applies to **every** operation, including reads — previously only writes
   were validated. `read()`/`read_bytes()` reject negative offsets/limits.
 - **Documented strict-rollback snapshot contract.** Host snapshots now
-  capture *all* files, including `.gitignore`-matched ones (`git add --all
-  --force`), and restore still runs `git clean -xfd`. Restore therefore
+  capture *all* files, including `.gitignore`-matched ones (`git add --all --force`), and restore still runs `git clean -xfd`. Restore therefore
   returns the workspace to the exact snapshot-time state: ignored files that
   existed at snapshot time are no longer destroyed by restore, and ignored
   files created afterwards are removed.
@@ -213,8 +235,7 @@ value.
 
 Alongside the new Codex JSON-RPC `TypedDict`s, the ACP adapter was updated to the
 current `agent-client-protocol` API: the permission response changed from a
-boolean `approved` to `RequestPermissionResponse(outcome=AllowedOutcome(...) |
-DeniedOutcome(...))`; `SessionNotification` now takes `session_id=` (was
+boolean `approved` to `RequestPermissionResponse(outcome=AllowedOutcome(...) | DeniedOutcome(...))`; `SessionNotification` now takes `session_id=` (was
 `sessionId=`); `FileSystemCapability` → `FileSystemCapabilities`; and
 `RequestError` takes positional `(code, message)`. These require
 `agent-client-protocol >= 0.9` (pin bumped to `>= 0.10.1`).
@@ -225,13 +246,12 @@ The dead-code sweep deletes two public names with **no shim**, so downstream
 imports or calls now raise `ImportError` / `AttributeError`:
 
 - **`Tool.wrap(handler)`** — the docstring/annotation-driven constructor on the
-  public `Tool` class is gone. Use `Tool[P, R].create(name=..., description=...,
-  handler=...)` instead.
+  public `Tool` class is gone. Use `Tool[P, R].create(name=..., description=..., handler=...)` instead.
 - **`ACPSessionState`** — dropped from the `weakincentives.adapters.acp`,
   `opencode_acp`, and `gemini_acp` exports (and from `llms.md`). The slice was
   never dispatched; there is no replacement.
 
----
+______________________________________________________________________
 
 ### Added
 
@@ -301,14 +321,12 @@ runtime — a thin subclass of `ACPAdapter` (the `OpenCodeACPAdapter` pattern):
 
 #### WebSocket transport for the Codex App Server adapter (#1150)
 
-`CodexAppServerClientConfig` gains a public `Transport = Literal["stdio",
-"websocket"]` selector plus `remote_url` and `ws_auth_token` fields, enabling
+`CodexAppServerClientConfig` gains a public `Transport = Literal["stdio", "websocket"]` selector plus `remote_url` and `ws_auth_token` fields, enabling
 three modes:
 
 - **stdio** (default, unchanged): spawns `codex app-server`, NDJSON over
   stdin/stdout.
-- **managed WebSocket** (`transport="websocket"`): spawns `codex app-server
-  --listen ws://127.0.0.1:<port>` on a free port (with port-collision retries),
+- **managed WebSocket** (`transport="websocket"`): spawns `codex app-server --listen ws://127.0.0.1:<port>` on a free port (with port-collision retries),
   waits for TCP readiness, then connects.
 - **external WebSocket** (`remote_url="ws://…"`): connects to an already-running
   server with no subprocess spawned. `ws_auth_token` is sent as
@@ -344,7 +362,7 @@ Changed):
 - **Keyboard nav**: `G` jumps to end, `gg` to start; the `?` shortcuts modal
   documents all bindings. (`src/weakincentives/cli/static/`)
 
----
+______________________________________________________________________
 
 ### Changed
 
@@ -353,8 +371,7 @@ Changed):
 The debug viewer's visual layer was rewritten: a **dark-first** signal-color
 palette (the default theme flips from light to dark), IBM Plex Mono / DM Sans
 typography, and flat surfaces replacing glassmorphism. The "Copy filtered"
-buttons were removed from the transcript and logs views. (`cli/static/{app.js,
-index.html,store.js,style.css}` and view modules)
+buttons were removed from the transcript and logs views. (`cli/static/{app.js, index.html,store.js,style.css}` and view modules)
 
 #### Toolchain check failures surface raw output + a reproduce command (#1116)
 
@@ -403,7 +420,7 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
 `@asynccontextmanager` return types across `src/` moved from
 `Iterator`/`AsyncIterator` to `Generator`/`AsyncGenerator`.
 
----
+______________________________________________________________________
 
 ### Fixed
 
@@ -424,7 +441,7 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
   install (e.g. a Node version mismatch) skips cleanly instead of erroring.
   (Test infrastructure.)
 
----
+______________________________________________________________________
 
 ### Internal / Refactoring / Tests / Docs
 
@@ -442,8 +459,7 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
   `banned-time-imports`, and `dead-code`; CI's static-analysis job now runs
   the same registry via `check.py --skip test` (newly gating PRs on bandit,
   deptry, pip-audit, markdown, architecture, code-length, dead-code, docs,
-  and the import checkers). The lint checker parses `ruff check
-  --output-format=json` — the old text parser had silently stopped matching
+  and the import checkers). The lint checker parses `ruff check --output-format=json` — the old text parser had silently stopped matching
   ruff's new output format, dumping raw code frames instead of structured
   `file:line: [code] message` diagnostics — and now marks auto-fixable issues
   with a `make lint-fix` summary. `typecheck` runs ty **and** pyright
@@ -474,8 +490,7 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
   the tree (#1139, #1131).
 - **Typed `session_id` boundary + de-dynamic access.** `SessionProtocol` now
   declares a `session_id: UUID | None` property (with `Session.session_id`
-  becoming a read-only property), so the ~13 `getattr(session, "session_id",
-  None)` probes scattered through the Claude Agent SDK, ACP, and Codex App Server
+  becoming a read-only property), so the ~13 `getattr(session, "session_id", None)` probes scattered through the Claude Agent SDK, ACP, and Codex App Server
   adapters are now plain attribute access. Companion cleanups dropped
   `getattr`/`hasattr` on statically-known attributes elsewhere: task-example
   validators in `prompt/_validators.py` are typed against the concrete
@@ -530,7 +545,7 @@ callbacks). To satisfy pyright 1.1.409, `@contextmanager` /
   removed `ACPSessionState` session-reuse section plus the stale `_state.py` /
   `_async.py` module entries.
 
----
+______________________________________________________________________
 
 ## v0.27.0 — 2026-02-16
 
@@ -559,7 +574,7 @@ sandbox violation configuration** extends `IsolationConfig` for fine-grained
 control. A new **AnalysisLoop specification** defines agent-driven debug bundle
 analysis. Direct `pydantic` imports are **banned project-wide**.
 
----
+______________________________________________________________________
 
 ### Added
 
@@ -743,7 +758,7 @@ specialized analysis tools: `bundle_query`, `bundle_compare`, `slice_inspect`,
 EvalLoop integration (dataset-driven with expected outputs) and AgentLoop
 integration (retrospective trajectory analysis).
 
----
+______________________________________________________________________
 
 ### Changed
 
@@ -776,8 +791,7 @@ inject `WallClock` (preferred), use `SYSTEM_CLOCK` singleton (acceptable),
 #### All `time.*` calls routed through `MonotonicClock` / `Sleeper`
 
 9 production files across 5 subsystems (ACP adapter/client, Claude SDK hooks,
-Codex deadline watchdog, Redis mailbox, evals, agent loop) have their `import
-time` removed and replaced with injected `MonotonicClock` and `Sleeper`
+Codex deadline watchdog, Redis mailbox, evals, agent loop) have their `import time` removed and replaced with injected `MonotonicClock` and `Sleeper`
 protocol parameters. Notable semantic improvement: `RedisMailbox` and
 `collect_results()` switch from `time.time()` (wall-clock, NTP-vulnerable) to
 `monotonic()` for deadline calculations. New constructor parameters with
@@ -806,7 +820,7 @@ Integration test namespace strings change from slash-separated
 (`integration.ack.adapter-name`) to comply with the new prompt namespace
 validation regex.
 
----
+______________________________________________________________________
 
 ### Breaking Changes
 
@@ -874,7 +888,7 @@ and `open_text(path, ...) -> TextReader`. Custom `Filesystem` implementations
 must add these methods. The built-in `HostFilesystem` and
 `InMemoryFilesystem` are updated.
 
----
+______________________________________________________________________
 
 ### Documentation
 
@@ -926,7 +940,7 @@ documentation, updated component-to-protocol mapping table, and the three-tier
 usage rule (inject protocol preferred, `SYSTEM_CLOCK` acceptable,
 `datetime.now(UTC)` prohibited).
 
----
+______________________________________________________________________
 
 ## v0.26.0 — 2026-02-14
 
@@ -971,7 +985,7 @@ adapters. A new **code length checker** enforces 120-line method and 720-line
 file limits. The **WINK presentation slides** are added as a Marp-based deck
 with a GitHub Actions build workflow.
 
----
+______________________________________________________________________
 
 ### Fixed
 
@@ -999,7 +1013,7 @@ with a GitHub Actions build workflow.
   leaking SDK-native types into the query database. Now uses the canonical
   `entry_type` directly. (`query.py`)
 
----
+______________________________________________________________________
 
 ### Breaking Changes
 
@@ -1011,6 +1025,7 @@ reusing the same config would eventually have every request fail with a stale
 deadline. Deadlines belong on per-request objects.
 
 **Migration:**
+
 ```python
 # Old ❌
 config = AgentLoopConfig(
@@ -1040,6 +1055,7 @@ not collected; sections with skills participate in progressive disclosure via
 `open_sections`.
 
 **Migration:**
+
 ```python
 # Old ❌
 adapter = ClaudeAgentSDKAdapter(
@@ -1063,6 +1079,7 @@ section = MarkdownSection(
 ```
 
 **New section-level infrastructure:**
+
 - `Section.__init__` accepts `skills: Sequence[object] | None`
 - `MarkdownSection.clone()` preserves skills
 - `RenderedPrompt.skills` exposes collected skills
@@ -1081,6 +1098,7 @@ protocol `WorkspaceSection` in `prompt/protocols.py` is renamed to
 `WorkspaceSectionProtocol`.
 
 **Migration:**
+
 ```python
 # Old ❌
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentWorkspaceSection
@@ -1097,14 +1115,17 @@ reduce API surface and simplify the implementation. Field-level aliases via
 `field(metadata={"alias": "..."})` remain supported.
 
 **Removed from `parse()`:**
+
 - `case_insensitive` — case-insensitive key matching
 - `alias_generator` — callable to transform field names
 - `aliases` — dict of field-to-alias mappings
 
 **Removed from `dump()`:**
+
 - `alias_generator` — callable to transform field names
 
 **Removed from `schema()`:**
+
 - `alias_generator` — callable to transform property names
 
 **Removed `extra="allow"` mode** — only `"ignore"` (default) and `"forbid"`
@@ -1116,6 +1137,7 @@ type annotations is removed in favor of the simpler generic alias approach
 (`parse(Wrapper[Data], data)`).
 
 **Migration:**
+
 ```python
 # Field-level aliases still work ✅
 @dataclass
@@ -1138,6 +1160,7 @@ The transcript system switches from adapter-specific formats to a canonical
 schema. All log events, context field names, and entry types change:
 
 **Log events renamed** (`transcript.collector.*` → `transcript.*`):
+
 - `transcript.collector.entry` → `transcript.entry`
 - `transcript.collector.start` → `transcript.start`
 - `transcript.collector.stop` → `transcript.stop`
@@ -1146,11 +1169,13 @@ schema. All log events, context field names, and entry types change:
 - `transcript.collector.error` → `transcript.error`
 
 **Log context fields renamed:**
+
 - `transcript_source` → `source`
 - `raw_json` → `raw`
 - `parsed` → `detail` (Claude SDK entries wrapped under `detail.sdk_entry`)
 
 **Entry types canonicalized:**
+
 - `user` → `user_message`
 - `assistant` → `assistant_message`
 - `summary` → `system_event`
@@ -1178,7 +1203,7 @@ API listings. The decorator infrastructure remains in the `dbc` module but is
 no longer applied or exported. Related purity tests are deleted (159 lines
 removed from `test_dbc_contracts.py`).
 
----
+______________________________________________________________________
 
 ### New Features
 
@@ -1244,6 +1269,7 @@ types: `user_message`, `assistant_message`, `tool_use`, `tool_result`,
 
 **Codex App Server integration** via `CodexTranscriptBridge`
 (`adapters/codex_app_server/_transcript.py`, 186 lines):
+
 - Maps Codex JSON-RPC notifications to canonical types
 - Suppresses streaming deltas (`item/agentMessage/delta`, etc.)
 - Handles `turn/started`, `item/started`, `item/completed`,
@@ -1252,6 +1278,7 @@ types: `user_message`, `assistant_message`, `tool_use`, `tool_result`,
 
 **ACP integration** via `ACPTranscriptBridge`
 (`adapters/acp/_transcript.py`, 186 lines):
+
 - Buffers `AgentMessageChunk` and `AgentThoughtChunk` streaming deltas
 - Consolidates `ToolCallProgress` updates per `tool_call_id`
 - Emits consolidated `assistant_message`, `thinking`, `tool_use`, `tool_result`
@@ -1259,12 +1286,14 @@ types: `user_message`, `assistant_message`, `tool_use`, `tool_result`,
 
 **Claude SDK message splitting** — mixed content blocks are split into
 separate transcript entries for structural consistency with Codex:
+
 - `_emit_assistant_split()`: text blocks → `assistant_message`, each tool_use
   block → `tool_use`
 - `_emit_user_tool_result_split()`: non-tool blocks → `user_message`, each
   tool_result block → `tool_result`
 
 **New configuration fields:**
+
 - `CodexAppServerClientConfig.transcript: bool = True`
 - `CodexAppServerClientConfig.transcript_emit_raw: bool = True`
 
@@ -1276,7 +1305,7 @@ separate transcript entries for structural consistency with Codex:
 provides typed access. The `wink query` CLI loads transcripts from this artifact
 first, falling back to log scanning.
 
----
+______________________________________________________________________
 
 ### Improvements
 
@@ -1300,6 +1329,7 @@ alongside tools.
 #### Expanded `wink query` Extraction Pipeline
 
 New extraction functions handle the unified transcript format:
+
 - `_apply_split_block_details()` — extracts `tool_name`/`tool_use_id` from
   split content blocks
 - `_apply_notification_item_details()` — extracts tool metadata from Codex
@@ -1312,8 +1342,7 @@ New extraction functions handle the unified transcript format:
 
 #### Debug UI Improvements
 
-- `wink debug` index page now returns `HTMLResponse` with `Cache-Control:
-  no-cache` header. HTTP middleware `_no_cache_static()` added to prevent stale
+- `wink debug` index page now returns `HTMLResponse` with `Cache-Control: no-cache` header. HTTP middleware `_no_cache_static()` added to prevent stale
   static asset caching.
 
 #### Integration Test Timeout Increase
@@ -1331,7 +1360,7 @@ Makefile.
 - `dataclasses/__init__.py`: Redundant `cast(Callable[[type[T]], type[T]], ...)`
   simplified to direct `dataclass()` call
 
----
+______________________________________________________________________
 
 ### Refactoring
 
@@ -1343,6 +1372,7 @@ through package `__init__.py` re-exports. In total, ~30 new private modules
 were created. Key decompositions:
 
 **Claude Agent SDK adapter** (`adapters/claude_agent_sdk/`):
+
 - `adapter.py` (1,774 → 695 lines): extracted `_message_extraction.py`,
   `_schema_normalization.py`, `_result_extraction.py`, `_sdk_execution.py`,
   `_sdk_options.py`
@@ -1354,15 +1384,18 @@ were created. Key decompositions:
   `_hook_tools.py` (constraint checking, tool processing)
 
 **Codex App Server adapter** (`adapters/codex_app_server/`):
+
 - `adapter.py`: extracted `_protocol.py` (JSON-RPC execution flow),
   `_response.py` (response building), `_schema.py` (tool spec conversion)
 
 **Debug system** (`debug/`):
+
 - `bundle.py` (1,591 → 459 lines): extracted `_bundle_reader.py`,
   `_bundle_writer.py`, `_bundle_retention.py`
 - `environment.py`: git operations extracted to `_git.py`
 
 **CLI** (`cli/`):
+
 - `query.py` (2,204 → 996 lines): extracted `_query_helpers.py`,
   `_query_tables.py`, `_query_transcript.py`, then further into
   `_query_builders.py`, `_query_environment.py`, `_query_formatters.py`.
@@ -1371,6 +1404,7 @@ were created. Key decompositions:
 - `debug_app.py` (736 → 34 lines): extracted `_bundle_store.py`
 
 **Prompt system** (`prompt/`):
+
 - `registry.py`: extracted `_validators.py` (section/tool/skill validation
   functions, registry invariant callbacks) and `_indices.py`
   (`build_registry_indices()`)
@@ -1378,21 +1412,26 @@ were created. Key decompositions:
   `_tool_overrides.py`, `_task_example_overrides.py`
 
 **Serde** (`serde/`):
+
 - `parse.py`: extracted `_coercers.py` (all type coercion functions) and
   `_generics.py` (generic type resolution, TypeVar mapping)
 
 **Formal verification** (`formal/`):
+
 - `__init__.py`: extracted `_metadata.py` (data types) and `_codegen.py`
   (TLA+ generation)
 
 **Filesystem** (`filesystem/`):
+
 - `_host.py`: git operations extracted to `_git_ops.py`
 
 **Runtime** (`runtime/`):
+
 - `agent_loop.py`: bundle metrics/artifacts extracted to
   `_agent_loop_bundle.py`
 
 **Contrib** (`contrib/mailbox/`):
+
 - `_redis.py`: Lua scripts extracted to `_lua_scripts.py`, TLA+ spec to
   `_redis_spec.py`
 
@@ -1411,7 +1450,7 @@ Five monolithic test files decomposed into focused test modules:
 
 All restructured tests preserve existing assertions with no functional changes.
 
----
+______________________________________________________________________
 
 ### Documentation
 
@@ -1470,6 +1509,7 @@ across all provider adapters:
 #### Query Guide Updates
 
 `guides/query.md` expanded with:
+
 - New "Environment Tables" section documenting 6 `env_*` tables with 5 example
   queries
 - Four new transcript views added to the views reference table
@@ -1511,7 +1551,7 @@ New `wink-presentation.md` (472 lines) — Marp-based presentation covering WINK
 architecture, design philosophy, and usage patterns. Published via
 `.github/workflows/presentation.yml` GitHub Actions workflow.
 
----
+______________________________________________________________________
 
 ### Developer Experience
 
@@ -1530,7 +1570,7 @@ Six methods refactored to satisfy the 120-line limit:
 `FormalSpec.to_tla`, `QueryDatabase._build_views`, `CompositeSnapshot.from_json`,
 `model_check`, and two test helpers.
 
----
+______________________________________________________________________
 
 ### Dependencies
 
@@ -1543,7 +1583,7 @@ Six methods refactored to satisfy the 120-line limit:
 - New optional: `agent-client-protocol>=0.8.0`, `mcp>=1.26.0` (via `[acp]` extra)
 - Lint rule: `ANN201` replaced with `RUF069` in per-file test ignores
 
----
+______________________________________________________________________
 
 ## v0.25.0 — 2026-02-06
 
@@ -1579,7 +1619,7 @@ and **pre-commit hooks enforcing full CI suites**. `BundleConfig` replaces
 **ReducerRegistry**, and **SessionSnapshotter**. New specs cover **Codex App
 Server** and **OpenCode ACP** integrations.
 
----
+______________________________________________________________________
 
 ### Fixed
 
@@ -1599,7 +1639,7 @@ Server** and **OpenCode ACP** integrations.
 - JavaScript tests now properly executed in CI test job (Bun was previously
   only installed in static-analysis job; `45292cb1` fixes `be065a9e`).
 
----
+______________________________________________________________________
 
 ### Breaking Changes
 
@@ -1610,6 +1650,7 @@ means it can expire before execution even starts. Deadlines belong on
 per-request objects (`AgentLoopRequest`, `Budget`, or `execute(deadline=...)`).
 
 **Migration:**
+
 ```python
 # Old ❌
 config = AgentLoopConfig(
@@ -1635,6 +1676,7 @@ and `LiteLLMAdapter` have been removed along with all supporting infrastructure:
 ~15,600 lines across 57 files.
 
 **Removed:**
+
 - `weakincentives.adapters.openai` module (911 lines)
 - `weakincentives.adapters.litellm` module (487 lines)
 - `weakincentives.adapters.inner_loop` module (617 lines)
@@ -1647,6 +1689,7 @@ and `LiteLLMAdapter` have been removed along with all supporting infrastructure:
 - Optional dependencies: `weakincentives[openai]`, `weakincentives[litellm]`
 
 **Migration:**
+
 ```python
 # Old ❌
 from weakincentives.adapters.openai import OpenAIAdapter
@@ -1663,6 +1706,7 @@ All tool sections that duplicate capabilities now provided by execution harness
 runtimes have been removed (~19,000 lines across 94 files):
 
 **Removed modules:**
+
 - `weakincentives.contrib.tools.vfs` — VFS filesystem tools (855 lines)
 - `weakincentives.contrib.tools.vfs_mounts` — VFS mount configuration (355 lines)
 - `weakincentives.contrib.tools.vfs_types` — VFS type definitions (792 lines)
@@ -1681,11 +1725,11 @@ Asteval.
 
 #### EvalLoopConfig.debug_bundle_dir → debug_bundle
 
-The `debug_bundle_dir: Path | None` field is replaced with `debug_bundle:
-BundleConfig | None`, adding an `enabled` flag, `storage_handler` callback,
+The `debug_bundle_dir: Path | None` field is replaced with `debug_bundle: BundleConfig | None`, adding an `enabled` flag, `storage_handler` callback,
 and `retention` policy.
 
 **Migration:**
+
 ```python
 # Old ❌
 config = EvalLoopConfig(debug_bundle_dir=Path("/bundles"))
@@ -1716,10 +1760,10 @@ Bedrock mapping `"claude-opus-4-6" → "us.anthropic.claude-opus-4-6-v1"` was ad
 #### Replaced max_thinking_tokens with Reasoning Effort Levels
 
 `ClaudeAgentSDKModelConfig.max_thinking_tokens: int | None` replaced with
-`reasoning: ReasoningEffort | None` where `ReasoningEffort = Literal["low",
-"medium", "high", "max"]`. Default changed from disabled (`None`) to `"high"`.
+`reasoning: ReasoningEffort | None` where `ReasoningEffort = Literal["low", "medium", "high", "max"]`. Default changed from disabled (`None`) to `"high"`.
 
 **Migration:**
+
 ```python
 # Old ❌
 config = ClaudeAgentSDKModelConfig(max_thinking_tokens=16000)
@@ -1745,7 +1789,7 @@ scoped methods `last_feedback_for_provider()` and
 `tool_calls_since_last_feedback_for_provider()` on `FeedbackContext`. All
 matching feedback blocks are collected and combined with `"\n\n".join()`.
 
----
+______________________________________________________________________
 
 ### New Features
 
@@ -1876,7 +1920,7 @@ The transcript tab in the debug viewer automatically hides when the bundle
 contains no transcript data. Keyboard shortcut numbers renumber dynamically
 to skip hidden tabs.
 
----
+______________________________________________________________________
 
 ### Improvements
 
@@ -1933,7 +1977,7 @@ before every commit to prevent CI failures from testmon-skipped tests.
 - Bandit AST patching warnings suppressed
 - Removed `--preview` flag from ruff format JSON check
 
----
+______________________________________________________________________
 
 ### Documentation
 
@@ -1981,7 +2025,7 @@ Replaced "Tracing & Observability" → "ACP Integration", added "Codex App Serve
 Integration", "Session Durability" → "Checkpointer Mechanism", "Named Entities"
 → "Basic Metrics".
 
----
+______________________________________________________________________
 
 ### CI / Infrastructure
 
@@ -2008,7 +2052,7 @@ single `run_heavy_tests` flag.
 
 Bun test runner for debug web UI with 77+ unit tests. Pure utility functions
 extracted to `lib.js`. Biome cognitive complexity threshold lowered from 25 to
-8. Integrated into `make test` and `make check`.
+8\. Integrated into `make test` and `make check`.
 
 #### Shared CI Setup Action
 
@@ -2023,7 +2067,7 @@ Static analysis and test jobs skip for documentation-only PRs.
 
 PR code review workflow updated to use Claude Opus 4.6 at maximum effort level.
 
----
+______________________________________________________________________
 
 ### Debug Web UI
 
@@ -2047,7 +2091,7 @@ The monolithic `app.js` (~2,700 lines) decomposed into modular architecture:
 `VirtualScroller`, `createFilterChip`/`createActiveFilter`, and
 `renderZoomJsonTree` extracted into `components/` directory as ES modules.
 
----
+______________________________________________________________________
 
 ### Dependencies
 
@@ -2084,7 +2128,7 @@ The monolithic `app.js` (~2,700 lines) decomposed into modular architecture:
 - `podman` — No longer needed (tool section removed)
 - `aiohttp` — No longer needed (removed with adapters)
 
----
+______________________________________________________________________
 
 ### Internal
 
@@ -2115,7 +2159,7 @@ The monolithic `app.js` (~2,700 lines) decomposed into modular architecture:
 - `pyproject.toml`: Added `--timeout=10 --timeout-method=thread` to default
   pytest addopts; `integration-tests` added to `norecursedirs`
 
----
+______________________________________________________________________
 
 ## v0.24.0 — 2026-01-30
 
@@ -2139,7 +2183,7 @@ state. Frontend code now enforces **Biome linting**. The codebase modernizes to
 **PEP 695 type syntax** and gains **comprehensive docstrings** across all 26
 public modules.
 
----
+______________________________________________________________________
 
 ### Breaking Changes
 
@@ -2149,6 +2193,7 @@ The `MainLoop` class and all related types have been renamed to `AgentLoop` for
 clarity. This affects all imports and type annotations.
 
 **Migration:**
+
 ```python
 # Old ❌
 from weakincentives.runtime import MainLoop, MainLoopConfig, MainLoopRequest, MainLoopResult
@@ -2167,11 +2212,13 @@ The `finalize()` method now receives the parsed output and returns a (possibly
 transformed) output. Subclasses overriding this method must update their signature.
 
 **Old signature:**
+
 ```python
 def finalize(self, prompt: Prompt[OutputT], session: Session) -> None:
 ```
 
 **New signature:**
+
 ```python
 def finalize(
     self,
@@ -2193,7 +2240,7 @@ captured in session state and viewable through the Sessions tab instead.
 - Keyboard shortcuts reduced from 6 tabs to 5 tabs
 - Filesystem view moved from key `5` to key `4`
 
----
+______________________________________________________________________
 
 ### New Features
 
@@ -2203,6 +2250,7 @@ Replaces `ClaudeLogAggregator` with a hook-driven transcript collection system
 that provides real-time collection from Claude Agent SDK sessions.
 
 **Key capabilities:**
+
 - Uses SDK hooks (`SubagentStart`, `SubagentStop`) for immediate transcript path
   discovery instead of directory polling
 - Automatic sub-agent transcript discovery and tailing
@@ -2212,6 +2260,7 @@ that provides real-time collection from Claude Agent SDK sessions.
 - Configurable poll intervals and max read bytes
 
 **Configuration:**
+
 ```python
 config = ClaudeAgentSDKClientConfig(
     transcript_collection=TranscriptCollectorConfig(
@@ -2231,6 +2280,7 @@ New `wink query` database schema (v5) with normalized transcript data:
 `tool_name`, `tool_use_id`, `raw_json`, `parsed`
 
 **Four pre-built SQL views:**
+
 - `transcript_flow` — Conversation flow with truncated previews
 - `transcript_tools` — Tool calls paired with their results
 - `transcript_thinking` — Thinking block analysis with length metrics
@@ -2240,6 +2290,7 @@ New `wink query` database schema (v5) with normalized transcript data:
 full-text search.
 
 **New Transcript tab** in `wink debug` with:
+
 - Filter chips for sources (main vs. subagents) and entry types
 - Full-text search on message content
 - Drilldown into raw JSON
@@ -2249,6 +2300,7 @@ full-text search.
 New Environment tab in `wink debug` displaying captured runtime context:
 
 **Six new database tables:**
+
 - `env_system` — OS, kernel, architecture, CPU, memory, hostname
 - `env_python` — Version, implementation, executable, virtualenv status
 - `env_git` — Commit SHA, branch, dirty status, remotes, tags
@@ -2356,7 +2408,7 @@ showing "binary file cannot be displayed":
 - Responsive sizing (max 70% viewport height)
 - Base64 encoding with MIME type whitelisting for security
 
----
+______________________________________________________________________
 
 ### Improvements
 
@@ -2385,7 +2437,7 @@ Request and response data is now captured in session state via three new event
 types: `LoopRequestState`, `LoopRawResponse`, `LoopFinalResponse`. This enables
 viewing the data through the Sessions tab and standard session inspection APIs.
 
----
+______________________________________________________________________
 
 ### Internal Changes
 
@@ -2451,7 +2503,7 @@ Added `.github/dependabot.yml` for automated dependency updates:
 - GitHub Actions: weekly, minor/patch only
 - Both assigned to `weakincentives/maintainers` team
 
----
+______________________________________________________________________
 
 ### Documentation
 
@@ -2501,7 +2553,7 @@ automatically infer `_params_type`** from generic base classes, eliminating
 manual type assignment. New documentation includes a comprehensive **Query
 guide** for SQL-based bundle analysis.
 
----
+______________________________________________________________________
 
 ### Breaking Changes
 
@@ -2520,6 +2572,7 @@ tracking.
   performance-sensitive code paths
 
 **Migration:**
+
 - Remove calls to `enable_dbc()` and `disable_dbc()` (no longer needed)
 - Replace `with dbc_enabled(False):` with `with dbc_suspended():`
 - Replace `with dbc_enabled():` or `with dbc_enabled(True):` with nothing (DbC
@@ -2531,15 +2584,18 @@ tracking.
 with explicit type specification at parse time using generic alias syntax.
 
 **Removed parameters from `dump()`:**
+
 - `include_dataclass_type: bool` — no longer embeds type metadata
 - `type_key: str` — no longer customizable
 
 **Removed parameters from `parse()`:**
+
 - `allow_dataclass_type: bool` — types must now be specified upfront
 - `type_key: str` — no longer reads embedded type metadata
 - `cls` parameter is now mandatory (was optional)
 
 **Migration:**
+
 - Replace `dump(obj, include_dataclass_type=True)` with `dump(obj)` and store
   type information separately (e.g., in a database column or message envelope)
 - Replace `parse(None, data, allow_dataclass_type=True)` with
@@ -2552,6 +2608,7 @@ with explicit type specification at parse time using generic alias syntax.
 better separation of concerns. The bundle layer is now generic, not eval-specific.
 
 **Migration:**
+
 - Replace `ctx.write_eval(eval_info)` with `ctx.write_metadata("eval", eval_info)`
 
 #### Experiment Class Relocated
@@ -2560,11 +2617,12 @@ better separation of concerns. The bundle layer is now generic, not eval-specifi
 root) to resolve circular import issues.
 
 **Migration:**
+
 - Replace `from weakincentives.evals._experiment import Experiment` with
   `from weakincentives.experiment import Experiment`
 - The public API `from weakincentives.evals import Experiment` continues to work
 
----
+______________________________________________________________________
 
 ### New Features
 
@@ -2574,11 +2632,13 @@ EvalLoop now supports debug bundle creation, providing full observability into
 evaluation runs.
 
 **Configuration:**
+
 ```python
 config = EvalLoopConfig(debug_bundle_dir=Path("/tmp/eval-bundles"))
 ```
 
 **Bundle contents:**
+
 - Session state before/after execution
 - Application logs during execution
 - Request input (sample and experiment)
@@ -2588,6 +2648,7 @@ config = EvalLoopConfig(debug_bundle_dir=Path("/tmp/eval-bundles"))
 - Environment information
 
 **New fields:**
+
 - `EvalLoopConfig.debug_bundle_dir: Path | None` — enables bundling when set
 - `EvalResult.bundle_path: Path | None` — path to created bundle
 - `EvalResult.experiment_name: str | None` — experiment identifier
@@ -2664,7 +2725,7 @@ class MySection(MarkdownSection[MyParams]):
 This works through `__init_subclass__` which propagates `_params_type` from
 specialized base classes created by `__class_getitem__`.
 
----
+______________________________________________________________________
 
 ### Bug Fixes
 
@@ -2689,13 +2750,14 @@ execution. The system now tracks execution state and reuses existing results
 instead of re-executing the sample, preventing inconsistent data from multiple
 executions.
 
----
+______________________________________________________________________
 
 ### Documentation
 
 #### Query Guide
 
 New comprehensive guide (`guides/query.md`) for SQL-based debug bundle analysis:
+
 - `wink query` CLI usage with `--schema`, `--table`, `--export-jsonl` options
 - Complete database schema reference (core tables, optional tables, dynamic
   slice tables)
@@ -2706,6 +2768,7 @@ New comprehensive guide (`guides/query.md`) for SQL-based debug bundle analysis:
 #### README Onboarding Update
 
 Refreshed onboarding guidance with a "hands-on first" approach:
+
 - Points new users to the starter repository for immediate experimentation
 - Repositions guides as supplementary resource for improvement
 - Acknowledges learning-by-doing preference
@@ -2722,24 +2785,26 @@ Refreshed onboarding guidance with a "hands-on first" approach:
 - `guides/serialization.md` — Replaced polymorphic section with generic alias
   documentation
 
----
+______________________________________________________________________
 
 ### Dependencies
 
 Updated to latest versions:
+
 - `claude-agent-sdk`: 0.1.21 → 0.1.22
 - `huggingface-hub`: 1.3.2 → 1.3.3
 - `hypothesis`: 6.150.2 → 6.150.3
 - `rich`: 14.2.0 → 14.3.0
 - `ruff`: 0.14.13 → 0.14.14 (sdist 25% smaller)
 
----
+______________________________________________________________________
 
 ### Tests
 
 #### Comprehensive Loop Type Serialization Tests
 
 New test suite (`tests/serde/test_loop_serde.py`) with 50+ test cases covering:
+
 - `Score`, `Sample`, `Experiment` round-trip serialization
 - `EvalRequest`, `EvalResult` with generic types and error handling
 - `AgentLoopConfig`, `AgentLoopRequest`, `AgentLoopResult` with complex nested types
@@ -2750,6 +2815,7 @@ New test suite (`tests/serde/test_loop_serde.py`) with 50+ test cases covering:
 #### EvalLoop Bundle Tests
 
 8 new test cases for EvalLoop debug bundle functionality:
+
 - Basic bundle creation and directory structure
 - Failed evaluation and None output handling
 - Session-aware evaluator support
@@ -2758,6 +2824,7 @@ New test suite (`tests/serde/test_loop_serde.py`) with 50+ test cases covering:
 #### Generic Type Resolution Tests
 
 18 new tests for AST-based type resolution:
+
 - Simple names, namespace handling, subscripted generics
 - Builtin generics, union types, literal types
 - Error handling and edge cases

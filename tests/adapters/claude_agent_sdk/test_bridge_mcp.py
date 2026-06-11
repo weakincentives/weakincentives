@@ -139,6 +139,7 @@ class TestMakeAsyncHandler:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         async_handler = make_async_handler(bridged)
@@ -167,6 +168,7 @@ class TestMakeAsyncHandler:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         async_handler = make_async_handler(bridged)
@@ -197,6 +199,7 @@ class TestMakeAsyncHandler:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         async_handler = make_async_handler(bridged)
@@ -244,6 +247,7 @@ class TestCreateMcpServer:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         mock_sdk_tool = MagicMock(return_value=lambda f: f)
@@ -326,6 +330,7 @@ class TestVisibilityExpansionRequiredPropagation:
             deadline=None,
             budget_tracker=None,
             visibility_signal=visibility_signal,
+            sandbox=None,
         )
 
         # Should return success response (not error - the tool worked correctly)
@@ -387,6 +392,7 @@ class TestVisibilityExpansionRequiredPropagation:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=None,
         )
 
         # Should return success response (tool worked correctly)
@@ -436,6 +442,7 @@ class TestVisibilityExpansionRequiredPropagation:
             deadline=None,
             budget_tracker=None,
             visibility_signal=visibility_signal,
+            sandbox=None,
         )
 
         async_handler = make_async_handler(bridged)

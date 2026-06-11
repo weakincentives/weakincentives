@@ -46,12 +46,13 @@ class ToolSection(Protocol):
 
 
 class _DummyAdapter(ProviderAdapter[Any]):
-    def evaluate(
+    def _evaluate(  # noqa: PLR0913
         self,
         prompt: Prompt[Any],
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
+        sandbox: object = None,
     ) -> PromptResponse[Any]:
         raise NotImplementedError
 

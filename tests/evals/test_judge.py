@@ -163,7 +163,7 @@ class _MockJudgeAdapter(ProviderAdapter[JudgeOutput]):
         self._return_none = return_none
         self.call_count = 0
 
-    def evaluate(
+    def _evaluate(
         self,
         prompt: Prompt[JudgeOutput],
         *,
@@ -171,9 +171,11 @@ class _MockJudgeAdapter(ProviderAdapter[JudgeOutput]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        heartbeat: object = None,
         run_context: object = None,
+        sandbox: object = None,
     ) -> PromptResponse[JudgeOutput]:
-        del prompt, session, deadline, budget, budget_tracker, run_context
+        del prompt, session, deadline, budget, budget_tracker, heartbeat, run_context
         self.call_count += 1
         if self._return_none:
             return PromptResponse(
@@ -264,7 +266,7 @@ def test_llm_judge_uses_criterion() -> None:
     class _CaptureAdapter(ProviderAdapter[JudgeOutput]):
         captured_prompt: Prompt[Any] | None = None
 
-        def evaluate(
+        def _evaluate(
             self,
             prompt: Prompt[JudgeOutput],
             *,
@@ -272,9 +274,11 @@ def test_llm_judge_uses_criterion() -> None:
             deadline: Deadline | None = None,
             budget: Budget | None = None,
             budget_tracker: BudgetTracker | None = None,
+            heartbeat: object = None,
             run_context: object = None,
+            sandbox: object = None,
         ) -> PromptResponse[JudgeOutput]:
-            del session, deadline, budget, budget_tracker, run_context
+            del session, deadline, budget, budget_tracker, heartbeat, run_context
             self.captured_prompt = prompt
             return PromptResponse(
                 prompt_name="llm_judge",

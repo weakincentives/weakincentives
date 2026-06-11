@@ -31,9 +31,9 @@ from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.watchdog import Heartbeat
-from ...sandbox import LocalSandboxProvider, SandboxProvider
+from ...sandbox import SandboxProvider
 from ...types import AdapterName
-from .._shared._sandbox import open_prompt_sandbox
+from .._shared._sandbox import bind_workspace_preview
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
 from ._async_utils import run_async
@@ -275,7 +275,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
     between the SDK's internal execution and the weakincentives Session.
     """
 
-    def __init__(  # pyright: ignore[reportMissingSuperCall]
+    def __init__(
         self,
         *,
         model: str | None = None,
@@ -299,12 +299,10 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             sandbox_provider: Provider materializing the prompt's sandbox
                 config. Defaults to :class:`LocalSandboxProvider`.
         """
+        super().__init__(sandbox_provider=sandbox_provider)
         resolved_model = model if model is not None else get_default_model()
         self._model = resolved_model
         self._client_config = client_config or ClaudeAgentSDKClientConfig()
-        self._sandbox_provider = (
-            sandbox_provider if sandbox_provider is not None else LocalSandboxProvider()
-        )
         self._model_config = model_config or ClaudeAgentSDKModelConfig(
             model=resolved_model
         )
@@ -339,7 +337,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         return CLAUDE_AGENT_SDK_ADAPTER_NAME
 
     @override
-    def evaluate(  # pyright: ignore[reportIncompatibleMethodOverride]
+    def _evaluate(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         prompt: Prompt[OutputT],
         *,
@@ -349,6 +347,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Evaluate prompt using Claude Agent SDK with hook-based state sync."""
         if budget and not budget_tracker:
@@ -397,6 +396,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
+                sandbox=sandbox,
             )
         )
 
@@ -409,39 +409,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat | None,
         run_context: RunContext | None,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
-        """Async implementation of evaluate."""
+        """Async implementation of evaluate against the open sandbox."""
         sdk = _import_sdk()
         self._stderr_buffer.clear()
 
-        sandbox = open_prompt_sandbox(prompt, self._sandbox_provider)
-        try:
-            return await self._evaluate_in_sandbox(
-                sdk=sdk,
-                prompt=prompt,
-                session=session,
-                deadline=deadline,
-                budget_tracker=budget_tracker,
-                heartbeat=heartbeat,
-                run_context=run_context,
-                sandbox=sandbox,
-            )
-        finally:
-            sandbox.close()
-
-    async def _evaluate_in_sandbox(
-        self,
-        *,
-        sdk: Any,
-        prompt: Prompt[OutputT],
-        session: SessionProtocol,
-        deadline: Deadline | None,
-        budget_tracker: BudgetTracker | None,
-        heartbeat: Heartbeat | None,
-        run_context: RunContext | None,
-        sandbox: Sandbox,
-    ) -> PromptResponse[OutputT]:
-        """Evaluate against an opened sandbox."""
+        bind_workspace_preview(prompt, sandbox)
         rendered = prompt.render(session=session)
         prompt_text = rendered.text
 

@@ -27,15 +27,15 @@ from ._bridge import (
     create_bridged_tools,
     create_mcp_server,
 )
-from ._sandbox import open_prompt_sandbox
+from ._sandbox import bind_workspace_preview
 from ._visibility_signal import VisibilityExpansionSignal
 
 __all__ = [
     "BridgedTool",
     "MCPToolExecutionState",
     "VisibilityExpansionSignal",
+    "bind_workspace_preview",
     "create_bridged_tools",
     "create_mcp_server",
-    "open_prompt_sandbox",
     "run_async",
 ]

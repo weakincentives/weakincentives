@@ -10,13 +10,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared sandbox lifecycle for provider adapters.
+"""Shared sandbox helpers for provider adapters.
 
-Every adapter evaluation runs against exactly one sandbox: the adapter
-reads the prompt's :class:`~weakincentives.sandbox.SandboxConfig` (an
-empty config when none is declared), asks its provider to materialize it,
-threads the opened sandbox into tool execution, points the harness ``cwd``
-at ``sandbox.root``, and closes the sandbox when evaluation completes.
+Sandbox lifecycle lives on the adapter base class
+(:meth:`~weakincentives.adapters.core.ProviderAdapter.open_sandbox` and
+the ``evaluate``/``_evaluate`` lease fork). This module holds the
+prompt-side glue adapters run per evaluation against the open sandbox.
 """
 
 from __future__ import annotations
@@ -24,32 +23,23 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ...prompt.workspace import workspace_preview_params
-from ...sandbox import SandboxConfig
 
 if TYPE_CHECKING:
     from ...prompt import Prompt
-    from ...sandbox import Sandbox, SandboxProvider
+    from ...sandbox import Sandbox
 
-__all__ = ["open_prompt_sandbox"]
+__all__ = ["bind_workspace_preview"]
 
 
-def open_prompt_sandbox(prompt: Prompt[Any], provider: SandboxProvider) -> Sandbox:
-    """Materialize the prompt's sandbox and bind the workspace preview.
+def bind_workspace_preview(prompt: Prompt[Any], sandbox: Sandbox) -> None:
+    """Bind the workspace preview params from the open sandbox.
 
-    Opens the prompt template's :class:`SandboxConfig` (an empty config
-    when the template declares none) through ``provider``. When the
-    template declares environment intent, the workspace preview params are
-    bound from the *opened* sandbox so the rendered prompt describes the
-    environment the agent actually acts on.
-
-    The caller owns the returned sandbox and must ``close()`` it.
+    Called at the start of every ``_evaluate`` so the rendered prompt
+    describes the environment the agent actually acts on. Rebinding is
+    idempotent (same-type params replace) and refreshes the listing on
+    re-evaluation — a visibility-expansion retry sees files written in
+    earlier rounds. No-op when the template declares no sandbox (no
+    preview section exists to consume the params).
     """
-    config = prompt.template.sandbox
-    sandbox = provider.open(config if config is not None else SandboxConfig())
-    try:
-        if config is not None:
-            _ = prompt.bind(workspace_preview_params(sandbox.filesystem))
-    except Exception:
-        sandbox.close()
-        raise
-    return sandbox
+    if prompt.template.sandbox is not None:
+        _ = prompt.bind(workspace_preview_params(sandbox.filesystem))

@@ -35,7 +35,7 @@ import os
 import socket
 from abc import abstractmethod
 from collections.abc import Generator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -46,6 +46,7 @@ from ..clock import SYSTEM_CLOCK, MonotonicClock
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
 from ._agent_loop_bundle import (
+    execute_for_bundle as _execute_for_bundle_fn,
     get_adapter_name as _get_adapter_name_fn,
     handle_message_with_bundle as _handle_message_with_bundle_fn,
     write_bundle_artifacts as _write_bundle_artifacts_fn,
@@ -70,10 +71,10 @@ from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
-    from ..debug import BundleWriter
     from ..debug.bundle import BundleConfig
     from ..experiment import Experiment
     from ..prompt import Prompt
+    from ..sandbox import Sandbox
     from .agent_loop_types import BundleContext
 
 _logger: StructuredLogger = get_logger(
@@ -321,14 +322,8 @@ class AgentLoop[UserRequestT, OutputT](
             # Bundle is now finalized
             print(f"Bundle at: {ctx.bundle_path}")
 
-            # With storage handler for external upload:
-            config = BundleConfig.create(
-                target=bundle_dir,
-                storage_handler=S3StorageHandler(bucket="my-bucket"),
-            )
-            with loop.execute_with_bundle(request, bundle_target=bundle_dir,
-                                          bundle_config=config) as ctx:
-                ...  # Bundle will be uploaded to S3 after finalization
+        Pass ``bundle_config`` with a ``storage_handler`` to upload the
+        finalized bundle to external storage.
         """
         from ..debug import BundleWriter
         from .agent_loop_types import BundleContext
@@ -337,9 +332,12 @@ class AgentLoop[UserRequestT, OutputT](
         started_at = SYSTEM_CLOCK.utcnow()
         start_mono = self._clock.monotonic()
 
-        with BundleWriter(
-            bundle_target, bundle_id=uuid4(), config=bundle_config, trigger="direct"
-        ) as writer:
+        with (
+            BundleWriter(
+                bundle_target, bundle_id=uuid4(), config=bundle_config, trigger="direct"
+            ) as writer,
+            ExitStack() as sandbox_stack,
+        ):
             # Create request event for tracking
             request_event = AgentLoopRequest(
                 request=request,
@@ -352,9 +350,10 @@ class AgentLoop[UserRequestT, OutputT](
             # Write request input
             writer.write_request_input(request_event)
 
-            # Prepare and execute
-            response, session, prompt, budget_tracker = self._execute_for_bundle(
-                request=request,
+            # Prepare and execute; the sandbox lease lives on the stack so
+            # it stays open for bundle capture after the caller's block.
+            response, session, prompt, budget_tracker, sandbox = _execute_for_bundle_fn(
+                self,  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
                 budget=budget,
                 deadline=deadline,
                 resources=resources,
@@ -362,6 +361,7 @@ class AgentLoop[UserRequestT, OutputT](
                 experiment=experiment,
                 writer=writer,
                 request_event=request_event,
+                sandbox_stack=sandbox_stack,
             )
 
             ended_at = SYSTEM_CLOCK.utcnow()
@@ -387,51 +387,13 @@ class AgentLoop[UserRequestT, OutputT](
                 ended_at=ended_at,
                 budget_tracker=budget_tracker,
                 config=self._config,
+                sandbox=sandbox,
             )
 
             prompt.cleanup()
 
         # BundleWriter context has exited, bundle is finalized
         # ctx.bundle_path now returns writer.path
-
-    def _execute_for_bundle(  # noqa: PLR0913
-        self,
-        *,
-        request: UserRequestT,
-        budget: Budget | None,
-        deadline: Deadline | None,
-        resources: Mapping[type[object], object] | None,
-        heartbeat: Heartbeat | None,
-        experiment: Experiment | None,
-        writer: BundleWriter,
-        request_event: AgentLoopRequest[UserRequestT],
-    ) -> tuple[PromptResponse[OutputT], Session, Prompt[OutputT], BudgetTracker | None]:
-        """Execute within bundle context with log capture."""
-        prompt, session = self.prepare(request, experiment=experiment)
-
-        # Publish request state to session after prepare()
-        _ = session.dispatch(LoopRequestState(request=request_event))
-
-        writer.write_session_before(session)
-        writer.set_prompt_info(
-            ns=prompt.ns, key=prompt.key, adapter=self._get_adapter_name()
-        )
-
-        prompt, budget_tracker, eff_deadline = self._resolve_settings(
-            prompt, budget=budget, deadline=deadline, resources=resources
-        )
-        eff_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
-
-        with writer.capture_logs():
-            response = self._evaluate_with_retries(
-                prompt=prompt,
-                session=session,
-                deadline=eff_deadline,
-                budget_tracker=budget_tracker,
-                heartbeat=eff_heartbeat,
-            )
-
-        return response, session, prompt, budget_tracker
 
     def _execute(
         self,
@@ -473,14 +435,16 @@ class AgentLoop[UserRequestT, OutputT](
         effective_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
 
         try:
-            response = self._evaluate_with_retries(
-                prompt=prompt,
-                session=session,
-                deadline=deadline,
-                budget_tracker=budget_tracker,
-                heartbeat=effective_heartbeat,
-                run_context=run_context,
-            )
+            with self._adapter.open_sandbox(prompt) as sandbox:
+                response = self._evaluate_with_retries(
+                    prompt=prompt,
+                    session=session,
+                    deadline=deadline,
+                    budget_tracker=budget_tracker,
+                    heartbeat=effective_heartbeat,
+                    sandbox=sandbox,
+                    run_context=run_context,
+                )
         finally:
             prompt.cleanup()
         return response, session, prompt
@@ -515,12 +479,15 @@ class AgentLoop[UserRequestT, OutputT](
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat,
+        sandbox: Sandbox,
         run_context: RunContext | None = None,
     ) -> PromptResponse[OutputT]:
         """Run evaluation with visibility expansion retry loop.
 
         Handles the core evaluate -> catch VisibilityExpansionRequired ->
         dispatch overrides -> retry cycle. Calls finalize() on success.
+        The borrowed ``sandbox`` lease spans every retry round, so files
+        written in one round are visible to the next.
 
         Returns:
             The prompt response from successful evaluation.
@@ -535,6 +502,7 @@ class AgentLoop[UserRequestT, OutputT](
                     budget_tracker=budget_tracker,
                     heartbeat=heartbeat,
                     run_context=run_context,
+                    sandbox=sandbox,
                 )
             except VisibilityExpansionRequired as e:
                 retries += 1

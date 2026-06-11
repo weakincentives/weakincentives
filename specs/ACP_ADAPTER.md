@@ -280,15 +280,14 @@ Create `BudgetTracker` if budget provided. Derive deadline from argument or
 opens the sandbox, binds the workspace preview, renders the prompt, and
 dispatches `PromptRendered`.
 
-### 3. Open Sandbox
+### 3. Sandbox Lease
 
-`open_prompt_sandbox()` at `src/weakincentives/adapters/_shared/_sandbox.py`:
-
-1. Read the template's `SandboxConfig` (empty config when none declared)
-1. Materialize it via the adapter's sandbox provider (default
-   `LocalSandboxProvider`)
-1. Bind workspace preview params from the opened sandbox
-1. `cwd = sandbox.root`; the sandbox closes when evaluation completes
+The base `ProviderAdapter` owns the lease (`open_sandbox` /
+`evaluate(..., sandbox=...)`; see `specs/ADAPTERS.md`). Inside
+`_evaluate`, `bind_workspace_preview()` at
+`src/weakincentives/adapters/_shared/_sandbox.py` rebinds the workspace
+preview params from the open sandbox on every round, and the agent runs
+with `cwd = sandbox.root`.
 
 ### 4. Build Tools and MCP Server
 
