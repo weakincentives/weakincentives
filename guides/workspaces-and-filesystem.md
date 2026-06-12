@@ -122,16 +122,18 @@ response = adapter.evaluate(prompt, session=session)
 # Sandbox opened, used, and released inside evaluate()
 ```
 
-Hold the lease yourself to span multiple evaluations or inspect output
-files before release:
+Open an `AgentRuntime` yourself to span multiple evaluations or inspect
+output files before release. The runtime binds the (adapter, prompt,
+sandbox) triple in one place, so a mismatched pairing cannot be
+constructed:
 
 ```python nocheck
-with adapter.open_sandbox(prompt) as sandbox:
-    response = adapter.evaluate(prompt, session=session, sandbox=sandbox)
-    report = sandbox.filesystem.read("report.md")
+with adapter.runtime(prompt) as rt:
+    response = rt.evaluate(session=session)
+    report = rt.sandbox.filesystem.read("report.md")
 ```
 
-`AgentLoop` holds one lease per request — spanning visibility-expansion
+`AgentLoop` holds one runtime per request — spanning visibility-expansion
 retries and debug-bundle capture — so re-rendered rounds see files written
 in earlier rounds. For full adapter integration patterns, see the
 [Claude Agent SDK guide](claude-agent-sdk.md).

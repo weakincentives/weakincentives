@@ -105,18 +105,19 @@ response = adapter.evaluate(prompt, session=session)
 ```
 
 To span one environment across multiple evaluations, or to inspect the
-agent's output files before the sandbox is removed, hold the lease
-explicitly:
+agent's output files before the sandbox is removed, open an
+`AgentRuntime` — the bound (adapter, prompt, sandbox) triple:
 
 ```python nocheck
-with adapter.open_sandbox(prompt) as sandbox:
-    response = adapter.evaluate(prompt, session=session, sandbox=sandbox)
-    report = sandbox.filesystem.read("report.md")
-# Lease released here: the sandbox directory is removed.
+with adapter.runtime(prompt) as rt:
+    response = rt.evaluate(session=session)
+    report = rt.sandbox.filesystem.read("report.md")
+# Runtime released here: the sandbox directory is removed.
 ```
 
-`AgentLoop` does this automatically: one lease spans visibility-expansion
-retries, `finalize()`, and debug-bundle filesystem capture.
+`AgentLoop` does this automatically: one runtime spans
+visibility-expansion retries, `finalize()`, and debug-bundle filesystem
+capture.
 
 ## Adapter Configuration
 

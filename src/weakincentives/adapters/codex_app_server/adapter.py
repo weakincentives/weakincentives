@@ -34,7 +34,6 @@ from ...sandbox import SandboxProvider
 from ...types import AdapterName
 from .._shared import run_async
 from .._shared._bridge import create_bridged_tools
-from .._shared._sandbox import bind_workspace_preview
 from .._shared._visibility_signal import VisibilityExpansionSignal
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
@@ -161,7 +160,6 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
-        bind_workspace_preview(prompt, sandbox)
         rendered = prompt.render(session=session)
         prompt_text = rendered.text
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"

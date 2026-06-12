@@ -33,7 +33,6 @@ from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.watchdog import Heartbeat
 from ...sandbox import SandboxProvider
 from ...types import AdapterName
-from .._shared._sandbox import bind_workspace_preview
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ..tool_spec import extract_tool_schema
 from ._async_utils import run_async
@@ -415,7 +414,6 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         sdk = _import_sdk()
         self._stderr_buffer.clear()
 
-        bind_workspace_preview(prompt, sandbox)
         rendered = prompt.render(session=session)
         prompt_text = rendered.text
 

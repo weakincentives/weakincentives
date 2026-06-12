@@ -4,25 +4,30 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-### Sandbox Lifecycle: Explicit Leases
+### AgentRuntime: One Pairing for Adapter, Prompt, and Sandbox
 
-The sandbox lifecycle from the M3 refactor (below) is reworked as an
-explicit **lease** owned by the base `ProviderAdapter`:
+The sandbox lifecycle from the M3 refactor (below) is owned by a new
+`AgentRuntime` — a prompt bound to its adapter and a live sandbox for one
+run. The (adapter, prompt, sandbox) triple is paired exactly once, inside
+`ProviderAdapter.runtime(prompt)`, so a mismatched pairing is
+unrepresentable: there is no API that accepts a foreign sandbox.
 
-- `ProviderAdapter.open_sandbox(prompt)` opens a lease on the prompt's
-  declared environment; `evaluate(..., sandbox=...)` borrows it without
-  closing. `evaluate()` without a sandbox opens one for the duration of
-  the call (previous behavior). Concrete adapters now implement
-  `_evaluate(..., sandbox: Sandbox)` — the explicit core contract with no
-  lifecycle code; subclasses overriding `evaluate` directly must migrate.
-- **`AgentLoop` holds one lease per request**: a visibility-expansion
-  retry now reuses the same sandbox (files written before the expansion
+- `with adapter.runtime(prompt) as rt:` opens the runtime;
+  `rt.evaluate(session=...)` takes neither a prompt nor a sandbox.
+  Every call runs in the same environment; the workspace preview rebinds
+  from the live sandbox before each round, so re-rendered prompts list
+  files written in earlier rounds. After release,
+  `rt.evaluate` raises `AgentRuntimeReleasedError` and `rt.sandbox`
+  stays readable for the holder only while the lease was open.
+- `adapter.evaluate(prompt, session=...)` survives unchanged as one-shot
+  sugar that opens a runtime for the duration of a single call. Concrete
+  adapters implement `_evaluate(..., sandbox: Sandbox)` — the explicit
+  core contract with no lifecycle code, reachable only through a runtime;
+  subclasses overriding `evaluate` directly must migrate.
+- **`AgentLoop` holds one runtime per request**: a visibility-expansion
+  retry reuses the same sandbox (files written before the expansion
   survive into the next round), and debug bundles capture the still-open
-  sandbox filesystem again (`write_bundle_artifacts(sandbox=...)`).
-- The workspace preview rebinds from the open sandbox at the start of
-  every evaluation round (`bind_workspace_preview`, replacing
-  `open_prompt_sandbox`), so re-rendered prompts list files written in
-  earlier rounds.
+  sandbox filesystem (`write_bundle_artifacts(sandbox=rt.sandbox)`).
 - `create_bridged_tools`/`BridgedTool` now require the `sandbox` argument
   (still nullable) so call sites opt out explicitly instead of silently
   running without rollback.

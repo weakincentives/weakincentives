@@ -70,11 +70,10 @@ from .session.visibility_overrides import SetVisibilityOverride
 from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
-    from ..adapters.core import PromptResponse, ProviderAdapter
+    from ..adapters.core import AgentRuntime, PromptResponse, ProviderAdapter
     from ..debug.bundle import BundleConfig
     from ..experiment import Experiment
     from ..prompt import Prompt
-    from ..sandbox import Sandbox
     from .agent_loop_types import BundleContext
 
 _logger: StructuredLogger = get_logger(
@@ -350,9 +349,9 @@ class AgentLoop[UserRequestT, OutputT](
             # Write request input
             writer.write_request_input(request_event)
 
-            # Prepare and execute; the sandbox lease lives on the stack so
-            # it stays open for bundle capture after the caller's block.
-            response, session, prompt, budget_tracker, sandbox = _execute_for_bundle_fn(
+            # Prepare and execute; the runtime lives on the stack so its
+            # sandbox stays open for bundle capture after the caller's block.
+            response, session, prompt, budget_tracker, rt = _execute_for_bundle_fn(
                 self,  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
                 budget=budget,
                 deadline=deadline,
@@ -387,7 +386,7 @@ class AgentLoop[UserRequestT, OutputT](
                 ended_at=ended_at,
                 budget_tracker=budget_tracker,
                 config=self._config,
-                sandbox=sandbox,
+                sandbox=rt.sandbox,
             )
 
             prompt.cleanup()
@@ -435,14 +434,13 @@ class AgentLoop[UserRequestT, OutputT](
         effective_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
 
         try:
-            with self._adapter.open_sandbox(prompt) as sandbox:
+            with self._adapter.runtime(prompt) as rt:
                 response = self._evaluate_with_retries(
-                    prompt=prompt,
+                    runtime=rt,
                     session=session,
                     deadline=deadline,
                     budget_tracker=budget_tracker,
                     heartbeat=effective_heartbeat,
-                    sandbox=sandbox,
                     run_context=run_context,
                 )
         finally:
@@ -474,35 +472,33 @@ class AgentLoop[UserRequestT, OutputT](
     def _evaluate_with_retries(  # noqa: PLR0913
         self,
         *,
-        prompt: Prompt[OutputT],
+        runtime: AgentRuntime[OutputT],
         session: Session,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat,
-        sandbox: Sandbox,
         run_context: RunContext | None = None,
     ) -> PromptResponse[OutputT]:
         """Run evaluation with visibility expansion retry loop.
 
         Handles the core evaluate -> catch VisibilityExpansionRequired ->
         dispatch overrides -> retry cycle. Calls finalize() on success.
-        The borrowed ``sandbox`` lease spans every retry round, so files
+        The runtime's sandbox lease spans every retry round, so files
         written in one round are visible to the next.
 
         Returns:
             The prompt response from successful evaluation.
         """
+        prompt = runtime.prompt
         retries = 0
         while True:
             try:
-                response = self._adapter.evaluate(
-                    prompt,
+                response = runtime.evaluate(
                     session=session,
                     deadline=deadline,
                     budget_tracker=budget_tracker,
                     heartbeat=heartbeat,
                     run_context=run_context,
-                    sandbox=sandbox,
                 )
             except VisibilityExpansionRequired as e:
                 retries += 1

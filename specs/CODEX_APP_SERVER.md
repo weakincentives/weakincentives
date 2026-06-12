@@ -549,8 +549,8 @@ When a tool raises `VisibilityExpansionRequired`:
 
 The prompt template declares environment intent via `SandboxConfig`
 (mounts, allowed roots, byte budgets — see `specs/SANDBOX.md`). The base
-adapter's sandbox lease materializes it (default `LocalSandboxProvider`;
-callers may hold one lease across evaluations — see `specs/ADAPTERS.md`);
+adapter's `AgentRuntime` materializes it (default `LocalSandboxProvider`;
+callers may hold one runtime across evaluations — see `specs/ADAPTERS.md`);
 `thread/start` runs with `cwd = sandbox.root` and the workspace preview is
 rendered from the opened sandbox. A failed bridged tool rolls back session
 and sandbox in one transaction.

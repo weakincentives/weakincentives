@@ -37,9 +37,9 @@ At `src/weakincentives/adapters/claude_agent_sdk/config.py`:
 The SDK working directory is not configurable: evaluation always runs
 against a sandbox lease materialized from the prompt template's
 `SandboxConfig` (see `specs/SANDBOX.md`) with `cwd = sandbox.root`.
-Callers may hold the lease across evaluations via
-`adapter.open_sandbox(prompt)` and `evaluate(..., sandbox=...)`. A failed
-bridged tool rolls back session and sandbox in one transaction.
+Callers may hold one environment across evaluations via
+`adapter.runtime(prompt)` (see `specs/ADAPTERS.md`). A failed bridged
+tool rolls back session and sandbox in one transaction.
 
 ### ClaudeAgentSDKModelConfig
 

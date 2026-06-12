@@ -43,7 +43,6 @@ All adapters extend `ProviderAdapter` at `src/weakincentives/adapters/core.py`.
 | `budget_tracker` | Optional shared budget tracker |
 | `heartbeat` | Optional heartbeat for liveness monitoring |
 | `run_context` | Optional execution context with correlation identifiers |
-| `sandbox` | Optional borrowed sandbox lease (see below) |
 
 | Property | Description |
 | --- | --- |
@@ -51,27 +50,37 @@ All adapters extend `ProviderAdapter` at `src/weakincentives/adapters/core.py`.
 
 Returns `PromptResponse[OutputT]` at `src/weakincentives/adapters/core.py`.
 
-### Sandbox Lease
+### AgentRuntime
 
-The base class owns the sandbox lifecycle as a **lease**:
+`AgentRuntime` (same module) is a prompt bound to its adapter and a live
+sandbox for one run. It is the **only** way a sandbox reaches evaluation,
+so a mismatched (adapter, prompt, sandbox) triple is unrepresentable —
+the triple is paired exactly once, inside `ProviderAdapter.runtime`:
 
-- `open_sandbox(prompt)` — context manager materializing the template's
+- `adapter.runtime(prompt)` — context manager materializing the template's
   `SandboxConfig` (empty config when none is declared) through the
-  adapter's injectable `sandbox_provider` (default `LocalSandboxProvider`).
-  Exiting the block releases the lease: locally provisioned sandboxes are
-  closed and removed.
-- `evaluate(..., sandbox=...)` — a supplied sandbox is **borrowed**: the
-  caller holds the lease and the adapter never closes it. Use this to span
-  one environment across multiple evaluations or to inspect the filesystem
-  before release. When omitted, `evaluate` opens a lease for the duration
-  of the call.
+  adapter's injectable `sandbox_provider` (default `LocalSandboxProvider`)
+  and pairing it with the prompt. Exiting the block releases the sandbox
+  lease: locally provisioned sandboxes are closed and removed.
+- `rt.evaluate(session=..., ...)` — evaluates the bound prompt against the
+  bound sandbox; takes neither a prompt nor a sandbox argument. Every call
+  runs in the same environment (visibility-expansion retries included) and
+  rebinds the workspace preview from the live sandbox first. Raises
+  `AgentRuntimeReleasedError` after release.
+- `rt.sandbox` / `rt.prompt` — read-only access for inspection and
+  evidence capture while the lease is held.
+- `adapter.evaluate(prompt, session=...)` — one-shot sugar that opens a
+  runtime for the duration of a single call.
 - `_evaluate(...)` — the abstract core contract concrete adapters
-  implement. It always receives an open sandbox, runs the harness with
-  `cwd = sandbox.root`, and contains no lifecycle code.
+  implement. Called only through a runtime; always receives an open
+  sandbox, runs the harness with `cwd = sandbox.root`, and contains no
+  lifecycle code.
 
-"Whoever opens closes" is decided at exactly one fork (the `sandbox is None` check in `evaluate`). Providers may pool or attach to remote
-environments underneath the lease without changing this contract
-(`refactor/M4.md`).
+The adapter owns its sandbox provider because it is the authority on
+which environments its harness can attach to (adapter↔provider
+coherence); the runtime owns adapter↔prompt↔sandbox coherence. Providers
+may pool or attach to remote environments underneath the runtime without
+changing this contract (`refactor/M4.md`).
 
 ### Configuration
 

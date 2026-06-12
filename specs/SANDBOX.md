@@ -163,15 +163,14 @@ facets to handlers and policies, and tool transactions snapshot/restore
 the (session, sandbox) pair atomically.
 
 **Lease semantics.** A `Sandbox` handle is a *lease* on an environment:
-`close()` releases the caller's claim — for locally provisioned sandboxes
+`close()` releases the holder's claim — for locally provisioned sandboxes
 that destroys the directory; future providers may pool environments or
-attach to harness-provided ones, where release means detach. The adapter
-base class owns the lease fork: `ProviderAdapter.open_sandbox(prompt)`
-opens one explicitly (callers hold it across multiple `evaluate` calls and
-inspect the filesystem before release), and `evaluate()` without a
-sandbox opens one for the duration of the call. `AgentLoop` holds one
-lease per request, spanning visibility-expansion retries and debug-bundle
-capture.
+attach to harness-provided ones, where release means detach. The lease is
+held by an `AgentRuntime` (see `specs/ADAPTERS.md`): the bound
+(adapter, prompt, sandbox) triple, paired once inside
+`ProviderAdapter.runtime(prompt)` so mismatched pairings are
+unrepresentable. `AgentLoop` holds one runtime per request, spanning
+visibility-expansion retries and debug-bundle capture.
 
 **Environment vs. workspace.** Today the sandbox conflates two roles that
 local execution makes indistinguishable: the *workspace* (root, filesystem

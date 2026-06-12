@@ -10,16 +10,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the adapter sandbox lease and the workspace preview binding."""
+"""Tests for AgentRuntime: the bound (adapter, prompt, sandbox) triple."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from tests.helpers.sandbox import make_memory_sandbox
-from weakincentives.adapters._shared import bind_workspace_preview
-from weakincentives.adapters.core import PromptResponse, ProviderAdapter
+from weakincentives.adapters.core import (
+    AgentRuntimeReleasedError,
+    PromptResponse,
+    ProviderAdapter,
+)
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
@@ -66,8 +71,8 @@ def _plain_prompt(key: str = "plain") -> Prompt[Any]:
     return Prompt(PromptTemplate.create(ns="t", key=key))
 
 
-class TestOpenSandboxLease:
-    def test_lease_materializes_template_config(self, tmp_path: Path) -> None:
+class TestRuntimePairing:
+    def test_runtime_materializes_template_config(self, tmp_path: Path) -> None:
         (tmp_path / "README.md").write_text("hello")
         prompt: Prompt[Any] = Prompt(
             PromptTemplate.create(
@@ -80,16 +85,20 @@ class TestOpenSandboxLease:
         )
         adapter = _RecordingAdapter()
 
-        with adapter.open_sandbox(prompt) as sandbox:
-            assert sandbox.filesystem.exists("src/README.md")
-            assert sandbox.filesystem.root == sandbox.root
-            root = Path(sandbox.root)
+        with adapter.runtime(prompt) as rt:
+            assert rt.adapter is adapter
+            assert rt.prompt is prompt
+            assert rt.sandbox.filesystem.exists("src/README.md")
+            assert rt.sandbox.filesystem.root == rt.sandbox.root
+            root = Path(rt.sandbox.root)
             assert root.is_dir()
+            assert rt.released is False
 
         # Lease released on exit: locally provisioned sandboxes are removed.
+        assert rt.released is True
         assert not root.exists()
 
-    def test_lease_defaults_to_empty_config(self) -> None:
+    def test_runtime_defaults_to_empty_config(self) -> None:
         opened: list[SandboxConfig] = []
 
         class _SpyProvider:
@@ -99,14 +108,75 @@ class TestOpenSandboxLease:
 
         adapter = _RecordingAdapter(sandbox_provider=_SpyProvider())
 
-        with adapter.open_sandbox(_plain_prompt()):
+        with adapter.runtime(_plain_prompt()):
             pass
 
         assert opened == [SandboxConfig()]
 
 
-class TestEvaluateLeaseFork:
-    def test_owned_path_opens_and_releases(self) -> None:
+class TestRuntimeEvaluate:
+    def test_sandbox_spans_multiple_evaluations(self) -> None:
+        adapter = _RecordingAdapter()
+        prompt = _plain_prompt(key="spans")
+
+        with adapter.runtime(prompt) as rt:
+            _ = rt.evaluate(session=None)  # type: ignore[arg-type]
+            _ = rt.evaluate(session=None)  # type: ignore[arg-type]
+
+            # Same environment both rounds; round-1 output visible in round 2.
+            assert adapter.seen == [rt.sandbox, rt.sandbox]
+            assert rt.sandbox.filesystem.exists("round-1.txt")
+            assert rt.sandbox.filesystem.exists("round-2.txt")
+
+    def test_release_is_idempotent(self) -> None:
+        adapter = _RecordingAdapter()
+        prompt = _plain_prompt(key="idempotent")
+
+        with adapter.runtime(prompt) as rt:
+            pass
+
+        # A second release (e.g. defensive teardown) is a no-op.
+        rt._release()
+        assert rt.released is True
+
+    def test_evaluate_after_release_raises(self) -> None:
+        adapter = _RecordingAdapter()
+        prompt = _plain_prompt(key="released")
+
+        with adapter.runtime(prompt) as rt:
+            pass
+
+        with pytest.raises(AgentRuntimeReleasedError, match="released"):
+            _ = rt.evaluate(session=None)  # type: ignore[arg-type]
+
+    def test_preview_rebinds_each_round(self) -> None:
+        prompt: Prompt[Any] = Prompt(
+            PromptTemplate.create(ns="t", key="preview", sandbox=SandboxConfig())
+        )
+        adapter = _RecordingAdapter()
+
+        with adapter.runtime(prompt) as rt:
+            _ = rt.evaluate(session=None)  # type: ignore[arg-type]
+            # Round 1 bound a listing before round-1.txt existed.
+            assert "- round-1.txt" not in prompt.render().text
+
+            _ = rt.evaluate(session=None)  # type: ignore[arg-type]
+            # Round 2 rebinds from the live sandbox: round 1's file shows up.
+            assert "- round-1.txt" in prompt.render().text
+
+    def test_no_preview_binding_without_template_sandbox(self) -> None:
+        adapter = _RecordingAdapter()
+        prompt = _plain_prompt(key="no-preview")
+
+        with adapter.runtime(prompt) as rt:
+            _ = rt.evaluate(session=None)  # type: ignore[arg-type]
+
+        assert prompt.params == ()
+        assert "round-1.txt" not in prompt.render().text
+
+
+class TestEvaluateSugar:
+    def test_one_shot_opens_and_releases(self) -> None:
         adapter = _RecordingAdapter()
         prompt = _plain_prompt()
 
@@ -114,74 +184,8 @@ class TestEvaluateLeaseFork:
 
         assert response.text == "ok"
         assert len(adapter.seen) == 1
-        # The adapter-owned lease is released after evaluate returns.
+        # The call-scoped runtime released its lease before returning.
         assert not Path(adapter.seen[0].root).exists()
-
-    def test_borrowed_sandbox_spans_multiple_evaluations(self) -> None:
-        adapter = _RecordingAdapter()
-        prompt = _plain_prompt(key="borrowed")
-
-        with adapter.open_sandbox(prompt) as sandbox:
-            _ = adapter.evaluate(prompt, session=None, sandbox=sandbox)  # type: ignore[arg-type]
-            _ = adapter.evaluate(prompt, session=None, sandbox=sandbox)  # type: ignore[arg-type]
-
-            # Same lease both rounds; round-1 output visible in round 2.
-            assert adapter.seen == [sandbox, sandbox]
-            assert sandbox.filesystem.exists("round-1.txt")
-            assert sandbox.filesystem.exists("round-2.txt")
-
-        assert not Path(sandbox.root).exists()
-
-    def test_borrowed_sandbox_not_closed_by_adapter(self) -> None:
-        adapter = _RecordingAdapter()
-        prompt = _plain_prompt(key="not-closed")
-        sandbox = make_memory_sandbox()
-
-        _ = adapter.evaluate(prompt, session=None, sandbox=sandbox)  # type: ignore[arg-type]
-
-        # Borrowed lease stays open: facets remain accessible.
-        assert sandbox.filesystem.exists("round-1.txt")
-        sandbox.close()
-
-
-class TestBindWorkspacePreview:
-    def test_binds_listing_from_sandbox(self) -> None:
-        prompt: Prompt[Any] = Prompt(
-            PromptTemplate.create(ns="t", key="preview", sandbox=SandboxConfig())
-        )
-        sandbox = make_memory_sandbox()
-        _ = sandbox.filesystem.write("README.md", "docs")
-
-        bind_workspace_preview(prompt, sandbox)
-
-        assert "- README.md" in prompt.render().text
-
-    def test_rebind_refreshes_listing(self) -> None:
-        prompt: Prompt[Any] = Prompt(
-            PromptTemplate.create(ns="t", key="refresh", sandbox=SandboxConfig())
-        )
-        sandbox = make_memory_sandbox()
-        _ = sandbox.filesystem.write("first.txt", "1")
-
-        bind_workspace_preview(prompt, sandbox)
-        assert "- second.txt" not in prompt.render().text
-
-        _ = sandbox.filesystem.write("second.txt", "2")
-        bind_workspace_preview(prompt, sandbox)
-
-        rendered = prompt.render().text
-        assert "- first.txt" in rendered
-        assert "- second.txt" in rendered
-
-    def test_noop_without_template_sandbox(self) -> None:
-        prompt = _plain_prompt(key="no-preview")
-        sandbox = make_memory_sandbox()
-        _ = sandbox.filesystem.write("README.md", "docs")
-
-        bind_workspace_preview(prompt, sandbox)
-
-        assert prompt.params == ()
-        assert "README.md" not in prompt.render().text
 
 
 class TestToolContextShell:

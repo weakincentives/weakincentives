@@ -45,7 +45,7 @@ from .session import Session
 from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
-    from ..adapters.core import PromptResponse, ProviderAdapter
+    from ..adapters.core import AgentRuntime, PromptResponse, ProviderAdapter
     from ..debug import BundleWriter
     from ..debug.bundle import BundleConfig
     from ..experiment import Experiment
@@ -94,12 +94,11 @@ class _LoopLike(Protocol):
     def _evaluate_with_retries(  # noqa: PLR0913
         self,
         *,
-        prompt: Prompt[Any],
+        runtime: AgentRuntime[Any],
         session: Session,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat,
-        sandbox: Sandbox,
         run_context: RunContext | None = ...,
     ) -> PromptResponse[Any]: ...
 
@@ -396,17 +395,16 @@ def handle_message_with_bundle(  # noqa: PLR0913, PLR0917
                 adapter=get_adapter_name(loop._adapter),
             )
 
-            # Resolve effective settings and execute against one sandbox
-            # lease spanning the retry loop and bundle capture.
-            with loop._adapter.open_sandbox(prompt) as sandbox:
+            # Resolve effective settings and execute against one runtime
+            # whose sandbox lease spans the retry loop and bundle capture.
+            with loop._adapter.runtime(prompt) as rt:
                 response, budget_tracker = _execute_with_bundled_settings(
                     loop,
                     request_event=request_event,
-                    prompt=prompt,
                     session=session,
                     run_context=run_context,
                     writer=writer,
-                    sandbox=sandbox,
+                    rt=rt,
                 )
 
                 ended_at = SYSTEM_CLOCK.utcnow()
@@ -420,7 +418,7 @@ def handle_message_with_bundle(  # noqa: PLR0913, PLR0917
                     ended_at=ended_at,
                     budget_tracker=budget_tracker,
                     config=loop._config,
-                    sandbox=sandbox,
+                    sandbox=rt.sandbox,
                 )
 
             prompt_cleaned_up = True
@@ -440,15 +438,14 @@ def _execute_with_bundled_settings(  # noqa: PLR0913
     loop: _LoopLike,
     *,
     request_event: AgentLoopRequest[Any],
-    prompt: Prompt[Any],
     session: Session,
     run_context: RunContext,
     writer: BundleWriter,
-    sandbox: Sandbox,
+    rt: AgentRuntime[Any],
 ) -> tuple[PromptResponse[Any], BudgetTracker | None]:
     """Execute prompt with settings resolved and log capture enabled."""
-    prompt, budget_tracker, eff_deadline = loop._resolve_settings(
-        prompt,
+    _, budget_tracker, eff_deadline = loop._resolve_settings(
+        rt.prompt,
         budget=request_event.budget,
         deadline=request_event.deadline,
         resources=request_event.resources,
@@ -456,12 +453,11 @@ def _execute_with_bundled_settings(  # noqa: PLR0913
 
     with writer.capture_logs():
         response = loop._evaluate_with_retries(
-            prompt=prompt,
+            runtime=rt,
             session=session,
             deadline=eff_deadline,
             budget_tracker=budget_tracker,
             heartbeat=loop._heartbeat,
-            sandbox=sandbox,
             run_context=run_context,
         )
 
@@ -484,13 +480,13 @@ def execute_for_bundle(  # noqa: PLR0913
     Session,
     Prompt[Any],
     BudgetTracker | None,
-    Sandbox,
+    AgentRuntime[Any],
 ]:
     """Execute within bundle context with log capture.
 
-    This was previously ``AgentLoop._execute_for_bundle``. The sandbox
-    lease is entered on ``sandbox_stack`` so it outlives this call: the
-    caller captures its filesystem into the bundle before the stack
+    This was previously ``AgentLoop._execute_for_bundle``. The runtime is
+    entered on ``sandbox_stack`` so its sandbox lease outlives this call:
+    the caller captures the filesystem into the bundle before the stack
     releases it.
     """
     prompt, session = loop.prepare(request_event.request, experiment=experiment)
@@ -508,15 +504,14 @@ def execute_for_bundle(  # noqa: PLR0913
     )
     eff_heartbeat = heartbeat if heartbeat is not None else loop._heartbeat
 
-    sandbox = sandbox_stack.enter_context(loop._adapter.open_sandbox(prompt))
+    rt = sandbox_stack.enter_context(loop._adapter.runtime(prompt))
     with writer.capture_logs():
         response = loop._evaluate_with_retries(
-            prompt=prompt,
+            runtime=rt,
             session=session,
             deadline=eff_deadline,
             budget_tracker=budget_tracker,
             heartbeat=eff_heartbeat,
-            sandbox=sandbox,
         )
 
-    return response, session, prompt, budget_tracker, sandbox
+    return response, session, prompt, budget_tracker, rt

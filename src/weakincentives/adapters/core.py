@@ -10,7 +10,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Core adapter interfaces shared across provider integrations."""
+"""Core adapter interfaces shared across provider integrations.
+
+The contract has three pieces, all in this module:
+
+- :class:`ProviderAdapter` — the harness translator. Concrete adapters
+  implement only :meth:`ProviderAdapter._evaluate`, which always receives
+  an open sandbox and never manages its lifecycle.
+- :class:`AgentRuntime` — a prompt bound to its adapter and a live
+  sandbox for one run. The runtime is the **only** way a sandbox reaches
+  evaluation, so a mismatched (adapter, prompt, sandbox) triple is
+  unrepresentable: the triple is paired exactly once, inside
+  :meth:`ProviderAdapter.runtime`.
+- :meth:`ProviderAdapter.evaluate` — one-shot sugar that opens a runtime
+  for the duration of a single call.
+"""
 
 from __future__ import annotations
 
@@ -29,8 +43,10 @@ from ..errors import (
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
     PromptEvaluationPhase,
+    WinkError,
 )
 from ..prompt import Prompt
+from ..prompt.workspace import workspace_preview_params
 from ..runtime.session.protocols import SessionProtocol
 from ..sandbox import LocalSandboxProvider, SandboxConfig, SandboxProvider
 
@@ -49,14 +65,114 @@ class PromptResponse[OutputT]:
     output: OutputT | None
 
 
+class AgentRuntimeReleasedError(WinkError, RuntimeError):
+    """Raised when evaluating through a released :class:`AgentRuntime`."""
+
+
+class AgentRuntime[OutputT]:
+    """A prompt bound to its adapter and a live sandbox for one run.
+
+    Construct via :meth:`ProviderAdapter.runtime` — the single place the
+    (adapter, prompt, sandbox) triple is paired. The runtime holds the
+    sandbox lease for its lifetime: every :meth:`evaluate` call runs
+    against the same environment, so files written in one round are
+    visible to the next (e.g. across visibility-expansion retries).
+
+    The sandbox is exposed read-only for inspection and evidence capture
+    while the lease is held::
+
+        with adapter.runtime(prompt) as rt:
+            response = rt.evaluate(session=session)
+            report = rt.sandbox.filesystem.read("report.md")
+        # lease released; the runtime can no longer evaluate
+
+    Not thread-safe: use one runtime per request.
+    """
+
+    def __init__(
+        self,
+        *,
+        adapter: ProviderAdapter[OutputT],
+        prompt: Prompt[OutputT],
+        sandbox: Sandbox,
+    ) -> None:
+        super().__init__()
+        self._adapter = adapter
+        self._prompt = prompt
+        self._sandbox = sandbox
+        self._released = False
+
+    @property
+    def adapter(self) -> ProviderAdapter[OutputT]:
+        """The adapter this runtime is bound to (telemetry/naming only)."""
+        return self._adapter
+
+    @property
+    def prompt(self) -> Prompt[OutputT]:
+        """The prompt this runtime is bound to."""
+        return self._prompt
+
+    @property
+    def sandbox(self) -> Sandbox:
+        """The live sandbox; valid until the runtime is released."""
+        return self._sandbox
+
+    @property
+    def released(self) -> bool:
+        """True once the sandbox lease has been released."""
+        return self._released
+
+    def evaluate(
+        self,
+        *,
+        session: SessionProtocol,
+        deadline: Deadline | None = None,
+        budget: Budget | None = None,
+        budget_tracker: BudgetTracker | None = None,
+        heartbeat: Heartbeat | None = None,
+        run_context: RunContext | None = None,
+    ) -> PromptResponse[OutputT]:
+        """Evaluate the bound prompt against the bound sandbox.
+
+        Rebinds the workspace preview from the live sandbox before each
+        round, so re-rendered prompts list files written in earlier
+        rounds.
+
+        Raises:
+            AgentRuntimeReleasedError: The runtime's lease was released.
+        """
+        if self._released:
+            msg = "AgentRuntime has been released; open a new one via adapter.runtime()"
+            raise AgentRuntimeReleasedError(msg)
+        _bind_workspace_preview(self._prompt, self._sandbox)
+        return self._adapter._evaluate(  # pyright: ignore[reportPrivateUsage] - paired in this module
+            self._prompt,
+            session=session,
+            deadline=deadline,
+            budget=budget,
+            budget_tracker=budget_tracker,
+            heartbeat=heartbeat,
+            run_context=run_context,
+            sandbox=self._sandbox,
+        )
+
+    def _release(self) -> None:
+        """Release the sandbox lease. Idempotent; called by the opener."""
+        if self._released:
+            return
+        self._released = True
+        self._sandbox.close()
+
+
 class ProviderAdapter(ABC):
     """Abstract base class describing the synchronous adapter contract.
 
-    The base class owns the sandbox-lease fork: :meth:`evaluate` either
-    borrows a sandbox supplied by the caller or opens one for the duration
-    of the call via :meth:`open_sandbox`. Concrete adapters implement only
-    :meth:`_evaluate`, which always receives an open sandbox and never
-    manages its lifecycle.
+    Concrete adapters implement only :meth:`_evaluate`; the base class
+    owns runtime construction (:meth:`runtime`) and the one-shot
+    :meth:`evaluate` sugar. The adapter also owns its sandbox provider:
+    the adapter is the authority on which environments its harness can
+    attach to, so adapter↔provider coherence lives here while
+    adapter↔prompt↔sandbox coherence lives in :class:`AgentRuntime`.
     """
 
     _sandbox_provider: SandboxProvider | None = None
@@ -86,24 +202,21 @@ class ProviderAdapter(ABC):
         return type(self).__name__
 
     @contextmanager
-    def open_sandbox[OutputT](self, prompt: Prompt[OutputT]) -> Generator[Sandbox]:
-        """Open a sandbox lease for the prompt's declared environment.
+    def runtime[OutputT](
+        self, prompt: Prompt[OutputT]
+    ) -> Generator[AgentRuntime[OutputT]]:
+        """Open an :class:`AgentRuntime` for the prompt.
 
         Materializes the prompt template's
-        :class:`~weakincentives.sandbox.SandboxConfig` (an empty config when
-        the template declares none) through this adapter's sandbox provider.
-        The lease spans the ``with`` block: the sandbox is released —
-        closed, for locally provisioned sandboxes — on exit.
+        :class:`~weakincentives.sandbox.SandboxConfig` (an empty config
+        when the template declares none) through this adapter's sandbox
+        provider and pairs it with the prompt for the lifetime of the
+        ``with`` block. The lease is released on exit: locally provisioned
+        sandboxes are closed and removed.
 
-        Use this to hold one environment across multiple :meth:`evaluate`
-        calls (e.g. visibility-expansion retries) or to inspect the
-        sandbox's filesystem before release::
-
-            with adapter.open_sandbox(prompt) as sandbox:
-                response = adapter.evaluate(
-                    prompt, session=session, sandbox=sandbox
-                )
-                report = sandbox.filesystem.read("report.md")
+        Hold a runtime to span one environment across multiple
+        evaluations (e.g. visibility-expansion retries) or to inspect the
+        sandbox's filesystem before release.
         """
         provider = (
             self._sandbox_provider
@@ -112,10 +225,13 @@ class ProviderAdapter(ABC):
         )
         config = prompt.template.sandbox
         sandbox = provider.open(config if config is not None else SandboxConfig())
+        rt: AgentRuntime[OutputT] = AgentRuntime(
+            adapter=self, prompt=prompt, sandbox=sandbox
+        )
         try:
-            yield sandbox
+            yield rt
         finally:
-            sandbox.close()
+            rt._release()  # pyright: ignore[reportPrivateUsage] - opener releases
 
     def evaluate[OutputT](
         self,
@@ -127,15 +243,13 @@ class ProviderAdapter(ABC):
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
-        sandbox: Sandbox | None = None,
     ) -> PromptResponse[OutputT]:
-        """Evaluate the prompt and return a structured response.
+        """Evaluate the prompt in a runtime scoped to this call.
 
-        When ``sandbox`` is provided it is **borrowed**: the caller holds
-        the lease and the adapter never closes it. When omitted, the
-        adapter opens a sandbox via :meth:`open_sandbox` for the duration
-        of this call. Either way :meth:`_evaluate` runs against exactly one
-        open sandbox and the harness working directory is its root.
+        One-shot sugar over :meth:`runtime`: opens an
+        :class:`AgentRuntime`, evaluates once, and releases the sandbox
+        lease before returning. To span one environment across multiple
+        evaluations, open the runtime explicitly.
 
         Visibility overrides are managed exclusively via Session state using the
         VisibilityOverrides state slice. Use session[VisibilityOverrides]
@@ -153,27 +267,14 @@ class ProviderAdapter(ABC):
         When ``run_context`` is provided, it is threaded through telemetry events
         (PromptRendered, PromptExecuted, ToolInvoked) for distributed tracing.
         """
-        if sandbox is not None:
-            return self._evaluate(
-                prompt,
+        with self.runtime(prompt) as rt:
+            return rt.evaluate(
                 session=session,
                 deadline=deadline,
                 budget=budget,
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
-                sandbox=sandbox,
-            )
-        with self.open_sandbox(prompt) as owned:
-            return self._evaluate(
-                prompt,
-                session=session,
-                deadline=deadline,
-                budget=budget,
-                budget_tracker=budget_tracker,
-                heartbeat=heartbeat,
-                run_context=run_context,
-                sandbox=owned,
             )
 
     @abstractmethod
@@ -191,12 +292,24 @@ class ProviderAdapter(ABC):
     ) -> PromptResponse[OutputT]:
         """Evaluate against an open sandbox (the explicit core contract).
 
-        Implementations must treat ``sandbox`` as borrowed: use its facets,
-        run the harness with ``cwd = sandbox.root``, and never close it —
-        the lease is owned by :meth:`evaluate` or by the caller.
+        Called only through :class:`AgentRuntime`, which guarantees the
+        sandbox was materialized by this adapter's provider from this
+        prompt's config. Implementations use the sandbox's facets, run the
+        harness with ``cwd = sandbox.root``, and never close it.
         """
 
         ...
+
+
+def _bind_workspace_preview(prompt: Prompt[Any], sandbox: Sandbox) -> None:
+    """Bind the workspace preview params from the open sandbox.
+
+    Rebinding is idempotent (same-type params replace) and refreshes the
+    listing on re-evaluation. No-op when the template declares no sandbox
+    (no preview section exists to consume the params).
+    """
+    if prompt.template.sandbox is not None:
+        _ = prompt.bind(workspace_preview_params(sandbox.filesystem))
 
 
 __all__ = [
@@ -204,6 +317,8 @@ __all__ = [
     "PROMPT_EVALUATION_PHASE_REQUEST",
     "PROMPT_EVALUATION_PHASE_RESPONSE",
     "PROMPT_EVALUATION_PHASE_TOOL",
+    "AgentRuntime",
+    "AgentRuntimeReleasedError",
     "Budget",
     "BudgetTracker",
     "PromptEvaluationError",
