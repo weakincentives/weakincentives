@@ -26,7 +26,7 @@ understand the individual pieces.
 ```python nocheck
 from weakincentives.contrib.tools import WorkspaceDigestSection
 from weakincentives.prompt import PromptTemplate, MarkdownSection
-from weakincentives.sandbox import HostMount, SandboxConfig
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
 
 def build_qa_template(*, session):
@@ -50,7 +50,7 @@ def build_qa_template(*, session):
                 template="${question}",
             ),
         ),
-        sandbox=SandboxConfig(mounts=(HostMount(host_path="."),)),
+        workspace=WorkspaceConfig(mounts=(HostMount(host_path="."),)),
     )
 ```
 
@@ -96,7 +96,7 @@ def build_patch_template(*, session):
                 template="${request}",
             ),
         ),
-        sandbox=SandboxConfig(mounts=mounts),
+        workspace=WorkspaceConfig(mounts=mounts),
     )
 ```
 

@@ -172,7 +172,7 @@ class ReferenceParams:
 
    - Renders cached workspace summary from session state
 
-1. **Sandbox** (`SandboxConfig` on the template)
+1. **Sandbox** (`WorkspaceConfig` on the template)
 
    - The adapter opens it per evaluation; native file tools act on its root
    - Uses configured host mounts

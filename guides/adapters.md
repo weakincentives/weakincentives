@@ -73,7 +73,7 @@ The adapter provides:
 - **Built-in sandboxing**: Hermetic isolation prevents access to host
   configuration and credentials
 - **MCP bridging**: Your WINK tools are automatically exposed as MCP tools
-- **Sandboxed environments**: the template's `SandboxConfig` provides
+- **Sandboxed environments**: the template's `WorkspaceConfig` provides
   structured access to host files with security boundaries
 
 **See [Claude Agent SDK Guide](claude-agent-sdk.md) for complete documentation**

@@ -17,7 +17,7 @@ what host content a sandbox starts from, :func:`materialize_mounts` copies
 it into a fresh temp directory with symlink and byte-budget guards, and
 :func:`compute_workspace_fingerprint` derives a deterministic key for
 mount-config reuse. ``prompt.workspace`` re-exports these for the
-workspace section until it dissolves into ``SandboxConfig``.
+workspace section until it dissolves into ``WorkspaceConfig``.
 """
 
 from __future__ import annotations

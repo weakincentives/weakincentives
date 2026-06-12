@@ -34,7 +34,7 @@ size limits, and snapshot/restore.
 ## The Sandbox Mental Model
 
 The agent acts on a sandbox: a temporary directory materialized from the
-`SandboxConfig` declared on the prompt template. Think of it as the one
+`WorkspaceConfig` declared on the prompt template. Think of it as the one
 environment every effect lands in:
 
 ```
@@ -85,13 +85,13 @@ This prevents path traversal attacks, especially important when mount
 paths come from user input.
 
 ```python nocheck
-from weakincentives.sandbox import SandboxConfig
+from weakincentives.sandbox import WorkspaceConfig
 
 template = PromptTemplate.create(
     ns="my-agent",
     key="main",
     sections=[...],
-    sandbox=SandboxConfig(
+    workspace=WorkspaceConfig(
         mounts=(mount,),
         allowed_host_roots=("/repos",),  # Only /repos/** allowed
     ),
@@ -106,7 +106,7 @@ roots.
 
 A sandbox is a **lease** on an environment. The lifecycle:
 
-1. **Open**: A provider materializes the template's `SandboxConfig`
+1. **Open**: A provider materializes the template's `WorkspaceConfig`
    (temp directory, files copied per mount config)
 1. **Preview**: The workspace preview section renders a listing of the
    open sandbox into the prompt — refreshed on every evaluation round

@@ -4,6 +4,18 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### WorkspaceConfig: Workspace Intent vs. Environment Lease
+
+`SandboxConfig` is renamed **`WorkspaceConfig`**, and the template
+field/kwarg moves with it: `PromptTemplate.create(..., workspace=...)`
+and `template.workspace`. The names now match the ownership: the
+*workspace* (mounts, read-only posture, environment seeding) is part of
+the agent definition, declared on the template; the *sandbox* is the
+live environment lease the adapter's provider materializes from it.
+The class stays in `weakincentives.sandbox`; `SandboxProvider`,
+`LocalSandboxProvider`, the `Sandbox` lease, and `render(sandbox=...)`
+keep their names. Entries below use the new name.
+
 ### Sandbox Everywhere, Run State Nowhere
 
 A hardening pass on the AgentRuntime/M3 work below; three breaking
@@ -64,8 +76,8 @@ unrepresentable: there is no API that accepts a foreign sandbox.
 **One environment model.** The sandbox introduced in M2 is now the execution
 context everywhere:
 
-- **`PromptTemplate.create(..., sandbox=SandboxConfig(...))`** declares
-  environment intent on the definition. Templates with a sandbox config carry a
+- **`PromptTemplate.create(..., workspace=WorkspaceConfig(...))`** declares
+  environment intent on the definition. Templates with a workspace config carry a
   workspace preview section (key `workspace`) rendered from the *opened*
   sandbox via `filesystem.list` — not copy-time bookkeeping.
 - **`ToolContext.sandbox`** exposes the environment to tool handlers;
@@ -89,15 +101,15 @@ context everywhere:
 **Breaking changes:**
 
 - `WorkspaceSection` is gone. Declare mounts via
-  `SandboxConfig(mounts=(HostMount(...),))` on the template instead. The
+  `WorkspaceConfig(mounts=(HostMount(...),))` on the template instead. The
   refcount/clone machinery and the `Filesystem`-as-resource binding died with
   it; `Prompt.filesystem()` and `WorkspaceSectionProtocol` are removed.
 - `cwd` is removed from `ClaudeAgentSDKClientConfig`,
   `CodexAppServerClientConfig`, and `ACPClientConfig`: the harness working
   directory is always the sandbox root.
-- The Claude Agent SDK's OS-isolation `SandboxConfig` is folded into
+- The Claude Agent SDK's OS-isolation `WorkspaceConfig` is folded into
   `IsolationConfig` (`sandbox_enabled`, `writable_paths`, `readable_paths`,
-  `excluded_commands`, ...) — the environment `SandboxConfig` is the only class
+  `excluded_commands`, ...) — the environment `WorkspaceConfig` is the only class
   with that name.
 - `weakincentives.prompt` no longer re-exports `HostMount`/mount machinery;
   import from `weakincentives.sandbox`.
@@ -302,7 +314,7 @@ on (`refactor/M2.md`; builds on the M1 filesystem narrow waist):
   one root, `snapshot`/`restore` delegating to the filesystem backend, and
   idempotent `close()` that removes the root and snapshot storage. Facet
   access after close raises `SandboxClosedError`.
-- **Intent + factory**: `SandboxConfig` (frozen serde value: mounts,
+- **Intent + factory**: `WorkspaceConfig` (frozen serde value: mounts,
   `allowed_host_roots`, `read_only`, `egress`, `env`, `setup`) and
   `SandboxProvider.open(config)` with `LocalSandboxProvider`. The host-mount
   machinery (`HostMount`, symlink/byte-budget guards,
@@ -658,7 +670,7 @@ structure. (`adapters/acp/_guardrails.py`, `adapters/acp/_mcp_http.py`,
 `NetworkPolicy` gains four new fields: `allow_unix_sockets` (tuple of socket
 paths, macOS only), `allow_all_unix_sockets` (boolean), `allow_local_binding`
 (boolean, macOS only), and `http_proxy_port`/`socks_proxy_port` (optional int
-for custom proxy configuration). `SandboxConfig` gains
+for custom proxy configuration). `WorkspaceConfig` gains
 `enable_weaker_nested_sandbox` (boolean for unprivileged Docker containers
 where full bubblewrap isolation is unavailable, Linux only),
 `ignore_file_violations` (tuple of file paths), and `ignore_network_violations`
@@ -950,7 +962,7 @@ task completion context fields, and the prompt-scoped declaration model.
 
 New field descriptions for `NetworkPolicy` (`allow_unix_sockets`,
 `allow_all_unix_sockets`, `allow_local_binding`, `http_proxy_port`,
-`socks_proxy_port`) and `SandboxConfig` (`enable_weaker_nested_sandbox`,
+`socks_proxy_port`) and `WorkspaceConfig` (`enable_weaker_nested_sandbox`,
 `ignore_file_violations`, `ignore_network_violations`).
 
 #### FILESYSTEM.md expanded for streaming API

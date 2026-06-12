@@ -33,10 +33,10 @@ from weakincentives.sandbox import (
     LocalSandbox,
     LocalSandboxProvider,
     Sandbox,
-    SandboxConfig,
     SandboxProvider,
     SandboxSetupError,
     WorkspaceBudgetExceededError,
+    WorkspaceConfig,
     WorkspaceSecurityError,
 )
 
@@ -67,7 +67,7 @@ class TestProviderProtocol:
         assert isinstance(provider, SandboxProvider)
 
     def test_open_returns_sandbox(self, provider: LocalSandboxProvider) -> None:
-        sandbox = provider.open(SandboxConfig())
+        sandbox = provider.open(WorkspaceConfig())
         try:
             assert isinstance(sandbox, Sandbox)
             assert isinstance(sandbox, LocalSandbox)
@@ -81,7 +81,7 @@ class TestMountParity:
     def test_empty_config_creates_empty_root(
         self, provider: LocalSandboxProvider
     ) -> None:
-        sandbox = provider.open(SandboxConfig())
+        sandbox = provider.open(WorkspaceConfig())
         try:
             assert Path(sandbox.root).exists()
             assert sandbox.filesystem.list(".") == []
@@ -91,7 +91,9 @@ class TestMountParity:
     def test_copies_single_file(
         self, provider: LocalSandboxProvider, host_dir: Path
     ) -> None:
-        config = SandboxConfig(mounts=(HostMount(host_path=str(host_dir / "main.py")),))
+        config = WorkspaceConfig(
+            mounts=(HostMount(host_path=str(host_dir / "main.py")),)
+        )
         sandbox = provider.open(config)
         try:
             assert sandbox.filesystem.read("main.py").content == "print('main')"
@@ -101,7 +103,7 @@ class TestMountParity:
     def test_copies_directory_recursively(
         self, provider: LocalSandboxProvider, host_dir: Path
     ) -> None:
-        config = SandboxConfig(mounts=(HostMount(host_path=str(host_dir)),))
+        config = WorkspaceConfig(mounts=(HostMount(host_path=str(host_dir)),))
         sandbox = provider.open(config)
         try:
             base = host_dir.name
@@ -113,7 +115,7 @@ class TestMountParity:
     def test_custom_mount_path(
         self, provider: LocalSandboxProvider, host_dir: Path
     ) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             mounts=(HostMount(host_path=str(host_dir), mount_path="custom/path"),)
         )
         sandbox = provider.open(config)
@@ -128,7 +130,7 @@ class TestMountParity:
         other = tmp_path / "other"
         other.mkdir()
         (other / "data.csv").write_text("a,b")
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             mounts=(
                 HostMount(host_path=str(host_dir), mount_path="one"),
                 HostMount(host_path=str(other), mount_path="two"),
@@ -144,7 +146,7 @@ class TestMountParity:
     def test_include_glob_filter(
         self, provider: LocalSandboxProvider, host_dir: Path
     ) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             mounts=(HostMount(host_path=str(host_dir), include_glob=("*.py",)),)
         )
         sandbox = provider.open(config)
@@ -158,7 +160,7 @@ class TestMountParity:
     def test_exclude_glob_filter(
         self, provider: LocalSandboxProvider, host_dir: Path
     ) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             mounts=(HostMount(host_path=str(host_dir), exclude_glob=("*.txt",)),)
         )
         sandbox = provider.open(config)
@@ -172,7 +174,7 @@ class TestMountParity:
     def test_byte_budget_enforced(
         self, provider: LocalSandboxProvider, host_dir: Path
     ) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             mounts=(HostMount(host_path=str(host_dir), max_bytes=2),)
         )
         with pytest.raises(WorkspaceBudgetExceededError, match="byte budget"):
@@ -183,7 +185,7 @@ class TestMountParity:
     ) -> None:
         allowed = tmp_path / "allowed-root"
         allowed.mkdir()
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             mounts=(HostMount(host_path=str(host_dir)),),
             allowed_host_roots=(str(allowed),),
         )
@@ -193,7 +195,7 @@ class TestMountParity:
     def test_security_boundary_allows_within_root(
         self, provider: LocalSandboxProvider, host_dir: Path
     ) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             mounts=(HostMount(host_path=str(host_dir)),),
             allowed_host_roots=(str(host_dir.parent),),
         )
@@ -204,7 +206,9 @@ class TestMountParity:
             sandbox.close()
 
     def test_nonexistent_host_path_raises(self, provider: LocalSandboxProvider) -> None:
-        config = SandboxConfig(mounts=(HostMount(host_path="/nonexistent/path/12345"),))
+        config = WorkspaceConfig(
+            mounts=(HostMount(host_path="/nonexistent/path/12345"),)
+        )
         with pytest.raises(FileNotFoundError):
             _ = provider.open(config)
 
@@ -213,7 +217,7 @@ class TestProviderConfig:
     def test_read_only_applies_to_filesystem_facet(
         self, provider: LocalSandboxProvider, host_dir: Path
     ) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             mounts=(HostMount(host_path=str(host_dir)),), read_only=True
         )
         sandbox = provider.open(config)
@@ -225,7 +229,7 @@ class TestProviderConfig:
             sandbox.close()
 
     def test_env_reaches_shell(self, provider: LocalSandboxProvider) -> None:
-        config = SandboxConfig(env={"WINK_SANDBOX_VAR": "configured"})
+        config = WorkspaceConfig(env={"WINK_SANDBOX_VAR": "configured"})
         sandbox = provider.open(config)
         try:
             result = sandbox.shell.run(
@@ -241,14 +245,14 @@ class TestProviderConfig:
 
     def test_egress_policy_seeds_sandbox(self, provider: LocalSandboxProvider) -> None:
         policy = EgressPolicy(allow=(EgressRule(host_glob="pypi.org"),))
-        sandbox = provider.open(SandboxConfig(egress=policy))
+        sandbox = provider.open(WorkspaceConfig(egress=policy))
         try:
             assert sandbox.egress is policy
         finally:
             sandbox.close()
 
     def test_default_egress_denies_all(self, provider: LocalSandboxProvider) -> None:
-        sandbox = provider.open(SandboxConfig())
+        sandbox = provider.open(WorkspaceConfig())
         try:
             assert not sandbox.egress.allows("example.com")
         finally:
@@ -257,7 +261,7 @@ class TestProviderConfig:
 
 class TestSetupCommands:
     def test_setup_runs_in_order(self, provider: LocalSandboxProvider) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             setup=(
                 f"{sys.executable} -c \"open('first.txt', 'w').write('1')\"",
                 (
@@ -273,14 +277,14 @@ class TestSetupCommands:
             sandbox.close()
 
     def test_setup_is_argv_not_shell(self, provider: LocalSandboxProvider) -> None:
-        config = SandboxConfig(setup=(f"{sys.executable} -c \"print('$HOME')\"",))
+        config = WorkspaceConfig(setup=(f"{sys.executable} -c \"print('$HOME')\"",))
         sandbox = provider.open(config)
         sandbox.close()
 
     def test_failing_setup_raises_and_cleans_up(
         self, provider: LocalSandboxProvider
     ) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             setup=(
                 (
                     f"{sys.executable} -c "
@@ -293,7 +297,7 @@ class TestSetupCommands:
         # The provider fixture asserts no temp directories were left behind.
 
     def test_empty_setup_command_rejected(self, provider: LocalSandboxProvider) -> None:
-        config = SandboxConfig(setup=("   ",))
+        config = WorkspaceConfig(setup=("   ",))
         with pytest.raises(SandboxSetupError, match="empty"):
             _ = provider.open(config)
 
@@ -302,7 +306,7 @@ class TestLifecycle:
     def test_open_use_snapshot_restore_close(
         self, provider: LocalSandboxProvider, host_dir: Path
     ) -> None:
-        config = SandboxConfig(mounts=(HostMount(host_path=str(host_dir)),))
+        config = WorkspaceConfig(mounts=(HostMount(host_path=str(host_dir)),))
         sandbox = provider.open(config)
         root = Path(sandbox.root)
         base = host_dir.name

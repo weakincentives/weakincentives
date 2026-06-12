@@ -98,7 +98,7 @@ from weakincentives.runtime import (
     Session,
 )
 from weakincentives.runtime.logging import configure_logging
-from weakincentives.sandbox import HostMount, SandboxConfig
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
 if TYPE_CHECKING:
     from weakincentives.adapters.core import ProviderAdapter
@@ -207,9 +207,9 @@ class ReviewParams:
 # =============================================================================
 
 
-def _create_sandbox_config(project_path: str) -> SandboxConfig:
+def _create_workspace_config(project_path: str) -> WorkspaceConfig:
     """Declare the review environment: the project mounted into a sandbox."""
-    return SandboxConfig(
+    return WorkspaceConfig(
         mounts=(
             HostMount(
                 host_path=project_path,
@@ -325,7 +325,7 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
                     key="output-format",
                 ),
             ),
-            sandbox=_create_sandbox_config(request.project_path),
+            workspace=_create_workspace_config(request.project_path),
         )
 
         prompt = Prompt(template).bind(ReviewParams(focus=request.focus))

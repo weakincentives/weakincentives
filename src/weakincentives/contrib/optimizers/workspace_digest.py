@@ -31,7 +31,7 @@ from ...dataclasses import FrozenDataclass
 from ...prompt import MarkdownSection, Prompt, PromptTemplate
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
-from ...sandbox import SandboxConfig
+from ...sandbox import WorkspaceConfig
 from ..tools.digests import set_workspace_digest
 
 if TYPE_CHECKING:
@@ -164,7 +164,7 @@ class WorkspaceDigestOptimizer:
                     key="output-format",
                 ),
             ),
-            sandbox=SandboxConfig(mounts=tuple(self.mounts)),
+            workspace=WorkspaceConfig(mounts=tuple(self.mounts)),
         )
 
         return Prompt(template)

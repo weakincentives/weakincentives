@@ -216,8 +216,8 @@ class TestWorkspaceDigestOptimizerIntegration:
         # Verify prompt declares the mounts as sandbox intent
         prompt = optimizer._build_optimization_prompt()
 
-        assert prompt.template.sandbox is not None
-        assert prompt.template.sandbox.mounts == (mount,)
+        assert prompt.template.workspace is not None
+        assert prompt.template.workspace.mounts == (mount,)
 
         # The workspace preview section renders a placeholder until opened
         rendered = prompt.render()

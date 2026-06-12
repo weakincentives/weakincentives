@@ -47,7 +47,7 @@ from ..errors import (
 )
 from ..prompt import Prompt
 from ..runtime.session.protocols import SessionProtocol
-from ..sandbox import LocalSandboxProvider, SandboxConfig, SandboxProvider
+from ..sandbox import LocalSandboxProvider, SandboxProvider, WorkspaceConfig
 
 if TYPE_CHECKING:
     from ..runtime.run_context import RunContext
@@ -196,7 +196,7 @@ class ProviderAdapter(ABC):
         """Initialize the adapter.
 
         Args:
-            sandbox_provider: Provider materializing the prompt's sandbox
+            sandbox_provider: Provider materializing the prompt's workspace
                 config. Defaults to :class:`LocalSandboxProvider`.
         """
         super().__init__()
@@ -223,7 +223,7 @@ class ProviderAdapter(ABC):
         """Open an :class:`AgentRuntime` for the prompt.
 
         Materializes the prompt template's
-        :class:`~weakincentives.sandbox.SandboxConfig` (an empty config
+        :class:`~weakincentives.sandbox.WorkspaceConfig` (an empty config
         when the template declares none) through this adapter's sandbox
         provider and pairs it with the prompt for the lifetime of the
         ``with`` block. The lease is released on exit: locally provisioned
@@ -238,8 +238,8 @@ class ProviderAdapter(ABC):
             if self._sandbox_provider is not None
             else LocalSandboxProvider()
         )
-        config = prompt.template.sandbox
-        sandbox = provider.open(config if config is not None else SandboxConfig())
+        config = prompt.template.workspace
+        sandbox = provider.open(config if config is not None else WorkspaceConfig())
         rt: AgentRuntime[OutputT] = AgentRuntime(
             adapter=self, prompt=prompt, sandbox=sandbox
         )

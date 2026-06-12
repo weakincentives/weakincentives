@@ -135,7 +135,7 @@ Defined at `src/weakincentives/adapters/acp/config.py:29`.
 | `mcp_servers` | `tuple[Any, ...]` | `()` | Additional MCP servers (WINK server always added first) |
 
 > **CWD:** The agent always runs with `cwd = sandbox.root` — the sandbox the
-> adapter opens for the evaluation from the prompt template's `SandboxConfig`
+> adapter opens for the evaluation from the prompt template's `WorkspaceConfig`
 > (an empty sandbox when none is declared).
 
 > **Capability alignment:** Advertised capabilities in `initialize` must match

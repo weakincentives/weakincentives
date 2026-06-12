@@ -36,7 +36,7 @@ At `src/weakincentives/adapters/claude_agent_sdk/config.py`:
 
 The SDK working directory is not configurable: evaluation always runs
 against a sandbox lease materialized from the prompt template's
-`SandboxConfig` (see `specs/SANDBOX.md`) with `cwd = sandbox.root`.
+`WorkspaceConfig` (see `specs/SANDBOX.md`) with `cwd = sandbox.root`.
 Callers may hold one environment across evaluations via
 `adapter.runtime(prompt)` (see `specs/ADAPTERS.md`). A failed bridged
 tool rolls back session and sandbox in one transaction.
@@ -77,7 +77,7 @@ At `src/weakincentives/adapters/claude_agent_sdk/config.py`:
 | `ignore_network_violations` | `tuple[str, ...]` | `()` | Network hosts to ignore violations |
 
 The OS-sandbox knobs configure the harness process; they are distinct from
-the environment `SandboxConfig` declared on prompt templates.
+the environment `WorkspaceConfig` declared on prompt templates.
 
 **Note:** Skills are attached to prompt sections, not IsolationConfig.
 See `specs/SKILLS.md` for skill attachment.
@@ -235,7 +235,7 @@ At `src/weakincentives/adapters/claude_agent_sdk/_errors.py`.
 - **Structured output**: `PromptTemplate[OutputType]` — adapter returns a typed
   instance deserialized from the SDK's `StructuredOutput` tool result.
 - **Secure code review**: declare the project mounts via the template's
-  `SandboxConfig` and combine with
+  `WorkspaceConfig` and combine with
   `IsolationConfig(network_policy=NetworkPolicy.no_network(), sandbox_enabled=True)`.
 - **Domain allowlist**: `NetworkPolicy.with_domains("docs.python.org", ...)` —
   restricts tool network access while leaving the API connection unrestricted.

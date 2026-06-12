@@ -236,7 +236,7 @@ from typing import Any
 from weakincentives.contrib.tools import WorkspaceDigestSection
 from weakincentives.prompt import PromptTemplate, MarkdownSection
 from weakincentives.runtime import Session
-from weakincentives.sandbox import HostMount, SandboxConfig
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
 
 def build_prompt_template(*, session: Session) -> PromptTemplate[Any]:
@@ -247,7 +247,7 @@ def build_prompt_template(*, session: Session) -> PromptTemplate[Any]:
             MarkdownSection(title="Instructions", key="instructions"),
             WorkspaceDigestSection(session=session),
         ),
-        sandbox=SandboxConfig(
+        workspace=WorkspaceConfig(
             mounts=(HostMount(host_path="/path/to/project"),),
         ),
     )

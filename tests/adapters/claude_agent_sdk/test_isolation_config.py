@@ -338,7 +338,7 @@ class TestIsolationConfig:
         self, session: Session, tmp_path: Path
     ) -> None:
         """Templates with sandbox config run with cwd at the opened sandbox root."""
-        from weakincentives.sandbox import HostMount, SandboxConfig
+        from weakincentives.sandbox import HostMount, WorkspaceConfig
 
         MockSDKQuery.reset()
         MockSDKQuery.set_results([MockResultMessage(result="Done")])
@@ -354,7 +354,7 @@ class TestIsolationConfig:
                     key="test",
                 ),
             ],
-            sandbox=SandboxConfig(mounts=(HostMount(host_path=str(tmp_path)),)),
+            workspace=WorkspaceConfig(mounts=(HostMount(host_path=str(tmp_path)),)),
         )
         prompt_with_sandbox: Prompt[SimpleOutput] = Prompt(template)
 
@@ -374,7 +374,7 @@ class TestIsolationConfig:
         self, session: Session, tmp_path: Path
     ) -> None:
         """The workspace preview lists the opened sandbox contents."""
-        from weakincentives.sandbox import HostMount, SandboxConfig
+        from weakincentives.sandbox import HostMount, WorkspaceConfig
 
         MockSDKQuery.reset()
         MockSDKQuery.set_results([MockResultMessage(result="Done")])
@@ -383,7 +383,7 @@ class TestIsolationConfig:
         template = PromptTemplate[SimpleOutput].create(
             ns="test",
             key="with-sandbox-preview",
-            sandbox=SandboxConfig(
+            workspace=WorkspaceConfig(
                 mounts=(HostMount(host_path=str(tmp_path), mount_path="src"),)
             ),
         )

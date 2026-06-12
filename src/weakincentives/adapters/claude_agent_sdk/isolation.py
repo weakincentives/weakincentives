@@ -343,7 +343,7 @@ class IsolationConfig:
     **OS sandbox knobs** control the SDK's OS-level sandboxing (bubblewrap
     on Linux, seatbelt on macOS). These are provider-level isolation
     settings for the harness process — distinct from the environment
-    :class:`~weakincentives.sandbox.SandboxConfig` a prompt declares.
+    :class:`~weakincentives.sandbox.WorkspaceConfig` a prompt declares.
 
     Attributes:
         network_policy: Network access constraints. None means no network access.

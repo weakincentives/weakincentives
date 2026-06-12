@@ -12,7 +12,7 @@
 
 """Sandbox intent: what environment to materialize, declared as data.
 
-:class:`SandboxConfig` is a serde value describing the environment an
+:class:`WorkspaceConfig` is a serde value describing the environment an
 agent should run in — mounts, write posture, environment variables, setup
 commands, and the egress policy. It carries credential **names only**;
 secret material is bound at runtime through the sandbox control plane
@@ -37,7 +37,7 @@ __all__ = [
     "CredentialInjection",
     "EgressPolicy",
     "EgressRule",
-    "SandboxConfig",
+    "WorkspaceConfig",
 ]
 
 _MAX_PORT = 65535
@@ -130,8 +130,16 @@ class EgressPolicy:
 
 
 @FrozenDataclass()
-class SandboxConfig:
-    """Declarative intent for a sandbox; a provider materializes it.
+class WorkspaceConfig:
+    """Declarative workspace intent; a provider materializes it as a sandbox.
+
+    Declared on the prompt definition
+    (``PromptTemplate.create(workspace=...)``): the per-run workspace the
+    agent acts on — mounts, read-only posture, environment seeding. The
+    *execution substrate* (where the harness runs, OS isolation, remote
+    transport) is adapter/provider configuration, not declared here; until
+    the substrate config exists (``refactor/M4.md``), the ``egress``,
+    ``env``, and ``setup`` fields ride on this value.
 
     A serde value safe to store and transmit: egress rules reference
     credentials by name only.

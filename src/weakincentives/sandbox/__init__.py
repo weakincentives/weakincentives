@@ -14,7 +14,7 @@
 
 One environment, one truth. A :class:`Sandbox` aggregate vends the two
 effect facets — :class:`~weakincentives.filesystem.Filesystem` and
-:class:`Shell` — and owns egress and lifecycle. A :class:`SandboxConfig`
+:class:`Shell` — and owns egress and lifecycle. A :class:`WorkspaceConfig`
 declares intent as a serde value; a :class:`SandboxProvider` materializes
 it. Local first: remote sandboxes differ only in transport.
 
@@ -31,7 +31,7 @@ Roles
     snapshot/restore delegating to the filesystem backend, and idempotent
     ``close``. Whoever opens a sandbox closes it; facets never self-close.
 
-:class:`SandboxConfig` / :class:`SandboxProvider`
+:class:`WorkspaceConfig` / :class:`SandboxProvider`
     Declarative intent (mounts, read-only posture, env, setup commands,
     egress policy) and the factory that materializes it.
     :class:`LocalSandboxProvider` absorbs the workspace mount machinery:
@@ -55,12 +55,12 @@ Usage
 Open, use, close::
 
     from weakincentives.sandbox import (
-        HostMount, LocalSandboxProvider, SandboxConfig,
+        HostMount, LocalSandboxProvider, WorkspaceConfig,
     )
 
     provider = LocalSandboxProvider()
     sandbox = provider.open(
-        SandboxConfig(mounts=(HostMount(host_path="/path/to/project"),))
+        WorkspaceConfig(mounts=(HostMount(host_path="/path/to/project"),))
     )
     try:
         sandbox.filesystem.write("notes.md", "hello")
@@ -77,7 +77,7 @@ from ._config import (
     CredentialInjection,
     EgressPolicy,
     EgressRule,
-    SandboxConfig,
+    WorkspaceConfig,
 )
 from ._mounts import (
     HostMount,
@@ -122,12 +122,12 @@ __all__ = [
     "LocalShell",
     "Sandbox",
     "SandboxClosedError",
-    "SandboxConfig",
     "SandboxError",
     "SandboxProvider",
     "SandboxSetupError",
     "Shell",
     "WorkspaceBudgetExceededError",
+    "WorkspaceConfig",
     "WorkspaceSecurityError",
     "compute_workspace_fingerprint",
     "materialize_mounts",

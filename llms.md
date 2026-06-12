@@ -304,7 +304,7 @@ from weakincentives.sandbox import (
     HostMount,
     LocalSandboxProvider,
     Sandbox,
-    SandboxConfig,
+    WorkspaceConfig,
     Shell,
 )
 
@@ -363,7 +363,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     TranscriptCollector,
     TranscriptCollectorConfig,
 )
-from weakincentives.sandbox import HostMount, SandboxConfig
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 from weakincentives.prompt import (
     # Task completion (canonical location; also re-exported from adapters.claude_agent_sdk)
     TaskCompletionChecker,
@@ -385,7 +385,7 @@ from weakincentives.adapters.codex_app_server import (
     SandboxMode,
     ApprovalPolicy,
 )
-from weakincentives.sandbox import HostMount, SandboxConfig
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 ```
 
 ### ACP Adapter (Generic)
@@ -727,7 +727,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 )
 from weakincentives.prompt import PromptTemplate
 from weakincentives.runtime import Session
-from weakincentives.sandbox import HostMount, SandboxConfig
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
 session = Session()
 
@@ -736,7 +736,7 @@ session = Session()
 template = PromptTemplate.create(
     ns="docs",
     key="sandboxed",
-    sandbox=SandboxConfig(
+    workspace=WorkspaceConfig(
         mounts=(
             HostMount(
                 host_path="/path/to/project",
@@ -775,7 +775,7 @@ adapter = ClaudeAgentSDKAdapter(
 
 - `NetworkPolicy.no_network()` - API access only
 - `NetworkPolicy(allowed_domains=("docs.python.org",))` - Specific domains
-- `SandboxConfig(enabled=True)` - OS-level sandboxing
+- `WorkspaceConfig(enabled=True)` - OS-level sandboxing
 
 **Reasoning effort** (replaces `max_thinking_tokens`):
 
@@ -960,7 +960,7 @@ with fs.open_text("logs.txt") as text:     # TextReader (lazy UTF-8)
         handle(line)
 ```
 
-**Sandbox**: the aggregate naming the environment. A `SandboxConfig` (serde
+**Sandbox**: the aggregate naming the environment. A `WorkspaceConfig` (serde
 value) declares mounts, env, setup commands, and a default-deny `EgressPolicy`;
 `LocalSandboxProvider.open(config)` materializes it into a `Sandbox` vending
 the two effect facets — `filesystem` and `shell` — with snapshot/restore and
@@ -968,11 +968,11 @@ one idempotent `close()`. Egress/credential reconfiguration is control-plane
 only (never reachable from tools).
 
 ```python
-from weakincentives.sandbox import HostMount, LocalSandboxProvider, SandboxConfig
+from weakincentives.sandbox import HostMount, LocalSandboxProvider, WorkspaceConfig
 
 provider = LocalSandboxProvider()
 sandbox = provider.open(
-    SandboxConfig(mounts=(HostMount(host_path="/path/to/project"),))
+    WorkspaceConfig(mounts=(HostMount(host_path="/path/to/project"),))
 )
 try:
     listing = sandbox.shell.run(["ls", "-la"])    # argv vector, no /bin/sh
@@ -1116,7 +1116,7 @@ OpenCode ACP agent?            → OpenCodeACPAdapter
 ### Which Environment?
 
 ```text
-Any adapter (Claude/Codex)?    → PromptTemplate.create(sandbox=SandboxConfig(...))
+Any adapter (Claude/Codex)?    → PromptTemplate.create(workspace=WorkspaceConfig(...))
 Testing/evaluation?            → Filesystem.in_memory()
 ```
 

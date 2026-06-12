@@ -58,7 +58,7 @@ so a mismatched (adapter, prompt, sandbox) triple is unrepresentable —
 the triple is paired exactly once, inside `ProviderAdapter.runtime`:
 
 - `adapter.runtime(prompt)` — context manager materializing the template's
-  `SandboxConfig` (empty config when none is declared) through the
+  `WorkspaceConfig` (empty config when none is declared) through the
   adapter's injectable `sandbox_provider` (default `LocalSandboxProvider`)
   and pairing it with the prompt. Exiting the block releases the sandbox
   lease: locally provisioned sandboxes are closed and removed.

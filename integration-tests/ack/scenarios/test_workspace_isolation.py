@@ -24,7 +24,7 @@ from weakincentives.prompt import (
     PromptTemplate,
 )
 from weakincentives.runtime.session import Session
-from weakincentives.sandbox import HostMount, SandboxConfig
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
 from ..adapters import AdapterFixture
 
@@ -57,7 +57,7 @@ def test_sandbox_mounts_host_files(
                     ),
                 ),
             ],
-            sandbox=SandboxConfig(
+            workspace=WorkspaceConfig(
                 mounts=(HostMount(host_path=str(host_dir), mount_path="data"),),
                 allowed_host_roots=(str(tmp_path),),
             ),
@@ -91,7 +91,7 @@ def test_sandbox_root_is_cwd(
                     ),
                 ),
             ],
-            sandbox=SandboxConfig(),
+            workspace=WorkspaceConfig(),
         )
     )
 

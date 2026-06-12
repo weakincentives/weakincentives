@@ -34,7 +34,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..budget import Budget, BudgetTracker
     from ..runtime.session import Session
     from ..runtime.session.protocols import SessionProtocol
-    from ..sandbox import SandboxConfig
+    from ..sandbox import WorkspaceConfig
     from ._prompt_resources import PromptResources
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
@@ -90,7 +90,7 @@ class PromptTemplateProtocol[TemplateOutputT](Protocol):
     ns: str
     key: str
     name: str | None
-    sandbox: SandboxConfig | None
+    workspace: WorkspaceConfig | None
 
     @property
     def sections(self) -> tuple[Any, ...]: ...

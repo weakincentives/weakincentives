@@ -40,8 +40,8 @@ from weakincentives.runtime.session.protocols import SessionProtocol
 from weakincentives.sandbox import (
     HostMount,
     Sandbox,
-    SandboxConfig,
     SandboxProvider,
+    WorkspaceConfig,
 )
 
 
@@ -84,7 +84,7 @@ class TestRuntimePairing:
             PromptTemplate.create(
                 ns="t",
                 key="with-mounts",
-                sandbox=SandboxConfig(
+                workspace=WorkspaceConfig(
                     mounts=(HostMount(host_path=str(tmp_path), mount_path="src"),)
                 ),
             )
@@ -105,10 +105,10 @@ class TestRuntimePairing:
         assert not root.exists()
 
     def test_runtime_defaults_to_empty_config(self) -> None:
-        opened: list[SandboxConfig] = []
+        opened: list[WorkspaceConfig] = []
 
         class _SpyProvider:
-            def open(self, config: SandboxConfig) -> Sandbox:
+            def open(self, config: WorkspaceConfig) -> Sandbox:
                 opened.append(config)
                 return make_memory_sandbox()
 
@@ -117,7 +117,7 @@ class TestRuntimePairing:
         with adapter.runtime(_plain_prompt()):
             pass
 
-        assert opened == [SandboxConfig()]
+        assert opened == [WorkspaceConfig()]
 
 
 class TestRuntimeEvaluate:
@@ -207,7 +207,7 @@ class TestRuntimeEvaluate:
 class TestWorkspacePreview:
     def test_render_resolves_preview_from_sandbox(self) -> None:
         prompt: Prompt[Any] = Prompt(
-            PromptTemplate.create(ns="t", key="preview", sandbox=SandboxConfig())
+            PromptTemplate.create(ns="t", key="preview", workspace=WorkspaceConfig())
         )
         adapter = _RecordingAdapter()
 
@@ -225,7 +225,9 @@ class TestWorkspacePreview:
 
     def test_render_without_sandbox_shows_placeholder(self) -> None:
         prompt: Prompt[Any] = Prompt(
-            PromptTemplate.create(ns="t", key="placeholder", sandbox=SandboxConfig())
+            PromptTemplate.create(
+                ns="t", key="placeholder", workspace=WorkspaceConfig()
+            )
         )
 
         assert "not yet materialized" in prompt.render().text

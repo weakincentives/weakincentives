@@ -7,7 +7,7 @@ One environment, one truth — and effects need a command channel. The
 effect facets (`Filesystem`, `Shell`) rooted at one directory, owns the
 egress/credential control plane, and has exactly one lifecycle owner —
 whoever opens a sandbox closes it; facets never self-close. A
-`SandboxConfig` declares intent as a serde value; a `SandboxProvider`
+`WorkspaceConfig` declares intent as a serde value; a `SandboxProvider`
 materializes it. Local first: remote sandboxes (M4) differ only in
 transport.
 
@@ -19,7 +19,7 @@ transport.
   `close()` is idempotent and is the only teardown
 - **Exec is an argv surface**: `Shell.run` executes a vector — never
   `/bin/sh`; no globbing, quoting, or variable expansion
-- **Intent is data**: `SandboxConfig` is a frozen serde value carrying
+- **Intent is data**: `WorkspaceConfig` is a frozen serde value carrying
   credential *names* only — never secret material
 - **Default-deny egress**: an empty `EgressPolicy` allows nothing; rules
   are explicit allow entries
@@ -35,7 +35,7 @@ transport.
 ```
 ┌───────────────────────────────────────────────────────────────┐
 │                     SandboxProvider.open(config)               │
-│   SandboxConfig: mounts · allowed_host_roots · read_only ·     │
+│   WorkspaceConfig: mounts · allowed_host_roots · read_only ·     │
 │                  egress · env · setup                          │
 ├───────────────────────────────────────────────────────────────┤
 │                          Sandbox                               │
@@ -99,7 +99,7 @@ readable.
 
 ## Intent and Provider
 
-`SandboxConfig` at `src/weakincentives/sandbox/_config.py` — a frozen
+`WorkspaceConfig` at `src/weakincentives/sandbox/_config.py` — a frozen
 serde value:
 
 | Field | Meaning |
@@ -131,7 +131,7 @@ injection time, inside the proxy only). Configs and serialized state carry
 `CredentialBinding(name, secret)` supplies material at runtime through
 `configure_credentials`. Invariants, enforced by tests:
 
-- Secret material never appears in `SandboxConfig`, serialized state,
+- Secret material never appears in `WorkspaceConfig`, serialized state,
   `repr`, or logs (`CredentialBinding` excludes the secret from `repr`)
 - Secret material is never written into the sandbox environment or
   filesystem

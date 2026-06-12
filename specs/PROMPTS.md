@@ -85,7 +85,7 @@ At `src/weakincentives/prompt/markdown.py`: Dedents, strips, runs `Template.subs
 
 ### Workspace preview
 
-Templates created with `sandbox=SandboxConfig(...)` carry a workspace
+Templates created with `workspace=WorkspaceConfig(...)` carry a workspace
 preview section rendered from the opened sandbox (see `specs/WORKSPACE.md`).
 
 ## Prompt Lifecycle

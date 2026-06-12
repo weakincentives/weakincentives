@@ -50,7 +50,7 @@ class ClaudeAgentSDKClientConfig:
 
     The SDK working directory is not configurable here: it is always the
     root of the sandbox opened for the evaluation (declared via the prompt
-    template's ``SandboxConfig``).
+    template's ``WorkspaceConfig``).
 
     Attributes:
         permission_mode: Tool permission handling mode. Defaults to

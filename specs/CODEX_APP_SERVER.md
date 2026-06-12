@@ -219,7 +219,7 @@ Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
 
 > **CWD:** `thread/start` always receives the root of the sandbox the
 > adapter opens for the evaluation (from the prompt template's
-> `SandboxConfig`; an empty sandbox when none is declared). When connecting
+> `WorkspaceConfig`; an empty sandbox when none is declared). When connecting
 > to a remote server the local sandbox root is unlikely to be valid on the
 > remote machine — see Known Gaps.
 
@@ -547,7 +547,7 @@ When a tool raises `VisibilityExpansionRequired`:
 
 ### Sandbox
 
-The prompt template declares environment intent via `SandboxConfig`
+The prompt template declares environment intent via `WorkspaceConfig`
 (mounts, allowed roots, byte budgets — see `specs/SANDBOX.md`). The base
 adapter's `AgentRuntime` materializes it (default `LocalSandboxProvider`;
 callers may hold one runtime across evaluations — see `specs/ADAPTERS.md`);

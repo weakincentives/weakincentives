@@ -101,7 +101,7 @@ capabilities once, in one place, and the definition ports across runtimes.
   fails, WINK automatically rolls back session state and filesystem changes to
   their pre-call state. Failed tools don't leave traces in mutable state.
 - **Sandboxed environments.** Declare environment intent on the template via
-  `SandboxConfig` (mounts with include/exclude patterns, egress policy, setup
+  `WorkspaceConfig` (mounts with include/exclude patterns, egress policy, setup
   commands); the adapter materializes one sandbox per evaluation and points the
   harness at its root. See [Sandbox](specs/SANDBOX.md).
 
@@ -283,7 +283,7 @@ adapter = ClaudeAgentSDKAdapter(
     ),
 )
 
-# `prompt` declares its environment via PromptTemplate.create(sandbox=...)
+# `prompt` declares its workspace via PromptTemplate.create(workspace=...)
 response = adapter.evaluate(prompt, session=session)
 ```
 
@@ -319,7 +319,7 @@ adapter = CodexAppServerAdapter(
     ),
 )
 
-# `prompt` declares its environment via PromptTemplate.create(sandbox=...)
+# `prompt` declares its workspace via PromptTemplate.create(workspace=...)
 response = adapter.evaluate(prompt, session=session)
 ```
 
@@ -354,7 +354,7 @@ adapter = OpenCodeACPAdapter(
     client_config=OpenCodeACPClientConfig(),
 )
 
-# `prompt` declares its environment via PromptTemplate.create(sandbox=...)
+# `prompt` declares its workspace via PromptTemplate.create(workspace=...)
 response = adapter.evaluate(prompt, session=session)
 ```
 

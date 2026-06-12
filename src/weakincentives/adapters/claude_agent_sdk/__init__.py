@@ -49,7 +49,7 @@ Key Components
 
 **Environment** (see :mod:`weakincentives.sandbox`)
     Prompt templates declare environment intent via
-    :class:`~weakincentives.sandbox.SandboxConfig`; the adapter materializes
+    :class:`~weakincentives.sandbox.WorkspaceConfig`; the adapter materializes
     it through its sandbox provider and points the SDK ``cwd`` at the
     opened sandbox root.
 
@@ -136,7 +136,7 @@ Sandbox Example
 Declaring environment intent on the template::
 
     from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-    from weakincentives.sandbox import HostMount, SandboxConfig
+    from weakincentives.sandbox import HostMount, WorkspaceConfig
     from weakincentives.adapters.claude_agent_sdk import (
         ClaudeAgentSDKAdapter,
         ClaudeAgentSDKClientConfig,
@@ -161,7 +161,7 @@ Declaring environment intent on the template::
                 template="Review the Python code in the workspace.",
             ),
         ),
-        sandbox=SandboxConfig(
+        workspace=WorkspaceConfig(
             mounts=(
                 HostMount(
                     host_path="src",
@@ -213,7 +213,7 @@ Configuration:
     - :data:`ReasoningEffort`: Literal type for adaptive reasoning effort levels
 
 Environment (in :mod:`weakincentives.sandbox`):
-    - :class:`~weakincentives.sandbox.SandboxConfig`: Declarative environment intent
+    - :class:`~weakincentives.sandbox.WorkspaceConfig`: Declarative environment intent
     - :class:`~weakincentives.sandbox.HostMount`: Configuration for mounting host files
 
 Isolation:

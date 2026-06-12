@@ -31,7 +31,7 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.runtime.session import Replace, Session, SliceOp, reducer
-from weakincentives.sandbox import LocalSandboxProvider, Sandbox, SandboxConfig
+from weakincentives.sandbox import LocalSandboxProvider, Sandbox, WorkspaceConfig
 
 from ..adapters import AdapterFixture
 from . import TransactionPromptParams, build_transactional_prompt, make_adapter_ns
@@ -354,7 +354,7 @@ def test_tool_failure_rolls_back_filesystem(
 ) -> None:
     """Failed tool calls roll back sandbox changes while successes persist."""
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    sandbox = LocalSandboxProvider().open(SandboxConfig())
+    sandbox = LocalSandboxProvider().open(WorkspaceConfig())
 
     try:
         write_succeed_tool = _build_write_and_succeed_tool()
@@ -380,7 +380,7 @@ def test_tool_failure_rolls_back_session_state(
 ) -> None:
     """Failed tool calls roll back session slice mutations."""
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    sandbox = LocalSandboxProvider().open(SandboxConfig())
+    sandbox = LocalSandboxProvider().open(WorkspaceConfig())
 
     try:
         write_succeed_tool = _build_write_and_succeed_tool()
@@ -407,7 +407,7 @@ def test_sequential_operations_isolation(
 ) -> None:
     """Rollback affects only failed operations in mixed success/failure sequences."""
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    sandbox = LocalSandboxProvider().open(SandboxConfig())
+    sandbox = LocalSandboxProvider().open(WorkspaceConfig())
 
     try:
         write_succeed_tool = _build_write_and_succeed_tool()
@@ -440,7 +440,7 @@ def test_rollback_verified_in_debug_bundle(
 ) -> None:
     """Debug bundles reflect transactional rollback in filesystem and session data."""
     session.install(ToolOperationLog, initial=ToolOperationLog)
-    sandbox = LocalSandboxProvider().open(SandboxConfig())
+    sandbox = LocalSandboxProvider().open(WorkspaceConfig())
     bundle_dir = tmp_path / "bundles"
     bundle_dir.mkdir()
 

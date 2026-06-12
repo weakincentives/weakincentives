@@ -13,7 +13,7 @@
 """Workspace preview for sandbox-backed prompts.
 
 When a :class:`~weakincentives.prompt.PromptTemplate` declares environment
-intent via ``sandbox=SandboxConfig(...)``, the template carries a workspace
+intent via ``workspace=WorkspaceConfig(...)``, the template carries a workspace
 preview section. The preview renders from the *opened* sandbox:
 ``prompt.render(session=..., sandbox=sandbox)`` resolves
 :class:`WorkspacePreviewParams` (built via :func:`workspace_preview_params`
@@ -48,7 +48,7 @@ _EMPTY_LISTING: Final = "(empty workspace)"
 
 _PREVIEW_TEMPLATE: Final = """
 Your working directory is a sandboxed workspace materialized from the
-prompt's sandbox configuration. Use the tools available to explore and
+prompt's workspace configuration. Use the tools available to explore and
 work with its contents.
 
 ${listing}

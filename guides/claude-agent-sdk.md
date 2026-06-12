@@ -22,7 +22,7 @@ is critical for multi-tenant deployments.
 MCP tools. You keep side effects and validation in Python while Claude uses
 tools natively.
 
-**Sandboxed environments**: the prompt template's `SandboxConfig` provides
+**Sandboxed environments**: the prompt template's `WorkspaceConfig` provides
 structured access to host files with security boundaries, size limits, and
 exclude patterns.
 
@@ -34,21 +34,21 @@ exclude patterns.
 
 The adapter requires claude-agent-sdk version 0.1.15 or later.
 
-## SandboxConfig
+## WorkspaceConfig
 
-`SandboxConfig` is the core abstraction for giving Claude Code access to
+`WorkspaceConfig` is the core abstraction for giving Claude Code access to
 host files. Declared on the prompt template, it is materialized by the
 adapter into an isolated sandbox directory with mounted content and
 enforced security boundaries.
 
 ```python nocheck
-from weakincentives.sandbox import HostMount, SandboxConfig
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
 template = PromptTemplate.create(
     ns="my-agent",
     key="main",
     sections=[...],
-    sandbox=SandboxConfig(
+    workspace=WorkspaceConfig(
         mounts=(
             HostMount(
                 host_path="/abs/path/to/repo",
@@ -79,7 +79,7 @@ restricts which host paths can be mounted:
 
 ```python nocheck
 # Only allows mounting from /home/app/repos
-sandbox_config = SandboxConfig(
+sandbox_config = WorkspaceConfig(
     mounts=(HostMount(host_path="/home/app/repos/myproject", mount_path="code"),),
     allowed_host_roots=("/home/app/repos",),
 )
@@ -267,12 +267,12 @@ policy = NetworkPolicy.with_domains("docs.python.org", "pypi.org")
 For production code review, `no_network()` is strongly recommended—it prevents
 the model from exfiltrating code or fetching malicious payloads.
 
-### SandboxConfig
+### WorkspaceConfig
 
 Fine-grained control over the sandbox:
 
 ```python nocheck
-sandbox = SandboxConfig(
+sandbox = WorkspaceConfig(
     enabled=True,
     writable_paths=("/tmp/workspace",),
     readable_paths=("/opt/references",),
@@ -503,14 +503,14 @@ from weakincentives.adapters.claude_agent_sdk import (
     IsolationConfig,
     NetworkPolicy,
 )
-from weakincentives.sandbox import HostMount, SandboxConfig
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
 # Declare the isolated environment on the template
 template = PromptTemplate.create(
     ns="review",
     key="isolated",
     sections=[...],
-    sandbox=SandboxConfig(
+    workspace=WorkspaceConfig(
         mounts=(
             HostMount(
                 host_path="/repos/project",

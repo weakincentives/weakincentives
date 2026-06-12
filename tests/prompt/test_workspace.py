@@ -29,7 +29,7 @@ from weakincentives.prompt import (
     workspace_preview_params,
     workspace_preview_section,
 )
-from weakincentives.sandbox import SandboxConfig
+from weakincentives.sandbox import WorkspaceConfig
 
 
 class TestWorkspacePreviewParams:
@@ -97,17 +97,17 @@ class TestTemplateSandboxIntegration:
         template = PromptTemplate.create(
             ns="tests",
             key="with-sandbox",
-            sandbox=SandboxConfig(),
+            workspace=WorkspaceConfig(),
         )
 
-        assert template.sandbox == SandboxConfig()
+        assert template.workspace == WorkspaceConfig()
         keys = [section.key for section in template.sections]
         assert keys[-1] == WORKSPACE_PREVIEW_KEY
 
     def test_no_sandbox_means_no_preview_section(self) -> None:
         template = PromptTemplate.create(ns="tests", key="plain")
 
-        assert template.sandbox is None
+        assert template.workspace is None
         assert template.sections == ()
 
     def test_render_uses_bound_preview_params(self) -> None:
@@ -116,7 +116,7 @@ class TestTemplateSandboxIntegration:
         template = PromptTemplate.create(
             ns="tests",
             key="render-preview",
-            sandbox=SandboxConfig(),
+            workspace=WorkspaceConfig(),
         )
         prompt = Prompt(template).bind(workspace_preview_params(fs))
 
@@ -128,7 +128,7 @@ class TestTemplateSandboxIntegration:
         template = PromptTemplate.create(
             ns="tests",
             key="render-placeholder",
-            sandbox=SandboxConfig(),
+            workspace=WorkspaceConfig(),
         )
 
         rendered = Prompt(template).render()

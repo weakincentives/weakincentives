@@ -33,7 +33,7 @@ class ACPClientConfig:
 
     The harness working directory is not configurable here: it is always
     the root of the sandbox opened for the evaluation (declared via the
-    prompt template's ``SandboxConfig``).
+    prompt template's ``WorkspaceConfig``).
 
     Attributes:
         agent_bin: Executable to spawn.

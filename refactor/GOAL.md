@@ -51,7 +51,7 @@ ______________________________________________________________________
 
 | Core | One responsibility | Invariant | Today (to fix) |
 |------|--------------------|-----------|----------------|
-| **Definition** (`prompt/`) | Express what the agent should do: sections, tools, policies, `SandboxConfig`, success criteria | Pure; renders deterministically; **imports no adapter** (checker-enforced) | Independence holds but is incidental; 3 parallel generic-specialization mechanisms; no isolation-test surface |
+| **Definition** (`prompt/`) | Express what the agent should do: sections, tools, policies, `WorkspaceConfig`, success criteria | Pure; renders deterministically; **imports no adapter** (checker-enforced) | Independence holds but is incidental; 3 parallel generic-specialization mechanisms; no isolation-test surface |
 | **State** (`runtime/session`) | Event-sourced session: pure reducers, snapshots, restore | All mutation via events; snapshot/restore total | Strong design; leaky encapsulation (backcompat shims, `_LoopLike` mirror — hardening H5) |
 | **Environment** (`sandbox/`, `filesystem/`) | Where effects land: filesystem, shell, egress — local or remote | Every tool effect lands in one `Sandbox`; rollback = (session, sandbox); egress **default-deny** | The missing core: no shell, no egress, FS-as-DI-resource, harness `cwd` diverges remotely |
 | **Contract** (`adapters/`) | The seam: one adapter protocol + declared capabilities + shared turn machinery | No adapter-name conditionals; capability negotiation; new harness = leaf | Largest package (14.5k LOC); turn-loop ×3, guardrails ×2, ephemeral home ×3; no capability negotiation at runtime |
@@ -63,7 +63,7 @@ Substrate underneath (`types`, `serde`, `dataclasses`, `dbc`, `clock`,
 dependency rule: substrate → cores → adapter leaves → CLI/debug tooling.
 
 ```
-DEFINITION  (code you own)     sections · tools · policies · SandboxConfig
+DEFINITION  (code you own)     sections · tools · policies · WorkspaceConfig
       │ bind / negotiate capabilities
 CONTRACT    (the narrow seam)  ProviderAdapter + AdapterCapabilities + bridged tools
       │ drives                        │ every effect lands in
@@ -92,7 +92,7 @@ Each tenet has a test; a change that fails the test is wrong even if convenient.
    flows through the `Sandbox` or the adapter. *Test: definition unit tests need
    no network and no real disk.*
 1. **Data at the boundaries, code inside.** Whatever crosses a boundary —
-   `SandboxConfig`, events, transcripts, traces, capabilities — is a serde value
+   `WorkspaceConfig`, events, transcripts, traces, capabilities — is a serde value
    with a schema. The definition itself is code.
 1. **One concept per concern.** The naming taxonomy below; no overloaded suffixes.
 1. **Delete over deprecate.** Alpha rule, already repo law (`CLAUDE.md`); the
@@ -114,7 +114,7 @@ Suffixes carry meaning. One idiom per concept, no overlaps:
 
 | Suffix | Means | Examples |
 |--------|-------|----------|
-| **`*Config`** | Immutable, declarative configuration — of a **component you construct/inject** *or* a **resource a provider materializes** (`provider.open(config) -> Resource`); may contain policies | `SandboxConfig`, `LLMConfig`, `…ClientConfig` |
+| **`*Config`** | Immutable, declarative configuration — of a **component you construct/inject** *or* a **resource a provider materializes** (`provider.open(config) -> Resource`); may contain policies | `WorkspaceConfig`, `LLMConfig`, `…ClientConfig` |
 | **`*Policy`** | **Rules/constraints** evaluated at runtime (fail-closed) | `EgressPolicy`, `ThrottlePolicy` |
 | **`*Params`** | Typed input to a **tool/section handler** | `ParamsT` dataclasses |
 | **`*Request` / `*Result`** | A unit of **work** through a loop + its outcome | `AgentLoopRequest`/`Result`, `ToolResult` |
@@ -123,10 +123,11 @@ Suffixes carry meaning. One idiom per concept, no overlaps:
 **On `*Config`:** we do not split out a separate `*Spec` suffix; `*Config` is the
 single declarative-input idiom, whether the thing is constructed in-process or
 handed to a provider to materialize. A config may *contain* policies
-(`SandboxConfig.egress: EgressPolicy`). The new environment `SandboxConfig`
-subsumes today's `claude_agent_sdk` isolation `SandboxConfig` (OS-isolation
-knobs), which is renamed `IsolationConfig` and refactored into provider
-configuration at [M3](M3.md) — one `SandboxConfig`, not two.
+(`WorkspaceConfig.egress: EgressPolicy`). The environment config (now
+`WorkspaceConfig`; landed as `SandboxConfig` and renamed at [M3](M3.md))
+subsumed the `claude_agent_sdk` isolation `SandboxConfig` (OS-isolation
+knobs), which was renamed `IsolationConfig` and refactored into provider
+configuration at [M3](M3.md) — one workspace config, not two.
 
 ______________________________________________________________________
 
@@ -135,7 +136,7 @@ ______________________________________________________________________
 Every `Sandbox` routes outbound traffic through a **proxy sidecar** it owns. The
 sidecar has two jobs, both reconfigurable **live, at any time** — no restart:
 
-- **Egress** — default-deny. `SandboxConfig.egress` seeds the allowlist;
+- **Egress** — default-deny. `WorkspaceConfig.egress` seeds the allowlist;
   `Sandbox.configure_egress(policy)` tightens/widens access per phase (e.g. open
   a package registry for a build step, then revoke).
 - **Credential injection** — secrets **never enter the sandbox**: not in env
@@ -145,7 +146,7 @@ sidecar has two jobs, both reconfigurable **live, at any time** — no restart:
   `Sandbox.configure_credentials(bindings)`, held only in the proxy, and attached
   to allowed outbound requests on the way through. The agent can **use** a
   credential without ever being able to **read** it; rotation is a control-plane
-  call. By construction, material never appears in `SandboxConfig` (serde values
+  call. By construction, material never appears in `WorkspaceConfig` (serde values
   carry credential *names* only) nor in evidence (transcripts/bundles).
 
 Both surfaces are **control-plane** capabilities (harness/policy-driven, *not*
@@ -165,7 +166,7 @@ environment — local or remote — and rollback becomes (session, sandbox).
 | # | Milestone | Outcome |
 |---|-----------|---------|
 | [M1](M1.md) | Filesystem narrow waist | One backend protocol + one facade; per-backend duplication deleted |
-| [M2](M2.md) | Sandbox aggregate | `Shell` facet, `Sandbox`, `SandboxConfig` (incl. egress), local provider |
+| [M2](M2.md) | Sandbox aggregate | `Shell` facet, `Sandbox`, `WorkspaceConfig` (incl. egress), local provider |
 | [M3](M3.md) | Sandbox as execution context | `ToolContext.sandbox`; transactions = (session, sandbox); `WorkspaceSection` dissolved; adapters unified behind `AgentRuntime` (the bound adapter+prompt+sandbox triple) |
 | [M4](M4.md) | Remote sandbox | `SandboxTransport`, remote facets; validated via ACP-over-SSH and Codex-in-container + egress/credential sidecar |
 

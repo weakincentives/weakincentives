@@ -3,7 +3,7 @@
 ## Purpose
 
 The workspace is the sandbox the agent acts on. Prompt templates declare
-environment intent via `SandboxConfig` (see `specs/SANDBOX.md`); the
+environment intent via `WorkspaceConfig` (see `specs/SANDBOX.md`); the
 evaluating adapter materializes one sandbox per evaluation, points the
 harness `cwd` at `sandbox.root`, and renders a **workspace preview** from
 the *opened* sandbox into the prompt. This spec covers the prompt-side
@@ -19,14 +19,14 @@ preview plus the digest and in-memory-filesystem surfaces.
 ## Guiding Principles
 
 - **Definition vs Harness**: Agent definitions specify what; harness provides how
-- **One environment model**: Mounts and posture live in `SandboxConfig`;
+- **One environment model**: Mounts and posture live in `WorkspaceConfig`;
   there is no separate workspace lifecycle to manage
 - **Render from reality**: The preview lists what the opened sandbox
   actually contains, not copy-time bookkeeping
 
 ## Workspace Preview
 
-`PromptTemplate.create(..., sandbox=SandboxConfig(...))` appends a preview
+`PromptTemplate.create(..., workspace=WorkspaceConfig(...))` appends a preview
 section (key `workspace`) to the template. Its params resolve at render
 time: `prompt.render(session=..., sandbox=sandbox)` builds a fresh listing
 from the open sandbox, so no run state is ever stored on the prompt:
@@ -43,7 +43,7 @@ materialized" placeholder, so direct `prompt.render()` calls still
 succeed.
 
 Mount declarations (`HostMount`), allowed-root validation, byte budgets,
-and symlink handling are part of `SandboxConfig` and are specified in
+and symlink handling are part of `WorkspaceConfig` and are specified in
 `specs/SANDBOX.md`.
 
 ## Workspace Digest
@@ -168,7 +168,7 @@ See `specs/CODEX_APP_SERVER.md` for details on workspace configuration.
 
 ## Related Specifications
 
-- `specs/SANDBOX.md` - SandboxConfig, providers, and the sandbox aggregate
+- `specs/SANDBOX.md` - WorkspaceConfig, providers, and the sandbox aggregate
 - `specs/CLAUDE_AGENT_SDK.md` - Claude Agent SDK adapter and workspace
 - `specs/CODEX_APP_SERVER.md` - Codex App Server adapter and workspace
 - `specs/FILESYSTEM.md` - Filesystem protocol
