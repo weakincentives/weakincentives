@@ -14,9 +14,8 @@
 
 This module provides transactional semantics for tool execution over the
 pair **(session, sandbox)**: a composite snapshot captures the session
-slices and, when a sandbox is in play, a filesystem snapshot of the
-sandbox. On tool failure both are restored atomically, so partial state
-never leaks.
+slices and a filesystem snapshot of the sandbox. On tool failure both are
+restored atomically, so partial state never leaks.
 
 Example usage::
 
@@ -62,7 +61,7 @@ if TYPE_CHECKING:
     from ..sandbox import Sandbox
 
 # Schema version for composite snapshot serialization
-COMPOSITE_SNAPSHOT_SCHEMA_VERSION = "2"
+COMPOSITE_SNAPSHOT_SCHEMA_VERSION = "3"
 
 
 @FrozenDataclass()
@@ -90,23 +89,22 @@ class SnapshotMetadata:
 class CompositeSnapshot:
     """Consistent snapshot of the (session, sandbox) pair.
 
-    CompositeSnapshot captures a point-in-time view of session slices and,
-    when a sandbox participates in the transaction, a snapshot reference
-    for the sandbox's filesystem state. This enables atomic rollback on
-    tool failure.
+    CompositeSnapshot captures a point-in-time view of session slices and
+    a snapshot reference for the sandbox's filesystem state. This enables
+    atomic rollback on tool failure.
 
     Attributes:
         snapshot_id: Unique identifier for this snapshot.
         created_at: Timestamp when the snapshot was taken.
         session: Snapshot of session slice state.
-        sandbox: Snapshot reference for the sandbox, if one was captured.
+        sandbox: Snapshot reference for the sandbox.
         metadata: Optional context about when/why this snapshot was taken.
     """
 
     snapshot_id: UUID
     created_at: datetime
     session: Snapshot
-    sandbox: SnapshotRef | None = None
+    sandbox: SnapshotRef
     metadata: SnapshotMetadata | None = None
 
     def to_json(self) -> str:
@@ -121,9 +119,7 @@ class CompositeSnapshot:
         try:
             session_json = self.session.to_json()
 
-            sandbox_payload: JSONValue = None
-            if self.sandbox is not None:
-                sandbox_payload = cast(JSONValue, dump(self.sandbox))
+            sandbox_payload: JSONValue = cast(JSONValue, dump(self.sandbox))
 
             metadata_payload: dict[str, JSONValue] | None = None
             if self.metadata is not None:  # pragma: no branch - tested separately
@@ -223,10 +219,8 @@ def _parse_session_snapshot(payload: Mapping[str, JSONValue]) -> Snapshot:
         raise SnapshotRestoreError("Failed to parse session snapshot") from error
 
 
-def _parse_sandbox_ref(payload: Mapping[str, JSONValue]) -> SnapshotRef | None:
+def _parse_sandbox_ref(payload: Mapping[str, JSONValue]) -> SnapshotRef:
     sandbox_payload = payload.get("sandbox")
-    if sandbox_payload is None:
-        return None
     if not isinstance(sandbox_payload, Mapping):
         raise SnapshotRestoreError("Sandbox snapshot must be an object")
     try:
@@ -291,24 +285,24 @@ class PendingToolExecution:
 
 def create_snapshot(
     session: SessionProtocol,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
     *,
     tag: str | None = None,
 ) -> CompositeSnapshot:
     """Capture a consistent snapshot of the (session, sandbox) pair.
 
-    Takes a point-in-time snapshot of the session state and, when a
-    sandbox is provided, of the sandbox's filesystem state.
+    Takes a point-in-time snapshot of the session state and the sandbox's
+    filesystem state.
 
     Args:
         session: Session to snapshot.
-        sandbox: Sandbox participating in the transaction, if any.
+        sandbox: Sandbox participating in the transaction.
         tag: Optional human-readable label for the snapshot.
 
     Returns:
         CompositeSnapshot containing the session and sandbox snapshots.
     """
-    sandbox_ref = sandbox.snapshot(tag=tag) if sandbox is not None else None
+    sandbox_ref = sandbox.snapshot(tag=tag)
     session_snapshot = session.snapshot()
 
     return CompositeSnapshot(
@@ -322,18 +316,17 @@ def create_snapshot(
 
 def restore_snapshot(
     session: SessionProtocol,
-    sandbox: Sandbox | None,
+    sandbox: Sandbox,
     snapshot: CompositeSnapshot,
 ) -> None:
     """Restore the (session, sandbox) pair from a composite snapshot.
 
-    Restores the session state first, then the sandbox state when the
-    snapshot captured one. If any restore operation fails, a
-    RestoreFailedError is raised.
+    Restores the session state first, then the sandbox state. If any
+    restore operation fails, a RestoreFailedError is raised.
 
     Args:
         session: Session to restore.
-        sandbox: Sandbox to restore, if one participated in the snapshot.
+        sandbox: Sandbox to restore.
         snapshot: The composite snapshot to restore from.
 
     Raises:
@@ -344,17 +337,16 @@ def restore_snapshot(
     except SnapshotRestoreError as error:
         raise RestoreFailedError(f"Failed to restore session: {error}") from error
 
-    if snapshot.sandbox is not None and sandbox is not None:
-        try:
-            sandbox.restore(snapshot.sandbox)
-        except Exception as error:
-            raise RestoreFailedError(f"Failed to restore sandbox: {error}") from error
+    try:
+        sandbox.restore(snapshot.sandbox)
+    except Exception as error:
+        raise RestoreFailedError(f"Failed to restore sandbox: {error}") from error
 
 
 @contextmanager
 def tool_transaction(
     session: SessionProtocol,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
     *,
     tag: str | None = None,
 ) -> Generator[CompositeSnapshot]:
@@ -375,7 +367,7 @@ def tool_transaction(
 
     Args:
         session: Session to snapshot and potentially restore.
-        sandbox: Sandbox participating in the transaction, if any.
+        sandbox: Sandbox participating in the transaction.
         tag: Optional human-readable label for the snapshot.
 
     Yields:
@@ -401,11 +393,11 @@ class PendingToolTracker:
 
     Attributes:
         session: Session for snapshot/restore operations.
-        sandbox: Sandbox participating in transactions, if any.
+        sandbox: Sandbox participating in transactions.
     """
 
     session: SessionProtocol
-    sandbox: Sandbox | None = None
+    sandbox: Sandbox
     _pending_tools: dict[str, PendingToolExecution] = field(
         default_factory=dict[str, PendingToolExecution], repr=False
     )

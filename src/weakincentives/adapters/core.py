@@ -46,7 +46,6 @@ from ..errors import (
     WinkError,
 )
 from ..prompt import Prompt
-from ..prompt.workspace import workspace_preview_params
 from ..runtime.session.protocols import SessionProtocol
 from ..sandbox import LocalSandboxProvider, SandboxConfig, SandboxProvider
 
@@ -134,22 +133,38 @@ class AgentRuntime[OutputT]:
     ) -> PromptResponse[OutputT]:
         """Evaluate the bound prompt against the bound sandbox.
 
-        Rebinds the workspace preview from the live sandbox before each
-        round, so re-rendered prompts list files written in earlier
-        rounds.
+        Owns the evaluation preamble shared by every adapter: promotes
+        ``budget`` to a tracker, resolves the effective deadline, and
+        fails fast when the deadline has already expired. The adapter's
+        :meth:`ProviderAdapter._evaluate` receives the resolved deadline
+        and tracker only.
 
         Raises:
             AgentRuntimeReleasedError: The runtime's lease was released.
+            PromptEvaluationError: The effective deadline already expired.
         """
         if self._released:
             msg = "AgentRuntime has been released; open a new one via adapter.runtime()"
             raise AgentRuntimeReleasedError(msg)
-        _bind_workspace_preview(self._prompt, self._sandbox)
+
+        if budget is not None and budget_tracker is None:
+            budget_tracker = BudgetTracker(budget)
+        effective_deadline = deadline or (budget.deadline if budget else None)
+        if (
+            effective_deadline is not None
+            and effective_deadline.remaining().total_seconds() <= 0
+        ):
+            prompt_name = self._prompt.name or f"{self._prompt.ns}:{self._prompt.key}"
+            raise PromptEvaluationError(
+                message="Deadline expired before evaluation",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            )
+
         return self._adapter._evaluate(  # pyright: ignore[reportPrivateUsage] - paired in this module
             self._prompt,
             session=session,
-            deadline=deadline,
-            budget=budget,
+            deadline=effective_deadline,
             budget_tracker=budget_tracker,
             heartbeat=heartbeat,
             run_context=run_context,
@@ -284,7 +299,6 @@ class ProviderAdapter(ABC):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
@@ -294,22 +308,15 @@ class ProviderAdapter(ABC):
 
         Called only through :class:`AgentRuntime`, which guarantees the
         sandbox was materialized by this adapter's provider from this
-        prompt's config. Implementations use the sandbox's facets, run the
-        harness with ``cwd = sandbox.root``, and never close it.
+        prompt's config and has already resolved the effective deadline
+        and budget tracker. Implementations render with
+        ``prompt.render(session=session, sandbox=sandbox)`` so the
+        workspace preview reflects the open environment, use the
+        sandbox's facets, run the harness with ``cwd = sandbox.root``,
+        and never close it.
         """
 
         ...
-
-
-def _bind_workspace_preview(prompt: Prompt[Any], sandbox: Sandbox) -> None:
-    """Bind the workspace preview params from the open sandbox.
-
-    Rebinding is idempotent (same-type params replace) and refreshes the
-    listing on re-evaluation. No-op when the template declares no sandbox
-    (no preview section exists to consume the params).
-    """
-    if prompt.template.sandbox is not None:
-        _ = prompt.bind(workspace_preview_params(sandbox.filesystem))
 
 
 __all__ = [

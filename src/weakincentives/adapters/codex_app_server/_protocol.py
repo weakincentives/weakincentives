@@ -191,7 +191,7 @@ async def execute_protocol(  # noqa: PLR0913
     visibility_signal: VisibilityExpansionSignal,
     async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
     prompt: PromptProtocol[Any] | None = None,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> tuple[str | None, TokenUsage | None]:
     """Execute the Codex protocol (init -> thread -> turn -> stream).
 
@@ -384,7 +384,7 @@ async def stream_turn(  # noqa: PLR0913
     visibility_signal: VisibilityExpansionSignal | None = None,
     async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
     prompt: PromptProtocol[Any] | None = None,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> tuple[str | None, TokenUsage | None]:
     """Stream turn notifications until turn/completed.
 
@@ -463,7 +463,7 @@ async def consume_messages(  # noqa: PLR0913
     visibility_signal: VisibilityExpansionSignal | None = None,
     prompt: PromptProtocol[Any] | None = None,
     deadline: Deadline | None = None,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> tuple[str, TokenUsage | None]:
     """Consume messages from the client until turn/completed."""
     turn_completed = False
@@ -652,7 +652,7 @@ async def handle_server_request(  # noqa: PLR0913
     prompt: PromptProtocol[Any] | None = None,
     session: SessionProtocol | None = None,
     deadline: Deadline | None = None,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> None:
     """Handle a server-initiated request (tool call or approval)."""
     method = str(message.get("method", ""))
@@ -693,7 +693,7 @@ async def handle_tool_call(  # noqa: PLR0913
     prompt: PromptProtocol[Any] | None = None,
     session: SessionProtocol | None = None,
     deadline: Deadline | None = None,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> None:
     """Handle an item/tool/call server request."""
     tool_name = str(params.get("tool", ""))

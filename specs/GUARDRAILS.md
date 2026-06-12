@@ -162,6 +162,7 @@ Multiple providers produce separate `<feedback>` blocks, joined by blank lines.
 |-----------------|-------------|
 | `session` | Session protocol |
 | `prompt` | Prompt protocol |
+| `sandbox` | The open execution environment (exposes `filesystem`) |
 | `deadline` | Optional deadline |
 | `last_feedback` | Most recent feedback for prompt |
 | `last_feedback_for_provider(name)` | Most recent feedback from specific provider |
@@ -233,7 +234,7 @@ Factory methods: `TaskCompletionResult.ok()`, `TaskCompletionResult.incomplete(f
 |-------|------|-------------|
 | `session` | `SessionProtocol` | Session containing state |
 | `tentative_output` | `Any` | Output being produced |
-| `sandbox` | `Sandbox \| None` | Execution environment (exposes `filesystem`) |
+| `sandbox` | `Sandbox` | The open execution environment (exposes `filesystem`) |
 | `adapter` | `ProviderAdapter \| None` | Optional adapter |
 | `stop_reason` | `str \| None` | Why agent is stopping |
 
@@ -242,8 +243,7 @@ Factory methods: `TaskCompletionResult.ok()`, `TaskCompletionResult.incomplete(f
 ### Built-in Implementations
 
 **`FileOutputChecker`** — Verifies that required output files exist on the
-filesystem. Returns incomplete if any are missing. Fail-closed: if no filesystem
-is available and files are required, returns incomplete (cannot verify).
+sandbox's filesystem. Returns incomplete if any are missing.
 
 Field: `files: tuple[str, ...]` — paths that must exist for completion.
 
@@ -286,8 +286,6 @@ or budget exhaustion, and composite checker logic (AND/OR). See `specs/ACK.md`.
 - **Default disabled**: Must configure checker on prompt to enable
 - **Budget/deadline bypass**: Skipped when exhausted
 - **Feedback truncation**: File output checker limits to 3 file paths in message
-- **Fail-closed on missing filesystem**: If no filesystem in context and files
-  are required, checker returns incomplete
 
 ______________________________________________________________________
 

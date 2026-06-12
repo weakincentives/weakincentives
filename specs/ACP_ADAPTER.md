@@ -271,21 +271,23 @@ The main entry point is `ACPAdapter.evaluate()` at
 
 ### 1. Budget/Deadline Setup
 
-Create `BudgetTracker` if budget provided. Derive deadline from argument or
-`budget.deadline`. Raise `PromptEvaluationError(phase="request")` if expired.
+`AgentRuntime.evaluate` owns the preamble: it promotes `budget` to a
+`BudgetTracker`, derives the effective deadline from the argument or
+`budget.deadline`, and raises `PromptEvaluationError(phase="request")` if
+expired. `_evaluate` receives only the resolved deadline and tracker.
 
 ### 2. Render Prompt
 
-`_evaluate_async()` at `src/weakincentives/adapters/acp/adapter.py:129`:
-opens the sandbox, binds the workspace preview, renders the prompt, and
-dispatches `PromptRendered`.
+`_evaluate_async()` renders with
+`prompt.render(session=session, sandbox=sandbox)` — the workspace preview
+resolves from the open sandbox at render time — and dispatches
+`PromptRendered`.
 
 ### 3. AgentRuntime
 
 The base `ProviderAdapter` owns the runtime (`adapter.runtime(prompt)` /
-one-shot `evaluate`; see `specs/ADAPTERS.md`). The runtime rebinds the
-workspace preview params from the open sandbox before every round, and
-the agent runs with `cwd = sandbox.root`.
+one-shot `evaluate`; see `specs/ADAPTERS.md`). The agent runs with
+`cwd = sandbox.root`.
 
 ### 4. Build Tools and MCP Server
 

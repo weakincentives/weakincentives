@@ -64,8 +64,10 @@ the triple is paired exactly once, inside `ProviderAdapter.runtime`:
   lease: locally provisioned sandboxes are closed and removed.
 - `rt.evaluate(session=..., ...)` — evaluates the bound prompt against the
   bound sandbox; takes neither a prompt nor a sandbox argument. Every call
-  runs in the same environment (visibility-expansion retries included) and
-  rebinds the workspace preview from the live sandbox first. Raises
+  runs in the same environment (visibility-expansion retries included).
+  Owns the shared evaluation preamble: promotes `budget` to a
+  `BudgetTracker`, resolves the effective deadline, and fails fast with
+  `PromptEvaluationError` when it has already expired. Raises
   `AgentRuntimeReleasedError` after release.
 - `rt.sandbox` / `rt.prompt` — read-only access for inspection and
   evidence capture while the lease is held.
@@ -73,8 +75,12 @@ the triple is paired exactly once, inside `ProviderAdapter.runtime`:
   runtime for the duration of a single call.
 - `_evaluate(...)` — the abstract core contract concrete adapters
   implement. Called only through a runtime; always receives an open
-  sandbox, runs the harness with `cwd = sandbox.root`, and contains no
-  lifecycle code.
+  sandbox plus the resolved deadline and budget tracker (no `budget`
+  parameter). Implementations render with
+  `prompt.render(session=session, sandbox=sandbox)` — the workspace
+  preview is resolved at render time from the open sandbox, never stored
+  on the prompt — run the harness with `cwd = sandbox.root`, and contain
+  no lifecycle code.
 
 The adapter owns its sandbox provider because it is the authority on
 which environments its harness can attach to (adapter↔provider

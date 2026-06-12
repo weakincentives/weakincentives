@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.codex_app_server._ephemeral_home import CodexEphemeralHome
 from weakincentives.adapters.codex_app_server._protocol import (
     authenticate,
@@ -125,7 +126,11 @@ class TestToolCallRunsInThread:
                     "isError": False,
                 }
                 await handle_tool_call(
-                    client, 20, {"tool": "calc", "arguments": {"x": 1}}, tool_lookup
+                    client,
+                    20,
+                    {"tool": "calc", "arguments": {"x": 1}},
+                    tool_lookup,
+                    sandbox=make_memory_sandbox(),
                 )
                 mock_to_thread.assert_called_once_with(mock_tool, {"x": 1})
 
@@ -297,6 +302,7 @@ class TestTranscriptBridgeIntegration:
                 {"tool": "calc", "arguments": {"x": 1}},
                 tool_lookup,
                 bridge=bridge,
+                sandbox=make_memory_sandbox(),
             )
             bridge.on_tool_call.assert_called_once_with(
                 {"tool": "calc", "arguments": {"x": 1}}
@@ -321,6 +327,7 @@ class TestTranscriptBridgeIntegration:
                 {"tool": "missing", "arguments": {}},
                 tool_lookup,
                 bridge=bridge,
+                sandbox=make_memory_sandbox(),
             )
             bridge.on_tool_call.assert_called_once()
             bridge.on_tool_result.assert_called_once()
@@ -343,7 +350,13 @@ class TestApprovalPolicyUntrusted:
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await handle_server_request(client, msg, {}, approval_policy="untrusted")
+            await handle_server_request(
+                client,
+                msg,
+                {},
+                approval_policy="untrusted",
+                sandbox=make_memory_sandbox(),
+            )
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "decline"
 
@@ -361,7 +374,13 @@ class TestApprovalPolicyUntrusted:
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await handle_server_request(client, msg, {}, approval_policy="on-failure")
+            await handle_server_request(
+                client,
+                msg,
+                {},
+                approval_policy="on-failure",
+                sandbox=make_memory_sandbox(),
+            )
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "accept"
 

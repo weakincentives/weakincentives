@@ -236,7 +236,9 @@ class TestShouldTriggerWithFileCreated:
         # Context without filesystem
         session = make_session()
         prompt = make_prompt()
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         with prompt.resources:
             assert _should_trigger(trigger, context, "TestProvider") is False
@@ -373,7 +375,9 @@ class TestStaticFeedbackProvider:
     def _make_context(self) -> FeedbackContext:
         session = make_session()
         prompt = make_prompt()
-        return FeedbackContext(session=session, prompt=prompt)
+        return FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
     def test_name_property(self) -> None:
         from weakincentives.prompt import StaticFeedbackProvider

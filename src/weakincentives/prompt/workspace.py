@@ -14,11 +14,12 @@
 
 When a :class:`~weakincentives.prompt.PromptTemplate` declares environment
 intent via ``sandbox=SandboxConfig(...)``, the template carries a workspace
-preview section. The preview renders from the *opened* sandbox: adapters
-bind :class:`WorkspacePreviewParams` (built via
-:func:`workspace_preview_params` from ``sandbox.filesystem.list``) after the
-provider materializes the environment, so the prompt always describes the
-environment the agent actually acts on.
+preview section. The preview renders from the *opened* sandbox:
+``prompt.render(session=..., sandbox=sandbox)`` resolves
+:class:`WorkspacePreviewParams` (built via :func:`workspace_preview_params`
+from ``sandbox.filesystem.list``) at render time, so the prompt always
+describes the environment the agent actually acts on and no run state is
+ever stored on the prompt.
 """
 
 from __future__ import annotations

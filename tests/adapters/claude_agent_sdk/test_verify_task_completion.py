@@ -66,6 +66,7 @@ class TestVerifyTaskCompletion:
             session=session,
             stop_reason="structured_output",
             prompt_name="test",
+            sandbox=make_memory_sandbox(),
         )
 
     def test_no_output_does_nothing(self, session: Session) -> None:
@@ -85,6 +86,7 @@ class TestVerifyTaskCompletion:
             stop_reason="structured_output",
             prompt_name="test",
             prompt=prompt,
+            sandbox=make_memory_sandbox(),
         )
 
     def test_logs_warning_when_files_missing(
@@ -156,6 +158,7 @@ class TestVerifyTaskCompletion:
             prompt_name="test_prompt",
             deadline=exceeded_deadline,
             prompt=prompt,
+            sandbox=make_memory_sandbox(),
         )
 
     def test_skips_when_budget_exhausted(self, session: Session) -> None:
@@ -184,6 +187,7 @@ class TestVerifyTaskCompletion:
             prompt_name="test_prompt",
             budget_tracker=tracker,
             prompt=prompt,
+            sandbox=make_memory_sandbox(),
         )
 
     def test_passes_sandbox_and_adapter_to_context(self, session: Session) -> None:
@@ -216,35 +220,6 @@ class TestVerifyTaskCompletion:
         ctx = captured_context[0]
         assert ctx.sandbox is sandbox
         assert ctx.filesystem is sandbox.filesystem
-        assert ctx.adapter is adapter
-
-    def test_no_sandbox_means_no_filesystem(self, session: Session) -> None:
-        """Without a sandbox, the context has no filesystem (fail-closed)."""
-        captured_context: list[TaskCompletionContext] = []
-
-        class CapturingChecker(TaskCompletionChecker):
-            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
-                captured_context.append(context)
-                return TaskCompletionResult.ok()
-
-        capturing_checker = CapturingChecker()
-        adapter = ClaudeAgentSDKAdapter()
-
-        mock_prompt = MagicMock()
-        mock_prompt.task_completion_checker = capturing_checker
-
-        self._call_verify(
-            adapter,
-            output={"summary": "done"},
-            session=session,
-            stop_reason="structured_output",
-            prompt_name="test_prompt",
-            prompt=mock_prompt,
-        )
-
-        assert len(captured_context) == 1
-        ctx = captured_context[0]
-        assert ctx.filesystem is None
         assert ctx.adapter is adapter
 
     def test_logs_warning_when_budget_not_exhausted(
@@ -308,6 +283,7 @@ class TestCheckTaskCompletion:
             adapter_name="test",
             prompt_name="test",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
 
         result = check_task_completion(checker, [], hook_context)
@@ -330,13 +306,14 @@ class TestCheckTaskCompletion:
 
         checker = FileOutputChecker(files=("output.txt",))
         prompt = _make_prompt_with_fs(fs)
-        constraints = HookConstraints(sandbox=make_memory_sandbox(fs))
+        constraints = HookConstraints()
         hook_context = HookContext(
             prompt=prompt,
             session=session,
             adapter_name="test",
             prompt_name="test",
             constraints=constraints,
+            sandbox=make_memory_sandbox(fs),
         )
 
         # Create a mock message with structured_output
@@ -348,8 +325,8 @@ class TestCheckTaskCompletion:
         # Files exist => complete => should not continue
         assert result == (False, None)
 
-    def test_fails_closed_without_filesystem_in_stream(self, session: Session) -> None:
-        """check_task_completion fails closed when prompt has no filesystem."""
+    def test_continues_when_required_files_missing(self, session: Session) -> None:
+        """check_task_completion continues when required files are missing."""
         from weakincentives.adapters.claude_agent_sdk._hooks import (
             HookConstraints,
             HookContext,
@@ -371,6 +348,7 @@ class TestCheckTaskCompletion:
             adapter_name="test",
             prompt_name="test",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
 
         mock_message = MagicMock()
@@ -378,8 +356,8 @@ class TestCheckTaskCompletion:
 
         result = check_task_completion(checker, [mock_message], hook_context)
 
-        # No filesystem => fail-closed => should continue with feedback
+        # Empty sandbox: required file missing => continue with feedback.
         should_continue, feedback = result
         assert should_continue is True
         assert feedback is not None
-        assert "No filesystem" in feedback
+        assert "not found" in feedback

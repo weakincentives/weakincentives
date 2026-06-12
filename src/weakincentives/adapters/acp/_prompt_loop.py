@@ -175,7 +175,7 @@ async def run_prompt_loop(
     clock: MonotonicClock,
     async_sleeper: AsyncSleeper,
     detect_empty_response: Callable[[ACPClient, Any], None],
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> tuple[str | None, TokenUsage | None]:
     """Run the prompt turn + task completion continuation loop."""
     from acp.schema import TextContentBlock

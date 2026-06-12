@@ -197,7 +197,7 @@ class BridgedTool:
         run_context: RunContext | None = None,
         visibility_signal: VisibilityExpansionSignal | None = None,
         mcp_tool_state: MCPToolExecutionState | None = None,
-        sandbox: Sandbox | None,
+        sandbox: Sandbox,
     ) -> None:
         super().__init__()
         self.name = name
@@ -532,7 +532,7 @@ def create_bridged_tools(
     run_context: RunContext | None = None,
     visibility_signal: VisibilityExpansionSignal | None = None,
     mcp_tool_state: MCPToolExecutionState | None = None,
-    sandbox: Sandbox | None,
+    sandbox: Sandbox,
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -551,9 +551,7 @@ def create_bridged_tools(
         visibility_signal: Signal for propagating VisibilityExpansionRequired
             exceptions from tool handlers to the adapter.
         mcp_tool_state: Shared state for passing tool_use_id from hooks to bridge.
-        sandbox: Execution environment for tool effects and rollback. Required
-            so call sites decide explicitly; pass None only when no sandbox
-            participates (no filesystem rollback, ``context.filesystem`` is None).
+        sandbox: The open execution environment for tool effects and rollback.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.

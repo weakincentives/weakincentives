@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +23,12 @@ import pytest
 from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.core import (
     AgentRuntimeReleasedError,
+    PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
 )
 from weakincentives.budget import Budget, BudgetTracker
+from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     Prompt,
@@ -43,11 +46,13 @@ from weakincentives.sandbox import (
 
 
 class _RecordingAdapter(ProviderAdapter[Any]):
-    """Minimal adapter recording the sandboxes its core contract receives."""
+    """Minimal adapter recording what its core contract receives."""
 
     def __init__(self, *, sandbox_provider: SandboxProvider | None = None) -> None:
         super().__init__(sandbox_provider=sandbox_provider)
         self.seen: list[Sandbox] = []
+        self.trackers: list[BudgetTracker | None] = []
+        self.deadlines: list[Deadline | None] = []
 
     def _evaluate[OutputT](
         self,
@@ -55,14 +60,15 @@ class _RecordingAdapter(ProviderAdapter[Any]):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: object = None,
         run_context: RunContext | None = None,
         sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
-        del session, deadline, budget, budget_tracker, heartbeat, run_context
+        del session, heartbeat, run_context
         self.seen.append(sandbox)
+        self.trackers.append(budget_tracker)
+        self.deadlines.append(deadline)
         _ = sandbox.filesystem.write(f"round-{len(self.seen)}.txt", "x")
         return PromptResponse(prompt_name=prompt.key, text="ok", output=None)
 
@@ -149,7 +155,57 @@ class TestRuntimeEvaluate:
         with pytest.raises(AgentRuntimeReleasedError, match="released"):
             _ = rt.evaluate(session=None)  # type: ignore[arg-type]
 
-    def test_preview_rebinds_each_round(self) -> None:
+    def test_promotes_budget_to_tracker(self) -> None:
+        adapter = _RecordingAdapter()
+        prompt = _plain_prompt(key="budget")
+        budget = Budget(
+            deadline=Deadline.create(datetime.now(UTC) + timedelta(minutes=5))
+        )
+
+        with adapter.runtime(prompt) as rt:
+            _ = rt.evaluate(session=None, budget=budget)  # type: ignore[arg-type]
+
+        tracker = adapter.trackers[0]
+        assert tracker is not None
+        assert tracker.budget is budget
+        # Effective deadline derived from the budget.
+        assert adapter.deadlines[0] is budget.deadline
+
+    def test_passes_existing_tracker_through(self) -> None:
+        adapter = _RecordingAdapter()
+        prompt = _plain_prompt(key="tracker")
+        budget = Budget(
+            deadline=Deadline.create(datetime.now(UTC) + timedelta(minutes=5))
+        )
+        tracker = BudgetTracker(budget)
+
+        with adapter.runtime(prompt) as rt:
+            _ = rt.evaluate(  # type: ignore[arg-type]
+                session=None, budget=budget, budget_tracker=tracker
+            )
+
+        assert adapter.trackers[0] is tracker
+
+    def test_expired_deadline_fails_before_adapter_call(self) -> None:
+        adapter = _RecordingAdapter()
+        prompt = _plain_prompt(key="expired")
+        clock = FakeClock()
+        anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+        clock.set_wall(anchor)
+        deadline = Deadline.create(
+            expires_at=anchor + timedelta(seconds=5), clock=clock
+        )
+        clock.advance(10)
+
+        with adapter.runtime(prompt) as rt:
+            with pytest.raises(PromptEvaluationError, match="Deadline expired"):
+                _ = rt.evaluate(session=None, deadline=deadline)  # type: ignore[arg-type]
+
+        assert adapter.seen == []
+
+
+class TestWorkspacePreview:
+    def test_render_resolves_preview_from_sandbox(self) -> None:
         prompt: Prompt[Any] = Prompt(
             PromptTemplate.create(ns="t", key="preview", sandbox=SandboxConfig())
         )
@@ -157,22 +213,33 @@ class TestRuntimeEvaluate:
 
         with adapter.runtime(prompt) as rt:
             _ = rt.evaluate(session=None)  # type: ignore[arg-type]
-            # Round 1 bound a listing before round-1.txt existed.
-            assert "- round-1.txt" not in prompt.render().text
+            # Render-time resolution: the listing reflects the live sandbox.
+            assert "- round-1.txt" in prompt.render(sandbox=rt.sandbox).text
 
             _ = rt.evaluate(session=None)  # type: ignore[arg-type]
-            # Round 2 rebinds from the live sandbox: round 1's file shows up.
-            assert "- round-1.txt" in prompt.render().text
+            assert "- round-2.txt" in prompt.render(sandbox=rt.sandbox).text
 
-    def test_no_preview_binding_without_template_sandbox(self) -> None:
+        # No run state is stored on the prompt itself.
+        assert prompt.params == ()
+        assert "round-1.txt" not in prompt.render().text
+
+    def test_render_without_sandbox_shows_placeholder(self) -> None:
+        prompt: Prompt[Any] = Prompt(
+            PromptTemplate.create(ns="t", key="placeholder", sandbox=SandboxConfig())
+        )
+
+        assert "not yet materialized" in prompt.render().text
+
+    def test_no_preview_without_template_sandbox(self) -> None:
         adapter = _RecordingAdapter()
         prompt = _plain_prompt(key="no-preview")
 
         with adapter.runtime(prompt) as rt:
             _ = rt.evaluate(session=None)  # type: ignore[arg-type]
+            # No preview section: rendering with the sandbox adds nothing.
+            assert "round-1.txt" not in prompt.render(sandbox=rt.sandbox).text
 
         assert prompt.params == ()
-        assert "round-1.txt" not in prompt.render().text
 
 
 class TestEvaluateSugar:
@@ -189,7 +256,7 @@ class TestEvaluateSugar:
 
 
 class TestToolContextShell:
-    def test_shell_facet_exposed_from_sandbox(self) -> None:
+    def test_facets_exposed_from_sandbox(self) -> None:
         sandbox = make_memory_sandbox()
         context = ToolContext(
             prompt=Prompt(PromptTemplate.create(ns="t", key="shell")),  # type: ignore[arg-type]
@@ -201,14 +268,3 @@ class TestToolContextShell:
 
         assert context.shell is sandbox.shell
         assert context.filesystem is sandbox.filesystem
-
-    def test_facets_none_without_sandbox(self) -> None:
-        context = ToolContext(
-            prompt=Prompt(PromptTemplate.create(ns="t", key="no-shell")),  # type: ignore[arg-type]
-            rendered_prompt=None,
-            adapter=None,  # type: ignore[arg-type]
-            session=None,  # type: ignore[arg-type]
-        )
-
-        assert context.shell is None
-        assert context.filesystem is None

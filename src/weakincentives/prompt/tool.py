@@ -98,7 +98,7 @@ class ToolContext:
 
     .. code-block:: python
 
-        # These are equivalent when a sandbox is present:
+        # These are equivalent:
         context.filesystem
         context.sandbox.filesystem
 
@@ -123,12 +123,12 @@ class ToolContext:
     rendered_prompt: RenderedPromptProtocol[Any] | None
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
+    sandbox: Sandbox
+    """Execution environment whose facets receive all tool effects."""
     deadline: Deadline | None = None
     heartbeat: Heartbeat | None = None
     run_context: RunContext | None = None
     """Execution context with correlation identifiers and metadata."""
-    sandbox: Sandbox | None = None
-    """Execution environment whose facets receive all tool effects."""
 
     @property
     def resources(self) -> PromptResources:
@@ -140,14 +140,14 @@ class ToolContext:
         return self.prompt.resources
 
     @property
-    def filesystem(self) -> Filesystem | None:
-        """Return the sandbox's filesystem facet, if a sandbox is present."""
-        return self.sandbox.filesystem if self.sandbox is not None else None
+    def filesystem(self) -> Filesystem:
+        """Return the sandbox's filesystem facet."""
+        return self.sandbox.filesystem
 
     @property
-    def shell(self) -> Shell | None:
-        """Return the sandbox's shell facet, if a sandbox is present."""
-        return self.sandbox.shell if self.sandbox is not None else None
+    def shell(self) -> Shell:
+        """Return the sandbox's shell facet."""
+        return self.sandbox.shell
 
     @property
     def budget_tracker(self) -> BudgetTracker | None:

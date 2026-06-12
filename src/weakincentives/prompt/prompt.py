@@ -44,7 +44,7 @@ from .task_completion import TaskCompletionChecker
 if TYPE_CHECKING:
     from ..resources.context import ScopedResourceContext
     from ..runtime.session.protocols import SessionProtocol
-    from ..sandbox import SandboxConfig
+    from ..sandbox import Sandbox, SandboxConfig
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
 
@@ -372,6 +372,7 @@ class Prompt[OutputT]:
         self,
         *,
         session: SessionProtocol | None = None,
+        sandbox: Sandbox | None = None,
     ) -> RenderedPrompt[OutputT]:
         """Render the prompt with bound parameters and optional overrides.
 
@@ -388,6 +389,11 @@ class Prompt[OutputT]:
                 visibility selectors that accept a `session` keyword argument.
                 The session is also used to query VisibilityOverrides for
                 section-specific visibility control.
+            sandbox: The open sandbox the prompt is being evaluated against.
+                When the template declares a sandbox config, the workspace
+                preview section renders a fresh listing of this sandbox's
+                filesystem. Resolved per render — never stored on the
+                prompt — so a shared prompt carries no run state.
         """
         tag = self.overrides_tag if self.overrides_tag else "latest"
 
@@ -405,8 +411,17 @@ class Prompt[OutputT]:
                 }
                 tool_overrides = dict(override.tool_overrides)
 
+        params = self._params
+        if sandbox is not None and self.template.sandbox is not None:
+            from .workspace import WorkspacePreviewParams, workspace_preview_params
+
+            params = (
+                *(p for p in params if type(p) is not WorkspacePreviewParams),
+                workspace_preview_params(sandbox.filesystem),
+            )
+
         renderer = self.renderer
-        param_lookup = renderer.build_param_lookup(self._params)
+        param_lookup = renderer.build_param_lookup(params)
         return renderer.render(
             param_lookup,
             overrides,

@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.acp._guardrails import (
     accumulate_usage,
     append_feedback,
@@ -64,6 +65,7 @@ class TestAppendFeedback:
                 prompt=mock_prompt,
                 session=session,
                 deadline=None,
+                sandbox=make_memory_sandbox(),
             )
 
         assert len(content) == 2
@@ -85,6 +87,7 @@ class TestAppendFeedback:
                 prompt=mock_prompt,
                 session=session,
                 deadline=None,
+                sandbox=make_memory_sandbox(),
             )
 
         assert len(content) == 1
@@ -104,6 +107,7 @@ class TestAppendFeedback:
                 prompt=mock_prompt,
                 session=session,
                 deadline=None,
+                sandbox=make_memory_sandbox(),
             )
             mock_collect.assert_not_called()
 
@@ -120,6 +124,7 @@ class TestAppendFeedback:
                 prompt=None,
                 session=MagicMock(),
                 deadline=None,
+                sandbox=make_memory_sandbox(),
             )
             mock_collect.assert_not_called()
 
@@ -137,6 +142,7 @@ class TestAppendFeedback:
                 prompt=mock_prompt,
                 session=None,
                 deadline=None,
+                sandbox=make_memory_sandbox(),
             )
             mock_collect.assert_not_called()
 
@@ -156,18 +162,20 @@ class TestAppendFeedback:
             "weakincentives.adapters.acp._guardrails.collect_feedback",
             return_value=None,
         ) as mock_collect:
+            sandbox = make_memory_sandbox()
             append_feedback(
                 content,
                 is_error=False,
                 prompt=mock_prompt,
                 session=session,
                 deadline=deadline,
+                sandbox=sandbox,
             )
             mock_collect.assert_called_once_with(
                 prompt=mock_prompt,
                 session=session,
                 deadline=deadline,
-                sandbox=None,
+                sandbox=sandbox,
             )
 
 
@@ -185,6 +193,7 @@ class TestCheckTaskCompletion:
             accumulated_text="text",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -200,6 +209,7 @@ class TestCheckTaskCompletion:
             accumulated_text="text",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -218,6 +228,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -238,6 +249,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is True
         assert feedback == "Missing report.md"
@@ -259,6 +271,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -283,6 +296,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=deadline,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -306,6 +320,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=None,
             budget_tracker=tracker,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None

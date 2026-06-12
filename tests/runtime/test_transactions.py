@@ -38,6 +38,11 @@ def _make_session() -> Session:
     return Session(dispatcher=InProcessDispatcher())
 
 
+def _sandbox_payload(sandbox: Sandbox) -> object:
+    """Serialized sandbox snapshot ref for hand-built payloads."""
+    return json.loads(create_snapshot(_make_session(), sandbox).to_json())["sandbox"]
+
+
 @pytest.fixture
 def sandbox(tmp_path: Path) -> Sandbox:
     """In-memory sandbox: fast snapshot/restore without git plumbing."""
@@ -61,29 +66,18 @@ class TestCompositeSnapshotSerialization:
 
         # Verify it's valid JSON
         payload = json.loads(json_str)
-        assert payload["version"] == "2"
+        assert payload["version"] == "3"
         assert "snapshot_id" in payload
         assert "created_at" in payload
         assert "session" in payload
-        assert payload["sandbox"]["token"] == snapshot.sandbox.token  # type: ignore[union-attr]
+        assert payload["sandbox"]["token"] == snapshot.sandbox.token
         assert payload["metadata"]["tag"] == "test"
 
-    def test_to_json_without_sandbox(self) -> None:
-        """Test serializing a snapshot without a sandbox."""
-        session = _make_session()
-
-        snapshot = create_snapshot(session, tag="no-sandbox")
-        json_str = snapshot.to_json()
-
-        payload = json.loads(json_str)
-        assert payload["sandbox"] is None
-        assert payload["metadata"]["tag"] == "no-sandbox"
-
-    def test_to_json_without_metadata(self) -> None:
+    def test_to_json_without_metadata(self, sandbox: Sandbox) -> None:
         """Test serializing a snapshot without a tag."""
         session = _make_session()
 
-        snapshot = create_snapshot(session)
+        snapshot = create_snapshot(session, sandbox)
         json_str = snapshot.to_json()
 
         payload = json.loads(json_str)
@@ -128,7 +122,7 @@ class TestCompositeSnapshotSerialization:
     def test_from_json_invalid_snapshot_id(self) -> None:
         """Test that invalid snapshot_id raises SnapshotRestoreError."""
         payload = {
-            "version": "2",
+            "version": "3",
             "snapshot_id": "not-a-uuid",
             "created_at": "2024-01-01T00:00:00+00:00",
         }
@@ -138,7 +132,7 @@ class TestCompositeSnapshotSerialization:
     def test_from_json_invalid_created_at(self) -> None:
         """Test that invalid created_at raises SnapshotRestoreError."""
         payload = {
-            "version": "2",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "not-a-timestamp",
         }
@@ -148,7 +142,7 @@ class TestCompositeSnapshotSerialization:
     def test_from_json_invalid_session(self) -> None:
         """Test that invalid session raises SnapshotRestoreError."""
         payload = {
-            "version": "2",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": "not an object",
@@ -164,7 +158,7 @@ class TestCompositeSnapshotSerialization:
         session_snapshot = session.snapshot()
 
         payload = {
-            "version": "2",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": json.loads(session_snapshot.to_json()),
@@ -181,7 +175,7 @@ class TestCompositeSnapshotSerialization:
         session_snapshot = session.snapshot()
 
         payload = {
-            "version": "2",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": json.loads(session_snapshot.to_json()),
@@ -192,49 +186,48 @@ class TestCompositeSnapshotSerialization:
         ):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_no_metadata(self) -> None:
+    def test_from_json_no_metadata(self, sandbox: Sandbox) -> None:
         """Test deserializing a snapshot with no metadata key."""
         session = _make_session()
         session_snapshot = session.snapshot()
 
         payload = {
-            "version": "2",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": json.loads(session_snapshot.to_json()),
-            "sandbox": None,
+            "sandbox": _sandbox_payload(sandbox),
         }
         restored = CompositeSnapshot.from_json(json.dumps(payload))
         assert restored.metadata is None
-        assert restored.sandbox is None
 
-    def test_from_json_invalid_metadata_not_object(self) -> None:
+    def test_from_json_invalid_metadata_not_object(self, sandbox: Sandbox) -> None:
         """Test that invalid metadata raises SnapshotRestoreError."""
         session = _make_session()
         session_snapshot = session.snapshot()
 
         payload = {
-            "version": "2",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": json.loads(session_snapshot.to_json()),
-            "sandbox": None,
+            "sandbox": _sandbox_payload(sandbox),
             "metadata": "not an object",
         }
         with pytest.raises(SnapshotRestoreError, match="Metadata must be an object"):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_metadata_phase(self) -> None:
+    def test_from_json_invalid_metadata_phase(self, sandbox: Sandbox) -> None:
         """Test that invalid metadata phase raises SnapshotRestoreError."""
         session = _make_session()
         session_snapshot = session.snapshot()
 
         payload = {
-            "version": "2",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": json.loads(session_snapshot.to_json()),
-            "sandbox": None,
+            "sandbox": _sandbox_payload(sandbox),
             "metadata": {"tag": None, "phase": "invalid_phase"},
         }
         with pytest.raises(SnapshotRestoreError, match="Metadata phase must be valid"):
@@ -258,11 +251,11 @@ class TestCompositeSnapshotSerialization:
 class TestRestoreSnapshotErrors:
     """Tests for error handling in restore_snapshot()."""
 
-    def test_restore_handles_session_restore_failure(self) -> None:
+    def test_restore_handles_session_restore_failure(self, sandbox: Sandbox) -> None:
         """Test that session restore failure raises RestoreFailedError."""
         session = _make_session()
 
-        snapshot = create_snapshot(session, tag="test")
+        snapshot = create_snapshot(session, sandbox, tag="test")
 
         class FailingSession:
             def restore(self, snapshot: Snapshot) -> None:
@@ -271,21 +264,9 @@ class TestRestoreSnapshotErrors:
         with pytest.raises(RestoreFailedError, match="Failed to restore session"):
             restore_snapshot(
                 FailingSession(),  # type: ignore[arg-type]
-                None,
+                sandbox,
                 snapshot,
             )
-
-    def test_restore_skips_sandbox_when_none_present(self, sandbox: Sandbox) -> None:
-        """A sandbox snapshot is skipped when no sandbox is supplied."""
-        session = _make_session()
-        _ = sandbox.filesystem.write("test.txt", "original")
-
-        snapshot = create_snapshot(session, sandbox, tag="test")
-        _ = sandbox.filesystem.write("test.txt", "modified")
-
-        # Should not raise - silently skips the sandbox restore
-        restore_snapshot(session, None, snapshot)
-        assert sandbox.filesystem.read("test.txt").content == "modified"
 
     def test_restore_handles_sandbox_restore_failure(self, sandbox: Sandbox) -> None:
         """Test that sandbox restore failure raises RestoreFailedError."""
@@ -327,20 +308,22 @@ class TestPendingToolTracker:
         assert result is True
         assert fs.read("test.txt").content == "original"
 
-    def test_abort_tool_execution_unknown_id_returns_false(self) -> None:
+    def test_abort_tool_execution_unknown_id_returns_false(
+        self, sandbox: Sandbox
+    ) -> None:
         """Test that aborting unknown tool returns False."""
         session = _make_session()
 
-        tracker = PendingToolTracker(session=session)
+        tracker = PendingToolTracker(session=session, sandbox=sandbox)
 
         result = tracker.abort_tool_execution("unknown-id")
         assert result is False
 
-    def test_pending_tool_executions_property(self) -> None:
+    def test_pending_tool_executions_property(self, sandbox: Sandbox) -> None:
         """Test the pending_tool_executions property."""
         session = _make_session()
 
-        tracker = PendingToolTracker(session=session)
+        tracker = PendingToolTracker(session=session, sandbox=sandbox)
 
         # Initially empty
         assert len(tracker.pending_tool_executions) == 0
@@ -360,11 +343,13 @@ class TestPendingToolTracker:
         with pytest.raises(TypeError):
             pending["call-3"] = None  # type: ignore[index]
 
-    def test_end_tool_execution_returns_false_for_unknown(self) -> None:
+    def test_end_tool_execution_returns_false_for_unknown(
+        self, sandbox: Sandbox
+    ) -> None:
         """Test that ending unknown tool returns False."""
         session = _make_session()
 
-        tracker = PendingToolTracker(session=session)
+        tracker = PendingToolTracker(session=session, sandbox=sandbox)
 
         result = tracker.end_tool_execution("unknown-id", success=True)
         assert result is False
@@ -449,22 +434,22 @@ class TestToolTransaction:
             restore_snapshot(session, sandbox, snapshot)
             assert fs.read("test.txt").content == "original"
 
-    def test_session_only_transaction(self) -> None:
-        """A transaction without a sandbox snapshots the session alone."""
+    def test_transaction_snapshot_carries_sandbox_ref(self, sandbox: Sandbox) -> None:
+        """Every transaction snapshot captures the sandbox."""
         session = _make_session()
 
-        with tool_transaction(session, tag="session-only") as snapshot:
-            assert snapshot.sandbox is None
+        with tool_transaction(session, sandbox, tag="paired") as snapshot:
+            assert snapshot.sandbox is not None
 
 
 class TestCompositeSnapshotErrors:
     """Tests for CompositeSnapshot error handling paths."""
 
-    def test_snapshot_with_metadata_roundtrip(self) -> None:
+    def test_snapshot_with_metadata_roundtrip(self, sandbox: Sandbox) -> None:
         """Test that snapshot with metadata serializes and deserializes."""
         session = _make_session()
 
-        snapshot = create_snapshot(session, tag="test-tag")
+        snapshot = create_snapshot(session, sandbox, tag="test-tag")
 
         # Verify metadata was set
         assert snapshot.metadata is not None

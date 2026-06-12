@@ -182,7 +182,7 @@ def verify_task_completion(  # noqa: PLR0913
     budget_tracker: BudgetTracker | None = None,
     prompt: PromptProtocol[Any] | None = None,
     adapter: Any = None,  # noqa: ANN401
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> None:
     """Verify task completion if checker is configured.
 

@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast, override
 from uuid import uuid4
 
-from ...budget import Budget, BudgetTracker
+from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK, AsyncSleeper, MonotonicClock
 from ...deadlines import Deadline
 from ...prompt import Prompt, RenderedPrompt
@@ -119,31 +119,17 @@ class ACPAdapter(ProviderAdapter[Any]):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
         sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Evaluate prompt using an ACP agent against the open sandbox."""
-        if budget and not budget_tracker:
-            budget_tracker = BudgetTracker(budget)
-
-        effective_deadline = deadline or (budget.deadline if budget else None)
-        prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
-
-        if effective_deadline and effective_deadline.remaining().total_seconds() <= 0:
-            raise PromptEvaluationError(
-                message="Deadline expired before ACP invocation",
-                prompt_name=prompt_name,
-                phase="request",
-            )
-
         return run_async(
             self._evaluate_async(
                 prompt,
                 session=session,
-                deadline=effective_deadline,
+                deadline=deadline,
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
@@ -163,7 +149,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
-        rendered = prompt.render(session=session)
+        rendered = prompt.render(session=session, sandbox=sandbox)
         prompt_text = rendered.text
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
         adapter_name = self._adapter_name()
@@ -453,7 +439,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         run_context: RunContext | None,
         visibility_signal: VisibilityExpansionSignal,
         structured_capture: Any,
-        sandbox: Sandbox | None = None,
+        sandbox: Sandbox,
     ) -> tuple[str | None, TokenUsage | None]:
         """Execute the ACP protocol flow."""
         try:

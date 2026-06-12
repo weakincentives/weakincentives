@@ -211,6 +211,10 @@ Groups optional parameters passed to hooks via `HookContext`:
 | `run_context` | `RunContext \| None` | `None` | Tracing context |
 | `mcp_tool_state` | `MCPToolExecutionState \| None` | `None` | MCP tool_use_id correlation |
 
+The open sandbox is not a constraint: `HookContext` takes it as a required
+`sandbox` keyword, so hook-based transactions always have an environment to
+snapshot and restore.
+
 ## Error Handling
 
 SDK exceptions are normalized to `PromptEvaluationError` via `normalize_sdk_error`.

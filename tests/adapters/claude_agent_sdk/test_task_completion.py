@@ -42,8 +42,8 @@ from ._hook_helpers import _make_prompt, _make_prompt_with_fs
 class TestTaskCompletionStopHook:
     """Tests for task completion stop hook with FileOutputChecker."""
 
-    def test_blocks_stop_when_no_filesystem(self, hook_context: HookContext) -> None:
-        """Stop is blocked when no filesystem is available (fail-closed)."""
+    def test_blocks_stop_when_files_missing(self, hook_context: HookContext) -> None:
+        """Stop is blocked when required files are missing from the sandbox."""
         hook = create_task_completion_stop_hook(
             hook_context, checker=FileOutputChecker(files=("output.txt",))
         )
@@ -52,7 +52,7 @@ class TestTaskCompletionStopHook:
         result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result.get("continue_") is True
-        assert "No filesystem" in result.get("reason", "")
+        assert "not found" in result.get("reason", "")
         assert hook_context.stop_reason == "end_turn"
 
     def test_allows_stop_when_all_files_exist(self, session: Session) -> None:
@@ -66,7 +66,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
+            sandbox=make_memory_sandbox(fs),
         )
 
         hook = create_task_completion_stop_hook(
@@ -91,7 +91,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
+            sandbox=make_memory_sandbox(fs),
         )
 
         hook = create_task_completion_stop_hook(
@@ -114,6 +114,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
 
         hook = create_task_completion_stop_hook(
@@ -134,6 +135,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
 
         hook = create_task_completion_stop_hook(
@@ -153,7 +155,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
+            sandbox=make_memory_sandbox(fs),
         )
 
         hook = create_task_completion_stop_hook(
@@ -175,7 +177,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
-            constraints=HookConstraints(sandbox=make_memory_sandbox(fs)),
+            sandbox=make_memory_sandbox(fs),
         )
 
         files = tuple(f"file_{i}.txt" for i in range(1, 10))
@@ -204,6 +206,7 @@ class TestTaskCompletionStopHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
 
         # Create hook with FileOutputChecker - verifies protocol compatibility
@@ -211,11 +214,11 @@ class TestTaskCompletionStopHook:
         hook = create_task_completion_stop_hook(context, checker=checker)
         input_data = {"hook_event_name": "Stop", "stopReason": "end_turn"}
 
-        # Should work with checker protocol (no filesystem -> fail-closed)
+        # Should work with checker protocol (empty sandbox -> file missing)
         result = asyncio.run(hook(input_data, None, {"signal": None}))
 
         assert result.get("continue_") is True
-        assert "No filesystem" in result.get("reason", "")
+        assert "not found" in result.get("reason", "")
         assert context.stop_reason == "end_turn"
 
     def test_skips_check_when_deadline_exceeded(self, session: Session) -> None:
@@ -239,6 +242,7 @@ class TestTaskCompletionStopHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
 
         hook = create_task_completion_stop_hook(
@@ -270,6 +274,7 @@ class TestTaskCompletionStopHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
 
         hook = create_task_completion_stop_hook(
@@ -291,6 +296,7 @@ class TestCompositeChecker:
         checker = CompositeChecker(checkers=())
         context = TaskCompletionContext(
             session=session,
+            sandbox=make_memory_sandbox(),
             tentative_output=None,
             stop_reason="end_turn",
         )

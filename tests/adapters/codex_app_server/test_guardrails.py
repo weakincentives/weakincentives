@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.codex_app_server._guardrails import (
     check_task_completion,
 )
@@ -99,6 +100,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=mock_prompt,
                     session=session,
+                    sandbox=make_memory_sandbox(),
                 )
 
             resp = client.send_response.call_args[0][1]
@@ -138,6 +140,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=mock_prompt,
                     session=session,
+                    sandbox=make_memory_sandbox(),
                 )
 
             resp = client.send_response.call_args[0][1]
@@ -170,6 +173,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=mock_prompt,
                     session=session,
+                    sandbox=make_memory_sandbox(),
                 )
                 mock_collect.assert_not_called()
 
@@ -200,6 +204,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=None,
                     session=None,
+                    sandbox=make_memory_sandbox(),
                 )
                 mock_collect.assert_not_called()
 
@@ -228,6 +233,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=mock_prompt,
                     session=None,
+                    sandbox=make_memory_sandbox(),
                 )
                 mock_collect.assert_not_called()
 
@@ -258,6 +264,7 @@ class TestHandleToolCallFeedback:
                 "weakincentives.adapters.codex_app_server._guardrails.collect_feedback",
                 return_value=None,
             ) as mock_collect:
+                sandbox = make_memory_sandbox()
                 await handle_tool_call(
                     client,
                     10,
@@ -266,12 +273,13 @@ class TestHandleToolCallFeedback:
                     prompt=mock_prompt,
                     session=session,
                     deadline=deadline,
+                    sandbox=sandbox,
                 )
                 mock_collect.assert_called_once_with(
                     prompt=mock_prompt,
                     session=session,
                     deadline=deadline,
-                    sandbox=None,
+                    sandbox=sandbox,
                 )
 
         asyncio.run(_run())
@@ -291,6 +299,7 @@ class TestCheckTaskCompletion:
             accumulated_text="text",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -306,6 +315,7 @@ class TestCheckTaskCompletion:
             accumulated_text="text",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -324,6 +334,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -344,6 +355,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is True
         assert feedback == "Missing report.md"
@@ -365,6 +377,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -391,6 +404,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=deadline,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -414,6 +428,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=None,
             budget_tracker=tracker,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None

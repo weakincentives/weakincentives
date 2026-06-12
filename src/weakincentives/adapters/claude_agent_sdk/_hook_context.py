@@ -102,9 +102,6 @@ class HookConstraints:
     mcp_tool_state: MCPToolExecutionState | None = None
     """Shared state for passing tool_use_id from hooks to MCP bridge."""
 
-    sandbox: Sandbox | None = None
-    """Execution environment participating in tool transactions."""
-
 
 class HookContext:
     """Context passed to hook callbacks for state access.
@@ -126,6 +123,7 @@ class HookContext:
         prompt: PromptProtocol[object],
         adapter_name: str,
         prompt_name: str,
+        sandbox: Sandbox,
         constraints: HookConstraints | None = None,
         clock: MonotonicClock = SYSTEM_CLOCK,
     ) -> None:
@@ -133,13 +131,13 @@ class HookContext:
         self._prompt = prompt
         self.adapter_name = adapter_name
         self.prompt_name = prompt_name
+        self.sandbox = sandbox
         # Unpack constraints or use defaults
         self.deadline = constraints.deadline if constraints else None
         self.budget_tracker = constraints.budget_tracker if constraints else None
         self.heartbeat = constraints.heartbeat if constraints else None
         self.run_context = constraints.run_context if constraints else None
         self.mcp_tool_state = constraints.mcp_tool_state if constraints else None
-        self.sandbox = constraints.sandbox if constraints else None
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None

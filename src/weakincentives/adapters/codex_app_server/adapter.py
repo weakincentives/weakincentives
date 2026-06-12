@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast, override
 from uuid import uuid4
 
-from ...budget import Budget, BudgetTracker
+from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK, AsyncSleeper
 from ...deadlines import Deadline
 from ...prompt import Prompt, RenderedPrompt
@@ -116,31 +116,17 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
         sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Evaluate prompt using the Codex App Server against the open sandbox."""
-        if budget and not budget_tracker:
-            budget_tracker = BudgetTracker(budget)
-
-        effective_deadline = deadline or (budget.deadline if budget else None)
-        prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
-
-        if effective_deadline and effective_deadline.remaining().total_seconds() <= 0:
-            raise PromptEvaluationError(
-                message="Deadline expired before Codex invocation",
-                prompt_name=prompt_name,
-                phase="request",
-            )
-
         return run_async(
             self._evaluate_async(
                 prompt,
                 session=session,
-                deadline=effective_deadline,
+                deadline=deadline,
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
@@ -160,7 +146,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
-        rendered = prompt.render(session=session)
+        rendered = prompt.render(session=session, sandbox=sandbox)
         prompt_text = rendered.text
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
 

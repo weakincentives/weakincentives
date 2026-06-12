@@ -564,14 +564,17 @@ and sandbox in one transaction.
 
 ### 1. Budget/Deadline Setup
 
-- Create `BudgetTracker` if budget provided
-- Derive deadline from argument or `budget.deadline`
-- Raise `PromptEvaluationError(phase="request")` if already expired
+Owned by `AgentRuntime.evaluate` (see `specs/ADAPTERS.md`): it creates a
+`BudgetTracker` when only a budget is provided, derives the effective
+deadline from the argument or `budget.deadline`, and raises
+`PromptEvaluationError(phase="request")` if already expired. `_evaluate`
+receives only the resolved deadline and tracker.
 
 ### 2. Render Prompt
 
-1. `prompt.render(session=session)` → `RenderedPrompt` (text + tools + output_type)
-1. Resolve CWD and bind a host-backed `Filesystem` resource if prompt has no filesystem
+1. `prompt.render(session=session, sandbox=sandbox)` → `RenderedPrompt`
+   (text + tools + output_type); the workspace preview resolves from the
+   open sandbox at render time
 1. Emit `PromptRendered`
 
 ### 3. Build Dynamic Tool Specs

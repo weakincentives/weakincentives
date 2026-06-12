@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._hooks import HookContext
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.protocols import PromptProtocol
@@ -290,6 +291,7 @@ def hook_context(session: Session) -> HookContext:
         prompt=cast("PromptProtocol[object]", _make_prompt()),
         adapter_name="claude_agent_sdk",
         prompt_name="test_prompt",
+        sandbox=make_memory_sandbox(),
     )
 
 

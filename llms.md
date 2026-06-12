@@ -850,7 +850,7 @@ agents_config = FeedbackProviderConfig(
 )
 
 # Collect feedback from prompt's configured providers
-# feedback_text = collect_feedback(prompt=prompt, session=session, deadline=deadline)
+# feedback_text = collect_feedback(prompt=prompt, session=session, sandbox=sandbox, deadline=deadline)
 ```
 
 **Built-in providers**:

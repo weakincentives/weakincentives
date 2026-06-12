@@ -69,26 +69,15 @@ class TestTaskCompletionResult:
 class TestFileOutputChecker:
     """Tests for the FileOutputChecker built-in implementation."""
 
-    def test_no_filesystem_returns_incomplete(self, session: Session) -> None:
-        """Fail-closed: when no filesystem is available and files required, checker returns incomplete."""
-        checker = FileOutputChecker(files=("report.md",))
-        context = TaskCompletionContext(session=session, sandbox=None)
-
-        result = checker.check(context)
-
-        assert result.complete is False
-        assert "No filesystem" in result.feedback
-        assert "1 required" in result.feedback
-
-    def test_no_filesystem_empty_files_returns_ok(self, session: Session) -> None:
-        """No filesystem but no files required => ok (vacuously true)."""
+    def test_empty_files_returns_ok(self, session: Session) -> None:
+        """No files required => ok (vacuously true)."""
         checker = FileOutputChecker(files=())
-        context = TaskCompletionContext(session=session, sandbox=None)
+        context = TaskCompletionContext(session=session, sandbox=make_memory_sandbox())
 
         result = checker.check(context)
 
         assert result.complete is True
-        assert "No files required" in result.feedback
+        assert "required output(s) exist" in result.feedback
 
     def test_all_files_exist(self, session: Session, fs: Filesystem) -> None:
         """All required files present => ok."""
@@ -176,7 +165,7 @@ class TestCompositeChecker:
     def test_empty_checkers(self, session: Session) -> None:
         """Empty composite => ok."""
         checker = CompositeChecker(checkers=())
-        context = TaskCompletionContext(session=session)
+        context = TaskCompletionContext(session=session, sandbox=make_memory_sandbox())
 
         result = checker.check(context)
 

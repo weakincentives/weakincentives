@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._hooks import HookConstraints, HookContext
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
@@ -34,6 +35,7 @@ class TestHookContext:
             prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         assert context.session is session
         assert context.adapter_name == "test_adapter"
@@ -50,6 +52,7 @@ class TestHookContext:
             prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         assert context.prompt is prompt
 
@@ -70,6 +73,7 @@ class TestHookContext:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
         assert context.deadline is deadline
         assert context.budget_tracker is tracker
@@ -93,6 +97,7 @@ class TestHookContext:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
 
         assert context.heartbeat is heartbeat
@@ -105,6 +110,7 @@ class TestHookContext:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
 
         assert context.heartbeat is None

@@ -4,6 +4,34 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Sandbox Everywhere, Run State Nowhere
+
+A hardening pass on the AgentRuntime/M3 work below; three breaking
+tightenings:
+
+- **Render-time workspace preview.** `prompt.render(session=...,
+  sandbox=sandbox)` resolves the workspace preview listing from the open
+  sandbox at render time. Nothing is bound onto the shared `Prompt`
+  anymore — no run state on the definition object, and one `Prompt` is
+  safe across concurrent runtimes. Rendering without a sandbox shows the
+  "not yet materialized" placeholder as before.
+- **`AgentRuntime.evaluate` owns the evaluation preamble.** Budget→tracker
+  promotion, effective-deadline resolution, and the fail-fast
+  "deadline expired" check moved from every adapter into the runtime.
+  `ProviderAdapter._evaluate` no longer takes a `budget` parameter;
+  concrete adapters are thin harness translators.
+- **Sandbox is non-nullable end to end.** `ToolContext.sandbox`,
+  `FeedbackContext.sandbox`, `TaskCompletionContext.sandbox` (and their
+  `filesystem`/`shell` properties), `collect_feedback(sandbox=...)`,
+  `create_bridged_tools`/`BridgedTool`, the Claude SDK hook plumbing
+  (`HookContext(sandbox=...)` required; `HookConstraints` no longer
+  carries it), and the transaction layer (`create_snapshot`,
+  `restore_snapshot`, `tool_transaction`, `PendingToolTracker`) all
+  require a `Sandbox`. `CompositeSnapshot.sandbox` is a required
+  `SnapshotRef` and the serialization schema version is now **3**.
+  `FileOutputChecker` no longer has a fail-closed "no filesystem" arm —
+  an environment always exists.
+
 ### AgentRuntime: One Pairing for Adapter, Prompt, and Sandbox
 
 The sandbox lifecycle from the M3 refactor (below) is owned by a new
@@ -14,9 +42,8 @@ unrepresentable: there is no API that accepts a foreign sandbox.
 
 - `with adapter.runtime(prompt) as rt:` opens the runtime;
   `rt.evaluate(session=...)` takes neither a prompt nor a sandbox.
-  Every call runs in the same environment; the workspace preview rebinds
-  from the live sandbox before each round, so re-rendered prompts list
-  files written in earlier rounds. After release,
+  Every call runs in the same environment, so files written in one
+  round are visible to the next. After release,
   `rt.evaluate` raises `AgentRuntimeReleasedError` and `rt.sandbox`
   stays readable for the holder only while the lease was open.
 - `adapter.evaluate(prompt, session=...)` survives unchanged as one-shot
@@ -28,9 +55,9 @@ unrepresentable: there is no API that accepts a foreign sandbox.
   retry reuses the same sandbox (files written before the expansion
   survive into the next round), and debug bundles capture the still-open
   sandbox filesystem (`write_bundle_artifacts(sandbox=rt.sandbox)`).
-- `create_bridged_tools`/`BridgedTool` now require the `sandbox` argument
-  (still nullable) so call sites opt out explicitly instead of silently
-  running without rollback.
+- `create_bridged_tools`/`BridgedTool` now require the `sandbox`
+  argument, so every bridged tool call carries an environment for
+  effects and rollback.
 
 ### M3 — Sandbox as the Execution Context
 
@@ -48,11 +75,11 @@ context everywhere:
   (`ReadBeforeWritePolicy`) and checkers (`FileOutputChecker`) read one shared
   source.
 - **Transactions are (session, sandbox).** `tool_transaction`,
-  `create_snapshot`, `restore_snapshot`, and `PendingToolTracker` take a
-  `Sandbox | None` instead of a resource context; `CompositeSnapshot` carries a
-  single optional `SnapshotRef` (schema version 2). The generic
-  singleton-`Snapshotable` resource scan is gone, as is the per-tool-scope
-  rebuilding of the resource instantiation order.
+  `create_snapshot`, `restore_snapshot`, and `PendingToolTracker` take the
+  `Sandbox` instead of a resource context; `CompositeSnapshot` carries the
+  sandbox's `SnapshotRef`. The generic singleton-`Snapshotable` resource
+  scan is gone, as is the per-tool-scope rebuilding of the resource
+  instantiation order.
 - **Adapters open the sandbox.** Claude Agent SDK, Codex App Server, and ACP
   (incl. Gemini/OpenCode) adapters follow one flow: read the template's config →
   `sandbox_provider.open(config)` (default `LocalSandboxProvider`; injectable

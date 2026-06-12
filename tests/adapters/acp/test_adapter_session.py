@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.acp.config import ACPAdapterConfig, ACPClientConfig
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.runtime.events import (
@@ -440,6 +441,7 @@ class TestProtocolImportError:
                     run_context=None,
                     visibility_signal=MagicMock(),
                     structured_capture=None,
+                    sandbox=make_memory_sandbox(),
                 )
             )
 

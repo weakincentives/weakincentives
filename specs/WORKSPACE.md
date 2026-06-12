@@ -27,8 +27,9 @@ preview plus the digest and in-memory-filesystem surfaces.
 ## Workspace Preview
 
 `PromptTemplate.create(..., sandbox=SandboxConfig(...))` appends a preview
-section (key `workspace`) to the template. Adapters bind its params from
-the opened sandbox before rendering:
+section (key `workspace`) to the template. Its params resolve at render
+time: `prompt.render(session=..., sandbox=sandbox)` builds a fresh listing
+from the open sandbox, so no run state is ever stored on the prompt:
 
 | Symbol | Role |
 |--------|------|
@@ -37,8 +38,9 @@ the opened sandbox before rendering:
 | `workspace_preview_params(filesystem)` | Builds the listing via `filesystem.list(".")` |
 | `WORKSPACE_PREVIEW_KEY` | The auto-appended section key (`"workspace"`) |
 
-Until an adapter binds params the section renders a "not yet materialized"
-placeholder, so direct `prompt.render()` calls still succeed.
+Without a `sandbox` argument the section renders a "not yet
+materialized" placeholder, so direct `prompt.render()` calls still
+succeed.
 
 Mount declarations (`HostMount`), allowed-root validation, byte budgets,
 and symlink handling are part of `SandboxConfig` and are specified in

@@ -49,7 +49,7 @@ def append_feedback(  # noqa: PLR0913
     prompt: PromptProtocol[Any] | None,
     session: SessionProtocol | None,
     deadline: Deadline | None,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> None:
     """Collect and append feedback after a successful tool call."""
     if is_error or prompt is None or session is None:
@@ -68,7 +68,7 @@ def check_task_completion(  # noqa: PLR0911, PLR0913
     accumulated_text: str | None,
     deadline: Deadline | None,
     budget_tracker: BudgetTracker | None,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> tuple[bool, str | None]:
     """Check if the task is complete according to the prompt's checker.
 

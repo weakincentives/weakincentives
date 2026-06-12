@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters._shared._visibility_signal import VisibilityExpansionSignal
 from weakincentives.adapters.codex_app_server._protocol import (
     consume_messages,
@@ -673,6 +674,7 @@ class TestConsumeMessagesVisibilitySignal:
                 accumulated_text="",
                 usage=None,
                 visibility_signal=signal,
+                sandbox=make_memory_sandbox(),
             )
             # Should return empty text (broke early, no turn/completed text)
             assert text == ""

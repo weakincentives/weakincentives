@@ -185,6 +185,7 @@ class TestSequentialDependencyPolicy:
             rendered_prompt=None,  # type: ignore[arg-type]
             adapter=None,  # type: ignore[arg-type]
             session=session,
+            sandbox=make_memory_sandbox(),
             deadline=None,
         )
 
@@ -311,14 +312,13 @@ class TestReadBeforeWritePolicy:
         prompt: Prompt[None] = Prompt(template)
         prompt.resources.__enter__()
 
-        sandbox = make_memory_sandbox(filesystem) if filesystem is not None else None
         return ToolContext(
             prompt=prompt,
             rendered_prompt=None,  # type: ignore[arg-type]
             adapter=None,  # type: ignore[arg-type]
             session=session,
+            sandbox=make_memory_sandbox(filesystem),
             deadline=None,
-            sandbox=sandbox,
         )
 
     def _make_tool(self, name: str) -> Tool[FileParams, None]:
@@ -353,16 +353,6 @@ class TestReadBeforeWritePolicy:
         )
 
         decision = policy.check(tool, NoPathParams(value="x"), context=context)
-        assert decision.allowed is True
-
-    def test_allows_write_when_no_filesystem(self) -> None:
-        policy = ReadBeforeWritePolicy()
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        context = self._make_context(session, filesystem=None)
-        tool = self._make_tool("write_file")
-
-        decision = policy.check(tool, FileParams(path="/x"), context=context)
         assert decision.allowed is True
 
     def test_allows_new_file_creation(self) -> None:

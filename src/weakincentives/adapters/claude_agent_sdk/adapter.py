@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast, override
 from uuid import uuid4
 
-from ...budget import Budget, BudgetTracker
+from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK
 from ...deadlines import Deadline
 from ...prompt import Prompt, RenderedPrompt
@@ -205,7 +205,7 @@ def _build_and_dispatch_response[OutputT](
     prompt: Prompt[OutputT],
     run_context: RunContext | None,
     duration_ms: int,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox,
 ) -> PromptResponse[OutputT]:
     """Extract result, validate, dispatch events, and return response."""
     result_text, output, usage = extract_result(
@@ -342,56 +342,33 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
         sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Evaluate prompt using Claude Agent SDK with hook-based state sync."""
-        if budget and not budget_tracker:
-            budget_tracker = BudgetTracker(budget)
-
-        effective_deadline = deadline or (budget.deadline if budget else None)
-
-        prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
-
         logger.debug(
             "claude_agent_sdk.evaluate.entry",
             event="evaluate.entry",
             context={
-                "prompt_name": prompt_name,
+                "prompt_name": prompt.name or f"{prompt.ns}:{prompt.key}",
                 "prompt_ns": prompt.ns,
                 "prompt_key": prompt.key,
-                "has_deadline": effective_deadline is not None,
+                "has_deadline": deadline is not None,
                 "deadline_remaining_seconds": (
-                    effective_deadline.remaining().total_seconds()
-                    if effective_deadline
-                    else None
+                    deadline.remaining().total_seconds() if deadline else None
                 ),
-                "has_budget": budget is not None,
                 "has_budget_tracker": budget_tracker is not None,
                 "has_heartbeat": heartbeat is not None,
             },
         )
 
-        if effective_deadline and effective_deadline.remaining().total_seconds() <= 0:
-            logger.debug(
-                "claude_agent_sdk.evaluate.deadline_expired",
-                event="evaluate.deadline_expired",
-                context={"prompt_name": prompt_name},
-            )
-            raise PromptEvaluationError(
-                message="Deadline expired before SDK invocation",
-                prompt_name=prompt_name,
-                phase="request",
-            )
-
         return run_async(
             self._evaluate_async(
                 prompt,
                 session=session,
-                deadline=effective_deadline,
+                deadline=deadline,
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
@@ -414,7 +391,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         sdk = _import_sdk()
         self._stderr_buffer.clear()
 
-        rendered = prompt.render(session=session)
+        rendered = prompt.render(session=session, sandbox=sandbox)
         prompt_text = rendered.text
 
         logger.debug(
@@ -476,13 +453,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             heartbeat=heartbeat,
             run_context=run_context,
             mcp_tool_state=mcp_tool_state,
-            sandbox=sandbox,
         )
         hook_context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", prompt),
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
+            sandbox=sandbox,
             constraints=constraints,
         )
         visibility_signal = VisibilityExpansionSignal()
