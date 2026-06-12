@@ -91,7 +91,7 @@ the code it covers.
 | Tools | `prompt/tool.py`, `prompt/tool_result.py` | `prompt/` | `TOOLS.md` |
 | Policies, feedback, task completion | `prompt/policy.py`, `prompt/feedback.py`, `prompt/task_completion.py` | `prompt/` | `GUARDRAILS.md` |
 | Task examples | `prompt/task_examples.py` | `prompts/` | `EXAMPLES.md` |
-| Workspace sections, digest tools | `prompt/workspace.py`, `contrib/tools/` | `prompt/`, `tools/` | `WORKSPACE.md` |
+| Workspace preview, digest tools | `prompt/workspace.py`, `contrib/tools/` | `prompt/`, `tools/` | `WORKSPACE.md` |
 | Sessions, events, budgets | `runtime/session/`, `runtime/events/`, `budget.py`, `deadlines.py` | `runtime/`, `test_budget.py`, `test_deadlines.py` | `SESSIONS.md` |
 | Slice storage | `runtime/session/slices/` | `runtime/test_slices.py`, `runtime/test_state_slice.py` | `SLICES.md` |
 | Agent loop | `runtime/agent_loop.py` | `runtime/agent_loop/` | `AGENT_LOOP.md` |

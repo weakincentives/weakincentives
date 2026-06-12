@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Self
 
 if TYPE_CHECKING:
-    from .isolation import IsolationConfig, NetworkPolicy, SandboxConfig
+    from .isolation import IsolationConfig, NetworkPolicy
 
 from ...skills import (
     MAX_SKILL_TOTAL_BYTES,
@@ -227,44 +227,44 @@ class EphemeralHome:
 
     def _configure_sandbox_settings(self, settings: dict[str, Any]) -> None:
         """Configure sandbox and network settings for settings.json."""
-        from .isolation import NetworkPolicy, SandboxConfig
+        from .isolation import NetworkPolicy
 
-        sandbox = self._isolation.sandbox or SandboxConfig()
-        network = self._isolation.network_policy or NetworkPolicy.no_network()
+        isolation = self._isolation
+        network = isolation.network_policy or NetworkPolicy.no_network()
 
         section: dict[str, Any] = {
-            "enabled": sandbox.enabled,
-            "autoAllowBashIfSandboxed": sandbox.bash_auto_allow,
-            "allowUnsandboxedCommands": sandbox.allow_unsandboxed_commands,
+            "enabled": isolation.sandbox_enabled,
+            "autoAllowBashIfSandboxed": isolation.bash_auto_allow,
+            "allowUnsandboxedCommands": isolation.allow_unsandboxed_commands,
         }
-        if sandbox.excluded_commands:
-            section["excludedCommands"] = list(sandbox.excluded_commands)
-        if sandbox.enable_weaker_nested_sandbox:
+        if isolation.excluded_commands:
+            section["excludedCommands"] = list(isolation.excluded_commands)
+        if isolation.enable_weaker_nested_sandbox:
             section["enableWeakerNestedSandbox"] = True
 
         violations: dict[str, list[str]] = {}
-        if sandbox.ignore_file_violations:
-            violations["file"] = list(sandbox.ignore_file_violations)
-        if sandbox.ignore_network_violations:
-            violations["network"] = list(sandbox.ignore_network_violations)
+        if isolation.ignore_file_violations:
+            violations["file"] = list(isolation.ignore_file_violations)
+        if isolation.ignore_network_violations:
+            violations["network"] = list(isolation.ignore_network_violations)
         if violations:
             section["ignoreViolations"] = violations
 
-        self._add_sandbox_paths(section, sandbox)
+        self._add_sandbox_paths(section, isolation)
         section["network"] = self._build_network_section(network)
         settings["sandbox"] = section
 
     @staticmethod
-    def _add_sandbox_paths(section: dict[str, Any], sandbox: SandboxConfig) -> None:
-        writable_paths: list[str] = list(sandbox.writable_paths)
-        if sandbox.enabled:
+    def _add_sandbox_paths(section: dict[str, Any], isolation: IsolationConfig) -> None:
+        writable_paths: list[str] = list(isolation.writable_paths)
+        if isolation.sandbox_enabled:
             claude_temp_dir = f"/tmp/claude-{os.getuid()}"  # nosec B108
             if claude_temp_dir not in writable_paths:
                 writable_paths.append(claude_temp_dir)
         if writable_paths:
             section["writablePaths"] = writable_paths
-        if sandbox.readable_paths:
-            section["readablePaths"] = list(sandbox.readable_paths)
+        if isolation.readable_paths:
+            section["readablePaths"] = list(isolation.readable_paths)
 
     @staticmethod
     def _build_network_section(network: NetworkPolicy) -> dict[str, Any]:

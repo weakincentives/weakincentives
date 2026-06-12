@@ -84,13 +84,10 @@ from weakincentives.dataclasses import FrozenDataclass
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import BundleConfig
 from weakincentives.prompt import (
-    HostMount,
     MarkdownSection,
     Prompt,
     PromptTemplate,
-    WorkspaceSection,
 )
-from weakincentives.prompt.section import Section
 from weakincentives.runtime import (
     AgentLoop,
     AgentLoopConfig,
@@ -101,6 +98,7 @@ from weakincentives.runtime import (
     Session,
 )
 from weakincentives.runtime.logging import configure_logging
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
 if TYPE_CHECKING:
     from weakincentives.adapters.core import ProviderAdapter
@@ -209,21 +207,17 @@ class ReviewParams:
 # =============================================================================
 
 
-def _create_workspace_section(
-    session: Session,
-    project_path: str,
-) -> Section:
-    """Create the workspace section."""
-    return WorkspaceSection(
-        session=session,
-        mounts=[
+def _create_workspace_config(project_path: str) -> WorkspaceConfig:
+    """Declare the review environment: the project mounted into a sandbox."""
+    return WorkspaceConfig(
+        mounts=(
             HostMount(
                 host_path=project_path,
                 include_glob=DEFAULT_INCLUDE_GLOBS,
                 exclude_glob=DEFAULT_EXCLUDE_GLOBS,
                 max_bytes=DEFAULT_MAX_BYTES,
-            )
-        ],
+            ),
+        ),
     )
 
 
@@ -274,8 +268,6 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
         )
         self._last_session = session
 
-        workspace = _create_workspace_section(session, request.project_path)
-
         template = PromptTemplate[ReviewResponse].create(
             ns="code-review",
             key="review-agent",
@@ -298,7 +290,6 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
                     template="${focus}",
                     key="focus",
                 ),
-                workspace,
                 MarkdownSection(
                     title="Instructions",
                     template=textwrap.dedent("""
@@ -334,6 +325,7 @@ class CodeReviewLoop(AgentLoop[ReviewRequest, ReviewResponse]):
                     key="output-format",
                 ),
             ),
+            workspace=_create_workspace_config(request.project_path),
         )
 
         prompt = Prompt(template).bind(ReviewParams(focus=request.focus))

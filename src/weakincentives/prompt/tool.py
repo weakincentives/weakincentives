@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from ..runtime.run_context import RunContext
     from ..runtime.session.protocols import SessionProtocol
     from ..runtime.watchdog import Heartbeat
+    from ..sandbox import Sandbox, Shell
     from ._prompt_resources import PromptResources
     from .protocols import (
         PromptProtocol,
@@ -89,28 +90,28 @@ class ToolExample[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]
 class ToolContext:
     """Immutable container exposing prompt execution state to handlers.
 
-    ToolContext provides access to prompt metadata, session state, and
-    runtime resources during tool execution.
+    ToolContext provides access to prompt metadata, session state, the
+    execution sandbox, and runtime resources during tool execution.
+
+    The sandbox is the execution environment: its filesystem and shell
+    facets are exposed directly so tool effects land in one place:
+
+    .. code-block:: python
+
+        # These are equivalent:
+        context.filesystem
+        context.sandbox.filesystem
+
+        context.shell
+        context.sandbox.shell
 
     Resources are available through the ``resources`` context, which
     delegates to the prompt's resource context:
 
     .. code-block:: python
 
-        fs = context.resources.get(Filesystem)
         tracer = context.resources.get(Tracer)
         budget = context.resources.get(BudgetTracker)
-
-    Common resources have sugar properties for convenience:
-
-    .. code-block:: python
-
-        # These are equivalent:
-        context.filesystem
-        context.resources.get(Filesystem)
-
-        context.budget_tracker
-        context.resources.get(BudgetTracker)
 
     When running within an AgentLoop or EvalLoop with lease extension enabled,
     tool handlers can call ``context.beat()`` to record a heartbeat during
@@ -122,6 +123,8 @@ class ToolContext:
     rendered_prompt: RenderedPromptProtocol[Any] | None
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
+    sandbox: Sandbox
+    """Execution environment whose facets receive all tool effects."""
     deadline: Deadline | None = None
     heartbeat: Heartbeat | None = None
     run_context: RunContext | None = None
@@ -137,15 +140,14 @@ class ToolContext:
         return self.prompt.resources
 
     @property
-    def filesystem(self) -> Filesystem | None:
-        """Return the filesystem resource, if available.
+    def filesystem(self) -> Filesystem:
+        """Return the sandbox's filesystem facet."""
+        return self.sandbox.filesystem
 
-        This is sugar for ``self.resources.get_optional(Filesystem)``.
-        """
-        # Import here to avoid circular import at module load time
-        from ..filesystem import Filesystem
-
-        return self.resources.get_optional(Filesystem)
+    @property
+    def shell(self) -> Shell:
+        """Return the sandbox's shell facet."""
+        return self.sandbox.shell
 
     @property
     def budget_tracker(self) -> BudgetTracker | None:

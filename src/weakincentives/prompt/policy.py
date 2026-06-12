@@ -252,13 +252,8 @@ class ReadBeforeWritePolicy:
         # Normalize path to match what handlers will use
         path = _normalize_path(raw_path, self.mount_point)
 
-        # No filesystem available: allow (other safety checks apply)
-        fs = context.filesystem
-        if fs is None:
-            return PolicyDecision.allow()
-
         # New file: allow creation without reading
-        if not fs.exists(path):
+        if not context.filesystem.exists(path):
             return PolicyDecision.allow()
 
         # Existing file: check if it was read

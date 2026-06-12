@@ -329,6 +329,10 @@ def test_loop_handles_visibility_expansion() -> None:
         assert len(msgs) == 1
         assert msgs[0].body.success is True
         assert adapter._call_count == 2  # 1 visibility expansion + 1 success
+        # One sandbox lease spans every retry round: files written before
+        # the expansion survive into the next round.
+        assert len(adapter._sandboxes) == 2
+        assert adapter._sandboxes[0] is adapter._sandboxes[1]
         msgs[0].acknowledge()
     finally:
         requests.close()

@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ...filesystem import Filesystem
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ..core import PromptEvaluationError
@@ -96,16 +95,6 @@ def update_token_stats(
         )
 
 
-def _resolve_filesystem(hook_context: HookContext) -> Filesystem | None:
-    """Resolve filesystem from prompt resources, returning None if unavailable."""
-    try:
-        result: Filesystem = hook_context.resources.get(Filesystem)
-    except (LookupError, AttributeError, RuntimeError):
-        return None
-    else:
-        return result
-
-
 def check_task_completion(
     checker: Any,  # noqa: ANN401
     round_messages: list[Any],
@@ -124,7 +113,7 @@ def check_task_completion(
         session=hook_context.session,
         tentative_output=tentative_output,
         stop_reason="message_stream_complete",
-        filesystem=_resolve_filesystem(hook_context),
+        sandbox=hook_context.sandbox,
     )
 
     result = checker.check(completion_context)

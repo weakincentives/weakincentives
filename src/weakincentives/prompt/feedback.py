@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from ..filesystem import Filesystem
     from ..runtime.events import ToolInvoked
     from ..runtime.session.protocols import SessionProtocol
+    from ..sandbox import Sandbox
     from ._prompt_resources import PromptResources
     from .protocols import PromptProtocol
 
@@ -169,11 +170,13 @@ class FeedbackContext:
     Attributes:
         session: The current session for state access.
         prompt: The prompt being executed.
+        sandbox: The open execution environment.
         deadline: Optional deadline for time-aware feedback.
     """
 
     session: SessionProtocol
     prompt: PromptProtocol[Any]
+    sandbox: Sandbox
     deadline: Deadline | None = None
 
     @property
@@ -191,11 +194,9 @@ class FeedbackContext:
         return self.prompt.resources
 
     @property
-    def filesystem(self) -> Filesystem | None:
-        """Return the filesystem resource if available, otherwise None."""
-        from ..filesystem import Filesystem
-
-        return self.resources.get_optional(Filesystem)
+    def filesystem(self) -> Filesystem:
+        """Return the sandbox's filesystem facet."""
+        return self.sandbox.filesystem
 
     def _feedback_for_prompt(self) -> Sequence[Feedback]:
         """Return all feedback for the current prompt."""
@@ -495,8 +496,7 @@ def _should_trigger(
     # Check file creation condition
     if trigger.on_file_created is not None:
         filename = trigger.on_file_created.filename
-        fs = context.filesystem
-        if fs is not None and fs.exists(filename):
+        if context.filesystem.exists(filename):
             # Check if trigger has already fired
             state = context.session[FileCreatedTriggerState].latest()
             fired: frozenset[str] = state.fired_filenames if state else frozenset[str]()
@@ -586,6 +586,7 @@ def collect_feedback(
     *,
     prompt: PromptProtocol[Any],
     session: SessionProtocol,
+    sandbox: Sandbox,
     deadline: Deadline | None = None,
 ) -> str | None:
     """Collect feedback from providers configured on the prompt.
@@ -596,6 +597,7 @@ def collect_feedback(
     Args:
         prompt: The prompt with feedback_providers configured.
         session: The current session for state access and feedback storage.
+        sandbox: The open execution environment for filesystem-aware triggers.
         deadline: Optional deadline for time-aware feedback providers.
 
     Returns:
@@ -605,6 +607,7 @@ def collect_feedback(
         >>> feedback_text = collect_feedback(
         ...     prompt=prompt,
         ...     session=session,
+        ...     sandbox=sandbox,
         ...     deadline=deadline,
         ... )
         >>> if feedback_text:
@@ -614,6 +617,7 @@ def collect_feedback(
     context = FeedbackContext(
         session=session,
         prompt=prompt,
+        sandbox=sandbox,
         deadline=deadline,
     )
     return run_feedback_providers(

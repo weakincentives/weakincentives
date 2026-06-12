@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters._shared._visibility_signal import VisibilityExpansionSignal
 from weakincentives.adapters.codex_app_server._protocol import (
     consume_messages,
@@ -118,7 +119,7 @@ class TestEvaluateEndToEnd:
     def test_simple_evaluation(self) -> None:
         """Test basic prompt evaluation with mocked client."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, dispatcher = _make_session()
 
@@ -167,7 +168,7 @@ class TestEvaluateEndToEnd:
 
     def test_evaluation_with_token_usage(self) -> None:
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -213,7 +214,7 @@ class TestEvaluateEndToEnd:
     def test_client_error_wrapped(self) -> None:
         """CodexClientError is wrapped in PromptEvaluationError."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -231,7 +232,7 @@ class TestEvaluateEndToEnd:
     def test_generic_error_wrapped(self) -> None:
         """Generic exceptions are wrapped in PromptEvaluationError."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -249,7 +250,7 @@ class TestEvaluateEndToEnd:
     def test_prompt_eval_error_passthrough(self) -> None:
         """PromptEvaluationError passes through unwrapped."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -286,7 +287,7 @@ class TestEvaluateEndToEnd:
     def test_stream_eof_before_turn_completed(self) -> None:
         """Stream ends with messages but no turn/completed -> raises."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -318,7 +319,7 @@ class TestEvaluateEndToEnd:
     def test_stream_eof_empty_stream(self) -> None:
         """Zero messages in stream -> raises."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -341,7 +342,7 @@ class TestEvaluateEndToEnd:
     def test_budget_creates_tracker(self) -> None:
         """Budget without tracker creates one automatically."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -388,7 +389,7 @@ class TestEvaluateEndToEnd:
             raise RuntimeError("Subscriber error")
 
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, dispatcher = _make_session()
         dispatcher.subscribe(RenderedTools, failing_handler)
@@ -472,7 +473,7 @@ class TestEvaluateWithTools:
         prompt = Prompt(template)
 
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, dispatcher = _make_session()
 
@@ -516,7 +517,7 @@ class TestStreamTurnWithDeadline:
     def test_stream_turn_with_active_deadline(self) -> None:
         """Watchdog task is created and cancelled after turn completes."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -586,7 +587,7 @@ class TestVisibilitySignalPassthrough:
 
     def test_visibility_expansion_passthrough(self) -> None:
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -673,6 +674,7 @@ class TestConsumeMessagesVisibilitySignal:
                 accumulated_text="",
                 usage=None,
                 visibility_signal=signal,
+                sandbox=make_memory_sandbox(),
             )
             # Should return empty text (broke early, no turn/completed text)
             assert text == ""

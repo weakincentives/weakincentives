@@ -72,7 +72,6 @@ class CodexAppServerFixture:
         return CodexAppServerAdapter(
             model_config=CodexAppServerModelConfig(model=self.get_model()),
             client_config=CodexAppServerClientConfig(
-                cwd=str(tmp_path),
                 approval_policy="never",
             ),
         )
@@ -92,7 +91,6 @@ class CodexAppServerFixture:
         return CodexAppServerAdapter(
             model_config=CodexAppServerModelConfig(model=self.get_model()),
             client_config=CodexAppServerClientConfig(
-                cwd=str(tmp_path),
                 approval_policy="never",
                 sandbox_mode=sandbox_mode,
             ),
@@ -113,7 +111,6 @@ class CodexAppServerFixture:
         return CodexAppServerAdapter(
             model_config=CodexAppServerModelConfig(model=self.get_model()),
             client_config=CodexAppServerClientConfig(
-                cwd=str(tmp_path),
                 approval_policy="never",
                 env=dict(env),
             ),

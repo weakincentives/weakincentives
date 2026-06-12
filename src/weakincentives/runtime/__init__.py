@@ -87,10 +87,10 @@ Tool execution supports transactional semantics with automatic rollback::
 
     from weakincentives.runtime import tool_transaction, restore_snapshot
 
-    with tool_transaction(session, resources.context) as snapshot:
+    with tool_transaction(session, sandbox) as snapshot:
         result = execute_tool(...)
         if not result.success:
-            restore_snapshot(session, resources.context, snapshot)
+            restore_snapshot(session, sandbox, snapshot)
 
 Exports
 -------
@@ -138,10 +138,10 @@ Exports
     - :class:`Watchdog` - Detects and terminates stuck workers
 
 **Transactions:**
-    - :func:`create_snapshot` - Capture session and resource state
+    - :func:`create_snapshot` - Capture (session, sandbox) state
     - :func:`restore_snapshot` - Restore from composite snapshot
     - :func:`tool_transaction` - Context manager for atomic tool execution
-    - :class:`CompositeSnapshot` - Combined session and resource snapshot
+    - :class:`CompositeSnapshot` - Combined session and sandbox snapshot
     - :class:`PendingToolTracker` - Manages in-flight tool transactions
 
 **Logging:**

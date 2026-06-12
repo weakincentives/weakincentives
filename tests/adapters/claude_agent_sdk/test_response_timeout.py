@@ -20,6 +20,7 @@ from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.runtime.session import Session
@@ -48,6 +49,7 @@ class TestResolveResponseWaitTimeout:
             adapter_name="test",
             prompt_name="test",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
 
     def test_deadline_already_expired_returns_stop(self, session: Session) -> None:

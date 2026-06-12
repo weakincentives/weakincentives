@@ -14,18 +14,14 @@
 
 from __future__ import annotations
 
-import shutil
-import tempfile
 from collections.abc import Mapping
 from datetime import datetime
-from pathlib import Path
-from typing import Any, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 from uuid import uuid4
 
-from ...budget import Budget, BudgetTracker
+from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK, AsyncSleeper
 from ...deadlines import Deadline
-from ...filesystem import Filesystem, HostBackend
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
 from ...runtime.events import PromptRendered
@@ -34,6 +30,7 @@ from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.watchdog import Heartbeat
+from ...sandbox import SandboxProvider
 from ...types import AdapterName
 from .._shared import run_async
 from .._shared._bridge import create_bridged_tools
@@ -49,6 +46,9 @@ from .config import (
     CodexAppServerClientConfig,
     CodexAppServerModelConfig,
 )
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 __all__ = [
     "CODEX_APP_SERVER_ADAPTER_NAME",
@@ -82,8 +82,9 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         model_config: CodexAppServerModelConfig | None = None,
         client_config: CodexAppServerClientConfig | None = None,
         async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
+        sandbox_provider: SandboxProvider | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(sandbox_provider=sandbox_provider)
         self._model_config = model_config or CodexAppServerModelConfig()
         self._client_config = client_config or CodexAppServerClientConfig()
         self._async_sleeper = async_sleeper
@@ -96,7 +97,6 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 "transport": self._client_config.transport,
                 "codex_bin": self._client_config.codex_bin,
                 "remote_url": self._client_config.remote_url,
-                "cwd": self._client_config.cwd,
                 "approval_policy": self._client_config.approval_policy,
                 "sandbox_mode": self._client_config.sandbox_mode,
                 "ephemeral": self._client_config.ephemeral,
@@ -110,39 +110,27 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         return CODEX_APP_SERVER_ADAPTER_NAME
 
     @override
-    def evaluate[OutputT](
+    def _evaluate[OutputT](
         self,
         prompt: Prompt[OutputT],
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
-        """Evaluate prompt using the Codex App Server."""
-        if budget and not budget_tracker:
-            budget_tracker = BudgetTracker(budget)
-
-        effective_deadline = deadline or (budget.deadline if budget else None)
-        prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
-
-        if effective_deadline and effective_deadline.remaining().total_seconds() <= 0:
-            raise PromptEvaluationError(
-                message="Deadline expired before Codex invocation",
-                prompt_name=prompt_name,
-                phase="request",
-            )
-
+        """Evaluate prompt using the Codex App Server against the open sandbox."""
         return run_async(
             self._evaluate_async(
                 prompt,
                 session=session,
-                deadline=effective_deadline,
+                deadline=deadline,
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
+                sandbox=sandbox,
             )
         )
 
@@ -155,9 +143,10 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat | None,
         run_context: RunContext | None,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
-        rendered = prompt.render(session=session)
+        rendered = prompt.render(session=session, sandbox=sandbox)
         prompt_text = rendered.text
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
 
@@ -204,52 +193,19 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 },
             )
 
-        # Determine CWD
-        effective_cwd, temp_workspace_dir, prompt = self._resolve_cwd(prompt)
-
-        try:
-            with prompt.resources:
-                return await self._run_codex(
-                    prompt=prompt,
-                    prompt_name=prompt_name,
-                    prompt_text=prompt_text,
-                    rendered=rendered,
-                    session=session,
-                    deadline=deadline,
-                    budget_tracker=budget_tracker,
-                    heartbeat=heartbeat,
-                    run_context=run_context,
-                    effective_cwd=effective_cwd,
-                )
-        finally:
-            if temp_workspace_dir:
-                shutil.rmtree(temp_workspace_dir, ignore_errors=True)
-
-    def _resolve_cwd[OutputT](
-        self, prompt: Prompt[OutputT]
-    ) -> tuple[str, str | None, Prompt[OutputT]]:
-        """Determine the effective cwd and optionally bind a filesystem.
-
-        Returns (effective_cwd, temp_workspace_dir_or_none, maybe_rebound_prompt).
-        """
-        temp_workspace_dir: str | None = None
-        effective_cwd: str | None = self._client_config.cwd
-
-        if prompt.filesystem() is None:
-            if effective_cwd is None:
-                temp_workspace_dir = tempfile.mkdtemp(prefix="wink-codex-")
-                effective_cwd = temp_workspace_dir
-            filesystem = Filesystem.host(effective_cwd)
-            prompt = prompt.bind(resources={Filesystem: filesystem})
-        elif effective_cwd is None:
-            fs = prompt.filesystem()
-            if fs is not None and isinstance(fs.backend, HostBackend):
-                effective_cwd = fs.root
-
-        if effective_cwd is None:
-            effective_cwd = str(Path.cwd().resolve())
-
-        return effective_cwd, temp_workspace_dir, prompt
+        with prompt.resources:
+            return await self._run_codex(
+                prompt=prompt,
+                prompt_name=prompt_name,
+                prompt_text=prompt_text,
+                rendered=rendered,
+                session=session,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=heartbeat,
+                run_context=run_context,
+                sandbox=sandbox,
+            )
 
     @staticmethod
     def _setup_skill_env(
@@ -287,10 +243,11 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat | None,
         run_context: RunContext | None,
-        effective_cwd: str,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Run the full Codex protocol flow."""
         visibility_signal = VisibilityExpansionSignal()
+        effective_cwd = sandbox.root
 
         bridged_tools = create_bridged_tools(
             rendered.tools,
@@ -305,6 +262,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
             heartbeat=heartbeat,
             run_context=run_context,
             visibility_signal=visibility_signal,
+            sandbox=sandbox,
         )
 
         dynamic_tool_specs = bridged_tools_to_dynamic_specs(bridged_tools)
@@ -345,6 +303,7 @@ class CodexAppServerAdapter(ProviderAdapter[Any]):
                 visibility_signal=visibility_signal,
                 async_sleeper=self._async_sleeper,
                 prompt=cast(Any, prompt),
+                sandbox=sandbox,
             )
         except VisibilityExpansionRequired:
             raise

@@ -31,10 +31,13 @@ class ACPClientConfig:
 
     Generic defaults that work with any ACP-compatible agent binary.
 
+    The harness working directory is not configurable here: it is always
+    the root of the sandbox opened for the evaluation (declared via the
+    prompt template's ``WorkspaceConfig``).
+
     Attributes:
         agent_bin: Executable to spawn.
         agent_args: Arguments passed to the agent binary.
-        cwd: Working directory (must be absolute; defaults to Path.cwd()).
         env: Extra environment variables merged into the subprocess env.
         startup_timeout_s: Max time for the initialize handshake.
         permission_mode: How to handle permissions in the ACP agent.
@@ -45,7 +48,6 @@ class ACPClientConfig:
 
     agent_bin: str = "opencode"
     agent_args: tuple[str, ...] = ("acp",)
-    cwd: str | None = None
     env: Mapping[str, str] | None = None
     startup_timeout_s: float = 10.0
     permission_mode: Literal["auto", "deny", "prompt"] = "auto"

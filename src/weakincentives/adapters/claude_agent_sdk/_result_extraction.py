@@ -18,12 +18,10 @@ response messages, and for validating completion requirements.
 
 from __future__ import annotations
 
-import contextlib
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
-from ...filesystem import Filesystem
 from ...prompt import RenderedPrompt
 from ...prompt.protocols import PromptProtocol
 from ...runtime.events.types import TokenUsage
@@ -35,6 +33,9 @@ from ._schema_normalization import (
     _normalize_claude_output_schema,  # pyright: ignore[reportPrivateUsage]
 )
 from ._task_completion import TaskCompletionContext
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "claude_agent_sdk"}
@@ -181,6 +182,7 @@ def verify_task_completion(  # noqa: PLR0913
     budget_tracker: BudgetTracker | None = None,
     prompt: PromptProtocol[Any] | None = None,
     adapter: Any = None,  # noqa: ANN401
+    sandbox: Sandbox,
 ) -> None:
     """Verify task completion if checker is configured.
 
@@ -194,8 +196,9 @@ def verify_task_completion(  # noqa: PLR0913
         prompt_name: Name of the prompt for error reporting.
         deadline: Optional deadline to check for exhaustion.
         budget_tracker: Optional budget tracker to check for exhaustion.
-        prompt: Optional prompt for filesystem access and checker resolution.
+        prompt: Optional prompt for checker resolution.
         adapter: The adapter instance (passed through to context).
+        sandbox: Execution environment for file-based completion checks.
     """
     from ._task_completion import resolve_checker
 
@@ -228,19 +231,11 @@ def verify_task_completion(  # noqa: PLR0913
             )
             return
 
-    # Get filesystem from prompt resources if available.
-    # checker is resolved from prompt so prompt is always set here,
-    # but guard defensively for type safety.
-    filesystem: Filesystem | None = None
-    if prompt is not None:  # pragma: no branch - invariant of resolve_checker
-        with contextlib.suppress(LookupError, AttributeError):
-            filesystem = prompt.resources.get(Filesystem)
-
     context = TaskCompletionContext(
         session=session,
         tentative_output=output,
         stop_reason=stop_reason or "structured_output",
-        filesystem=filesystem,
+        sandbox=sandbox,
         adapter=adapter,
     )
     completion = checker.check(context)

@@ -71,10 +71,16 @@ At `src/weakincentives/debug/bundle.py`:
 1. Receive `AgentLoopRequest` or direct `execute()` call
 1. `prepare(request)` -> `(Prompt, Session)`
 1. Resolve effective settings (budget, deadline, resources)
-1. Evaluate with adapter
-1. On `VisibilityExpansionRequired`: apply overrides to session, retry step 4
+1. Open one `AgentRuntime` via `adapter.runtime(prompt)`
+1. Evaluate through the runtime
+1. On `VisibilityExpansionRequired`: apply overrides to session, retry
+   step 5 — the runtime's sandbox spans every retry round, so files
+   written in one round are visible to the next
 1. `finalize(prompt, session, output)` -> `OutputT` (post-processing/transformation)
-1. `prompt.cleanup()` - Release section resources
+1. In bundled execution: capture the still-open sandbox filesystem into
+   the debug bundle
+1. Release the runtime (closing its sandbox); `prompt.cleanup()` -
+   Release section resources
 1. Return `AgentLoopResult` (with `output` on success, `error` on failure)
 
 ### Visibility Expansion Retry Limit

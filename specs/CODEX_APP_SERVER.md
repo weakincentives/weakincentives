@@ -193,7 +193,6 @@ Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
 | `codex_bin` | `str` | `"codex"` | Executable to spawn (managed modes only) |
 | `remote_url` | `str \| None` | `None` | WebSocket URL of an external server (e.g. `ws://10.0.1.5:4500`). When set, no subprocess is spawned |
 | `ws_auth_token` | `str \| None` | `None` | Bearer token for WebSocket auth. Sent as `Authorization: Bearer TOKEN` during upgrade |
-| `cwd` | `str \| None` | `None` | Working directory (must be absolute; defaults to `Path.cwd().resolve()`) |
 | `env` | `Mapping[str, str] \| None` | `None` | Extra environment variables for the subprocess (managed modes only) |
 | `suppress_stderr` | `bool` | `True` | Capture stderr for debugging (stdio mode only) |
 | `startup_timeout_s` | `float` | `10.0` | Max time for initialize handshake |
@@ -218,10 +217,11 @@ Tool bridging reuses `BridgedTool` and `create_bridged_tools()` from
   WebSocket. **No subprocess is spawned or managed.** `codex_bin`, `env`, and
   `suppress_stderr` are ignored.
 
-> **CWD requirement:** `thread/start` requires `cwd` to be an absolute path. If
-> `None`, the adapter resolves to `Path.cwd().resolve()`. When connecting to a
-> remote server, `cwd` refers to a path on the **remote** machine — the caller
-> is responsible for ensuring it exists and is accessible.
+> **CWD:** `thread/start` always receives the root of the sandbox the
+> adapter opens for the evaluation (from the prompt template's
+> `WorkspaceConfig`; an empty sandbox when none is declared). When connecting
+> to a remote server the local sandbox root is unlikely to be valid on the
+> remote machine — see Known Gaps.
 
 > **Approval handling:** `approval_policy="never"` means the adapter auto-accepts
 > all approvals. For non-interactive WINK execution, `"never"` is the default
@@ -545,38 +545,36 @@ When a tool raises `VisibilityExpansionRequired`:
 
 ## Workspace Management
 
-### WorkspaceSection
+### Sandbox
 
-At `src/weakincentives/prompt/workspace.py` (exported from `weakincentives.prompt`):
-
-- Accepts `HostMount` tuples, `allowed_host_roots`, max-bytes budgets
-- Materializes temporary directory with copied files (with glob filtering,
-  symlink safety, and byte budget enforcement)
-- Exposes `temp_dir` for `CodexAppServerClientConfig.cwd`
-- Renders a provider-agnostic summary of mounts and budgets
-- Exposes cleanup via `.cleanup()` with reference counting for cloned sections
-- Provides `workspace_fingerprint` for session reuse validation
-- Binds a host-backed `Filesystem` resource scoped to the temp directory
+The prompt template declares environment intent via `WorkspaceConfig`
+(mounts, allowed roots, byte budgets — see `specs/SANDBOX.md`). The base
+adapter's `AgentRuntime` materializes it (default `LocalSandboxProvider`;
+callers may hold one runtime across evaluations — see `specs/ADAPTERS.md`);
+`thread/start` runs with `cwd = sandbox.root` and the workspace preview is
+rendered from the opened sandbox. A failed bridged tool rolls back session
+and sandbox in one transaction.
 
 > **Remote servers:** When using WebSocket mode to connect to a remote Codex
-> App Server, `cwd` refers to a directory on the remote machine. Workspace
-> materialization (temp dirs, file copies) happens locally and the resulting
-> path is sent to the remote server. The caller must ensure the remote server
-> has access to the specified path — typically by using a shared filesystem,
-> pre-staging files, or specifying a path that already exists on the remote.
+> App Server, the sandbox is materialized locally and its path is sent to
+> the remote server, where it is unlikely to be valid. Remote sandboxes are
+> a planned capability (`refactor/M4.md`).
 
 ## Execution Flow
 
 ### 1. Budget/Deadline Setup
 
-- Create `BudgetTracker` if budget provided
-- Derive deadline from argument or `budget.deadline`
-- Raise `PromptEvaluationError(phase="request")` if already expired
+Owned by `AgentRuntime.evaluate` (see `specs/ADAPTERS.md`): it creates a
+`BudgetTracker` when only a budget is provided, derives the effective
+deadline from the argument or `budget.deadline`, and raises
+`PromptEvaluationError(phase="request")` if already expired. `_evaluate`
+receives only the resolved deadline and tracker.
 
 ### 2. Render Prompt
 
-1. `prompt.render(session=session)` → `RenderedPrompt` (text + tools + output_type)
-1. Resolve CWD and bind a host-backed `Filesystem` resource if prompt has no filesystem
+1. `prompt.render(session=session, sandbox=sandbox)` → `RenderedPrompt`
+   (text + tools + output_type); the workspace preview resolves from the
+   open sandbox at render time
 1. Emit `PromptRendered`
 
 ### 3. Build Dynamic Tool Specs
@@ -969,13 +967,11 @@ non-loopback bearer auth.
 
 ### Implicit local `cwd` in external mode
 
-When `remote_url` is set (external WebSocket mode), the adapter's
-`_resolve_cwd()` logic still falls back to creating a local temp directory or
-using the local `Path.cwd()`. That local path is then sent to the remote
-server's `thread/start`, where it is unlikely to be valid. Callers using
-external mode **must** set an explicit `cwd` that exists on the remote server.
-A future version should reject implicit `cwd` resolution when `remote_url` is
-configured.
+When `remote_url` is set (external WebSocket mode), the adapter still opens
+a **local** sandbox and sends its root to the remote server's
+`thread/start`, where it is unlikely to be valid. External mode therefore
+requires a remote sandbox provider; this lands with `refactor/M4.md`
+(remote sandboxes).
 
 ### Hard-coded managed-WS startup timeout
 

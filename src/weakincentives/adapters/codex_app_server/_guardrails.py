@@ -25,10 +25,11 @@ from ...prompt.feedback import collect_feedback
 from ...prompt.task_completion import TaskCompletionContext
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
-from .._shared._guardrails import accumulate_usage, resolve_filesystem
+from .._shared._guardrails import accumulate_usage
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol
+    from ...sandbox import Sandbox
 
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "codex_app_server"}
@@ -38,33 +39,36 @@ __all__ = [
     "accumulate_usage",
     "append_feedback",
     "check_task_completion",
-    "resolve_filesystem",
 ]
 
 
-def append_feedback(
+def append_feedback(  # noqa: PLR0913
     content_items: list[dict[str, str]],
     *,
     is_error: bool,
     prompt: PromptProtocol[Any] | None,
     session: SessionProtocol | None,
     deadline: Deadline | None,
+    sandbox: Sandbox,
 ) -> None:
     """Collect and append feedback after a successful tool call."""
     if is_error or prompt is None or session is None:
         return
-    feedback_text = collect_feedback(prompt=prompt, session=session, deadline=deadline)
+    feedback_text = collect_feedback(
+        prompt=prompt, session=session, deadline=deadline, sandbox=sandbox
+    )
     if feedback_text:
         content_items.append({"type": "inputText", "text": feedback_text})
 
 
-def check_task_completion(  # noqa: PLR0911
+def check_task_completion(  # noqa: PLR0911, PLR0913
     *,
     prompt: PromptProtocol[Any] | None,
     session: SessionProtocol,
     accumulated_text: str | None,
     deadline: Deadline | None,
     budget_tracker: BudgetTracker | None,
+    sandbox: Sandbox,
 ) -> tuple[bool, str | None]:
     """Check if the task is complete according to the prompt's checker.
 
@@ -100,11 +104,10 @@ def check_task_completion(  # noqa: PLR0911
             )
             return False, None
 
-    filesystem = resolve_filesystem(prompt)
     context = TaskCompletionContext(
         session=session,
         tentative_output=accumulated_text,
-        filesystem=filesystem,
+        sandbox=sandbox,
     )
     result = checker.check(context)
 

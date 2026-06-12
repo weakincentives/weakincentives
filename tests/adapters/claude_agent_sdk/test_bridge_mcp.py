@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._bridge import (
     BridgedTool,
     create_mcp_server,
@@ -51,6 +52,15 @@ def _make_prompt_with_resources(
         PromptTemplate.create(ns="tests", key="bridge-test")
     )
     prompt = prompt.bind(resources=resources)
+    prompt.resources.__enter__()
+    return prompt
+
+
+def _make_prompt() -> Prompt[object]:
+    """Create a prompt in active context."""
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate.create(ns="tests", key="bridge-test")
+    )
     prompt.resources.__enter__()
     return prompt
 
@@ -129,6 +139,7 @@ class TestMakeAsyncHandler:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         async_handler = make_async_handler(bridged)
@@ -157,6 +168,7 @@ class TestMakeAsyncHandler:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         async_handler = make_async_handler(bridged)
@@ -187,6 +199,7 @@ class TestMakeAsyncHandler:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         async_handler = make_async_handler(bridged)
@@ -234,6 +247,7 @@ class TestCreateMcpServer:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         mock_sdk_tool = MagicMock(return_value=lambda f: f)
@@ -316,6 +330,7 @@ class TestVisibilityExpansionRequiredPropagation:
             deadline=None,
             budget_tracker=None,
             visibility_signal=visibility_signal,
+            sandbox=make_memory_sandbox(),
         )
 
         # Should return success response (not error - the tool worked correctly)
@@ -377,6 +392,7 @@ class TestVisibilityExpansionRequiredPropagation:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         # Should return success response (tool worked correctly)
@@ -426,6 +442,7 @@ class TestVisibilityExpansionRequiredPropagation:
             deadline=None,
             budget_tracker=None,
             visibility_signal=visibility_signal,
+            sandbox=make_memory_sandbox(),
         )
 
         async_handler = make_async_handler(bridged)
@@ -439,10 +456,10 @@ class TestVisibilityExpansionRequiredPropagation:
         assert stored_exc is not None
         assert stored_exc.section_keys == ("a.b",)
 
-    def test_passes_filesystem_to_tool_context(
+    def test_passes_sandbox_to_tool_context(
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
-        """Test that filesystem is accessed via prompt resources."""
+        """Test that the sandbox's filesystem facet reaches the tool context."""
         from weakincentives.filesystem import Filesystem
 
         captured_filesystem: list[object] = []
@@ -462,7 +479,8 @@ class TestVisibilityExpansionRequiredPropagation:
         )
 
         test_filesystem = Filesystem.in_memory()
-        prompt = _make_prompt_with_resources({Filesystem: test_filesystem})
+        sandbox = make_memory_sandbox(test_filesystem)
+        prompt = _make_prompt()
 
         bridged = BridgedTool(
             name="capture",
@@ -478,6 +496,7 @@ class TestVisibilityExpansionRequiredPropagation:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=sandbox,
         )
 
         _ = bridged({"query": "test"})

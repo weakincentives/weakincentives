@@ -27,7 +27,6 @@ class TestOpenCodeACPClientConfig:
         opencode = OpenCodeACPClientConfig()
         assert opencode.agent_bin == base.agent_bin
         assert opencode.agent_args == base.agent_args
-        assert opencode.cwd == base.cwd
         assert opencode.env == base.env
         assert opencode.startup_timeout_s == base.startup_timeout_s
         assert opencode.permission_mode == base.permission_mode

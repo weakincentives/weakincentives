@@ -45,10 +45,10 @@ class TestOpenCodeAdapterDefaults:
     def test_custom_configs(self) -> None:
         adapter = OpenCodeACPAdapter(
             adapter_config=OpenCodeACPAdapterConfig(model_id="test-model"),
-            client_config=OpenCodeACPClientConfig(cwd="/tmp/work"),
+            client_config=OpenCodeACPClientConfig(env={"FOO": "bar"}),
         )
         assert adapter._adapter_config.model_id == "test-model"
-        assert adapter._client_config.cwd == "/tmp/work"
+        assert adapter._client_config.env == {"FOO": "bar"}
 
 
 class TestValidateModel:

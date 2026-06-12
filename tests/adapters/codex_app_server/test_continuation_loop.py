@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters._shared._visibility_signal import VisibilityExpansionSignal
 from weakincentives.adapters.codex_app_server._guardrails import accumulate_usage
 from weakincentives.adapters.codex_app_server._protocol import execute_protocol
@@ -122,6 +123,7 @@ class TestContinuationLoop:
                 run_context=None,
                 visibility_signal=signal,
                 prompt=None,
+                sandbox=make_memory_sandbox(),
             )
             assert text == "hello"
 
@@ -184,6 +186,7 @@ class TestContinuationLoop:
                 run_context=None,
                 visibility_signal=signal,
                 prompt=mock_prompt,
+                sandbox=make_memory_sandbox(),
             )
             assert text == "second response"
             assert mock_checker.check.call_count == 2
@@ -246,6 +249,7 @@ class TestContinuationLoop:
                 run_context=None,
                 visibility_signal=signal,
                 prompt=mock_prompt,
+                sandbox=make_memory_sandbox(),
             )
             # 1 initial + 10 continuations = 11 turns
             assert mock_checker.check.call_count == 11
@@ -295,6 +299,7 @@ class TestContinuationLoop:
                 run_context=None,
                 visibility_signal=signal,
                 prompt=mock_prompt,
+                sandbox=make_memory_sandbox(),
             )
             assert text == "response"
             assert mock_checker.check.call_count == 1
@@ -367,6 +372,7 @@ class TestContinuationLoop:
                 visibility_signal=signal,
                 prompt=mock_prompt,
                 async_sleeper=clock,
+                sandbox=make_memory_sandbox(),
             )
             assert text == "response"
             # Checker should not have been called because deadline was exhausted
@@ -463,6 +469,7 @@ class TestContinuationLoop:
                 run_context=None,
                 visibility_signal=signal,
                 prompt=mock_prompt,
+                sandbox=make_memory_sandbox(),
             )
             # Usage should be accumulated: 10+30=40, 5+15=20
             assert usage is not None
@@ -506,6 +513,7 @@ class TestContinuationLoop:
                     run_context=None,
                     visibility_signal=signal,
                     prompt=None,
+                    sandbox=make_memory_sandbox(),
                 )
 
         asyncio.run(_run())
@@ -575,6 +583,7 @@ class TestContinuationLoop:
                     run_context=None,
                     visibility_signal=signal,
                     prompt=mock_prompt,
+                    sandbox=make_memory_sandbox(),
                 )
             # Checker should not have been called — loop broke early.
             mock_checker.check.assert_not_called()

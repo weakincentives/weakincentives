@@ -30,6 +30,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     DeadlineFeedback,
@@ -149,7 +150,9 @@ class TestShouldTrigger:
                 )
             )
 
-        return FeedbackContext(session=session, prompt=prompt)
+        return FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
     def test_returns_false_for_empty_trigger(self) -> None:
         trigger = FeedbackTrigger()
@@ -255,7 +258,9 @@ class TestRunFeedbackProviders:
         for i in range(tool_calls):
             session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
 
-        return FeedbackContext(session=session, prompt=prompt)
+        return FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
     def test_returns_none_when_no_providers(self) -> None:
         context = self._make_context(tool_calls=5)
@@ -408,7 +413,9 @@ class TestRunFeedbackProviders:
             # Add tool calls to reach count n
             while len(session[ToolInvoked].all()) < n:
                 session.dispatcher.dispatch(make_tool_invoked("tool"))
-            context = FeedbackContext(session=session, prompt=prompt)
+            context = FeedbackContext(
+                session=session, prompt=prompt, sandbox=make_memory_sandbox()
+            )
             return run_feedback_providers(providers=configs, context=context)
 
         # At call 3: A triggers (3 calls since start), B doesn't (only 3, needs 5)
@@ -453,7 +460,12 @@ class TestDeadlineFeedback:
     def _make_context(self, deadline: Deadline | None = None) -> FeedbackContext:
         session = make_session()
         prompt = make_prompt()
-        return FeedbackContext(session=session, prompt=prompt, deadline=deadline)
+        return FeedbackContext(
+            session=session,
+            prompt=prompt,
+            sandbox=make_memory_sandbox(),
+            deadline=deadline,
+        )
 
     def test_name_property(self) -> None:
         provider = DeadlineFeedback()
@@ -515,6 +527,7 @@ class TestDeadlineFeedback:
         mock_context = FeedbackContext(
             session=session,
             prompt=prompt,
+            sandbox=make_memory_sandbox(),
             deadline=mock_deadline,  # type: ignore[arg-type]
         )
 

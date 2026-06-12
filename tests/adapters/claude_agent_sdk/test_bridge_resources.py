@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._bridge import (
     BridgedTool,
     create_bridged_tools,
@@ -103,11 +104,11 @@ def mock_adapter() -> MagicMock:
     return MagicMock()
 
 
-class TestCreateBridgedToolsWithFilesystem:
-    def test_passes_filesystem_to_bridged_tools(
+class TestCreateBridgedToolsWithSandbox:
+    def test_passes_sandbox_filesystem_to_bridged_tools(
         self, session: Session, mock_adapter: MagicMock
     ) -> None:
-        """Test that create_bridged_tools passes filesystem via prompt resources."""
+        """Test that create_bridged_tools threads the sandbox into contexts."""
         from weakincentives.filesystem import Filesystem
 
         captured_filesystem: list[object] = []
@@ -127,7 +128,8 @@ class TestCreateBridgedToolsWithFilesystem:
         )
 
         test_filesystem = Filesystem.in_memory()
-        prompt = _make_prompt_with_resources({Filesystem: test_filesystem})
+        sandbox = make_memory_sandbox(test_filesystem)
+        prompt = _make_prompt_with_resources({})
 
         bridged_tools = create_bridged_tools(
             (capture_tool,),
@@ -137,6 +139,7 @@ class TestCreateBridgedToolsWithFilesystem:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=sandbox,
         )
 
         assert len(bridged_tools) == 1
@@ -191,6 +194,7 @@ class TestBudgetTrackerInResourceRegistry:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,  # Now unused; tracker is in resources
+            sandbox=make_memory_sandbox(),
         )
 
         _ = bridged({"query": "test"})
@@ -236,6 +240,7 @@ class TestBudgetTrackerInResourceRegistry:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,  # Now unused; tracker is in resources
+            sandbox=make_memory_sandbox(),
         )
 
         assert len(bridged_tools) == 1
@@ -291,6 +296,7 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({"query": "test"})
@@ -338,6 +344,7 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({"query": "test"})
@@ -371,6 +378,7 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         # Pass invalid args to trigger validation error
@@ -429,6 +437,7 @@ class TestBridgedToolTransactionalExecution:
             deadline=None,
             budget_tracker=None,
             visibility_signal=visibility_signal,
+            sandbox=make_memory_sandbox(),
         )
 
         # Should return success response (tool worked correctly)
@@ -442,12 +451,12 @@ class TestBridgedToolTransactionalExecution:
         stored_exc = visibility_signal.get_and_clear()
         assert stored_exc is not None
 
-    def test_no_filesystem_when_not_in_resources(
+    def test_filesystem_comes_from_sandbox(
         self,
         session: Session,
         mock_adapter: MagicMock,
     ) -> None:
-        """Test that when no filesystem is in resources, context.filesystem is None."""
+        """context.filesystem is the sandbox's filesystem facet."""
         captured_filesystem: list[object] = []
 
         def capture_handler(
@@ -467,6 +476,7 @@ class TestBridgedToolTransactionalExecution:
             PromptTemplate.create(ns="tests", key="no-fs-test")
         )
         prompt.resources.__enter__()
+        sandbox = make_memory_sandbox()
 
         bridged = BridgedTool(
             name="capture_tool",
@@ -482,10 +492,11 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=sandbox,
         )
 
         result = bridged({"query": "test"})
 
         assert result["isError"] is False
-        # Without filesystem in resources, context.filesystem should be None
-        assert captured_filesystem == [None]
+        # context.filesystem is always the sandbox facet.
+        assert captured_filesystem == [sandbox.filesystem]

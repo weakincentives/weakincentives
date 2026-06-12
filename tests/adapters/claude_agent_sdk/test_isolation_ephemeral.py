@@ -25,7 +25,6 @@ from weakincentives.adapters.claude_agent_sdk._ephemeral_home import (
 from weakincentives.adapters.claude_agent_sdk.isolation import (
     IsolationConfig,
     NetworkPolicy,
-    SandboxConfig,
 )
 
 
@@ -103,9 +102,7 @@ class TestEphemeralHomeSettingsGeneration:
             ]
 
     def test_sandbox_disabled(self) -> None:
-        config = IsolationConfig(
-            sandbox=SandboxConfig(enabled=False, bash_auto_allow=False)
-        )
+        config = IsolationConfig(sandbox_enabled=False, bash_auto_allow=False)
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["enabled"] is False
@@ -113,10 +110,8 @@ class TestEphemeralHomeSettingsGeneration:
 
     def test_sandbox_excluded_commands(self) -> None:
         config = IsolationConfig(
-            sandbox=SandboxConfig(
-                excluded_commands=("docker", "podman"),
-                allow_unsandboxed_commands=True,
-            )
+            excluded_commands=("docker", "podman"),
+            allow_unsandboxed_commands=True,
         )
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
@@ -124,9 +119,7 @@ class TestEphemeralHomeSettingsGeneration:
             assert settings["sandbox"]["allowUnsandboxedCommands"] is True
 
     def test_sandbox_writable_paths(self) -> None:
-        config = IsolationConfig(
-            sandbox=SandboxConfig(writable_paths=("/tmp/output", "/var/log"))
-        )
+        config = IsolationConfig(writable_paths=("/tmp/output", "/var/log"))
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             # When sandbox is enabled, Claude Code's temp dir is auto-added
@@ -136,9 +129,7 @@ class TestEphemeralHomeSettingsGeneration:
     def test_sandbox_writable_paths_already_includes_claude_temp(self) -> None:
         """Test that Claude temp dir is not duplicated if already in writable_paths."""
         claude_temp_dir = f"/tmp/claude-{os.getuid()}"
-        config = IsolationConfig(
-            sandbox=SandboxConfig(writable_paths=("/tmp/output", claude_temp_dir))
-        )
+        config = IsolationConfig(writable_paths=("/tmp/output", claude_temp_dir))
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             # Should not duplicate the Claude temp dir
@@ -146,17 +137,13 @@ class TestEphemeralHomeSettingsGeneration:
             assert settings["sandbox"]["writablePaths"] == expected
 
     def test_sandbox_readable_paths(self) -> None:
-        config = IsolationConfig(
-            sandbox=SandboxConfig(readable_paths=("/data/readonly",))
-        )
+        config = IsolationConfig(readable_paths=("/data/readonly",))
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["readablePaths"] == ["/data/readonly"]
 
     def test_enable_weaker_nested_sandbox(self) -> None:
-        config = IsolationConfig(
-            sandbox=SandboxConfig(enable_weaker_nested_sandbox=True)
-        )
+        config = IsolationConfig(enable_weaker_nested_sandbox=True)
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["enableWeakerNestedSandbox"] is True
@@ -169,9 +156,7 @@ class TestEphemeralHomeSettingsGeneration:
             assert "enableWeakerNestedSandbox" not in settings["sandbox"]
 
     def test_ignore_file_violations(self) -> None:
-        config = IsolationConfig(
-            sandbox=SandboxConfig(ignore_file_violations=("/tmp/noisy", "/var/log"))
-        )
+        config = IsolationConfig(ignore_file_violations=("/tmp/noisy", "/var/log"))
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["ignoreViolations"]["file"] == [
@@ -180,9 +165,7 @@ class TestEphemeralHomeSettingsGeneration:
             ]
 
     def test_ignore_network_violations(self) -> None:
-        config = IsolationConfig(
-            sandbox=SandboxConfig(ignore_network_violations=("localhost", "127.0.0.1"))
-        )
+        config = IsolationConfig(ignore_network_violations=("localhost", "127.0.0.1"))
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["ignoreViolations"]["network"] == [

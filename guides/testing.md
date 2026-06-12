@@ -58,8 +58,18 @@ expected. When prompts are deterministic, you can test them like regular code.
 Call handlers directly with fake `ToolContext`:
 
 ```python nocheck
+from pathlib import Path
+
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import ToolContext, ToolResult
 from weakincentives.runtime import Session
+from weakincentives.sandbox import LocalSandbox, LocalShell
+
+
+def make_test_sandbox() -> LocalSandbox:
+    # In-memory filesystem; the root path is never created on disk.
+    root = Path("/tmp/test-sandbox")
+    return LocalSandbox(root=root, filesystem=Filesystem.in_memory(), shell=LocalShell(root))
 
 
 def test_search_handler_success():
@@ -68,7 +78,7 @@ def test_search_handler_success():
         rendered_prompt=None,
         adapter=None,
         session=Session(),
-        resources=None,
+        sandbox=make_test_sandbox(),
     )
 
     result = search_handler(SearchParams(query="test"), context=context)

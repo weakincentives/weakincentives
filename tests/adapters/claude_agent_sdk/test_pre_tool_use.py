@@ -18,6 +18,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._bridge import MCPToolExecutionState
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookConstraints,
@@ -63,6 +64,7 @@ class TestPreToolUseHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
         hook = create_pre_tool_use_hook(context)
         input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
@@ -88,6 +90,7 @@ class TestPreToolUseHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
         hook = create_pre_tool_use_hook(context)
         input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
@@ -113,6 +116,7 @@ class TestPreToolUseHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
         hook = create_pre_tool_use_hook(context)
         input_data = {"hook_event_name": "PreToolUse", "tool_name": "Read"}
@@ -136,6 +140,7 @@ class TestPreToolUseHookTransactional:
             prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
 
         hook = create_pre_tool_use_hook(context)
@@ -162,6 +167,7 @@ class TestPreToolUseHookTransactional:
             prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
 
         hook = create_pre_tool_use_hook(context)
@@ -190,6 +196,7 @@ class TestPreToolUseHookTransactional:
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
             constraints=HookConstraints(mcp_tool_state=mcp_state),
+            sandbox=make_memory_sandbox(),
         )
 
         hook = create_pre_tool_use_hook(context)
@@ -221,6 +228,7 @@ class TestPreToolUseHookTransactional:
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
             constraints=HookConstraints(mcp_tool_state=mcp_state),
+            sandbox=make_memory_sandbox(),
         )
 
         hook = create_pre_tool_use_hook(context)

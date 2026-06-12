@@ -42,9 +42,9 @@ from .structured_output import StructuredOutputConfig
 from .task_completion import TaskCompletionChecker
 
 if TYPE_CHECKING:
-    from ..filesystem import Filesystem
     from ..resources.context import ScopedResourceContext
     from ..runtime.session.protocols import SessionProtocol
+    from ..sandbox import Sandbox, WorkspaceConfig
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
 
@@ -100,6 +100,12 @@ class PromptTemplate[OutputT](Constructable):
     All derived state (registry snapshot, structured output config) is
     computed by :class:`Prompt` at bind time.
 
+    Workspace intent is declared via ``workspace``: a
+    :class:`~weakincentives.sandbox.WorkspaceConfig` the evaluating adapter
+    materializes through its sandbox provider. Templates with a workspace
+    config carry a workspace preview section rendered from the opened
+    sandbox.
+
     Resources can be declared at the template level and will be combined with
     resources contributed by individual sections.
     """
@@ -113,6 +119,7 @@ class PromptTemplate[OutputT](Constructable):
     task_completion_checker: TaskCompletionChecker | None = None
     allow_extra_keys: bool = False
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
+    workspace: WorkspaceConfig | None = None
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -152,8 +159,14 @@ class PromptTemplate[OutputT](Constructable):
         task_completion_checker: TaskCompletionChecker | None = None,
         allow_extra_keys: bool = False,
         resources: ResourceRegistry | None = None,
+        workspace: WorkspaceConfig | None = None,
     ) -> PromptTemplate[OutputT]:
-        """Create a validated PromptTemplate instance."""
+        """Create a validated PromptTemplate instance.
+
+        When ``workspace`` is provided, a workspace preview section is
+        appended so renders against an open sandbox describe the actual
+        environment.
+        """
         try:
             stripped_ns = normalize_component_key(ns, owner="Prompt namespace")
         except ValueError as exc:
@@ -163,17 +176,27 @@ class PromptTemplate[OutputT](Constructable):
         except ValueError as exc:
             raise PromptValidationError(str(exc)) from exc
 
+        all_sections = tuple(sections)
+        if workspace is not None:
+            from .workspace import workspace_preview_section
+
+            all_sections = (
+                *all_sections,
+                cast(Section[SupportsDataclass], workspace_preview_section()),
+            )
+
         with allow_construction():
             return cls(
                 ns=stripped_ns,
                 key=stripped_key,
                 name=name,
-                sections=tuple(sections),
+                sections=all_sections,
                 policies=tuple(policies),
                 feedback_providers=tuple(feedback_providers),
                 task_completion_checker=task_completion_checker,
                 allow_extra_keys=allow_extra_keys,
                 resources=resources if resources is not None else ResourceRegistry(),
+                workspace=workspace,
             )
 
 
@@ -349,6 +372,7 @@ class Prompt[OutputT]:
         self,
         *,
         session: SessionProtocol | None = None,
+        sandbox: Sandbox | None = None,
     ) -> RenderedPrompt[OutputT]:
         """Render the prompt with bound parameters and optional overrides.
 
@@ -365,6 +389,11 @@ class Prompt[OutputT]:
                 visibility selectors that accept a `session` keyword argument.
                 The session is also used to query VisibilityOverrides for
                 section-specific visibility control.
+            sandbox: The open sandbox the prompt is being evaluated against.
+                When the template declares a workspace config, the workspace
+                preview section renders a fresh listing of this sandbox's
+                filesystem. Resolved per render — never stored on the
+                prompt — so a shared prompt carries no run state.
         """
         tag = self.overrides_tag if self.overrides_tag else "latest"
 
@@ -382,8 +411,17 @@ class Prompt[OutputT]:
                 }
                 tool_overrides = dict(override.tool_overrides)
 
+        params = self._params
+        if sandbox is not None and self.template.workspace is not None:
+            from .workspace import WorkspacePreviewParams, workspace_preview_params
+
+            params = (
+                *(p for p in params if type(p) is not WorkspacePreviewParams),
+                workspace_preview_params(sandbox.filesystem),
+            )
+
         renderer = self.renderer
-        param_lookup = renderer.build_param_lookup(self._params)
+        param_lookup = renderer.build_param_lookup(params)
         return renderer.render(
             param_lookup,
             overrides,
@@ -415,22 +453,6 @@ class Prompt[OutputT]:
             f"{self.template.ns}:{self.template.key}."
         )
         raise KeyError(msg)
-
-    def filesystem(self) -> Filesystem | None:
-        """Return the filesystem from the workspace section, if present.
-
-        Searches the template's section tree for a section implementing
-        WorkspaceSectionProtocol and returns its filesystem property.
-
-        Returns None if no workspace section exists in the template.
-        """
-        from .protocols import WorkspaceSectionProtocol
-
-        for node in self._snapshot.sections:
-            section = node.section
-            if isinstance(section, WorkspaceSectionProtocol):
-                return section.filesystem  # pragma: no cover
-        return None
 
     def cleanup(self) -> None:
         """Clean up resources held by prompt sections.

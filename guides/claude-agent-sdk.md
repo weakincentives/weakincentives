@@ -22,9 +22,9 @@ is critical for multi-tenant deployments.
 MCP tools. You keep side effects and validation in Python while Claude uses
 tools natively.
 
-**Workspace management**: `WorkspaceSection` provides structured
-access to host files with security boundaries, size limits, and exclude
-patterns.
+**Sandboxed environments**: the prompt template's `WorkspaceConfig` provides
+structured access to host files with security boundaries, size limits, and
+exclude patterns.
 
 ## Requirements
 
@@ -34,26 +34,31 @@ patterns.
 
 The adapter requires claude-agent-sdk version 0.1.15 or later.
 
-## WorkspaceSection
+## WorkspaceConfig
 
-`WorkspaceSection` is the core abstraction for giving Claude Code
-access to host files. It creates an isolated workspace directory with mounted
-content and enforces security boundaries.
+`WorkspaceConfig` is the core abstraction for giving Claude Code access to
+host files. Declared on the prompt template, it is materialized by the
+adapter into an isolated sandbox directory with mounted content and
+enforced security boundaries.
 
 ```python nocheck
-from weakincentives.prompt import WorkspaceSection, HostMount
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(
-        HostMount(
-            host_path="/abs/path/to/repo",
-            mount_path="repo",
-            exclude_glob=(".git/*", "*.pyc", "__pycache__/*"),
-            max_bytes=5_000_000,
+template = PromptTemplate.create(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    workspace=WorkspaceConfig(
+        mounts=(
+            HostMount(
+                host_path="/abs/path/to/repo",
+                mount_path="repo",
+                exclude_glob=(".git/*", "*.pyc", "__pycache__/*"),
+                max_bytes=5_000_000,
+            ),
         ),
+        allowed_host_roots=("/abs/path/to",),
     ),
-    allowed_host_roots=("/abs/path/to",),
 )
 ```
 
@@ -74,35 +79,45 @@ restricts which host paths can be mounted:
 
 ```python nocheck
 # Only allows mounting from /home/app/repos
-workspace = WorkspaceSection(
-    session=session,
+sandbox_config = WorkspaceConfig(
     mounts=(HostMount(host_path="/home/app/repos/myproject", mount_path="code"),),
     allowed_host_roots=("/home/app/repos",),
 )
 
-# This would fail validation:
+# This would fail validation when the adapter opens the sandbox:
 # HostMount(host_path="/etc/passwd", mount_path="secrets")
 ```
 
 Without `allowed_host_roots`, any path could be mounted—dangerous in
 multi-tenant environments where mount paths might come from user input.
 
-### Workspace Lifecycle
+### Sandbox Lifecycle
 
-The workspace section manages a temporary directory:
+Evaluation always runs against a sandbox lease with
+`cwd = sandbox.root`. By default the adapter opens and releases one per
+`evaluate()` call:
 
 ```python nocheck
-with workspace:
-    # workspace.temp_dir exists and contains mounted files
-    adapter = ClaudeAgentSDKAdapter(
-        client_config=ClaudeAgentSDKClientConfig(cwd=str(workspace.temp_dir)),
-    )
-    response = adapter.evaluate(prompt, session=session)
-# temp_dir cleaned up automatically
+adapter = ClaudeAgentSDKAdapter()
+response = adapter.evaluate(prompt, session=session)
+# The sandbox is materialized, previewed in the prompt, and removed
+# inside evaluate() — even on error.
 ```
 
-The section implements the context manager protocol. When used with
-`Prompt.resources`, cleanup is automatic.
+To span one environment across multiple evaluations, or to inspect the
+agent's output files before the sandbox is removed, open an
+`AgentRuntime` — the bound (adapter, prompt, sandbox) triple:
+
+```python nocheck
+with adapter.runtime(prompt) as rt:
+    response = rt.evaluate(session=session)
+    report = rt.sandbox.filesystem.read("report.md")
+# Runtime released here: the sandbox directory is removed.
+```
+
+`AgentLoop` does this automatically: one runtime spans
+visibility-expansion retries, `finalize()`, and debug-bundle filesystem
+capture.
 
 ## Adapter Configuration
 
@@ -118,7 +133,6 @@ from weakincentives.adapters.claude_agent_sdk import (
 
 config = ClaudeAgentSDKClientConfig(
     permission_mode="bypassPermissions",
-    cwd="/path/to/workspace",
     max_turns=10,
     max_budget_usd=1.0,
     suppress_stderr=True,
@@ -131,7 +145,6 @@ adapter = ClaudeAgentSDKAdapter(client_config=config)
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `permission_mode` | `PermissionMode` | `"bypassPermissions"` | Permission handling |
-| `cwd` | `str \| None` | `None` | Working directory |
 | `max_turns` | `int \| None` | `None` | Maximum conversation turns |
 | `max_budget_usd` | `float \| None` | `None` | Maximum budget in USD |
 | `suppress_stderr` | `bool` | `True` | Suppress stderr output |
@@ -176,12 +189,11 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKClientConfig,
     IsolationConfig,
     NetworkPolicy,
-    SandboxConfig,
 )
 
 isolation = IsolationConfig(
     network_policy=NetworkPolicy.no_network(),
-    sandbox=SandboxConfig(enabled=True),
+    sandbox_enabled=True,
     api_key="sk-ant-...",
     include_host_env=False,
 )
@@ -194,7 +206,7 @@ adapter = ClaudeAgentSDKAdapter(
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `network_policy` | `NetworkPolicy \| None` | `None` | Tool network restrictions |
-| `sandbox` | `SandboxConfig \| None` | `None` | Sandbox configuration |
+| `sandbox_enabled` | `bool` | `True` | Enable OS-level sandboxing |
 | `env` | `Mapping[str, str] \| None` | `None` | Environment variables |
 | `api_key` | `str \| None` | `None` | Explicit API key (disables Bedrock) |
 | `aws_config_path` | `Path \| str \| None` | `None` | AWS config path for Docker |
@@ -255,12 +267,12 @@ policy = NetworkPolicy.with_domains("docs.python.org", "pypi.org")
 For production code review, `no_network()` is strongly recommended—it prevents
 the model from exfiltrating code or fetching malicious payloads.
 
-### SandboxConfig
+### WorkspaceConfig
 
 Fine-grained control over the sandbox:
 
 ```python nocheck
-sandbox = SandboxConfig(
+sandbox = WorkspaceConfig(
     enabled=True,
     writable_paths=("/tmp/workspace",),
     readable_paths=("/opt/references",),
@@ -490,36 +502,35 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKClientConfig,
     IsolationConfig,
     NetworkPolicy,
-    SandboxConfig,
 )
-from weakincentives.prompt import WorkspaceSection, HostMount
+from weakincentives.sandbox import HostMount, WorkspaceConfig
 
-# Create isolated workspace
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(
-        HostMount(
-            host_path="/repos/project",
-            mount_path="code",
-            exclude_glob=(".git/*", "*.pyc", "__pycache__/*", "node_modules/*"),
-            max_bytes=10_000_000,
+# Declare the isolated environment on the template
+template = PromptTemplate.create(
+    ns="review",
+    key="isolated",
+    sections=[...],
+    workspace=WorkspaceConfig(
+        mounts=(
+            HostMount(
+                host_path="/repos/project",
+                mount_path="code",
+                exclude_glob=(".git/*", "*.pyc", "__pycache__/*", "node_modules/*"),
+                max_bytes=10_000_000,
+            ),
         ),
+        allowed_host_roots=("/repos",),
     ),
-    allowed_host_roots=("/repos",),
 )
 
 # Configure adapter with full isolation
 adapter = ClaudeAgentSDKAdapter(
     client_config=ClaudeAgentSDKClientConfig(
-        cwd=str(workspace.temp_dir),
         max_turns=20,
         max_budget_usd=2.0,
         isolation=IsolationConfig(
             network_policy=NetworkPolicy.no_network(),
-            sandbox=SandboxConfig(
-                enabled=True,
-                readable_paths=(str(workspace.temp_dir),),
-            ),
+            sandbox_enabled=True,
         ),
     ),
 )
@@ -538,7 +549,7 @@ adapter = ClaudeAgentSDKAdapter(
                 "typing.readthedocs.io",
                 "peps.python.org",
             ),
-            sandbox=SandboxConfig(enabled=True),
+            sandbox_enabled=True,
         ),
     ),
 )

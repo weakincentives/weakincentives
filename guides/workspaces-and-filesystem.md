@@ -31,14 +31,15 @@ knowing whether the backend is an in-memory store, a sandboxed temp
 directory, or a Podman container. The protocol handles path validation,
 size limits, and snapshot/restore.
 
-## The Workspace Mental Model
+## The Sandbox Mental Model
 
-A workspace is a temporary directory on the host that contains a
-controlled subset of files the agent needs. Think of it as a sandbox:
+The agent acts on a sandbox: a temporary directory materialized from the
+`WorkspaceConfig` declared on the prompt template. Think of it as the one
+environment every effect lands in:
 
 ```
-Host filesystem             Workspace (temp dir)
-/repos/project/             /tmp/wink-abc123/
+Host filesystem             Sandbox (temp dir)
+/repos/project/             /tmp/wink-sandbox-abc123/
   src/                        code/
   tests/                        src/
   .git/           -- mount -->    tests/
@@ -46,9 +47,9 @@ Host filesystem             Workspace (temp dir)
   node_modules/
 ```
 
-The workspace copies files from the host into a temp directory according
-to mount rules you define. The agent sees only what you explicitly mount.
-Everything else is invisible.
+The sandbox provider copies files from the host into a temp directory
+according to mount rules you declare. The agent sees only what you
+explicitly mount. Everything else is invisible.
 
 This is the core security boundary. The agent cannot read `/etc/passwd`
 or your `.env` file because those paths were never mounted. Even if the
@@ -57,10 +58,10 @@ protocol rejects them.
 
 ## Host Mounts
 
-A `HostMount` defines what gets copied from the host into the workspace:
+A `HostMount` defines what gets copied from the host into the sandbox:
 
 ```python nocheck
-from weakincentives.prompt import HostMount
+from weakincentives.sandbox import HostMount
 
 mount = HostMount(
     host_path="/repos/project",
@@ -84,10 +85,16 @@ This prevents path traversal attacks, especially important when mount
 paths come from user input.
 
 ```python nocheck
-workspace = WorkspaceSection(
-    session=session,
-    mounts=(mount,),
-    allowed_host_roots=("/repos",),  # Only /repos/** allowed
+from weakincentives.sandbox import WorkspaceConfig
+
+template = PromptTemplate.create(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    workspace=WorkspaceConfig(
+        mounts=(mount,),
+        allowed_host_roots=("/repos",),  # Only /repos/** allowed
+    ),
 )
 ```
 
@@ -95,25 +102,40 @@ Symlinks are rejected by default. This prevents symlink-based escapes
 where a link inside the mounted directory points outside the allowed
 roots.
 
-## Workspace Lifecycle
+## Sandbox Lifecycle
 
-Workspaces follow a predictable lifecycle:
+A sandbox is a **lease** on an environment. The lifecycle:
 
-1. **Create**: Temp directory created, files copied per mount config
-1. **Use**: Agent reads and writes files within the workspace
-1. **Clone**: Sub-agents can share the workspace via reference counting
-1. **Cleanup**: Last reference deletes the temp directory
+1. **Open**: A provider materializes the template's `WorkspaceConfig`
+   (temp directory, files copied per mount config)
+1. **Preview**: The workspace preview section renders a listing of the
+   open sandbox into the prompt — refreshed on every evaluation round
+1. **Use**: The harness runs with `cwd = sandbox.root`; tool handlers see
+   the same environment via `context.filesystem` / `context.shell`
+1. **Release**: Whoever opened the lease closes it; locally provisioned
+   sandboxes are removed on release, even on error
 
-The workspace section implements context manager protocol. When used
-with `Prompt.resources`, cleanup is automatic:
+By default `evaluate()` opens and releases a lease per call:
 
 ```python nocheck
-with prompt.resources:
-    response = adapter.evaluate(prompt, session=session)
-# Workspace temp dir cleaned up here
+response = adapter.evaluate(prompt, session=session)
+# Sandbox opened, used, and released inside evaluate()
 ```
 
-For full adapter integration patterns, see the
+Open an `AgentRuntime` yourself to span multiple evaluations or inspect
+output files before release. The runtime binds the (adapter, prompt,
+sandbox) triple in one place, so a mismatched pairing cannot be
+constructed:
+
+```python nocheck
+with adapter.runtime(prompt) as rt:
+    response = rt.evaluate(session=session)
+    report = rt.sandbox.filesystem.read("report.md")
+```
+
+`AgentLoop` holds one runtime per request — spanning visibility-expansion
+retries and debug-bundle capture — so re-rendered rounds see files written
+in earlier rounds. For full adapter integration patterns, see the
 [Claude Agent SDK guide](claude-agent-sdk.md).
 
 ## Workspace Digests
@@ -161,7 +183,7 @@ tooling commands (test, lint, format), and known caveats.
 | Backend | Storage | Use Case |
 |---------|---------|----------|
 | `MemoryBackend` | Python dicts | Tests, evals, lightweight agents |
-| `HostBackend` | Sandboxed host directory | Production workspace access |
+| `HostBackend` | Sandboxed host directory | Production sandbox access |
 
 ### When to Use the In-Memory Backend
 

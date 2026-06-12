@@ -44,6 +44,7 @@ from ._visibility_signal import VisibilityExpansionSignal
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
     from ...runtime.session.protocols import SessionProtocol
+    from ...sandbox import Sandbox
     from ..core import ProviderAdapter
 
 __all__ = [
@@ -172,9 +173,9 @@ class BridgedTool:
         input_schema: JSON schema for tool parameters.
         handler: Callable that executes the tool and returns MCP-format result.
 
-    Transactional semantics: a snapshot is taken before execution and restored
-    on failure, ensuring consistent state across failed or aborted tool calls.
-    Session and resources are accessed via the prompt.
+    Transactional semantics: a snapshot of the (session, sandbox) pair is
+    taken before execution and restored on failure, ensuring consistent
+    state across failed or aborted tool calls.
     """
 
     def __init__(
@@ -196,6 +197,7 @@ class BridgedTool:
         run_context: RunContext | None = None,
         visibility_signal: VisibilityExpansionSignal | None = None,
         mcp_tool_state: MCPToolExecutionState | None = None,
+        sandbox: Sandbox,
     ) -> None:
         super().__init__()
         self.name = name
@@ -214,6 +216,7 @@ class BridgedTool:
         self._run_context = run_context
         self._visibility_signal = visibility_signal
         self._mcp_tool_state = mcp_tool_state
+        self._sandbox = sandbox
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
@@ -252,7 +255,7 @@ class BridgedTool:
 
         with tool_transaction(
             self._session,
-            self._prompt.resources.context,
+            self._sandbox,
             tag=f"tool:{self.name}",
         ) as snapshot:
             return self._execute_handler(
@@ -378,6 +381,7 @@ class BridgedTool:
             deadline=self._deadline,
             heartbeat=self._heartbeat,
             run_context=self._run_context,
+            sandbox=self._sandbox,
         )
 
     def _restore_snapshot(self, snapshot: CompositeSnapshot, *, reason: str) -> None:
@@ -387,7 +391,7 @@ class BridgedTool:
             snapshot: CompositeSnapshot to restore.
             reason: Reason for restore (for logging).
         """
-        restore_snapshot(self._session, self._prompt.resources.context, snapshot)
+        restore_snapshot(self._session, self._sandbox, snapshot)
         logger.debug(
             f"State restored after {reason}.",
             event=f"bridge.{reason}_restore",
@@ -528,6 +532,7 @@ def create_bridged_tools(
     run_context: RunContext | None = None,
     visibility_signal: VisibilityExpansionSignal | None = None,
     mcp_tool_state: MCPToolExecutionState | None = None,
+    sandbox: Sandbox,
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -546,6 +551,7 @@ def create_bridged_tools(
         visibility_signal: Signal for propagating VisibilityExpansionRequired
             exceptions from tool handlers to the adapter.
         mcp_tool_state: Shared state for passing tool_use_id from hooks to bridge.
+        sandbox: The open execution environment for tool effects and rollback.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
@@ -589,6 +595,7 @@ def create_bridged_tools(
             run_context=run_context,
             visibility_signal=visibility_signal,
             mcp_tool_state=mcp_tool_state,
+            sandbox=sandbox,
         )
         bridged.append(bridged_tool)
 

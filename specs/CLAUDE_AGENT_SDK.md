@@ -23,7 +23,6 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `permission_mode` | `PermissionMode` | `"bypassPermissions"` | Permission handling |
-| `cwd` | `str \| None` | `None` | Working directory |
 | `max_turns` | `int \| None` | `None` | Maximum conversation turns |
 | `max_budget_usd` | `float \| None` | `None` | Maximum budget in USD |
 | `suppress_stderr` | `bool` | `True` | Suppress stderr output |
@@ -34,6 +33,13 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 
 At `src/weakincentives/adapters/claude_agent_sdk/config.py`:
 `ClaudeAgentSDKClientConfig`.
+
+The SDK working directory is not configurable: evaluation always runs
+against a sandbox lease materialized from the prompt template's
+`WorkspaceConfig` (see `specs/SANDBOX.md`) with `cwd = sandbox.root`.
+Callers may hold one environment across evaluations via
+`adapter.runtime(prompt)` (see `specs/ADAPTERS.md`). A failed bridged
+tool rolls back session and sandbox in one transaction.
 
 ### ClaudeAgentSDKModelConfig
 
@@ -56,11 +62,22 @@ At `src/weakincentives/adapters/claude_agent_sdk/config.py`:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `network_policy` | `NetworkPolicy \| None` | `None` | Tool network restrictions |
-| `sandbox` | `SandboxConfig \| None` | `None` | Sandbox configuration |
 | `env` | `Mapping[str, str] \| None` | `None` | Environment variables |
 | `api_key` | `str \| None` | `None` | Explicit API key (disables Bedrock) |
 | `aws_config_path` | `Path \| str \| None` | `None` | AWS config path for Docker |
 | `include_host_env` | `bool` | `False` | Copy non-sensitive vars |
+| `sandbox_enabled` | `bool` | `True` | Enable OS-level sandboxing |
+| `writable_paths` | `tuple[str, ...]` | `()` | Writable paths |
+| `readable_paths` | `tuple[str, ...]` | `()` | Readable paths |
+| `excluded_commands` | `tuple[str, ...]` | `()` | Commands bypassing the sandbox |
+| `allow_unsandboxed_commands` | `bool` | `False` | Allow unsandboxed commands |
+| `bash_auto_allow` | `bool` | `True` | Auto-allow bash when sandboxed |
+| `enable_weaker_nested_sandbox` | `bool` | `False` | Weaker sandbox for Docker (Linux) |
+| `ignore_file_violations` | `tuple[str, ...]` | `()` | File paths to ignore violations |
+| `ignore_network_violations` | `tuple[str, ...]` | `()` | Network hosts to ignore violations |
+
+The OS-sandbox knobs configure the harness process; they are distinct from
+the environment `WorkspaceConfig` declared on prompt templates.
 
 **Note:** Skills are attached to prompt sections, not IsolationConfig.
 See `specs/SKILLS.md` for skill attachment.
@@ -101,20 +118,6 @@ where AWS credentials are mounted (e.g., `/mnt/aws` instead of `~/.aws`).
 |---------|-------------|
 | `NetworkPolicy.no_network()` | No tool network access |
 | `NetworkPolicy.with_domains(*domains)` | Allow specific domains |
-
-### SandboxConfig
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `bool` | `True` | Enable sandboxing |
-| `writable_paths` | `tuple[str, ...]` | `()` | Writable paths |
-| `readable_paths` | `tuple[str, ...]` | `()` | Readable paths |
-| `excluded_commands` | `tuple[str, ...]` | `()` | Excluded commands |
-| `allow_unsandboxed_commands` | `bool` | `False` | Allow unsandboxed |
-| `bash_auto_allow` | `bool` | `True` | Auto-allow bash |
-| `enable_weaker_nested_sandbox` | `bool` | `False` | Weaker sandbox for Docker (Linux) |
-| `ignore_file_violations` | `tuple[str, ...]` | `()` | File paths to ignore violations |
-| `ignore_network_violations` | `tuple[str, ...]` | `()` | Network hosts to ignore violations |
 
 ## Isolation Behavior
 
@@ -208,6 +211,10 @@ Groups optional parameters passed to hooks via `HookContext`:
 | `run_context` | `RunContext \| None` | `None` | Tracing context |
 | `mcp_tool_state` | `MCPToolExecutionState \| None` | `None` | MCP tool_use_id correlation |
 
+The open sandbox is not a constraint: `HookContext` takes it as a required
+`sandbox` keyword, so hook-based transactions always have an environment to
+snapshot and restore.
+
 ## Error Handling
 
 SDK exceptions are normalized to `PromptEvaluationError` via `normalize_sdk_error`.
@@ -227,8 +234,9 @@ At `src/weakincentives/adapters/claude_agent_sdk/_errors.py`.
 
 - **Structured output**: `PromptTemplate[OutputType]` — adapter returns a typed
   instance deserialized from the SDK's `StructuredOutput` tool result.
-- **Secure code review**: combine `WorkspaceSection` with
-  `IsolationConfig(network_policy=NetworkPolicy.no_network(), sandbox=SandboxConfig(...))`.
+- **Secure code review**: declare the project mounts via the template's
+  `WorkspaceConfig` and combine with
+  `IsolationConfig(network_policy=NetworkPolicy.no_network(), sandbox_enabled=True)`.
 - **Domain allowlist**: `NetworkPolicy.with_domains("docs.python.org", ...)` —
   restricts tool network access while leaving the API connection unrestricted.
 - **AWS Bedrock**: set `model` to a Bedrock model ID and use `IsolationConfig()`

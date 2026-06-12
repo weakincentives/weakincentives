@@ -10,18 +10,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for transactions module."""
+"""Tests for transactions over the (session, sandbox) pair."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from weakincentives.errors import RestoreFailedError
 from weakincentives.filesystem import Filesystem
-from weakincentives.prompt import Prompt, PromptTemplate
-from weakincentives.runtime import Snapshotable
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot, SnapshotRestoreError
@@ -32,88 +31,65 @@ from weakincentives.runtime.transactions import (
     restore_snapshot,
     tool_transaction,
 )
+from weakincentives.sandbox import LocalSandbox, LocalShell, Sandbox
 
 
-def _make_prompt_with_fs(fs: Filesystem) -> Prompt[object]:
-    """Create a prompt with filesystem bound in active context."""
-    prompt: Prompt[object] = Prompt(
-        PromptTemplate.create(ns="tests", key="transactions-test")
+def _make_session() -> Session:
+    return Session(dispatcher=InProcessDispatcher())
+
+
+def _sandbox_payload(sandbox: Sandbox) -> object:
+    """Serialized sandbox snapshot ref for hand-built payloads."""
+    return json.loads(create_snapshot(_make_session(), sandbox).to_json())["sandbox"]
+
+
+@pytest.fixture
+def sandbox(tmp_path: Path) -> Sandbox:
+    """In-memory sandbox: fast snapshot/restore without git plumbing."""
+    return LocalSandbox(
+        root=tmp_path,
+        filesystem=Filesystem.in_memory(),
+        shell=LocalShell(tmp_path),
     )
-    prompt = prompt.bind(resources={Filesystem: fs})
-    prompt.resources.__enter__()
-    return prompt
-
-
-def _make_prompt() -> Prompt[object]:
-    """Create a prompt in active context."""
-    prompt: Prompt[object] = Prompt(
-        PromptTemplate.create(ns="tests", key="transactions-test")
-    )
-    prompt.resources.__enter__()
-    return prompt
 
 
 class TestCompositeSnapshotSerialization:
     """Tests for CompositeSnapshot.to_json() and from_json() methods."""
 
-    def test_to_json_basic(self) -> None:
+    def test_to_json_basic(self, sandbox: Sandbox) -> None:
         """Test serializing a composite snapshot to JSON."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "content")
-        prompt = _make_prompt_with_fs(fs)
+        session = _make_session()
+        _ = sandbox.filesystem.write("test.txt", "content")
 
-        snapshot = create_snapshot(session, prompt.resources.context, tag="test")
+        snapshot = create_snapshot(session, sandbox, tag="test")
         json_str = snapshot.to_json()
 
         # Verify it's valid JSON
         payload = json.loads(json_str)
-        assert payload["version"] == "1"
+        assert payload["version"] == "3"
         assert "snapshot_id" in payload
         assert "created_at" in payload
         assert "session" in payload
-        assert "resources" in payload
+        assert payload["sandbox"]["token"] == snapshot.sandbox.token
         assert payload["metadata"]["tag"] == "test"
 
-    def test_to_json_without_resources(self) -> None:
-        """Test serializing a snapshot without snapshotable resources."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        prompt = _make_prompt()
+    def test_to_json_without_metadata(self, sandbox: Sandbox) -> None:
+        """Test serializing a snapshot without a tag."""
+        session = _make_session()
 
-        snapshot = create_snapshot(
-            session, prompt.resources.context, tag="no-resources"
-        )
-        json_str = snapshot.to_json()
-
-        payload = json.loads(json_str)
-        assert payload["resources"] == []
-        assert payload["metadata"]["tag"] == "no-resources"
-
-    def test_to_json_without_metadata(self) -> None:
-        """Test serializing a snapshot without metadata."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        prompt = _make_prompt()
-
-        # Create snapshot without tag to have minimal metadata
-        snapshot = create_snapshot(session, prompt.resources.context)
+        snapshot = create_snapshot(session, sandbox)
         json_str = snapshot.to_json()
 
         payload = json.loads(json_str)
         assert payload["metadata"] is not None  # Still has metadata with None tag
 
-    def test_from_json_basic(self) -> None:
+    def test_from_json_basic(self, sandbox: Sandbox) -> None:
         """Test deserializing a composite snapshot from JSON."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "original")
-        prompt = _make_prompt_with_fs(fs)
+        session = _make_session()
+        _ = sandbox.filesystem.write("test.txt", "original")
 
         # Create and serialize
-        original = create_snapshot(session, prompt.resources.context, tag="roundtrip")
+        original = create_snapshot(session, sandbox, tag="roundtrip")
         json_str = original.to_json()
 
         # Deserialize
@@ -121,6 +97,7 @@ class TestCompositeSnapshotSerialization:
 
         assert restored.snapshot_id == original.snapshot_id
         assert restored.created_at == original.created_at
+        assert restored.sandbox == original.sandbox
         assert restored.metadata is not None
         assert restored.metadata.tag == "roundtrip"
 
@@ -145,7 +122,7 @@ class TestCompositeSnapshotSerialization:
     def test_from_json_invalid_snapshot_id(self) -> None:
         """Test that invalid snapshot_id raises SnapshotRestoreError."""
         payload = {
-            "version": "1",
+            "version": "3",
             "snapshot_id": "not-a-uuid",
             "created_at": "2024-01-01T00:00:00+00:00",
         }
@@ -155,7 +132,7 @@ class TestCompositeSnapshotSerialization:
     def test_from_json_invalid_created_at(self) -> None:
         """Test that invalid created_at raises SnapshotRestoreError."""
         payload = {
-            "version": "1",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "not-a-timestamp",
         }
@@ -165,7 +142,7 @@ class TestCompositeSnapshotSerialization:
     def test_from_json_invalid_session(self) -> None:
         """Test that invalid session raises SnapshotRestoreError."""
         payload = {
-            "version": "1",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": "not an object",
@@ -175,123 +152,111 @@ class TestCompositeSnapshotSerialization:
         ):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_resources_not_list(self) -> None:
-        """Test that resources not being a list raises SnapshotRestoreError."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+    def test_from_json_invalid_sandbox_not_object(self) -> None:
+        """Test that a non-object sandbox payload raises SnapshotRestoreError."""
+        session = _make_session()
         session_snapshot = session.snapshot()
 
         payload = {
-            "version": "1",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": json.loads(session_snapshot.to_json()),
-            "resources": "not a list",
-        }
-        with pytest.raises(SnapshotRestoreError, match="Resources must be a list"):
-            CompositeSnapshot.from_json(json.dumps(payload))
-
-    def test_from_json_invalid_resource_entry(self) -> None:
-        """Test that invalid resource entry raises SnapshotRestoreError."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        session_snapshot = session.snapshot()
-
-        payload = {
-            "version": "1",
-            "snapshot_id": "12345678-1234-5678-1234-567812345678",
-            "created_at": "2024-01-01T00:00:00+00:00",
-            "session": json.loads(session_snapshot.to_json()),
-            "resources": ["not an object"],
+            "sandbox": "not an object",
         }
         with pytest.raises(
-            SnapshotRestoreError, match="Resource entry must be an object"
+            SnapshotRestoreError, match="Sandbox snapshot must be an object"
         ):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_no_metadata(self) -> None:
-        """Test deserializing a snapshot with no metadata key."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+    def test_from_json_invalid_sandbox_payload(self) -> None:
+        """Test that an unparsable sandbox ref raises SnapshotRestoreError."""
+        session = _make_session()
         session_snapshot = session.snapshot()
 
         payload = {
-            "version": "1",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": json.loads(session_snapshot.to_json()),
-            "resources": [],
+            "sandbox": {"unexpected": "shape"},
+        }
+        with pytest.raises(
+            SnapshotRestoreError, match="Failed to parse sandbox snapshot ref"
+        ):
+            CompositeSnapshot.from_json(json.dumps(payload))
+
+    def test_from_json_no_metadata(self, sandbox: Sandbox) -> None:
+        """Test deserializing a snapshot with no metadata key."""
+        session = _make_session()
+        session_snapshot = session.snapshot()
+
+        payload = {
+            "version": "3",
+            "snapshot_id": "12345678-1234-5678-1234-567812345678",
+            "created_at": "2024-01-01T00:00:00+00:00",
+            "session": json.loads(session_snapshot.to_json()),
+            "sandbox": _sandbox_payload(sandbox),
         }
         restored = CompositeSnapshot.from_json(json.dumps(payload))
         assert restored.metadata is None
 
-    def test_from_json_invalid_metadata_not_object(self) -> None:
+    def test_from_json_invalid_metadata_not_object(self, sandbox: Sandbox) -> None:
         """Test that invalid metadata raises SnapshotRestoreError."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = _make_session()
         session_snapshot = session.snapshot()
 
         payload = {
-            "version": "1",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": json.loads(session_snapshot.to_json()),
-            "resources": [],
+            "sandbox": _sandbox_payload(sandbox),
             "metadata": "not an object",
         }
         with pytest.raises(SnapshotRestoreError, match="Metadata must be an object"):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_metadata_phase(self) -> None:
+    def test_from_json_invalid_metadata_phase(self, sandbox: Sandbox) -> None:
         """Test that invalid metadata phase raises SnapshotRestoreError."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = _make_session()
         session_snapshot = session.snapshot()
 
         payload = {
-            "version": "1",
+            "version": "3",
             "snapshot_id": "12345678-1234-5678-1234-567812345678",
             "created_at": "2024-01-01T00:00:00+00:00",
             "session": json.loads(session_snapshot.to_json()),
-            "resources": [],
+            "sandbox": _sandbox_payload(sandbox),
             "metadata": {"tag": None, "phase": "invalid_phase"},
         }
         with pytest.raises(SnapshotRestoreError, match="Metadata phase must be valid"):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_roundtrip_with_filesystem_resource(self) -> None:
-        """Test full roundtrip serialization with filesystem resource."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "original")
-        prompt = _make_prompt_with_fs(fs)
+    def test_roundtrip_with_sandbox(self, sandbox: Sandbox) -> None:
+        """Test full roundtrip serialization with a sandbox snapshot ref."""
+        session = _make_session()
+        _ = sandbox.filesystem.write("test.txt", "original")
 
-        # Create and serialize
-        original = create_snapshot(session, prompt.resources.context, tag="roundtrip")
+        original = create_snapshot(session, sandbox, tag="roundtrip")
         json_str = original.to_json()
 
-        # Deserialize
         restored = CompositeSnapshot.from_json(json_str)
 
-        # Verify all fields match
         assert restored.snapshot_id == original.snapshot_id
         assert restored.created_at == original.created_at
-        assert len(restored.resources) == len(original.resources)
+        assert restored.sandbox == original.sandbox
 
 
 class TestRestoreSnapshotErrors:
     """Tests for error handling in restore_snapshot()."""
 
-    def test_restore_handles_session_restore_failure(self) -> None:
+    def test_restore_handles_session_restore_failure(self, sandbox: Sandbox) -> None:
         """Test that session restore failure raises RestoreFailedError."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        prompt = _make_prompt()
+        session = _make_session()
 
-        snapshot = create_snapshot(session, prompt.resources.context, tag="test")
+        snapshot = create_snapshot(session, sandbox, tag="test")
 
-        # Create a corrupted session snapshot
         class FailingSession:
             def restore(self, snapshot: Snapshot) -> None:
                 raise SnapshotRestoreError("Session restore failed")
@@ -299,106 +264,66 @@ class TestRestoreSnapshotErrors:
         with pytest.raises(RestoreFailedError, match="Failed to restore session"):
             restore_snapshot(
                 FailingSession(),  # type: ignore[arg-type]
-                prompt.resources.context,
+                sandbox,
                 snapshot,
             )
 
-    def test_restore_skips_missing_resources(self) -> None:
-        """Test that restore skips resources not in current context."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "original")
-        prompt_with_fs = _make_prompt_with_fs(fs)
+    def test_restore_handles_sandbox_restore_failure(self, sandbox: Sandbox) -> None:
+        """Test that sandbox restore failure raises RestoreFailedError."""
+        session = _make_session()
+        snapshot = create_snapshot(session, sandbox, tag="test")
 
-        # Create snapshot with filesystem resource
-        snapshot = create_snapshot(
-            session, prompt_with_fs.resources.context, tag="test"
-        )
-
-        # Create a new prompt without filesystem
-        prompt_without_fs = _make_prompt()
-
-        # Should not raise - silently skips missing resources
-        restore_snapshot(session, prompt_without_fs.resources.context, snapshot)
-
-    def test_restore_handles_resource_restore_failure(self) -> None:
-        """Test that resource restore failure raises RestoreFailedError."""
-
-        class FailingFilesystem(Snapshotable[dict[str, str]]):
-            """Filesystem that fails on restore."""
-
-            def snapshot(self, *, tag: str | None = None) -> dict[str, str]:
-                return {"state": "snapshot"}
-
-            def restore(self, snapshot: dict[str, str]) -> None:
+        class FailingSandbox:
+            def restore(self, ref: object) -> None:
                 raise SnapshotRestoreError("Restore failed!")
 
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-
-        # Create prompt with failing filesystem
-        prompt: Prompt[object] = Prompt(
-            PromptTemplate.create(ns="tests", key="failing-fs-test")
-        )
-        prompt = prompt.bind(resources={Filesystem: FailingFilesystem()})
-        prompt.resources.__enter__()
-
-        snapshot = create_snapshot(session, prompt.resources.context, tag="test")
-
-        with pytest.raises(RestoreFailedError, match="Failed to restore"):
-            restore_snapshot(session, prompt.resources.context, snapshot)
+        with pytest.raises(RestoreFailedError, match="Failed to restore sandbox"):
+            restore_snapshot(
+                session,
+                FailingSandbox(),  # type: ignore[arg-type]
+                snapshot,
+            )
 
 
 class TestPendingToolTracker:
     """Tests for PendingToolTracker class."""
 
-    def test_abort_tool_execution_restores_state(self) -> None:
+    def test_abort_tool_execution_restores_state(self, sandbox: Sandbox) -> None:
         """Test that abort_tool_execution restores state."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "original")
-        prompt = _make_prompt_with_fs(fs)
+        session = _make_session()
+        fs = sandbox.filesystem
+        _ = fs.write("test.txt", "original")
 
-        tracker = PendingToolTracker(
-            session=session, resources=prompt.resources.context
-        )
+        tracker = PendingToolTracker(session=session, sandbox=sandbox)
 
         # Begin tool execution
         tracker.begin_tool_execution("call-1", "my_tool")
 
         # Modify state
-        fs.write("/test.txt", "modified")
-        assert fs.read("/test.txt").content == "modified"
+        _ = fs.write("test.txt", "modified")
+        assert fs.read("test.txt").content == "modified"
 
         # Abort should restore
         result = tracker.abort_tool_execution("call-1")
         assert result is True
-        assert fs.read("/test.txt").content == "original"
+        assert fs.read("test.txt").content == "original"
 
-    def test_abort_tool_execution_unknown_id_returns_false(self) -> None:
+    def test_abort_tool_execution_unknown_id_returns_false(
+        self, sandbox: Sandbox
+    ) -> None:
         """Test that aborting unknown tool returns False."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        prompt = _make_prompt()
+        session = _make_session()
 
-        tracker = PendingToolTracker(
-            session=session, resources=prompt.resources.context
-        )
+        tracker = PendingToolTracker(session=session, sandbox=sandbox)
 
         result = tracker.abort_tool_execution("unknown-id")
         assert result is False
 
-    def test_pending_tool_executions_property(self) -> None:
+    def test_pending_tool_executions_property(self, sandbox: Sandbox) -> None:
         """Test the pending_tool_executions property."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        prompt = _make_prompt()
+        session = _make_session()
 
-        tracker = PendingToolTracker(
-            session=session, resources=prompt.resources.context
-        )
+        tracker = PendingToolTracker(session=session, sandbox=sandbox)
 
         # Initially empty
         assert len(tracker.pending_tool_executions) == 0
@@ -418,130 +343,113 @@ class TestPendingToolTracker:
         with pytest.raises(TypeError):
             pending["call-3"] = None  # type: ignore[index]
 
-    def test_end_tool_execution_returns_false_for_unknown(self) -> None:
+    def test_end_tool_execution_returns_false_for_unknown(
+        self, sandbox: Sandbox
+    ) -> None:
         """Test that ending unknown tool returns False."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        prompt = _make_prompt()
+        session = _make_session()
 
-        tracker = PendingToolTracker(
-            session=session, resources=prompt.resources.context
-        )
+        tracker = PendingToolTracker(session=session, sandbox=sandbox)
 
         result = tracker.end_tool_execution("unknown-id", success=True)
         assert result is False
 
-    def test_end_tool_execution_restores_on_failure(self) -> None:
+    def test_end_tool_execution_restores_on_failure(self, sandbox: Sandbox) -> None:
         """Test that end_tool_execution restores state on failure."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "original")
-        prompt = _make_prompt_with_fs(fs)
+        session = _make_session()
+        fs = sandbox.filesystem
+        _ = fs.write("test.txt", "original")
 
-        tracker = PendingToolTracker(
-            session=session, resources=prompt.resources.context
-        )
+        tracker = PendingToolTracker(session=session, sandbox=sandbox)
 
         # Begin tool execution
         tracker.begin_tool_execution("call-1", "my_tool")
 
         # Modify state
-        fs.write("/test.txt", "modified")
+        _ = fs.write("test.txt", "modified")
 
         # End with failure should restore
         result = tracker.end_tool_execution("call-1", success=False)
         assert result is True
-        assert fs.read("/test.txt").content == "original"
+        assert fs.read("test.txt").content == "original"
 
-    def test_end_tool_execution_preserves_on_success(self) -> None:
+    def test_end_tool_execution_preserves_on_success(self, sandbox: Sandbox) -> None:
         """Test that end_tool_execution preserves state on success."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "original")
-        prompt = _make_prompt_with_fs(fs)
+        session = _make_session()
+        fs = sandbox.filesystem
+        _ = fs.write("test.txt", "original")
 
-        tracker = PendingToolTracker(
-            session=session, resources=prompt.resources.context
-        )
+        tracker = PendingToolTracker(session=session, sandbox=sandbox)
 
         # Begin tool execution
         tracker.begin_tool_execution("call-1", "my_tool")
 
         # Modify state
-        fs.write("/test.txt", "modified")
+        _ = fs.write("test.txt", "modified")
 
         # End with success should preserve changes
         result = tracker.end_tool_execution("call-1", success=True)
         assert result is False
-        assert fs.read("/test.txt").content == "modified"
+        assert fs.read("test.txt").content == "modified"
 
 
 class TestToolTransaction:
     """Tests for tool_transaction context manager."""
 
-    def test_restores_on_exception(self) -> None:
+    def test_restores_on_exception(self, sandbox: Sandbox) -> None:
         """Test that tool_transaction restores state on exception."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "original")
-        prompt = _make_prompt_with_fs(fs)
+        session = _make_session()
+        fs = sandbox.filesystem
+        _ = fs.write("test.txt", "original")
 
         with pytest.raises(RuntimeError, match="Tool failed"):
-            with tool_transaction(session, prompt.resources.context, tag="failing"):
-                fs.write("/test.txt", "modified")
+            with tool_transaction(session, sandbox, tag="failing"):
+                _ = fs.write("test.txt", "modified")
                 raise RuntimeError("Tool failed")
 
-        assert fs.read("/test.txt").content == "original"
+        assert fs.read("test.txt").content == "original"
 
-    def test_preserves_on_success(self) -> None:
+    def test_preserves_on_success(self, sandbox: Sandbox) -> None:
         """Test that tool_transaction preserves state on success."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "original")
-        prompt = _make_prompt_with_fs(fs)
+        session = _make_session()
+        fs = sandbox.filesystem
+        _ = fs.write("test.txt", "original")
 
-        with tool_transaction(session, prompt.resources.context, tag="success"):
-            fs.write("/test.txt", "modified")
+        with tool_transaction(session, sandbox, tag="success"):
+            _ = fs.write("test.txt", "modified")
 
-        assert fs.read("/test.txt").content == "modified"
+        assert fs.read("test.txt").content == "modified"
 
-    def test_yields_snapshot_for_manual_restore(self) -> None:
+    def test_yields_snapshot_for_manual_restore(self, sandbox: Sandbox) -> None:
         """Test that tool_transaction yields snapshot for manual restore."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = Filesystem.in_memory()
-        fs.write("/test.txt", "original")
-        prompt = _make_prompt_with_fs(fs)
+        session = _make_session()
+        fs = sandbox.filesystem
+        _ = fs.write("test.txt", "original")
 
-        with tool_transaction(
-            session, prompt.resources.context, tag="manual"
-        ) as snapshot:
-            fs.write("/test.txt", "modified")
-            assert fs.read("/test.txt").content == "modified"
+        with tool_transaction(session, sandbox, tag="manual") as snapshot:
+            _ = fs.write("test.txt", "modified")
+            assert fs.read("test.txt").content == "modified"
 
             # Manual restore
-            restore_snapshot(session, prompt.resources.context, snapshot)
-            assert fs.read("/test.txt").content == "original"
+            restore_snapshot(session, sandbox, snapshot)
+            assert fs.read("test.txt").content == "original"
+
+    def test_transaction_snapshot_carries_sandbox_ref(self, sandbox: Sandbox) -> None:
+        """Every transaction snapshot captures the sandbox."""
+        session = _make_session()
+
+        with tool_transaction(session, sandbox, tag="paired") as snapshot:
+            assert snapshot.sandbox is not None
 
 
 class TestCompositeSnapshotErrors:
     """Tests for CompositeSnapshot error handling paths."""
 
-    def test_snapshot_with_metadata_roundtrip(self) -> None:
+    def test_snapshot_with_metadata_roundtrip(self, sandbox: Sandbox) -> None:
         """Test that snapshot with metadata serializes and deserializes."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        prompt = _make_prompt()
+        session = _make_session()
 
-        snapshot = create_snapshot(
-            session,
-            prompt.resources.context,
-            tag="test-tag",
-        )
+        snapshot = create_snapshot(session, sandbox, tag="test-tag")
 
         # Verify metadata was set
         assert snapshot.metadata is not None
@@ -553,36 +461,3 @@ class TestCompositeSnapshotErrors:
 
         assert restored.metadata is not None
         assert restored.metadata.tag == "test-tag"
-
-
-class TestRestoreSnapshotEdgeCases:
-    """Tests for restore_snapshot edge cases."""
-
-    def test_restore_skips_non_snapshotable_resources(self) -> None:
-        """Test that restore_snapshot skips resources without Snapshotable."""
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-
-        # Create a simple non-snapshotable resource
-        class SimpleResource:
-            def __init__(self) -> None:
-                self.value = "original"
-
-        resource = SimpleResource()
-        prompt: Prompt[object] = Prompt(
-            PromptTemplate.create(ns="tests", key="non-snapshotable-test")
-        )
-        prompt = prompt.bind(resources={SimpleResource: resource})
-        prompt.resources.__enter__()
-
-        # Create snapshot (won't include non-snapshotable resource)
-        snapshot = create_snapshot(session, prompt.resources.context, tag="test")
-
-        # Modify the resource
-        resource.value = "modified"
-
-        # Restore should not fail (just skip the non-snapshotable resource)
-        restore_snapshot(session, prompt.resources.context, snapshot)
-
-        # Resource should still be modified since it wasn't snapshotable
-        assert resource.value == "modified"

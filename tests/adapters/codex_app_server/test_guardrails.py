@@ -19,9 +19,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.codex_app_server._guardrails import (
     check_task_completion,
-    resolve_filesystem,
 )
 from weakincentives.adapters.codex_app_server._protocol import handle_tool_call
 from weakincentives.adapters.codex_app_server.client import CodexAppServerClient
@@ -100,6 +100,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=mock_prompt,
                     session=session,
+                    sandbox=make_memory_sandbox(),
                 )
 
             resp = client.send_response.call_args[0][1]
@@ -139,6 +140,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=mock_prompt,
                     session=session,
+                    sandbox=make_memory_sandbox(),
                 )
 
             resp = client.send_response.call_args[0][1]
@@ -171,6 +173,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=mock_prompt,
                     session=session,
+                    sandbox=make_memory_sandbox(),
                 )
                 mock_collect.assert_not_called()
 
@@ -201,6 +204,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=None,
                     session=None,
+                    sandbox=make_memory_sandbox(),
                 )
                 mock_collect.assert_not_called()
 
@@ -229,6 +233,7 @@ class TestHandleToolCallFeedback:
                     tool_lookup,
                     prompt=mock_prompt,
                     session=None,
+                    sandbox=make_memory_sandbox(),
                 )
                 mock_collect.assert_not_called()
 
@@ -259,6 +264,7 @@ class TestHandleToolCallFeedback:
                 "weakincentives.adapters.codex_app_server._guardrails.collect_feedback",
                 return_value=None,
             ) as mock_collect:
+                sandbox = make_memory_sandbox()
                 await handle_tool_call(
                     client,
                     10,
@@ -267,46 +273,16 @@ class TestHandleToolCallFeedback:
                     prompt=mock_prompt,
                     session=session,
                     deadline=deadline,
+                    sandbox=sandbox,
                 )
                 mock_collect.assert_called_once_with(
                     prompt=mock_prompt,
                     session=session,
                     deadline=deadline,
+                    sandbox=sandbox,
                 )
 
         asyncio.run(_run())
-
-
-# ---- TestResolveFilesystem ----
-
-
-class TestResolveFilesystem:
-    """Tests for resolve_filesystem."""
-
-    def test_none_prompt(self) -> None:
-        assert resolve_filesystem(None) is None
-
-    def test_prompt_with_filesystem(self) -> None:
-        mock_fs = MagicMock()
-        mock_prompt = MagicMock()
-        mock_prompt.resources.get_optional.return_value = mock_fs
-
-        result = resolve_filesystem(mock_prompt)
-        assert result is mock_fs
-
-    def test_prompt_without_filesystem(self) -> None:
-        mock_prompt = MagicMock()
-        mock_prompt.resources.get_optional.return_value = None
-
-        result = resolve_filesystem(mock_prompt)
-        assert result is None
-
-    def test_prompt_resources_raises(self) -> None:
-        mock_prompt = MagicMock()
-        mock_prompt.resources.get_optional.side_effect = RuntimeError("no context")
-
-        result = resolve_filesystem(mock_prompt)
-        assert result is None
 
 
 # ---- TestCheckTaskCompletion ----
@@ -323,6 +299,7 @@ class TestCheckTaskCompletion:
             accumulated_text="text",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -338,6 +315,7 @@ class TestCheckTaskCompletion:
             accumulated_text="text",
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -350,17 +328,14 @@ class TestCheckTaskCompletion:
         mock_prompt = MagicMock()
         mock_prompt.task_completion_checker = mock_checker
 
-        with patch(
-            "weakincentives.adapters.codex_app_server._guardrails.resolve_filesystem",
-            return_value=None,
-        ):
-            should_continue, feedback = check_task_completion(
-                prompt=mock_prompt,
-                session=session,
-                accumulated_text="output",
-                deadline=None,
-                budget_tracker=None,
-            )
+        should_continue, feedback = check_task_completion(
+            prompt=mock_prompt,
+            session=session,
+            accumulated_text="output",
+            deadline=None,
+            budget_tracker=None,
+            sandbox=make_memory_sandbox(),
+        )
         assert should_continue is False
         assert feedback is None
 
@@ -374,17 +349,14 @@ class TestCheckTaskCompletion:
         mock_prompt = MagicMock()
         mock_prompt.task_completion_checker = mock_checker
 
-        with patch(
-            "weakincentives.adapters.codex_app_server._guardrails.resolve_filesystem",
-            return_value=None,
-        ):
-            should_continue, feedback = check_task_completion(
-                prompt=mock_prompt,
-                session=session,
-                accumulated_text="output",
-                deadline=None,
-                budget_tracker=None,
-            )
+        should_continue, feedback = check_task_completion(
+            prompt=mock_prompt,
+            session=session,
+            accumulated_text="output",
+            deadline=None,
+            budget_tracker=None,
+            sandbox=make_memory_sandbox(),
+        )
         assert should_continue is True
         assert feedback == "Missing report.md"
 
@@ -399,17 +371,14 @@ class TestCheckTaskCompletion:
         mock_prompt = MagicMock()
         mock_prompt.task_completion_checker = mock_checker
 
-        with patch(
-            "weakincentives.adapters.codex_app_server._guardrails.resolve_filesystem",
-            return_value=None,
-        ):
-            should_continue, feedback = check_task_completion(
-                prompt=mock_prompt,
-                session=session,
-                accumulated_text="output",
-                deadline=None,
-                budget_tracker=None,
-            )
+        should_continue, feedback = check_task_completion(
+            prompt=mock_prompt,
+            session=session,
+            accumulated_text="output",
+            deadline=None,
+            budget_tracker=None,
+            sandbox=make_memory_sandbox(),
+        )
         assert should_continue is False
         assert feedback is None
 
@@ -435,6 +404,7 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=deadline,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
@@ -458,34 +428,35 @@ class TestCheckTaskCompletion:
             accumulated_text="output",
             deadline=None,
             budget_tracker=tracker,
+            sandbox=make_memory_sandbox(),
         )
         assert should_continue is False
         assert feedback is None
         mock_checker.check.assert_not_called()
 
-    def test_filesystem_passed_to_context(self) -> None:
-        """Filesystem resolved from prompt is passed to TaskCompletionContext."""
+    def test_sandbox_passed_to_context(self) -> None:
+        """The sandbox is passed to TaskCompletionContext for file checks."""
         session, _ = _make_session()
         mock_fs = MagicMock()
+        mock_sandbox = MagicMock()
+        mock_sandbox.filesystem = mock_fs
         mock_checker = MagicMock(spec=TaskCompletionChecker)
         mock_checker.check.return_value = TaskCompletionResult.ok()
 
         mock_prompt = MagicMock()
         mock_prompt.task_completion_checker = mock_checker
 
-        with patch(
-            "weakincentives.adapters.codex_app_server._guardrails.resolve_filesystem",
-            return_value=mock_fs,
-        ):
-            check_task_completion(
-                prompt=mock_prompt,
-                session=session,
-                accumulated_text="output",
-                deadline=None,
-                budget_tracker=None,
-            )
+        check_task_completion(
+            prompt=mock_prompt,
+            session=session,
+            accumulated_text="output",
+            deadline=None,
+            budget_tracker=None,
+            sandbox=mock_sandbox,
+        )
 
         ctx = mock_checker.check.call_args[0][0]
+        assert ctx.sandbox is mock_sandbox
         assert ctx.filesystem is mock_fs
         assert ctx.session is session
         assert ctx.tentative_output == "output"

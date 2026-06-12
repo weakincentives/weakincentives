@@ -88,6 +88,8 @@ from .config import (
     LLMConfig,
 )
 from .core import (
+    AgentRuntime,
+    AgentRuntimeReleasedError,
     PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
@@ -98,6 +100,8 @@ __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
     "CODEX_APP_SERVER_ADAPTER_NAME",
     "AdapterName",
+    "AgentRuntime",
+    "AgentRuntimeReleasedError",
     "LLMConfig",
     "PromptEvaluationError",
     "PromptResponse",

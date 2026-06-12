@@ -1,72 +1,50 @@
-# Workspace Tools Specification
+# Workspace Specification
 
 ## Purpose
 
-Workspace tools provide surfaces for caching workspace summaries, testing
-with in-memory filesystems, and managing temporary workspace directories
-with host file mounts. Tool sections for file operations and shell execution
-are provided by the execution harness (e.g., Claude Agent SDK, Codex App Server).
+The workspace is the sandbox the agent acts on. Prompt templates declare
+environment intent via `WorkspaceConfig` (see `specs/SANDBOX.md`); the
+evaluating adapter materializes one sandbox per evaluation, points the
+harness `cwd` at `sandbox.root`, and renders a **workspace preview** from
+the *opened* sandbox into the prompt. This spec covers the prompt-side
+preview plus the digest and in-memory-filesystem surfaces.
 
 **Implementation:**
 
+- Workspace preview: `src/weakincentives/prompt/workspace.py`
 - Workspace digests: `src/weakincentives/contrib/tools/digests.py`
 - In-memory filesystem: `src/weakincentives/filesystem/_memory.py`
 - Public API: `src/weakincentives/contrib/tools/__init__.py`
-- Workspace section: `src/weakincentives/prompt/workspace.py`
 
 ## Guiding Principles
 
 - **Definition vs Harness**: Agent definitions specify what; harness provides how
-- **Predictable paths**: Normalized POSIX-style, ASCII-only, relative to session root
-- **Single source of state**: Reducers own mutations; handlers remain pure
+- **One environment model**: Mounts and posture live in `WorkspaceConfig`;
+  there is no separate workspace lifecycle to manage
+- **Render from reality**: The preview lists what the opened sandbox
+  actually contains, not copy-time bookkeeping
 
-## Workspace Sections
+## Workspace Preview
 
-A single generic workspace section manages temporary directories with host
-file mounts:
+`PromptTemplate.create(..., workspace=WorkspaceConfig(...))` appends a preview
+section (key `workspace`) to the template. Its params resolve at render
+time: `prompt.render(session=..., sandbox=sandbox)` builds a fresh listing
+from the open sandbox, so no run state is ever stored on the prompt:
 
-| Section | Key | Source |
-|---------|-----|--------|
-| `WorkspaceSection` | `workspace` | `src/weakincentives/prompt/workspace.py` |
+| Symbol | Role |
+|--------|------|
+| `WorkspacePreviewParams` | `listing` rendered into the section body |
+| `workspace_preview_section()` | Section factory (used by `PromptTemplate.create`) |
+| `workspace_preview_params(filesystem)` | Builds the listing via `filesystem.list(".")` |
+| `WORKSPACE_PREVIEW_KEY` | The auto-appended section key (`"workspace"`) |
 
-`WorkspaceSection` works with all adapters and renders a provider-agnostic
-section description.
+Without a `sandbox` argument the section renders a "not yet
+materialized" placeholder, so direct `prompt.render()` calls still
+succeed.
 
-### Host Mounts
-
-Host mounts copy files from the host filesystem into the workspace temp directory.
-The `HostMount` and `HostMountPreview` dataclasses and the mount machinery live
-in `weakincentives.sandbox` (see `specs/SANDBOX.md`) and are re-exported by
-`weakincentives.prompt.workspace`.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `host_path` | `str` | (required) | Absolute or relative path to host file/directory |
-| `mount_path` | `str \| None` | `None` | Relative path in temp directory (defaults to basename) |
-| `include_glob` | `tuple[str, ...]` | `()` | Glob patterns to include (empty = all) |
-| `exclude_glob` | `tuple[str, ...]` | `()` | Glob patterns to exclude |
-| `max_bytes` | `int \| None` | `None` | Maximum total bytes to copy |
-| `follow_symlinks` | `bool` | `False` | Whether to follow symbolic links |
-
-### Security
-
-- **Allowed roots**: Mounts are validated against `allowed_host_roots` to
-  prevent path traversal outside security boundaries
-- **Symlink handling**: Symlinks are rejected by default (`follow_symlinks=False`)
-- **Mount path validation**: Codex workspace validates mount paths cannot escape
-  the temp directory
-
-### Workspace Lifecycle
-
-1. **Creation**: Temp directory created, host files copied per mount config
-1. **Usage**: Workspace section renders mount previews for the prompt
-1. **Cloning**: `clone(session=...)` shares the temp directory with reference counting
-1. **Cleanup**: `cleanup()` decrements reference count; last reference deletes temp dir
-
-### Resources
-
-Both workspace sections contribute a `Filesystem` resource (backed by
-`HostBackend`) to the prompt's resource registry.
+Mount declarations (`HostMount`), allowed-root validation, byte budgets,
+and symlink handling are part of `WorkspaceConfig` and are specified in
+`specs/SANDBOX.md`.
 
 ## Workspace Digest
 
@@ -157,15 +135,6 @@ print(result.content)  # "Hello, world!"
 **Note:** Streaming operations (`open_read`, `open_write`) have no inherent size
 limits. See `FILESYSTEM.md` for streaming API details.
 
-## Cloning
-
-Workspace sections support `clone(session=..., dispatcher=...)`:
-
-- Shares temp directory with original via reference counting
-- Shares filesystem instance for consistency
-- Re-registers reducers on new session
-- Fully decoupled from original section lifecycle
-
 ## Execution Harness Tools
 
 Tool sections for filesystem operations, planning, and shell execution are
@@ -187,7 +156,6 @@ See `specs/CLAUDE_AGENT_SDK.md` for details on workspace configuration.
 When using `CodexAppServerAdapter`, the harness provides:
 
 - **Shared module tools** - File operations via JSON-RPC
-- **Workspace fingerprinting** - Deterministic fingerprint for reuse detection
 
 See `specs/CODEX_APP_SERVER.md` for details on workspace configuration.
 
@@ -200,6 +168,7 @@ See `specs/CODEX_APP_SERVER.md` for details on workspace configuration.
 
 ## Related Specifications
 
+- `specs/SANDBOX.md` - WorkspaceConfig, providers, and the sandbox aggregate
 - `specs/CLAUDE_AGENT_SDK.md` - Claude Agent SDK adapter and workspace
 - `specs/CODEX_APP_SERVER.md` - Codex App Server adapter and workspace
 - `specs/FILESYSTEM.md` - Filesystem protocol

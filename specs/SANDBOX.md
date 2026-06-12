@@ -7,7 +7,7 @@ One environment, one truth — and effects need a command channel. The
 effect facets (`Filesystem`, `Shell`) rooted at one directory, owns the
 egress/credential control plane, and has exactly one lifecycle owner —
 whoever opens a sandbox closes it; facets never self-close. A
-`SandboxConfig` declares intent as a serde value; a `SandboxProvider`
+`WorkspaceConfig` declares intent as a serde value; a `SandboxProvider`
 materializes it. Local first: remote sandboxes (M4) differ only in
 transport.
 
@@ -19,7 +19,7 @@ transport.
   `close()` is idempotent and is the only teardown
 - **Exec is an argv surface**: `Shell.run` executes a vector — never
   `/bin/sh`; no globbing, quoting, or variable expansion
-- **Intent is data**: `SandboxConfig` is a frozen serde value carrying
+- **Intent is data**: `WorkspaceConfig` is a frozen serde value carrying
   credential *names* only — never secret material
 - **Default-deny egress**: an empty `EgressPolicy` allows nothing; rules
   are explicit allow entries
@@ -35,7 +35,7 @@ transport.
 ```
 ┌───────────────────────────────────────────────────────────────┐
 │                     SandboxProvider.open(config)               │
-│   SandboxConfig: mounts · allowed_host_roots · read_only ·     │
+│   WorkspaceConfig: mounts · allowed_host_roots · read_only ·     │
 │                  egress · env · setup                          │
 ├───────────────────────────────────────────────────────────────┤
 │                          Sandbox                               │
@@ -99,12 +99,12 @@ readable.
 
 ## Intent and Provider
 
-`SandboxConfig` at `src/weakincentives/sandbox/_config.py` — a frozen
+`WorkspaceConfig` at `src/weakincentives/sandbox/_config.py` — a frozen
 serde value:
 
 | Field | Meaning |
 |-------|---------|
-| `mounts` | `HostMount` entries copied in at open time (machinery shared with the workspace section, `_mounts.py`) |
+| `mounts` | `HostMount` entries copied in at open time (`_mounts.py`) |
 | `allowed_host_roots` | Security boundary mount sources must live under |
 | `read_only` | Filesystem facet rejects writes (the shell is OS-level and unaffected) |
 | `egress` | `EgressPolicy` seeding the sandbox (default deny) |
@@ -112,11 +112,10 @@ serde value:
 | `setup` | Commands run in order after mounts; `shlex`-split into argv, no shell; non-zero exit fails the open with `SandboxSetupError` |
 
 `SandboxProvider.open(config) -> Sandbox` is the factory seam.
-`LocalSandboxProvider` materializes mounts with the same guards the
-workspace section applies (allowed-root validation, symlink rejection and
-escape checks, byte budgets, mount-target confinement) — the
-workspace-mount tests are the parity oracle — then roots the facets at the
-new directory and hands ownership to the returned sandbox.
+`LocalSandboxProvider` materializes mounts with allowed-root validation,
+symlink rejection and escape checks, byte budgets, and mount-target
+confinement, then roots the facets at the new directory and hands
+ownership to the returned sandbox.
 
 ## Egress & Credential Control Plane
 
@@ -132,7 +131,7 @@ injection time, inside the proxy only). Configs and serialized state carry
 `CredentialBinding(name, secret)` supplies material at runtime through
 `configure_credentials`. Invariants, enforced by tests:
 
-- Secret material never appears in `SandboxConfig`, serialized state,
+- Secret material never appears in `WorkspaceConfig`, serialized state,
   `repr`, or logs (`CredentialBinding` excludes the secret from `repr`)
 - Secret material is never written into the sandbox environment or
   filesystem
@@ -157,9 +156,30 @@ provider.open(config)
 sandbox.close()        # idempotent: rm root, rm snapshot storage, clear bindings
 ```
 
-Not yet wired into prompts, `ToolContext`, or adapters — that is M3
-(`refactor/M3.md`). The workspace section currently consumes the mount
-machinery from this package directly.
+The sandbox is the execution context (`refactor/M3.md`): prompt templates
+declare intent via `PromptTemplate.create(sandbox=...)`, adapters run the
+harness with `cwd = sandbox.root`, `ToolContext.sandbox` exposes the
+facets to handlers and policies, and tool transactions snapshot/restore
+the (session, sandbox) pair atomically.
+
+**Lease semantics.** A `Sandbox` handle is a *lease* on an environment:
+`close()` releases the holder's claim — for locally provisioned sandboxes
+that destroys the directory; future providers may pool environments or
+attach to harness-provided ones, where release means detach. The lease is
+held by an `AgentRuntime` (see `specs/ADAPTERS.md`): the bound
+(adapter, prompt, sandbox) triple, paired once inside
+`ProviderAdapter.runtime(prompt)` so mismatched pairings are
+unrepresentable. `AgentLoop` holds one runtime per request, spanning
+visibility-expansion retries and debug-bundle capture.
+
+**Environment vs. workspace.** Today the sandbox conflates two roles that
+local execution makes indistinguishable: the *workspace* (root, filesystem
+facet, snapshots — cheap, per-run) and the *execution substrate* (the
+place where the harness process runs — expensive, reusable, owner of
+shell transport and egress). The harness currently runs on the host with
+`cwd = sandbox.root`; when the environment becomes a container or SSH box
+(`refactor/M4.md`), the substrate moves behind the provider and the lease
+abstraction is the seam that keeps `evaluate` unchanged.
 
 ## Testing
 
@@ -167,15 +187,14 @@ Tests in `tests/sandbox/` mirror the package: `test_shell.py` (argv
 semantics, cwd/env/stdin/timeout/caps, launch-failure exit codes),
 `test_sandbox.py` (facets, snapshot/restore, control plane, close
 idempotency, secret-material invariants), `test_config.py` (validation,
-default-deny, serde round-trip), `test_provider.py` (mount parity with the
-workspace section, setup commands, fail-closed open), `test_mounts.py`
-(machinery moved verbatim from `tests/prompt/test_workspace_helpers.py`).
+default-deny, serde round-trip), `test_provider.py` (mount parity, setup
+commands, fail-closed open), `test_mounts.py` (the mount machinery).
 
 ## Related Specifications
 
 - `specs/FILESYSTEM.md` - The filesystem facet and backend protocol
-- `specs/WORKSPACE.md` - Workspace section consuming the mount machinery
+- `specs/WORKSPACE.md` - Workspace preview rendered from the opened sandbox
 - `specs/MODULE_BOUNDARIES.md` - `sandbox` is a core-layer package
 - `refactor/M2.md` - Milestone introducing this package
-- `refactor/M3.md` - Sandbox as the execution context (next)
+- `refactor/M3.md` - Sandbox as the execution context
 - `refactor/M4.md` - Remote sandbox and the proxy sidecar (next)

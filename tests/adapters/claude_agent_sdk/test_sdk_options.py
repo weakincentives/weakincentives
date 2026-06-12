@@ -37,22 +37,20 @@ from .conftest import MockClaudeSDKClient, MockHookMatcher
 
 
 class TestSDKConfigOptions:
-    def test_passes_cwd_option(
+    def test_cwd_is_sandbox_root(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         setup_mock_query(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
-        adapter = ClaudeAgentSDKAdapter(
-            client_config=ClaudeAgentSDKClientConfig(cwd="/home/user/project"),
-        )
+        adapter = ClaudeAgentSDKAdapter()
 
         with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
         assert len(MockSDKQuery.captured_options) == 1
-        assert MockSDKQuery.captured_options[0].cwd == "/home/user/project"
+        assert "wink-sandbox-" in MockSDKQuery.captured_options[0].cwd
 
     def test_passes_max_turns_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]

@@ -99,8 +99,9 @@ At `src/weakincentives/resources/context.py`:
 ### Snapshotable
 
 At `src/weakincentives/resources/protocols.py`. `snapshot(tag=)` / `restore(snapshot)`
-for rollback. Used by `Filesystem`, whose backends implement snapshots via
-structural sharing (`MemoryBackend`) or git commits (`HostBackend`).
+for state capture. Transaction rollback no longer scans resources: tool
+transactions snapshot the (session, sandbox) pair directly (see
+`runtime/transactions.py`).
 
 ### Closeable
 
@@ -138,9 +139,10 @@ See `src/weakincentives/prompt/prompt.py` for `PromptResources`.
 
 ## Transaction Patterns
 
-`tool_transaction(session, resource_context, tag)` from `runtime/transactions.py`
-provides a context manager that snapshots session and resource state on entry and
-restores it on failure.
+`tool_transaction(session, sandbox, tag=...)` from `runtime/transactions.py`
+provides a context manager that snapshots the session and the sandbox on
+entry and restores both on failure. Resources are not part of the
+transaction boundary.
 
 ## Testing Patterns
 
@@ -153,7 +155,6 @@ replace implementations. Verify cleanup via resource `.closed` attribute.
 - **No conditional bindings**: Use explicit registry construction
 - **No interception**: No AOP-style interceptors
 - **No named bindings**: Use wrapper types
-- **Snapshot scope**: Only SINGLETON resources snapshotted
 
 ## Future Considerations
 

@@ -330,6 +330,7 @@ def _run_feedback_providers(  # pragma: no cover - integration tested
         prompt=hook_context._prompt,  # pyright: ignore[reportPrivateUsage]
         session=hook_context.session,
         deadline=hook_context.deadline,
+        sandbox=hook_context.sandbox,
     )
     if feedback_text is not None:
         logger.debug(

@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.clock import FakeClock
 from weakincentives.runtime.lease_extender import LeaseExtender, LeaseExtenderConfig
 from weakincentives.runtime.mailbox import (
@@ -341,6 +342,7 @@ def test_tool_context_beat_with_heartbeat() -> None:
         rendered_prompt=None,  # type: ignore[arg-type]
         adapter=None,  # type: ignore[arg-type]
         session=session,
+        sandbox=make_memory_sandbox(),
         deadline=None,
         heartbeat=heartbeat,
     )
@@ -373,6 +375,7 @@ def test_hook_context_beat_with_heartbeat() -> None:
         session=session,
         adapter_name="test",
         prompt_name="test",
+        sandbox=make_memory_sandbox(),
         constraints=constraints,
     )
 
@@ -395,6 +398,7 @@ def test_tool_context_beat_without_heartbeat() -> None:
         rendered_prompt=None,  # type: ignore[arg-type]
         adapter=None,  # type: ignore[arg-type]
         session=session,
+        sandbox=make_memory_sandbox(),
         deadline=None,
         heartbeat=None,  # No heartbeat
     )

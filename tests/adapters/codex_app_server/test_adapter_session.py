@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -34,7 +34,6 @@ from weakincentives.adapters.codex_app_server.config import (
 )
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.budget import Budget
-from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate, Tool
 from weakincentives.prompt.tool import ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessDispatcher
@@ -126,95 +125,6 @@ def _messages_iterator(
 # ---- Tests ----
 
 
-class TestResolveCwd:
-    def test_no_filesystem_no_cwd_creates_temp(self) -> None:
-        import shutil as _shutil
-
-        adapter = CodexAppServerAdapter()
-        prompt = _make_simple_prompt()
-
-        cwd, temp_dir, _new_prompt = adapter._resolve_cwd(prompt)
-        try:
-            assert cwd is not None
-            assert temp_dir is not None
-            assert cwd == temp_dir
-        finally:
-            if temp_dir:
-                _shutil.rmtree(temp_dir, ignore_errors=True)
-
-    def test_no_filesystem_with_cwd_uses_configured(self) -> None:
-        adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/configured")
-        )
-        prompt = _make_simple_prompt()
-
-        cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-        assert cwd == "/tmp/configured"
-        assert temp_dir is None
-
-    def test_workspace_section_extracts_root(self) -> None:
-        """When prompt has a workspace section with HostFilesystem and no cwd."""
-        from weakincentives.prompt import WorkspaceSection
-
-        adapter = CodexAppServerAdapter()
-        session, _ = _make_session()
-
-        workspace = WorkspaceSection(session=session)
-        workspace_root = str(workspace.temp_dir)
-        try:
-            template: PromptTemplate[object] = PromptTemplate.create(
-                ns="test",
-                key="with-ws",
-                sections=(workspace,),
-                name="ws-prompt",
-            )
-            prompt = Prompt(template)
-
-            cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-            assert cwd == workspace_root
-            assert temp_dir is None
-        finally:
-            workspace.cleanup()
-
-    def test_non_host_filesystem_falls_back_to_cwd(self) -> None:
-        """When filesystem is not HostFilesystem, falls back to Path.cwd()."""
-        adapter = CodexAppServerAdapter()
-        prompt = _make_simple_prompt()
-
-        # Mock prompt.filesystem() to return a non-HostFilesystem
-        mock_fs = MagicMock(spec=Filesystem)
-        with patch.object(type(prompt), "filesystem", return_value=mock_fs):
-            cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-            assert cwd is not None
-            assert temp_dir is None
-
-    def test_workspace_with_configured_cwd(self) -> None:
-        """When prompt has workspace section AND cwd is configured, cwd wins."""
-        from weakincentives.prompt import WorkspaceSection
-
-        adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/configured")
-        )
-        session, _ = _make_session()
-
-        workspace = WorkspaceSection(session=session)
-        try:
-            template: PromptTemplate[object] = PromptTemplate.create(
-                ns="test",
-                key="with-ws2",
-                sections=(workspace,),
-                name="ws-prompt2",
-            )
-            prompt = Prompt(template)
-
-            cwd, temp_dir, _ = adapter._resolve_cwd(prompt)
-            # Configured cwd should win over workspace root
-            assert cwd == "/tmp/configured"
-            assert temp_dir is None
-        finally:
-            workspace.cleanup()
-
-
 class TestParseStructuredOutput:
     def test_valid_json(self) -> None:
         from weakincentives.prompt.rendering import RenderedPrompt as RP
@@ -294,7 +204,7 @@ class TestArraySchemaWrapping:
             value: int
 
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -370,7 +280,7 @@ class TestEvaluateWithOutputSchema:
             value: int
 
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -432,7 +342,7 @@ class TestEvaluateWithDeltaAccumulation:
 
     def test_delta_then_text_uses_text(self) -> None:
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -475,7 +385,7 @@ class TestEvaluateWithBudgetTracking:
         from weakincentives.budget import BudgetTracker
 
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -522,7 +432,7 @@ class TestEvaluateWithServerRequestDuringStream:
 
     def test_tool_call_during_stream(self) -> None:
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()

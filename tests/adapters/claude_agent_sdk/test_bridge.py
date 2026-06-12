@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._bridge import (
     BridgedTool,
     create_bridged_tools,
@@ -146,6 +147,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({"query": "test"})
@@ -171,6 +173,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({})
@@ -198,6 +201,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({"wrong_field": "value"})
@@ -225,6 +229,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({"query": "test"})
@@ -253,6 +258,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({"query": "test"})
@@ -296,6 +302,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({"query": "test"})
@@ -342,6 +349,7 @@ class TestBridgedTool:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({"query": "test"})
@@ -368,6 +376,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         assert len(bridged) == 1
@@ -390,6 +399,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         assert len(bridged) == 1
@@ -411,6 +421,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         schema = bridged[0].input_schema
@@ -441,6 +452,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         assert len(bridged) == 1
@@ -475,6 +487,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         result = bridged({})
@@ -496,6 +509,7 @@ class TestCreateBridgedTools:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            sandbox=make_memory_sandbox(),
         )
 
         assert bridged == ()

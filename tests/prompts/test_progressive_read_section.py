@@ -28,6 +28,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.prompt import (
     MarkdownSection,
     PromptValidationError,
@@ -89,6 +90,7 @@ def _make_tool_context() -> ToolContext:
         rendered_prompt=None,
         adapter=MagicMock(),
         session=MagicMock(),
+        sandbox=make_memory_sandbox(),
     )
 
 

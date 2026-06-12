@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from typing import cast
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     create_post_tool_use_hook,
@@ -47,6 +48,7 @@ class TestHookEventNameValidation:
             prompt_name="test-prompt",
             session=session,
             adapter_name="claude_agent_sdk",
+            sandbox=make_memory_sandbox(),
         )
 
     def test_pre_tool_use_hook_wrong_event_name(self) -> None:

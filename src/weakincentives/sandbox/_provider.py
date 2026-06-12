@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Sandbox providers: materialize a :class:`SandboxConfig` into a sandbox.
+"""Sandbox providers: materialize a :class:`WorkspaceConfig` into a sandbox.
 
 ``SandboxProvider.open`` is the factory seam between declared intent and a
 live environment. :class:`LocalSandboxProvider` materializes configs on
@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from ..filesystem import Filesystem, HostBackend
-from ._config import SandboxConfig
+from ._config import WorkspaceConfig
 from ._mounts import materialize_mounts
 from ._sandbox import LocalSandbox, Sandbox, SandboxError
 from ._shell import LocalShell
@@ -53,7 +53,7 @@ _STDERR_TAIL_BYTES = 2048
 class SandboxProvider(Protocol):
     """Materializes sandbox intent into a live environment."""
 
-    def open(self, config: SandboxConfig) -> Sandbox:
+    def open(self, config: WorkspaceConfig) -> Sandbox:
         """Open a sandbox satisfying ``config``.
 
         The caller owns the returned sandbox and must ``close()`` it.
@@ -68,7 +68,7 @@ class LocalSandboxProvider:
         super().__init__()
         self._temp_dir_prefix = temp_dir_prefix
 
-    def open(self, config: SandboxConfig) -> LocalSandbox:
+    def open(self, config: WorkspaceConfig) -> LocalSandbox:
         """Materialize ``config`` into a :class:`LocalSandbox`.
 
         Mounts are validated against ``config.allowed_host_roots`` and

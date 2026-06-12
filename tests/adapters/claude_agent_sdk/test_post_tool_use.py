@@ -18,6 +18,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import cast
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._bridge import MCPToolExecutionState
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookConstraints,
@@ -47,6 +48,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         input_data = {
@@ -109,6 +111,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         input_data = {
@@ -134,6 +137,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         # tool_response is a non-dict, non-None value (e.g., a string)
@@ -160,6 +164,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         long_output = "x" * 2000
@@ -181,6 +186,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         input_data = {
@@ -203,6 +209,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context, stop_on_structured_output=False)
         input_data = {
@@ -226,6 +233,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         input_data = {
@@ -253,6 +261,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         # Full SDK-format input that will be parsed successfully
@@ -282,6 +291,7 @@ class TestPostToolUseHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             constraints=HookConstraints(mcp_tool_state=mcp_state),
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         input_data = {
@@ -307,6 +317,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(fs),
         )
         hook = create_post_tool_use_hook(
             context,
@@ -341,6 +352,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", _make_prompt_with_fs(fs)),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(fs),
         )
         hook = create_post_tool_use_hook(
             context,
@@ -358,16 +370,17 @@ class TestPostToolUseHook:
         # Should stop - all required files exist
         assert result == {"continue_": False}
 
-    def test_continues_when_structured_output_without_filesystem(
+    def test_continues_when_structured_output_files_missing(
         self, session: Session
     ) -> None:
-        """PostToolUse continues after StructuredOutput when no filesystem available."""
-        # Prompt has no filesystem bound - checker fails closed
+        """PostToolUse continues after StructuredOutput when files are missing."""
+        # Empty sandbox: the required file does not exist yet.
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(
             context,
@@ -382,9 +395,9 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-structured", {"signal": None}))
 
-        # Should continue - no filesystem means fail-closed
+        # Should continue - the required output file is missing.
         assert result.get("continue_") is True
-        assert "No filesystem" in result["hookSpecificOutput"]["additionalContext"]
+        assert "not found" in result["hookSpecificOutput"]["additionalContext"]
 
     def test_returns_feedback_when_provider_triggers(self, session: Session) -> None:
         """PostToolUse returns additionalContext when feedback provider triggers."""
@@ -397,6 +410,7 @@ class TestPostToolUseHook:
             prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
 
@@ -444,6 +458,7 @@ class TestPostToolUseHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             constraints=constraints,
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
 

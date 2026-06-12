@@ -39,6 +39,7 @@ from ..runtime.logging import get_logger
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
     from ..runtime.session import SessionProtocol
+    from ..sandbox import Sandbox
 
 __all__ = [
     "CompositeChecker",
@@ -82,17 +83,22 @@ class TaskCompletionContext:
 
     Attributes:
         session: The session containing state slices.
+        sandbox: The open execution environment for file-based completion checks.
         tentative_output: The output the agent is attempting to produce.
-        filesystem: Optional filesystem for checking file-based completion.
         adapter: Optional adapter for LLM-based verification.
         stop_reason: The reason for the stop attempt.
     """
 
     session: SessionProtocol
+    sandbox: Sandbox
     tentative_output: Any = None
-    filesystem: Filesystem | None = None
     adapter: object | None = None
     stop_reason: str | None = None
+
+    @property
+    def filesystem(self) -> Filesystem:
+        """Return the sandbox's filesystem facet."""
+        return self.sandbox.filesystem
 
 
 @runtime_checkable
@@ -122,12 +128,8 @@ class TaskCompletionChecker(Protocol):
 class FileOutputChecker:
     """File-based task completion checker.
 
-    Verifies that required output files exist on the filesystem. Accepts a
-    tuple of file paths; returns incomplete if any are missing.
-
-    Fails closed when no filesystem is available in the context: if the checker
-    cannot verify that required files exist, it reports incomplete. This follows
-    the same fail-closed philosophy as tool policies.
+    Verifies that required output files exist on the sandbox's filesystem.
+    Accepts a tuple of file paths; returns incomplete if any are missing.
 
     Example:
         >>> checker = FileOutputChecker(files=("report.md", "results.json"))
@@ -146,26 +148,11 @@ class FileOutputChecker:
         """Check if all required output files exist.
 
         Args:
-            context: Context with optional filesystem for existence checks.
+            context: Context with the sandbox filesystem for existence checks.
 
         Returns:
-            Complete if all files exist. Incomplete if filesystem unavailable
-            (fail-closed) or if any required files are missing.
+            Complete if all files exist; incomplete if any are missing.
         """
-        if context.filesystem is None:
-            logger.debug(
-                "task_completion.file_output_checker.no_filesystem",
-                event="file_output_checker.no_filesystem",
-            )
-            if not self._files:
-                return TaskCompletionResult.ok(
-                    "No files required; filesystem not needed."
-                )
-            file_count = len(self._files)
-            return TaskCompletionResult.incomplete(
-                f"<blocker>\nNo filesystem available to verify {file_count} required output file(s).\n</blocker>"
-            )
-
         missing = [f for f in self._files if not context.filesystem.exists(f)]
         if not missing:
             file_count = len(self._files)

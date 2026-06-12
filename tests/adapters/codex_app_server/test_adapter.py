@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.codex_app_server._protocol import (
     authenticate,
     create_deadline_watchdog,
@@ -450,7 +451,9 @@ class TestHandleServerRequest:
                 "method": "item/tool/call",
                 "params": {"tool": "nonexistent", "arguments": {}},
             }
-            await handle_server_request(client, msg, {}, approval_policy="never")
+            await handle_server_request(
+                client, msg, {}, approval_policy="never", sandbox=make_memory_sandbox()
+            )
             client.send_response.assert_called_once()
             resp = client.send_response.call_args[0][1]
             assert resp["success"] is False
@@ -465,7 +468,9 @@ class TestHandleServerRequest:
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await handle_server_request(client, msg, {}, approval_policy="never")
+            await handle_server_request(
+                client, msg, {}, approval_policy="never", sandbox=make_memory_sandbox()
+            )
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "accept"
 
@@ -479,7 +484,13 @@ class TestHandleServerRequest:
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await handle_server_request(client, msg, {}, approval_policy="on-request")
+            await handle_server_request(
+                client,
+                msg,
+                {},
+                approval_policy="on-request",
+                sandbox=make_memory_sandbox(),
+            )
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "decline"
 
@@ -493,7 +504,9 @@ class TestHandleServerRequest:
                 "method": "item/fileChange/requestApproval",
                 "params": {},
             }
-            await handle_server_request(client, msg, {}, approval_policy="never")
+            await handle_server_request(
+                client, msg, {}, approval_policy="never", sandbox=make_memory_sandbox()
+            )
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "accept"
 
@@ -503,7 +516,9 @@ class TestHandleServerRequest:
         async def _run() -> None:
             client = _make_mock_client()
             msg = {"id": 5, "method": "unknown/request", "params": {}}
-            await handle_server_request(client, msg, {}, approval_policy="never")
+            await handle_server_request(
+                client, msg, {}, approval_policy="never", sandbox=make_memory_sandbox()
+            )
             client.send_response.assert_called_once_with(5, {})
 
         asyncio.run(_run())
@@ -520,7 +535,11 @@ class TestHandleToolCall:
             }
             tool_lookup = {"calc": mock_tool}
             await handle_tool_call(
-                client, 10, {"tool": "calc", "arguments": {"x": 1}}, tool_lookup
+                client,
+                10,
+                {"tool": "calc", "arguments": {"x": 1}},
+                tool_lookup,
+                sandbox=make_memory_sandbox(),
             )
             resp = client.send_response.call_args[0][1]
             assert resp["success"] is True
@@ -538,7 +557,11 @@ class TestHandleToolCall:
             }
             tool_lookup = {"t": mock_tool}
             await handle_tool_call(
-                client, 11, {"tool": "t", "arguments": '{"a": 1}'}, tool_lookup
+                client,
+                11,
+                {"tool": "t", "arguments": '{"a": 1}'},
+                tool_lookup,
+                sandbox=make_memory_sandbox(),
             )
             mock_tool.assert_called_once_with({"a": 1})
 
@@ -554,7 +577,11 @@ class TestHandleToolCall:
             }
             tool_lookup = {"t": mock_tool}
             await handle_tool_call(
-                client, 12, {"tool": "t", "arguments": "not json"}, tool_lookup
+                client,
+                12,
+                {"tool": "t", "arguments": "not json"},
+                tool_lookup,
+                sandbox=make_memory_sandbox(),
             )
             mock_tool.assert_called_once_with({})
 
@@ -570,7 +597,11 @@ class TestHandleToolCall:
             }
             tool_lookup = {"t": mock_tool}
             await handle_tool_call(
-                client, 13, {"tool": "t", "arguments": {}}, tool_lookup
+                client,
+                13,
+                {"tool": "t", "arguments": {}},
+                tool_lookup,
+                sandbox=make_memory_sandbox(),
             )
             resp = client.send_response.call_args[0][1]
             assert resp["success"] is False

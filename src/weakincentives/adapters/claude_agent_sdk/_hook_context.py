@@ -35,6 +35,7 @@ from ._bridge import MCPToolExecutionState
 
 if TYPE_CHECKING:
     from ...prompt.prompt import PromptResources
+    from ...sandbox import Sandbox
 
 __all__ = [
     "HookConstraints",
@@ -122,6 +123,7 @@ class HookContext:
         prompt: PromptProtocol[object],
         adapter_name: str,
         prompt_name: str,
+        sandbox: Sandbox,
         constraints: HookConstraints | None = None,
         clock: MonotonicClock = SYSTEM_CLOCK,
     ) -> None:
@@ -129,6 +131,7 @@ class HookContext:
         self._prompt = prompt
         self.adapter_name = adapter_name
         self.prompt_name = prompt_name
+        self.sandbox = sandbox
         # Unpack constraints or use defaults
         self.deadline = constraints.deadline if constraints else None
         self.budget_tracker = constraints.budget_tracker if constraints else None
@@ -175,7 +178,7 @@ class HookContext:
         if self._tool_tracker is None:
             self._tool_tracker = PendingToolTracker(
                 session=self._session,
-                resources=self._prompt.resources.context,
+                sandbox=self.sandbox,
             )
         return self._tool_tracker
 

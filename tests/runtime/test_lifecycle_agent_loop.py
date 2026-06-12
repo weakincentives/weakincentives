@@ -76,7 +76,7 @@ class _MockAdapter(ProviderAdapter[_Output]):
         self._error = error
         self.call_count = 0
 
-    def evaluate(
+    def _evaluate(
         self,
         prompt: Prompt[_Output],
         *,
@@ -86,6 +86,7 @@ class _MockAdapter(ProviderAdapter[_Output]):
         budget_tracker: BudgetTracker | None = None,
         heartbeat: object = None,
         run_context: object = None,
+        sandbox: object = None,
     ) -> PromptResponse[_Output]:
         del prompt, session, deadline, budget, budget_tracker, heartbeat, run_context
         self.call_count += 1
@@ -349,7 +350,7 @@ def test_agent_loop_nacks_remaining_messages_on_shutdown() -> None:
             super().__init__()
             self._loop = loop
 
-        def evaluate(
+        def _evaluate(
             self,
             prompt: Prompt[_Output],
             *,
@@ -359,8 +360,9 @@ def test_agent_loop_nacks_remaining_messages_on_shutdown() -> None:
             budget_tracker: BudgetTracker | None = None,
             heartbeat: object = None,
             run_context: object = None,
+            sandbox: object = None,
         ) -> PromptResponse[_Output]:
-            result = super().evaluate(
+            result = super()._evaluate(
                 prompt,
                 session=session,
                 deadline=deadline,
@@ -368,6 +370,7 @@ def test_agent_loop_nacks_remaining_messages_on_shutdown() -> None:
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
+                sandbox=sandbox,
             )
             # Trigger shutdown after first message
             if self.call_count == 1:
@@ -431,7 +434,7 @@ def test_agent_loop_nacks_with_expired_receipt_handle() -> None:
             super().__init__()
             self._loop = loop
 
-        def evaluate(
+        def _evaluate(
             self,
             prompt: Prompt[_Output],
             *,
@@ -441,8 +444,9 @@ def test_agent_loop_nacks_with_expired_receipt_handle() -> None:
             budget_tracker: BudgetTracker | None = None,
             heartbeat: object = None,
             run_context: object = None,
+            sandbox: object = None,
         ) -> PromptResponse[_Output]:
-            result = super().evaluate(
+            result = super()._evaluate(
                 prompt,
                 session=session,
                 deadline=deadline,
@@ -450,6 +454,7 @@ def test_agent_loop_nacks_with_expired_receipt_handle() -> None:
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
+                sandbox=sandbox,
             )
             # Trigger shutdown after first message
             if self.call_count == 1:

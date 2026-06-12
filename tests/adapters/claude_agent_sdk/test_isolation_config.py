@@ -44,7 +44,6 @@ class TestIsolationConfig:
         from weakincentives.adapters.claude_agent_sdk import (
             IsolationConfig,
             NetworkPolicy,
-            SandboxConfig,
         )
 
         setup_mock_query(
@@ -53,7 +52,7 @@ class TestIsolationConfig:
 
         isolation = IsolationConfig(
             network_policy=NetworkPolicy.no_network(),
-            sandbox=SandboxConfig(enabled=True),
+            sandbox_enabled=True,
         )
 
         adapter = ClaudeAgentSDKAdapter(
@@ -282,10 +281,10 @@ class TestIsolationConfig:
         assert usage.input_tokens is None
         assert usage.output_tokens is None
 
-    def test_creates_temp_folder_when_no_workspace_or_cwd(
+    def test_opens_empty_sandbox_when_no_sandbox_config(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        """When no workspace and no cwd, creates a temp folder as cwd."""
+        """When the template declares no sandbox, an empty sandbox is the cwd."""
         MockSDKQuery.reset()
         MockSDKQuery.set_results([MockResultMessage(result="Done")])
 
@@ -298,7 +297,7 @@ class TestIsolationConfig:
         options = MockSDKQuery.captured_options[0]
         assert hasattr(options, "cwd")
         assert options.cwd is not None
-        assert "wink-sdk-" in options.cwd
+        assert "wink-sandbox-" in options.cwd
 
     def test_temp_folder_cleaned_up_after_evaluate(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
@@ -335,123 +334,65 @@ class TestIsolationConfig:
 
         assert not Path(temp_cwd).exists()
 
-    def test_derives_cwd_from_workspace_section(self, session: Session) -> None:
-        """When prompt has a workspace section, cwd is derived from its root."""
-        from weakincentives.prompt import WorkspaceSection
-
-        MockSDKQuery.reset()
-        MockSDKQuery.set_results([MockResultMessage(result="Done")])
-
-        workspace = WorkspaceSection(session=session)
-        try:
-            template = PromptTemplate[SimpleOutput].create(
-                ns="test",
-                key="with-workspace",
-                sections=[
-                    MarkdownSection(
-                        title="Test",
-                        template="Hello",
-                        key="test",
-                    ),
-                    workspace,
-                ],
-            )
-            prompt_with_workspace: Prompt[SimpleOutput] = Prompt(template)
-
-            adapter = ClaudeAgentSDKAdapter()
-
-            with sdk_patches():
-                _ = adapter.evaluate(prompt_with_workspace, session=session)
-
-            assert len(MockSDKQuery.captured_options) == 1
-            options = MockSDKQuery.captured_options[0]
-
-            cwd = getattr(options, "cwd", None)
-            assert cwd is not None
-            assert cwd == str(workspace.temp_dir)
-        finally:
-            workspace.cleanup()
-
-    def test_explicit_cwd_overrides_workspace_root(
+    def test_cwd_is_sandbox_root_for_sandbox_template(
         self, session: Session, tmp_path: Path
     ) -> None:
-        """Explicit cwd in client config takes precedence over workspace root."""
-        from weakincentives.prompt import WorkspaceSection
+        """Templates with sandbox config run with cwd at the opened sandbox root."""
+        from weakincentives.sandbox import HostMount, WorkspaceConfig
 
         MockSDKQuery.reset()
         MockSDKQuery.set_results([MockResultMessage(result="Done")])
 
-        workspace = WorkspaceSection(session=session)
-        try:
-            template = PromptTemplate[SimpleOutput].create(
-                ns="test",
-                key="with-workspace",
-                sections=[
-                    MarkdownSection(
-                        title="Test",
-                        template="Hello",
-                        key="test",
-                    ),
-                    workspace,
-                ],
-            )
-            prompt_with_workspace: Prompt[SimpleOutput] = Prompt(template)
-
-            explicit_cwd = str(tmp_path)
-            adapter = ClaudeAgentSDKAdapter(
-                client_config=ClaudeAgentSDKClientConfig(cwd=explicit_cwd),
-            )
-
-            with sdk_patches():
-                _ = adapter.evaluate(prompt_with_workspace, session=session)
-
-            assert len(MockSDKQuery.captured_options) == 1
-            options = MockSDKQuery.captured_options[0]
-
-            cwd = getattr(options, "cwd", None)
-            assert cwd == explicit_cwd
-        finally:
-            workspace.cleanup()
-
-    def test_non_host_filesystem_does_not_derive_cwd(
-        self, session: Session, tmp_path: Path
-    ) -> None:
-        """When workspace filesystem is not HostFilesystem, cwd stays None."""
-        from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt import WorkspaceSection
-
-        MockSDKQuery.reset()
-        MockSDKQuery.set_results([MockResultMessage(result="Done")])
-
-        mem_fs = Filesystem.in_memory()
-        workspace = WorkspaceSection(
-            session=session,
-            _temp_dir=tmp_path,
-            _mount_previews=(),
-            _filesystem=mem_fs,
-        )
-
+        (tmp_path / "README.md").write_text("hello")
         template = PromptTemplate[SimpleOutput].create(
             ns="test",
-            key="with-inmem-fs",
+            key="with-sandbox",
             sections=[
                 MarkdownSection(
                     title="Test",
                     template="Hello",
                     key="test",
                 ),
-                workspace,
             ],
+            workspace=WorkspaceConfig(mounts=(HostMount(host_path=str(tmp_path)),)),
         )
-        prompt: Prompt[SimpleOutput] = Prompt(template)
+        prompt_with_sandbox: Prompt[SimpleOutput] = Prompt(template)
 
         adapter = ClaudeAgentSDKAdapter()
 
         with sdk_patches():
-            _ = adapter.evaluate(prompt, session=session)
+            _ = adapter.evaluate(prompt_with_sandbox, session=session)
 
         assert len(MockSDKQuery.captured_options) == 1
         options = MockSDKQuery.captured_options[0]
 
         cwd = getattr(options, "cwd", None)
-        assert cwd is None
+        assert cwd is not None
+        assert "wink-sandbox-" in cwd
+
+    def test_workspace_preview_renders_opened_sandbox(
+        self, session: Session, tmp_path: Path
+    ) -> None:
+        """The workspace preview lists the opened sandbox contents."""
+        from weakincentives.sandbox import HostMount, WorkspaceConfig
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        (tmp_path / "README.md").write_text("hello")
+        template = PromptTemplate[SimpleOutput].create(
+            ns="test",
+            key="with-sandbox-preview",
+            workspace=WorkspaceConfig(
+                mounts=(HostMount(host_path=str(tmp_path), mount_path="src"),)
+            ),
+        )
+        prompt_with_sandbox: Prompt[SimpleOutput] = Prompt(template)
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            _ = adapter.evaluate(prompt_with_sandbox, session=session)
+
+        assert len(MockSDKQuery.captured_prompts) == 1
+        assert "- src/" in MockSDKQuery.captured_prompts[0]

@@ -31,7 +31,8 @@ harnesses. The harness owns execution; you own the definition.
 
 ## Adapter Protocol
 
-All adapters implement `ProviderAdapter` at `src/weakincentives/adapters/core.py`:
+All adapters extend `ProviderAdapter` at `src/weakincentives/adapters/core.py`.
+`evaluate()` parameters:
 
 | Parameter | Description |
 | --- | --- |
@@ -48,6 +49,44 @@ All adapters implement `ProviderAdapter` at `src/weakincentives/adapters/core.py
 | `adapter_name` | Canonical name (e.g., `"claude_agent_sdk"`, `"codex_app_server"`, `"acp"`). Default: `type(self).__name__`. |
 
 Returns `PromptResponse[OutputT]` at `src/weakincentives/adapters/core.py`.
+
+### AgentRuntime
+
+`AgentRuntime` (same module) is a prompt bound to its adapter and a live
+sandbox for one run. It is the **only** way a sandbox reaches evaluation,
+so a mismatched (adapter, prompt, sandbox) triple is unrepresentable —
+the triple is paired exactly once, inside `ProviderAdapter.runtime`:
+
+- `adapter.runtime(prompt)` — context manager materializing the template's
+  `WorkspaceConfig` (empty config when none is declared) through the
+  adapter's injectable `sandbox_provider` (default `LocalSandboxProvider`)
+  and pairing it with the prompt. Exiting the block releases the sandbox
+  lease: locally provisioned sandboxes are closed and removed.
+- `rt.evaluate(session=..., ...)` — evaluates the bound prompt against the
+  bound sandbox; takes neither a prompt nor a sandbox argument. Every call
+  runs in the same environment (visibility-expansion retries included).
+  Owns the shared evaluation preamble: promotes `budget` to a
+  `BudgetTracker`, resolves the effective deadline, and fails fast with
+  `PromptEvaluationError` when it has already expired. Raises
+  `AgentRuntimeReleasedError` after release.
+- `rt.sandbox` / `rt.prompt` — read-only access for inspection and
+  evidence capture while the lease is held.
+- `adapter.evaluate(prompt, session=...)` — one-shot sugar that opens a
+  runtime for the duration of a single call.
+- `_evaluate(...)` — the abstract core contract concrete adapters
+  implement. Called only through a runtime; always receives an open
+  sandbox plus the resolved deadline and budget tracker (no `budget`
+  parameter). Implementations render with
+  `prompt.render(session=session, sandbox=sandbox)` — the workspace
+  preview is resolved at render time from the open sandbox, never stored
+  on the prompt — run the harness with `cwd = sandbox.root`, and contain
+  no lifecycle code.
+
+The adapter owns its sandbox provider because it is the authority on
+which environments its harness can attach to (adapter↔provider
+coherence); the runtime owns adapter↔prompt↔sandbox coherence. Providers
+may pool or attach to remote environments underneath the runtime without
+changing this contract (`refactor/M4.md`).
 
 ### Configuration
 
@@ -217,13 +256,15 @@ error results (never abort).
 
 ### Transactional Tool Execution
 
-Tool execution is transactional via `src/weakincentives/runtime/transactions.py`:
+Tool execution is transactional over the (session, sandbox) pair via
+`src/weakincentives/runtime/transactions.py`:
 
-- `create_snapshot(session, resource_context, tag)` - Capture state
-- `restore_snapshot(session, resource_context, snapshot)` - Rollback
+- `create_snapshot(session, sandbox, tag=...)` - Capture state
+- `restore_snapshot(session, sandbox, snapshot)` - Rollback
 - `tool_transaction` context manager for simpler cases
 
-Failed or aborted tools leave no trace in mutable state.
+Failed or aborted tools leave no trace in mutable state — neither in the
+session nor in the sandbox filesystem.
 
 ## Error Handling
 

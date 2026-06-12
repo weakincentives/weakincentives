@@ -135,9 +135,10 @@ PromptResponse(prompt_name, text, output)
 
 ## weakincentives.prompt (Workspace)
 
-**Workspace sections:**
+**Environment (weakincentives.sandbox):**
 
-- `WorkspaceSection(session, mounts)` — Workspace with file access
+- `WorkspaceConfig(mounts=..., allowed_host_roots=...)` — declared on
+  `PromptTemplate.create(sandbox=...)`
 - `HostMount(host_path, include_glob=(), exclude_glob=(), max_bytes=None)`
 
 ## weakincentives.evals

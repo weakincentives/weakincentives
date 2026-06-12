@@ -57,7 +57,6 @@ class TestCodexAppServerClientConfig:
         assert cfg.codex_bin == "codex"
         assert cfg.remote_url is None
         assert cfg.ws_auth_token is None
-        assert cfg.cwd is None
         assert cfg.env is None
         assert cfg.suppress_stderr is True
         assert cfg.startup_timeout_s == 10.0
@@ -73,7 +72,6 @@ class TestCodexAppServerClientConfig:
         auth = ApiKeyAuth(api_key="key")
         cfg = CodexAppServerClientConfig(
             codex_bin="/usr/local/bin/codex",
-            cwd="/tmp/work",
             env={"OPENAI_API_KEY": "key"},
             suppress_stderr=False,
             startup_timeout_s=30.0,
@@ -86,7 +84,6 @@ class TestCodexAppServerClientConfig:
             client_version="2.0.0",
         )
         assert cfg.codex_bin == "/usr/local/bin/codex"
-        assert cfg.cwd == "/tmp/work"
         assert cfg.approval_policy == "on-request"
         assert cfg.sandbox_mode == "read-only"
         assert cfg.auth_mode is auth

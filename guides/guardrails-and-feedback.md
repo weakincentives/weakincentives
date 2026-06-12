@@ -179,7 +179,7 @@ Implement the `FeedbackProvider` protocol:
   observations, suggestions, and severity
 
 The `FeedbackContext` gives you access to the session, the prompt,
-the deadline, recent tool calls, and feedback history. This is enough
+the open sandbox, the deadline, recent tool calls, and feedback history. This is enough
 to detect patterns like repeated failures or stalled progress.
 
 ## Task Completion

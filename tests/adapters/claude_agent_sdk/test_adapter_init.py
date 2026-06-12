@@ -40,13 +40,11 @@ class TestClaudeAgentSDKAdapterInit:
     def test_custom_client_config(self) -> None:
         config = ClaudeAgentSDKClientConfig(
             permission_mode="acceptEdits",
-            cwd="/home/user",
             max_turns=5,
         )
         adapter = ClaudeAgentSDKAdapter(client_config=config)
 
         assert adapter._client_config.permission_mode == "acceptEdits"
-        assert adapter._client_config.cwd == "/home/user"
         assert adapter._client_config.max_turns == 5
 
     def test_custom_model_config(self) -> None:

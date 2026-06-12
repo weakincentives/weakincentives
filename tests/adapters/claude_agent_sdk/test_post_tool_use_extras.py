@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from typing import cast
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     create_post_tool_use_hook,
@@ -41,6 +42,7 @@ class TestPostToolUseHookWithTypedParsing:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         # Full SDK-format input
@@ -82,6 +84,7 @@ class TestPostToolUseHookWithTypedParsing:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         # Malformed input missing tool_name
@@ -108,6 +111,7 @@ class TestPostToolUseHookWithTypedParsing:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         # Missing tool_name causes parsing failure, and tool_response is a string
@@ -134,6 +138,7 @@ class TestPostToolUseHookWithTypedParsing:
             prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(),
         )
         hook = create_post_tool_use_hook(context)
         # Missing tool_name causes parsing failure, and tool_response is None
@@ -165,6 +170,7 @@ class TestPostToolUseHookTransactional:
             prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(fs),
         )
 
         # Take snapshot via pre-tool hook
@@ -210,6 +216,7 @@ class TestPostToolUseHookTransactional:
             prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
+            sandbox=make_memory_sandbox(fs),
         )
 
         # Take snapshot via pre-tool hook

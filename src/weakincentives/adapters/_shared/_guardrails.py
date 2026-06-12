@@ -13,9 +13,8 @@
 """Shared guardrail utilities used by multiple adapter implementations.
 
 Adapters that use a turn-based protocol (ACP and Codex App Server) share
-identical logic for accumulating token usage across continuation rounds and
-resolving the filesystem from prompt resources. This module centralises that
-shared logic to avoid duplication.
+identical logic for accumulating token usage across continuation rounds.
+This module centralises that shared logic to avoid duplication.
 
 Adapter-specific concerns such as feedback content type and log event names
 are intentionally kept in each adapter's own ``_guardrails`` module.
@@ -23,14 +22,7 @@ are intentionally kept in each adapter's own ``_guardrails`` module.
 
 from __future__ import annotations
 
-import contextlib
-from typing import TYPE_CHECKING, Any
-
 from ...budget import TokenUsage
-
-if TYPE_CHECKING:
-    from ...filesystem import Filesystem
-    from ...prompt.protocols import PromptProtocol
 
 
 def accumulate_usage(current: TokenUsage | None, new: TokenUsage) -> TokenUsage:
@@ -48,20 +40,4 @@ def accumulate_usage(current: TokenUsage | None, new: TokenUsage) -> TokenUsage:
     )
 
 
-def resolve_filesystem(prompt: PromptProtocol[Any] | None) -> Filesystem | None:
-    """Extract filesystem from prompt resources if available.
-
-    Returns ``None`` when *prompt* is ``None``, when the filesystem is not
-    bound in the resource context, or when any error occurs during lookup
-    (e.g. no active resource context).
-    """
-    if prompt is None:
-        return None
-    from ...filesystem import Filesystem as FsType
-
-    with contextlib.suppress(Exception):
-        return prompt.resources.get_optional(FsType)
-    return None
-
-
-__all__ = ["accumulate_usage", "resolve_filesystem"]
+__all__ = ["accumulate_usage"]

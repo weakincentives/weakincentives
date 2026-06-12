@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.codex_app_server._ephemeral_home import CodexEphemeralHome
 from weakincentives.adapters.codex_app_server._protocol import (
     authenticate,
@@ -125,7 +126,11 @@ class TestToolCallRunsInThread:
                     "isError": False,
                 }
                 await handle_tool_call(
-                    client, 20, {"tool": "calc", "arguments": {"x": 1}}, tool_lookup
+                    client,
+                    20,
+                    {"tool": "calc", "arguments": {"x": 1}},
+                    tool_lookup,
+                    sandbox=make_memory_sandbox(),
                 )
                 mock_to_thread.assert_called_once_with(mock_tool, {"x": 1})
 
@@ -165,7 +170,7 @@ class TestSetupRPCDeadlineBounding:
     def test_setup_timeout_wraps_client_error(self) -> None:
         """When thread/start times out, PromptEvaluationError has phase='request'."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -246,7 +251,7 @@ class TestTranscriptBridgeIntegration:
     def test_evaluate_with_transcript_disabled(self) -> None:
         """When transcript=False, bridge is not created."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test", transcript=False),
+            client_config=CodexAppServerClientConfig(transcript=False),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -297,6 +302,7 @@ class TestTranscriptBridgeIntegration:
                 {"tool": "calc", "arguments": {"x": 1}},
                 tool_lookup,
                 bridge=bridge,
+                sandbox=make_memory_sandbox(),
             )
             bridge.on_tool_call.assert_called_once_with(
                 {"tool": "calc", "arguments": {"x": 1}}
@@ -321,6 +327,7 @@ class TestTranscriptBridgeIntegration:
                 {"tool": "missing", "arguments": {}},
                 tool_lookup,
                 bridge=bridge,
+                sandbox=make_memory_sandbox(),
             )
             bridge.on_tool_call.assert_called_once()
             bridge.on_tool_result.assert_called_once()
@@ -343,7 +350,13 @@ class TestApprovalPolicyUntrusted:
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await handle_server_request(client, msg, {}, approval_policy="untrusted")
+            await handle_server_request(
+                client,
+                msg,
+                {},
+                approval_policy="untrusted",
+                sandbox=make_memory_sandbox(),
+            )
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "decline"
 
@@ -361,7 +374,13 @@ class TestApprovalPolicyUntrusted:
                 "method": "item/commandExecution/requestApproval",
                 "params": {},
             }
-            await handle_server_request(client, msg, {}, approval_policy="on-failure")
+            await handle_server_request(
+                client,
+                msg,
+                {},
+                approval_policy="on-failure",
+                sandbox=make_memory_sandbox(),
+            )
             resp = client.send_response.call_args[0][1]
             assert resp["decision"] == "accept"
 
@@ -387,7 +406,7 @@ class TestEvaluateWithSkills:
         """When rendered prompt has skills, client env includes HOME + CODEX_HOME."""
         skill_dir = _make_dir_skill(tmp_path, "my-skill")
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -432,7 +451,7 @@ class TestEvaluateWithSkills:
     def test_no_skills_no_ephemeral_home(self) -> None:
         """When rendered prompt has no skills, env is unchanged."""
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -461,7 +480,7 @@ class TestEvaluateWithSkills:
         """Ephemeral home is cleaned up even when protocol raises."""
         skill_dir = _make_dir_skill(tmp_path, "my-skill")
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()
@@ -499,7 +518,6 @@ class TestEvaluateWithSkills:
         skill_dir = _make_dir_skill(tmp_path, "my-skill")
         adapter = CodexAppServerAdapter(
             client_config=CodexAppServerClientConfig(
-                cwd="/tmp/test",
                 env={"CUSTOM_VAR": "value"},
             ),
         )
@@ -546,7 +564,7 @@ class TestEvaluateWithSkills:
         """Ephemeral home is cleaned up when mount_skills raises."""
         nonexistent = tmp_path / "does-not-exist"
         adapter = CodexAppServerAdapter(
-            client_config=CodexAppServerClientConfig(cwd="/tmp/test"),
+            client_config=CodexAppServerClientConfig(),
         )
         session, _ = _make_session()
         prompt = _make_simple_prompt()

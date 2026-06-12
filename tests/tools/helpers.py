@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, TypeVar, cast
 
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
@@ -46,12 +47,13 @@ class ToolSection(Protocol):
 
 
 class _DummyAdapter(ProviderAdapter[Any]):
-    def evaluate(
+    def _evaluate(  # noqa: PLR0913
         self,
         prompt: Prompt[Any],
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
+        sandbox: object = None,
     ) -> PromptResponse[Any]:
         raise NotImplementedError
 
@@ -78,6 +80,7 @@ def build_tool_context(
         rendered_prompt=None,
         adapter=adapter,
         session=session,
+        sandbox=make_memory_sandbox(filesystem),
     )
 
 

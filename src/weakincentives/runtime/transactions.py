@@ -12,20 +12,20 @@
 
 """Transaction support for tool execution.
 
-This module provides transactional semantics for tool execution by managing
-composite snapshots of session state and snapshotable resources. It enables
-atomic rollback on tool failure.
+This module provides transactional semantics for tool execution over the
+pair **(session, sandbox)**: a composite snapshot captures the session
+slices and a filesystem snapshot of the sandbox. On tool failure both are
+restored atomically, so partial state never leaks.
 
 Example usage::
 
     from weakincentives.runtime.transactions import tool_transaction, restore_snapshot
 
     # Use as context manager for automatic rollback on exception
-    # Note: pass prompt.resources.context (the ScopedResourceContext)
-    with tool_transaction(session, prompt.resources.context, tag="my_tool") as snapshot:
+    with tool_transaction(session, sandbox, tag="my_tool") as snapshot:
         result = execute_tool(...)
         if not result.success:
-            restore_snapshot(session, prompt.resources.context, snapshot)
+            restore_snapshot(session, sandbox, snapshot)
         return result
 
 For hook-based native tool execution, use the PendingToolTracker class to
@@ -47,8 +47,8 @@ from uuid import UUID, uuid4
 from ..clock import SYSTEM_CLOCK
 from ..dataclasses import FrozenDataclass
 from ..errors import RestoreFailedError
-from ..resources.protocols import Snapshotable
-from ..serde import dump, parse, resolve_type_identifier, type_identifier
+from ..filesystem import SnapshotRef
+from ..serde import dump, parse
 from ..types import JSONValue
 from .session.protocols import SessionProtocol
 from .session.snapshots import (
@@ -58,10 +58,10 @@ from .session.snapshots import (
 )
 
 if TYPE_CHECKING:
-    from ..resources.context import ScopedResourceContext
+    from ..sandbox import Sandbox
 
 # Schema version for composite snapshot serialization
-COMPOSITE_SNAPSHOT_SCHEMA_VERSION = "1"
+COMPOSITE_SNAPSHOT_SCHEMA_VERSION = "3"
 
 
 @FrozenDataclass()
@@ -87,26 +87,24 @@ class SnapshotMetadata:
 
 @FrozenDataclass()
 class CompositeSnapshot:
-    """Consistent snapshot of session and snapshotable resources.
+    """Consistent snapshot of the (session, sandbox) pair.
 
-    CompositeSnapshot captures a point-in-time view of session slices and all
-    registered snapshotable resources (e.g., filesystem). This enables atomic
-    rollback on tool failure.
+    CompositeSnapshot captures a point-in-time view of session slices and
+    a snapshot reference for the sandbox's filesystem state. This enables
+    atomic rollback on tool failure.
 
     Attributes:
         snapshot_id: Unique identifier for this snapshot.
         created_at: Timestamp when the snapshot was taken.
         session: Snapshot of session slice state.
-        resources: Mapping of resource types to their snapshots.
+        sandbox: Snapshot reference for the sandbox.
         metadata: Optional context about when/why this snapshot was taken.
     """
 
     snapshot_id: UUID
     created_at: datetime
     session: Snapshot
-    resources: Mapping[type[object], object] = field(
-        default_factory=lambda: types.MappingProxyType({})
-    )
+    sandbox: SnapshotRef
     metadata: SnapshotMetadata | None = None
 
     def to_json(self) -> str:
@@ -119,30 +117,10 @@ class CompositeSnapshot:
             SnapshotSerializationError: If serialization fails.
         """
         try:
-            # Serialize session snapshot
             session_json = self.session.to_json()
 
-            # Serialize resource snapshots
-            resource_entries: list[dict[str, JSONValue]] = []
-            for resource_type, resource_snapshot in sorted(
-                self.resources.items(),
-                key=lambda item: type_identifier(item[0]),
-            ):
-                try:
-                    serialized_snapshot = dump(resource_snapshot)
-                except Exception as error:  # pragma: no cover - defensive
-                    msg = f"Failed to serialize resource snapshot for {resource_type.__qualname__}"
-                    raise SnapshotSerializationError(msg) from error
+            sandbox_payload: JSONValue = cast(JSONValue, dump(self.sandbox))
 
-                resource_entries.append(
-                    {
-                        "resource_type": type_identifier(resource_type),
-                        "snapshot_type": type_identifier(type(resource_snapshot)),
-                        "snapshot": cast(JSONValue, serialized_snapshot),
-                    }
-                )
-
-            # Serialize metadata
             metadata_payload: dict[str, JSONValue] | None = None
             if self.metadata is not None:  # pragma: no branch - tested separately
                 metadata_payload = {
@@ -157,12 +135,10 @@ class CompositeSnapshot:
                 "snapshot_id": str(self.snapshot_id),
                 "created_at": self.created_at.isoformat(),
                 "session": json.loads(session_json),
-                "resources": resource_entries,
+                "sandbox": sandbox_payload,
                 "metadata": metadata_payload,
             }
             return json.dumps(payload, sort_keys=True)
-        except SnapshotSerializationError:  # pragma: no cover - defensive
-            raise
         except Exception as error:  # pragma: no cover - defensive
             msg = "Failed to serialize composite snapshot"
             raise SnapshotSerializationError(msg) from error
@@ -201,14 +177,14 @@ class CompositeSnapshot:
         snapshot_id = _parse_snapshot_id(payload)
         created_at = _parse_created_at(payload)
         session_snapshot = _parse_session_snapshot(payload)
-        resources = _parse_resource_snapshots(payload)
+        sandbox_ref = _parse_sandbox_ref(payload)
         metadata = _parse_snapshot_metadata(payload)
 
         return cls(
             snapshot_id=snapshot_id,
             created_at=created_at,
             session=session_snapshot,
-            resources=types.MappingProxyType(resources),
+            sandbox=sandbox_ref,
             metadata=metadata,
         )
 
@@ -243,61 +219,14 @@ def _parse_session_snapshot(payload: Mapping[str, JSONValue]) -> Snapshot:
         raise SnapshotRestoreError("Failed to parse session snapshot") from error
 
 
-def _parse_resource_snapshots(
-    payload: Mapping[str, JSONValue],
-) -> dict[type[object], object]:
-    resources_payload = payload.get("resources", [])
-    if not isinstance(resources_payload, list):
-        raise SnapshotRestoreError("Resources must be a list")
-
-    resources: dict[type[object], object] = {}
-    for entry in resources_payload:
-        if not isinstance(entry, Mapping):
-            raise SnapshotRestoreError("Resource entry must be an object")
-        resource_type, snapshot = _parse_single_resource(
-            cast(Mapping[str, JSONValue], entry)
-        )
-        resources[resource_type] = snapshot
-    return resources
-
-
-def _parse_single_resource(
-    entry: Mapping[str, JSONValue],
-) -> tuple[type[object], object]:
-    resource_type_str = entry.get("resource_type")
-    if not isinstance(resource_type_str, str):  # pragma: no cover - defensive
-        raise SnapshotRestoreError("Resource type must be a string")
-
+def _parse_sandbox_ref(payload: Mapping[str, JSONValue]) -> SnapshotRef:
+    sandbox_payload = payload.get("sandbox")
+    if not isinstance(sandbox_payload, Mapping):
+        raise SnapshotRestoreError("Sandbox snapshot must be an object")
     try:
-        resource_type = resolve_type_identifier(resource_type_str)
-    except (TypeError, ValueError, ImportError) as error:  # pragma: no cover
-        raise SnapshotRestoreError(
-            f"Unknown resource type: {resource_type_str}"
-        ) from error
-
-    snapshot_data = entry.get("snapshot")
-    if not isinstance(snapshot_data, Mapping):  # pragma: no cover - defensive
-        raise SnapshotRestoreError("Resource snapshot must be an object")
-
-    snapshot_type_str = entry.get("snapshot_type")
-    if not isinstance(snapshot_type_str, str):  # pragma: no cover - defensive
-        raise SnapshotRestoreError("Resource entry must include snapshot_type")
-
-    try:
-        snapshot_type = resolve_type_identifier(snapshot_type_str)
-    except (TypeError, ValueError, ImportError) as error:  # pragma: no cover
-        raise SnapshotRestoreError(
-            f"Unknown snapshot type: {snapshot_type_str}"
-        ) from error
-
-    try:
-        resource_snapshot = parse(snapshot_type, snapshot_data)
-    except Exception as error:  # pragma: no cover - defensive
-        raise SnapshotRestoreError(
-            f"Failed to parse resource snapshot for {resource_type_str}"
-        ) from error
-
-    return resource_type, resource_snapshot
+        return parse(SnapshotRef, sandbox_payload)
+    except Exception as error:
+        raise SnapshotRestoreError("Failed to parse sandbox snapshot ref") from error
 
 
 def _parse_snapshot_metadata(
@@ -356,84 +285,68 @@ class PendingToolExecution:
 
 def create_snapshot(
     session: SessionProtocol,
-    resources: ScopedResourceContext,
+    sandbox: Sandbox,
     *,
     tag: str | None = None,
 ) -> CompositeSnapshot:
-    """Capture consistent snapshot of session and all snapshotable resources.
+    """Capture a consistent snapshot of the (session, sandbox) pair.
 
-    Takes a point-in-time snapshot of the session state and all registered
-    resources that implement the Snapshotable protocol.
+    Takes a point-in-time snapshot of the session state and the sandbox's
+    filesystem state.
 
     Args:
         session: Session to snapshot.
-        resources: Resource context containing snapshotable resources.
+        sandbox: Sandbox participating in the transaction.
         tag: Optional human-readable label for the snapshot.
 
     Returns:
-        CompositeSnapshot containing session and resource snapshots.
+        CompositeSnapshot containing the session and sandbox snapshots.
     """
-    resource_snapshots: dict[type[object], object] = {}
-
-    for resource_type, resource in resources.singleton_cache.items():
-        if isinstance(resource, Snapshotable):
-            resource_snapshots[resource_type] = resource.snapshot(tag=tag)
-
+    sandbox_ref = sandbox.snapshot(tag=tag)
     session_snapshot = session.snapshot()
 
     return CompositeSnapshot(
         snapshot_id=uuid4(),
         created_at=SYSTEM_CLOCK.utcnow(),
         session=session_snapshot,
-        resources=types.MappingProxyType(resource_snapshots),
+        sandbox=sandbox_ref,
         metadata=SnapshotMetadata(tag=tag),
     )
 
 
 def restore_snapshot(
     session: SessionProtocol,
-    resources: ScopedResourceContext,
+    sandbox: Sandbox,
     snapshot: CompositeSnapshot,
 ) -> None:
-    """Restore session and all snapshotable resources from a composite snapshot.
+    """Restore the (session, sandbox) pair from a composite snapshot.
 
-    Restores the session state first, then restores each snapshotable resource.
-    If any restore operation fails, a RestoreFailedError is raised.
+    Restores the session state first, then the sandbox state. If any
+    restore operation fails, a RestoreFailedError is raised.
 
     Args:
         session: Session to restore.
-        resources: Resource context containing snapshotable resources.
+        sandbox: Sandbox to restore.
         snapshot: The composite snapshot to restore from.
 
     Raises:
         RestoreFailedError: If restoring any component fails.
     """
-    # Restore session first
     try:
         session.restore(snapshot.session)
     except SnapshotRestoreError as error:
         raise RestoreFailedError(f"Failed to restore session: {error}") from error
 
-    # Restore each snapshotable resource
-    for resource_type, resource_snapshot in snapshot.resources.items():
-        resource = resources.singleton_cache.get(resource_type)
-        if resource is None:
-            continue
-
-        if isinstance(resource, Snapshotable):  # pragma: no branch - tested separately
-            try:
-                # Snapshot type matches at runtime (stored by calling resource.snapshot())
-                resource.restore(resource_snapshot)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-            except Exception as error:
-                raise RestoreFailedError(
-                    f"Failed to restore {resource_type.__qualname__}: {error}"
-                ) from error
+    try:
+        sandbox.restore(snapshot.sandbox)
+    except Exception as error:
+        raise RestoreFailedError(f"Failed to restore sandbox: {error}") from error
 
 
 @contextmanager
 def tool_transaction(
     session: SessionProtocol,
-    resources: ScopedResourceContext,
+    sandbox: Sandbox,
     *,
     tag: str | None = None,
 ) -> Generator[CompositeSnapshot]:
@@ -446,16 +359,15 @@ def tool_transaction(
 
     Example usage::
 
-        # Pass prompt.resources.context (the ScopedResourceContext)
-        with tool_transaction(session, prompt.resources.context, tag="my_tool") as snapshot:
+        with tool_transaction(session, sandbox, tag="my_tool") as snapshot:
             result = execute_tool(...)
             if not result.success:
-                restore_snapshot(session, prompt.resources.context, snapshot)
+                restore_snapshot(session, sandbox, snapshot)
             return result
 
     Args:
         session: Session to snapshot and potentially restore.
-        resources: Resource context containing snapshotable resources.
+        sandbox: Sandbox participating in the transaction.
         tag: Optional human-readable label for the snapshot.
 
     Yields:
@@ -464,11 +376,11 @@ def tool_transaction(
     Raises:
         Any exception from the block, after state restoration.
     """
-    snapshot = create_snapshot(session, resources, tag=tag)
+    snapshot = create_snapshot(session, sandbox, tag=tag)
     try:
         yield snapshot
     except Exception:
-        restore_snapshot(session, resources, snapshot)
+        restore_snapshot(session, sandbox, snapshot)
         raise
 
 
@@ -481,11 +393,11 @@ class PendingToolTracker:
 
     Attributes:
         session: Session for snapshot/restore operations.
-        resources: Resource context for snapshot/restore operations.
+        sandbox: Sandbox participating in transactions.
     """
 
     session: SessionProtocol
-    resources: ScopedResourceContext
+    sandbox: Sandbox
     _pending_tools: dict[str, PendingToolExecution] = field(
         default_factory=dict[str, PendingToolExecution], repr=False
     )
@@ -511,7 +423,7 @@ class PendingToolTracker:
         """
         with self._lock:
             snapshot = create_snapshot(
-                self.session, self.resources, tag=f"pre:{tool_name}:{tool_use_id}"
+                self.session, self.sandbox, tag=f"pre:{tool_name}:{tool_use_id}"
             )
             self._pending_tools[tool_use_id] = PendingToolExecution(
                 tool_use_id=tool_use_id,
@@ -549,7 +461,7 @@ class PendingToolTracker:
                 return False
 
             if not success:
-                restore_snapshot(self.session, self.resources, pending.snapshot)
+                restore_snapshot(self.session, self.sandbox, pending.snapshot)
                 return True
 
             return False
@@ -575,7 +487,7 @@ class PendingToolTracker:
             if pending is None:
                 return False
 
-            restore_snapshot(self.session, self.resources, pending.snapshot)
+            restore_snapshot(self.session, self.sandbox, pending.snapshot)
             return True
 
     @property

@@ -25,7 +25,7 @@ from weakincentives.sandbox import (
     EgressPolicy,
     EgressRule,
     HostMount,
-    SandboxConfig,
+    WorkspaceConfig,
 )
 
 
@@ -131,9 +131,9 @@ class TestEgressPolicy:
         assert not policy.allows("db.internal", port=5432, protocol="udp")
 
 
-class TestSandboxConfig:
+class TestWorkspaceConfig:
     def test_defaults(self) -> None:
-        config = SandboxConfig()
+        config = WorkspaceConfig()
         assert config.mounts == ()
         assert config.allowed_host_roots == ()
         assert config.read_only is False
@@ -142,12 +142,12 @@ class TestSandboxConfig:
         assert config.setup == ()
 
     def test_frozen(self) -> None:
-        config = SandboxConfig()
+        config = WorkspaceConfig()
         with pytest.raises(FrozenInstanceError):
             config.read_only = True  # type: ignore[misc]
 
     def test_serde_round_trip(self) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             mounts=(HostMount(host_path="/src", include_glob=("*.py",)),),
             allowed_host_roots=("/src",),
             read_only=True,
@@ -164,11 +164,11 @@ class TestSandboxConfig:
             setup=("python -m venv .venv",),
         )
         data = serde.dump(config)
-        restored = serde.parse(SandboxConfig, data)
+        restored = serde.parse(WorkspaceConfig, data)
         assert restored == config
 
     def test_serde_value_carries_credential_names_only(self) -> None:
-        config = SandboxConfig(
+        config = WorkspaceConfig(
             egress=EgressPolicy(
                 allow=(
                     EgressRule(

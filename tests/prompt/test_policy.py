@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import (
     PolicyDecision,
@@ -31,7 +32,6 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.prompt.policy import _extract_path, _normalize_path
-from weakincentives.resources import Binding, ResourceRegistry
 from weakincentives.runtime import InProcessDispatcher, Session
 
 # --- Test Parameters ---
@@ -185,6 +185,7 @@ class TestSequentialDependencyPolicy:
             rendered_prompt=None,  # type: ignore[arg-type]
             adapter=None,  # type: ignore[arg-type]
             session=session,
+            sandbox=make_memory_sandbox(),
             deadline=None,
         )
 
@@ -304,22 +305,11 @@ class TestReadBeforeWritePolicy:
     def _make_context(
         self, session: Session, *, filesystem: Filesystem | None = None
     ) -> ToolContext:
-        """Create a ToolContext with optional filesystem."""
-        if filesystem is not None:
-            # Register with Filesystem protocol as key
-            registry = ResourceRegistry.of(
-                Binding(Filesystem, lambda _: filesystem)  # type: ignore[type-abstract]
-            )
-            template: PromptTemplate[None] = PromptTemplate.create(
-                ns="test", key="test-prompt", name="test", resources=registry
-            )
-            prompt: Prompt[None] = Prompt(template)
-            prompt = prompt.bind(resources={Filesystem: filesystem})  # type: ignore[type-abstract]
-        else:
-            template = PromptTemplate.create(ns="test", key="test-prompt", name="test")
-            prompt = Prompt(template)
-
-        # Always enter resource context
+        """Create a ToolContext with an optional sandbox-backed filesystem."""
+        template: PromptTemplate[None] = PromptTemplate.create(
+            ns="test", key="test-prompt", name="test"
+        )
+        prompt: Prompt[None] = Prompt(template)
         prompt.resources.__enter__()
 
         return ToolContext(
@@ -327,6 +317,7 @@ class TestReadBeforeWritePolicy:
             rendered_prompt=None,  # type: ignore[arg-type]
             adapter=None,  # type: ignore[arg-type]
             session=session,
+            sandbox=make_memory_sandbox(filesystem),
             deadline=None,
         )
 
@@ -362,16 +353,6 @@ class TestReadBeforeWritePolicy:
         )
 
         decision = policy.check(tool, NoPathParams(value="x"), context=context)
-        assert decision.allowed is True
-
-    def test_allows_write_when_no_filesystem(self) -> None:
-        policy = ReadBeforeWritePolicy()
-        dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        context = self._make_context(session, filesystem=None)
-        tool = self._make_tool("write_file")
-
-        decision = policy.check(tool, FileParams(path="/x"), context=context)
         assert decision.allowed is True
 
     def test_allows_new_file_creation(self) -> None:

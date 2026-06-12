@@ -16,18 +16,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
-import tempfile
 from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
-from typing import Any, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 from uuid import uuid4
 
-from ...budget import Budget, BudgetTracker
+from ...budget import BudgetTracker
 from ...clock import SYSTEM_CLOCK, AsyncSleeper, MonotonicClock
 from ...deadlines import Deadline
-from ...filesystem import Filesystem, HostBackend
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.protocols import PromptProtocol
@@ -40,6 +36,7 @@ from ...runtime.session.protocols import SessionProtocol
 from ...runtime.session.rendered_tools import RenderedTools
 from ...runtime.transcript import TranscriptEmitter
 from ...runtime.watchdog import Heartbeat
+from ...sandbox import SandboxProvider
 from ...types import ACP_ADAPTER_NAME, AdapterName
 from .._shared import run_async
 from .._shared._bridge import BridgedTool, create_bridged_tools
@@ -54,6 +51,9 @@ from ._structured_output import create_structured_output_tool
 from ._transcript import ACPTranscriptBridge
 from .client import ACPClient
 from .config import ACPAdapterConfig, ACPClientConfig
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 __all__ = ["ACPAdapter"]
 
@@ -85,8 +85,9 @@ class ACPAdapter(ProviderAdapter[Any]):
         client_config: ACPClientConfig | None = None,
         async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
         clock: MonotonicClock = SYSTEM_CLOCK,
+        sandbox_provider: SandboxProvider | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(sandbox_provider=sandbox_provider)
         self._adapter_config = adapter_config or ACPAdapterConfig()
         self._client_config = client_config or ACPClientConfig()
         self._async_sleeper = async_sleeper
@@ -97,7 +98,6 @@ class ACPAdapter(ProviderAdapter[Any]):
             event="adapter.init",
             context={
                 "agent_bin": self._client_config.agent_bin,
-                "cwd": self._client_config.cwd,
                 "permission_mode": self._client_config.permission_mode,
             },
         )
@@ -113,39 +113,27 @@ class ACPAdapter(ProviderAdapter[Any]):
         return ACP_ADAPTER_NAME
 
     @override
-    def evaluate[OutputT](
+    def _evaluate[OutputT](
         self,
         prompt: Prompt[OutputT],
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
-        """Evaluate prompt using an ACP agent."""
-        if budget and not budget_tracker:
-            budget_tracker = BudgetTracker(budget)
-
-        effective_deadline = deadline or (budget.deadline if budget else None)
-        prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
-
-        if effective_deadline and effective_deadline.remaining().total_seconds() <= 0:
-            raise PromptEvaluationError(
-                message="Deadline expired before ACP invocation",
-                prompt_name=prompt_name,
-                phase="request",
-            )
-
+        """Evaluate prompt using an ACP agent against the open sandbox."""
         return run_async(
             self._evaluate_async(
                 prompt,
                 session=session,
-                deadline=effective_deadline,
+                deadline=deadline,
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
                 run_context=run_context,
+                sandbox=sandbox,
             )
         )
 
@@ -158,9 +146,10 @@ class ACPAdapter(ProviderAdapter[Any]):
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat | None,
         run_context: RunContext | None,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
-        rendered = prompt.render(session=session)
+        rendered = prompt.render(session=session, sandbox=sandbox)
         prompt_text = rendered.text
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
         adapter_name = self._adapter_name()
@@ -208,49 +197,19 @@ class ACPAdapter(ProviderAdapter[Any]):
                 },
             )
 
-        # Determine CWD
-        effective_cwd, temp_workspace_dir, prompt = self._resolve_cwd(prompt)
-
-        try:
-            with prompt.resources:
-                return await self._run_acp(
-                    prompt=prompt,
-                    prompt_name=prompt_name,
-                    prompt_text=prompt_text,
-                    rendered=rendered,
-                    session=session,
-                    deadline=deadline,
-                    budget_tracker=budget_tracker,
-                    heartbeat=heartbeat,
-                    run_context=run_context,
-                    effective_cwd=effective_cwd,
-                )
-        finally:
-            if temp_workspace_dir:
-                shutil.rmtree(temp_workspace_dir, ignore_errors=True)
-
-    def _resolve_cwd[OutputT](
-        self, prompt: Prompt[OutputT]
-    ) -> tuple[str, str | None, Prompt[OutputT]]:
-        """Determine the effective cwd and optionally bind a filesystem."""
-        temp_workspace_dir: str | None = None
-        effective_cwd: str | None = self._client_config.cwd
-
-        if prompt.filesystem() is None:
-            if effective_cwd is None:
-                temp_workspace_dir = tempfile.mkdtemp(prefix="wink-acp-")
-                effective_cwd = temp_workspace_dir
-            filesystem = Filesystem.host(effective_cwd)
-            prompt = prompt.bind(resources={Filesystem: filesystem})
-        elif effective_cwd is None:
-            fs = prompt.filesystem()
-            if fs is not None and isinstance(fs.backend, HostBackend):
-                effective_cwd = fs.root
-
-        if effective_cwd is None:
-            effective_cwd = str(Path.cwd().resolve())
-
-        return effective_cwd, temp_workspace_dir, prompt
+        with prompt.resources:
+            return await self._run_acp(
+                prompt=prompt,
+                prompt_name=prompt_name,
+                prompt_text=prompt_text,
+                rendered=rendered,
+                session=session,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=heartbeat,
+                run_context=run_context,
+                sandbox=sandbox,
+            )
 
     async def _run_acp[OutputT](
         self,
@@ -264,11 +223,12 @@ class ACPAdapter(ProviderAdapter[Any]):
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat | None,
         run_context: RunContext | None,
-        effective_cwd: str,
+        sandbox: Sandbox,
     ) -> PromptResponse[OutputT]:
         """Run the full ACP protocol flow."""
         adapter_name = self._adapter_name()
         visibility_signal = VisibilityExpansionSignal()
+        effective_cwd = sandbox.root
 
         all_tools, structured_capture = self._prepare_tools(
             rendered=rendered,
@@ -281,6 +241,7 @@ class ACPAdapter(ProviderAdapter[Any]):
             heartbeat=heartbeat,
             run_context=run_context,
             visibility_signal=visibility_signal,
+            sandbox=sandbox,
         )
 
         def _feedback_hook(
@@ -294,6 +255,7 @@ class ACPAdapter(ProviderAdapter[Any]):
                 prompt=cast("PromptProtocol[Any]", prompt),
                 session=session,
                 deadline=deadline,
+                sandbox=sandbox,
             )
 
         mcp_server = create_mcp_tool_server(
@@ -332,6 +294,7 @@ class ACPAdapter(ProviderAdapter[Any]):
                 run_context=run_context,
                 visibility_signal=visibility_signal,
                 structured_capture=structured_capture,
+                sandbox=sandbox,
             )
         except VisibilityExpansionRequired:
             raise
@@ -372,6 +335,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         heartbeat: Heartbeat | None,
         run_context: RunContext | None,
         visibility_signal: VisibilityExpansionSignal,
+        sandbox: Sandbox,
     ) -> tuple[list[BridgedTool | Any], Any]:
         """Build bridged tools and optional structured output tool."""
         bridged_tools = create_bridged_tools(
@@ -387,6 +351,7 @@ class ACPAdapter(ProviderAdapter[Any]):
             heartbeat=heartbeat,
             run_context=run_context,
             visibility_signal=visibility_signal,
+            sandbox=sandbox,
         )
 
         all_tools: list[BridgedTool | Any] = list(bridged_tools)
@@ -474,6 +439,7 @@ class ACPAdapter(ProviderAdapter[Any]):
         run_context: RunContext | None,
         visibility_signal: VisibilityExpansionSignal,
         structured_capture: Any,
+        sandbox: Sandbox,
     ) -> tuple[str | None, TokenUsage | None]:
         """Execute the ACP protocol flow."""
         try:
@@ -547,6 +513,7 @@ class ACPAdapter(ProviderAdapter[Any]):
                     clock=self._clock,
                     async_sleeper=self._async_sleeper,
                     detect_empty_response=self._detect_empty_response,
+                    sandbox=sandbox,
                 )
         finally:
             await mcp_http.stop()

@@ -12,22 +12,14 @@
 
 """Tests for prompt protocol conformance.
 
-Verifies that all implementations of ToolSuiteSection and WorkspaceSectionProtocol
-protocols conform to the expected interfaces.
+Verifies that implementations of the ToolSuiteSection protocol conform to
+the expected interface.
 """
 
 from __future__ import annotations
 
-import pytest
-
-from weakincentives.prompt.protocols import ToolSuiteSection, WorkspaceSectionProtocol
+from weakincentives.prompt.protocols import ToolSuiteSection
 from weakincentives.runtime import InProcessDispatcher, Session
-
-
-@pytest.fixture
-def session() -> Session:
-    """Create a session for testing."""
-    return Session(dispatcher=InProcessDispatcher())
 
 
 class TestToolSuiteSectionProtocol:
@@ -63,67 +55,20 @@ class TestToolSuiteSectionProtocol:
         assert not isinstance(obj, ToolSuiteSection)
 
 
-class TestWorkspaceSectionProtocol:
-    """Tests for WorkspaceSectionProtocol conformance."""
-
-    def test_protocol_is_runtime_checkable(self) -> None:
-        """WorkspaceSectionProtocol can be used with isinstance."""
-        assert hasattr(WorkspaceSectionProtocol, "__protocol_attrs__") or hasattr(
-            WorkspaceSectionProtocol, "_is_runtime_protocol"
-        )
-
-    def test_workspace_section_extends_tool_suite(self) -> None:
-        """WorkspaceSectionProtocol inherits from ToolSuiteSection.
-
-        Note: We can't use issubclass() because protocols with non-method
-        members (properties) don't support it. We verify inheritance through
-        the MRO instead.
-        """
-        # Check inheritance via MRO (Method Resolution Order)
-        assert ToolSuiteSection in WorkspaceSectionProtocol.__mro__
-
-    def test_workspace_section_conforms(self, session: Session) -> None:
-        """WorkspaceSection (concrete class) implements WorkspaceSectionProtocol."""
-        from weakincentives.prompt import WorkspaceSection
-
-        section = WorkspaceSection(session=session)
-
-        try:
-            assert isinstance(section, WorkspaceSectionProtocol)
-            assert hasattr(section, "filesystem")
-
-            from weakincentives.filesystem import Filesystem
-
-            assert isinstance(section.filesystem, Filesystem)
-        finally:
-            section.cleanup()
-
-
 class TestProtocolExports:
     """Tests for protocol module exports."""
 
     def test_protocols_exported_from_prompt(self) -> None:
-        """ToolSuiteSection and WorkspaceSectionProtocol exported from prompt module."""
-        from weakincentives.prompt import (
-            ToolSuiteSection as ExportedToolSuite,
-            WorkspaceSectionProtocol as ExportedWorkspaceProtocol,
-        )
+        """ToolSuiteSection exported from prompt module."""
+        from weakincentives.prompt import ToolSuiteSection as ExportedToolSuite
 
         assert ExportedToolSuite is ToolSuiteSection
-        assert ExportedWorkspaceProtocol is WorkspaceSectionProtocol
 
     def test_protocols_in_module_all(self) -> None:
         """Protocols listed in __all__ exports."""
         from weakincentives import prompt
 
         assert "ToolSuiteSection" in prompt.__all__
-        assert "WorkspaceSectionProtocol" in prompt.__all__
-
-    def test_workspace_section_in_module_all(self) -> None:
-        """WorkspaceSection (concrete class) listed in __all__ exports."""
-        from weakincentives import prompt
-
-        assert "WorkspaceSection" in prompt.__all__
 
 
 class TestDuckTypingConformance:
@@ -131,12 +76,10 @@ class TestDuckTypingConformance:
 
     def test_custom_implementation_passes_isinstance(self) -> None:
         """Custom class implementing protocol passes isinstance."""
-        from weakincentives.filesystem import Filesystem
 
-        class CustomWorkspaceSection:
+        class CustomToolSuiteSection:
             def __init__(self, session: Session) -> None:
                 self._session = session
-                self._fs = Filesystem.in_memory()
 
             @property
             def session(self) -> Session:
@@ -146,21 +89,15 @@ class TestDuckTypingConformance:
             def accepts_overrides(self) -> bool:
                 return False
 
-            @property
-            def filesystem(self) -> Filesystem:
-                return self._fs
-
-            def clone(self, **kwargs: object) -> CustomWorkspaceSection:
+            def clone(self, **kwargs: object) -> CustomToolSuiteSection:
                 new_session = kwargs.get("session", self._session)
                 assert isinstance(new_session, Session)
-                return CustomWorkspaceSection(new_session)
+                return CustomToolSuiteSection(new_session)
 
         session = Session(dispatcher=InProcessDispatcher())
-        custom = CustomWorkspaceSection(session)
+        custom = CustomToolSuiteSection(session)
 
-        # Should pass both protocol checks
         assert isinstance(custom, ToolSuiteSection)
-        assert isinstance(custom, WorkspaceSectionProtocol)
 
     def test_method_signature_mismatch_still_passes_runtime_check(self) -> None:
         """Runtime check only verifies attribute existence, not signatures.

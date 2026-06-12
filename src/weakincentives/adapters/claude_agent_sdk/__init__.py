@@ -14,7 +14,7 @@
 
 This adapter enables weakincentives prompts to leverage Claude's full agentic
 capabilities through the official claude-code-sdk Python package. It provides
-native tool execution (Read, Write, Edit, Glob, Grep, Bash), workspace isolation,
+native tool execution (Read, Write, Edit, Glob, Grep, Bash), sandbox isolation,
 and hook-based state synchronization between SDK execution and the weakincentives
 Session.
 
@@ -47,10 +47,11 @@ Key Components
     Client-level settings (permission mode, max turns, budget) and model-level
     settings (adaptive reasoning effort).
 
-**Workspace** (see :mod:`weakincentives.prompt.workspace`)
-    The generic :class:`~weakincentives.prompt.workspace.WorkspaceSection` and
-    :class:`~weakincentives.prompt.workspace.HostMount` live in the core prompt
-    package and work with any adapter.
+**Environment** (see :mod:`weakincentives.sandbox`)
+    Prompt templates declare environment intent via
+    :class:`~weakincentives.sandbox.WorkspaceConfig`; the adapter materializes
+    it through its sandbox provider and points the SDK ``cwd`` at the
+    opened sandbox root.
 
 **Isolation** (:class:`IsolationConfig`, :class:`EphemeralHome`, :class:`NetworkPolicy`)
     Hermetic isolation configuration that creates ephemeral environments with
@@ -130,13 +131,12 @@ Simple adapter usage without workspace mounts::
     response = adapter.evaluate(prompt, session=session)
     print(response.output.message)
 
-Workspace Example
------------------
-Using workspace sections to mount host files::
+Sandbox Example
+---------------
+Declaring environment intent on the template::
 
-    from weakincentives.prompt import (
-        HostMount, MarkdownSection, Prompt, PromptTemplate, WorkspaceSection,
-    )
+    from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+    from weakincentives.sandbox import HostMount, WorkspaceConfig
     from weakincentives.adapters.claude_agent_sdk import (
         ClaudeAgentSDKAdapter,
         ClaudeAgentSDKClientConfig,
@@ -151,20 +151,6 @@ Using workspace sections to mount host files::
 
     session = Session(dispatcher=InProcessDispatcher())
 
-    # Create workspace with host file mounts
-    workspace = WorkspaceSection(
-        session=session,
-        mounts=[
-            HostMount(
-                host_path="src",
-                include_glob=("*.py",),
-                exclude_glob=("*_test.py",),
-                max_bytes=1_000_000,
-            ),
-        ],
-        allowed_host_roots=["/home/user/project"],
-    )
-
     template = PromptTemplate[ReviewResult].create(
         ns="review",
         key="code",
@@ -174,7 +160,17 @@ Using workspace sections to mount host files::
                 key="task",
                 template="Review the Python code in the workspace.",
             ),
-            workspace,
+        ),
+        workspace=WorkspaceConfig(
+            mounts=(
+                HostMount(
+                    host_path="src",
+                    include_glob=("*.py",),
+                    exclude_glob=("*_test.py",),
+                    max_bytes=1_000_000,
+                ),
+            ),
+            allowed_host_roots=("/home/user/project",),
         ),
     )
 
@@ -182,16 +178,12 @@ Using workspace sections to mount host files::
         model="claude-opus-4-6",
         client_config=ClaudeAgentSDKClientConfig(
             permission_mode="acceptEdits",
-            cwd=str(workspace.temp_dir),
         ),
     )
 
-    try:
-        prompt = Prompt(template)
-        response = adapter.evaluate(prompt, session=session)
-        print(response.output)
-    finally:
-        workspace.cleanup()
+    prompt = Prompt(template)
+    response = adapter.evaluate(prompt, session=session)
+    print(response.output)
 
 Task Completion Example
 -----------------------
@@ -220,16 +212,14 @@ Configuration:
     - :data:`PermissionMode`: Literal type for permission handling modes
     - :data:`ReasoningEffort`: Literal type for adaptive reasoning effort levels
 
-Workspace (in :mod:`weakincentives.prompt.workspace`):
-    - :class:`~weakincentives.prompt.WorkspaceSection`: Generic workspace section
-    - :class:`~weakincentives.prompt.HostMount`: Configuration for mounting host files
-    - :class:`~weakincentives.prompt.HostMountPreview`: Summary of materialized mount
+Environment (in :mod:`weakincentives.sandbox`):
+    - :class:`~weakincentives.sandbox.WorkspaceConfig`: Declarative environment intent
+    - :class:`~weakincentives.sandbox.HostMount`: Configuration for mounting host files
 
 Isolation:
-    - :class:`IsolationConfig`: Hermetic isolation configuration
+    - :class:`IsolationConfig`: Hermetic isolation configuration (incl. OS sandbox knobs)
     - :class:`EphemeralHome`: Manages temporary home directory
     - :class:`NetworkPolicy`: Network access constraints for tools
-    - :class:`SandboxConfig`: OS-level sandbox configuration
     - :class:`BedrockConfig`: Detected Bedrock configuration
     - :class:`AuthMode`: Authentication mode enumeration
     - :class:`AwsConfigResolution`: Result of AWS config path resolution
@@ -294,7 +284,6 @@ from .isolation import (
     IsolationAuthError,
     IsolationConfig,
     NetworkPolicy,
-    SandboxConfig,
     get_default_model,
 )
 
@@ -316,7 +305,6 @@ __all__ = [
     "NetworkPolicy",
     "PermissionMode",
     "ReasoningEffort",
-    "SandboxConfig",
     "TaskCompletionChecker",
     "TaskCompletionContext",
     "TaskCompletionResult",

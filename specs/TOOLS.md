@@ -64,11 +64,13 @@ At `src/weakincentives/prompt/tool.py` (`ToolContext` class):
 | `deadline` | Optional deadline |
 | `heartbeat` | Optional heartbeat for lease extension |
 | `run_context` | Optional execution context with correlation IDs |
+| `sandbox` | Execution environment whose facets receive all tool effects |
 
 | Property/Method | Description |
 | --- | --- |
 | `resources` | Access prompt's resource context |
-| `filesystem` | Shortcut for Filesystem resource |
+| `filesystem` | The sandbox's filesystem facet (`sandbox.filesystem`) |
+| `shell` | The sandbox's shell facet (`sandbox.shell`) |
 | `budget_tracker` | Shortcut for BudgetTracker resource |
 | `beat()` | Record heartbeat for long operations |
 
@@ -76,8 +78,9 @@ Tool handlers publish events via `context.session.dispatcher`.
 
 ### Resource Access
 
-Tools access resources via `context.resources.get(Protocol)` or the
-`context.filesystem` / `context.budget_tracker` shorthands.
+Tools access resources via `context.resources.get(Protocol)`. Environment
+effects go through `context.filesystem` / `context.shell`, which are
+facets of the sandbox opened by the adapter for this evaluation.
 
 ### ToolExample
 

@@ -64,7 +64,6 @@ __all__ = [
     "IsolationConfig",
     "IsolationOptions",
     "NetworkPolicy",
-    "SandboxConfig",
     "get_default_model",
 ]
 
@@ -112,48 +111,6 @@ class NetworkPolicy:
     def with_domains(cls, *domains: str) -> NetworkPolicy:
         """Create a policy allowing specific domains."""
         return cls(allowed_domains=domains)
-
-
-@FrozenDataclass()
-class SandboxConfig:
-    """Sandbox configuration for Claude Agent SDK.
-
-    Provides programmatic control over OS-level sandboxing that would otherwise
-    require manual settings.json configuration.
-
-    Attributes:
-        enabled: Enable OS-level sandboxing. Defaults to True for isolation.
-        writable_paths: Paths the SDK can write to beyond the workspace.
-            Relative paths are resolved against the workspace root.
-        readable_paths: Additional paths the SDK can read (beyond workspace).
-        excluded_commands: Commands that bypass the sandbox (e.g., "docker").
-            Use sparingly—each exclusion is a potential security hole.
-        allow_unsandboxed_commands: If True, allow specific commands to run
-            outside the sandbox. Requires excluded_commands to be set.
-        bash_auto_allow: If True, auto-approve Bash commands in sandbox mode.
-            Only safe when network_policy blocks external access.
-        enable_weaker_nested_sandbox: If True, use a weaker sandbox that works
-            inside unprivileged Docker containers where full bubblewrap
-            isolation is unavailable. This is better than disabling the sandbox
-            entirely (``enabled=False``) because it still enforces some
-            restrictions, but it substantially weakens security compared to
-            the full sandbox. Only use when the container itself provides
-            additional isolation. Linux only.
-        ignore_file_violations: File paths for which sandbox violations should
-            be silently ignored rather than flagged.
-        ignore_network_violations: Network hosts for which sandbox violations
-            should be silently ignored rather than flagged.
-    """
-
-    enabled: bool = True
-    writable_paths: tuple[str, ...] = ()
-    readable_paths: tuple[str, ...] = ()
-    excluded_commands: tuple[str, ...] = ()
-    allow_unsandboxed_commands: bool = False
-    bash_auto_allow: bool = True
-    enable_weaker_nested_sandbox: bool = False
-    ignore_file_violations: tuple[str, ...] = ()
-    ignore_network_violations: tuple[str, ...] = ()
 
 
 class IsolationAuthError(Exception):
@@ -329,15 +286,12 @@ def get_default_model() -> str:
 class IsolationOptions:
     """Common optional parameters for IsolationConfig factory methods.
 
-    Groups network, sandbox, environment, and skills configuration to simplify
+    Groups network, environment, and host-env configuration to simplify
     factory method signatures.
     """
 
     network_policy: NetworkPolicy | None = None
     """Network access constraints for tools."""
-
-    sandbox: SandboxConfig | None = None
-    """Sandbox configuration for OS-level isolation."""
 
     env: Mapping[str, str] | None = None
     """Additional environment variables to set."""
@@ -386,9 +340,13 @@ class IsolationConfig:
     Example (Docker container with mounted AWS config):
         >>> config = IsolationConfig.for_bedrock(aws_config_path="/mnt/aws")
 
+    **OS sandbox knobs** control the SDK's OS-level sandboxing (bubblewrap
+    on Linux, seatbelt on macOS). These are provider-level isolation
+    settings for the harness process — distinct from the environment
+    :class:`~weakincentives.sandbox.WorkspaceConfig` a prompt declares.
+
     Attributes:
         network_policy: Network access constraints. None means no network access.
-        sandbox: Sandbox configuration. None uses secure defaults.
         env: Additional environment variables for the SDK subprocess.
         api_key: Anthropic API key. If set, uses this key and disables Bedrock.
             If None, inherits authentication from the host environment.
@@ -398,6 +356,23 @@ class IsolationConfig:
         include_host_env: If True, inherit non-sensitive host env vars.
             Sensitive vars (HOME, CLAUDE_*, ANTHROPIC_*, AWS_*, GOOGLE_*)
             are always excluded.
+        sandbox_enabled: Enable OS-level sandboxing. Defaults to True.
+        writable_paths: Paths the SDK can write to beyond the workspace.
+            Relative paths are resolved against the workspace root.
+        readable_paths: Additional paths the SDK can read (beyond workspace).
+        excluded_commands: Commands that bypass the sandbox (e.g., "docker").
+            Use sparingly—each exclusion is a potential security hole.
+        allow_unsandboxed_commands: If True, allow specific commands to run
+            outside the sandbox. Requires excluded_commands to be set.
+        bash_auto_allow: If True, auto-approve Bash commands in sandbox mode.
+            Only safe when network_policy blocks external access.
+        enable_weaker_nested_sandbox: If True, use a weaker sandbox that works
+            inside unprivileged Docker containers where full bubblewrap
+            isolation is unavailable. Linux only.
+        ignore_file_violations: File paths for which sandbox violations should
+            be silently ignored rather than flagged.
+        ignore_network_violations: Network hosts for which sandbox violations
+            should be silently ignored rather than flagged.
 
     Note:
         Skills are attached to prompt sections, not IsolationConfig.
@@ -405,18 +380,25 @@ class IsolationConfig:
     """
 
     network_policy: NetworkPolicy | None = None
-    sandbox: SandboxConfig | None = None
     env: Mapping[str, str] | None = None
     api_key: str | None = None
     aws_config_path: Path | str | None = None
     include_host_env: bool = False
+    sandbox_enabled: bool = True
+    writable_paths: tuple[str, ...] = ()
+    readable_paths: tuple[str, ...] = ()
+    excluded_commands: tuple[str, ...] = ()
+    allow_unsandboxed_commands: bool = False
+    bash_auto_allow: bool = True
+    enable_weaker_nested_sandbox: bool = False
+    ignore_file_violations: tuple[str, ...] = ()
+    ignore_network_violations: tuple[str, ...] = ()
 
     @classmethod
     def inherit_host_auth(
         cls,
         *,
         network_policy: NetworkPolicy | None = None,
-        sandbox: SandboxConfig | None = None,
         env: Mapping[str, str] | None = None,
         include_host_env: bool = False,
     ) -> IsolationConfig:
@@ -427,7 +409,6 @@ class IsolationConfig:
 
         Args:
             network_policy: Network access constraints for tools.
-            sandbox: Sandbox configuration.
             env: Additional environment variables.
             include_host_env: If True, inherit non-sensitive host env vars.
 
@@ -447,7 +428,6 @@ class IsolationConfig:
 
         return cls(
             network_policy=network_policy,
-            sandbox=sandbox,
             env=env,
             api_key=None,
             aws_config_path=None,
@@ -467,7 +447,7 @@ class IsolationConfig:
 
         Args:
             api_key: Anthropic API key (required).
-            options: Optional isolation options (network, sandbox, env).
+            options: Optional isolation options (network, env).
 
         Returns:
             IsolationConfig configured with the explicit API key.
@@ -482,7 +462,6 @@ class IsolationConfig:
         opts = options or IsolationOptions()
         return cls(
             network_policy=opts.network_policy,
-            sandbox=opts.sandbox,
             env=opts.env,
             api_key=api_key,
             aws_config_path=None,
@@ -494,7 +473,6 @@ class IsolationConfig:
         cls,
         *,
         network_policy: NetworkPolicy | None = None,
-        sandbox: SandboxConfig | None = None,
         env: Mapping[str, str] | None = None,
         include_host_env: bool = False,
     ) -> IsolationConfig:
@@ -505,7 +483,6 @@ class IsolationConfig:
 
         Args:
             network_policy: Network access constraints for tools.
-            sandbox: Sandbox configuration.
             env: Additional environment variables.
             include_host_env: If True, inherit non-sensitive host env vars.
 
@@ -521,7 +498,6 @@ class IsolationConfig:
 
         return cls(
             network_policy=network_policy,
-            sandbox=sandbox,
             env=env,
             api_key=None,
             aws_config_path=None,
@@ -543,7 +519,7 @@ class IsolationConfig:
         Args:
             aws_config_path: Path to AWS config directory. Use this when running
                 in a container where AWS config is mounted at a non-standard path.
-            options: Optional isolation options (network, sandbox, env).
+            options: Optional isolation options (network, env).
 
         Returns:
             IsolationConfig configured for Bedrock authentication.
@@ -562,7 +538,6 @@ class IsolationConfig:
         opts = options or IsolationOptions()
         return cls(
             network_policy=opts.network_policy,
-            sandbox=opts.sandbox,
             env=opts.env,
             api_key=None,
             aws_config_path=aws_config_path,

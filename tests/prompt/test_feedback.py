@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     Feedback,
@@ -234,7 +235,9 @@ class TestFeedbackContext:
         session = make_session()
         prompt = make_prompt()
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         assert context.session is session
         assert context.prompt is prompt
@@ -245,29 +248,39 @@ class TestFeedbackContext:
         prompt = make_prompt()
         deadline = Deadline.create(expires_at=datetime.now(UTC) + timedelta(hours=1))
 
-        context = FeedbackContext(session=session, prompt=prompt, deadline=deadline)
+        context = FeedbackContext(
+            session=session,
+            prompt=prompt,
+            sandbox=make_memory_sandbox(),
+            deadline=deadline,
+        )
 
         assert context.deadline is deadline
 
     def test_resources_returns_prompt_resources(self) -> None:
         session = make_session()
         prompt = make_prompt()
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         assert isinstance(context.resources, PromptResources)
 
-    def test_filesystem_returns_none_when_not_registered(self) -> None:
+    def test_filesystem_returns_sandbox_facet(self) -> None:
         session = make_session()
         prompt = make_prompt()
-        context = FeedbackContext(session=session, prompt=prompt)
+        sandbox = make_memory_sandbox()
+        context = FeedbackContext(session=session, prompt=prompt, sandbox=sandbox)
 
         with prompt.resources:
-            assert context.filesystem is None
+            assert context.filesystem is sandbox.filesystem
 
     def test_last_feedback_returns_none_when_empty(self) -> None:
         session = make_session()
         prompt = make_prompt()
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         assert context.last_feedback is None
 
@@ -282,7 +295,9 @@ class TestFeedbackContext:
             Feedback(provider_name="B", summary="Second", prompt_name="test")
         )
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         assert context.last_feedback is not None
         assert context.last_feedback.summary == "Second"
@@ -290,7 +305,9 @@ class TestFeedbackContext:
     def test_tool_call_count_returns_zero_when_empty(self) -> None:
         session = make_session()
         prompt = make_prompt()
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         assert context.tool_call_count == 0
 
@@ -301,7 +318,9 @@ class TestFeedbackContext:
         for i in range(3):
             session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         assert context.tool_call_count == 3
 
@@ -312,7 +331,9 @@ class TestFeedbackContext:
         for i in range(5):
             session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         assert context.tool_calls_since_last_feedback() == 5
 
@@ -331,7 +352,9 @@ class TestFeedbackContext:
         for i in range(2):
             session.dispatcher.dispatch(make_tool_invoked(f"more_{i}"))
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         # 5 total - 3 at last feedback = 2 since
         assert context.tool_calls_since_last_feedback() == 2
@@ -339,7 +362,9 @@ class TestFeedbackContext:
     def test_last_feedback_for_provider_returns_none_when_no_feedback(self) -> None:
         session = make_session()
         prompt = make_prompt()
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         assert context.last_feedback_for_provider("A") is None
 
@@ -357,7 +382,9 @@ class TestFeedbackContext:
             Feedback(provider_name="A", summary="From A again", prompt_name="test")
         )
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         # Should get the most recent from provider A
         last_a = context.last_feedback_for_provider("A")
@@ -379,7 +406,9 @@ class TestFeedbackContext:
         for i in range(5):
             session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         # No feedback from any provider, so all tool calls count
         assert context.tool_calls_since_last_feedback_for_provider("A") == 5
@@ -403,7 +432,9 @@ class TestFeedbackContext:
         for i in range(2):
             session.dispatcher.dispatch(make_tool_invoked(f"more_{i}"))
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         # Provider A: 5 total - 3 at last feedback = 2 since
         assert context.tool_calls_since_last_feedback_for_provider("A") == 2
@@ -417,7 +448,9 @@ class TestFeedbackContext:
         for i in range(5):
             session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
         recent = context.recent_tool_calls(3)
 
         assert len(recent) == 3
@@ -432,7 +465,9 @@ class TestFeedbackContext:
         for i in range(2):
             session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
         recent = context.recent_tool_calls(5)
 
         assert len(recent) == 2
@@ -444,7 +479,9 @@ class TestFeedbackContext:
         for i in range(3):
             session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
         recent = context.recent_tool_calls(0)
 
         assert len(recent) == 0
@@ -453,7 +490,9 @@ class TestFeedbackContext:
         session = make_session()
         prompt = make_prompt()
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
         recent = context.recent_tool_calls(5)
 
         assert len(recent) == 0
@@ -479,7 +518,9 @@ class TestFeedbackContext:
         )
         session.dispatcher.dispatch(make_tool_invoked("tool_3"))  # prompt_name="test"
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
 
         # Only 3 calls for "test" prompt, not the 4th from "other_prompt"
         assert context.tool_call_count == 3
@@ -503,7 +544,9 @@ class TestFeedbackContext:
         )
         session.dispatcher.dispatch(make_tool_invoked("tool_2"))
 
-        context = FeedbackContext(session=session, prompt=prompt)
+        context = FeedbackContext(
+            session=session, prompt=prompt, sandbox=make_memory_sandbox()
+        )
         recent = context.recent_tool_calls(5)
 
         # Only 2 calls for "test" prompt

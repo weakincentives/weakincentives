@@ -76,10 +76,15 @@ class ScopedResourceContext:
     _resolving: set[type[object]] = field(default_factory=lambda: set[type[object]]())
     """Tracks in-flight resolutions for cycle detection."""
 
-    _instantiation_order: list[tuple[Scope, type[object]]] = field(
-        default_factory=lambda: list[tuple[Scope, type[object]]]()
+    _singleton_order: list[type[object]] = field(
+        default_factory=lambda: list[type[object]]()
     )
-    """Tracks instantiation order for cleanup."""
+    """Tracks singleton instantiation order for cleanup."""
+
+    _tool_call_order: list[type[object]] = field(
+        default_factory=lambda: list[type[object]]()
+    )
+    """Tracks tool-call instantiation order for the active scope."""
 
     def get[T](self, protocol: type[T]) -> T:
         """Resolve and return resource for protocol.
@@ -117,7 +122,10 @@ class ScopedResourceContext:
         # Cache per scope
         if cache is not None:
             cache[protocol] = constructed
-            self._instantiation_order.append((binding.scope, protocol))
+            if binding.scope == Scope.SINGLETON:
+                self._singleton_order.append(protocol)
+            else:
+                self._tool_call_order.append(protocol)
 
         return constructed
 
@@ -192,17 +200,24 @@ class ScopedResourceContext:
     def close(self) -> None:
         """Dispose all instantiated resources implementing Closeable.
 
-        Resources are closed in reverse instantiation order.
-        Only SINGLETON and TOOL_CALL scoped resources are tracked and closed;
-        PROTOTYPE resources are not cached and thus not tracked.
+        Resources are closed in reverse instantiation order: tool-call
+        scoped resources first, then singletons. PROTOTYPE resources are
+        not cached and thus not tracked.
         """
         logger.debug(
             "resource.context.close.start",
             event="resource.context.close.start",
-            context={"resource_count": len(self._instantiation_order)},
+            context={
+                "resource_count": (
+                    len(self._singleton_order) + len(self._tool_call_order)
+                )
+            },
         )
-        for scope, protocol in reversed(self._instantiation_order):
-            # Only SINGLETON and TOOL_CALL are ever in _instantiation_order
+        ordered = [
+            *((Scope.SINGLETON, protocol) for protocol in self._singleton_order),
+            *((Scope.TOOL_CALL, protocol) for protocol in self._tool_call_order),
+        ]
+        for scope, protocol in reversed(ordered):
             cache = (
                 self.singleton_cache
                 if scope == Scope.SINGLETON
@@ -226,7 +241,8 @@ class ScopedResourceContext:
                         event="resource.close_error",
                         context={"protocol": protocol.__qualname__},
                     )
-        self._instantiation_order.clear()
+        self._singleton_order.clear()
+        self._tool_call_order.clear()
         self.singleton_cache.clear()
         self._tool_call_cache.clear()
         logger.debug(
@@ -252,25 +268,18 @@ class ScopedResourceContext:
             "resource.tool_scope.enter",
             event="resource.tool_scope.enter",
         )
-        # Save and clear tool-call cache
+        # Save and clear tool-call state; restored on exit
         previous_cache = self._tool_call_cache
-        previous_order = [
-            (s, p) for s, p in self._instantiation_order if s == Scope.TOOL_CALL
-        ]
+        previous_order = self._tool_call_order
         self._tool_call_cache = {}
-        # Remove tool-call entries from instantiation order
-        self._instantiation_order = [
-            (s, p) for s, p in self._instantiation_order if s != Scope.TOOL_CALL
-        ]
+        self._tool_call_order = []
 
         try:
             yield self
         finally:
             # Close tool-call scoped resources in reverse order
-            tool_call_order = [
-                (s, p) for s, p in self._instantiation_order if s == Scope.TOOL_CALL
-            ]
-            for _, protocol in reversed(tool_call_order):
+            closed_count = len(self._tool_call_order)
+            for protocol in reversed(self._tool_call_order):
                 instance = self._tool_call_cache.get(protocol)
                 if instance is not None and isinstance(instance, Closeable):
                     try:
@@ -284,15 +293,11 @@ class ScopedResourceContext:
 
             # Restore previous state
             self._tool_call_cache = previous_cache
-            # Restore tool-call entries to instantiation order
-            self._instantiation_order = [
-                (s, p) for s, p in self._instantiation_order if s != Scope.TOOL_CALL
-            ]
-            self._instantiation_order.extend(previous_order)
+            self._tool_call_order = previous_order
             logger.debug(
                 "resource.tool_scope.exit",
                 event="resource.tool_scope.exit",
-                context={"closed_count": len(tool_call_order)},
+                context={"closed_count": closed_count},
             )
 
 

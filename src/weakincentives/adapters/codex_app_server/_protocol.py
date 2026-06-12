@@ -53,6 +53,7 @@ from .config import (
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol
+    from ...sandbox import Sandbox
 
 
 def deadline_remaining_s(deadline: Deadline | None, prompt_name: str) -> float | None:
@@ -138,7 +139,40 @@ async def _initialize_session(  # noqa: PLR0913
         ) from error
 
 
-async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
+async def _start_turn_or_raise(  # noqa: PLR0913
+    *,
+    client: CodexAppServerClient,
+    thread_id: str,
+    prompt_text: str,
+    output_schema: dict[str, object] | None,
+    model_config: CodexAppServerModelConfig,
+    deadline: Deadline | None,
+    prompt_name: str,
+    bridge: CodexTranscriptBridge | None,
+) -> int:
+    """Start a turn, mapping client errors to PromptEvaluationError."""
+    try:
+        if bridge is not None:
+            bridge.on_user_message(prompt_text)
+        timeout = deadline_remaining_s(deadline, prompt_name)
+        turn_result = await start_turn(
+            client,
+            thread_id,
+            prompt_text,
+            output_schema,
+            model_config=model_config,
+            timeout=timeout,
+        )
+    except CodexClientError as error:
+        raise PromptEvaluationError(
+            message=str(error),
+            prompt_name=prompt_name,
+            phase="request",
+        ) from error
+    return int(turn_result["turn"]["id"])
+
+
+async def execute_protocol(  # noqa: PLR0913
     *,
     client_config: CodexAppServerClientConfig,
     model_config: CodexAppServerModelConfig,
@@ -157,6 +191,7 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
     visibility_signal: VisibilityExpansionSignal,
     async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
     prompt: PromptProtocol[Any] | None = None,
+    sandbox: Sandbox,
 ) -> tuple[str | None, TokenUsage | None]:
     """Execute the Codex protocol (init -> thread -> turn -> stream).
 
@@ -184,26 +219,16 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
         usage: TokenUsage | None = None
 
         while True:
-            try:
-                if bridge is not None:
-                    bridge.on_user_message(current_prompt_text)
-                current_schema = output_schema
-                timeout = deadline_remaining_s(deadline, prompt_name)
-                turn_result = await start_turn(
-                    client,
-                    thread_id,
-                    current_prompt_text,
-                    current_schema,
-                    model_config=model_config,
-                    timeout=timeout,
-                )
-            except CodexClientError as error:
-                raise PromptEvaluationError(
-                    message=str(error),
-                    prompt_name=prompt_name,
-                    phase="request",
-                ) from error
-            turn_id: int = turn_result["turn"]["id"]
+            turn_id = await _start_turn_or_raise(
+                client=client,
+                thread_id=thread_id,
+                prompt_text=current_prompt_text,
+                output_schema=output_schema,
+                model_config=model_config,
+                deadline=deadline,
+                prompt_name=prompt_name,
+                bridge=bridge,
+            )
 
             turn_text, turn_usage = await stream_turn(
                 client=client,
@@ -220,6 +245,7 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
                 visibility_signal=visibility_signal,
                 async_sleeper=async_sleeper,
                 prompt=prompt,
+                sandbox=sandbox,
             )
             accumulated_text = turn_text
             if turn_usage is not None:
@@ -235,6 +261,7 @@ async def execute_protocol(  # noqa: C901, PLR0913, PLR0914
                 accumulated_text=accumulated_text,
                 deadline=deadline,
                 budget_tracker=budget_tracker,
+                sandbox=sandbox,
             )
             if (
                 should_continue
@@ -357,6 +384,7 @@ async def stream_turn(  # noqa: PLR0913
     visibility_signal: VisibilityExpansionSignal | None = None,
     async_sleeper: AsyncSleeper = SYSTEM_CLOCK,
     prompt: PromptProtocol[Any] | None = None,
+    sandbox: Sandbox,
 ) -> tuple[str | None, TokenUsage | None]:
     """Stream turn notifications until turn/completed.
 
@@ -384,6 +412,7 @@ async def stream_turn(  # noqa: PLR0913
             visibility_signal=visibility_signal,
             prompt=prompt,
             deadline=deadline,
+            sandbox=sandbox,
         )
     finally:
         if watchdog_task is not None:
@@ -434,6 +463,7 @@ async def consume_messages(  # noqa: PLR0913
     visibility_signal: VisibilityExpansionSignal | None = None,
     prompt: PromptProtocol[Any] | None = None,
     deadline: Deadline | None = None,
+    sandbox: Sandbox,
 ) -> tuple[str, TokenUsage | None]:
     """Consume messages from the client until turn/completed."""
     turn_completed = False
@@ -449,6 +479,7 @@ async def consume_messages(  # noqa: PLR0913
                 prompt=prompt,
                 session=session,
                 deadline=deadline,
+                sandbox=sandbox,
             )
             # Break early if a tool call triggered visibility expansion.
             # The caller will re-raise the stored exception after cleanup.
@@ -621,6 +652,7 @@ async def handle_server_request(  # noqa: PLR0913
     prompt: PromptProtocol[Any] | None = None,
     session: SessionProtocol | None = None,
     deadline: Deadline | None = None,
+    sandbox: Sandbox,
 ) -> None:
     """Handle a server-initiated request (tool call or approval)."""
     method = str(message.get("method", ""))
@@ -637,6 +669,7 @@ async def handle_server_request(  # noqa: PLR0913
             prompt=prompt,
             session=session,
             deadline=deadline,
+            sandbox=sandbox,
         )
     elif method in {
         "item/commandExecution/requestApproval",
@@ -660,6 +693,7 @@ async def handle_tool_call(  # noqa: PLR0913
     prompt: PromptProtocol[Any] | None = None,
     session: SessionProtocol | None = None,
     deadline: Deadline | None = None,
+    sandbox: Sandbox,
 ) -> None:
     """Handle an item/tool/call server request."""
     tool_name = str(params.get("tool", ""))
@@ -710,6 +744,7 @@ async def handle_tool_call(  # noqa: PLR0913
         prompt=prompt,
         session=session,
         deadline=deadline,
+        sandbox=sandbox,
     )
 
     response: ToolCallResponse = {

@@ -38,7 +38,6 @@ from weakincentives.adapters.claude_agent_sdk.isolation import (
     IsolationConfig,
     IsolationOptions,
     NetworkPolicy,
-    SandboxConfig,
     get_default_model,
 )
 
@@ -81,10 +80,10 @@ class TestNetworkPolicy:
         assert policy.socks_proxy_port == 1080
 
 
-class TestSandboxConfig:
+class TestIsolationSandboxKnobs:
     def test_defaults(self) -> None:
-        config = SandboxConfig()
-        assert config.enabled is True
+        config = IsolationConfig()
+        assert config.sandbox_enabled is True
         assert config.writable_paths == ()
         assert config.readable_paths == ()
         assert config.excluded_commands == ()
@@ -95,7 +94,7 @@ class TestSandboxConfig:
         assert config.ignore_network_violations == ()
 
     def test_with_paths(self) -> None:
-        config = SandboxConfig(
+        config = IsolationConfig(
             writable_paths=("/tmp/output",),
             readable_paths=("/data/readonly",),
         )
@@ -103,7 +102,7 @@ class TestSandboxConfig:
         assert config.readable_paths == ("/data/readonly",)
 
     def test_with_excluded_commands(self) -> None:
-        config = SandboxConfig(
+        config = IsolationConfig(
             excluded_commands=("docker", "podman"),
             allow_unsandboxed_commands=True,
         )
@@ -111,16 +110,16 @@ class TestSandboxConfig:
         assert config.allow_unsandboxed_commands is True
 
     def test_disabled_sandbox(self) -> None:
-        config = SandboxConfig(enabled=False, bash_auto_allow=False)
-        assert config.enabled is False
+        config = IsolationConfig(sandbox_enabled=False, bash_auto_allow=False)
+        assert config.sandbox_enabled is False
         assert config.bash_auto_allow is False
 
     def test_enable_weaker_nested_sandbox(self) -> None:
-        config = SandboxConfig(enable_weaker_nested_sandbox=True)
+        config = IsolationConfig(enable_weaker_nested_sandbox=True)
         assert config.enable_weaker_nested_sandbox is True
 
     def test_with_ignore_violations(self) -> None:
-        config = SandboxConfig(
+        config = IsolationConfig(
             ignore_file_violations=("/tmp/noisy",),
             ignore_network_violations=("localhost",),
         )
@@ -132,7 +131,6 @@ class TestIsolationConfig:
     def test_defaults(self) -> None:
         config = IsolationConfig()
         assert config.network_policy is None
-        assert config.sandbox is None
         assert config.env is None
         assert config.api_key is None
         assert config.include_host_env is False
@@ -141,11 +139,6 @@ class TestIsolationConfig:
         policy = NetworkPolicy.no_network()
         config = IsolationConfig(network_policy=policy)
         assert config.network_policy is policy
-
-    def test_with_sandbox(self) -> None:
-        sandbox = SandboxConfig(enabled=True)
-        config = IsolationConfig(sandbox=sandbox)
-        assert config.sandbox is sandbox
 
     def test_with_env(self) -> None:
         config = IsolationConfig(env={"MY_VAR": "value"})
@@ -193,15 +186,12 @@ class TestIsolationConfigFactoryMethods:
     def test_inherit_host_auth_passes_options(self) -> None:
         """inherit_host_auth passes through optional parameters."""
         policy = NetworkPolicy.no_network()
-        sandbox = SandboxConfig(enabled=True)
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "key"}, clear=True):
             config = IsolationConfig.inherit_host_auth(
                 network_policy=policy,
-                sandbox=sandbox,
                 include_host_env=True,
             )
             assert config.network_policy is policy
-            assert config.sandbox is sandbox
             assert config.include_host_env is True
 
     def test_with_api_key_succeeds(self) -> None:
@@ -264,8 +254,7 @@ class TestIsolationConfigFactoryMethods:
 
     def test_for_bedrock_passes_options(self) -> None:
         """for_bedrock passes through optional parameters."""
-        sandbox = SandboxConfig(enabled=False)
-        options = IsolationOptions(sandbox=sandbox, include_host_env=True)
+        options = IsolationOptions(include_host_env=True)
         with mock.patch.dict(
             os.environ,
             {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "eu-west-1"},
@@ -274,7 +263,6 @@ class TestIsolationConfigFactoryMethods:
             config = IsolationConfig.for_bedrock(
                 options=options,
             )
-            assert config.sandbox is sandbox
             assert config.include_host_env is True
 
 
@@ -462,15 +450,12 @@ class TestIsolationConfigForAnthropicApi:
     def test_for_anthropic_api_passes_options(self) -> None:
         """for_anthropic_api passes through optional parameters."""
         policy = NetworkPolicy.no_network()
-        sandbox = SandboxConfig(enabled=True)
         with mock.patch.dict(
             os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True
         ):
             config = IsolationConfig.for_anthropic_api(
                 network_policy=policy,
-                sandbox=sandbox,
                 include_host_env=True,
             )
             assert config.network_policy is policy
-            assert config.sandbox is sandbox
             assert config.include_host_env is True
