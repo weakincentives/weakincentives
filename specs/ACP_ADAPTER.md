@@ -271,7 +271,7 @@ The main entry point is `ACPAdapter.evaluate()` at
 
 ### 1. Budget/Deadline Setup
 
-`AgentRuntime.evaluate` owns the preamble: it promotes `budget` to a
+`Runtime.evaluate` owns the preamble: it promotes `budget` to a
 `BudgetTracker`, derives the effective deadline from the argument or
 `budget.deadline`, and raises `PromptEvaluationError(phase="request")` if
 expired. `_evaluate` receives only the resolved deadline and tracker.
@@ -283,7 +283,7 @@ expired. `_evaluate` receives only the resolved deadline and tracker.
 resolves from the open sandbox at render time — and dispatches
 `PromptRendered`.
 
-### 3. AgentRuntime
+### 3. Runtime
 
 The base `ProviderAdapter` owns the runtime (`adapter.runtime(prompt)` /
 one-shot `evaluate`; see `specs/ADAPTERS.md`). The agent runs with

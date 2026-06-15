@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for AgentRuntime: the bound (adapter, prompt, sandbox) triple."""
+"""Tests for Runtime: the bound (adapter, prompt, sandbox) triple."""
 
 from __future__ import annotations
 
@@ -22,10 +22,10 @@ import pytest
 
 from tests.helpers.sandbox import make_memory_sandbox
 from weakincentives.adapters.core import (
-    AgentRuntimeReleasedError,
     PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
+    RuntimeReleasedError,
 )
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.clock import FakeClock
@@ -152,7 +152,7 @@ class TestRuntimeEvaluate:
         with adapter.runtime(prompt) as rt:
             pass
 
-        with pytest.raises(AgentRuntimeReleasedError, match="released"):
+        with pytest.raises(RuntimeReleasedError, match="released"):
             _ = rt.evaluate(session=None)  # type: ignore[arg-type]
 
     def test_promotes_budget_to_tracker(self) -> None:

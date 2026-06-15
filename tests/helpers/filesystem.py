@@ -651,6 +651,49 @@ class FilesystemValidationSuite:
         fs.mkdir("topdir", parents=False)
         assert fs.exists("topdir")
 
+    def test_rename_file(self, fs: Filesystem) -> None:
+        """rename() should move a file to a new path."""
+        fs.write("old.txt", "content")
+        fs.rename("old.txt", "new.txt")
+        assert not fs.exists("old.txt")
+        assert fs.read("new.txt").content == "content"
+
+    def test_rename_directory_with_contents(self, fs: Filesystem) -> None:
+        """rename() should move a directory and everything under it."""
+        fs.write("src/a.txt", "a")
+        fs.write("src/sub/b.txt", "b")
+        fs.rename("src", "dst")
+        assert not fs.exists("src")
+        assert fs.read("dst/a.txt").content == "a"
+        assert fs.read("dst/sub/b.txt").content == "b"
+
+    def test_rename_creates_parents(self, fs: Filesystem) -> None:
+        """rename() should create the destination's parent directories."""
+        fs.write("file.txt", "content")
+        fs.rename("file.txt", "a/b/file.txt")
+        assert fs.read("a/b/file.txt").content == "content"
+
+    def test_rename_missing_source_raises(self, fs: Filesystem) -> None:
+        """rename() should raise FileNotFoundError when the source is absent."""
+        with pytest.raises(FileNotFoundError):
+            fs.rename("missing.txt", "new.txt")
+
+    def test_rename_onto_existing_raises(self, fs: Filesystem) -> None:
+        """rename() should refuse to clobber an existing destination."""
+        fs.write("a.txt", "a")
+        fs.write("b.txt", "b")
+        with pytest.raises(FileExistsError):
+            fs.rename("a.txt", "b.txt")
+        assert fs.read("a.txt").content == "a"
+
+    def test_rename_root_raises(self, fs: Filesystem) -> None:
+        """rename() should reject the root as source or destination."""
+        fs.write("file.txt", "content")
+        with pytest.raises(ValueError, match=r"[Cc]annot rename"):
+            fs.rename(".", "dst")
+        with pytest.raises(ValueError, match=r"[Cc]annot rename"):
+            fs.rename("file.txt", ".")
+
     # -------------------------------------------------------------------------
     # Path Normalization
     # -------------------------------------------------------------------------

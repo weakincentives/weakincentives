@@ -45,7 +45,7 @@ from .session import Session
 from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
-    from ..adapters.core import AgentRuntime, PromptResponse, ProviderAdapter
+    from ..adapters.core import PromptResponse, ProviderAdapter, Runtime
     from ..debug import BundleWriter
     from ..debug.bundle import BundleConfig
     from ..experiment import Experiment
@@ -94,7 +94,7 @@ class _LoopLike(Protocol):
     def _evaluate_with_retries(  # noqa: PLR0913
         self,
         *,
-        runtime: AgentRuntime[Any],
+        runtime: Runtime[Any],
         session: Session,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
@@ -441,7 +441,7 @@ def _execute_with_bundled_settings(  # noqa: PLR0913
     session: Session,
     run_context: RunContext,
     writer: BundleWriter,
-    rt: AgentRuntime[Any],
+    rt: Runtime[Any],
 ) -> tuple[PromptResponse[Any], BudgetTracker | None]:
     """Execute prompt with settings resolved and log capture enabled."""
     _, budget_tracker, eff_deadline = loop._resolve_settings(
@@ -480,7 +480,7 @@ def execute_for_bundle(  # noqa: PLR0913
     Session,
     Prompt[Any],
     BudgetTracker | None,
-    AgentRuntime[Any],
+    Runtime[Any],
 ]:
     """Execute within bundle context with log capture.
 

@@ -159,6 +159,20 @@ class FilesystemBackend(Protocol):
         """
         ...
 
+    def rename(self, src: str, dst: str) -> None:
+        """Move a file or directory (with its contents) from ``src`` to ``dst``.
+
+        ``dst``'s parent directories are created as needed. Renaming is a
+        primitive — not facade copy+delete — so backends that can move
+        atomically do. The facade rejects a ``dst`` whose parent chain crosses
+        an existing file before calling this.
+
+        Raises:
+            FileNotFoundError: ``src`` does not exist.
+            FileExistsError: ``dst`` already exists.
+        """
+        ...
+
     def snapshot(self, *, tag: str | None) -> SnapshotRef:
         """Capture current state as an opaque, immutable snapshot ref."""
         ...

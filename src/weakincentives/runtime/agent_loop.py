@@ -70,7 +70,7 @@ from .session.visibility_overrides import SetVisibilityOverride
 from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
-    from ..adapters.core import AgentRuntime, PromptResponse, ProviderAdapter
+    from ..adapters.core import PromptResponse, ProviderAdapter, Runtime
     from ..debug.bundle import BundleConfig
     from ..experiment import Experiment
     from ..prompt import Prompt
@@ -472,7 +472,7 @@ class AgentLoop[UserRequestT, OutputT](
     def _evaluate_with_retries(  # noqa: PLR0913
         self,
         *,
-        runtime: AgentRuntime[OutputT],
+        runtime: Runtime[OutputT],
         session: Session,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,

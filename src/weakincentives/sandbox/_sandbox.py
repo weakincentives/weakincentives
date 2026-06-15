@@ -24,10 +24,11 @@ secret. Secret material lives outside config and serialized state;
 :class:`CredentialBinding` redacts it from ``repr`` and it is never
 logged.
 
-Locally there is no egress proxy to reconfigure: ``configure_egress``
-updates the policy the sandbox reports and ``configure_credentials`` holds
-bindings in process memory — a documented no-op beyond bookkeeping.
-Enforcing proxies arrive with the remote sandbox (M4).
+Egress is enforced by a sidecar the *environment* owns — a process WINK
+configures over the control plane, never one it runs. A local environment
+has no sidecar: ``configure_egress`` updates the policy the sandbox reports
+and ``configure_credentials`` holds bindings in process memory — bookkeeping
+only. Remote sandboxes carry these calls to the sidecar over their transport.
 """
 
 from __future__ import annotations
@@ -51,6 +52,7 @@ __all__ = [
     "Sandbox",
     "SandboxClosedError",
     "SandboxError",
+    "validate_bindings",
 ]
 
 
@@ -83,6 +85,21 @@ class CredentialBinding:
         if not self.secret:
             msg = f"credential {self.name!r} must bind non-empty secret material"
             raise ValueError(msg)
+
+
+def validate_bindings(bindings: Sequence[CredentialBinding]) -> dict[str, str]:
+    """Collect bindings into a name→secret mapping, rejecting duplicates.
+
+    Raises:
+        ValueError: Two bindings share a name.
+    """
+    collected: dict[str, str] = {}
+    for binding in bindings:
+        if binding.name in collected:
+            msg = f"duplicate credential binding: {binding.name!r}"
+            raise ValueError(msg)
+        collected[binding.name] = binding.secret
+    return collected
 
 
 @runtime_checkable
@@ -223,8 +240,8 @@ class LocalSandbox:
     def configure_egress(self, policy: EgressPolicy) -> None:
         """Replace the egress policy.
 
-        Locally there is no proxy to reconfigure; the new policy is
-        recorded and reported via :attr:`egress`.
+        A local environment has no egress sidecar to reconfigure; the new
+        policy is recorded and reported via :attr:`egress`.
         """
         self._ensure_open()
         self._egress = policy
@@ -239,13 +256,7 @@ class LocalSandbox:
             ValueError: Two bindings share a name.
         """
         self._ensure_open()
-        replacement: dict[str, str] = {}
-        for binding in bindings:
-            if binding.name in replacement:
-                msg = f"duplicate credential binding: {binding.name!r}"
-                raise ValueError(msg)
-            replacement[binding.name] = binding.secret
-        self._credentials = replacement
+        self._credentials = validate_bindings(bindings)
 
     def snapshot(self, *, tag: str | None = None) -> SnapshotRef:
         """Capture the environment state via the filesystem backend."""

@@ -106,7 +106,7 @@ response = adapter.evaluate(prompt, session=session)
 
 To span one environment across multiple evaluations, or to inspect the
 agent's output files before the sandbox is removed, open an
-`AgentRuntime` — the bound (adapter, prompt, sandbox) triple:
+`Runtime` — the bound (adapter, prompt, sandbox) triple:
 
 ```python nocheck
 with adapter.runtime(prompt) as rt:

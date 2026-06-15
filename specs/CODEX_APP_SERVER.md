@@ -549,7 +549,7 @@ When a tool raises `VisibilityExpansionRequired`:
 
 The prompt template declares environment intent via `WorkspaceConfig`
 (mounts, allowed roots, byte budgets — see `specs/SANDBOX.md`). The base
-adapter's `AgentRuntime` materializes it (default `LocalSandboxProvider`;
+adapter's `Runtime` materializes it (default `LocalSandboxProvider`;
 callers may hold one runtime across evaluations — see `specs/ADAPTERS.md`);
 `thread/start` runs with `cwd = sandbox.root` and the workspace preview is
 rendered from the opened sandbox. A failed bridged tool rolls back session
@@ -564,7 +564,7 @@ and sandbox in one transaction.
 
 ### 1. Budget/Deadline Setup
 
-Owned by `AgentRuntime.evaluate` (see `specs/ADAPTERS.md`): it creates a
+Owned by `Runtime.evaluate` (see `specs/ADAPTERS.md`): it creates a
 `BudgetTracker` when only a budget is provided, derives the effective
 deadline from the argument or `budget.deadline`, and raises
 `PromptEvaluationError(phase="request")` if already expired. `_evaluate`

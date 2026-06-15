@@ -10,10 +10,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for LocalSandboxProvider.
+"""Tests for LocalSandboxProvider and RemoteSandboxProvider.
 
 The mount cases mirror the workspace-section mount tests: the provider
-absorbs that machinery and must reproduce its behavior.
+absorbs that machinery and must reproduce its behavior. The remote
+provider materializes the same intent through a loopback transport.
 """
 
 from __future__ import annotations
@@ -26,15 +27,20 @@ from pathlib import Path
 
 import pytest
 
+from weakincentives.filesystem import WriteMode
 from weakincentives.sandbox import (
     EgressPolicy,
     EgressRule,
     HostMount,
     LocalSandbox,
     LocalSandboxProvider,
+    LoopbackTransport,
+    RemoteSandbox,
+    RemoteSandboxProvider,
     Sandbox,
     SandboxProvider,
     SandboxSetupError,
+    TransportFault,
     WorkspaceBudgetExceededError,
     WorkspaceConfig,
     WorkspaceSecurityError,
@@ -322,3 +328,192 @@ class TestLifecycle:
         sandbox.close()
         sandbox.close()
         assert not root.exists()
+
+
+class _RemoteHarness:
+    """Connect factory tracking the transports it hands out."""
+
+    def __init__(self, env_base: Path) -> None:
+        self.env_base = env_base
+        self.transports: list[LoopbackTransport] = []
+
+    def connect(self) -> LoopbackTransport:
+        env_root = self.env_base / f"env-{len(self.transports)}"
+        env_root.mkdir(parents=True)
+        transport = LoopbackTransport(env_root, owns_root=True)
+        self.transports.append(transport)
+        return transport
+
+
+@pytest.fixture
+def remote_harness(tmp_path: Path) -> _RemoteHarness:
+    return _RemoteHarness(tmp_path / "remote-envs")
+
+
+@pytest.fixture
+def remote_provider(
+    remote_harness: _RemoteHarness,
+) -> Iterator[RemoteSandboxProvider]:
+    """Remote provider with a unique staging prefix so leftovers are detectable."""
+    prefix = f"wink-staging-{uuid.uuid4().hex[:8]}-"
+    yield RemoteSandboxProvider(remote_harness.connect, temp_dir_prefix=prefix)
+    leftovers = list(Path(tempfile.gettempdir()).glob(f"{prefix}*"))
+    assert leftovers == []
+
+
+class TestRemoteSandboxProvider:
+    def test_implements_provider_protocol(
+        self, remote_provider: RemoteSandboxProvider
+    ) -> None:
+        assert isinstance(remote_provider, SandboxProvider)
+
+    def test_open_returns_remote_sandbox(
+        self, remote_provider: RemoteSandboxProvider, remote_harness: _RemoteHarness
+    ) -> None:
+        sandbox = remote_provider.open(WorkspaceConfig())
+        try:
+            assert isinstance(sandbox, Sandbox)
+            assert isinstance(sandbox, RemoteSandbox)
+            assert sandbox.root == remote_harness.transports[0].root
+            assert sandbox.filesystem.list(".") == []
+        finally:
+            sandbox.close()
+
+    def test_mounts_upload_through_transport(
+        self,
+        remote_provider: RemoteSandboxProvider,
+        host_dir: Path,
+    ) -> None:
+        config = WorkspaceConfig(
+            mounts=(HostMount(host_path=str(host_dir), mount_path="proj"),)
+        )
+        sandbox = remote_provider.open(config)
+        try:
+            assert sandbox.filesystem.read("proj/main.py").content == "print('main')"
+            assert sandbox.filesystem.exists("proj/sub/nested.py")
+            result = sandbox.shell.run(["cat", "proj/notes.txt"])
+            assert result.stdout == b"notes"
+        finally:
+            sandbox.close()
+
+    def test_egress_seeds_transport_and_sandbox(
+        self, remote_provider: RemoteSandboxProvider, remote_harness: _RemoteHarness
+    ) -> None:
+        policy = EgressPolicy(allow=(EgressRule(host_glob="pypi.org"),))
+        sandbox = remote_provider.open(WorkspaceConfig(egress=policy))
+        try:
+            assert sandbox.egress is policy
+            assert remote_harness.transports[0].egress is policy
+        finally:
+            sandbox.close()
+
+    def test_read_only_applies_to_filesystem_facet(
+        self, remote_provider: RemoteSandboxProvider, host_dir: Path
+    ) -> None:
+        config = WorkspaceConfig(
+            mounts=(HostMount(host_path=str(host_dir)),), read_only=True
+        )
+        sandbox = remote_provider.open(config)
+        try:
+            assert sandbox.filesystem.read_only
+            assert sandbox.filesystem.exists(f"{host_dir.name}/main.py")
+            with pytest.raises(PermissionError):
+                _ = sandbox.filesystem.write("new.txt", "nope")
+        finally:
+            sandbox.close()
+
+    def test_env_reaches_remote_shell(
+        self, remote_provider: RemoteSandboxProvider
+    ) -> None:
+        config = WorkspaceConfig(env={"WINK_REMOTE_VAR": "configured"})
+        sandbox = remote_provider.open(config)
+        try:
+            result = sandbox.shell.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os; print(os.environ['WINK_REMOTE_VAR'])",
+                ]
+            )
+            assert result.stdout.decode().strip() == "configured"
+        finally:
+            sandbox.close()
+
+    def test_setup_runs_through_remote_shell(
+        self, remote_provider: RemoteSandboxProvider
+    ) -> None:
+        config = WorkspaceConfig(
+            setup=(f"{sys.executable} -c \"open('made.txt', 'w').write('yes')\"",)
+        )
+        sandbox = remote_provider.open(config)
+        try:
+            assert sandbox.filesystem.read("made.txt").content == "yes"
+        finally:
+            sandbox.close()
+
+    def test_failing_setup_closes_transport(
+        self, remote_provider: RemoteSandboxProvider, remote_harness: _RemoteHarness
+    ) -> None:
+        config = WorkspaceConfig(
+            setup=(
+                (
+                    f"{sys.executable} -c "
+                    "\"import sys; sys.stderr.write('remote setup blew up'); "
+                    'sys.exit(2)"'
+                ),
+            )
+        )
+        with pytest.raises(SandboxSetupError, match="remote setup blew up"):
+            _ = remote_provider.open(config)
+        transport = remote_harness.transports[0]
+        assert transport.closed
+        assert not Path(transport.root).exists()
+
+    def test_empty_setup_command_closes_transport(
+        self, remote_provider: RemoteSandboxProvider, remote_harness: _RemoteHarness
+    ) -> None:
+        with pytest.raises(SandboxSetupError, match="empty"):
+            _ = remote_provider.open(WorkspaceConfig(setup=("   ",)))
+        assert remote_harness.transports[0].closed
+
+    def test_connect_failure_cleans_staging(self, host_dir: Path) -> None:
+        prefix = f"wink-staging-{uuid.uuid4().hex[:8]}-"
+
+        def refuse() -> LoopbackTransport:
+            raise ConnectionError("no route to environment")
+
+        provider = RemoteSandboxProvider(refuse, temp_dir_prefix=prefix)
+        config = WorkspaceConfig(mounts=(HostMount(host_path=str(host_dir)),))
+        with pytest.raises(ConnectionError, match="no route"):
+            _ = provider.open(config)
+        assert list(Path(tempfile.gettempdir()).glob(f"{prefix}*")) == []
+
+    def test_upload_failure_closes_transport(
+        self, remote_harness: _RemoteHarness, host_dir: Path
+    ) -> None:
+        class WriteRefusingTransport(LoopbackTransport):
+            def write(self, path: str, data: bytes, *, mode: WriteMode) -> None:
+                raise TransportFault("io", "remote disk full")
+
+        env_root = remote_harness.env_base / "refusing"
+        env_root.mkdir(parents=True)
+        transport = WriteRefusingTransport(env_root)
+        provider = RemoteSandboxProvider(lambda: transport)
+        config = WorkspaceConfig(mounts=(HostMount(host_path=str(host_dir)),))
+        with pytest.raises(TransportFault, match="remote disk full"):
+            _ = provider.open(config)
+        assert transport.closed
+
+    def test_mount_guards_apply_before_connecting(
+        self, remote_harness: _RemoteHarness, host_dir: Path, tmp_path: Path
+    ) -> None:
+        allowed = tmp_path / "allowed-root"
+        allowed.mkdir()
+        provider = RemoteSandboxProvider(remote_harness.connect)
+        config = WorkspaceConfig(
+            mounts=(HostMount(host_path=str(host_dir)),),
+            allowed_host_roots=(str(allowed),),
+        )
+        with pytest.raises(WorkspaceSecurityError, match="outside allowed"):
+            _ = provider.open(config)
+        assert remote_harness.transports == []
