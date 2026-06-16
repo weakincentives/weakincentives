@@ -32,9 +32,9 @@ in under 100 lines.
 │  open_read()/open_write()/open_text() streaming · exists()    │
 │  normalization + validation + read-only/root/size guards      │
 ├──────────────────────────────────────────────────────────────┤
-│              FilesystemBackend (protocol, ~10 primitives)     │
+│              FilesystemBackend (protocol, ~11 primitives)     │
 │  root · read_only · stat · list · glob · grep · read_range    │
-│  write · delete · mkdir · snapshot · restore                  │
+│  write · delete · mkdir · rename · snapshot · restore          │
 ├──────────────────┬──────────────────┬────────────────────────┤
 │   HostBackend    │   MemoryBackend  │   (your backend here)   │
 └──────────────────┴──────────────────┴────────────────────────┘
@@ -59,6 +59,7 @@ intended caller.
 | `write(path, data, mode)` | Writes bytes, creating parents; raises `FileExistsError` for `mode="create"` |
 | `delete(path, recursive)` | Removes file or directory; raises `FileNotFoundError`/`IsADirectoryError` |
 | `mkdir(path)` | Creates directory and missing parents (idempotent) |
+| `rename(src, dst)` | Moves a file or directory (with contents) to `dst`, creating parents; raises `FileNotFoundError`/`FileExistsError` |
 | `snapshot(tag)` | Returns an opaque `SnapshotRef` |
 | `restore(ref)` | Restores; raises `SnapshotRestoreError` for unknown refs |
 
@@ -87,8 +88,8 @@ check `isinstance(fs.backend, HostBackend)`).
 | `write_bytes(path, content, mode, create_parents)` | Byte write, 32 MB cap |
 
 **Metadata and Mutations:** `exists`, `stat`, `list`, `glob`, `grep`,
-`delete(recursive)`, `mkdir(parents, exist_ok)`, plus `root` and `read_only`
-properties.
+`delete(recursive)`, `mkdir(parents, exist_ok)`, `rename(src, dst)`, plus
+`root` and `read_only` properties.
 
 **Write modes:** `"create"`, `"overwrite"`, `"append"`
 

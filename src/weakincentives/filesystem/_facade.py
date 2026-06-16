@@ -423,6 +423,29 @@ class Filesystem:
         self._check_parent(norm, parents)
         self._backend.mkdir(norm)
 
+    def rename(self, src: str, dst: str) -> None:
+        """Move a file or directory (with its contents) to a new path.
+
+        Renaming is a backend primitive, so atomic backends move atomically
+        rather than copying. ``dst``'s parent directories are created as
+        needed.
+
+        Raises:
+            FileNotFoundError: ``src`` does not exist.
+            FileExistsError: ``dst`` already exists.
+            NotADirectoryError: A file occupies a segment of ``dst``'s parent.
+            PermissionError: Filesystem is read-only.
+            ValueError: ``src`` or ``dst`` is the root path.
+        """
+        self._check_writable()
+        norm_src = self._normalize(src)
+        norm_dst = self._normalize(dst)
+        if not norm_src or not norm_dst:
+            msg = "Cannot rename the root directory"
+            raise ValueError(msg)
+        self._check_ancestors(norm_dst)
+        self._backend.rename(norm_src, norm_dst)
+
     # --- Streaming operations -------------------------------------------------
 
     def open_read(self, path: str) -> ByteReader:

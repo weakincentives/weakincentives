@@ -260,6 +260,17 @@ class HostBackend:
         """Create a directory and any missing parents (idempotent)."""
         self._resolve(path).mkdir(parents=True, exist_ok=True)
 
+    def rename(self, src: str, dst: str) -> None:
+        """Move a file or directory tree to a new path (atomic on one device)."""
+        resolved_src = self._resolve(src)
+        if not resolved_src.exists() and not resolved_src.is_symlink():
+            raise FileNotFoundError(src)
+        resolved_dst = self._resolve(dst)
+        if resolved_dst.exists() or resolved_dst.is_symlink():
+            raise FileExistsError(f"File already exists: {dst}")
+        resolved_dst.parent.mkdir(parents=True, exist_ok=True)
+        _ = resolved_src.rename(resolved_dst)
+
     # --- Snapshots ------------------------------------------------------------
 
     def _ensure_git(self) -> str:

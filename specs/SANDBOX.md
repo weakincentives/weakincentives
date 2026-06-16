@@ -8,8 +8,9 @@ effect facets (`Filesystem`, `Shell`) rooted at one directory, owns the
 egress/credential control plane, and has exactly one lifecycle owner —
 whoever opens a sandbox closes it; facets never self-close. A
 `WorkspaceConfig` declares intent as a serde value; a `SandboxProvider`
-materializes it. Local first: remote sandboxes (M4) differ only in
-transport.
+materializes it. Local and remote differ only in transport: a
+`SandboxTransport` carries the same primitives over one connection, and
+the remote facets are thin clients of it (M4).
 
 **Implementation:** `src/weakincentives/sandbox/`
 
@@ -124,9 +125,9 @@ case-insensitively, empty `ports` means any port. `rule_for`/`allows`
 answer queries; the first matching rule wins.
 
 `CredentialInjection(credential, header_template)` names a credential and
-how a proxy injects it (the `{secret}` placeholder is replaced at
-injection time, inside the proxy only). Configs and serialized state carry
-**names only**.
+how the egress sidecar injects it (the `{secret}` placeholder is replaced
+at injection time, inside the sidecar only). Configs and serialized state
+carry **names only**.
 
 `CredentialBinding(name, secret)` supplies material at runtime through
 `configure_credentials`. Invariants, enforced by tests:
@@ -137,11 +138,76 @@ injection time, inside the proxy only). Configs and serialized state carry
   filesystem
 - Bindings are cleared on `close()`
 
-**Local semantics:** there is no local proxy. `configure_egress` records
-the policy the sandbox reports; `configure_credentials` holds bindings in
-process memory — a documented no-op beyond bookkeeping. Enforcing,
-live-reconfigurable proxies arrive with the remote sandbox (M4); the wire
-ops are out of scope here.
+**Where enforcement lives.** The egress chokepoint is a **sidecar process
+the environment owns** — WINK configures it over the control plane but
+never runs it. A local environment has no sidecar, so `configure_egress`
+records the policy the sandbox reports and `configure_credentials` holds
+bindings in process memory (bookkeeping only). A remote sandbox carries the
+same calls over its transport to the sidecar; `RemoteSandbox` retains
+credential *names* only, and secret material lives only in the sidecar.
+
+## Remote Sandbox
+
+Local and remote differ only in transport (`refactor/M4.md`). This
+milestone lands the *interface* and its *local-host* implementations; the
+remote transports (SSH, container) implement the same protocols later.
+The pieces, all in `src/weakincentives/sandbox/`:
+
+**`SandboxTransport`** (`_transport.py`) — the remote environment's narrow
+waist: one method per filesystem primitive (`stat`, `list`, `read_range`,
+`write`, `glob`, `grep`, `delete`, `mkdir`, `rename`, `snapshot`,
+`restore`), one exec surface (`exec`, concrete timeout), the egress-sidecar
+control plane (`configure_egress`, `configure_credentials`), a `root`
+property, and idempotent `close()`. `glob`/`grep` are transport methods so
+they execute **server-side** — never a client-side `rglob` over RPC.
+
+**Fault contract** — transport methods raise `TransportFault(code, message)` with a portable `TransportFaultCode`. `exception_for_fault`
+maps faults to the facet protocols' exception contract (`not-found` →
+`FileNotFoundError`, `is-a-directory`/`not-a-directory`/`exists`/
+`permission`/`invalid`/`io`/`snapshot` → the matching standard exception,
+`connectivity` → `RuntimeError`: the transport is broken, not the
+operation); `fault_for_exception` is the server-side inverse. The
+round-trip preserves type and message.
+
+**Remote facets** (`_remote.py`) — `RemoteBackend(transport)` implements
+`FilesystemBackend`; `RemoteShell(transport)` implements `Shell`
+(argument-shape validation client-side; `cwd` existence/escape checks are
+the environment's and come back as faults); `RemoteSandbox` composes them
+over one transport and `close()` tears the transport down. After close,
+facet access raises `SandboxClosedError`; identity and policy stay
+readable.
+
+**`LoopbackTransport`** (`_loopback.py`) — the transport with no wire:
+drives a `HostBackend` + `LocalShell` in-process, converting native
+exceptions to faults so clients exercise the same fault path a wire
+transport produces. The full `FilesystemValidationSuite` and Shell
+contract suite run over it (no sockets). After `close()` every method
+raises a `connectivity` fault; `owns_root=True` removes the root on close.
+
+**Egress sidecar (control plane).** Enforcement is **not** a WINK-run
+object: the egress chokepoint is a sidecar the *environment* owns, and the
+transport's `configure_egress`/`configure_credentials` carry policy and
+credential material to it. An enforcing sidecar applies the policy to real
+traffic and injects bound credentials into allowed requests — the agent
+makes credential-less requests and can *use* a secret it can never *read*.
+A local environment (host, loopback) has no sidecar, so those calls record
+policy and credential names for observability and enforce nothing; secret
+material is held in process memory only, never logged, and dropped on
+`close()`.
+
+**`RemoteSandboxProvider(connect)`** (`_provider.py`) — materializes a
+`WorkspaceConfig` through a fresh transport per open: mounts stage locally
+under the same allowed-root/symlink/byte-budget guards as the local
+provider and upload through the transport's own primitives, the egress
+policy seeds the enforcement point, setup commands run through the remote
+shell, and any failure after connect closes the transport (fail-closed).
+The staging directory is always removed. Paired with `LoopbackTransport`
+it is the local-host provider; remote transports slot in unchanged.
+
+Still to land from M4: the remote transport implementations (the SSH
+transport — ACP harness on a box over one SSH connection — and the
+container reference topology with the enforcing egress/credential proxy
+sidecar) and the optional funnel mode.
 
 ## Lifecycle
 
@@ -166,7 +232,7 @@ the (session, sandbox) pair atomically.
 `close()` releases the holder's claim — for locally provisioned sandboxes
 that destroys the directory; future providers may pool environments or
 attach to harness-provided ones, where release means detach. The lease is
-held by an `AgentRuntime` (see `specs/ADAPTERS.md`): the bound
+held by an `Runtime` (see `specs/ADAPTERS.md`): the bound
 (adapter, prompt, sandbox) triple, paired once inside
 `ProviderAdapter.runtime(prompt)` so mismatched pairings are
 unrepresentable. `AgentLoop` holds one runtime per request, spanning
@@ -183,12 +249,19 @@ abstraction is the seam that keeps `evaluate` unchanged.
 
 ## Testing
 
-Tests in `tests/sandbox/` mirror the package: `test_shell.py` (argv
-semantics, cwd/env/stdin/timeout/caps, launch-failure exit codes),
-`test_sandbox.py` (facets, snapshot/restore, control plane, close
-idempotency, secret-material invariants), `test_config.py` (validation,
-default-deny, serde round-trip), `test_provider.py` (mount parity, setup
-commands, fail-closed open), `test_mounts.py` (the mount machinery).
+Tests in `tests/sandbox/` mirror the package: `test_shell.py` (the
+generic Shell contract from `tests/helpers/shell.py` over `LocalShell`,
+plus host env hygiene), `test_sandbox.py` (facets, snapshot/restore,
+control plane, close idempotency, secret-material invariants),
+`test_config.py` (validation, default-deny, serde round-trip),
+`test_provider.py` (mount parity, setup commands, fail-closed open, the
+remote provider over loopback), `test_mounts.py` (the mount machinery),
+`test_transport.py` (fault↔exception mapping, both directions and the
+round-trip law), `test_loopback.py` (loopback transport semantics),
+and `test_remote.py` (the full `FilesystemValidationSuite` and Shell
+contract suites over `Filesystem(RemoteBackend)`/`RemoteShell` + loopback,
+fault translation against a failing transport stub, `RemoteSandbox`
+lifecycle, including the local egress-bookkeeping semantics).
 
 ## Related Specifications
 

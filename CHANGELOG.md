@@ -4,6 +4,69 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### `AgentRuntime` renamed to `Runtime`
+
+The bound (adapter, prompt, sandbox) lease object is now
+`weakincentives.adapters.Runtime` (was `AgentRuntime`), and its lease-use
+error is `RuntimeReleasedError` (was `AgentRuntimeReleasedError`). The
+unprefixed name matches `Sandbox`: it is an object that exists attached to
+a `ProviderAdapter` to abstract lifecycle across dependent resources, so
+the `Agent` prefix added nothing. `ProviderAdapter.runtime(prompt)` is
+unchanged.
+
+### Remote Sandbox: the transport interface and its local-host implementations (M4)
+
+Local and remote sandboxes differ only in transport. This change lands
+the interface and the local-host implementations; the remote transports
+implement the same protocols later. New in `weakincentives.sandbox`:
+
+- **`SandboxTransport`** — the remote environment's narrow waist: one
+  method per filesystem primitive (`stat`, `list`, `read_range`, `write`,
+  `glob`/`grep` (server-side by contract), `delete`, `mkdir`, `rename`,
+  `snapshot`, `restore`), one `exec` surface, the egress-sidecar control
+  plane, and idempotent `close()`. Failures travel as **`TransportFault`**
+  with a portable code; `exception_for_fault`/`fault_for_exception`
+  translate between faults and the facet protocols' exception contracts
+  (connectivity → `RuntimeError`), preserving type and message across
+  the round-trip.
+- **`rename` is now a filesystem primitive.** `Filesystem.rename`,
+  `FilesystemBackend.rename`, and `SandboxTransport.rename` move a file or
+  directory (with its contents) to a new path — a real primitive (atomic
+  where the backend can), not a facade copy+delete. Implemented by
+  `HostBackend`, `MemoryBackend`, the loopback transport, and the test
+  fake.
+- **Remote facets** — `RemoteBackend(transport)` implements
+  `FilesystemBackend`, `RemoteShell(transport)` implements `Shell`, and
+  `RemoteSandbox` composes them over one transport, torn down on
+  `close()`. Credential material transits the transport; only names are
+  retained client-side. Transport-generic — these run against any
+  `SandboxTransport`.
+- **`LoopbackTransport`** — the local-host transport: drives a
+  `HostBackend`/`LocalShell` in-process. The full
+  `FilesystemValidationSuite` and the new generic Shell contract suite
+  (`tests/helpers/shell.py`) run over the remote facets with no sockets.
+- **Egress is an environment-owned sidecar, not a WINK-run object.**
+  `configure_egress`/`configure_credentials` on the transport and sandbox
+  carry policy and credential material to a sidecar the *environment* owns
+  (the network chokepoint); WINK configures it but never runs it. A local
+  environment has no sidecar, so those calls record policy and hold
+  credential names only (secret material in process memory, dropped on
+  `close()`). The earlier `EgressProxy`/`NoOpEgressProxy` objects are
+  removed — the transport control-plane methods are the seam.
+- **`RemoteSandboxProvider(connect)`** — materializes a
+  `WorkspaceConfig` through a fresh transport per open: mounts stage
+  locally under the usual guards and upload over the waist, egress seeds
+  the sidecar, setup commands run through the remote shell, and failures
+  after connect close the transport. With `LoopbackTransport` it is the
+  local-host provider.
+
+Also exported: `validate_bindings` (shared credential-binding
+validation). Dependency bump alongside this change: `cryptography`,
+`python-multipart`, and `starlette` upgraded to clear pip-audit
+advisories. Still to land from M4: the remote transport implementations
+(an SSH transport and the container reference topology with the
+environment's enforcing egress/credential sidecar) and funnel mode.
+
 ### WorkspaceConfig: Workspace Intent vs. Environment Lease
 
 `SandboxConfig` is renamed **`WorkspaceConfig`**, and the template
@@ -18,7 +81,7 @@ keep their names. Entries below use the new name.
 
 ### Sandbox Everywhere, Run State Nowhere
 
-A hardening pass on the AgentRuntime/M3 work below; three breaking
+A hardening pass on the Runtime/M3 work below; three breaking
 tightenings:
 
 - **Render-time workspace preview.** `prompt.render(session=...,
@@ -27,7 +90,7 @@ tightenings:
   anymore — no run state on the definition object, and one `Prompt` is
   safe across concurrent runtimes. Rendering without a sandbox shows the
   "not yet materialized" placeholder as before.
-- **`AgentRuntime.evaluate` owns the evaluation preamble.** Budget→tracker
+- **`Runtime.evaluate` owns the evaluation preamble.** Budget→tracker
   promotion, effective-deadline resolution, and the fail-fast
   "deadline expired" check moved from every adapter into the runtime.
   `ProviderAdapter._evaluate` no longer takes a `budget` parameter;
@@ -44,10 +107,10 @@ tightenings:
   `FileOutputChecker` no longer has a fail-closed "no filesystem" arm —
   an environment always exists.
 
-### AgentRuntime: One Pairing for Adapter, Prompt, and Sandbox
+### Runtime: One Pairing for Adapter, Prompt, and Sandbox
 
 The sandbox lifecycle from the M3 refactor (below) is owned by a new
-`AgentRuntime` — a prompt bound to its adapter and a live sandbox for one
+`Runtime` — a prompt bound to its adapter and a live sandbox for one
 run. The (adapter, prompt, sandbox) triple is paired exactly once, inside
 `ProviderAdapter.runtime(prompt)`, so a mismatched pairing is
 unrepresentable: there is no API that accepts a foreign sandbox.
@@ -56,7 +119,7 @@ unrepresentable: there is no API that accepts a foreign sandbox.
   `rt.evaluate(session=...)` takes neither a prompt nor a sandbox.
   Every call runs in the same environment, so files written in one
   round are visible to the next. After release,
-  `rt.evaluate` raises `AgentRuntimeReleasedError` and `rt.sandbox`
+  `rt.evaluate` raises `RuntimeReleasedError` and `rt.sandbox`
   stays readable for the holder only while the lease was open.
 - `adapter.evaluate(prompt, session=...)` survives unchanged as one-shot
   sugar that opens a runtime for the duration of a single call. Concrete

@@ -291,6 +291,25 @@ class MemoryBackend:
                 raise NotADirectoryError(msg)
             self._directories.add(candidate)
 
+    def rename(self, src: str, dst: str) -> None:
+        """Move a file or directory (with its contents) to ``dst``."""
+        is_file = src in self._files
+        if not is_file and src not in self._directories:
+            raise FileNotFoundError(src)
+        if dst in self._files or dst in self._directories:
+            raise FileExistsError(f"File already exists: {dst}")
+        parent = dst.rsplit("/", 1)[0] if "/" in dst else ""
+        if parent:
+            self.mkdir(parent)
+        if is_file:
+            self._files[dst] = self._files.pop(src)
+            return
+        for file_path in [p for p in self._files if is_path_under(p, src)]:
+            self._files[dst + file_path[len(src) :]] = self._files.pop(file_path)
+        for dir_path in [d for d in self._directories if is_path_under(d, src)]:
+            self._directories.discard(dir_path)
+            self._directories.add(dst + dir_path[len(src) :])
+
     # --- Snapshots ------------------------------------------------------------
 
     def snapshot(self, *, tag: str | None = None) -> SnapshotRef:

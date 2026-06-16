@@ -167,7 +167,7 @@ environment — local or remote — and rollback becomes (session, sandbox).
 |---|-----------|---------|
 | [M1](M1.md) | Filesystem narrow waist | One backend protocol + one facade; per-backend duplication deleted |
 | [M2](M2.md) | Sandbox aggregate | `Shell` facet, `Sandbox`, `WorkspaceConfig` (incl. egress), local provider |
-| [M3](M3.md) | Sandbox as execution context | `ToolContext.sandbox`; transactions = (session, sandbox); `WorkspaceSection` dissolved; adapters unified behind `AgentRuntime` (the bound adapter+prompt+sandbox triple) |
+| [M3](M3.md) | Sandbox as execution context | `ToolContext.sandbox`; transactions = (session, sandbox); `WorkspaceSection` dissolved; adapters unified behind `Runtime` (the bound adapter+prompt+sandbox triple) |
 | [M4](M4.md) | Remote sandbox | `SandboxTransport`, remote facets; validated via ACP-over-SSH and Codex-in-container + egress/credential sidecar |
 
 ### R2 — The Definition & Contract Cores (M5–M6)

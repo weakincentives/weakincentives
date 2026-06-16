@@ -982,6 +982,30 @@ finally:
     sandbox.close()
 ```
 
+**Remote sandbox (interface + local host)**: the same facets over one
+`SandboxTransport` — a narrow protocol with one method per filesystem
+primitive (`glob`/`grep` execute server-side), one `exec` surface, the
+egress/credential control plane, and `close()`. `RemoteSandboxProvider(connect)`
+materializes a `WorkspaceConfig` through a transport: mounts stage locally
+under the usual guards and upload over the waist, setup commands run through
+the remote shell, and failures close the transport. Transports raise
+`TransportFault` with a portable code; the remote facets translate faults
+back into each protocol's exception contract (connectivity → `RuntimeError`).
+`LoopbackTransport` is the local-host transport — it drives a host directory
+in-process, passing the full filesystem/shell contract with no sockets.
+Egress enforcement is an **environment-owned sidecar** WINK configures over
+the transport (`configure_egress`/`configure_credentials`) but never runs; a
+local environment has no sidecar, so those calls record policy and hold
+credential names only. The remote transports (SSH, container) implement the
+same protocols later.
+
+```python
+from weakincentives.sandbox import LoopbackTransport, RemoteSandboxProvider
+
+provider = RemoteSandboxProvider(lambda: LoopbackTransport("/srv/env", owns_root=True))
+sandbox = provider.open(WorkspaceConfig())   # same facets, in-process transport
+```
+
 **Note:** Tool sections for filesystem operations, planning, and shell execution
 are provided by the execution harness (e.g., Claude Agent SDK) rather than
 defined in WINK. This keeps agent definitions portable across runtimes.

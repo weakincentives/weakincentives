@@ -127,6 +127,21 @@ class FakeBackend:
     def mkdir(self, path: str) -> None:
         self._dirs.update(accumulate(path.split("/"), lambda a, b: f"{a}/{b}"))
 
+    def rename(self, src: str, dst: str) -> None:
+        if dst in self._files or dst in self._dirs:
+            raise FileExistsError(f"File already exists: {dst}")
+        moved = [p for p in [*self._files, *self._dirs] if is_path_under(p, src)]
+        if not moved:
+            raise FileNotFoundError(src)
+        self.mkdir(dst.rsplit("/", 1)[0] if "/" in dst else "")
+        for path in moved:
+            target = dst + path[len(src) :]
+            if path in self._files:
+                self._files[target] = self._files.pop(path)
+            else:
+                self._dirs.discard(path)
+                self._dirs.add(target)
+
     def snapshot(self, *, tag: str | None = None) -> SnapshotRef:
         token = f"fake-{len(self._snapshots)}"
         self._snapshots[token] = (dict(self._files), set(self._dirs))

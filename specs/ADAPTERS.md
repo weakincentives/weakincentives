@@ -50,9 +50,9 @@ All adapters extend `ProviderAdapter` at `src/weakincentives/adapters/core.py`.
 
 Returns `PromptResponse[OutputT]` at `src/weakincentives/adapters/core.py`.
 
-### AgentRuntime
+### Runtime
 
-`AgentRuntime` (same module) is a prompt bound to its adapter and a live
+`Runtime` (same module) is a prompt bound to its adapter and a live
 sandbox for one run. It is the **only** way a sandbox reaches evaluation,
 so a mismatched (adapter, prompt, sandbox) triple is unrepresentable —
 the triple is paired exactly once, inside `ProviderAdapter.runtime`:
@@ -68,7 +68,7 @@ the triple is paired exactly once, inside `ProviderAdapter.runtime`:
   Owns the shared evaluation preamble: promotes `budget` to a
   `BudgetTracker`, resolves the effective deadline, and fails fast with
   `PromptEvaluationError` when it has already expired. Raises
-  `AgentRuntimeReleasedError` after release.
+  `RuntimeReleasedError` after release.
 - `rt.sandbox` / `rt.prompt` — read-only access for inspection and
   evidence capture while the lease is held.
 - `adapter.evaluate(prompt, session=...)` — one-shot sugar that opens a

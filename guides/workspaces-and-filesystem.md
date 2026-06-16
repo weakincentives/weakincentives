@@ -122,7 +122,7 @@ response = adapter.evaluate(prompt, session=session)
 # Sandbox opened, used, and released inside evaluate()
 ```
 
-Open an `AgentRuntime` yourself to span multiple evaluations or inspect
+Open an `Runtime` yourself to span multiple evaluations or inspect
 output files before release. The runtime binds the (adapter, prompt,
 sandbox) triple in one place, so a mismatched pairing cannot be
 constructed:

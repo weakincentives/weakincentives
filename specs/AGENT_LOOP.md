@@ -71,7 +71,7 @@ At `src/weakincentives/debug/bundle.py`:
 1. Receive `AgentLoopRequest` or direct `execute()` call
 1. `prepare(request)` -> `(Prompt, Session)`
 1. Resolve effective settings (budget, deadline, resources)
-1. Open one `AgentRuntime` via `adapter.runtime(prompt)`
+1. Open one `Runtime` via `adapter.runtime(prompt)`
 1. Evaluate through the runtime
 1. On `VisibilityExpansionRequired`: apply overrides to session, retry
    step 5 — the runtime's sandbox spans every retry round, so files

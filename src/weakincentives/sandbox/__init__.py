@@ -44,10 +44,10 @@ Egress and credentials (control plane)
 may name a credential via :class:`CredentialInjection` — names only, never
 material. ``configure_egress`` and ``configure_credentials`` are driven by
 the harness and policies, never exposed to the model: an agent cannot
-widen its own egress or read a bound secret. Locally there is no proxy;
-the local sandbox records policy and holds bindings in process memory
-only (a documented no-op beyond bookkeeping — enforcing proxies arrive
-with the remote sandbox).
+widen its own egress or read a bound secret. Enforcement is an egress
+sidecar the *environment* owns — a remote process WINK configures but does
+not run; a local environment has no sidecar, so the local sandbox records
+policy and holds bindings in process memory only (bookkeeping).
 
 Usage
 -----
@@ -79,6 +79,7 @@ from ._config import (
     EgressRule,
     WorkspaceConfig,
 )
+from ._loopback import LoopbackTransport
 from ._mounts import (
     HostMount,
     HostMountPreview,
@@ -89,8 +90,14 @@ from ._mounts import (
 )
 from ._provider import (
     LocalSandboxProvider,
+    RemoteSandboxProvider,
     SandboxProvider,
     SandboxSetupError,
+)
+from ._remote import (
+    RemoteBackend,
+    RemoteSandbox,
+    RemoteShell,
 )
 from ._sandbox import (
     CredentialBinding,
@@ -98,6 +105,7 @@ from ._sandbox import (
     Sandbox,
     SandboxClosedError,
     SandboxError,
+    validate_bindings,
 )
 from ._shell import (
     DEFAULT_SHELL_TIMEOUT_S,
@@ -106,10 +114,19 @@ from ._shell import (
     LocalShell,
     Shell,
 )
+from ._transport import (
+    TRANSPORT_FAULT_CODES,
+    SandboxTransport,
+    TransportFault,
+    TransportFaultCode,
+    exception_for_fault,
+    fault_for_exception,
+)
 
 __all__ = [
     "DEFAULT_SHELL_TIMEOUT_S",
     "MAX_COMMAND_OUTPUT_BYTES",
+    "TRANSPORT_FAULT_CODES",
     "CommandResult",
     "CredentialBinding",
     "CredentialInjection",
@@ -120,15 +137,26 @@ __all__ = [
     "LocalSandbox",
     "LocalSandboxProvider",
     "LocalShell",
+    "LoopbackTransport",
+    "RemoteBackend",
+    "RemoteSandbox",
+    "RemoteSandboxProvider",
+    "RemoteShell",
     "Sandbox",
     "SandboxClosedError",
     "SandboxError",
     "SandboxProvider",
     "SandboxSetupError",
+    "SandboxTransport",
     "Shell",
+    "TransportFault",
+    "TransportFaultCode",
     "WorkspaceBudgetExceededError",
     "WorkspaceConfig",
     "WorkspaceSecurityError",
     "compute_workspace_fingerprint",
+    "exception_for_fault",
+    "fault_for_exception",
     "materialize_mounts",
+    "validate_bindings",
 ]

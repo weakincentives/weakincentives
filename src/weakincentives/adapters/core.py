@@ -17,7 +17,7 @@ The contract has three pieces, all in this module:
 - :class:`ProviderAdapter` — the harness translator. Concrete adapters
   implement only :meth:`ProviderAdapter._evaluate`, which always receives
   an open sandbox and never manages its lifecycle.
-- :class:`AgentRuntime` — a prompt bound to its adapter and a live
+- :class:`Runtime` — a prompt bound to its adapter and a live
   sandbox for one run. The runtime is the **only** way a sandbox reaches
   evaluation, so a mismatched (adapter, prompt, sandbox) triple is
   unrepresentable: the triple is paired exactly once, inside
@@ -64,11 +64,11 @@ class PromptResponse[OutputT]:
     output: OutputT | None
 
 
-class AgentRuntimeReleasedError(WinkError, RuntimeError):
-    """Raised when evaluating through a released :class:`AgentRuntime`."""
+class RuntimeReleasedError(WinkError, RuntimeError):
+    """Raised when evaluating through a released :class:`Runtime`."""
 
 
-class AgentRuntime[OutputT]:
+class Runtime[OutputT]:
     """A prompt bound to its adapter and a live sandbox for one run.
 
     Construct via :meth:`ProviderAdapter.runtime` — the single place the
@@ -140,12 +140,12 @@ class AgentRuntime[OutputT]:
         and tracker only.
 
         Raises:
-            AgentRuntimeReleasedError: The runtime's lease was released.
+            RuntimeReleasedError: The runtime's lease was released.
             PromptEvaluationError: The effective deadline already expired.
         """
         if self._released:
-            msg = "AgentRuntime has been released; open a new one via adapter.runtime()"
-            raise AgentRuntimeReleasedError(msg)
+            msg = "Runtime has been released; open a new one via adapter.runtime()"
+            raise RuntimeReleasedError(msg)
 
         if budget is not None and budget_tracker is None:
             budget_tracker = BudgetTracker(budget)
@@ -187,7 +187,7 @@ class ProviderAdapter(ABC):
     :meth:`evaluate` sugar. The adapter also owns its sandbox provider:
     the adapter is the authority on which environments its harness can
     attach to, so adapter↔provider coherence lives here while
-    adapter↔prompt↔sandbox coherence lives in :class:`AgentRuntime`.
+    adapter↔prompt↔sandbox coherence lives in :class:`Runtime`.
     """
 
     _sandbox_provider: SandboxProvider | None = None
@@ -217,10 +217,8 @@ class ProviderAdapter(ABC):
         return type(self).__name__
 
     @contextmanager
-    def runtime[OutputT](
-        self, prompt: Prompt[OutputT]
-    ) -> Generator[AgentRuntime[OutputT]]:
-        """Open an :class:`AgentRuntime` for the prompt.
+    def runtime[OutputT](self, prompt: Prompt[OutputT]) -> Generator[Runtime[OutputT]]:
+        """Open an :class:`Runtime` for the prompt.
 
         Materializes the prompt template's
         :class:`~weakincentives.sandbox.WorkspaceConfig` (an empty config
@@ -240,9 +238,7 @@ class ProviderAdapter(ABC):
         )
         config = prompt.template.workspace
         sandbox = provider.open(config if config is not None else WorkspaceConfig())
-        rt: AgentRuntime[OutputT] = AgentRuntime(
-            adapter=self, prompt=prompt, sandbox=sandbox
-        )
+        rt: Runtime[OutputT] = Runtime(adapter=self, prompt=prompt, sandbox=sandbox)
         try:
             yield rt
         finally:
@@ -262,7 +258,7 @@ class ProviderAdapter(ABC):
         """Evaluate the prompt in a runtime scoped to this call.
 
         One-shot sugar over :meth:`runtime`: opens an
-        :class:`AgentRuntime`, evaluates once, and releases the sandbox
+        :class:`Runtime`, evaluates once, and releases the sandbox
         lease before returning. To span one environment across multiple
         evaluations, open the runtime explicitly.
 
@@ -306,7 +302,7 @@ class ProviderAdapter(ABC):
     ) -> PromptResponse[OutputT]:
         """Evaluate against an open sandbox (the explicit core contract).
 
-        Called only through :class:`AgentRuntime`, which guarantees the
+        Called only through :class:`Runtime`, which guarantees the
         sandbox was materialized by this adapter's provider from this
         prompt's config and has already resolved the effective deadline
         and budget tracker. Implementations render with
@@ -324,12 +320,12 @@ __all__ = [
     "PROMPT_EVALUATION_PHASE_REQUEST",
     "PROMPT_EVALUATION_PHASE_RESPONSE",
     "PROMPT_EVALUATION_PHASE_TOOL",
-    "AgentRuntime",
-    "AgentRuntimeReleasedError",
     "Budget",
     "BudgetTracker",
     "PromptEvaluationError",
     "PromptEvaluationPhase",
     "PromptResponse",
     "ProviderAdapter",
+    "Runtime",
+    "RuntimeReleasedError",
 ]
