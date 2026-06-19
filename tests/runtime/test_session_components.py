@@ -185,6 +185,6 @@ class TestSessionBackwardCompatibility:
     ) -> None:
         session, _ = session_factory()
 
-        config = session._slice_config
+        config = session._store.config
 
         assert config == default_slice_config()
